@@ -1,3 +1,5 @@
+import { Shader } from './shader';
+
 const defaultVertexSource = `
     attribute vec2 a_position;
     attribute vec3 a_color;
@@ -21,49 +23,7 @@ const defaultFragmentSource = `
 
 
 // gl is a global variable that will be used throughout the application
-let gl: WebGL2RenderingContext;
-
-class Shader {
-    private _shaderProgram!: WebGLProgram;
-    private _vertexShader!: WebGLShader;
-    private _fragmentShader!: WebGLShader;
-
-    constructor() {
-        let vs = gl.createShader(gl.VERTEX_SHADER);
-        if (!vs) throw new Error('Error creating vertex shader');
-        this._vertexShader = vs;
-
-        const fs = gl.createShader(gl.FRAGMENT_SHADER);
-        if (!fs) throw new Error('Error creating fragment shader');
-        this._fragmentShader = fs;
-    }
-
-    public create(vertexSource: string, fragmentSource: string): void {
-        gl.shaderSource(this._vertexShader, vertexSource);
-        gl.compileShader(this._vertexShader);
-        gl.compileShader(this._vertexShader);
-        if (!gl.getShaderParameter(this._vertexShader, gl.COMPILE_STATUS))
-            throw new Error(gl.getShaderInfoLog(this._vertexShader) || 'Unknown error creating vertex shader');
-
-        gl.shaderSource(this._fragmentShader, fragmentSource);
-        gl.compileShader(this._fragmentShader);
-        if (!gl.getShaderParameter(this._fragmentShader, gl.COMPILE_STATUS))
-            throw new Error(gl.getShaderInfoLog(this._fragmentShader) || 'Unknown error creating fragment shader');
-
-        this._shaderProgram = gl.createProgram() as WebGLProgram;
-        gl.attachShader(this._shaderProgram, this._vertexShader);
-        gl.attachShader(this._shaderProgram, this._fragmentShader);
-        gl.linkProgram(this._shaderProgram);
-    }
-
-    public use(): void {
-        gl.useProgram(this._shaderProgram);
-    }
-
-    public getAttribLocation(name: string): number {
-        return gl.getAttribLocation(this._shaderProgram, name);
-    }
-}
+export let gl: WebGL2RenderingContext;
 
 class Renderer {
     private _canvas: HTMLCanvasElement;
@@ -78,11 +38,11 @@ class Renderer {
         document.body.appendChild(this._canvas);
 
         // Check WebGL support
-        if (!this._canvas.getContext('webgl'))
+        if (!this._canvas.getContext('webgl2'))
             throw new Error('WebGL context not available');
 
         // Get WebGL context
-        gl = this._canvas.getContext('webgl') as WebGL2RenderingContext;
+        gl = this._canvas.getContext('webgl2') as WebGL2RenderingContext;
 
         // Create default shader
         this._shader = new Shader();
@@ -153,7 +113,6 @@ class Application {
 
     public onResize(): void {
         this._renderer.resize();
-        
     }
 }
 
