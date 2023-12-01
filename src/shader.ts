@@ -1,10 +1,19 @@
 import { gl } from './renderer';
 
+type AttributeLayout = {
+    size: number,
+    type: number,
+    normalized: boolean,
+    stride: number,
+    offset: number
+}
+
 type AttributeInfo = {
     name: string,       // name of the attribute
     type: string,       // human readable type of the attribute
-    size: number,       // size of the attribute in bytes
+    byteSize: number,   // size of the attribute in bytes
     location: number    // location of the attribute in the shader program
+    layout: AttributeLayout
 }
 
 export class Shader {
@@ -58,10 +67,6 @@ export class Shader {
             gl.useProgram(this._shaderProgram);
     }
 
-    public getAttribLocation(name: string): number {
-        return gl.getAttribLocation(this._shaderProgram, name);
-    }
-
     private loadShaderSource(path: string): string {
         const request = new XMLHttpRequest();
         request.open('GET', path, false);
@@ -75,22 +80,48 @@ export class Shader {
 
     private storeAttributes(): void {
         const numAttribs = gl.getProgramParameter(this._shaderProgram, gl.ACTIVE_ATTRIBUTES);
+        let attributesStride = 0;
+    
         for (let i = 0; i < numAttribs; i++) {
             const attribInfo = gl.getActiveAttrib(this._shaderProgram, i);
             if (!attribInfo) break;
+    
+            // TODO: Handle other types, 4 is the default for floats
+            attributesStride += this.getTypeSize(attribInfo.type) * 4;
+        }
+    
+        let offset = 0; // Start offset at 0
+    
+        for (let i = 0; i < numAttribs; i++) {
+            const attribInfo = gl.getActiveAttrib(this._shaderProgram, i);
+            if (!attribInfo) break;
+    
+            const byteSize = this.getTypeByteSize(attribInfo.type);
+    
             this._attributes.push(
                 {
                     name: attribInfo.name,
-                    type: this.getAttributeType(attribInfo.type),
-                    size: this.getAttributeByteSize(attribInfo.type),
-                    location: gl.getAttribLocation(this._shaderProgram, attribInfo.name)
-                });
+                    type: this.getTypeName(attribInfo.type),
+                    byteSize: byteSize,
+                    location: gl.getAttribLocation(this._shaderProgram, attribInfo.name),
+                    layout: {
+                        size: byteSize / 4, // Assuming each component is a 4-byte float
+                        type: gl.FLOAT,     // TODO: Handle types other than floats
+                        normalized: false,
+                        stride: attributesStride,
+                        offset: offset,
+                    },
+                }
+            );
+    
+            // Update the offset for the next attribute
+            offset += byteSize;
         }
-
+    
         console.log(this._attributes);
     }
 
-    private getAttributeType(type: number): string {
+    private getTypeName(type: number): string {
         switch (type) {
             case gl.FLOAT: return 'float';
             case gl.FLOAT_VEC2: return 'vec2';
@@ -111,23 +142,22 @@ export class Shader {
             case gl.SAMPLER_CUBE: return 'samplerCube';
             default: return 'unknown';
         }
-    
     }
 
-    private getAttributeByteSize(type: number): number {
+    private getTypeByteSize(type: number): number {
         switch (type) {
-            case gl.FLOAT:
-            case gl.INT:
-            case gl.UNSIGNED_INT:
-                return 4;
+            case gl.BYTE:
+            case gl.UNSIGNED_BYTE:
+                return 1;
 
             case gl.SHORT:
             case gl.UNSIGNED_SHORT:
                 return 2;
 
-            case gl.BYTE:
-            case gl.UNSIGNED_BYTE:
-                return 1;
+            case gl.FLOAT:
+            case gl.INT:
+            case gl.UNSIGNED_INT:
+                return 4;
 
             case gl.FLOAT_VEC2:
             case gl.INT_VEC2:
@@ -143,6 +173,36 @@ export class Shader {
             case gl.INT_VEC4:
             case gl.BOOL_VEC4:
                 return 16;
+
+            default: return 0;
+        }
+    }
+
+    private getTypeSize(type: number): number {
+        switch (type) {
+            case gl.FLOAT:
+            case gl.INT:
+            case gl.UNSIGNED_INT:
+            case gl.SHORT:
+            case gl.UNSIGNED_SHORT:
+            case gl.BYTE:
+            case gl.UNSIGNED_BYTE:
+                return 1;
+
+            case gl.FLOAT_VEC2:
+            case gl.INT_VEC2:
+            case gl.BOOL_VEC2:
+                return 2;
+
+            case gl.FLOAT_VEC3:
+            case gl.INT_VEC3:
+            case gl.BOOL_VEC3:
+                return 3;
+
+            case gl.FLOAT_VEC4:
+            case gl.INT_VEC4:
+            case gl.BOOL_VEC4:
+                return 4;
 
             default: return 0;
         }

@@ -50,16 +50,10 @@ export class Renderer {
 
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
 
-        // TODO: Shader class should handle this
-        const positionAttributeLocation = this._shader.getAttribLocation('a_position');
-        const colorAttributeLocation = this._shader.getAttribLocation('a_color');
-
-        gl.enableVertexAttribArray(positionAttributeLocation);
-        gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 5 * 4, 0);
-
-        gl.enableVertexAttribArray(colorAttributeLocation);
-        gl.vertexAttribPointer(colorAttributeLocation, 3, gl.FLOAT, false, 5 * 4, 2 * 4);
-        // end TODO
+        for (let attr of this._shader.attributes) {
+            gl.enableVertexAttribArray(attr.location);
+            gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
+        }
     
         gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
