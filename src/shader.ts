@@ -1,9 +1,10 @@
-import { gl } from './app';
+import { gl } from './renderer';
 
 type AttributeInfo = {
-    name: string,   // name of the attribute
-    type: string,   // human readable type of the attribute
-    size: number    // size of the attribute in bytes
+    name: string,       // name of the attribute
+    type: string,       // human readable type of the attribute
+    size: number,       // size of the attribute in bytes
+    location: number    // location of the attribute in the shader program
 }
 
 export class Shader {
@@ -20,6 +21,12 @@ export class Shader {
         const fs = gl.createShader(gl.FRAGMENT_SHADER);
         if (!fs) throw new Error('Error creating fragment shader');
         this._fragmentShader = fs;
+    }
+
+    public createFromFiles(vertexShaderPath: string, fragmentShaderPath: string): void {
+        const vertexShaderSource = this.loadShaderSource(vertexShaderPath);
+        const fragmentShaderSource = this.loadShaderSource(fragmentShaderPath);
+        this.create(vertexShaderSource, fragmentShaderSource);
     }
 
     public create(vertexSource: string, fragmentSource: string): void {
@@ -55,6 +62,17 @@ export class Shader {
         return gl.getAttribLocation(this._shaderProgram, name);
     }
 
+    private loadShaderSource(path: string): string {
+        const request = new XMLHttpRequest();
+        request.open('GET', path, false);
+        request.send();
+
+        if (request.status !== 200)
+            throw new Error(`Error getting shader source: ${path}`);
+
+        return request.responseText;
+    }
+
     private storeAttributes(): void {
         const numAttribs = gl.getProgramParameter(this._shaderProgram, gl.ACTIVE_ATTRIBUTES);
         for (let i = 0; i < numAttribs; i++) {
@@ -64,7 +82,8 @@ export class Shader {
                 {
                     name: attribInfo.name,
                     type: this.getAttributeType(attribInfo.type),
-                    size: this.getAttributeByteSize(attribInfo.type)
+                    size: this.getAttributeByteSize(attribInfo.type),
+                    location: gl.getAttribLocation(this._shaderProgram, attribInfo.name)
                 });
         }
 
@@ -128,4 +147,6 @@ export class Shader {
             default: return 0;
         }
     }
+
+    public get attributes(): AttributeInfo[] { return this._attributes; }
 }
