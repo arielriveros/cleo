@@ -67,6 +67,84 @@ export class Shader {
             gl.useProgram(this._shaderProgram);
     }
 
+    setUniform(name: string, type: string, value: any) {
+        const location = gl.getUniformLocation(this._shaderProgram, name);
+        if (!location) throw new Error(`Uniform ${name} not found`);
+    
+        switch (type) {
+            case 'float':
+                gl.uniform1f(location, value);
+                break;
+    
+            case 'vec2':
+                gl.uniform2fv(location, value);
+                break;
+    
+            case 'vec3':
+                gl.uniform3fv(location, value);
+                break;
+    
+            case 'vec4':
+                gl.uniform4fv(location, value);
+                break;
+    
+            case 'mat2':
+                gl.uniformMatrix2fv(location, false, value);
+                break;
+    
+            case 'mat3':
+                gl.uniformMatrix3fv(location, false, value);
+                break;
+    
+            case 'mat4':
+                gl.uniformMatrix4fv(location, false, value);
+                break;
+    
+            case 'int':
+                gl.uniform1i(location, value);
+                break;
+    
+            case 'ivec2':
+                gl.uniform2iv(location, value);
+                break;
+    
+            case 'ivec3':
+                gl.uniform3iv(location, value);
+                break;
+    
+            case 'ivec4':
+                gl.uniform4iv(location, value);
+                break;
+    
+            case 'bool':
+                gl.uniform1i(location, value);
+                break;
+    
+            case 'bvec2':
+                gl.uniform2iv(location, value);
+                break;
+    
+            case 'bvec3':
+                gl.uniform3iv(location, value);
+                break;
+    
+            case 'bvec4':
+                gl.uniform4iv(location, value);
+                break;
+    
+            case 'sampler2D':
+                gl.uniform1i(location, value);
+                break;
+    
+            case 'samplerCube':
+                gl.uniform1i(location, value);
+                break;
+    
+            default:
+                throw new Error(`Unknown uniform type ${type}`);
+        }
+    }
+
     private loadShaderSource(path: string): string {
         const request = new XMLHttpRequest();
         request.open('GET', path, false);

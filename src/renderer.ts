@@ -42,10 +42,10 @@ export class Renderer {
         gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
 
         const vertices = [
-        //  x    y    r   g   b
-           -0.5, 0,   1,  0,  0,
-            0.5, 0,   0,  1,  0,
-            0,   0.5, 0,  0,  1
+        //  x    y  
+           -0.5, 0, 
+            0.5, 0, 
+            0,   0.5
         ];
 
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
@@ -54,6 +54,10 @@ export class Renderer {
             gl.enableVertexAttribArray(attr.location);
             gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
         }
+
+        // set uniforms
+        const time = Date.now() / 1000;
+        this._shader.setUniform('u_color', 'vec3', [Math.sin(time) * 0.5 + 0.5, Math.cos(time) * 0.5 + 0.5, Math.sin(time + 0.5) * 0.5 + 0.5]);
     
         gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
