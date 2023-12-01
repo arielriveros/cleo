@@ -1,42 +1,107 @@
+const defaultVertexSource = `
+    attribute vec2 a_position;
+    attribute vec3 a_color;
+
+    varying vec3 v_color;
+
+    void main() {
+        gl_Position = vec4(a_position, 0, 1);
+        v_color = a_color;
+    }
+`;
+
+const defaultFragmentSource = `
+    precision mediump float;
+
+    varying vec3 v_color;
+    void main() {
+        gl_FragColor = vec4(v_color, 1);
+    }
+`;
+
+
+// gl is a global variable that will be used throughout the application
+let gl: WebGL2RenderingContext;
+
+class Shader {
+    private _shaderProgram!: WebGLProgram;
+    private _vertexShader!: WebGLShader;
+    private _fragmentShader!: WebGLShader;
+
+    constructor() {
+        let vs = gl.createShader(gl.VERTEX_SHADER);
+        if (!vs) throw new Error('Error creating vertex shader');
+        this._vertexShader = vs;
+
+        const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        if (!fs) throw new Error('Error creating fragment shader');
+        this._fragmentShader = fs;
+    }
+
+    public create(vertexSource: string, fragmentSource: string): void {
+        gl.shaderSource(this._vertexShader, vertexSource);
+        gl.compileShader(this._vertexShader);
+        gl.compileShader(this._vertexShader);
+        if (!gl.getShaderParameter(this._vertexShader, gl.COMPILE_STATUS))
+            throw new Error(gl.getShaderInfoLog(this._vertexShader) || 'Unknown error creating vertex shader');
+
+        gl.shaderSource(this._fragmentShader, fragmentSource);
+        gl.compileShader(this._fragmentShader);
+        if (!gl.getShaderParameter(this._fragmentShader, gl.COMPILE_STATUS))
+            throw new Error(gl.getShaderInfoLog(this._fragmentShader) || 'Unknown error creating fragment shader');
+
+        this._shaderProgram = gl.createProgram() as WebGLProgram;
+        gl.attachShader(this._shaderProgram, this._vertexShader);
+        gl.attachShader(this._shaderProgram, this._fragmentShader);
+        gl.linkProgram(this._shaderProgram);
+    }
+
+    public use(): void {
+        gl.useProgram(this._shaderProgram);
+    }
+
+    public getAttribLocation(name: string): number {
+        return gl.getAttribLocation(this._shaderProgram, name);
+    }
+}
 
 class Renderer {
     private _canvas: HTMLCanvasElement;
-    private _context!: WebGLRenderingContext;
-    private _shaderProgram!: WebGLProgram;
+    private _shader!: Shader;
 
     constructor() {
         // Create canvas
         this._canvas = document.createElement('canvas');
-        this._canvas.width = window.innerWidth;
-        this._canvas.height = window.innerHeight;
+        this.resize();
 
         // add the canvas to the document
         document.body.appendChild(this._canvas);
 
         // Check WebGL support
-        if (!this._canvas.getContext('webgl')) {
-            console.error('WebGL context not available');
-            return;
-        }
+        if (!this._canvas.getContext('webgl'))
+            throw new Error('WebGL context not available');
 
         // Get WebGL context
-        this._context = this._canvas.getContext('webgl') as WebGLRenderingContext;
+        gl = this._canvas.getContext('webgl') as WebGL2RenderingContext;
+
+        // Create default shader
+        this._shader = new Shader();
     }
 
     public initialize(): void {
-        this._context.clearColor(0.0, 0.0, 0.0, 1.0);
-        this._context.clear(this._context.COLOR_BUFFER_BIT);
-        this.createShaders();
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        this._shader.create(defaultVertexSource, defaultFragmentSource);        
     }
 
     public render(): void {
-        this._context.clearColor(0.0, 0.0, 0.0, 1.0);
-        this._context.clear(this._context.COLOR_BUFFER_BIT);
-        const positionAttributeLocation = this._context.getAttribLocation(this._shaderProgram, 'a_position');
-        const colorAttributeLocation = this._context.getAttribLocation(this._shaderProgram, 'a_color');
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
 
-        const vertexBuffer = this._context.createBuffer();
-        this._context.bindBuffer(this._context.ARRAY_BUFFER, vertexBuffer);
+        this._shader.use();
+
+        const vertexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
 
         const vertices = [
         //  x    y    r   g   b
@@ -45,66 +110,29 @@ class Renderer {
             0,   0.5, 0,  0,  1
         ];
 
-        this._context.bufferData(this._context.ARRAY_BUFFER, new Float32Array(vertices), this._context.STATIC_DRAW);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
 
-        this._context.enableVertexAttribArray(positionAttributeLocation);
-        this._context.vertexAttribPointer(positionAttributeLocation, 2, this._context.FLOAT, false, 5 * 4, 0);
+        const positionAttributeLocation = this._shader.getAttribLocation('a_position');
+        const colorAttributeLocation = this._shader.getAttribLocation('a_color');
 
-        this._context.enableVertexAttribArray(colorAttributeLocation);
-        this._context.vertexAttribPointer(colorAttributeLocation, 3, this._context.FLOAT, false, 5 * 4, 2 * 4);
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 5 * 4, 0);
 
-        this._context.drawArrays(this._context.TRIANGLES, 0, 3);
+        gl.enableVertexAttribArray(colorAttributeLocation);
+        gl.vertexAttribPointer(colorAttributeLocation, 3, gl.FLOAT, false, 5 * 4, 2 * 4);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    public resize() {
+        this._canvas.width = window.innerWidth;
+        this._canvas.height = window.innerHeight;
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
-    public get context(): WebGLRenderingContext { return this._context; }
+    public get context(): WebGL2RenderingContext { return gl; }
 
-    private createShaders(): void {
-        const vertexShaderSource = `
-            attribute vec2 a_position;
-            attribute vec3 a_color;
-
-            varying vec3 v_color;
-
-            void main() {
-                gl_Position = vec4(a_position, 0, 1);
-                v_color = a_color;
-            }
-        `;
-        const vertexShader = this._context.createShader(this._context.VERTEX_SHADER);
-        if (!vertexShader) throw new Error('Error creating vertex shader');
-        this._context.shaderSource(vertexShader, vertexShaderSource);
-        this._context.compileShader(vertexShader);
-        if (!this._context.getShaderParameter(vertexShader, this._context.COMPILE_STATUS)) {
-            throw new Error(this._context.getShaderInfoLog(vertexShader) || 'Unknown error creating vertex shader');
-        }
-
-        const fragmentShaderSource = `
-            precision mediump float;
-
-            varying vec3 v_color;
-            void main() {
-                gl_FragColor = vec4(v_color, 1);
-            }
-        `;
-        const fragmentShader = this._context.createShader(this._context.FRAGMENT_SHADER);
-        if (!fragmentShader) throw new Error('Error creating fragment shader');
-        this._context.shaderSource(fragmentShader, fragmentShaderSource);
-        this._context.compileShader(fragmentShader);
-        if (!this._context.getShaderParameter(fragmentShader, this._context.COMPILE_STATUS)) {
-            throw new Error(this._context.getShaderInfoLog(fragmentShader) || 'Unknown error creating fragment shader');
-        }
-
-        this._shaderProgram = this._context.createProgram() as WebGLProgram;
-        this._context.attachShader(this._shaderProgram, vertexShader);
-        this._context.attachShader(this._shaderProgram, fragmentShader);
-        this._context.linkProgram(this._shaderProgram);
-        if (!this._context.getProgramParameter(this._shaderProgram, this._context.LINK_STATUS)) {
-            throw new Error(this._context.getProgramInfoLog(this._shaderProgram) || 'Unknown error creating shader program');
-        }
-
-        this._context.useProgram(this._shaderProgram);
-    }
+    
 }
 
 class Application {
@@ -124,8 +152,8 @@ class Application {
     }
 
     public onResize(): void {
-        this._renderer.canvas.width = window.innerWidth;
-        this._renderer.canvas.height = window.innerHeight;
+        this._renderer.resize();
+        
     }
 }
 
