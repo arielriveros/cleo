@@ -17,5 +17,8 @@
     "webpack-cli": "^5.1.4",
     "webpack-dev-server": "^4.15.1"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@types/gl-matrix": "^3.2.0",
+    "gl-matrix": "^3.4.3"
+  }
 }

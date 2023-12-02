@@ -1,4 +1,4 @@
-import { Renderer } from "./renderer";
+import { Renderer } from "./graphics/renderer";
 
 class Application {
     private _renderer: Renderer;

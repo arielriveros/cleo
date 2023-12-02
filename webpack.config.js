@@ -34,7 +34,7 @@ module.exports = {
     plugins: [
         new CopyWebpackPlugin({patterns: [
             { from: 'src/static', to: './' },
-            { from: 'src/shaders', to: './shaders' }
+            { from: 'src/graphics/shaders', to: './shaders' }
         ]})
     ]
 };

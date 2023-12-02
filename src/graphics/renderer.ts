@@ -45,6 +45,7 @@ export class Renderer {
         const mesh1 = new Mesh().create(vertices);
         this._BasicShader.initializeMeshVAO(mesh1);
         this._model1 = new Model(mesh1, Material.Basic([1.0, 0.0, 0.0]));
+        this._model1.position[0] = -0.5;
 
         const vertices2 = [
             //  x    y  
@@ -61,7 +62,18 @@ export class Renderer {
         gl.clearColor(0.0, 0.0, 0.0, 1.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
 
+        this._model1.rotation[1] += 0.01;
+        this._model2.rotation[0] -= 0.01;
+
+        this._BasicShader.use();
+
+        // set uniforms
+        this._BasicShader.setUniform('u_color', 'vec3', this._model1.material.diffuse);
+        this._BasicShader.setUniform('u_model', 'mat4', this._model1.modelMatrix);
         this._model1.draw();
+
+        this._BasicShader.setUniform('u_color', 'vec3', this._model2.material.diffuse);
+        this._BasicShader.setUniform('u_model', 'mat4', this._model2.modelMatrix);
         this._model2.draw();
     }
 
