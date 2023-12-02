@@ -1,4 +1,6 @@
 import { gl } from './renderer';
+import { Mesh } from './mesh';
+
 
 type AttributeLayout = {
     size: number,
@@ -65,6 +67,20 @@ export class Shader {
         // Use the program only if it is not already in use
         if (gl.getParameter(gl.CURRENT_PROGRAM) !== this._shaderProgram)
             gl.useProgram(this._shaderProgram);
+    }
+
+    public initializeMeshVAO(mesh: Mesh): void {
+        this.use();
+        gl.bindVertexArray(mesh.vertexArray);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
+
+        for (let attr of this._attributes) {
+            gl.enableVertexAttribArray(attr.location);
+            gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
+        }
+
+        gl.bindVertexArray(null);
     }
 
     setUniform(name: string, type: string, value: any) {
