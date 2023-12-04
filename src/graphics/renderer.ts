@@ -4,6 +4,8 @@ import { Shader } from './shader';
 import { MaterialSystem } from './systems/materialSystem';
 import { Geometry } from '../core/geometry';
 import { Camera } from '../core/camera';
+import { DirectionalLight } from '../core/lighting';
+import { LightingSystem } from './systems/lightingSystem';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -16,11 +18,9 @@ interface RendererConfig {
 export class Renderer {
     private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
-    private _materialSystem!: MaterialSystem;
-    private _model1!: Model;
-    private _model2!: Model;
-    private _model3!: Model;
-    private _model4!: Model;
+    
+    private _materialSystem: MaterialSystem;
+    private _lightingSystem: LightingSystem;
 
     constructor(config: RendererConfig) {
         this._config = config;
@@ -40,10 +40,13 @@ export class Renderer {
 
         // Create material system
         this._materialSystem = MaterialSystem.Instance;
+        this._lightingSystem = LightingSystem.Instance;
 
+        // Create a directional light
+        
     }
 
-    public initialize(camera: Camera): void {
+    public initialize(camera: Camera, scene: Model[]): void {
         gl.clearColor(this._config.clearColor[0], this._config.clearColor[1], this._config.clearColor[2], this._config.clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.enable(gl.DEPTH_TEST);
@@ -59,45 +62,19 @@ export class Renderer {
         this._materialSystem.addShader('basic', basicShader);
         this._materialSystem.addShader('default', defaultShader);
 
-        this._model1 = new Model(Geometry.Triangle(), Material.Basic({color: [1.0, 0.0, 0.0]}));
-        this._model1.position[0] = -0.5;
-        this._model1.scale[0] = 0.5;
-        this._model1.scale[1] = 0.5;
-        
-        this._model2 = new Model(Geometry.Quad(), Material.Default({diffuse: [0.0, 1.0, 1.0]}));
-        this._model2.position[0] = 0.5;
-        this._model2.scale[0] = 0.5;
 
-        this._model3 = new Model(Geometry.Circle(), Material.Default({diffuse: [1.0, 1.0, 0.0]}));
-        this._model3.position[1] = 0.5;
+        const directionalLight = new DirectionalLight({ direction: [0.0, -1.0, 0.0] });
+        this._lightingSystem.addLight(directionalLight);
 
-        this._model4 = new Model(Geometry.Cube(), Material.Default({diffuse: [1.0, 0.0, 1.0]}));
-        this._model4.position[1] = -0.5;
-        this._model4.scale[0] = 0.5;
-        this._model4.scale[1] = 0.5;
-        this._model4.scale[2] = 0.5;
-
-        this._model1.initialize();
-        this._model2.initialize();
-        this._model3.initialize();
-        this._model4.initialize();
+        for (const model of scene)
+            model.initialize();
     }
 
-    public render(camera: Camera): void {
+    public render(camera: Camera, scene: Model[]): void {
         gl.clear(gl.COLOR_BUFFER_BIT);
-    
-        // update camera on every shader that a camera is used
-        
-        this._model1.rotation[1] += 0.01;
-        this._model2.rotation[2] -= 0.01;
-        this._model3.rotation[0] += 0.01;
-        this._model4.rotation[1] -= 0.01;
-        this._model4.rotation[2] -= 0.01;
-        
-        this._model1.draw(camera);
-        this._model2.draw(camera);
-        this._model3.draw(camera);
-        this._model4.draw(camera);
+
+        for (const model of scene)
+            model.draw(camera);
     }
 
     public resize() {

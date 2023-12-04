@@ -1,5 +1,5 @@
+import { mat4, vec2, vec3, vec4 } from 'gl-matrix';
 import { gl } from './renderer';
-import { Mesh } from './mesh';
 
 
 type AttributeLayout = {
@@ -19,7 +19,6 @@ type AttributeInfo = {
 }
 
 type UniformInfo = {
-    name: string,    // name of the uniform
     type: string,   // human readable type of the uniform
     size: number,   // size of the uniform
     byteSize: number,   // size of the uniform in bytes
@@ -31,7 +30,9 @@ export class Shader {
     private _vertexShader!: WebGLShader;
     private _fragmentShader!: WebGLShader;
     private _attributes: AttributeInfo[] = [];
-    private _uniforms: UniformInfo[] = [];
+    private _uniforms: {
+        [name: string]: {info: UniformInfo, value: any}
+    } = {};
 
     constructor() {
         let vs = gl.createShader(gl.VERTEX_SHADER);
@@ -80,7 +81,7 @@ export class Shader {
             gl.useProgram(this._shaderProgram);
     }
 
-    public setUniform(name: string, type: string, value: any) {
+    private setUniform(name: string, type: string, value: any) {
         const location = gl.getUniformLocation(this._shaderProgram, name);
         if (!location) throw new Error(`Uniform ${name} of type ${type} not found`);
     
@@ -158,6 +159,19 @@ export class Shader {
         }
     }
 
+    public update(): void {
+        for (const uniform of Object.values(this._uniforms)) {
+            const name = Object.keys(this._uniforms).find(key => this._uniforms[key] === uniform);
+            if (!name) throw new Error('Uniform not found');
+
+            this.setUniform(name, uniform.info.type, uniform.value);
+        }
+    }
+
+    public hasUniform(name: string) {
+        return gl.getUniformLocation(this._shaderProgram, name) !== null;        
+    }
+
     private loadShaderSource(path: string): string {
         const request = new XMLHttpRequest();
         request.open('GET', path, false);
@@ -231,14 +245,42 @@ export class Shader {
                 for (let i = 0; i < size; i++)
                     array[i] = `${name}[${i}]`;
             }
-            
-            this._uniforms.push({
-                name: name,
-                type: type,
-                size: size,
-                byteSize: byteSize,
-                location: location,
-            });
+
+            let defaultValue;
+
+            switch (type) {
+                case 'int':
+                case 'float':
+                    defaultValue = 0;
+                    break;
+                case 'vec2':
+                    defaultValue = vec2.create();
+                    break;
+                case 'vec3':
+                    defaultValue = vec3.create();
+                    break;
+                case 'vec4':
+                    defaultValue = vec4.create();
+                    break;
+                case 'mat4':
+                    defaultValue = mat4.create();
+                    break;
+                case 'sampler2D':
+                    defaultValue = 0;
+                    break;
+                default:
+                    throw new Error(`Uniform type ${type} not supported`);
+            }
+
+            this._uniforms[name] = {
+                info: {
+                    type: type,
+                    size: size,
+                    byteSize: byteSize,
+                    location: location,
+                },
+                value: defaultValue
+            };
         }
     }
 
@@ -339,5 +381,5 @@ export class Shader {
     }
 
     public get attributes(): AttributeInfo[] { return this._attributes; }
-    public get uniforms(): UniformInfo[] { return this._uniforms; }
+    public get uniforms(): { [name: string]: {info: UniformInfo, value: any} } { return this._uniforms; }
 }

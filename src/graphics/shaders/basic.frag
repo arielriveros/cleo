@@ -2,10 +2,12 @@
 
 precision mediump float;
 
-uniform vec3 u_color;
+uniform struct {
+    vec3 color;
+} u_material;
 
 out vec4 outColor;
 
 void main() {
-    outColor = vec4(u_color, 1.0);
+    outColor = vec4(u_material.color, 1.0);
 }

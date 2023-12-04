@@ -37,7 +37,7 @@ export class Material {
             material.type = 'default';
             material.properties.set('diffuse', properties.diffuse || [1.0, 1.0, 1.0]);
             material.properties.set('specular', properties.specular || [0.25, 0.25, 0.25]);
-            material.properties.set('ambient', properties.ambient || [0.1, 0.1, 0.1]);
+            material.properties.set('ambient', properties.ambient || properties.diffuse || [0.25, 0.25, 0.25]);
             material.properties.set('shininess', properties.shininess || 32.0);
             return material;
     }
