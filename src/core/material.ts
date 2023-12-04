@@ -21,7 +21,7 @@ export class Material {
     constructor(config?: MaterialConfig) {
         this.properties = new Map<string, any>();
         this.config = {
-            side: config?.side || 'front'
+            side: config?.side || 'double'
         };
     }
 

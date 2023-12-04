@@ -1,9 +1,9 @@
 import { Model } from './model';
-import { Mesh } from './mesh';
 import { Material } from '../core/material';
 import { Shader } from './shader';
 import { MaterialSystem } from './systems/materialSystem';
 import { Geometry } from '../core/geometry';
+import { Camera } from '../core/camera';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -43,10 +43,13 @@ export class Renderer {
 
     }
 
-    public initialize(): void {
+    public initialize(camera: Camera): void {
         gl.clearColor(this._config.clearColor[0], this._config.clearColor[1], this._config.clearColor[2], this._config.clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.enable(gl.DEPTH_TEST);
+
+        // Initialize camera
+        camera.resize();
 
         // Create default shaders
         const basicShader = new Shader().createFromFiles('shaders/basic.vert', 'shaders/basic.frag');
@@ -74,15 +77,16 @@ export class Renderer {
         this._model4.scale[1] = 0.5;
         this._model4.scale[2] = 0.5;
 
-    
         this._model1.initialize();
         this._model2.initialize();
         this._model3.initialize();
         this._model4.initialize();
     }
 
-    public render(): void {
+    public render(camera: Camera): void {
         gl.clear(gl.COLOR_BUFFER_BIT);
+    
+        // update camera on every shader that a camera is used
         
         this._model1.rotation[1] += 0.01;
         this._model2.rotation[2] -= 0.01;
@@ -90,10 +94,10 @@ export class Renderer {
         this._model4.rotation[1] -= 0.01;
         this._model4.rotation[2] -= 0.01;
         
-        this._model1.draw();
-        this._model2.draw();
-        this._model3.draw();
-        this._model4.draw();
+        this._model1.draw(camera);
+        this._model2.draw(camera);
+        this._model3.draw(camera);
+        this._model4.draw(camera);
     }
 
     public resize() {

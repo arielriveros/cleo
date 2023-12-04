@@ -4,6 +4,7 @@ import { mat4, vec3 } from 'gl-matrix';
 import { MaterialSystem } from './systems/materialSystem';
 import { Geometry } from '../core/geometry';
 import { gl } from './renderer';
+import { Camera } from '../core/camera';
 
 
 export class Model {
@@ -58,10 +59,11 @@ export class Model {
         this._mesh.create(this._geometry.getData(attributes), this._geometry.vertexCount, this._geometry.indices);
     }
 
-    public draw(): void {
+    public draw(camera: Camera): void {
         MaterialSystem.Instance.bind(this._material.type);
-        
 
+        MaterialSystem.Instance.setUniform(this._material.type, 'u_view', camera.viewMatrix);
+        MaterialSystem.Instance.setUniform(this._material.type, 'u_projection', camera.projectionMatrix);
         MaterialSystem.Instance.setUniform(this._material.type, 'u_model', this.modelMatrix);
 
         for (const [name, value] of this._material.properties) {
