@@ -1,31 +1,11 @@
-import { Renderer } from "./graphics/renderer";
+import { Engine } from "./core/engine";
 
-class Application {
-    private _renderer: Renderer;
-
-    constructor() {
-        this._renderer = new Renderer();
-    }
-
-    public initialize(): void {
-        this._renderer.initialize();
-    }
-
-    public run(): void {
-        this._renderer.render();
-        requestAnimationFrame(this.run.bind( this ));
-    }
-
-    public onResize(): void {
-        this._renderer.resize();
-    }
-}
-
-
-let app: Application;
+let app: Engine;
 
 window.onload = () => {
-    app = new Application();
+    app = new Engine({
+        clearColor: [0.2, 0.2, 0.2, 1.0]
+    });
     app.initialize();
     app.run();
 }

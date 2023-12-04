@@ -18,11 +18,20 @@ type AttributeInfo = {
     layout: AttributeLayout
 }
 
+type UniformInfo = {
+    name: string,    // name of the uniform
+    type: string,   // human readable type of the uniform
+    size: number,   // size of the uniform
+    byteSize: number,   // size of the uniform in bytes
+    location: WebGLUniformLocation
+}
+
 export class Shader {
     private _shaderProgram!: WebGLProgram;
     private _vertexShader!: WebGLShader;
     private _fragmentShader!: WebGLShader;
     private _attributes: AttributeInfo[] = [];
+    private _uniforms: UniformInfo[] = [];
 
     constructor() {
         let vs = gl.createShader(gl.VERTEX_SHADER);
@@ -34,10 +43,11 @@ export class Shader {
         this._fragmentShader = fs;
     }
 
-    public createFromFiles(vertexShaderPath: string, fragmentShaderPath: string): void {
+    public createFromFiles(vertexShaderPath: string, fragmentShaderPath: string): Shader {
         const vertexShaderSource = this.loadShaderSource(vertexShaderPath);
         const fragmentShaderSource = this.loadShaderSource(fragmentShaderPath);
         this.create(vertexShaderSource, fragmentShaderSource);
+        return this;
     }
 
     public create(vertexSource: string, fragmentSource: string): void {
@@ -61,6 +71,7 @@ export class Shader {
             throw new Error(gl.getProgramInfoLog(this._shaderProgram) || 'Unknown error creating program');
 
         this.storeAttributes();
+        this.storeUniforms();
     }
 
     public use(): void {
@@ -69,23 +80,9 @@ export class Shader {
             gl.useProgram(this._shaderProgram);
     }
 
-    public initializeMeshVAO(mesh: Mesh): void {
-        this.use();
-        gl.bindVertexArray(mesh.vertexArray);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
-
-        for (let attr of this._attributes) {
-            gl.enableVertexAttribArray(attr.location);
-            gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
-        }
-
-        gl.bindVertexArray(null);
-    }
-
-    setUniform(name: string, type: string, value: any) {
+    public setUniform(name: string, type: string, value: any) {
         const location = gl.getUniformLocation(this._shaderProgram, name);
-        if (!location) throw new Error(`Uniform ${name} not found`);
+        if (!location) throw new Error(`Uniform ${name} of type ${type} not found`);
     
         switch (type) {
             case 'float':
@@ -211,8 +208,38 @@ export class Shader {
             // Update the offset for the next attribute
             offset += byteSize;
         }
+    }
+
+    private storeUniforms(): void {
+        const numUniforms = gl.getProgramParameter(this._shaderProgram, gl.ACTIVE_UNIFORMS);
     
-        console.log(this._attributes);
+        for (let i = 0; i < numUniforms; i++) {
+            const uniformInfo = gl.getActiveUniform(this._shaderProgram, i);
+            if (!uniformInfo) break;
+
+            const location = gl.getUniformLocation(this._shaderProgram, uniformInfo.name);
+            if (!location) continue;
+
+            const type = this.getTypeName(uniformInfo.type);
+            const size = uniformInfo.size;
+            const byteSize = this.getTypeByteSize(uniformInfo.type);
+            const isArray = uniformInfo.name.substring(-3) === '[0]';
+            const name = isArray ? uniformInfo.name.substring(0, uniformInfo.name.length - 3) : uniformInfo.name;
+
+            if (isArray) {
+                const array = new Array(size);
+                for (let i = 0; i < size; i++)
+                    array[i] = `${name}[${i}]`;
+            }
+            
+            this._uniforms.push({
+                name: name,
+                type: type,
+                size: size,
+                byteSize: byteSize,
+                location: location,
+            });
+        }
     }
 
     private getTypeName(type: number): string {
@@ -268,6 +295,15 @@ export class Shader {
             case gl.BOOL_VEC4:
                 return 16;
 
+            case gl.FLOAT_MAT2:
+                return 16;
+
+            case gl.FLOAT_MAT3:
+                return 36;
+
+            case gl.FLOAT_MAT4:
+                return 64;
+
             default: return 0;
         }
     }
@@ -303,4 +339,5 @@ export class Shader {
     }
 
     public get attributes(): AttributeInfo[] { return this._attributes; }
+    public get uniforms(): UniformInfo[] { return this._uniforms; }
 }

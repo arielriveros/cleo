@@ -1,9 +1,13 @@
-import { Material } from './material';
+import { Material } from '../core/material';
 import { Mesh } from './mesh';
-import { mat4, quat, vec3 } from 'gl-matrix';
+import { mat4, vec3 } from 'gl-matrix';
+import { MaterialSystem } from './systems/materialSystem';
+import { Geometry } from '../core/geometry';
+import { gl } from './renderer';
 
 
 export class Model {
+    private readonly  _geometry: Geometry;
     private readonly  _mesh: Mesh;
     private readonly  _material: Material;
     private readonly  _modelMatrix: mat4;
@@ -12,9 +16,11 @@ export class Model {
     private _rotation: vec3;
     private _scale: vec3;
 
-    constructor(mesh: Mesh, material: Material) {
-        this._mesh = mesh;
+    constructor(geometry: Geometry, material: Material) {
+        this._geometry = geometry;
         this._material = material;
+
+        this._mesh = new Mesh();
 
         this._modelMatrix = mat4.create();
 
@@ -23,8 +29,65 @@ export class Model {
         this._scale = vec3.fromValues(1, 1, 1);
     }
 
+    public initialize(): void {
+        const shader = MaterialSystem.Instance.getShader(this._material.type);
+        this._mesh.initializeVAO(shader.attributes);
+        const attributes = [];
+
+        for (const attr of shader.attributes) {
+            switch (attr.name) {
+                case 'position':
+                case 'a_position':
+                    attributes.push('position');
+                    break;
+                case 'normal':
+                case 'a_normal':
+                    attributes.push('normal');
+                    break;
+                case 'uv':
+                case 'a_uv':
+                case 'texCoord':
+                case 'a_texCoord':
+                    attributes.push('uv');
+                    break;
+                default:
+                    throw new Error(`Attribute ${attr.name} not supported`);
+            }
+        }
+
+        this._mesh.create(this._geometry.getData(attributes), this._geometry.vertexCount, this._geometry.indices);
+    }
+
     public draw(): void {
+        MaterialSystem.Instance.bind(this._material.type);
+        
+
+        MaterialSystem.Instance.setUniform(this._material.type, 'u_model', this.modelMatrix);
+
+        for (const [name, value] of this._material.properties) {
+            MaterialSystem.Instance.setUniform(this._material.type, `u_${name}`, value);
+        }
+        MaterialSystem.Instance.update();
+
+        const materialConfig = this._material.config;
+
+        switch(materialConfig.side) {
+            case 'front':
+                gl.enable(gl.CULL_FACE);
+                gl.cullFace(gl.BACK);
+                break;
+            case 'back':
+                gl.enable(gl.CULL_FACE);
+                gl.cullFace(gl.FRONT);
+                break;
+            case 'double':
+                gl.disable(gl.CULL_FACE);
+                break;
+        }
+
         this._mesh.draw();
+
+        gl.disable(gl.CULL_FACE);
     }
 
     public get mesh(): Mesh { return this._mesh; }

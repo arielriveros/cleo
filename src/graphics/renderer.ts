@@ -1,18 +1,29 @@
 import { Model } from './model';
 import { Mesh } from './mesh';
-import { Material } from './material';
+import { Material } from '../core/material';
 import { Shader } from './shader';
+import { MaterialSystem } from './systems/materialSystem';
+import { Geometry } from '../core/geometry';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
 
+
+interface RendererConfig {
+    clearColor: number[];
+}
+
 export class Renderer {
+    private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
-    private _BasicShader!: Shader;
+    private _materialSystem!: MaterialSystem;
     private _model1!: Model;
     private _model2!: Model;
+    private _model3!: Model;
+    private _model4!: Model;
 
-    constructor() {
+    constructor(config: RendererConfig) {
+        this._config = config;
         // Create canvas
         this._canvas = document.createElement('canvas');
         this.resize();
@@ -27,54 +38,62 @@ export class Renderer {
         // Get WebGL context
         gl = this._canvas.getContext('webgl2') as WebGL2RenderingContext;
 
-        // Create default shader
-        this._BasicShader = new Shader();
+        // Create material system
+        this._materialSystem = MaterialSystem.Instance;
+
     }
 
     public initialize(): void {
-        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.clearColor(this._config.clearColor[0], this._config.clearColor[1], this._config.clearColor[2], this._config.clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
-        this._BasicShader.createFromFiles('shaders/default.vert', 'shaders/default.frag');
+        gl.enable(gl.DEPTH_TEST);
 
-        const vertices = [
-            //  x    y  
-               -0.5, 0, 
-                0.5, 0, 
-                0,   0.5
-            ];
-        const mesh1 = new Mesh().create(vertices);
-        this._BasicShader.initializeMeshVAO(mesh1);
-        this._model1 = new Model(mesh1, Material.Basic([1.0, 0.0, 0.0]));
+        // Create default shaders
+        const basicShader = new Shader().createFromFiles('shaders/basic.vert', 'shaders/basic.frag');
+        const defaultShader = new Shader().createFromFiles('shaders/default.vert', 'shaders/default.frag');
+
+        // Add shaders to the material system
+        this._materialSystem.addShader('basic', basicShader);
+        this._materialSystem.addShader('default', defaultShader);
+
+        this._model1 = new Model(Geometry.Triangle(), Material.Basic({color: [1.0, 0.0, 0.0]}));
         this._model1.position[0] = -0.5;
+        this._model1.scale[0] = 0.5;
+        this._model1.scale[1] = 0.5;
+        
+        this._model2 = new Model(Geometry.Quad(), Material.Default({diffuse: [0.0, 1.0, 1.0]}));
+        this._model2.position[0] = 0.5;
+        this._model2.scale[0] = 0.5;
 
-        const vertices2 = [
-            //  x    y  
-                0.5, 0, 
-                1,   0, 
-                0.75,  -0.5
-            ];
-        const mesh2 = new Mesh().create(vertices2);
-        this._BasicShader.initializeMeshVAO(mesh2);
-        this._model2 = new Model(mesh2, Material.Basic([0, 1.0, 0.0]));
+        this._model3 = new Model(Geometry.Circle(), Material.Default({diffuse: [1.0, 1.0, 0.0]}));
+        this._model3.position[1] = 0.5;
+
+        this._model4 = new Model(Geometry.Cube(), Material.Default({diffuse: [1.0, 0.0, 1.0]}));
+        this._model4.position[1] = -0.5;
+        this._model4.scale[0] = 0.5;
+        this._model4.scale[1] = 0.5;
+        this._model4.scale[2] = 0.5;
+
+    
+        this._model1.initialize();
+        this._model2.initialize();
+        this._model3.initialize();
+        this._model4.initialize();
     }
 
     public render(): void {
-        gl.clearColor(0.0, 0.0, 0.0, 1.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
-
+        
         this._model1.rotation[1] += 0.01;
-        this._model2.rotation[0] -= 0.01;
-
-        this._BasicShader.use();
-
-        // set uniforms
-        this._BasicShader.setUniform('u_color', 'vec3', this._model1.material.diffuse);
-        this._BasicShader.setUniform('u_model', 'mat4', this._model1.modelMatrix);
+        this._model2.rotation[2] -= 0.01;
+        this._model3.rotation[0] += 0.01;
+        this._model4.rotation[1] -= 0.01;
+        this._model4.rotation[2] -= 0.01;
+        
         this._model1.draw();
-
-        this._BasicShader.setUniform('u_color', 'vec3', this._model2.material.diffuse);
-        this._BasicShader.setUniform('u_model', 'mat4', this._model2.modelMatrix);
         this._model2.draw();
+        this._model3.draw();
+        this._model4.draw();
     }
 
     public resize() {
