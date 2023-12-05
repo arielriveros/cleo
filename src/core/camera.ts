@@ -36,7 +36,9 @@ export class Camera {
     }
 
     public resize() {
-        this._ratio = window.innerWidth / window.innerHeight;
+        const canvas = document.querySelector('canvas');
+        if (!canvas) throw new Error('Canvas not found');
+        this._ratio = canvas.width / canvas.height;
     }
 
     public moveForward(distance: number) {

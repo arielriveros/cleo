@@ -2,10 +2,8 @@ import { gl } from './renderer';
 import { mat4, vec3 } from 'gl-matrix';
 import { Mesh } from './mesh';
 import { MaterialSystem } from './systems/materialSystem';
-import { LightingSystem } from './systems/lightingSystem';
 import { Material } from '../core/material';
 import { Geometry } from '../core/geometry';
-import { Camera } from '../core/camera';
 
 
 export class Model {
@@ -60,26 +58,13 @@ export class Model {
         this._mesh.create(this._geometry.getData(attributes), this._geometry.vertexCount, this._geometry.indices);
     }
 
-    public draw(camera: Camera): void {
+    public draw(): void {
         const materialSys = MaterialSystem.Instance;
-        const lightingSys = LightingSystem.Instance;
 
         materialSys.bind(this._material.type);
 
         // Set Transform releted uniforms on the model's shader type
-        materialSys.setProperty('u_view', camera.viewMatrix);
-        materialSys.setProperty('u_projection', camera.projectionMatrix);
         materialSys.setProperty('u_model', this.modelMatrix);
-
-        // TODO: Move this to the lighting system, no point in setting this for every model
-        // Set Lighting releted uniforms on the model's shader type
-        materialSys.setProperty('u_viewPos', camera.position);
-        if (lightingSys.directionalLight) {
-            materialSys.setProperty('u_dirLight.diffuse', lightingSys.directionalLight.diffuse);
-            materialSys.setProperty('u_dirLight.specular', lightingSys.directionalLight.specular);
-            materialSys.setProperty('u_dirLight.ambient', lightingSys.directionalLight.ambient);
-            materialSys.setProperty('u_dirLight.direction', lightingSys.directionalLight.direction);
-        }
 
         // Set Material releted uniforms on the model's shader type
         for (const [name, value] of this._material.properties)

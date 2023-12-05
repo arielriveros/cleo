@@ -1,4 +1,3 @@
-import { mat4, vec2, vec3, vec4 } from "gl-matrix";
 import { Shader } from "../shader";
 
 export class MaterialSystem {
@@ -37,7 +36,7 @@ export class MaterialSystem {
     public setProperty(name: string, value: any): void {
         if (!this._boundShader) throw new Error("No shader bound");
         if (this._boundShader.uniforms[name])
-            this._boundShader.uniforms[name].value = value;
+            this._boundShader.setUniform(name, value);
     }
 
     public update(): void {

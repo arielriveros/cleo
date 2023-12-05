@@ -1,8 +1,6 @@
 import { Model } from './model';
-import { Material } from '../core/material';
 import { Shader } from './shader';
 import { MaterialSystem } from './systems/materialSystem';
-import { Geometry } from '../core/geometry';
 import { Camera } from '../core/camera';
 import { DirectionalLight } from '../core/lighting';
 import { LightingSystem } from './systems/lightingSystem';
@@ -42,8 +40,6 @@ export class Renderer {
         this._materialSystem = MaterialSystem.Instance;
         this._lightingSystem = LightingSystem.Instance;
 
-        // Create a directional light
-        
     }
 
     public initialize(camera: Camera, scene: Model[]): void {
@@ -73,13 +69,30 @@ export class Renderer {
     public render(camera: Camera, scene: Model[]): void {
         gl.clear(gl.COLOR_BUFFER_BIT);
 
+        const materialSys = MaterialSystem.Instance;
+
+        // Set Camera releted uniforms
+        for (const shaderName of ['basic', 'default', 'custom']) {
+            materialSys.bind(shaderName);
+            materialSys.setProperty('u_view', camera.viewMatrix);
+            materialSys.setProperty('u_projection', camera.projectionMatrix);
+            materialSys.setProperty('u_viewPos', camera.position);
+        }
+
+        // TODO: Add support for different shaders that support lighting
+        materialSys.bind('default');
+        this._lightingSystem.update();
+
         for (const model of scene)
-            model.draw(camera);
+            model.draw();
     }
 
     public resize() {
         this._canvas.width = window.innerWidth;
         this._canvas.height = window.innerHeight;
+
+        if (!gl) return;
+        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }

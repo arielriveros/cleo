@@ -14,7 +14,7 @@ window.onload = () => {
     });
 
     camera = new Camera({
-        position: [0, 0, -2]
+        position: [0, 0, -2],
     });
 
     const model1 = new Model(Geometry.Triangle(), Material.Basic({color: [1.0, 0.0, 0.0]}));
@@ -35,7 +35,20 @@ window.onload = () => {
     model4.scale[1] = 0.5;
     model4.scale[2] = 0.5;
 
-    scene = [model1, model2, model3, model4];
+    const model5 = new Model(
+        Geometry.Cube(),
+        Material.Custom(
+            'custom',
+            { vertexShader: 'shaders/basic.vert', fragmentShader: 'assets/custom.frag'},
+            new Map<string, any>()
+        )
+    )
+    model5.position[1] = -1.0;
+    model5.scale[0] = 0.5;
+    model5.scale[1] = 0.5;
+    model5.scale[2] = 0.5;
+
+    scene = [model1, model2, model3, model4, model5];
 
     app.camera = camera;
     app.scene = scene;
@@ -49,13 +62,15 @@ window.onload = () => {
         scene[2].rotation[0] += 0.01;
         scene[3].rotation[1] -= 0.01;
         scene[3].rotation[2] -= 0.01;
+        scene[4].material.properties.set('time', time / 1000);
     }
 }
 
 window.onmousemove = (event: MouseEvent) => {
-    camera.rotation[0] = -(event.clientY / window.innerHeight - 0.5) * Math.PI;
-    camera.rotation[1] = -(event.clientX / window.innerWidth - 0.5) * Math.PI * 2;
-
+    if (event.buttons === 1) {
+        camera.rotation[0] = -(event.clientY / window.innerHeight - 0.5) * Math.PI;
+        camera.rotation[1] = -(event.clientX / window.innerWidth - 0.5) * Math.PI * 2;
+    }
 }
 
 window.onkeydown = (event: KeyboardEvent) => {
