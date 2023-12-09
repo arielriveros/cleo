@@ -70,6 +70,10 @@ export class Model {
         for (const [name, value] of this._material.properties)
             materialSys.setProperty(`u_material.${name}`, value);
 
+        // TODO: 
+        //for (const [name, value] of this._material.textures)
+            //materialSys.bindTexture(name, value);
+
         // Update the material system before drawing the respective mesh
         materialSys.update();
 

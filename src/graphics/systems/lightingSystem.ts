@@ -5,9 +5,8 @@ export class LightingSystem {
     private static _instance: LightingSystem | null = null;
     private _lights: Light[] = [];
     private _directionalLight: DirectionalLight | null = null;
-    private _lightsUpdated: boolean = false;
     
-    private constructor() { }
+    private constructor() { return this; }
     
     public addLight(light: Light): void {
         if (light instanceof DirectionalLight) {
@@ -16,7 +15,6 @@ export class LightingSystem {
         }
         
         this._lights.push(light);
-        this._lightsUpdated = true;
     }
     public update() {
 

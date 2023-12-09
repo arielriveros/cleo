@@ -3,6 +3,7 @@ import { Engine } from "./core/engine";
 import { Geometry } from "./core/geometry";
 import { Material } from "./core/material";
 import { Model } from "./graphics/model";
+import { Texture } from "./graphics/texture";
 
 let app: Engine;
 let camera: Camera;
@@ -21,15 +22,33 @@ window.onload = () => {
     model1.position[0] = -0.5;
     model1.scale[0] = 0.5;
     model1.scale[1] = 0.5;
+
+    const texture = new Texture().createFromFile('assets/roma.png')
     
-    const model2 = new Model(Geometry.Quad(), Material.Default({diffuse: [1.0, 1.0, 0.0], specular: [0.0, 1.0, 1.0], shininess: 512.0}, { side: 'front'}));
+    const model2 = new Model(
+        Geometry.Quad(),
+        Material.Basic({
+            texture: texture,
+            color: [1.0, 0.0, 1.0]},
+            { side: 'double'}
+        )
+    );
     model2.position[0] = 0.5;
     model2.scale[2] = 0.5;
 
     const model3 = new Model(Geometry.Circle(), Material.Default({diffuse: [1.0, 0.0, 1.0], specular: [0.0, 1.0, 0.0]}, { side: 'front'}));
     model3.position[1] = 0.5;
 
-    const model4 = new Model(Geometry.Cube(), Material.Default({diffuse: [1.0, 0.0, 1.0], ambient: [1.0, 0.0, 1.0]}));
+    const model4 = new Model(
+        Geometry.Cube(),
+        Material.Default({
+            texture: texture,
+            diffuse: [1.0, 1.0, 0.0],
+            specular: [0.0, 1.0, 1.0],
+            shininess: 512.0},
+            { side: 'front'}
+        )
+    );
     model4.position[1] = -0.5;
     model4.scale[0] = 0.5;
     model4.scale[1] = 0.5;

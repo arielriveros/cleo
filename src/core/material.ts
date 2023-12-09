@@ -1,5 +1,6 @@
 import { Shader } from "../graphics/shader";
 import { MaterialSystem } from "../graphics/systems/materialSystem";
+import { Texture } from "../graphics/texture";
 
 interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
@@ -7,6 +8,7 @@ interface MaterialConfig {
 
 interface BasicProperties {
     color?: number[];
+    texture?: Texture;
 }
 
 interface DefaultProperties {
@@ -14,6 +16,8 @@ interface DefaultProperties {
     specular?: number[];
     ambient?: number[];
     shininess?: number;
+
+    texture?: Texture;
 }
 
 enum MaterialType {
@@ -38,6 +42,13 @@ export class Material {
         const material = new Material(config);
         material.type = MaterialType.Basic;
         material.properties.set('color', properties.color || [1.0, 1.0, 1.0] );
+
+        if (properties.texture) {
+            material.properties.set('hasTexture', true);
+            material.properties.set('texture', properties.texture);
+        } 
+        else
+            material.properties.set('hasTexture', false);
         return material;
     }
 
@@ -48,6 +59,14 @@ export class Material {
             material.properties.set('specular', properties.specular || [0.25, 0.25, 0.25]);
             material.properties.set('ambient', properties.ambient || properties.diffuse || [0.25, 0.25, 0.25]);
             material.properties.set('shininess', properties.shininess || 32.0);
+
+            if (properties.texture) {
+                material.properties.set('hasTexture', true);
+                material.properties.set('texture', properties.texture);
+            } 
+            else
+                material.properties.set('hasTexture', false);
+
             return material;
     }
 

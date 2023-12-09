@@ -27,10 +27,8 @@ export class MaterialSystem {
     }
 
     public bind(name: string): void {
-        const shader = this._shaders.get(name);
-        if (!shader) throw new Error(`Shader ${name} not found`);
-        this._boundShader = shader;
-        shader.use();
+        this._boundShader = this.getShader(name);
+        this._boundShader.use();
     }
 
     public setProperty(name: string, value: any): void {

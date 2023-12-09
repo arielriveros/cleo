@@ -5,6 +5,9 @@ precision mediump float;
 // Material
 uniform struct Material {
     vec3 diffuse;
+    bool hasTexture;
+    sampler2D texture;
+
     vec3 ambient;
     vec3 specular;
     float shininess;
@@ -39,6 +42,7 @@ vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) 
 
 in vec3 fragPos;
 in vec3 fragNormal;
+in vec2 fragTexCoord;
 
 out vec4 outColor;
 
@@ -48,7 +52,14 @@ void main() {
 
     vec3 result = vec3(0.0);
 
-    result += computeDirectionalLight(normal, viewDir, u_dirLight);
+    vec3 texel;
+
+    if (u_material.hasTexture) {
+        texel = texture(u_material.texture, fragTexCoord).rgb;
+    } else {
+        texel = vec3(1.0);
+    }
+    result += computeDirectionalLight(normal, viewDir, u_dirLight) * texel;
 
     outColor = vec4(result, 1.0f);
 }

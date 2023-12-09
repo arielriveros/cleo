@@ -85,13 +85,17 @@ export class Shader {
     }
 
     public setUniform(name: string, value: any) {
-        if (!this._uniforms[name]) throw new Error(`Uniform ${name} not found`);
+        if (!this._uniforms[name]) return;
         if (this._uniforms[name].value === value) return;
         this._uniforms[name].value = value;
         this._requiresUpdate = true;
     }
 
     private _setUniform(name: string, type: string, value: any) {
+        // check if location is from current shader program
+        if (gl.getParameter(gl.CURRENT_PROGRAM) !== this._shaderProgram)
+            return;
+
         const location = gl.getUniformLocation(this._shaderProgram, name);
         if (!location) throw new Error(`Uniform ${name} of type ${type} not found`);
     
@@ -276,6 +280,9 @@ export class Shader {
                     break;
                 case 'mat4':
                     defaultValue = mat4.create();
+                    break;
+                case 'bool':
+                    defaultValue = false;
                     break;
                 case 'sampler2D':
                     defaultValue = 0;
