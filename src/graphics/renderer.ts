@@ -10,6 +10,7 @@ export let gl: WebGL2RenderingContext;
 
 
 interface RendererConfig {
+    canvas: HTMLCanvasElement | null;
     clearColor: number[];
 }
 
@@ -23,7 +24,7 @@ export class Renderer {
     constructor(config: RendererConfig) {
         this._config = config;
         // Create canvas
-        this._canvas = document.createElement('canvas');
+        this._canvas = config.canvas? config.canvas : document.createElement('canvas');
         this.resize();
 
         // add the canvas to the document
@@ -42,13 +43,10 @@ export class Renderer {
 
     }
 
-    public initialize(camera: Camera, scene: Model[]): void {
+    public preInitialize(): void {
         gl.clearColor(this._config.clearColor[0], this._config.clearColor[1], this._config.clearColor[2], this._config.clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.enable(gl.DEPTH_TEST);
-
-        // Initialize camera
-        camera.resize();
 
         // Create default shaders
         const basicShader = new Shader().createFromFiles('shaders/basic.vert', 'shaders/basic.frag');
@@ -57,7 +55,11 @@ export class Renderer {
         // Add shaders to the material system
         this._materialSystem.addShader('basic', basicShader);
         this._materialSystem.addShader('default', defaultShader);
+    }
 
+    public initialize(camera: Camera, scene: Model[]): void {
+        // Initialize camera
+        camera.resize(this._canvas.width, this._canvas.height);
 
         const directionalLight = new DirectionalLight({ direction: [1.0, -1.0, 1.0] });
         this._lightingSystem.addLight(directionalLight);

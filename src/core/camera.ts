@@ -29,16 +29,16 @@ export class Camera {
     }
 
     public update() {
+        if (this._rotation[0] > Math.PI / 2) this._rotation[0] = Math.PI / 2 - 0.0001;
+        if (this._rotation[0] < -Math.PI / 2) this._rotation[0] = -Math.PI / 2 + 0.0001;
+
         this._forward[0] = Math.cos(this._rotation[0]) * Math.sin(this._rotation[1]);
         this._forward[1] = Math.sin(this._rotation[0]);
         this._forward[2] = Math.cos(this._rotation[0]) * Math.cos(this._rotation[1]);
-
     }
 
-    public resize() {
-        const canvas = document.querySelector('canvas');
-        if (!canvas) throw new Error('Canvas not found');
-        this._ratio = canvas.width / canvas.height;
+    public resize(width: number, height: number) {
+        this._ratio = width / height;
     }
 
     public moveForward(distance: number) {
@@ -46,7 +46,13 @@ export class Camera {
     }
 
     public moveRight(distance: number) {
-        vec3.add(this._position, this._position, vec3.scale(vec3.create(), vec3.cross(vec3.create(), this._forward, vec3.fromValues(0, 1, 0)), distance));
+        // normalize forward vector
+        vec3.normalize(this._forward, this._forward);
+        // normalize right vector
+        let right = vec3.cross(vec3.create(), this._forward, vec3.fromValues(0, 1, 0));
+        vec3.normalize(right, right);
+        // move along right vector
+        vec3.add(this._position, this._position, vec3.scale(vec3.create(), right, distance));
     }
 
     public moveUp(distance: number) {
