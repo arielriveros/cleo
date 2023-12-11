@@ -31,7 +31,7 @@ export class DirectionalLight extends Light{
 
     constructor(properties: DirectionalLightProperties) {
         super(properties);
-        this._direction = properties.direction || vec3.fromValues(0.0, -1.0, 0.0);
+        this._direction = vec3.normalize(vec3.create(), properties.direction || vec3.fromValues(0.0, -1.0, 0.0));
     }
 
     public get direction(): vec3 { return this._direction; }

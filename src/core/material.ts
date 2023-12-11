@@ -17,7 +17,10 @@ interface DefaultProperties {
     ambient?: number[];
     shininess?: number;
 
-    texture?: Texture;
+    textures?: {
+        base?: Texture;
+        specular?: Texture;
+    }
 }
 
 enum MaterialType {
@@ -29,10 +32,12 @@ enum MaterialType {
 export class Material {
     public type: MaterialType = MaterialType.Basic;
     public properties: Map<string, any>;
+    public textures: Map<string, Texture>;
     public config: MaterialConfig;
 
     constructor(config?: MaterialConfig) {
         this.properties = new Map<string, any>();
+        this.textures = new Map<string, Texture>();
         this.config = {
             side: config?.side || 'double'
         };
@@ -43,12 +48,13 @@ export class Material {
         material.type = MaterialType.Basic;
         material.properties.set('color', properties.color || [1.0, 1.0, 1.0] );
 
+        material.properties.set('hasTexture', properties.texture ? true : false);
+
         if (properties.texture) {
-            material.properties.set('hasTexture', true);
-            material.properties.set('texture', properties.texture);
-        } 
-        else
-            material.properties.set('hasTexture', false);
+            const tex = properties.texture;
+            material.textures.set('texture', tex);
+        }
+
         return material;
     }
 
@@ -60,12 +66,19 @@ export class Material {
             material.properties.set('ambient', properties.ambient || properties.diffuse || [0.25, 0.25, 0.25]);
             material.properties.set('shininess', properties.shininess || 32.0);
 
-            if (properties.texture) {
-                material.properties.set('hasTexture', true);
-                material.properties.set('texture', properties.texture);
-            } 
-            else
-                material.properties.set('hasTexture', false);
+            material.properties.set('hasBaseTexture', properties.textures?.base ? true : false);
+
+            if (properties.textures?.base) {
+                const tex = properties.textures.base;
+                material.textures.set('baseTexture', tex);
+            }
+
+            material.properties.set('hasSpecularMap', properties.textures?.specular ? true : false);
+
+            if (properties.textures?.specular) {
+                const tex = properties.textures.specular;
+                material.textures.set('specularMap', tex);
+            }
 
             return material;
     }

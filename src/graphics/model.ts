@@ -70,9 +70,21 @@ export class Model {
         for (const [name, value] of this._material.properties)
             materialSys.setProperty(`u_material.${name}`, value);
 
-        // TODO: 
-        //for (const [name, value] of this._material.textures)
-            //materialSys.bindTexture(name, value);
+        for (const [name, tex] of this._material.textures) {
+            
+            let slot = 0;
+            switch(name) {
+                case 'texture':
+                case 'baseTexture':
+                    slot = 0;
+                    break;
+                case 'specularMap':
+                    slot = 1;
+                    break;
+            }
+            materialSys.setProperty(`u_material.${name}`, slot);
+            tex.bind(slot);
+        }
 
         // Update the material system before drawing the respective mesh
         materialSys.update();

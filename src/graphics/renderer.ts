@@ -59,7 +59,7 @@ export class Renderer {
         this._materialSystem.addShader('default', defaultShader);
 
 
-        const directionalLight = new DirectionalLight({ direction: [0.0, -1.0, 0.0] });
+        const directionalLight = new DirectionalLight({ direction: [0.0, -1.0, 1.0] });
         this._lightingSystem.addLight(directionalLight);
 
         for (const model of scene)

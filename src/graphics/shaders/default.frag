@@ -2,14 +2,20 @@
 
 precision mediump float;
 
+in vec3 fragPos;
+in vec3 fragNormal;
+in vec2 fragTexCoord;
+
 // Material
 uniform struct Material {
     vec3 diffuse;
-    bool hasTexture;
-    sampler2D texture;
+    bool hasBaseTexture;
+    sampler2D baseTexture;
 
     vec3 ambient;
     vec3 specular;
+    bool hasSpecularMap;
+    sampler2D specularMap;
     float shininess;
 } u_material;
 
@@ -27,22 +33,25 @@ uniform struct DirectionalLight {
 vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) {
     //ambient
     vec3 ambient = light.ambient * u_material.ambient;
+    if (u_material.hasBaseTexture)
+        ambient *= vec3(texture(u_material.baseTexture, fragTexCoord));
 
     // diffuse
     float diff = max(dot(normal, -light.direction), 0.0f);
-    vec3 diffuse = light.diffuse * (diff * u_material.diffuse);
+    vec3 diffuse = light.diffuse * diff * u_material.diffuse;
+    if (u_material.hasBaseTexture)
+        diffuse *= vec3(texture(u_material.baseTexture, fragTexCoord));
 
     // specular blinn phong
     vec3 halfwayDir = normalize(-light.direction + viewDir);
     float spec = pow(max(dot(normal, halfwayDir), 0.0f), u_material.shininess);
-    vec3 specular = light.specular * (spec * u_material.specular);
+    vec3 specular = light.specular * spec * u_material.specular;
+
+    if (u_material.hasSpecularMap)
+        specular *=  vec3(texture(u_material.specularMap, fragTexCoord));
 
     return (ambient + diffuse + specular);
 }
-
-in vec3 fragPos;
-in vec3 fragNormal;
-in vec2 fragTexCoord;
 
 out vec4 outColor;
 
@@ -52,14 +61,7 @@ void main() {
 
     vec3 result = vec3(0.0);
 
-    vec3 texel;
-
-    if (u_material.hasTexture) {
-        texel = texture(u_material.texture, fragTexCoord).rgb;
-    } else {
-        texel = vec3(1.0);
-    }
-    result += computeDirectionalLight(normal, viewDir, u_dirLight) * texel;
+    result += computeDirectionalLight(normal, viewDir, u_dirLight);
 
     outColor = vec4(result, 1.0f);
 }

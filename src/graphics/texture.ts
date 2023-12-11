@@ -32,7 +32,8 @@ export class Texture {
         });
     }
 
-    public bind(): void {
+    public bind(slot: number = 0): void {
+        gl.activeTexture(gl.TEXTURE0 + slot);
         gl.bindTexture(this._usage, this._texture);
     }
 
@@ -59,7 +60,7 @@ export class Texture {
         console.log(`Texture ${this._width}x${this._height} created`);
 
         // TODO: add support for multiple textures
-        //this.unbind();
+        this.unbind();
     }
 
     public get width(): number { return this._width; }
