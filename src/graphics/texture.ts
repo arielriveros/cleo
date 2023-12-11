@@ -1,4 +1,9 @@
 import { gl } from "./renderer";
+import { Loader } from './loader';
+
+interface TextureConfig {
+    flipY: boolean;
+}
 
 export class Texture {
     private readonly _texture: WebGLTexture;
@@ -13,23 +18,14 @@ export class Texture {
         this._usage = usage;
     }
 
-    public createFromFile(path: string): Texture {
+    public createFromFile(path: string, config?: TextureConfig): Texture {
         try {
-            this.loadFromPath(path).then((image) => this._create(image));
+            Loader.loadImage(path).then((image) => this._create(image, config));
             return this;
         }
         catch (e) {
             throw new Error(`Error loading texture from path ${path}`);
         }
-    }
-
-    private async loadFromPath(path: string): Promise<HTMLImageElement> {
-        return new Promise<HTMLImageElement>((resolve, reject) => {
-            const image = new Image();
-            image.src = path;
-            image.onload = () => resolve(image);
-            image.onerror = () => reject();
-        });
     }
 
     public bind(slot: number = 0): void {
@@ -41,14 +37,16 @@ export class Texture {
         gl.bindTexture(this._usage, null);
     }
 
-    private _create(data: HTMLImageElement): void {
+    private _create(data: HTMLImageElement, config?: TextureConfig): void {
         this.bind();
         this._width = data.width;
         this._height = data.height;
-        
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, data);
-        // Before creating a texutres flips (u,v) coords to match (x,y) coords
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+
+        // Flip Y
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !config?.flipY || false);
+
+        gl.texImage2D(this._usage, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, data);
+
         gl.generateMipmap(gl.TEXTURE_2D);
         // Tex coordinates clamping to edge
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

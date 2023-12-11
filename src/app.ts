@@ -7,7 +7,7 @@ import { Texture } from "./graphics/texture";
 
 let app: Engine;
 let camera: Camera;
-let scene: Model[];
+let scene: Model[] = [];
 
 window.onload = () => {
     app = new Engine({
@@ -18,27 +18,6 @@ window.onload = () => {
         position: [0, 0, -2],
     });
 
-    const model1 = new Model(Geometry.Triangle(), Material.Basic({color: [1.0, 0.0, 0.0]}));
-    model1.position[0] = -0.5;
-    model1.scale[0] = 0.5;
-    model1.scale[1] = 0.5;
-
-    const texture = new Texture().createFromFile('assets/roma.png');
-    
-    const model2 = new Model(
-        Geometry.Quad(),
-        Material.Basic({
-            texture: texture,
-            color: [1.0, 0.0, 1.0]},
-            { side: 'double'}
-        )
-    );
-    model2.position[0] = 0.5;
-    model2.scale[2] = 0.5;
-
-    const model3 = new Model(Geometry.Circle(), Material.Default({diffuse: [1.0, 0.0, 1.0], specular: [0.0, 1.0, 0.0]}, { side: 'front'}));
-    model3.position[1] = 0.5;
-
     const crateSpec = new Texture().createFromFile('assets/cube_spec.png');
     const crateTex = new Texture().createFromFile('assets/cube_diff.png');
     const crate = new Model(
@@ -48,82 +27,57 @@ window.onload = () => {
                 base: crateTex,
                 specular: crateSpec
             },
-            shininess: 32.0},
+            shininess: 256.0},
             { side: 'front'}
         )
     );
-    crate.position[1] = -0.5;
+    
+    crate.position[0] = -0.5;
+    crate.position[1] = 0.25;
+    
     crate.scale[0] = 0.5;
     crate.scale[1] = 0.5;
     crate.scale[2] = 0.5;
 
-    const model5 = new Model(
-        Geometry.Cube(),
-        Material.Custom(
-            'custom',
-            { vertexShader: 'shaders/basic.vert', fragmentShader: 'assets/custom.frag'},
-            new Map<string, any>()
-        )
-    )
-    model5.position[1] = -1.0;
-    model5.scale[0] = 0.5;
-    model5.scale[1] = 0.5;
-    model5.scale[2] = 0.5;
-
-    const wallTex = new Texture().createFromFile('assets/bricks_diff.jpg');
-    const wallSpec = new Texture().createFromFile('assets/bricks_spec.jpg');
-
-    const wall = new Model(
-        Geometry.Quad(),
-        Material.Default({
-            textures: {
-                base: wallTex,
-                specular: wallSpec
-            },
-            shininess: 512.0},
-            { side: 'front'}
-        )
-    )
-    wall.position[2] = 0.5;
-    wall.rotation[0] = Math.PI;
-
-    wall.scale[0] = 2;
-    wall.scale[1] = 2;
-
-    const grassTex = new Texture().createFromFile('assets/grass_diff.jpg');
-    const grassSpec = new Texture().createFromFile('assets/grass_spec.jpg');
-    const grass = new Model(
-        Geometry.Quad(),
-        Material.Default({
-            textures: {
-                base: grassTex,
-                specular: grassSpec
-            },
-            shininess: 512.0},
-            { side: 'front'}
-        )
-    )
-    grass.position[1] = -1;
-    grass.position[2] = -0.5;
-    
-    grass.rotation[0] = -Math.PI / 2;
-    grass.scale[0] = 2;
-    grass.scale[1] = 2;
-
-    scene = [model1, model2, model3, crate, model5, wall, grass];
+    scene.push(crate);
 
     app.camera = camera;
     app.scene = scene;
 
-    app.initialize();
-    app.run();
+    Model.FromFile('assets/viking_room.obj', Material.Default({textures: {
+            base: new Texture().createFromFile('assets/viking_room.png')},
+            specular: [0.25, 0.25, 0.25],
+        })).then((model) => {
+        model.position[1] = -1;
+        model.rotation[0] = -Math.PI / 2;
+        model.rotation[2] = Math.PI / 2;
+        model.scale[0] = 3;
+        model.scale[1] = 3;
+        model.scale[2] = 3;
+        scene.push(model);
+
+        Model.FromFile('assets/backpack.obj', Material.Default({textures: {
+                base: new Texture().createFromFile('assets/backpack_diff.jpg', {flipY: true}),
+                specular: new Texture().createFromFile('assets/backpack_spec.jpg', {flipY: true})},
+                shininess: 64}
+            )).then((backpack) => {
+            backpack.rotation[2] = -Math.PI / 4;
+            backpack.rotation[1] = -Math.PI / 2;
+            
+            backpack.scale[0] = 0.5;
+            backpack.scale[1] = 0.5;
+            backpack.scale[2] = 0.5;
+            scene.push(backpack);
+
+            app.initialize();
+            app.run();
+        });
+    });
+
+    
+    
 
     app.onUpdate = (delta: number, time: number) => {
-        scene[0].rotation[1] += 0.01;
-        scene[1].rotation[0] -= 0.01;
-        scene[2].rotation[0] += 0.01;
-        scene[3].rotation[0] -= 0.01;
-        scene[4].material.properties.set('time', time / 1000);
     }
 }
 

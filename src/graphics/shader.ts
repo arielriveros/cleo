@@ -1,5 +1,6 @@
 import { mat4, vec2, vec3, vec4 } from 'gl-matrix';
 import { gl } from './renderer';
+import { Loader } from './loader';
 
 
 type AttributeLayout = {
@@ -48,8 +49,8 @@ export class Shader {
     }
 
     public createFromFiles(vertexShaderPath: string, fragmentShaderPath: string): Shader {
-        const vertexShaderSource = this.loadShaderSource(vertexShaderPath);
-        const fragmentShaderSource = this.loadShaderSource(fragmentShaderPath);
+        const vertexShaderSource = Loader.loadText(vertexShaderPath);
+        const fragmentShaderSource = Loader.loadText(fragmentShaderPath);
         this.create(vertexShaderSource, fragmentShaderSource);
         return this;
     }
@@ -186,17 +187,6 @@ export class Shader {
 
     public hasUniform(name: string) {
         return gl.getUniformLocation(this._shaderProgram, name) !== null;        
-    }
-
-    private loadShaderSource(path: string): string {
-        const request = new XMLHttpRequest();
-        request.open('GET', path, false);
-        request.send();
-
-        if (request.status !== 200)
-            throw new Error(`Error getting shader source: ${path}`);
-
-        return request.responseText;
     }
 
     private storeAttributes(): void {

@@ -41,4 +41,8 @@ export class MaterialSystem {
         for (const shader of this._shaders.values())
             shader.update();
     }
+
+    public get registeredShaders(): string[] {
+        return Array.from(this._shaders.keys());
+    }
 }

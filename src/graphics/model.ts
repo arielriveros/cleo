@@ -4,6 +4,7 @@ import { Mesh } from './mesh';
 import { MaterialSystem } from './systems/materialSystem';
 import { Material } from '../core/material';
 import { Geometry } from '../core/geometry';
+import { Loader } from './loader';
 
 
 export class Model {
@@ -110,6 +111,18 @@ export class Model {
         gl.disable(gl.CULL_FACE);
     }
 
+    public static FromFile(path: string, material: Material = Material.Default({})): Promise<Model> {
+        return new Promise<Model>((resolve, reject) => {
+            Loader.loadOBJ(path).then((geometry) => {
+                const model = new Model(geometry, material);
+                resolve(model);
+            })
+            .catch((err) => {
+                reject(err);
+            });
+        });
+    }
+
     public get mesh(): Mesh { return this._mesh; }
     public get material(): Material { return this._material; }
     public get modelMatrix(): mat4 {
@@ -122,8 +135,8 @@ export class Model {
         let rotX = mat4.fromXRotation(mat4.create(), this.rotation[0]);
         let rotY = mat4.fromYRotation(mat4.create(), this.rotation[1]);
         let rotZ = mat4.fromZRotation(mat4.create(), this.rotation[2]);
-        mat4.multiply(rotMat, rotX, rotY);
-        mat4.multiply(rotMat, rotMat, rotZ);
+        mat4.multiply(rotMat, rotX, rotZ);
+        mat4.multiply(rotMat, rotMat, rotY);
 
         mat4.fromScaling(scaleMat, this.scale);
 
