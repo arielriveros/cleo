@@ -21,6 +21,8 @@ uniform struct Material {
     vec3 emissive;
     bool hasEmissiveMap;
     sampler2D emissiveMap;
+
+    float opacity;
 } u_material;
 
 // Lighting
@@ -123,5 +125,6 @@ void main() {
     else
         result += u_material.emissive;
 
-    outColor = vec4(result, 1.0f);
+    float alpha = u_material.opacity;
+    outColor = vec4(result, alpha);
 }

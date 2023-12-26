@@ -20,7 +20,10 @@ app.onPreInitialize = async () => {
             textures: {
                 base: new Texture().createFromFile('assets/backpack_diff.jpg', {flipY: true}),
                 specular: new Texture().createFromFile('assets/backpack_spec.jpg', {flipY: true})},
-            shininess: 64
+            shininess: 64,
+            opacity: 0.75,
+        }, {
+            transparent: true
         })
     );
     const backpack = new ModelNode('backpack', backpackModel)
@@ -35,10 +38,8 @@ app.onPreInitialize = async () => {
             textures: {
                 base: new Texture().createFromFile('assets/cube_diff.png'),
                 specular: new Texture().createFromFile('assets/cube_spec.png'),
-                emissive: new Texture().createFromFile('assets/cube_emis.png')
-            },
-            shininess: 256.0},
-            { side: 'front'}
+                emissive: new Texture().createFromFile('assets/cube_emis.png')}
+            }
         )
     ));
     crate.position[0] = -2;

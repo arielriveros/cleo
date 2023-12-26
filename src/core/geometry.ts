@@ -229,15 +229,16 @@ export class Geometry {
                     }
                 }
 
-                for (let i = 0; i < width-1; i++) {
-                    for (let j = 0; j < height-1; j++) {
+                for (let i = 0; i < width - 1; i++) {
+                    for (let j = 0; j < height - 1; j++) {
                         const topLeft = i * (height + 1) + j;
                         const topRight = topLeft + 1;
                         const bottomLeft = (i + 1) * (height + 1) + j;
                         const bottomRight = bottomLeft + 1;
                 
-                        indices.push(topLeft, bottomLeft, topRight);
-                        indices.push(topRight, bottomLeft, bottomRight);
+                        // Change the order of indices to create triangles in a counter-clockwise direction
+                        indices.push(topLeft, topRight, bottomLeft);
+                        indices.push(topRight, bottomRight, bottomLeft);
                     }
                 }
 

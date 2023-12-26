@@ -4,6 +4,7 @@ import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
 import { LightNode, ModelNode } from '../core/scene/node';
 import { PointLight } from '../core/lighting';
+import { vec3 } from 'gl-matrix';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -45,6 +46,8 @@ export class Renderer {
         gl.clearColor(this._config.clearColor[0], this._config.clearColor[1], this._config.clearColor[2], this._config.clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.enable(gl.DEPTH_TEST);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.DST_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
         // Create default shaders
         const basicShader = new Shader().createFromFiles('shaders/basic.vert', 'shaders/basic.frag');
@@ -63,24 +66,32 @@ export class Renderer {
     public render(camera: Camera, scene: Scene): void {
         gl.clear(gl.COLOR_BUFFER_BIT);
 
-        const materialSys = MaterialSystem.Instance;
-
-        // Set Camera releted uniforms
-        for (const shaderName of materialSys.registeredShaders) {
-            materialSys.bind(shaderName);
-            materialSys.setProperty('u_view', camera.viewMatrix);
-            materialSys.setProperty('u_projection', camera.projectionMatrix);
-            materialSys.setProperty('u_viewPos', camera.position);
-        }
-
         const nodes = scene.nodes;
+        const opaqueDrawQueue: ModelNode[] = [];
+        const transparentDrawQueue: ModelNode[] = [];
         for (const node of nodes) {
-            if (node instanceof ModelNode)
-                this._renderModel(node);
+            if (node instanceof ModelNode) {
+                if (node.model.material.config.transparent === true)
+                    transparentDrawQueue.push(node);
+                else
+                    opaqueDrawQueue.push(node);
+            }
 
             if (node instanceof LightNode)
                 this._setLighting(node, scene.numPointLights);
         }
+
+        // Sort transparent draw queue by distance to camera
+        transparentDrawQueue.sort((a, b) => {
+            const aDist = vec3.distance(camera.position, a.worldPosition);
+            const bDist = vec3.distance(camera.position, b.worldPosition);
+
+            return bDist - aDist;
+        });
+
+        // Merge draw queues and render the scene
+        for (const node of [...opaqueDrawQueue, ...transparentDrawQueue])
+            this._renderModel(node, camera);
     }
 
     public resize() {
@@ -123,7 +134,7 @@ export class Renderer {
         node.model.mesh.create(node.model.geometry.getData(attributes), node.model.geometry.vertexCount, node.model.geometry.indices);
     }
 
-    private _renderModel(node: ModelNode): void {
+    private _renderModel(node: ModelNode, camera: Camera): void {
         if (!node.initialized) {
             this._initializeModel(node);
             node.initialized = true;
@@ -131,6 +142,10 @@ export class Renderer {
         const materialSys = MaterialSystem.Instance;
 
         materialSys.bind(node.model.material.type);
+
+        materialSys.setProperty('u_view', camera.viewMatrix);
+        materialSys.setProperty('u_projection', camera.projectionMatrix);
+        materialSys.setProperty('u_viewPos', camera.position);
 
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction

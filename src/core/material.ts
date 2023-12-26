@@ -4,11 +4,13 @@ import { Texture } from "../graphics/texture";
 
 interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
+    transparent?: boolean;
 }
 
 interface BasicProperties {
     color?: number[];
     texture?: Texture;
+    opacity?: number;
 }
 
 interface DefaultProperties {
@@ -17,6 +19,7 @@ interface DefaultProperties {
     ambient?: number[];
     emissive?: number[];
     shininess?: number;
+    opacity?: number;
 
     textures?: {
         base?: Texture;
@@ -41,7 +44,8 @@ export class Material {
         this.properties = new Map<string, any>();
         this.textures = new Map<string, Texture>();
         this.config = {
-            side: config?.side || 'double'
+            side: config?.side || 'front',
+            transparent: config?.transparent || false
         };
     }
 
@@ -49,6 +53,7 @@ export class Material {
         const material = new Material(config);
         material.type = MaterialType.Basic;
         material.properties.set('color', properties.color || [1.0, 1.0, 1.0] );
+        material.properties.set('opacity', properties.opacity || 1.0);
 
         material.properties.set('hasTexture', properties.texture ? true : false);
 
@@ -68,6 +73,7 @@ export class Material {
             material.properties.set('ambient', properties.ambient || properties.diffuse || [1.0, 1.0, 1.0]);
             material.properties.set('emissive', properties.emissive || [0.0, 0.0, 0.0]);
             material.properties.set('shininess', properties.shininess || 32.0);
+            material.properties.set('opacity', properties.opacity || 1.0);
 
             material.properties.set('hasBaseTexture', properties.textures?.base ? true : false);
 
