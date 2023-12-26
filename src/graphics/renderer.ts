@@ -1,9 +1,12 @@
-import { Model } from './model';
 import { Shader } from './shader';
 import { MaterialSystem } from './systems/materialSystem';
 import { Camera } from '../core/camera';
 import { DirectionalLight } from '../core/lighting';
 import { LightingSystem } from './systems/lightingSystem';
+import { Scene } from '../core/scene/scene';
+import { Model } from './model';
+import { mat4 } from 'gl-matrix';
+import { ModelNode } from '../core/scene/node';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -57,18 +60,15 @@ export class Renderer {
         this._materialSystem.addShader('default', defaultShader);
     }
 
-    public initialize(camera: Camera, scene: Model[]): void {
+    public initialize(camera: Camera): void {
         // Initialize camera
         camera.resize(this._canvas.width, this._canvas.height);
 
         const directionalLight = new DirectionalLight({ direction: [1.0, -1.0, 1.0] });
         this._lightingSystem.addLight(directionalLight);
-
-        for (const model of scene)
-            model.initialize();
     }
 
-    public render(camera: Camera, scene: Model[]): void {
+    public render(camera: Camera, scene: Scene): void {
         gl.clear(gl.COLOR_BUFFER_BIT);
 
         const materialSys = MaterialSystem.Instance;
@@ -85,8 +85,16 @@ export class Renderer {
         materialSys.bind('default');
         this._lightingSystem.update();
 
-        for (const model of scene)
-            model.draw();
+        const nodes = scene.nodes;
+        for (const node of nodes) {
+            if (node instanceof ModelNode) {
+                if (!node.initialized) {
+                    this._initializeModel(node.model);
+                    node.initialized = true;
+                }
+                this._renderModel(node.model, node.worldTransform);
+            }
+        }
     }
 
     public resize() {
@@ -100,5 +108,87 @@ export class Renderer {
     public get canvas(): HTMLCanvasElement { return this._canvas; }
     public get context(): WebGL2RenderingContext { return gl; }
 
+    private _initializeModel(model: Model): void {
+        const shader = MaterialSystem.Instance.getShader(model.material.type);
+        model.mesh.initializeVAO(shader.attributes);
+        const attributes = [];
+
+        for (const attr of shader.attributes) {
+            switch (attr.name) {
+                case 'position':
+                case 'a_position':
+                    attributes.push('position');
+                    break;
+                case 'normal':
+                case 'a_normal':
+                    attributes.push('normal');
+                    break;
+                case 'uv':
+                case 'a_uv':
+                case 'texCoord':
+                case 'a_texCoord':
+                    attributes.push('uv');
+                    break;
+                default:
+                    throw new Error(`Attribute ${attr.name} not supported`);
+            }
+        }
+
+        model.mesh.create(model.geometry.getData(attributes), model.geometry.vertexCount, model.geometry.indices);
+    }
+
+    private _renderModel(model: Model, transform: mat4): void {
+        const materialSys = MaterialSystem.Instance;
+
+        materialSys.bind(model.material.type);
+
+        // Set Transform releted uniforms on the model's shader type
+        // TODO: Mutliply node transform with model transform for model correction
+        materialSys.setProperty('u_model', transform);
+
+        // Set Material releted uniforms on the model's shader type
+        for (const [name, value] of model.material.properties)
+            materialSys.setProperty(`u_material.${name}`, value);
+
+        for (const [name, tex] of model.material.textures) {
+            
+            let slot = 0;
+            switch(name) {
+                case 'texture':
+                case 'baseTexture':
+                    slot = 0;
+                    break;
+                case 'specularMap':
+                    slot = 1;
+                    break;
+            }
+            materialSys.setProperty(`u_material.${name}`, slot);
+            tex.bind(slot);
+        }
+
+        // Update the material system before drawing the respective mesh
+        materialSys.update();
+
+        const materialConfig = model.material.config;
+
+        switch(materialConfig.side) {
+            case 'front':
+                gl.enable(gl.CULL_FACE);
+                gl.cullFace(gl.BACK);
+                break;
+            case 'back':
+                gl.enable(gl.CULL_FACE);
+                gl.cullFace(gl.FRONT);
+                break;
+            case 'double':
+                gl.disable(gl.CULL_FACE);
+                break;
+        }
+
+        model.mesh.draw();
+
+        gl.disable(gl.CULL_FACE);
+
+    }
     
 }

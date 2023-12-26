@@ -1,7 +1,7 @@
-import { Model } from "../graphics/model";
 import { Renderer } from "../graphics/renderer";
 import { InputManager } from "../input/inputManager";
 import { Camera } from "./camera";
+import { Scene } from "./scene/scene";
 
 interface EngineConfig {
     canvas?: HTMLCanvasElement;
@@ -13,7 +13,7 @@ export class Engine {
     private _lastTimestamp: number = performance.now();
     private _ready: boolean = false;
 
-    private _scene: Model[];
+    private _scene!: Scene;
     private _camera!: Camera;
     
     public onUpdate: (delta: number, time: number) => void;
@@ -26,14 +26,13 @@ export class Engine {
             clearColor: config?.clearColor || [0.0, 0.0, 0.0, 1.0]
         });
 
-        this._scene = [];
         this.onUpdate = () => {};
         this.onPreInitialize = async () => {};
         this.onPostInitialize = () => {};
     }
 
-    public get scene(): Model[] { return this._scene; }
-    public set scene(scene: Model[]) { this._scene = scene; }
+    public get scene(): Scene { return this._scene; }
+    public set scene(scene: Scene) { this._scene = scene; }
     public get camera(): Camera { return this._camera; }
     public set camera(camera: Camera) { this._camera = camera; }
 
@@ -46,10 +45,11 @@ export class Engine {
         this._renderer.preInitialize();
         await this.onPreInitialize();
 
-        this._renderer.initialize(this._camera, this._scene);
+        this._renderer.initialize(this._camera);
         this.onPostInitialize();
 
-        this._ready = true;
+        if (this._scene)
+            this._ready = true;
     }
 
     public run(): void {

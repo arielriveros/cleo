@@ -114,8 +114,6 @@ export class InputManager {
         keysInfo[event.code].released = true;
     }
 
-
-
     private _initKeys() {
         InputManager._keysInfo = {
             'KeyW': { pressed: false, released: true, onPress: () => {} },
@@ -143,6 +141,11 @@ export class InputManager {
             'Digit1': { pressed: false, released: true, onPress: () => {} },
             'Digit2': { pressed: false, released: true, onPress: () => {} },
             'Digit3': { pressed: false, released: true, onPress: () => {} },
+
+            'ArrowUp': { pressed: false, released: true, onPress: () => {} },
+            'ArrowDown': { pressed: false, released: true, onPress: () => {} },
+            'ArrowLeft': { pressed: false, released: true, onPress: () => {} },
+            'ArrowRight': { pressed: false, released: true, onPress: () => {} },
         }
     }
 
