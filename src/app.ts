@@ -4,8 +4,9 @@ import { Geometry } from "./core/geometry";
 import { Material } from "./core/material";
 import { Model } from "./graphics/model";
 import { Texture } from "./graphics/texture";
-import { ModelNode } from "./core/scene/node";
+import { LightNode, ModelNode } from "./core/scene/node";
 import { Scene } from "./core/scene/scene";
+import { DirectionalLight, PointLight } from "./core/lighting";
 
 let app: Engine = new Engine({clearColor: [0.2, 0.2, 0.2, 1.0]});
 
@@ -23,6 +24,10 @@ app.onPreInitialize = async () => {
         })
     );
     const backpack = new ModelNode('backpack', backpackModel)
+    backpack.scale[0] = 0.5;
+    backpack.scale[1] = 0.5;
+    backpack.scale[2] = 0.5;
+    app.scene.addNode(backpack);
 
     const crate = new ModelNode('crate', new Model(
         Geometry.Cube(),
@@ -37,12 +42,7 @@ app.onPreInitialize = async () => {
     ));
     crate.position[0] = -2;
     crate.position[1] = 1;
-    backpack.addChild(crate);
-    
-    backpack.scale[0] = 0.5;
-    backpack.scale[1] = 0.5;
-    backpack.scale[2] = 0.5;
-    app.scene.addNode(backpack);
+    app.scene.attachNode(crate, 'backpack');
 
     const roomModel = await Model.FromFile(
         'assets/viking_room.obj', 
@@ -61,6 +61,26 @@ app.onPreInitialize = async () => {
     room.scale[1] = 3;
     room.scale[2] = 3;
     app.scene.addNode(room);
+
+    app.scene.addNode(new LightNode('sun', new DirectionalLight({})));
+    const pl1 = new LightNode('pointLight', new PointLight({
+        diffuse: [0.0, 0.0, 1.0],
+        specular: [0.0, 0.0, 1.0],
+        constant: 1.0
+    }));
+    pl1.position[0] = 2;
+    pl1.position[1] = 2;
+    pl1.position[2] = 2;
+
+    app.scene.addNode(pl1);
+    
+    const pl2 = new LightNode('pointLight2', new PointLight({
+        diffuse: [0.0, 1.0, 0.0],
+        specular: [0.0, 1.0, 0.0],
+        constant: 1.0
+    }));
+    app.scene.attachNode(pl2, 'crate');
+
 };
 
 app.onPostInitialize = () => { 
@@ -88,10 +108,12 @@ app.onUpdate = (delta: number, time: number) => {
     app.input.isKeyPressed('KeyE') && app.camera.moveUp(0.1);
     app.input.isKeyPressed('KeyQ') && app.camera.moveUp(-0.1);
 
-    let room = app.scene.getNode('room')
-    if (room) {
-        app.input.isKeyPressed('ArrowLeft') && (room.rotation[2] -= 0.01);
-        app.input.isKeyPressed('ArrowRight') && (room.rotation[2] += 0.01);
+    let sun = app.scene.getNode('sun')
+    if (sun) {
+        app.input.isKeyPressed('ArrowLeft') && (sun.rotation[1] -= 0.01);
+        app.input.isKeyPressed('ArrowRight') && (sun.rotation[1] += 0.01);
+        app.input.isKeyPressed('ArrowUp') && (sun.rotation[0] -= 0.01);
+        app.input.isKeyPressed('ArrowDown') && (sun.rotation[0] += 0.01);
     }
 
     let backpack = app.scene.getNode('backpack')
@@ -99,8 +121,16 @@ app.onUpdate = (delta: number, time: number) => {
         backpack.rotation[1] += 0.01;
 
     let crate = app.scene.getNode('crate')
-    if (crate)
+    if (crate) {
+        crate.position[1] = Math.sin(time*0.001) + 1;
         crate.rotation[0] += 0.01;
+    }
+
+    let blueLight = app.scene.getNode('pointLight')
+    if (blueLight) {
+        blueLight.position[0] = Math.sin(time*0.005) * 2;
+        blueLight.position[2] = Math.cos(time*0.005) * 2;
+    }
 }
 
 app.run();

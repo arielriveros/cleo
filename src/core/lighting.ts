@@ -22,17 +22,31 @@ export class Light {
     public get ambient(): vec3 { return this._ambient; }
 }
 
-interface DirectionalLightProperties extends LightProperties{
-    direction?: vec3;
+export class DirectionalLight extends Light{
+    constructor(properties: LightProperties) {
+        super(properties);
+    }
 }
 
-export class DirectionalLight extends Light{
-    private _direction: vec3;
+export interface PointLightProperties extends LightProperties {
+    constant?: number;
+    linear?: number;
+    quadratic?: number;
+}
 
-    constructor(properties: DirectionalLightProperties) {
+export class PointLight extends Light {
+    private _constant: number;
+    private _linear: number;
+    private _quadratic: number;
+
+    constructor(properties: PointLightProperties) {
         super(properties);
-        this._direction = vec3.normalize(vec3.create(), properties.direction || vec3.fromValues(0.0, -1.0, 0.0));
+        this._constant = properties.constant || 1.0;
+        this._linear = properties.linear || 0.09;
+        this._quadratic = properties.quadratic || 0.032;
     }
 
-    public get direction(): vec3 { return this._direction; }
+    public get constant(): number { return this._constant; }
+    public get linear(): number { return this._linear; }
+    public get quadratic(): number { return this._quadratic; }
 }

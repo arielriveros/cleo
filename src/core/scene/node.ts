@@ -1,24 +1,24 @@
 import { mat4, vec3 } from "gl-matrix";
 import { Model } from "../../graphics/model";
+import { DirectionalLight, Light, PointLight } from "../lighting";
 
 export class Node {
-    private _name: string;
+    private readonly _name: string;
     private _parent: Node | null;
-    private _children: Node[];
-    private _initialized: boolean;
+    private readonly _children: Node[];
+    
 
     private readonly  _localTransform: mat4;
     private _worldTransform: mat4;
 
-    private _position: vec3;
-    private _rotation: vec3;
-    private _scale: vec3;
+    private readonly _position: vec3;
+    private readonly _rotation: vec3;
+    private readonly _scale: vec3;
 
     constructor(name: string) {
         this._name = name;
         this._parent = null;
         this._children = [];
-        this._initialized = false;
 
         this._localTransform = mat4.create();
         this._worldTransform = mat4.create();
@@ -46,8 +46,7 @@ export class Node {
     public get name(): string { return this._name; }
     public get parent(): Node | null { return this._parent; }
     public get children(): Node[] { return this._children; }
-    public get initialized(): boolean { return this._initialized; }
-    public set initialized(value: boolean) { this._initialized = value; }
+    
 
     public set parent(node: Node | null) { this._parent = node; }
 
@@ -74,6 +73,27 @@ export class Node {
         return this._worldTransform;
     }
 
+    public get forward(): vec3 {
+        // transpose(inverse(worldTransform))
+        let rotTransform = mat4.create();
+        if (this._parent)
+            mat4.multiply(this._worldTransform, this._parent.worldTransform, this.localTransform);
+        else
+            this._worldTransform = this.localTransform;
+        mat4.transpose(rotTransform, this.worldTransform);
+        mat4.invert(rotTransform, rotTransform);
+        let forward = vec3.fromValues(0, 0, 1);
+        vec3.transformMat4(forward, forward, rotTransform);
+        vec3.normalize(forward, forward);
+        return forward;
+    }
+
+    public get worldPosition(): vec3 {
+        let pos = vec3.create();
+        vec3.transformMat4(pos, pos, this.worldTransform);
+        return pos;
+    }
+
     public get position(): vec3 { return this._position; }
     public get rotation(): vec3 { return this._rotation; }
     public get scale(): vec3 { return this._scale; }
@@ -81,11 +101,39 @@ export class Node {
 
 export class ModelNode extends Node {
     private _model: Model;
+    private _initialized: boolean;
 
     constructor(name: string, model: Model) {
         super(name);
         this._model = model;
+        this._initialized = false;
     }
 
     public get model(): Model { return this._model; }
+    public get initialized(): boolean { return this._initialized; }
+    public set initialized(value: boolean) { this._initialized = value; }
+}
+
+export class LightNode extends Node {
+    private readonly _light: Light
+    private readonly _type: 'directional' | 'point' | 'spot';
+    private _index: number;
+
+    constructor(name: string, light: Light) {
+        super(name);
+        this._light = light;
+        this._index = -1;
+
+        if (light instanceof DirectionalLight)
+            this._type = 'directional';
+        else if (light instanceof PointLight)
+            this._type = 'point';
+        else
+            throw new Error("Light type not supported");
+    }
+
+    public get light(): Light { return this._light; }
+    public get type(): 'directional' | 'point' | 'spot' { return this._type; }
+    public get index(): number { return this._index; }
+    public set index(value: number) { this._index = value; }
 }

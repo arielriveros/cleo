@@ -1,7 +1,8 @@
-import { Node } from "./node";
+import { LightNode, Node } from "./node";
 
 export class Scene {
     private _root: Node;
+    private _numPointLights: number = 0;
 
     constructor() {
         this._root = new Node('root');
@@ -9,6 +10,17 @@ export class Scene {
 
     public addNode(node: Node): void {
         this._root.addChild(node);
+        if (node instanceof LightNode)
+            this._asignLightIndices();
+    }
+
+    public attachNode(node: Node, parent: string): void {
+        const parentNode = this.getNode(parent);
+        if (parentNode)
+            parentNode.addChild(node);
+
+        if (node instanceof LightNode)
+            this._asignLightIndices();
     }
 
     public get nodes(): Set<Node> {
@@ -56,4 +68,20 @@ export class Scene {
 
         return null;
     }
+
+    private _asignLightIndices(): void {
+        const nodes = this.nodes;
+        let pointLights = 0;
+        for (const node of nodes) {
+            if (node instanceof LightNode) {
+                if (node.type === 'point') {
+                    node.index = pointLights;
+                    pointLights++;
+                }
+            }
+        }
+        this._numPointLights = pointLights;
+    }
+
+    public get numPointLights(): number { return this._numPointLights; }
 }

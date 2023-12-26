@@ -1,12 +1,9 @@
 import { Shader } from './shader';
 import { MaterialSystem } from './systems/materialSystem';
 import { Camera } from '../core/camera';
-import { DirectionalLight } from '../core/lighting';
-import { LightingSystem } from './systems/lightingSystem';
 import { Scene } from '../core/scene/scene';
-import { Model } from './model';
-import { mat4 } from 'gl-matrix';
-import { ModelNode } from '../core/scene/node';
+import { LightNode, ModelNode } from '../core/scene/node';
+import { PointLight } from '../core/lighting';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -22,7 +19,6 @@ export class Renderer {
     private _canvas: HTMLCanvasElement;
     
     private _materialSystem: MaterialSystem;
-    private _lightingSystem: LightingSystem;
 
     constructor(config: RendererConfig) {
         this._config = config;
@@ -42,7 +38,6 @@ export class Renderer {
 
         // Create material system
         this._materialSystem = MaterialSystem.Instance;
-        this._lightingSystem = LightingSystem.Instance;
 
     }
 
@@ -63,9 +58,6 @@ export class Renderer {
     public initialize(camera: Camera): void {
         // Initialize camera
         camera.resize(this._canvas.width, this._canvas.height);
-
-        const directionalLight = new DirectionalLight({ direction: [1.0, -1.0, 1.0] });
-        this._lightingSystem.addLight(directionalLight);
     }
 
     public render(camera: Camera, scene: Scene): void {
@@ -81,19 +73,13 @@ export class Renderer {
             materialSys.setProperty('u_viewPos', camera.position);
         }
 
-        // TODO: Add support for different shaders that support lighting
-        materialSys.bind('default');
-        this._lightingSystem.update();
-
         const nodes = scene.nodes;
         for (const node of nodes) {
-            if (node instanceof ModelNode) {
-                if (!node.initialized) {
-                    this._initializeModel(node.model);
-                    node.initialized = true;
-                }
-                this._renderModel(node.model, node.worldTransform);
-            }
+            if (node instanceof ModelNode)
+                this._renderModel(node);
+
+            if (node instanceof LightNode)
+                this._setLighting(node, scene.numPointLights);
         }
     }
 
@@ -108,9 +94,9 @@ export class Renderer {
     public get canvas(): HTMLCanvasElement { return this._canvas; }
     public get context(): WebGL2RenderingContext { return gl; }
 
-    private _initializeModel(model: Model): void {
-        const shader = MaterialSystem.Instance.getShader(model.material.type);
-        model.mesh.initializeVAO(shader.attributes);
+    private _initializeModel(node: ModelNode): void {
+        const shader = MaterialSystem.Instance.getShader(node.model.material.type);
+        node.model.mesh.initializeVAO(shader.attributes);
         const attributes = [];
 
         for (const attr of shader.attributes) {
@@ -134,23 +120,27 @@ export class Renderer {
             }
         }
 
-        model.mesh.create(model.geometry.getData(attributes), model.geometry.vertexCount, model.geometry.indices);
+        node.model.mesh.create(node.model.geometry.getData(attributes), node.model.geometry.vertexCount, node.model.geometry.indices);
     }
 
-    private _renderModel(model: Model, transform: mat4): void {
+    private _renderModel(node: ModelNode): void {
+        if (!node.initialized) {
+            this._initializeModel(node);
+            node.initialized = true;
+        }
         const materialSys = MaterialSystem.Instance;
 
-        materialSys.bind(model.material.type);
+        materialSys.bind(node.model.material.type);
 
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
-        materialSys.setProperty('u_model', transform);
+        materialSys.setProperty('u_model', node.worldTransform);
 
         // Set Material releted uniforms on the model's shader type
-        for (const [name, value] of model.material.properties)
+        for (const [name, value] of node.model.material.properties)
             materialSys.setProperty(`u_material.${name}`, value);
 
-        for (const [name, tex] of model.material.textures) {
+        for (const [name, tex] of node.model.material.textures) {
             
             let slot = 0;
             switch(name) {
@@ -169,7 +159,7 @@ export class Renderer {
         // Update the material system before drawing the respective mesh
         materialSys.update();
 
-        const materialConfig = model.material.config;
+        const materialConfig = node.model.material.config;
 
         switch(materialConfig.side) {
             case 'front':
@@ -185,10 +175,39 @@ export class Renderer {
                 break;
         }
 
-        model.mesh.draw();
+        node.model.mesh.draw();
 
         gl.disable(gl.CULL_FACE);
 
+    }
+
+    private _setLighting(node: LightNode, numPointLights: number): void {
+        const materialSys = MaterialSystem.Instance;
+        // TODO: Add support for different shaders that support lighting
+        materialSys.bind('default');
+        materialSys.setProperty('u_numPointLights', numPointLights);
+
+        switch (node.type) {
+            case 'directional':
+                materialSys.setProperty('u_dirLight.diffuse', node.light.diffuse);
+                materialSys.setProperty('u_dirLight.specular', node.light.specular);
+                materialSys.setProperty('u_dirLight.ambient', node.light.ambient);
+                materialSys.setProperty('u_dirLight.direction', node.forward);
+                break;
+            case 'point':
+                materialSys.setProperty(`u_pointLights[${node.index}].position`, node.worldPosition);
+                materialSys.setProperty(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
+                materialSys.setProperty(`u_pointLights[${node.index}].specular`, node.light.specular);
+                materialSys.setProperty(`u_pointLights[${node.index}].ambient`, node.light.ambient);
+                materialSys.setProperty(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
+                materialSys.setProperty(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
+                materialSys.setProperty(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
+                break;
+            case 'spot':
+                break;
+        }
+
+        
     }
     
 }

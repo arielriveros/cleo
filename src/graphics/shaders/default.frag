@@ -21,6 +21,8 @@ uniform struct Material {
 
 // Lighting
 uniform vec3 u_viewPos;
+const int MAX_POINT_LIGHTS = 4;
+uniform int u_numPointLights;
 
 // Directional
 uniform struct DirectionalLight {
@@ -29,6 +31,18 @@ uniform struct DirectionalLight {
     vec3 diffuse;
     vec3 specular;
 } u_dirLight;
+
+struct PointLight {
+    vec3 position;
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+    float constant;
+    float linear;
+    float quadratic;
+};
+
+uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 
 vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) {
     //ambient
@@ -53,6 +67,38 @@ vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) 
     return (ambient + diffuse + specular);
 }
 
+vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light) {
+    // ambient
+    vec3 ambient = light.ambient * u_material.ambient;
+    if (u_material.hasBaseTexture)
+        ambient *= vec3(texture(u_material.baseTexture, fragTexCoord));
+
+    // diffuse
+    vec3 lightDir = normalize(light.position - fragPos);
+    float diff = max(dot(normal, lightDir), 0.0f);
+    vec3 diffuse = light.diffuse * diff * u_material.diffuse;
+    if (u_material.hasBaseTexture)
+        diffuse *= vec3(texture(u_material.baseTexture, fragTexCoord));
+
+    // specular blinn phong
+    vec3 halfwayDir = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfwayDir), 0.0f), u_material.shininess);
+    vec3 specular = light.specular * spec * u_material.specular;
+
+    if (u_material.hasSpecularMap)
+        specular *=  vec3(texture(u_material.specularMap, fragTexCoord));
+
+    // attenuation
+    float distance = length(light.position - fragPos);
+    float attenuation = 1.0f / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
+
+    ambient *= attenuation;
+    diffuse *= attenuation;
+    specular *= attenuation;
+
+    return (ambient + diffuse + specular);
+}
+
 out vec4 outColor;
 
 void main() {
@@ -62,6 +108,10 @@ void main() {
     vec3 result = vec3(0.0);
 
     result += computeDirectionalLight(normal, viewDir, u_dirLight);
+
+    for (int i = 0; i < u_numPointLights; i++) {
+        result += computePointLight(normal, viewDir, u_pointLights[i]);
+    }
 
     outColor = vec4(result, 1.0f);
 }
