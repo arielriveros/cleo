@@ -1,4 +1,5 @@
 import { vec2 } from "gl-matrix";
+import { KEYS } from "./keys";
 
 interface MouseInfo {
     buttons: {
@@ -101,6 +102,7 @@ export class InputManager {
 
     private _onKeyDown(event: KeyboardEvent) {
         const keysInfo = InputManager._keysInfo;
+        if (!keysInfo[event.code]) return;
         keysInfo[event.code].pressed = true;
         // dont call onPress if the key is not released
         if (keysInfo[event.code].released) keysInfo[event.code].onPress();
@@ -110,42 +112,19 @@ export class InputManager {
 
     private _onKeyUp(event: KeyboardEvent) {
         const keysInfo = InputManager._keysInfo;
+        if (!keysInfo[event.code]) return;
         keysInfo[event.code].pressed = false;
         keysInfo[event.code].released = true;
     }
 
     private _initKeys() {
-        InputManager._keysInfo = {
-            'KeyW': { pressed: false, released: true, onPress: () => {} },
-            'KeyA': { pressed: false, released: true, onPress: () => {} },
-            'KeyS': { pressed: false, released: true, onPress: () => {} },
-            'KeyD': { pressed: false, released: true, onPress: () => {} },
-            'KeyQ': { pressed: false, released: true, onPress: () => {} },
-            'KeyE': { pressed: false, released: true, onPress: () => {} },
-            'KeyR': { pressed: false, released: true, onPress: () => {} },
-            'KeyF': { pressed: false, released: true, onPress: () => {} },
-            'KeyZ': { pressed: false, released: true, onPress: () => {} },
-            'KeyX': { pressed: false, released: true, onPress: () => {} },
-            'KeyC': { pressed: false, released: true, onPress: () => {} },
-            'KeyV': { pressed: false, released: true, onPress: () => {} },
-            'KeyB': { pressed: false, released: true, onPress: () => {} },
-            'KeyN': { pressed: false, released: true, onPress: () => {} },
-            'KeyM': { pressed: false, released: true, onPress: () => {} },
-            'Space': { pressed: false, released: true, onPress: () => {} },
-            'ShiftLeft': { pressed: false, released: true, onPress: () => {} },
-            'ControlLeft': { pressed: false, released: true, onPress: () => {} },
-            'AltLeft': { pressed: false, released: true, onPress: () => {} },
-            'ShiftRight': { pressed: false, released: true, onPress: () => {} },
-            'ControlRight': { pressed: false, released: true, onPress: () => {} },
-            'AltRight': { pressed: false, released: true, onPress: () => {} },
-            'Digit1': { pressed: false, released: true, onPress: () => {} },
-            'Digit2': { pressed: false, released: true, onPress: () => {} },
-            'Digit3': { pressed: false, released: true, onPress: () => {} },
-
-            'ArrowUp': { pressed: false, released: true, onPress: () => {} },
-            'ArrowDown': { pressed: false, released: true, onPress: () => {} },
-            'ArrowLeft': { pressed: false, released: true, onPress: () => {} },
-            'ArrowRight': { pressed: false, released: true, onPress: () => {} },
+        InputManager._keysInfo = {};
+        for (const key of KEYS) {
+            InputManager._keysInfo[key] = {
+                pressed: false,
+                released: true,
+                onPress: () => {}
+            }
         }
     }
 

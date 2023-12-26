@@ -176,4 +176,73 @@ export class Geometry {
 
         return new Geometry(positions, normals, uvs, indices);
     }
+
+    public static async Terrain(heightmapPath: string): Promise<Geometry> {
+        return new Promise<Geometry>((resolve, reject) => {
+            const positions: vec3[] = [];
+            const normals: vec3[] = [];
+            const uvs: vec2[] = [];
+            const indices: number[] = [];
+
+            const image = new Image();
+            image.src = heightmapPath;
+
+            image.onload = () => {
+                const width = image.width;
+                const height = image.height;
+
+                const halfWidth = width / 2;
+                const halfHeight = height / 2;
+
+                let data = null;
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const context = canvas.getContext('2d');
+                if (!context) {
+                    reject();
+                    return;
+                }
+                    
+                context.drawImage(image, 0, 0);
+                data = context.getImageData(0, 0, width, height).data;
+
+                // calculate amplitude based on width and height of the image
+                const amplitude = Math.sqrt(Math.max(width, height)) / 2;
+
+                for (let i = 0; i <= width; i++) {
+                    for (let j = 0; j <= height; j++) {
+                        const x = -halfWidth + j;
+                        const y = ((data[(i * height + j) * 4] / 255 ) * 2 - 1) * amplitude;
+                        const z = halfHeight - i;
+
+                        positions.push(vec3.fromValues(x, y, z));
+                        uvs.push(vec2.fromValues(j / height, i / width));
+                        // calculate normal
+                        let normal = vec3.fromValues(0.0, 0.0, 0.0);
+                        if (i > 0 && j > 0) {
+                            const v1 = vec3.subtract(vec3.create(), positions[i * (height + 1) + j], positions[(i - 1) * (height + 1) + j]);
+                            const v2 = vec3.subtract(vec3.create(), positions[i * (height + 1) + j], positions[i * (height + 1) + j - 1]);
+                            normal = vec3.normalize(vec3.create(), vec3.cross(vec3.create(), v2, v1));
+                        }
+                        normals.push(normal);
+                    }
+                }
+
+                for (let i = 0; i < width-1; i++) {
+                    for (let j = 0; j < height-1; j++) {
+                        const topLeft = i * (height + 1) + j;
+                        const topRight = topLeft + 1;
+                        const bottomLeft = (i + 1) * (height + 1) + j;
+                        const bottomRight = bottomLeft + 1;
+                
+                        indices.push(topLeft, bottomLeft, topRight);
+                        indices.push(topRight, bottomLeft, bottomRight);
+                    }
+                }
+
+                resolve(new Geometry(positions, normals, uvs, indices));
+            }
+        });
+    }
 }

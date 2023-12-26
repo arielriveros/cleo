@@ -11,7 +11,7 @@ import { DirectionalLight, PointLight } from "./core/lighting";
 let app: Engine = new Engine({clearColor: [0.2, 0.2, 0.2, 1.0]});
 
 app.onPreInitialize = async () => {
-    app.camera = new Camera({position: [0, 0, -2],});
+    app.camera = new Camera({position: [0, 0, -2], far: 10000});
     app.scene = new Scene();    
 
     const backpackModel = await Model.FromFile(
@@ -63,7 +63,10 @@ app.onPreInitialize = async () => {
     room.scale[2] = 3;
     app.scene.addNode(room);
 
-    app.scene.addNode(new LightNode('sun', new DirectionalLight({})));
+    const sun = new LightNode('sun', new DirectionalLight({}))
+    sun.rotation[0] = Math.PI / 4;
+    app.scene.addNode(sun);
+
     const pl1 = new LightNode('pointLight', new PointLight({
         diffuse: [0.0, 0.0, 1.0],
         specular: [0.0, 0.0, 1.0],
@@ -82,6 +85,22 @@ app.onPreInitialize = async () => {
     }));
     app.scene.attachNode(pl2, 'crate');
 
+    const terrain = new ModelNode('terrain', new Model(
+        await Geometry.Terrain('assets/terrain_hm.jpg'),
+        Material.Default({
+            textures: {
+                base: new Texture().createFromFile('assets/terrain_tex.jpg', {flipY: true}),
+            },
+            specular: [0.4, 0.4, 0.4],
+            shininess: 64.0
+        })
+    ));
+
+    terrain.position[1] = -4;
+    terrain.scale[0] = 0.25;
+    terrain.scale[1] = 0.25;
+    terrain.scale[2] = 0.25;
+    app.scene.addNode(terrain)
 };
 
 app.onPostInitialize = () => { 
@@ -125,7 +144,7 @@ app.onUpdate = (delta: number, time: number) => {
     if (crate) {
         crate.position[1] = Math.sin(time*0.001) + 1;
         crate.rotation[0] += 0.01;
-        let change = Math.sin(time * 0.005) + 1;
+        let change = Math.sin(time * 0.005)/2 + 1;
         (crate as ModelNode).model.material.properties.set('emissive', [0, change, 0]);
         let light = app.scene.getNode('pointLight2') as LightNode;
         if (light)
