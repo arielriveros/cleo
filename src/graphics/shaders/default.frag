@@ -17,6 +17,10 @@ uniform struct Material {
     bool hasSpecularMap;
     sampler2D specularMap;
     float shininess;
+    
+    vec3 emissive;
+    bool hasEmissiveMap;
+    sampler2D emissiveMap;
 } u_material;
 
 // Lighting
@@ -112,6 +116,12 @@ void main() {
     for (int i = 0; i < u_numPointLights; i++) {
         result += computePointLight(normal, viewDir, u_pointLights[i]);
     }
+
+    if (u_material.hasEmissiveMap)
+        result += vec3(texture(u_material.emissiveMap, fragTexCoord)) * u_material.emissive;
+
+    else
+        result += u_material.emissive;
 
     outColor = vec4(result, 1.0f);
 }

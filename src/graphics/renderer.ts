@@ -151,6 +151,9 @@ export class Renderer {
                 case 'specularMap':
                     slot = 1;
                     break;
+                case 'emissiveMap':
+                    slot = 2;
+                    break;
             }
             materialSys.setProperty(`u_material.${name}`, slot);
             tex.bind(slot);
@@ -179,6 +182,9 @@ export class Renderer {
 
         gl.disable(gl.CULL_FACE);
 
+        // unbind textures
+        for (const [_, tex] of node.model.material.textures)
+            tex.unbind();
     }
 
     private _setLighting(node: LightNode, numPointLights: number): void {

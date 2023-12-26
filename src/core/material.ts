@@ -15,11 +15,13 @@ interface DefaultProperties {
     diffuse?: number[];
     specular?: number[];
     ambient?: number[];
+    emissive?: number[];
     shininess?: number;
 
     textures?: {
         base?: Texture;
         specular?: Texture;
+        emissive?: Texture;
     }
 }
 
@@ -64,6 +66,7 @@ export class Material {
             material.properties.set('diffuse', properties.diffuse || [1.0, 1.0, 1.0]);
             material.properties.set('specular', properties.specular || [1.0, 1.0, 1.0]);
             material.properties.set('ambient', properties.ambient || properties.diffuse || [1.0, 1.0, 1.0]);
+            material.properties.set('emissive', properties.emissive || [0.0, 0.0, 0.0]);
             material.properties.set('shininess', properties.shininess || 32.0);
 
             material.properties.set('hasBaseTexture', properties.textures?.base ? true : false);
@@ -78,6 +81,13 @@ export class Material {
             if (properties.textures?.specular) {
                 const tex = properties.textures.specular;
                 material.textures.set('specularMap', tex);
+            }
+
+            material.properties.set('hasEmissiveMap', properties.textures?.emissive ? true : false);
+
+            if (properties.textures?.emissive) {
+                const tex = properties.textures.emissive;
+                material.textures.set('emissiveMap', tex);
             }
 
             return material;

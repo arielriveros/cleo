@@ -34,7 +34,8 @@ app.onPreInitialize = async () => {
         Material.Default({
             textures: {
                 base: new Texture().createFromFile('assets/cube_diff.png'),
-                specular: new Texture().createFromFile('assets/cube_spec.png')
+                specular: new Texture().createFromFile('assets/cube_spec.png'),
+                emissive: new Texture().createFromFile('assets/cube_emis.png')
             },
             shininess: 256.0},
             { side: 'front'}
@@ -124,6 +125,11 @@ app.onUpdate = (delta: number, time: number) => {
     if (crate) {
         crate.position[1] = Math.sin(time*0.001) + 1;
         crate.rotation[0] += 0.01;
+        let change = Math.sin(time * 0.005) + 1;
+        (crate as ModelNode).model.material.properties.set('emissive', [0, change, 0]);
+        let light = app.scene.getNode('pointLight2') as LightNode;
+        if (light)
+            light.light.diffuse[1] = change;
     }
 
     let blueLight = app.scene.getNode('pointLight')
