@@ -177,6 +177,56 @@ export class Geometry {
         return new Geometry(positions, normals, uvs, indices);
     }
 
+    public static Sphere(segments: number = 32): Geometry {
+        const positions: vec3[] = [];
+        const normals: vec3[] = [];
+        const uvs: vec2[] = [];
+        const indices: number[] = [];
+
+        for (let i = 0; i <= segments; ++i)
+        {
+            let v = i / segments;
+            let phi = v * Math.PI;
+
+            for (let j = 0; j <= segments; ++j)
+            {
+                let u = j / segments;
+                let theta = u * 2 * Math.PI;
+
+                const x = Math.cos(theta) * Math.sin(phi);
+                const y = Math.cos(phi);
+                const z = Math.sin(theta) * Math.sin(phi);
+
+                let pos = vec3.fromValues(x, y, z);
+                let uv = vec2.fromValues((segments - j) / segments, v);
+                let nor = vec3.normalize(vec3.create(), pos);
+
+                positions.push(pos);
+                uvs.push(uv);
+                normals.push(nor);
+            }
+        }
+
+        // Generate indices
+        for (let i = 0; i < segments; ++i)
+            for (let j = 0; j < segments; ++j)
+            {
+                let k1 = i * (segments + 1) + j;
+                let k2 = k1 + segments + 1;
+
+                indices.push(k1);
+                indices.push(k1 + 1);
+                indices.push(k2);
+
+                indices.push(k2);
+                indices.push(k1 + 1);
+                indices.push(k2 + 1);
+            }
+
+
+        return new Geometry(positions, normals, uvs, indices);
+    }
+
     public static async Terrain(heightmapPath: string): Promise<Geometry> {
         return new Promise<Geometry>((resolve, reject) => {
             const positions: vec3[] = [];

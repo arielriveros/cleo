@@ -7,11 +7,13 @@ import { Texture } from "./graphics/texture";
 import { LightNode, ModelNode } from "./core/scene/node";
 import { Scene } from "./core/scene/scene";
 import { DirectionalLight, PointLight } from "./core/lighting";
+import { Shape } from "./physics/shape";
+import { Vec3 } from "cannon";
 
 let app: Engine = new Engine({clearColor: [0.2, 0.2, 0.2, 1.0]});
 
 app.onPreInitialize = async () => {
-    app.camera = new Camera({position: [0, 0, -2], far: 10000});
+    app.camera = new Camera({position: [0, 1, -10], far: 1000});
     app.scene = new Scene();    
 
     const backpackModel = await Model.FromFile(
@@ -27,9 +29,7 @@ app.onPreInitialize = async () => {
         })
     );
     const backpack = new ModelNode('backpack', backpackModel)
-    backpack.scale[0] = 0.5;
-    backpack.scale[1] = 0.5;
-    backpack.scale[2] = 0.5;
+    backpack.setUniformScale(0.5);
     app.scene.addNode(backpack);
 
     const crate = new ModelNode('crate', new Model(
@@ -42,8 +42,7 @@ app.onPreInitialize = async () => {
             }
         )
     ));
-    crate.position[0] = -2;
-    crate.position[1] = 1;
+    crate.setPosition([-2, 1, 0]);
     app.scene.attachNode(crate, 'backpack');
 
     const roomModel = await Model.FromFile(
@@ -56,12 +55,10 @@ app.onPreInitialize = async () => {
         )
     );
     const room = new ModelNode('room', roomModel);
-    room.position[1] = -1;
+    room.setY(-1);
     room.rotation[0] = -Math.PI / 2;
     room.rotation[2] = Math.PI / 2;
-    room.scale[0] = 3;
-    room.scale[1] = 3;
-    room.scale[2] = 3;
+    room.setUniformScale(3);
     app.scene.addNode(room);
 
     const sun = new LightNode('sun', new DirectionalLight({}))
@@ -73,9 +70,7 @@ app.onPreInitialize = async () => {
         specular: [0.0, 0.0, 1.0],
         constant: 1.0
     }));
-    pl1.position[0] = 2;
-    pl1.position[1] = 2;
-    pl1.position[2] = 2;
+    pl1.setPosition([2, 2, 2]);
 
     app.scene.addNode(pl1);
     
@@ -97,11 +92,28 @@ app.onPreInitialize = async () => {
         })
     ));
 
-    terrain.position[1] = -4;
-    terrain.scale[0] = 0.25;
-    terrain.scale[1] = 0.25;
-    terrain.scale[2] = 0.25;
+    terrain.setY(-4);
+    terrain.setUniformScale(0.25);
     app.scene.addNode(terrain)
+
+    const floor = new ModelNode('floor', new Model(
+        Geometry.Quad(),
+        Material.Default({
+            specular: [0.25, 0.25, 0.25],
+            shininess: 128,
+            textures: {
+                base: new Texture().createFromFile('assets/grass_diff.jpg'),
+                specular: new Texture().createFromFile('assets/grass_spec.jpg')
+            },
+        })
+    ));
+
+    floor.setUniformScale(10);
+    floor.setY(-2);
+    floor.rotation[0] = -Math.PI / 2;
+    floor.setBody(Shape.Box(5, 0.01, 5), 0);
+    app.scene.addNode(floor);
+
 };
 
 app.onPostInitialize = () => { 
@@ -112,6 +124,23 @@ app.onPostInitialize = () => {
         app.camera.position[2] = 0;
 
         app.scene = new Scene();
+    });
+
+    let worldTexture = new Texture().createFromFile('assets/world.png', {flipY: true})
+    app.input.registerKeyPress('KeyZ', () => {
+        const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
+            Geometry.Sphere(),
+            Material.Default({ textures: { base: worldTexture} })
+        ));
+        sphere.setPosition([Math.random(), 5, Math.random()]);
+        let color = [Math.random(), Math.random(), Math.random()];
+        const light = new LightNode(`light${Math.random() * 1000}`, new PointLight({
+            diffuse: [color[0], color[1], color[2]],
+            specular: [color[0] * 0.5, color[1] * 0.5, color[2] * 0.5]
+        }));
+        sphere.addChild(light);
+        sphere.setBody(Shape.Sphere(1), Math.random() * 10);
+        app.scene.addNode(sphere);
     });
 };  
 
@@ -143,7 +172,7 @@ app.onUpdate = (delta: number, time: number) => {
 
     let crate = app.scene.getNode('crate')
     if (crate) {
-        crate.position[1] = Math.sin(time*0.001) + 1;
+        crate.setY(Math.sin(time*0.001) + 1);
         crate.rotation[0] += 0.01;
         let change = Math.sin(time * 0.005)/2 + 1;
         (crate as ModelNode).model.material.properties.set('emissive', [0, change, 0]);
@@ -153,10 +182,8 @@ app.onUpdate = (delta: number, time: number) => {
     }
 
     let blueLight = app.scene.getNode('pointLight')
-    if (blueLight) {
-        blueLight.position[0] = Math.sin(time*0.005) * 2;
-        blueLight.position[2] = Math.cos(time*0.005) * 2;
-    }
+    if (blueLight)
+        blueLight.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
 }
 
 app.run();

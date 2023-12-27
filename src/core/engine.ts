@@ -1,5 +1,6 @@
 import { Renderer } from "../graphics/renderer";
 import { InputManager } from "../input/inputManager";
+import { PhysicsSystem } from "../physics/physicsSystem";
 import { Camera } from "./camera";
 import { Scene } from "./scene/scene";
 
@@ -9,9 +10,11 @@ interface EngineConfig {
 }
 
 export class Engine {
-    private _renderer: Renderer;
     private _lastTimestamp: number = performance.now();
     private _ready: boolean = false;
+    
+    private _renderer: Renderer;
+    private _physicsSystem: PhysicsSystem;
 
     private _scene!: Scene;
     private _camera!: Camera;
@@ -24,6 +27,10 @@ export class Engine {
         this._renderer = new Renderer({
             canvas: config?.canvas || null,
             clearColor: config?.clearColor || [0.0, 0.0, 0.0, 1.0]
+        });
+        this._physicsSystem = new PhysicsSystem({
+            gravity: [0, -9.82, 0],
+            killZHeight: -10
         });
 
         this.onUpdate = () => {};
@@ -46,10 +53,14 @@ export class Engine {
         await this.onPreInitialize();
 
         this._renderer.initialize(this._camera);
-        this.onPostInitialize();
 
-        if (this._scene)
+        if (this._scene) {
+            this._scene.update();
+            this._physicsSystem.initialize(this._scene);
             this._ready = true;
+        }
+
+        this.onPostInitialize();
     }
 
     public run(): void {
@@ -62,6 +73,10 @@ export class Engine {
     private _gameLoop(): void {
         const currentTimestamp = performance.now();
         const deltaTime = (currentTimestamp - this._lastTimestamp) / 1000;
+        
+        this._scene.update();
+        this._physicsSystem.update(deltaTime);
+
         this._camera.update();
         this._renderer.render(this._camera, this._scene);
         this.onUpdate(deltaTime, currentTimestamp);

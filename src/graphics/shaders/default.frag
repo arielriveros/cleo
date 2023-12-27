@@ -27,7 +27,7 @@ uniform struct Material {
 
 // Lighting
 uniform vec3 u_viewPos;
-const int MAX_POINT_LIGHTS = 4;
+const int MAX_POINT_LIGHTS = 32;
 uniform int u_numPointLights;
 
 // Directional
