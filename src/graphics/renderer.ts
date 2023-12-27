@@ -67,14 +67,14 @@ export class Renderer {
         gl.clear(gl.COLOR_BUFFER_BIT);
 
         const nodes = scene.nodes;
-        const opaqueDrawQueue: ModelNode[] = [];
         const transparentDrawQueue: ModelNode[] = [];
         for (const node of nodes) {
             if (node instanceof ModelNode) {
+                // Add to transparent draw queue if transparent so that it is drawn last
                 if (node.model.material.config.transparent === true)
                     transparentDrawQueue.push(node);
                 else
-                    opaqueDrawQueue.push(node);
+                    this._renderModel(node, camera);
             }
 
             if (node instanceof LightNode)
@@ -89,8 +89,7 @@ export class Renderer {
             return bDist - aDist;
         });
 
-        // Merge draw queues and render the scene
-        for (const node of [...opaqueDrawQueue, ...transparentDrawQueue])
+        for (const node of transparentDrawQueue)
             this._renderModel(node, camera);
     }
 

@@ -72,4 +72,6 @@ export class Camera {
     public get projectionMatrix(): mat4 {
         return mat4.perspective(mat4.create(), this._fov, this._ratio, this._near, this._far);
     }
+
+    public get forward(): vec3 { return this._forward; }
 }

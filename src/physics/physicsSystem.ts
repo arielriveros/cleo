@@ -1,5 +1,5 @@
 import { Scene } from "../core/scene/scene";
-import { World, Vec3, Quaternion, Plane } from 'cannon';
+import { World, Vec3, Quaternion } from 'cannon';
 import { Body } from "./body";
 import { Shape } from "./shape";
 
@@ -11,7 +11,6 @@ interface PhysicsSystemConfig {
 export class PhysicsSystem {
     private _scene!: Scene;
     private _world!: World;
-    private _bodies!: Body[];
     private _gravity: number[];
     private _killZHeight: number;
 
@@ -23,9 +22,10 @@ export class PhysicsSystem {
     public initialize(scene: Scene): void {
         this._scene = scene;
         this._world = new World();
-        this._world.gravity.set(this._gravity[0], this._gravity[1], this._gravity[2]); 
-
-        this._bodies = [];
+        this._world.gravity.set(this._gravity[0], this._gravity[1], this._gravity[2]);
+        this._world.allowSleep = true;
+        this._world.quatNormalizeSkip = 0;
+        this._world.quatNormalizeFast = true;
 
         // Kill z plane
         const quat = new Quaternion();
@@ -63,6 +63,9 @@ export class PhysicsSystem {
 
             const pos = body.position;
             node.setPosition([pos.x, pos.y, pos.z]);
+
+            const quat = body.quaternion;
+            node.setQuaternion([quat.x, quat.y, quat.z, quat.w]);
         }
     }
 }

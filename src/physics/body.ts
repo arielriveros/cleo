@@ -26,6 +26,13 @@ export class Body extends CannonBody {
         this._name = config?.name || ''
     }
 
+    public impulse(impulse: vec3): void {
+        super.applyImpulse(
+            new Vec3(impulse[0], impulse[1], impulse[2]),
+            this.position
+        )
+    }
+
     public get name(): string { return this._name; }
     public set name(name: string) { this._name = name; }
 }

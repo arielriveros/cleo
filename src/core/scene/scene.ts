@@ -30,8 +30,10 @@ export class Scene {
 
     public removeNodeByName(name: string): void {
         const node = this.getNode(name);
-        if (node)
+        if (node) {
             this.removeNode(node);
+            this._dirty = true;
+        }
     }
 
     public attachNode(node: Node, parent: string): void {

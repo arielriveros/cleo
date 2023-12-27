@@ -8,7 +8,7 @@ import { LightNode, ModelNode } from "./core/scene/node";
 import { Scene } from "./core/scene/scene";
 import { DirectionalLight, PointLight } from "./core/lighting";
 import { Shape } from "./physics/shape";
-import { Vec3 } from "cannon";
+import { vec3 } from "gl-matrix";
 
 let app: Engine = new Engine({clearColor: [0.2, 0.2, 0.2, 1.0]});
 
@@ -30,6 +30,7 @@ app.onPreInitialize = async () => {
     );
     const backpack = new ModelNode('backpack', backpackModel)
     backpack.setUniformScale(0.5);
+    backpack.setPosition([2, 0, 2]);
     app.scene.addNode(backpack);
 
     const crate = new ModelNode('crate', new Model(
@@ -55,14 +56,13 @@ app.onPreInitialize = async () => {
         )
     );
     const room = new ModelNode('room', roomModel);
-    room.setY(-1);
-    room.rotation[0] = -Math.PI / 2;
-    room.rotation[2] = Math.PI / 2;
+    room.setPosition([2, -1, 2]);
+    room.setRotation([-90, 90, 0]);
     room.setUniformScale(3);
     app.scene.addNode(room);
 
     const sun = new LightNode('sun', new DirectionalLight({}))
-    sun.rotation[0] = Math.PI / 4;
+    sun.setRotation([90, 0, 0]);
     app.scene.addNode(sun);
 
     const pl1 = new LightNode('pointLight', new PointLight({
@@ -110,38 +110,50 @@ app.onPreInitialize = async () => {
 
     floor.setUniformScale(10);
     floor.setY(-2);
-    floor.rotation[0] = -Math.PI / 2;
-    floor.setBody(Shape.Box(5, 0.01, 5), 0);
+    floor.setRotation([-90, 0, 0]);
+    floor.setBody(Shape.Box(5, 5, 0.001), 0);
     app.scene.addNode(floor);
 
 };
 
-app.onPostInitialize = () => { 
-    app.input.registerKeyPress('KeyR', () => {
-        console.log('Resetting');
-        app.camera.position[0] = 0;
-        app.camera.position[1] = 0;
-        app.camera.position[2] = 0;
-
-        app.scene = new Scene();
-    });
+app.onPostInitialize = () => {
 
     let worldTexture = new Texture().createFromFile('assets/world.png', {flipY: true})
-    app.input.registerKeyPress('KeyZ', () => {
+    const shootSphere = () => {
         const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
             Geometry.Sphere(),
             Material.Default({ textures: { base: worldTexture} })
         ));
-        sphere.setPosition([Math.random(), 5, Math.random()]);
-        let color = [Math.random(), Math.random(), Math.random()];
-        const light = new LightNode(`light${Math.random() * 1000}`, new PointLight({
-            diffuse: [color[0], color[1], color[2]],
-            specular: [color[0] * 0.5, color[1] * 0.5, color[2] * 0.5]
-        }));
-        sphere.addChild(light);
-        sphere.setBody(Shape.Sphere(1), Math.random() * 10);
+        sphere.setUniformScale(0.5)
+        sphere.setPosition(app.camera.position);
+        sphere.setBody(Shape.Sphere(0.5), 5);
+        const impulseVector = vec3.create();
+        vec3.scale(impulseVector, app.camera.forward, 100);
+        sphere.body?.impulse(impulseVector)
         app.scene.addNode(sphere);
-    });
+    }
+
+    let boxBaseTexture = new Texture().createFromFile('assets/cube_diff.png');
+    let boxSpecularTexture = new Texture().createFromFile('assets/cube_spec.png');
+
+    const spawnBox = () => {
+        const box = new ModelNode(`box${Math.random() * 1000}`, new Model(
+            Geometry.Cube(),
+            Material.Default({
+                textures: {
+                    base: boxBaseTexture,
+                    specular: boxSpecularTexture
+                }
+            })
+        ));
+        box.setPosition([Math.random(), 5, Math.random()]);
+        box.setBody(Shape.Box(0.5, 0.5, 0.5), Math.random() * 10);
+        app.scene.addNode(box);
+    }
+
+    
+    app.input.registerKeyPress('KeyZ', () => { shootSphere(); });
+    app.input.registerKeyPress('KeyX', () => { spawnBox(); });
 };  
 
 app.onUpdate = (delta: number, time: number) => {
@@ -160,20 +172,21 @@ app.onUpdate = (delta: number, time: number) => {
 
     let sun = app.scene.getNode('sun')
     if (sun) {
-        app.input.isKeyPressed('ArrowLeft') && (sun.rotation[1] -= 0.01);
-        app.input.isKeyPressed('ArrowRight') && (sun.rotation[1] += 0.01);
-        app.input.isKeyPressed('ArrowUp') && (sun.rotation[0] -= 0.01);
-        app.input.isKeyPressed('ArrowDown') && (sun.rotation[0] += 0.01);
+        app.input.isKeyPressed('ArrowLeft') && (sun.rotateY(-0.01));
+        app.input.isKeyPressed('ArrowRight') && (sun.rotateY(0.01));
+        app.input.isKeyPressed('ArrowUp') && (sun.rotateX(0.01));
+        app.input.isKeyPressed('ArrowDown') && (sun.rotateX(-0.01));
     }
 
     let backpack = app.scene.getNode('backpack')
     if (backpack)
-        backpack.rotation[1] += 0.01;
+        backpack.rotateY(0.01);
 
     let crate = app.scene.getNode('crate')
     if (crate) {
         crate.setY(Math.sin(time*0.001) + 1);
-        crate.rotation[0] += 0.01;
+        crate.rotateX(0.01);
+        crate.rotateY(0.01);
         let change = Math.sin(time * 0.005)/2 + 1;
         (crate as ModelNode).model.material.properties.set('emissive', [0, change, 0]);
         let light = app.scene.getNode('pointLight2') as LightNode;

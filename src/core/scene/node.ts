@@ -15,7 +15,6 @@ export class Node {
     private readonly _position: vec3;
     private readonly _translationMatrix: mat4;
 
-    private readonly _rotation: vec3;
     private readonly _quaternion: quat;
     private readonly _rotationMatrix: mat4;
 
@@ -35,7 +34,6 @@ export class Node {
         this._position = vec3.create();
         this._translationMatrix = mat4.create();
 
-        this._rotation = vec3.create();
         this._quaternion = quat.create();
         this._rotationMatrix = mat4.create();
 
@@ -68,15 +66,7 @@ export class Node {
     public set parent(node: Node | null) { this._parent = node; }
 
     public get localTransform(): mat4 {
-        let rotMat = mat4.create();
-    
-        let rotX = mat4.fromXRotation(mat4.create(), this.rotation[0]);
-        let rotY = mat4.fromYRotation(mat4.create(), this.rotation[1]);
-        let rotZ = mat4.fromZRotation(mat4.create(), this.rotation[2]);
-        mat4.multiply(rotMat, rotX, rotZ);
-        mat4.multiply(rotMat, rotMat, rotY);
-
-        mat4.multiply(this._localTransform, this._translationMatrix, rotMat);
+        mat4.multiply(this._localTransform, this._translationMatrix, this._rotationMatrix);
         return mat4.multiply(this._localTransform, this._localTransform, this._scaleMatrix);
     }
 
@@ -102,8 +92,6 @@ export class Node {
     public get worldPosition(): vec3 {
         return vec3.transformMat4(vec3.create(), vec3.create(), this.worldTransform);
     }
-
-    public get rotation(): vec3 { return this._rotation; }
 
     public setX(value: number): void {
         this._position[0] = value;
@@ -144,8 +132,37 @@ export class Node {
         mat4.fromTranslation(this._translationMatrix, this._position);
     }
 
-    public setRotation(rot: vec3): void {
-        vec3.copy(this._rotation, rot);
+    public rotateX(value: number): void {
+        this._rotateOnAxis([1, 0, 0], value);
+    }
+
+    public rotateY(value: number): void {
+        this._rotateOnAxis([0, 1, 0], value);
+    }
+
+    public rotateZ(value: number): void {
+        this._rotateOnAxis([0, 0, 1], value);
+    }
+
+    public setRotation(value: vec3): void {
+        quat.fromEuler(this._quaternion, value[0], value[1], value[2]);
+        this._updateRotationMatrix();
+    }
+
+    public setQuaternion(quaternion: quat): void {
+        quat.copy(this._quaternion, quaternion);
+        this._updateRotationMatrix();
+    }
+
+    private _rotateOnAxis(axis: vec3, value: number): void {
+        const q = quat.create();
+        quat.setAxisAngle(q, axis, value);
+        quat.multiply(this._quaternion, q, this._quaternion);
+        this._updateRotationMatrix();
+    }
+
+    private _updateRotationMatrix(): void {
+        mat4.fromQuat(this._rotationMatrix, this._quaternion);
     }
 
     public setXScale(value: number): void {
@@ -200,8 +217,14 @@ export class Node {
             this._parent.children.splice(this._parent.children.indexOf(this), 1);
             this._parent = null;
         }
-        // TODO: Add quaternion support
-        this._body = new Body({ name: this._name, mass: mass, shape: shape, position: this._position });
+        
+        this._body = new Body({ 
+            name: this._name,
+            mass: mass,
+            shape: shape,
+            position: this._position,
+            quaternion: this._quaternion
+        });
     }
 }
 
