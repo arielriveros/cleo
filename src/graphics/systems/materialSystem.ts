@@ -36,10 +36,6 @@ export class MaterialSystem {
         this._boundShader.setUniform(name, value);
     }
 
-    public update(): void {
-        this._boundShader?.update();
-    }
-
     public get registeredShaders(): string[] {
         return Array.from(this._shaders.keys());
     }

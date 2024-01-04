@@ -34,7 +34,6 @@ export class Shader {
     private _uniforms: {
         [name: string]: {info: UniformInfo, value: any}
     } = {};
-    private _requiresUpdate: boolean = false;
 
     constructor() {
         let vs = gl.createShader(gl.VERTEX_SHADER);
@@ -44,8 +43,6 @@ export class Shader {
         const fs = gl.createShader(gl.FRAGMENT_SHADER);
         if (!fs) throw new Error('Error creating fragment shader');
         this._fragmentShader = fs;
-
-        this._requiresUpdate = true;
     }
 
     public createFromFiles(vertexShaderPath: string, fragmentShaderPath: string): Shader {
@@ -89,7 +86,7 @@ export class Shader {
         if (!this._uniforms[name]) return;
         if (this._uniforms[name].value === value) return;
         this._uniforms[name].value = value;
-        this._requiresUpdate = true;
+        this._setUniform(name, this._uniforms[name].info.type, value);
     }
 
     private _setUniform(name: string, type: string, value: any) {
@@ -172,17 +169,6 @@ export class Shader {
             default:
                 throw new Error(`Unknown uniform type ${type}`);
         }
-    }
-
-    public update(): void {
-        if (!this._requiresUpdate) return;
-        for (const uniform of Object.values(this._uniforms)) {
-            const name = Object.keys(this._uniforms).find(key => this._uniforms[key] === uniform);
-            if (!name) throw new Error('Uniform not found');
-
-            this._setUniform(name, uniform.info.type, uniform.value);
-        }
-        this._requiresUpdate = false;
     }
 
     public hasUniform(name: string) {

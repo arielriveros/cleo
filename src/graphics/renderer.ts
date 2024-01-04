@@ -173,11 +173,6 @@ export class Renderer {
             tex.bind(slot);
         }
 
-        // Update the material system before drawing the respective mesh
-        // TODO: This is a cpu bottleneck
-        // Should update necessary uniforms only, per frame, per material and then per model
-        materialSys.update();
-
         const materialConfig = node.model.material.config;
 
         switch(materialConfig.side) {
