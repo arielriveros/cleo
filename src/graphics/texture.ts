@@ -2,7 +2,8 @@ import { gl } from "./renderer";
 import { Loader } from './loader';
 
 interface TextureConfig {
-    flipY: boolean;
+    flipY?: boolean;
+    repeat?: boolean;
 }
 
 export class Texture {
@@ -49,15 +50,12 @@ export class Texture {
 
         gl.generateMipmap(gl.TEXTURE_2D);
         // Tex coordinates clamping to edge
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, config?.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, config?.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
         // Mipmapping
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-        console.log(`Texture ${this._width}x${this._height} created`);
-
-        // TODO: add support for multiple textures
         this.unbind();
     }
 

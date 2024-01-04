@@ -20,6 +20,7 @@
     "webpack-dev-server": "^4.15.1"
   },
   "dependencies": {
+    "assimpjs": "0.0.10",
     "cannon": "^0.6.2",
     "gl-matrix": "^3.4.3",
     "webgl-obj-loader": "^2.0.8"

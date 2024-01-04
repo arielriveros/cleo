@@ -7,6 +7,11 @@ import { Geometry } from '../core/geometry';
 import { Loader } from './loader';
 
 
+interface FromFileOptions {
+    filePaths: string[];
+    material?: Material;
+}
+
 export class Model {
     private readonly  _geometry: Geometry;
     private readonly  _mesh: Mesh;
@@ -19,11 +24,17 @@ export class Model {
         this._mesh = new Mesh();
     }
 
-    public static FromFile(path: string, material: Material = Material.Default({})): Promise<Model> {
-        return new Promise<Model>((resolve, reject) => {
-            Loader.loadOBJ(path).then((geometry) => {
-                const model = new Model(geometry, material);
-                resolve(model);
+    public static FromFile(config: FromFileOptions): Promise<Model[]> {
+        return new Promise<Model[]>((resolve, reject) => {
+            Loader.loadFromFile(config.filePaths)
+            .then((meshes) => {
+                const models: Model[] = [];
+                for (const mesh of meshes)
+                    models.push(new Model(
+                        mesh.geometry,
+                        config?.material ? config.material : mesh.material
+                    ));
+                resolve(models);
             })
             .catch((err) => {
                 reject(err);

@@ -33,13 +33,11 @@ export class MaterialSystem {
 
     public setProperty(name: string, value: any): void {
         if (!this._boundShader) throw new Error("No shader bound");
-        if (this._boundShader.uniforms[name])
-            this._boundShader.setUniform(name, value);
+        this._boundShader.setUniform(name, value);
     }
 
     public update(): void {
-        for (const shader of this._shaders.values())
-            shader.update();
+        this._boundShader?.update();
     }
 
     public get registeredShaders(): string[] {

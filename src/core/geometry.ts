@@ -22,7 +22,7 @@ export class Geometry {
     public get normals(): vec3[] { return this._normals; }
     public get uvs(): vec2[] { return this._uvs; }
     public get indices(): number[] { return this._indices; }
-    public get vertexCount(): number { return this._positions.length / 3; }
+    public get vertexCount(): number { return this._positions.length * 3; }
     public getData(attributes: string[] = []): number[] {
         const interleaved: number[] = [];
 

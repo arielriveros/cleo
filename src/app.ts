@@ -4,7 +4,7 @@ import { Geometry } from "./core/geometry";
 import { Material } from "./core/material";
 import { Model } from "./graphics/model";
 import { Texture } from "./graphics/texture";
-import { LightNode, ModelNode } from "./core/scene/node";
+import { Node, LightNode, ModelNode } from "./core/scene/node";
 import { Scene } from "./core/scene/scene";
 import { DirectionalLight, PointLight } from "./core/lighting";
 import { Shape } from "./physics/shape";
@@ -12,26 +12,9 @@ import { vec3 } from "gl-matrix";
 
 let app: Engine = new Engine({clearColor: [0.2, 0.2, 0.2, 1.0]});
 
-app.onPreInitialize = async () => {
+app.onPreInitialize = async () => { 
     app.camera = new Camera({position: [0, 1, -10], far: 1000});
-    app.scene = new Scene();    
-
-    const backpackModel = await Model.FromFile(
-        'assets/backpack.obj',
-        Material.Default({
-            textures: {
-                base: new Texture().createFromFile('assets/backpack_diff.jpg', {flipY: true}),
-                specular: new Texture().createFromFile('assets/backpack_spec.jpg', {flipY: true})},
-            shininess: 64,
-            opacity: 0.75,
-        }, {
-            transparent: true
-        })
-    );
-    const backpack = new ModelNode('backpack', backpackModel)
-    backpack.setUniformScale(0.5);
-    backpack.setPosition([2, 0, 2]);
-    app.scene.addNode(backpack);
+    app.scene = new Scene();  
 
     const crate = new ModelNode('crate', new Model(
         Geometry.Cube(),
@@ -44,26 +27,11 @@ app.onPreInitialize = async () => {
         )
     ));
     crate.setPosition([-2, 1, 0]);
-    app.scene.attachNode(crate, 'backpack');
-
-    const roomModel = await Model.FromFile(
-        'assets/viking_room.obj', 
-        Material.Default({
-            textures: {
-                base: new Texture().createFromFile('assets/viking_room.png')},
-                specular: [0.25, 0.25, 0.25]
-            }
-        )
-    );
-    const room = new ModelNode('room', roomModel);
-    room.setPosition([2, -1, 2]);
-    room.setRotation([-90, 90, 0]);
-    room.setUniformScale(3);
-    app.scene.addNode(room);
+    
 
     const sun = new LightNode('sun', new DirectionalLight({}))
     sun.setRotation([90, 0, 0]);
-    app.scene.addNode(sun);
+    
 
     const pl1 = new LightNode('pointLight', new PointLight({
         diffuse: [0.0, 0.0, 1.0],
@@ -72,14 +40,11 @@ app.onPreInitialize = async () => {
     }));
     pl1.setPosition([2, 2, 2]);
 
-    app.scene.addNode(pl1);
-    
     const pl2 = new LightNode('pointLight2', new PointLight({
         diffuse: [0.0, 1.0, 0.0],
         specular: [0.0, 1.0, 0.0],
-        constant: 1.0
+        constant: 2.0
     }));
-    app.scene.attachNode(pl2, 'crate');
 
     const terrain = new ModelNode('terrain', new Model(
         await Geometry.Terrain('assets/terrain_hm.jpg'),
@@ -91,16 +56,15 @@ app.onPreInitialize = async () => {
             shininess: 64.0
         })
     ));
-
     terrain.setY(-4);
     terrain.setUniformScale(0.25);
-    app.scene.addNode(terrain)
 
     const floor = new ModelNode('floor', new Model(
         Geometry.Quad(),
         Material.Default({
-            specular: [0.25, 0.25, 0.25],
-            shininess: 128,
+            diffuse: [0.6, 0.6, 0.6],
+            specular: [0.4, 0.4, 0.4],
+            shininess: 512,
             textures: {
                 base: new Texture().createFromFile('assets/grass_diff.jpg'),
                 specular: new Texture().createFromFile('assets/grass_spec.jpg')
@@ -112,8 +76,41 @@ app.onPreInitialize = async () => {
     floor.setY(-2);
     floor.setRotation([-90, 0, 0]);
     floor.setBody(Shape.Box(5, 5, 0.001), 0);
-    app.scene.addNode(floor);
 
+    const backpack = new Node('backpack')
+    backpack.setUniformScale(0.5);
+    backpack.setPosition([2, 0, 2]);
+
+    const backpackModels = await Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
+
+    for (const model of backpackModels) {
+        const node = new ModelNode('backpack'+Math.random().toString(), model);
+        backpack.addChild(node);
+    }
+    
+    const roomModel = await Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']});
+    const room = new ModelNode('room', roomModel[0]);
+    room.setPosition([2, -1, 2]);
+    room.setRotation([0, 90, 0]);
+    room.setUniformScale(3);
+
+    const sponza = new Node('sponza')
+    sponza.setUniformScale(0.01);
+
+    const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
+    for (const model of sponzaModels) {
+        const node = new ModelNode('sponza'+Math.random().toString(), model);
+        sponza.addChild(node);
+    }
+    app.scene.addNode(sun);
+    app.scene.addNode(pl1);
+    app.scene.attachNode(pl2, 'crate');
+    app.scene.addNode(terrain)
+    app.scene.addNode(floor);
+    app.scene.addNode(backpack);
+    app.scene.attachNode(crate, 'backpack');
+    app.scene.addNode(sponza);
+    app.scene.addNode(room);
 };
 
 app.onPostInitialize = () => {
@@ -122,7 +119,8 @@ app.onPostInitialize = () => {
     const shootSphere = () => {
         const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
             Geometry.Sphere(),
-            Material.Default({ textures: { base: worldTexture} })
+            Material.Basic({texture: worldTexture})
+            //Material.Default({ textures: { base: worldTexture} })
         ));
         sphere.setUniformScale(0.5)
         sphere.setPosition(app.camera.position);
@@ -154,6 +152,8 @@ app.onPostInitialize = () => {
     
     app.input.registerKeyPress('KeyZ', () => { shootSphere(); });
     app.input.registerKeyPress('KeyX', () => { spawnBox(); });
+
+    console.log(app.scene.nodes.size);
 };  
 
 app.onUpdate = (delta: number, time: number) => {

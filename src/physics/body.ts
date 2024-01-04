@@ -24,6 +24,8 @@ export class Body extends CannonBody {
             }
         );
         this._name = config?.name || ''
+        this.linearDamping = 0.1;
+        this.angularDamping = 0.1;
     }
 
     public impulse(impulse: vec3): void {
