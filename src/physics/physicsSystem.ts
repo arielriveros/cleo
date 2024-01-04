@@ -33,9 +33,8 @@ export class PhysicsSystem {
         const killZPlane = new Body({
             mass: 0,
             position: [0, this._killZHeight, 0],
-            quaternion: [quat.x, quat.y, quat.z, quat.w],
-            shape: Shape.Plane()
-        });
+            quaternion: [quat.x, quat.y, quat.z, quat.w]})
+        .attachShape(Shape.Plane());
         this._world.addBody(killZPlane);
 
         killZPlane.addEventListener('collide', (e: any) => {
@@ -58,8 +57,10 @@ export class PhysicsSystem {
             if (!node.body) continue;
             const body = node.body;
 
-            if (this._world.bodies.indexOf(body) === -1)
+            if (this._world.bodies.indexOf(body) === -1) {
                 this._world.addBody(body);
+                console.log('added body');
+            }
 
             const pos = body.position;
             node.setPosition([pos.x, pos.y, pos.z]);

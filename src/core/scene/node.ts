@@ -211,7 +211,7 @@ export class Node {
 
 
     public get body(): Body | null { return this._body; }
-    public setBody(shape: Shape, mass: number): void {
+    public setBody(mass: number): Body {
         // when setting a non static body, detach from parent so that the body is not affected by the parent's transform
         if (this._parent && mass > 0) {
             this._parent.children.splice(this._parent.children.indexOf(this), 1);
@@ -221,10 +221,11 @@ export class Node {
         this._body = new Body({ 
             name: this._name,
             mass: mass,
-            shape: shape,
             position: this._position,
             quaternion: this._quaternion
         });
+
+        return this._body;
     }
 }
 

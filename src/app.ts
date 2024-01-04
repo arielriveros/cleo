@@ -13,7 +13,7 @@ import { vec3 } from "gl-matrix";
 let app: Engine = new Engine({clearColor: [0.2, 0.2, 0.2, 1.0]});
 
 app.onPreInitialize = async () => { 
-    app.camera = new Camera({position: [0, 1, -10], far: 1000});
+    app.camera = new Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000});
     app.scene = new Scene();  
 
     const crate = new ModelNode('crate', new Model(
@@ -58,73 +58,60 @@ app.onPreInitialize = async () => {
     ));
     terrain.setY(-4);
     terrain.setUniformScale(0.25);
-
-    const floor = new ModelNode('floor', new Model(
-        Geometry.Quad(),
-        Material.Default({
-            diffuse: [0.6, 0.6, 0.6],
-            specular: [0.4, 0.4, 0.4],
-            shininess: 512,
-            textures: {
-                base: new Texture().createFromFile('assets/grass_diff.jpg'),
-                specular: new Texture().createFromFile('assets/grass_spec.jpg')
-            },
-        })
-    ));
-
-    floor.setUniformScale(10);
-    floor.setY(-2);
-    floor.setRotation([-90, 0, 0]);
-    floor.setBody(Shape.Box(5, 5, 0.001), 0);
-
-    const backpack = new Node('backpack')
-    backpack.setUniformScale(0.5);
-    backpack.setPosition([2, 0, 2]);
-
-    const backpackModels = await Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
-
-    for (const model of backpackModels) {
-        const node = new ModelNode('backpack'+Math.random().toString(), model);
-        backpack.addChild(node);
-    }
     
     const roomModel = await Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']});
     const room = new ModelNode('room', roomModel[0]);
-    room.setPosition([2, -1, 2]);
-    room.setRotation([0, 90, 0]);
-    room.setUniformScale(3);
+    room.setY(1);
+    room.setBody(25)
+    .attachShape(Shape.Box(1, 0.2, 1))
+    .attachShape(Shape.Box(0.8, 0.8, 0.2), [0, 0.5, 1])
+    .attachShape(Shape.Box(0.5, 0.8, 1), [-0.5, 0.5, 0])
 
-    const sponza = new Node('sponza')
-    sponza.setUniformScale(0.01);
 
-    const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
-    for (const model of sponzaModels) {
-        const node = new ModelNode('sponza'+Math.random().toString(), model);
-        sponza.addChild(node);
-    }
+    const floor = new Node('floor');
+    floor.setY(-2);
+    floor.setBody(0)
+    .attachShape(Shape.Box(100, 0.1, 100))
+    app.scene.addNode(floor);
+
     app.scene.addNode(sun);
     app.scene.addNode(pl1);
-    app.scene.attachNode(pl2, 'crate');
     app.scene.addNode(terrain)
-    app.scene.addNode(floor);
-    app.scene.addNode(backpack);
     app.scene.attachNode(crate, 'backpack');
-    app.scene.addNode(sponza);
+    app.scene.attachNode(pl2, 'crate');
     app.scene.addNode(room);
 };
 
 app.onPostInitialize = () => {
 
+    const sponza = new Node('sponza')
+    sponza.setBody(0)
+    .attachShape(Shape.Box(12, 0.01, 30)) // floor
+    .attachShape(Shape.Box(10, 10, 0.01), [0, 5, -12.5]) // back wall
+    .attachShape(Shape.Box(10, 10, 0.01), [0, 5, 14]) // front wall
+    .attachShape(Shape.Box(0.01, 10, 30), [-6.5, 5, 0]) // left wall
+    .attachShape(Shape.Box(0.01, 10, 30), [6, 5, 0]) // right wall
+    .attachShape(Shape.Box(0.5, 0.5, 0.5), [-2.2, 0.5, 2.4])
+    .attachShape(Shape.Box(0.5, 0.5, 0.5), [ 1.4, 0.5, 2.4])
+
+    Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then((models) => {
+        for (const model of models) {
+            const node = new ModelNode('sponza'+Math.random().toString(), model);
+            sponza.addChild(node);
+        }
+        app.scene.addNode(sponza);
+    });
+
     let worldTexture = new Texture().createFromFile('assets/world.png', {flipY: true})
     const shootSphere = () => {
         const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
             Geometry.Sphere(),
-            Material.Basic({texture: worldTexture})
-            //Material.Default({ textures: { base: worldTexture} })
+            Material.Default({ textures: { base: worldTexture} })
         ));
-        sphere.setUniformScale(0.5)
+        sphere.setUniformScale(0.25)
         sphere.setPosition(app.camera.position);
-        sphere.setBody(Shape.Sphere(0.5), 5);
+        sphere.setBody(5)
+        .attachShape(Shape.Sphere(0.25))
         const impulseVector = vec3.create();
         vec3.scale(impulseVector, app.camera.forward, 100);
         sphere.body?.impulse(impulseVector)
@@ -145,15 +132,14 @@ app.onPostInitialize = () => {
             })
         ));
         box.setPosition([Math.random(), 5, Math.random()]);
-        box.setBody(Shape.Box(0.5, 0.5, 0.5), Math.random() * 10);
+        box.setBody(Math.random() * 10)
+        .attachShape(Shape.Box(1, 1, 1))
         app.scene.addNode(box);
     }
 
     
     app.input.registerKeyPress('KeyZ', () => { shootSphere(); });
     app.input.registerKeyPress('KeyX', () => { spawnBox(); });
-
-    console.log(app.scene.nodes.size);
 };  
 
 app.onUpdate = (delta: number, time: number) => {

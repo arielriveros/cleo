@@ -1,7 +1,4 @@
-import { gl } from './renderer';
-import { mat4, vec3 } from 'gl-matrix';
 import { Mesh } from './mesh';
-import { MaterialSystem } from './systems/materialSystem';
 import { Material } from '../core/material';
 import { Geometry } from '../core/geometry';
 import { Loader } from './loader';

@@ -138,21 +138,20 @@ export class Renderer {
             this._initializeModel(node);
             node.initialized = true;
         }
-        const materialSys = MaterialSystem.Instance;
 
-        materialSys.bind(node.model.material.type);
+        this._materialSystem.bind(node.model.material.type);
 
-        materialSys.setProperty('u_view', camera.viewMatrix);
-        materialSys.setProperty('u_projection', camera.projectionMatrix);
-        materialSys.setProperty('u_viewPos', camera.position);
+        this._materialSystem.setProperty('u_view', camera.viewMatrix);
+        this._materialSystem.setProperty('u_projection', camera.projectionMatrix);
+        this._materialSystem.setProperty('u_viewPos', camera.position);
 
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
-        materialSys.setProperty('u_model', node.worldTransform);
+        this._materialSystem.setProperty('u_model', node.worldTransform);
 
         // Set Material releted uniforms on the model's shader type
         for (const [name, value] of node.model.material.properties)
-            materialSys.setProperty(`u_material.${name}`, value);
+            this._materialSystem.setProperty(`u_material.${name}`, value);
 
         for (const [name, tex] of node.model.material.textures) {
             
@@ -169,7 +168,7 @@ export class Renderer {
                     slot = 2;
                     break;
             }
-            materialSys.setProperty(`u_material.${name}`, slot);
+            this._materialSystem.setProperty(`u_material.${name}`, slot);
             tex.bind(slot);
         }
 
@@ -199,26 +198,25 @@ export class Renderer {
     }
 
     private _setLighting(node: LightNode, numPointLights: number): void {
-        const materialSys = MaterialSystem.Instance;
         // TODO: Add support for different shaders that support lighting
-        materialSys.bind('default');
-        materialSys.setProperty('u_numPointLights', numPointLights);
+        this._materialSystem.bind('default');
+        this._materialSystem.setProperty('u_numPointLights', numPointLights);
 
         switch (node.type) {
             case 'directional':
-                materialSys.setProperty('u_dirLight.diffuse', node.light.diffuse);
-                materialSys.setProperty('u_dirLight.specular', node.light.specular);
-                materialSys.setProperty('u_dirLight.ambient', node.light.ambient);
-                materialSys.setProperty('u_dirLight.direction', node.forward);
+                this._materialSystem.setProperty('u_dirLight.diffuse', node.light.diffuse);
+                this._materialSystem.setProperty('u_dirLight.specular', node.light.specular);
+                this._materialSystem.setProperty('u_dirLight.ambient', node.light.ambient);
+                this._materialSystem.setProperty('u_dirLight.direction', node.forward);
                 break;
             case 'point':
-                materialSys.setProperty(`u_pointLights[${node.index}].position`, node.worldPosition);
-                materialSys.setProperty(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
-                materialSys.setProperty(`u_pointLights[${node.index}].specular`, node.light.specular);
-                materialSys.setProperty(`u_pointLights[${node.index}].ambient`, node.light.ambient);
-                materialSys.setProperty(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
-                materialSys.setProperty(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
-                materialSys.setProperty(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
+                this._materialSystem.setProperty(`u_pointLights[${node.index}].position`, node.worldPosition);
+                this._materialSystem.setProperty(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
+                this._materialSystem.setProperty(`u_pointLights[${node.index}].specular`, node.light.specular);
+                this._materialSystem.setProperty(`u_pointLights[${node.index}].ambient`, node.light.ambient);
+                this._materialSystem.setProperty(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
+                this._materialSystem.setProperty(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
+                this._materialSystem.setProperty(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
                 break;
             case 'spot':
                 break;
