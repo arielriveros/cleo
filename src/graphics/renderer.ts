@@ -11,10 +11,10 @@ import { Framebuffer } from './framebuffer';
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
 
-
 interface RendererConfig {
     canvas: HTMLCanvasElement | null;
-    clearColor: number[];
+    clearColor?: number[];
+    shadowMapResolution?: number;
 }
 
 export class Renderer {
@@ -22,6 +22,7 @@ export class Renderer {
     private _canvas: HTMLCanvasElement;
 
     private _framebuffer: Framebuffer;
+    private _shadowFramebuffer: Framebuffer;
     private _screenQuad: Mesh;
     
     private _shaderManager: ShaderManager;
@@ -46,11 +47,13 @@ export class Renderer {
         this._shaderManager = ShaderManager.Instance;
 
         this._screenQuad = new Mesh();
-        this._framebuffer = new Framebuffer();
+        this._framebuffer = new Framebuffer('color');
+        this._shadowFramebuffer = new Framebuffer('depth');
     }
 
     public preInitialize(): void {
-        gl.clearColor(this._config.clearColor[0], this._config.clearColor[1], this._config.clearColor[2], this._config.clearColor[3]);
+        const clearColor = this._config.clearColor || [0.0, 0.0, 0.0, 1.0];
+        gl.clearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.enable(gl.DEPTH_TEST);
         gl.enable(gl.BLEND);
@@ -60,14 +63,21 @@ export class Renderer {
         const basicShader = new Shader().createFromFiles('shaders/basic.vert', 'shaders/basic.frag');
         const defaultShader = new Shader().createFromFiles('shaders/default.vert', 'shaders/default.frag');
         const screenShader = new Shader().createFromFiles('shaders/screen.vert', 'shaders/screen.frag');
+        const shadowMapShader = new Shader().createFromFiles('shaders/shadowMap.vert', 'shaders/shadowMap.frag');
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
         this._shaderManager.addShader('default', defaultShader);
         this._shaderManager.addShader('screen', screenShader);
+        this._shaderManager.addShader('shadowMap', shadowMapShader);
 
+        // Create framebuffers
         this._framebuffer.create(this._canvas.width, this._canvas.height);
+
+        const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || 2048;
+        this._shadowFramebuffer.create(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
         
+        // Create screen quad to render framebuffer to
         this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
         this._screenQuad.create([-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1 ], 12, [0, 1, 2, 0, 2, 3]);
     }
@@ -78,16 +88,19 @@ export class Renderer {
     }
 
     public render(camera: Camera, scene: Scene): void {
+        for (const light of scene.lights)
+            this._setLighting(light, scene.numPointLights);
         
-        // Set framebuffer
-        this._framebuffer.bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        for (const node of scene.lights) {
+            if (!node.castShadows) continue;
+            this._renderShadowMap(scene.models, node);
+            this._shaderManager.bind('default');
+            this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
+            this._shaderManager.setUniform('u_shadowMap', 3);
+            this._shadowFramebuffer.depth.bind(3);
+        }
 
-        this._renderScene(scene, camera);
-
-        // Unbind framebuffer
-        this._framebuffer.unbind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._renderScene(scene.models, camera); 
 
         // draw image on screen shader
         this._shaderManager.bind('screen');
@@ -110,21 +123,19 @@ export class Renderer {
     public get canvas(): HTMLCanvasElement { return this._canvas; }
     public get context(): WebGL2RenderingContext { return gl; }
 
-    private _renderScene(scene: Scene, camera: Camera): void {
-        const nodes = scene.nodes;
+    private _renderScene(models: Set<ModelNode>, camera: Camera): void {
+        this._framebuffer.bind();
+        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
         const transparentDrawQueue: ModelNode[] = [];
         
-        for (const node of nodes) {
-            if (node instanceof ModelNode) {
-                // Add to transparent draw queue if transparent so that it is drawn last
-                if (node.model.material.config.transparent === true)
-                    transparentDrawQueue.push(node);
-                else
-                    this._renderModel(node, camera);
-            }
-
-            if (node instanceof LightNode)
-                this._setLighting(node, scene.numPointLights);
+        for (const node of models) {
+            // Add to transparent draw queue if transparent so that it is drawn last
+            if (node.model.material.config.transparent === true)
+                transparentDrawQueue.push(node);
+            else
+                this._renderModel(node, camera);
         }
 
         // Sort transparent draw queue by distance to camera
@@ -137,6 +148,10 @@ export class Renderer {
 
         for (const node of transparentDrawQueue)
             this._renderModel(node, camera);
+
+        // Unbind framebuffer
+        this._framebuffer.unbind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     }
 
     private _initializeModel(node: ModelNode): void {
@@ -230,6 +245,28 @@ export class Renderer {
         // unbind textures
         for (const [_, tex] of node.model.material.textures)
             tex.unbind();
+
+        // unbind shadow map
+        this._shadowFramebuffer.depth.unbind();
+    }
+
+    private _renderShadowMap(models: Set<ModelNode>, light: LightNode): void {
+        // Set framebuffer
+        this._shadowFramebuffer.bind();
+        gl.viewport(0, 0, this._shadowFramebuffer.width, this._shadowFramebuffer.height);
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+
+        // Set shader
+        this._shaderManager.bind('shadowMap');
+        this._shaderManager.setUniform('u_lightSpace', light.lightSpace); // sm shader
+
+        // Render scene
+        gl.cullFace(gl.FRONT);
+        for (const node of models) {
+            this._shaderManager.setUniform('u_model', node.worldTransform);
+            node.model.mesh.draw();
+        }
+        gl.cullFace(gl.BACK);
     }
 
     private _setLighting(node: LightNode, numPointLights: number): void {

@@ -5,6 +5,7 @@ precision mediump float;
 in vec3 fragPos;
 in vec3 fragNormal;
 in vec2 fragTexCoord;
+in vec4 fragPosLightSpace;
 
 // Material
 uniform struct Material {
@@ -29,6 +30,7 @@ uniform struct Material {
 uniform vec3 u_viewPos;
 const int MAX_POINT_LIGHTS = 32;
 uniform int u_numPointLights;
+uniform sampler2D u_shadowMap;
 
 // Directional
 uniform struct DirectionalLight {
@@ -50,6 +52,31 @@ struct PointLight {
 
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 
+float shadowCalculation(vec4 fragPosLS) {
+    vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    if (projCoords.x > 1.0 || projCoords.y > 1.0 || projCoords.x < 0.0 || projCoords.y < 0.0 || projCoords.z > 1.0)
+        return 0.0;
+
+    float closestDepth = texture(u_shadowMap, projCoords.xy).r; 
+    float currentDepth = projCoords.z;
+    //float bias = max(0.05 * (1.0 - dot(fragNormal, -u_dirLight.direction)), 0.005);
+    float bias = 0.0025;
+    float shadow = 0.0;
+
+    // pcf
+    float offset = (1.0 / float(textureSize(u_shadowMap, 0).x)) / 2.0;
+    for(int x = -1; x <= 1; ++x) {
+        for(int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * offset).r; 
+            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
+        }    
+    }
+    shadow /= 9.0;
+
+    return shadow;
+}
+
 vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) {
     //ambient
     vec3 ambient = light.ambient * u_material.ambient;
@@ -70,7 +97,10 @@ vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) 
     if (u_material.hasSpecularMap)
         specular *=  vec3(texture(u_material.specularMap, fragTexCoord));
 
-    return (ambient + diffuse + specular);
+    // calculate shadow
+    float shadow = shadowCalculation(fragPosLightSpace);       
+
+    return (ambient + (1.0 - shadow) * (diffuse + specular));
 }
 
 vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light) {

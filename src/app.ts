@@ -10,7 +10,13 @@ import { DirectionalLight, PointLight } from "./core/lighting";
 import { Shape } from "./physics/shape";
 import { vec3 } from "gl-matrix";
 
-let app: Engine = new Engine({clearColor: [0.2, 0.2, 0.2, 1.0]});
+let app: Engine = new Engine({
+    graphics: {
+        clearColor: [0.25, 0.05, 0.8, 1.0],
+        shadowMapSize: 4096
+    },
+    physics: {gravity: [0, -9.8, 0]}
+});
 
 app.onPreInitialize = async () => { 
     app.camera = new Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000});
@@ -33,7 +39,7 @@ app.onPreInitialize = async () => {
     crate.setPosition([-2, 1, 0]);
     
 
-    const sun = new LightNode('sun', new DirectionalLight({}))
+    const sun = new LightNode('sun', new DirectionalLight({}), true)
     sun.setRotation([90, 0, 0]);
     
 
@@ -61,7 +67,6 @@ app.onPreInitialize = async () => {
         })
     ));
     terrain.setY(-4);
-    terrain.setUniformScale(0.25);
     
     const roomModel = await Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']});
     const room = new ModelNode('room', roomModel[0]);
@@ -80,15 +85,14 @@ app.onPreInitialize = async () => {
 
     app.scene.addNode(sun);
     app.scene.addNode(pl1);
-    app.scene.addNode(terrain)
-    app.scene.addNode(crate);
-    app.scene.attachNode(pl2, 'crate');
     app.scene.addNode(room);
+    app.scene.addNode(crate);
+    app.scene.addNode(terrain)
+    app.scene.attachNode(pl2, 'crate');
 };
 
 app.onPostInitialize = () => {
-
-    /* const sponza = new Node('sponza')
+    const sponza = new Node('sponza')
     sponza.setBody(0)
     .attachShape(Shape.Box(12, 0.01, 30)) // floor
     .attachShape(Shape.Box(10, 10, 0.01), [0, 5, -12.5]) // back wall
@@ -104,7 +108,7 @@ app.onPostInitialize = () => {
             sponza.addChild(node);
         }
         app.scene.addNode(sponza);
-    }); */
+    });
 
     let worldTexture = new Texture().createFromFile('assets/world.png', {flipY: true})
     const shootSphere = () => {
@@ -162,8 +166,8 @@ app.onUpdate = (delta: number, time: number) => {
 
     let sun = app.scene.getNode('sun')
     if (sun) {
-        app.input.isKeyPressed('ArrowLeft') && (sun.rotateY(-0.01));
-        app.input.isKeyPressed('ArrowRight') && (sun.rotateY(0.01));
+        app.input.isKeyPressed('ArrowLeft') && (sun.rotateZ(-0.01));
+        app.input.isKeyPressed('ArrowRight') && (sun.rotateZ(0.01));
         app.input.isKeyPressed('ArrowUp') && (sun.rotateX(0.01));
         app.input.isKeyPressed('ArrowDown') && (sun.rotateX(-0.01));
     }

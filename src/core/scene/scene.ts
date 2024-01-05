@@ -1,8 +1,10 @@
-import { LightNode, Node } from "./node";
+import { LightNode, ModelNode, Node } from "./node";
 
 export class Scene {
     private _root: Node;
     private _nodes: Set<Node>;
+    private _lights: Set<LightNode>;
+    private _models: Set<ModelNode>;
     private _dirty: boolean = true;
 
     // TODO: Move this to a LightManager class
@@ -11,6 +13,8 @@ export class Scene {
     constructor() {
         this._root = new Node('root');
         this._nodes = new Set();
+        this._lights = new Set();
+        this._models = new Set();
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
@@ -75,6 +79,15 @@ export class Scene {
 
         this._nodes = visited;
         this._dirty = false;
+
+        this._lights = new Set();
+        this._models = new Set();
+        for (const node of this._nodes) {
+            if (node instanceof LightNode)
+                this._lights.add(node);
+            if (node instanceof ModelNode)
+                this._models.add(node);
+        }
     }
  
     public getNode(name: string): Node | null {
@@ -106,6 +119,18 @@ export class Scene {
         if (this._dirty)
             this.breadthFirstTraversal();
         return this._nodes;
+    }
+
+    public get lights(): Set<LightNode> {
+        if (this._dirty)
+            this.breadthFirstTraversal();
+        return this._lights;
+    }
+
+    public get models(): Set<ModelNode> {
+        if (this._dirty)
+            this.breadthFirstTraversal();
+        return this._models;
     }
 
     // TODO: Move this to a LightManager class

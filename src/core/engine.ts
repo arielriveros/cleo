@@ -5,8 +5,15 @@ import { Camera } from "./camera";
 import { Scene } from "./scene/scene";
 
 interface EngineConfig {
-    canvas?: HTMLCanvasElement;
-    clearColor?: number[];
+    graphics?: {
+        canvas?: HTMLCanvasElement;
+        clearColor?: number[];
+        shadowMapSize?: number;
+    },
+    physics?: {
+        gravity?: number[];
+        killZHeight?: number;
+    }
 }
 
 export class Engine {
@@ -25,12 +32,13 @@ export class Engine {
 
     constructor(config?: EngineConfig) {
         this._renderer = new Renderer({
-            canvas: config?.canvas || null,
-            clearColor: config?.clearColor || [0.0, 0.0, 0.0, 1.0]
+            canvas: config?.graphics?.canvas || null,
+            clearColor: config?.graphics?.clearColor,
+            shadowMapResolution: config?.graphics?.shadowMapSize
         });
         this._physicsSystem = new PhysicsSystem({
-            gravity: [0, -9.82, 0],
-            killZHeight: -10
+            gravity: config?.physics?.gravity || [0, -9.81, 0],
+            killZHeight: config?.physics?.killZHeight || -100
         });
 
         this.onUpdate = () => {};

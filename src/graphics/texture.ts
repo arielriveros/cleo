@@ -59,25 +59,41 @@ export class Texture {
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !config?.flipY || false);
 
         if (data) {
-            if (this._usage === 'depth')
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, data);
-            else
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, data);
+            gl.texImage2D(
+                gl.TEXTURE_2D,
+                0,
+                this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : gl.RGBA,
+                this._usage === 'depth' ? gl.DEPTH_COMPONENT : gl.RGBA,
+                this._usage === 'depth' ? gl.UNSIGNED_INT : gl.UNSIGNED_BYTE,
+                data);
         }
         else {
-            if (this._usage === 'depth')
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, this._width, this._height, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
-            else
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this._width, this._height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+            gl.texImage2D(
+                gl.TEXTURE_2D,
+                0,
+                this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : gl.RGBA,
+                this._width, this._height,
+                0,
+                this._usage === 'depth' ? gl.DEPTH_COMPONENT : gl.RGBA,
+                this._usage === 'depth' ? gl.UNSIGNED_INT : gl.UNSIGNED_BYTE,
+                null);
         }
 
-        gl.generateMipmap(gl.TEXTURE_2D);
-        // Tex coordinates clamping to edge
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, config?.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, config?.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-        // Mipmapping
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        if (this._usage === 'depth') {
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        }
+        else {
+            // Mipmapping
+            gl.generateMipmap(gl.TEXTURE_2D);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            // Tex coordinates clamping to edge
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, config?.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, config?.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+        }
 
         this.unbind();
     }

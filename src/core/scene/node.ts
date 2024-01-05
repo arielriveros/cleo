@@ -248,11 +248,15 @@ export class LightNode extends Node {
     private readonly _light: Light
     private readonly _type: 'directional' | 'point' | 'spot';
     private _index: number;
+    private _lightSpace: mat4;
+    private _castShadows: boolean;
 
-    constructor(name: string, light: Light) {
+    constructor(name: string, light: Light, castShadows: boolean = false) {
         super(name);
         this._light = light;
         this._index = -1;
+        this._lightSpace = mat4.create();
+        this._castShadows = castShadows;
 
         if (light instanceof DirectionalLight)
             this._type = 'directional';
@@ -266,4 +270,17 @@ export class LightNode extends Node {
     public get type(): 'directional' | 'point' | 'spot' { return this._type; }
     public get index(): number { return this._index; }
     public set index(value: number) { this._index = value; }
+    public get lightSpace(): mat4 {
+        const lightView = mat4.create();
+        const lightProjection = mat4.create();
+        const lightPos = vec3.scale(vec3.create(), this.forward, -50);
+        if (this._type === 'directional') {
+            // TODO: Change look at position to be the center of where the camera is looking
+            mat4.lookAt(lightView, lightPos, [0, 0, 0], [0, 1, 0]);
+            mat4.ortho(lightProjection, -20, 20, -20, 20, 0.1, 100);
+        }
+        return mat4.multiply(this._lightSpace, lightProjection, lightView);
+    }
+    public get castShadows(): boolean { return this._castShadows; }
+    public set castShadows(value: boolean) { this._castShadows = value; }
 }
