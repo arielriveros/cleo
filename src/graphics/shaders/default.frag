@@ -135,7 +135,8 @@ vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light) {
     return (ambient + diffuse + specular);
 }
 
-out vec4 outColor;
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec4 brightColor;
 
 void main() {
     vec3 normal = normalize(fragNormal);
@@ -156,5 +157,13 @@ void main() {
         result += u_material.emissive;
 
     float alpha = u_material.opacity;
-    outColor = vec4(result, alpha);
+
+    float brightness = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
+    fragColor = vec4(result, alpha);
+    
+    if (brightness > 1.2) {
+        brightColor = vec4(result, 1.0);
+    } else {
+        brightColor = vec4(0.0, 0.0, 0.0, 1.0);
+    }
 }

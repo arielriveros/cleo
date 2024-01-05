@@ -83,11 +83,7 @@ export class Shader {
     }
 
     public setUniform(name: string, value: any) {
-        if (!this._uniforms[name]) {
-            console.warn(`Uniform ${name} not found`);
-            return
-        };
-        //if (this._uniforms[name].value === value) return;
+        if (!this._uniforms[name]) return;
         this._uniforms[name].value = value;
         this._setUniform(name, this._uniforms[name].info.type, value);
     }

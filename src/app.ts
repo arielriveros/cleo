@@ -13,7 +13,8 @@ import { vec3 } from "gl-matrix";
 let app: Engine = new Engine({
     graphics: {
         clearColor: [0.25, 0.05, 0.8, 1.0],
-        shadowMapSize: 4096
+        shadowMapSize: 4096,
+        bloom: true
     },
     physics: {gravity: [0, -9.8, 0]}
 });
@@ -37,9 +38,11 @@ app.onPreInitialize = async () => {
         )
     ));
     crate.setPosition([-2, 1, 0]);
-    
 
-    const sun = new LightNode('sun', new DirectionalLight({}), true)
+    const sun = new LightNode('sun', new DirectionalLight({
+        diffuse: [1.2, 1.2, 1.2],
+        specular: [1.2, 1.2, 1.2]
+    }), true)
     sun.setRotation([90, 0, 0]);
     
 
@@ -89,9 +92,7 @@ app.onPreInitialize = async () => {
     app.scene.addNode(crate);
     app.scene.addNode(terrain)
     app.scene.attachNode(pl2, 'crate');
-};
 
-app.onPostInitialize = () => {
     const sponza = new Node('sponza')
     sponza.setBody(0)
     .attachShape(Shape.Box(12, 0.01, 30)) // floor
@@ -102,14 +103,15 @@ app.onPostInitialize = () => {
     .attachShape(Shape.Box(0.5, 0.5, 0.5), [-2.2, 0.5, 2.4])
     .attachShape(Shape.Box(0.5, 0.5, 0.5), [ 1.4, 0.5, 2.4])
 
-    Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then((models) => {
-        for (const model of models) {
-            const node = new ModelNode('sponza'+Math.random().toString(), model);
-            sponza.addChild(node);
-        }
-        app.scene.addNode(sponza);
-    });
+    const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
+    for (const model of sponzaModels) {
+        const node = new ModelNode('sponza'+Math.random().toString(), model);
+        sponza.addChild(node);
+    }
+    app.scene.addNode(sponza);
+};
 
+app.onPostInitialize = () => {
     let worldTexture = new Texture().createFromFile('assets/world.png', {flipY: true})
     const shootSphere = () => {
         const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(

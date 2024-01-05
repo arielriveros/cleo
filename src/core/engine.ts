@@ -9,6 +9,7 @@ interface EngineConfig {
         canvas?: HTMLCanvasElement;
         clearColor?: number[];
         shadowMapSize?: number;
+        bloom?: boolean;
     },
     physics?: {
         gravity?: number[];
@@ -34,7 +35,8 @@ export class Engine {
         this._renderer = new Renderer({
             canvas: config?.graphics?.canvas || null,
             clearColor: config?.graphics?.clearColor,
-            shadowMapResolution: config?.graphics?.shadowMapSize
+            shadowMapResolution: config?.graphics?.shadowMapSize,
+            bloom: config?.graphics?.bloom
         });
         this._physicsSystem = new PhysicsSystem({
             gravity: config?.physics?.gravity || [0, -9.81, 0],

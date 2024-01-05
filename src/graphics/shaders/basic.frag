@@ -11,13 +11,15 @@ uniform struct {
 
 in vec2 fragTexCoord;
 
-out vec4 outColor;
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec4 brightColor;
 
 void main() {
-
     if (u_material.hasTexture) {
-        outColor = texture(u_material.texture, fragTexCoord) * vec4(u_material.color, u_material.opacity);
+        fragColor = texture(u_material.texture, fragTexCoord) * vec4(u_material.color, u_material.opacity);
     } else {
-        outColor = vec4(u_material.color, u_material.opacity);
+        fragColor = vec4(u_material.color, u_material.opacity);
     }
+
+    brightColor = vec4(0.0, 0.0, 0.0, 1.0);
 }
