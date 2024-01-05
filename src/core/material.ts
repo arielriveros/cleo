@@ -1,5 +1,5 @@
 import { Shader } from "../graphics/shader";
-import { MaterialSystem } from "../graphics/systems/materialSystem";
+import { ShaderManager } from "../graphics/systems/shaderManager";
 import { Texture } from "../graphics/texture";
 
 interface MaterialConfig {
@@ -107,7 +107,7 @@ export class Material {
         const shader: Shader = new Shader();
         shader.createFromFiles(source.vertexShader, source.fragmentShader);
 
-        MaterialSystem.Instance.addShader(name, shader);
+        ShaderManager.Instance.addShader(name, shader);
 
         return material;
     }

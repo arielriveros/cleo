@@ -1,19 +1,18 @@
 import { Shader } from "../shader";
 
-export class MaterialSystem {
-    private static _instance: MaterialSystem | null = null;
+export class ShaderManager {
+    private static _instance: ShaderManager | null = null;
     private _shaders: Map<string, Shader>;
     private _boundShader: Shader | null = null;
 
     private constructor() {
-        console.log("Material system created");
         this._shaders = new Map<string, Shader>();
     }
 
-    public static get Instance(): MaterialSystem {
-        if (!MaterialSystem._instance)
-            MaterialSystem._instance = new MaterialSystem();
-        return MaterialSystem._instance;
+    public static get Instance(): ShaderManager {
+        if (!ShaderManager._instance)
+            ShaderManager._instance = new ShaderManager();
+        return ShaderManager._instance;
     }
 
     public addShader(name: string, shader: Shader): void {
@@ -31,7 +30,7 @@ export class MaterialSystem {
         this._boundShader.use();
     }
 
-    public setProperty(name: string, value: any): void {
+    public setUniform(name: string, value: any): void {
         if (!this._boundShader) throw new Error("No shader bound");
         this._boundShader.setUniform(name, value);
     }

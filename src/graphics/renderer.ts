@@ -1,10 +1,12 @@
 import { Shader } from './shader';
-import { MaterialSystem } from './systems/materialSystem';
+import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
 import { LightNode, ModelNode } from '../core/scene/node';
 import { PointLight } from '../core/lighting';
 import { vec3 } from 'gl-matrix';
+import { Mesh } from './mesh';
+import { Framebuffer } from './framebuffer';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -18,8 +20,11 @@ interface RendererConfig {
 export class Renderer {
     private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
+
+    private _framebuffer: Framebuffer;
+    private _screenQuad: Mesh;
     
-    private _materialSystem: MaterialSystem;
+    private _shaderManager: ShaderManager;
 
     constructor(config: RendererConfig) {
         this._config = config;
@@ -38,8 +43,10 @@ export class Renderer {
         gl = this._canvas.getContext('webgl2') as WebGL2RenderingContext;
 
         // Create material system
-        this._materialSystem = MaterialSystem.Instance;
+        this._shaderManager = ShaderManager.Instance;
 
+        this._screenQuad = new Mesh();
+        this._framebuffer = new Framebuffer();
     }
 
     public preInitialize(): void {
@@ -52,10 +59,17 @@ export class Renderer {
         // Create default shaders
         const basicShader = new Shader().createFromFiles('shaders/basic.vert', 'shaders/basic.frag');
         const defaultShader = new Shader().createFromFiles('shaders/default.vert', 'shaders/default.frag');
+        const screenShader = new Shader().createFromFiles('shaders/screen.vert', 'shaders/screen.frag');
 
         // Add shaders to the material system
-        this._materialSystem.addShader('basic', basicShader);
-        this._materialSystem.addShader('default', defaultShader);
+        this._shaderManager.addShader('basic', basicShader);
+        this._shaderManager.addShader('default', defaultShader);
+        this._shaderManager.addShader('screen', screenShader);
+
+        this._framebuffer.create(this._canvas.width, this._canvas.height);
+        
+        this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
+        this._screenQuad.create([-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1 ], 12, [0, 1, 2, 0, 2, 3]);
     }
 
     public initialize(camera: Camera): void {
@@ -64,10 +78,42 @@ export class Renderer {
     }
 
     public render(camera: Camera, scene: Scene): void {
-        gl.clear(gl.COLOR_BUFFER_BIT);
+        
+        // Set framebuffer
+        this._framebuffer.bind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+        this._renderScene(scene, camera);
+
+        // Unbind framebuffer
+        this._framebuffer.unbind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        // draw image on screen shader
+        this._shaderManager.bind('screen');
+        this._shaderManager.setUniform('u_screenTexture', 0);
+        this._framebuffer.texture.bind();
+        this._screenQuad.draw();
+    }
+
+    public resize() {
+        this._canvas.width = window.innerWidth;
+        this._canvas.height = window.innerHeight;
+
+        if (!gl) return;
+        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+
+        if (this._framebuffer)
+            this._framebuffer.resize(this._canvas.width, this._canvas.height);
+    }
+
+    public get canvas(): HTMLCanvasElement { return this._canvas; }
+    public get context(): WebGL2RenderingContext { return gl; }
+
+    private _renderScene(scene: Scene, camera: Camera): void {
         const nodes = scene.nodes;
         const transparentDrawQueue: ModelNode[] = [];
+        
         for (const node of nodes) {
             if (node instanceof ModelNode) {
                 // Add to transparent draw queue if transparent so that it is drawn last
@@ -93,19 +139,8 @@ export class Renderer {
             this._renderModel(node, camera);
     }
 
-    public resize() {
-        this._canvas.width = window.innerWidth;
-        this._canvas.height = window.innerHeight;
-
-        if (!gl) return;
-        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
-    }
-
-    public get canvas(): HTMLCanvasElement { return this._canvas; }
-    public get context(): WebGL2RenderingContext { return gl; }
-
     private _initializeModel(node: ModelNode): void {
-        const shader = MaterialSystem.Instance.getShader(node.model.material.type);
+        const shader = ShaderManager.Instance.getShader(node.model.material.type);
         node.model.mesh.initializeVAO(shader.attributes);
         const attributes = [];
 
@@ -139,19 +174,19 @@ export class Renderer {
             node.initialized = true;
         }
 
-        this._materialSystem.bind(node.model.material.type);
+        this._shaderManager.bind(node.model.material.type);
 
-        this._materialSystem.setProperty('u_view', camera.viewMatrix);
-        this._materialSystem.setProperty('u_projection', camera.projectionMatrix);
-        this._materialSystem.setProperty('u_viewPos', camera.position);
+        this._shaderManager.setUniform('u_view', camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', camera.projectionMatrix);
+        this._shaderManager.setUniform('u_viewPos', camera.position);
 
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
-        this._materialSystem.setProperty('u_model', node.worldTransform);
+        this._shaderManager.setUniform('u_model', node.worldTransform);
 
         // Set Material releted uniforms on the model's shader type
         for (const [name, value] of node.model.material.properties)
-            this._materialSystem.setProperty(`u_material.${name}`, value);
+            this._shaderManager.setUniform(`u_material.${name}`, value);
 
         for (const [name, tex] of node.model.material.textures) {
             
@@ -168,7 +203,7 @@ export class Renderer {
                     slot = 2;
                     break;
             }
-            this._materialSystem.setProperty(`u_material.${name}`, slot);
+            this._shaderManager.setUniform(`u_material.${name}`, slot);
             tex.bind(slot);
         }
 
@@ -199,24 +234,24 @@ export class Renderer {
 
     private _setLighting(node: LightNode, numPointLights: number): void {
         // TODO: Add support for different shaders that support lighting
-        this._materialSystem.bind('default');
-        this._materialSystem.setProperty('u_numPointLights', numPointLights);
+        this._shaderManager.bind('default');
+        this._shaderManager.setUniform('u_numPointLights', numPointLights);
 
         switch (node.type) {
             case 'directional':
-                this._materialSystem.setProperty('u_dirLight.diffuse', node.light.diffuse);
-                this._materialSystem.setProperty('u_dirLight.specular', node.light.specular);
-                this._materialSystem.setProperty('u_dirLight.ambient', node.light.ambient);
-                this._materialSystem.setProperty('u_dirLight.direction', node.forward);
+                this._shaderManager.setUniform('u_dirLight.diffuse', node.light.diffuse);
+                this._shaderManager.setUniform('u_dirLight.specular', node.light.specular);
+                this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
+                this._shaderManager.setUniform('u_dirLight.direction', node.forward);
                 break;
             case 'point':
-                this._materialSystem.setProperty(`u_pointLights[${node.index}].position`, node.worldPosition);
-                this._materialSystem.setProperty(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
-                this._materialSystem.setProperty(`u_pointLights[${node.index}].specular`, node.light.specular);
-                this._materialSystem.setProperty(`u_pointLights[${node.index}].ambient`, node.light.ambient);
-                this._materialSystem.setProperty(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
-                this._materialSystem.setProperty(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
-                this._materialSystem.setProperty(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
+                this._shaderManager.setUniform(`u_pointLights[${node.index}].position`, node.worldPosition);
+                this._shaderManager.setUniform(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
+                this._shaderManager.setUniform(`u_pointLights[${node.index}].specular`, node.light.specular);
+                this._shaderManager.setUniform(`u_pointLights[${node.index}].ambient`, node.light.ambient);
+                this._shaderManager.setUniform(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
+                this._shaderManager.setUniform(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
+                this._shaderManager.setUniform(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
                 break;
             case 'spot':
                 break;

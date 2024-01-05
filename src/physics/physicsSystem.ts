@@ -57,10 +57,8 @@ export class PhysicsSystem {
             if (!node.body) continue;
             const body = node.body;
 
-            if (this._world.bodies.indexOf(body) === -1) {
+            if (this._world.bodies.indexOf(body) === -1)
                 this._world.addBody(body);
-                console.log('added body');
-            }
 
             const pos = body.position;
             node.setPosition([pos.x, pos.y, pos.z]);

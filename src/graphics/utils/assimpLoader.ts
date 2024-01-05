@@ -5,51 +5,50 @@ const DIFFUSE_TEXTURE = 1;
 const SPECULAR_TEXTURE = 2;
 const EMISSIVE_TEXTURE = 4;
 
-const assimpjs = require ('assimpjs');
+const assimpjs = require('assimpjs');
 
-async function loadAssimpModel(urls: string[], options = {}): Promise<{meshes: any[], materials: any[]}> {
-    return new Promise<{meshes: any[], materials: any[]}>((resolve, reject) => {
-        assimpjs().then(function (ajs: any) {
-            // fetch the files to import
-            let files = [...urls];
-            Promise.all(files.map(file => fetch(file)))
-                .then(responses => { return Promise.all(responses.map(res => res.arrayBuffer())); })
-                .then(arrayBuffers => {
-                    // create new file list object, and add the files
-                    let fileList = new ajs.FileList();
-                    for (let i = 0; i < files.length; i++)
-                        fileList.AddFile(files[i], new Uint8Array(arrayBuffers[i]));
-    
-                    // convert file list to assimp json
-                    let result = ajs.ConvertFileList(fileList, 'assjson');
-    
-                    // check if the conversion succeeded
-                    if (!result.IsSuccess() || result.FileCount() == 0)
-                        console.error(result.GetErrorCode());
-    
-                    // get the result file, and convert to string
-                    let resultFile = result.GetFile(0);
-    
-                    let jsonContent = new TextDecoder().decode(resultFile.GetContent());
-    
-                    // parse the result json
-                    let resultJson = JSON.parse(jsonContent);
-    
-                    const materials: any[] = [];
-                    const meshes: any[] = [];
-    
-                    for (const material of resultJson.materials)
-                        materials.push(material);
-    
-                    for (const mesh of resultJson.meshes)
-                        meshes.push(mesh);
-    
-                    let output: { meshes: any[]; materials: any[]; };
-                    output = { meshes, materials };
-                    resolve(output);
-                });
-        });
-    });
+async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: any[], materials: any[] }> {
+    try {
+        const ajs = await assimpjs();
+
+        // Fetch the files to import
+        let files = [...urls];
+        const responses = await Promise.all(files.map(file => fetch(file)));
+        const arrayBuffers = await Promise.all(responses.map(res => res.arrayBuffer()));
+
+        // Create a new file list object and add the files
+        let fileList = new ajs.FileList();
+        
+        for (let i = 0; i < files.length; i++)
+            fileList.AddFile(files[i], new Uint8Array(arrayBuffers[i]));
+        
+        // Convert file list to assimp json
+        let result = ajs.ConvertFileList(fileList, 'assjson');
+
+        // Check if the conversion succeeded
+        if (!result.IsSuccess() || result.FileCount() == 0) {
+            console.error(result.GetErrorCode());
+            throw new Error('Conversion failed');
+        }
+
+        // Get the result file and convert to string
+        let resultFile = result.GetFile(0);
+        let jsonContent = new TextDecoder().decode(resultFile.GetContent());
+
+        // Parse the result JSON
+        let resultJson = JSON.parse(jsonContent);
+
+        const materials: any[] = resultJson.materials;
+        const meshes: any[] = resultJson.meshes;
+
+        let output: { meshes: any[]; materials: any[]; };
+        output = { meshes, materials };
+        return output;
+    } 
+    catch (error) {
+        console.error(error);
+        throw error;
+    }
 }
 
 interface AiMaterialProperties {

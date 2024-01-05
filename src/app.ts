@@ -19,10 +19,14 @@ app.onPreInitialize = async () => {
     const crate = new ModelNode('crate', new Model(
         Geometry.Cube(),
         Material.Default({
+            opacity: 0.5,
             textures: {
                 base: new Texture().createFromFile('assets/cube_diff.png'),
                 specular: new Texture().createFromFile('assets/cube_spec.png'),
-                emissive: new Texture().createFromFile('assets/cube_emis.png')}
+                emissive: new Texture().createFromFile('assets/cube_emis.png')},
+            },
+            {
+                transparent: true,
             }
         )
     ));
@@ -77,14 +81,14 @@ app.onPreInitialize = async () => {
     app.scene.addNode(sun);
     app.scene.addNode(pl1);
     app.scene.addNode(terrain)
-    app.scene.attachNode(crate, 'backpack');
+    app.scene.addNode(crate);
     app.scene.attachNode(pl2, 'crate');
     app.scene.addNode(room);
 };
 
 app.onPostInitialize = () => {
 
-    const sponza = new Node('sponza')
+    /* const sponza = new Node('sponza')
     sponza.setBody(0)
     .attachShape(Shape.Box(12, 0.01, 30)) // floor
     .attachShape(Shape.Box(10, 10, 0.01), [0, 5, -12.5]) // back wall
@@ -100,7 +104,7 @@ app.onPostInitialize = () => {
             sponza.addChild(node);
         }
         app.scene.addNode(sponza);
-    });
+    }); */
 
     let worldTexture = new Texture().createFromFile('assets/world.png', {flipY: true})
     const shootSphere = () => {
