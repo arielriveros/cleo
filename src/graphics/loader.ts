@@ -1,6 +1,5 @@
 import { vec2, vec3 } from "gl-matrix";
 import { Geometry } from "../core/geometry";
-import { OBJ } from "webgl-obj-loader";
 import { Material } from "../core/material";
 import { Texture } from "./texture";
 import { loadAssimpModel, parseMaterial } from "./utils/assimpLoader";
@@ -119,47 +118,5 @@ export class Loader {
         }
 
         return output;
-    }
-
-    public static loadMTL(mtlPath: string): {name: string, material: Material}[] {
-            const materials: {name: string, material: Material}[] = [];
-            const mtlRaw = Loader.loadText(mtlPath);
-            const mtl = new OBJ.MaterialLibrary(mtlRaw);
-            for (let mat in mtl.materials) {
-                const name = mat;
-                const materialData = mtl.materials[mat];
-
-                const diffuse = materialData.diffuse;
-                const specular = materialData.specular;
-                const ambient = materialData.ambient;
-                const shininess = materialData.specularExponent;
-                const emissive = materialData.emissive;
-
-                let opacity = 1.0;
-                let transparent = false;
-                if (materialData.transparency > 0.0) {
-                    opacity = 1.0 - materialData.transparency;
-                    transparent = true;
-                }
-
-                const path = mtlPath.split('/').slice(0, -1).join('/');
-                const diffuseMap = materialData.mapDiffuse.filename !== '' ? `${path}/${materialData.mapDiffuse.filename}` : undefined
-                const specularMap = materialData.mapSpecular.filename !== '' ? `${path}/${materialData.mapSpecular.filename}` : undefined;
-                const emissiveMap = materialData.mapEmissive.filename !== '' ? `${path}/${materialData.mapEmissive.filename}` : undefined;
-
-                const material = Material.Default({
-                    ambient, diffuse, specular, shininess, emissive, opacity,
-                    textures: {
-                        base: diffuseMap ? new Texture().createFromFile(diffuseMap, {repeat: true}) : undefined,
-                        specular: specularMap ? new Texture().createFromFile(specularMap, {repeat: true}) : undefined,
-                        emissive: emissiveMap ? new Texture().createFromFile(emissiveMap, {repeat: true}) : undefined
-                    }},
-                    { transparent }
-                );
-
-                materials.push({name, material});
-            }
-
-            return materials;
     }
 }

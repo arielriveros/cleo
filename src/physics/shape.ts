@@ -1,6 +1,6 @@
 import { Shape as CannonShape, 
     Box, Sphere, Cylinder, Plane, Trimesh,
-    Vec3 } from "cannon";
+    Vec3 } from "cannon-es";
 import { vec3 } from "gl-matrix";
 import { Geometry } from "../core/geometry";
 

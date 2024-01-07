@@ -75,15 +75,17 @@ app.onPreInitialize = async () => {
     const room = new ModelNode('room', roomModel[0]);
     room.setY(1);
     room.setBody(25)
-    .attachShape(Shape.Box(1, 0.2, 1))
+    .attachShape(Shape.TriMesh(roomModel[0].geometry, [1, 1, 1]))
+    /* .attachShape(Shape.Box(1, 0.2, 1))
     .attachShape(Shape.Box(0.8, 0.8, 0.2), [0, 0.5, 1])
-    .attachShape(Shape.Box(0.5, 0.8, 1), [-0.5, 0.5, 0])
+    .attachShape(Shape.Box(0.5, 0.8, 1), [-0.5, 0.5, 0]) */
 
 
     const floor = new Node('floor');
     floor.setY(-2);
+    floor.rotateX(-Math.PI/2);
     floor.setBody(0)
-    .attachShape(Shape.Box(100, 0.1, 100))
+    .attachShape(Shape.Plane())
     app.scene.addNode(floor);
 
     app.scene.addNode(sun);
@@ -93,7 +95,7 @@ app.onPreInitialize = async () => {
     app.scene.addNode(terrain)
     app.scene.attachNode(pl2, 'crate');
 
-    const sponza = new Node('sponza')
+    /* const sponza = new Node('sponza')
     sponza.setBody(0)
     .attachShape(Shape.Box(12, 0.01, 30)) // floor
     .attachShape(Shape.Box(10, 10, 0.01), [0, 5, -12.5]) // back wall
@@ -108,7 +110,7 @@ app.onPreInitialize = async () => {
         const node = new ModelNode('sponza'+Math.random().toString(), model);
         sponza.addChild(node);
     }
-    app.scene.addNode(sponza);
+    app.scene.addNode(sponza); */
 };
 
 app.onPostInitialize = () => {

@@ -2,7 +2,6 @@ import { mat4, vec3, quat } from "gl-matrix";
 import { Model } from "../../graphics/model";
 import { DirectionalLight, Light, PointLight } from "../lighting";
 import { Body } from "../../physics/body";
-import { Shape } from "../../physics/shape";
 
 export class Node {
     private readonly _name: string;

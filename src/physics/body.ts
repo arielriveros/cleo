@@ -1,4 +1,4 @@
-import { Body as CannonBody, Vec3, Quaternion} from 'cannon'
+import { Body as CannonBody, Vec3, Quaternion} from 'cannon-es'
 import { quat, vec3 } from 'gl-matrix';
 import { Shape } from './shape';
 
@@ -29,9 +29,13 @@ export class Body extends CannonBody {
     }
 
     public impulse(impulse: vec3): void {
-        super.applyImpulse(
+        /* super.applyImpulse(
             new Vec3(impulse[0], impulse[1], impulse[2]),
             this.position
+        ) */
+        super.applyImpulse(
+            new Vec3(impulse[0], impulse[1], impulse[2]),
+            new Vec3(0, 0, 0)
         )
     }
 

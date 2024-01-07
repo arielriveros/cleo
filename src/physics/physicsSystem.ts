@@ -1,5 +1,5 @@
 import { Scene } from "../core/scene/scene";
-import { World, Vec3, Quaternion } from 'cannon';
+import { World, Vec3, Quaternion } from 'cannon-es';
 import { Body } from "./body";
 import { Shape } from "./shape";
 
