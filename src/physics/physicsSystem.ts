@@ -49,7 +49,7 @@ export class PhysicsSystem {
     }
 
     public update(deltaTime: number): void {
-        this._world?.step(1 / 60, deltaTime, 3);
+        this._world?.step(deltaTime);
 
         if (!this._scene) return;
         const nodes = this._scene.nodes;

@@ -5,6 +5,7 @@ import { Texture } from "../graphics/texture";
 interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
     transparent?: boolean;
+    castShadow?: boolean;
 }
 
 interface BasicProperties {
@@ -45,7 +46,8 @@ export class Material {
         this.textures = new Map<string, Texture>();
         this.config = {
             side: config?.side || 'front',
-            transparent: config?.transparent || false
+            transparent: config?.transparent || false,
+            castShadow: config?.castShadow || false
         };
     }
 

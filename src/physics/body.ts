@@ -20,12 +20,13 @@ export class Body extends CannonBody {
                 mass: config?.mass || 0,
                 position: config?.position ? new Vec3(config.position[0], config.position[1], config.position[2]) : new Vec3(0, 0, 0),
                 quaternion: config?.quaternion ? new Quaternion(config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]) : new Quaternion(0, 0, 0, 1),
-                linearDamping: config?.linearDamping || 0.1,
-                angularDamping: config?.angularDamping || 0.1,
-                material: undefined
+                linearDamping: config?.linearDamping || 0.25,
+                angularDamping: config?.angularDamping || 0.25,
+                material: undefined,
             }
         );
         this._name = config?.name || ''
+        this.sleepTimeLimit = 0.25;
     }
 
     public impulse(impulse: vec3): void {

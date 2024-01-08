@@ -1,4 +1,4 @@
-import { vec3 } from 'gl-matrix';
+import { mat4, quat, vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
@@ -67,7 +67,9 @@ export class Renderer {
 
         // Create default shaders
         const basicShader = new Shader().createFromFiles('shaders/basic.vert', 'shaders/basic.frag');
+        const basicInstancedShader = new Shader().createFromFiles('shaders/basic_instanced.vert', 'shaders/basic.frag');
         const defaultShader = new Shader().createFromFiles('shaders/default.vert', 'shaders/default.frag');
+        const defaultInstancedShader = new Shader().createFromFiles('shaders/default_instanced.vert', 'shaders/default.frag');
         const screenShader = new Shader().createFromFiles('shaders/screen.vert', 'shaders/screen.frag');
         const shadowMapShader = new Shader().createFromFiles('shaders/shadowMap.vert', 'shaders/shadowMap.frag');
         const blurShader = new Shader().createFromFiles('shaders/screen.vert', 'shaders/gaussianBlur.frag');
@@ -75,7 +77,9 @@ export class Renderer {
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
+        this._shaderManager.addShader('basic_instanced', basicInstancedShader);
         this._shaderManager.addShader('default', defaultShader);
+        this._shaderManager.addShader('default_instanced', defaultInstancedShader);
         this._shaderManager.addShader('screen', screenShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
         this._shaderManager.addShader('blur', blurShader);
@@ -87,8 +91,8 @@ export class Renderer {
         const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || 2048;
         this._shadowMapFBO.create(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
 
-        this._blur_FBOs[0].create(this._canvas.width / 2, this._canvas.height / 2);
-        this._blur_FBOs[1].create(this._canvas.width / 2, this._canvas.height / 2);
+        this._blur_FBOs[0].create(this._canvas.width / 3, this._canvas.height / 3);
+        this._blur_FBOs[1].create(this._canvas.width / 3, this._canvas.height / 3);
         this._bloom_FBO.create(this._canvas.width, this._canvas.height);
         
         // Create screen quad to render framebuffer to
@@ -112,6 +116,10 @@ export class Renderer {
             this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
             this._shaderManager.setUniform('u_shadowMap', 3);
             this._shadowMapFBO.depth.bind(3);
+            this._shaderManager.bind('default_instanced');
+            this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
+            this._shaderManager.setUniform('u_shadowMap', 3);
+            this._shadowMapFBO.depth.bind(3);
         }
 
         this._renderScene(scene.models, camera);
@@ -129,8 +137,8 @@ export class Renderer {
         if (this._sceneFBO)
             this._sceneFBO.resize(this._canvas.width, this._canvas.height);
 
-        this._blur_FBOs[0].resize(this._canvas.width / 2, this._canvas.height / 2);
-        this._blur_FBOs[1].resize(this._canvas.width / 2, this._canvas.height / 2);
+        this._blur_FBOs[0].resize(this._canvas.width / 3, this._canvas.height / 3);
+        this._blur_FBOs[1].resize(this._canvas.width / 3, this._canvas.height / 3);
         this._bloom_FBO.resize(this._canvas.width, this._canvas.height);
     }
 
@@ -203,7 +211,8 @@ export class Renderer {
             node.initialized = true;
         }
 
-        this._shaderManager.bind(node.model.material.type);
+        const instanced = node.isInstanced;
+        this._shaderManager.bind(`${node.model.material.type}${instanced ? '_instanced' : ''}`);
 
         this._shaderManager.setUniform('u_view', camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', camera.projectionMatrix);
@@ -211,7 +220,17 @@ export class Renderer {
 
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
-        this._shaderManager.setUniform('u_model', node.worldTransform);
+        if (!instanced)
+            this._shaderManager.setUniform('u_model', node.worldTransform);
+        else {
+            const instances = node.instances;
+            for (let i = 0; i < instances.length; i++) {
+                let transform = instances[i].localTransform;
+                let worldTransform = mat4.multiply(mat4.create(), node.worldTransform, transform);
+                
+                this._shaderManager.setUniform(`u_instances[${i}].model`, worldTransform);
+            }
+        }
 
         // Set Material releted uniforms on the model's shader type
         for (const [name, value] of node.model.material.properties)
@@ -252,7 +271,8 @@ export class Renderer {
                 break;
         }
 
-        node.model.mesh.draw();
+
+        node.model.mesh.draw(gl.TRIANGLES, { instanced: instanced, instanceCount: node.instances.length});
 
         gl.disable(gl.CULL_FACE);
 
@@ -269,43 +289,63 @@ export class Renderer {
 
         // Set shader
         this._shaderManager.bind('shadowMap');
-        this._shaderManager.setUniform('u_lightSpace', light.lightSpace); // sm shader
+        this._shaderManager.setUniform('u_lightSpace', light.lightSpace); // sm shader 
 
         // Render scene
         gl.cullFace(gl.FRONT);
         for (const node of models) {
-            this._shaderManager.setUniform('u_model', node.worldTransform);
-            node.model.mesh.draw();
+            if (!node.model.material.config.castShadow) continue;
+            const instanced = node.isInstanced;
+            if (instanced) {
+                this._shaderManager.setUniform('u_isInstanced', true);
+                const instances = node.instances;
+                for (let i = 0; i < instances.length; i++) {
+                    let transform = instances[i].localTransform;
+                    let worldTransform = mat4.multiply(mat4.create(), node.worldTransform, transform);
+                    this._shaderManager.setUniform(`u_instances[${i}].model`, worldTransform);
+                }
+            }
+            else {
+                this._shaderManager.setUniform('u_isInstanced', false);
+                this._shaderManager.setUniform('u_model', node.worldTransform);
+            }
+            node.model.mesh.draw(gl.TRIANGLES, { instanced, instanceCount: node.instances.length});
         }
         gl.cullFace(gl.BACK);
     }
 
     private _setLighting(node: LightNode, numPointLights: number): void {
+
+        const setLights = (node: LightNode) => {
+            switch (node.type) {
+                case 'directional':
+                    this._shaderManager.setUniform('u_dirLight.diffuse', node.light.diffuse);
+                    this._shaderManager.setUniform('u_dirLight.specular', node.light.specular);
+                    this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
+                    this._shaderManager.setUniform('u_dirLight.direction', node.forward);
+                    break;
+                case 'point':
+                    this._shaderManager.setUniform(`u_pointLights[${node.index}].position`, node.worldPosition);
+                    this._shaderManager.setUniform(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
+                    this._shaderManager.setUniform(`u_pointLights[${node.index}].specular`, node.light.specular);
+                    this._shaderManager.setUniform(`u_pointLights[${node.index}].ambient`, node.light.ambient);
+                    this._shaderManager.setUniform(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
+                    this._shaderManager.setUniform(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
+                    this._shaderManager.setUniform(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
+                    break;
+                case 'spot':
+                    break;
+            }
+        }
+
         // TODO: Add support for different shaders that support lighting
         this._shaderManager.bind('default');
         this._shaderManager.setUniform('u_numPointLights', numPointLights);
+        setLights(node);
 
-        switch (node.type) {
-            case 'directional':
-                this._shaderManager.setUniform('u_dirLight.diffuse', node.light.diffuse);
-                this._shaderManager.setUniform('u_dirLight.specular', node.light.specular);
-                this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
-                this._shaderManager.setUniform('u_dirLight.direction', node.forward);
-                break;
-            case 'point':
-                this._shaderManager.setUniform(`u_pointLights[${node.index}].position`, node.worldPosition);
-                this._shaderManager.setUniform(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
-                this._shaderManager.setUniform(`u_pointLights[${node.index}].specular`, node.light.specular);
-                this._shaderManager.setUniform(`u_pointLights[${node.index}].ambient`, node.light.ambient);
-                this._shaderManager.setUniform(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
-                this._shaderManager.setUniform(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
-                this._shaderManager.setUniform(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
-                break;
-            case 'spot':
-                break;
-        }
-
-        
+        this._shaderManager.bind('default_instanced');
+        this._shaderManager.setUniform('u_numPointLights', numPointLights);
+        setLights(node);
     }
 
     private _applyPostProcessing(): void {
@@ -325,7 +365,7 @@ export class Renderer {
         for (let i = 0; i < iterations; i++) {
             // blur horizontal
             this._blur_FBOs[0].bind();
-            gl.viewport(0, 0, this._canvas.width / 2, this._canvas.height / 2);
+            gl.viewport(0, 0, this._canvas.width / 3, this._canvas.height / 3);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             this._shaderManager.bind('blur');
             this._shaderManager.setUniform('u_horizontal', true);
@@ -338,7 +378,7 @@ export class Renderer {
 
             // blur vertical
             this._blur_FBOs[1].bind();
-            gl.viewport(0, 0, this._canvas.width/ 2 , this._canvas.height/ 2);
+            gl.viewport(0, 0, this._canvas.width / 3 , this._canvas.height / 3);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             this._shaderManager.bind('blur');
             this._shaderManager.setUniform('u_horizontal', false);

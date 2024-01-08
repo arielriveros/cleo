@@ -21,21 +21,19 @@ export class Model {
         this._mesh = new Mesh();
     }
 
-    public static FromFile(config: FromFileOptions): Promise<Model[]> {
-        return new Promise<Model[]>((resolve, reject) => {
+    public static FromFile(config: FromFileOptions): Promise<{name: string, model: Model}[]> {
+        return new Promise<{name: string, model: Model}[]>((resolve, reject) => {
             Loader.loadFromFile(config.filePaths)
             .then((meshes) => {
-                const models: Model[] = [];
+                const models: {name: string, model: Model}[] = [];
                 for (const mesh of meshes)
-                    models.push(new Model(
-                        mesh.geometry,
-                        config?.material ? config.material : mesh.material
-                    ));
+                    models.push({
+                        name: mesh.name,
+                        model: new Model( mesh.geometry, config?.material ? config.material : mesh.material)
+                    });
                 resolve(models);
             })
-            .catch((err) => {
-                reject(err);
-            });
+            .catch(err => reject(err));
         });
     }
 

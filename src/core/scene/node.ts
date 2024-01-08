@@ -232,15 +232,34 @@ export class ModelNode extends Node {
     private _model: Model;
     private _initialized: boolean;
 
+    private _isInstanced: boolean = false;
+    private _instances: Node[] = [];
+    private _instancesDirty: boolean = false;
+
     constructor(name: string, model: Model) {
         super(name);
         this._model = model;
         this._initialized = false;
+        this._isInstanced = false;
+    }
+
+    public addInstance(position: vec3 = [0, 0, 0], orientation: vec3 = [0, 0, 0], scale: vec3 = [1, 1, 1]): void {
+        this._isInstanced = true;
+        const node = new Node(`${this.name}_instance_${this._instances.length}`);
+        node.setPosition(position);
+        node.setRotation(orientation);
+        node.setScale(scale);
+        this._instances.push(node);
+        this._instancesDirty = true;
     }
 
     public get model(): Model { return this._model; }
     public get initialized(): boolean { return this._initialized; }
     public set initialized(value: boolean) { this._initialized = value; }
+    public get instances(): Node[] { return this._instances; }
+    public get isInstanced(): boolean { return this._isInstanced; }
+    public get instancesDirty(): boolean { return this._instancesDirty; }
+    public set instancesDirty(value: boolean) { this._instancesDirty = value; }
 }
 
 export class LightNode extends Node {

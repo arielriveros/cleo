@@ -217,7 +217,6 @@ export class Shader {
 
     private storeUniforms(): void {
         const numUniforms = gl.getProgramParameter(this._shaderProgram, gl.ACTIVE_UNIFORMS);
-    
         for (let i = 0; i < numUniforms; i++) {
             const uniformInfo = gl.getActiveUniform(this._shaderProgram, i);
             if (!uniformInfo) break;
@@ -228,14 +227,7 @@ export class Shader {
             const type = this.getTypeName(uniformInfo.type);
             const size = uniformInfo.size;
             const byteSize = this.getTypeByteSize(uniformInfo.type);
-            const isArray = uniformInfo.name.substring(-3) === '[0]';
-            const name = isArray ? uniformInfo.name.substring(0, uniformInfo.name.length - 3) : uniformInfo.name;
-
-            if (isArray) {
-                const array = new Array(size);
-                for (let i = 0; i < size; i++)
-                    array[i] = `${name}[${i}]`;
-            }
+            const name = uniformInfo.name;
 
             let defaultValue;
 

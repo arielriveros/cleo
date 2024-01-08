@@ -32,9 +32,7 @@ app.onPreInitialize = async () => {
                 specular: new Texture().createFromFile('assets/cube_spec.png'),
                 emissive: new Texture().createFromFile('assets/cube_emis.png')},
             },
-            {
-                transparent: true,
-            }
+            { transparent: true }
         )
     ));
     crate.setPosition([-2, 1, 0]);
@@ -72,17 +70,13 @@ app.onPreInitialize = async () => {
     terrain.setY(-4);
     
     const roomModel = await Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']});
-    const room = new ModelNode('room', roomModel[0]);
+    roomModel[0].model.material.config.castShadow = true;
+    const room = new ModelNode('room', roomModel[0].model);
     room.setY(1);
     room.setBody(25)
-    .attachShape(Shape.TriMesh(roomModel[0].geometry, [1, 1, 1]))
-    /* .attachShape(Shape.Box(1, 0.2, 1))
-    .attachShape(Shape.Box(0.8, 0.8, 0.2), [0, 0.5, 1])
-    .attachShape(Shape.Box(0.5, 0.8, 1), [-0.5, 0.5, 0]) */
-
+    .attachShape(Shape.TriMesh(roomModel[0].model.geometry, [1, 1, 1]))
 
     const floor = new Node('floor');
-    floor.setY(-2);
     floor.rotateX(-Math.PI/2);
     floor.setBody(0)
     .attachShape(Shape.Plane())
@@ -95,22 +89,52 @@ app.onPreInitialize = async () => {
     app.scene.addNode(terrain)
     app.scene.attachNode(pl2, 'crate');
 
-    /* const sponza = new Node('sponza')
+    let instanceCount = 1000;
+
+    const instancedSpheres = new ModelNode('instancedSpheres',
+        new Model(
+            Geometry.Sphere(),
+            Material.Default({ 
+                textures: { base: new Texture().createFromFile('assets/world.png', {flipY: true}) } },
+                { castShadow: true })
+        )
+    );
+
+    for (let i = 0; i < instanceCount; i++) {
+        const position = vec3.fromValues(Math.random() * 50 - 25, Math.random() * 10 -5, Math.random() * 50 - 25);
+        const rotation = vec3.fromValues(Math.random() * 180, Math.random() * 180, Math.random() * 180);
+        const scale = vec3.fromValues(Math.random() * 0.25, Math.random() * 0.25, Math.random() * 0.25);
+        instancedSpheres.addInstance(position, rotation, scale)
+    }
+    
+    app.scene.addNode(instancedSpheres);
+
+    const sponza = new Node('sponza')
     sponza.setBody(0)
-    .attachShape(Shape.Box(12, 0.01, 30)) // floor
-    .attachShape(Shape.Box(10, 10, 0.01), [0, 5, -12.5]) // back wall
-    .attachShape(Shape.Box(10, 10, 0.01), [0, 5, 14]) // front wall
-    .attachShape(Shape.Box(0.01, 10, 30), [-6.5, 5, 0]) // left wall
-    .attachShape(Shape.Box(0.01, 10, 30), [6, 5, 0]) // right wall
-    .attachShape(Shape.Box(0.5, 0.5, 0.5), [-2.2, 0.5, 2.4])
-    .attachShape(Shape.Box(0.5, 0.5, 0.5), [ 1.4, 0.5, 2.4])
 
     const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
-    for (const model of sponzaModels) {
-        const node = new ModelNode('sponza'+Math.random().toString(), model);
+    for (const result of sponzaModels) {
+        result.model.material.config.castShadow = true;
+        const node = new ModelNode(result.name, result.model);
         sponza.addChild(node);
+        const geometry = new Geometry();
+        if (result.name === 'sponza_sponza_arch' ||
+            result.name === 'sponza_sponza_bricks' ||
+            result.name === 'sponza_sponza_ceiling' ||
+            result.name === 'sponza_sponza_column_a' ||
+            result.name === 'sponza_sponza_column_b' ||
+            result.name === 'sponza_sponza_column_c' ||
+            result.name === 'sponza_sponza_flagpole' ||
+            result.name === 'sponza_sponza_roof' ||
+            result.name === 'sponza_sponza_vase' ||
+            result.name === 'sponza_sponza_vase_round') { 
+                geometry.positions.push(...result.model.geometry.positions);
+                geometry.indices.push(...result.model.geometry.indices);
+            }
+            
+            sponza.body?.attachShape(Shape.TriMesh(geometry, [1, 1, 1]))
     }
-    app.scene.addNode(sponza); */
+    app.scene.addNode(sponza);
 };
 
 app.onPostInitialize = () => {
@@ -118,7 +142,7 @@ app.onPostInitialize = () => {
     const shootSphere = () => {
         const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
             Geometry.Sphere(),
-            Material.Default({ textures: { base: worldTexture} })
+            Material.Default({ textures: { base: worldTexture} }, { castShadow: true })
         ));
         sphere.setUniformScale(0.25)
         sphere.setPosition(app.camera.position);
@@ -141,7 +165,7 @@ app.onPostInitialize = () => {
                     base: boxBaseTexture,
                     specular: boxSpecularTexture
                 }
-            })
+            }, { castShadow: true })
         ));
         box.setPosition([Math.random(), 5, Math.random()]);
         box.setBody(Math.random() * 10)
@@ -156,17 +180,18 @@ app.onPostInitialize = () => {
 
 app.onUpdate = (delta: number, time: number) => {
     let mouse = app.input.mouse;
+    let movement = delta * 2;
     if (mouse.buttons.Left) {
-        app.camera.rotation[0] -= mouse.velocity[1] * 0.01;
-        app.camera.rotation[1] -= mouse.velocity[0] * 0.01;
+        app.camera.rotation[0] -= mouse.velocity[1] * movement / 10;
+        app.camera.rotation[1] -= mouse.velocity[0] * movement / 10;
     }
 
-    app.input.isKeyPressed('KeyW') && app.camera.moveForward(0.1);
-    app.input.isKeyPressed('KeyS') && app.camera.moveForward(-0.1);
-    app.input.isKeyPressed('KeyA') && app.camera.moveRight(-0.1);
-    app.input.isKeyPressed('KeyD') && app.camera.moveRight(0.1);
-    app.input.isKeyPressed('KeyE') && app.camera.moveUp(0.1);
-    app.input.isKeyPressed('KeyQ') && app.camera.moveUp(-0.1);
+    app.input.isKeyPressed('KeyW') && app.camera.moveForward(movement);
+    app.input.isKeyPressed('KeyS') && app.camera.moveForward(-movement);
+    app.input.isKeyPressed('KeyA') && app.camera.moveRight(-movement);
+    app.input.isKeyPressed('KeyD') && app.camera.moveRight(movement);
+    app.input.isKeyPressed('KeyE') && app.camera.moveUp(movement);
+    app.input.isKeyPressed('KeyQ') && app.camera.moveUp(-movement);
 
     let sun = app.scene.getNode('sun')
     if (sun) {
@@ -195,6 +220,10 @@ app.onUpdate = (delta: number, time: number) => {
     let blueLight = app.scene.getNode('pointLight')
     if (blueLight)
         blueLight.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
+
+    let instancedSpheres = app.scene.getNode('instancedSpheres')
+    if (instancedSpheres)
+        instancedSpheres.rotateY(0.01);
 }
 
 app.run();

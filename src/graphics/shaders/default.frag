@@ -158,12 +158,11 @@ void main() {
 
     float alpha = u_material.opacity;
 
-    float brightness = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
     fragColor = vec4(result, alpha);
     
-    if (brightness > 1.2) {
+    float brightness = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
+    if (brightness > 1.0)
         brightColor = vec4(result, 1.0);
-    } else {
+    else
         brightColor = vec4(0.0, 0.0, 0.0, 1.0);
-    }
 }

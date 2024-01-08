@@ -14,8 +14,9 @@ out vec4 outColor;
 
 void main()
 {             
-    float tex_offset_x = 1.0 / float(textureSize(u_screenTexture, 0).x);
-    float tex_offset_y = 1.0 / float(textureSize(u_screenTexture, 0).y);
+    ivec2 texSize = textureSize(u_screenTexture, 0);
+    float tex_offset_x = 1.0 / float(texSize.x);
+    float tex_offset_y = 1.0 / float(texSize.y);
 
     vec3 result = texture(u_screenTexture, fragTexCoord).rgb * WEIGHTS[0]; // current fragment's contribution
     if(u_horizontal)

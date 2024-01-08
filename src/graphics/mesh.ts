@@ -1,5 +1,10 @@
 import { gl } from './renderer';
 
+interface InstanceOptions {
+    instanced: boolean;
+    instanceCount: number;
+}
+
 export class Mesh {
     private _vertexArray: WebGLVertexArrayObject;
     private _vertexBuffer: WebGLBuffer;
@@ -34,13 +39,21 @@ export class Mesh {
         return this;
     }
 
-    public draw(mode: number = gl.TRIANGLES): void {
+    public draw(mode: number = gl.TRIANGLES, instanceOptions: InstanceOptions = {instanced: false, instanceCount: 0}): void {
         gl.bindVertexArray(this._vertexArray);
 
-        if (this._indexBuffer && this._indexCount > 0)
-            gl.drawElements(mode, this._indexCount, gl.UNSIGNED_SHORT, 0);
-        else
-            gl.drawArrays(mode, 0, this._vertexCount);
+        if (instanceOptions.instanced) {
+            if (this._indexBuffer && this._indexCount > 0)
+                gl.drawElementsInstanced(mode, this._indexCount, gl.UNSIGNED_SHORT, 0, instanceOptions.instanceCount);
+            else
+                gl.drawArraysInstanced(mode, 0, this._vertexCount, instanceOptions.instanceCount);
+        }
+        else {
+            if (this._indexBuffer && this._indexCount > 0)
+                gl.drawElements(mode, this._indexCount, gl.UNSIGNED_SHORT, 0);
+            else
+                gl.drawArrays(mode, 0, this._vertexCount);
+        }
 
         gl.bindVertexArray(null);
     }
