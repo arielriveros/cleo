@@ -3,9 +3,9 @@
 precision mediump float;
 
 in vec3 fragPos;
-in vec3 fragNormal;
 in vec2 fragTexCoord;
 in vec4 fragPosLightSpace;
+in mat3 TBN;
 
 // Material
 uniform struct Material {
@@ -22,6 +22,12 @@ uniform struct Material {
     vec3 emissive;
     bool hasEmissiveMap;
     sampler2D emissiveMap;
+
+    bool hasNormalMap;
+    sampler2D normalMap;
+
+    bool hasMaskMap;
+    sampler2D maskMap;
 
     float opacity;
 } u_material;
@@ -60,8 +66,7 @@ float shadowCalculation(vec4 fragPosLS) {
 
     float closestDepth = texture(u_shadowMap, projCoords.xy).r; 
     float currentDepth = projCoords.z;
-    //float bias = max(0.05 * (1.0 - dot(fragNormal, -u_dirLight.direction)), 0.005);
-    float bias = 0.0025;
+    float bias = 0.001;
     float shadow = 0.0;
 
     // pcf
@@ -98,7 +103,7 @@ vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) 
         specular *=  vec3(texture(u_material.specularMap, fragTexCoord));
 
     // calculate shadow
-    float shadow = shadowCalculation(fragPosLightSpace);       
+    float shadow = shadowCalculation(fragPosLightSpace);
 
     return (ambient + (1.0 - shadow) * (diffuse + specular));
 }
@@ -139,9 +144,19 @@ layout(location = 0) out vec4 fragColor;
 layout(location = 1) out vec4 brightColor;
 
 void main() {
-    vec3 normal = normalize(fragNormal);
+    if (u_material.hasMaskMap) {
+        float mask = texture(u_material.maskMap, fragTexCoord).r;
+        if (mask < 0.5) discard;
+    }
+
+    vec3 normal = TBN[2];
     vec3 viewDir = normalize(u_viewPos - fragPos);
 
+    if (u_material.hasNormalMap) {
+        normal = texture(u_material.normalMap, fragTexCoord).rgb;
+        normal = normalize(normal * 2.0 - 1.0);  
+        normal = normalize(TBN * normal);
+    }
     vec3 result = vec3(0.0);
 
     result += computeDirectionalLight(normal, viewDir, u_dirLight);

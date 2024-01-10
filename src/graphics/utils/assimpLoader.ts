@@ -3,9 +3,12 @@ import { Texture } from "../texture";
 
 const DIFFUSE_TEXTURE = 1;
 const SPECULAR_TEXTURE = 2;
-const EMISSIVE_TEXTURE = 4;
 
-const assimpjs = require('assimpjs');
+const EMISSIVE_TEXTURE = 4;
+const NORMAL_TEXTURE = 5;
+const MASK_TEXTURE = 8;
+
+const assimpjs = require('./assimpjs');
 
 async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: any[], materials: any[] }> {
     try {
@@ -117,15 +120,21 @@ function parseMaterial(mat: any, path?: string, type: 'basic' | 'default' = 'def
     if (diffuseMap) diffuseMap = `${path}/${diffuseMap}`;
     let specularMap = getTexture(properties, SPECULAR_TEXTURE);
     if (specularMap) specularMap = `${path}/${specularMap}`;
+    let normalMap = getTexture(properties, NORMAL_TEXTURE);
+    if (normalMap) normalMap = `${path}/${normalMap}`;
     let emissiveMap = getTexture(properties, EMISSIVE_TEXTURE);
     if (emissiveMap) emissiveMap = `${path}/${emissiveMap}`;
+    let maskMap = getTexture(properties, MASK_TEXTURE);
+    if (maskMap) maskMap = `${path}/${maskMap}`;
 
     const material = Material.Default({
         ambient, diffuse, specular, shininess, emissive, opacity,
         textures: {
             base: diffuseMap ? new Texture().createFromFile(diffuseMap, {repeat: true}) : undefined,
             specular: specularMap ? new Texture().createFromFile(specularMap, {repeat: true}) : undefined,
-            emissive: emissiveMap ? new Texture().createFromFile(emissiveMap, {repeat: true}) : undefined
+            emissive: emissiveMap ? new Texture().createFromFile(emissiveMap, {repeat: true}) : undefined,
+            normal: normalMap ? new Texture().createFromFile(normalMap, {repeat: true}) : undefined,
+            mask: maskMap ? new Texture().createFromFile(maskMap, {repeat: true}) : undefined
         }}
     );
 

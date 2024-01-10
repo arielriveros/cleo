@@ -4,18 +4,27 @@ export class Geometry {
     private readonly _positions: vec3[];
     private readonly _normals: vec3[];
     private readonly _uvs: vec2[];
+    private _tangents!: vec3[];
+    private _bitangents!: vec3[];
     private readonly _indices: number[];
 
     constructor(
         positions: vec3[] = [],
         normals: vec3[] = [],
         uvs: vec2[] = [],
+        tangents: vec3[] = [],
+        bitangents: vec3[] = [],
         indices: number[] = []
     ) {
         this._positions = positions;
         this._normals = normals;
         this._uvs = uvs;
+        this._tangents = tangents;
+        this._bitangents = bitangents;        
         this._indices = indices;
+
+        if (this._tangents.length === 0 || this._bitangents.length === 0)
+            this._calculateTangents();
     }
 
     public get positions(): vec3[] { return this._positions; }
@@ -43,9 +52,54 @@ export class Geometry {
                 interleaved.push(this._uvs[i][0]);
                 interleaved.push(this._uvs[i][1]);
             }
+
+            if (this._tangents?.length > 0 && attributes.includes('tangent')) {
+                interleaved.push(this._tangents[i][0]);
+                interleaved.push(this._tangents[i][1]);
+                interleaved.push(this._tangents[i][2]);
+            }
+
+            if (this._bitangents?.length > 0 && attributes.includes('bitangent')) {
+                interleaved.push(this._bitangents[i][0]);
+                interleaved.push(this._bitangents[i][1]);
+                interleaved.push(this._bitangents[i][2]);
+            }
         }
 
         return interleaved;
+    }
+    private _calculateTangents(): void {
+        const faces: number[][] = []
+        for (let i = 0; i < this._indices.length; i+=3)
+            faces.push([this._indices[i], this._indices[i+1], this._indices[i+2]]);
+
+        for (let face of faces) {
+            const v0 = this._positions[face[0]];
+            const v1 = this._positions[face[1]];
+            const v2 = this._positions[face[2]];
+            
+            const uv0 = this._uvs[face[0]];
+            const uv1 = this._uvs[face[1]];
+            const uv2 = this._uvs[face[2]];
+            
+            const edge1 = vec3.subtract(vec3.create(), v1, v0);
+            const edge2 = vec3.subtract(vec3.create(), v2, v0);
+            
+            const deltaUV1 = vec2.subtract(vec2.create(), uv1, uv0);
+            const deltaUV2 = vec2.subtract(vec2.create(), uv2, uv0);
+            
+            const f = 1.0 / (deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1]);
+
+            const x = f * (deltaUV2[1] * edge1[0] - deltaUV1[1] * edge2[0]);
+            const y = f * (deltaUV2[1] * edge1[1] - deltaUV1[1] * edge2[1]);
+            const z = f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2]);
+            const tangent = vec3.fromValues(x, y, z);
+            this._tangents.push(tangent, tangent);
+
+            const bigangent =vec3.cross(vec3.create(), this._normals[face[0]], tangent);
+            vec3.scale(bigangent, bigangent, -1.0)
+            this._bitangents.push(bigangent, bigangent);
+        }
     }
 
     public static Triangle(base: number = 1, height: number = 1): Geometry {
@@ -65,7 +119,17 @@ export class Geometry {
                 vec2.fromValues(1.0, 0.0),
                 vec2.fromValues(0.5, 1.0)
             ],
-            [0, 1, 2]
+            [
+                vec3.fromValues(1.0, 0.0, 0.0),
+                vec3.fromValues(1.0, 0.0, 0.0),
+                vec3.fromValues(1.0, 0.0, 0.0)
+            ],
+            [
+                vec3.fromValues(0.0, 1.0, 0.0),
+                vec3.fromValues(0.0, 1.0, 0.0),
+                vec3.fromValues(0.0, 1.0, 0.0)
+            ],
+            [0, 1, 2],
         );
     }
 
@@ -88,6 +152,18 @@ export class Geometry {
                 vec2.fromValues(1.0, 0.0),
                 vec2.fromValues(1.0, 1.0),
                 vec2.fromValues(0.0, 1.0)
+            ],
+            [
+                vec3.fromValues(1.0, 0.0, 0.0),
+                vec3.fromValues(1.0, 0.0, 0.0),
+                vec3.fromValues(1.0, 0.0, 0.0),
+                vec3.fromValues(1.0, 0.0, 0.0)
+            ],
+            [
+                vec3.fromValues(0.0, 1.0, 0.0),
+                vec3.fromValues(0.0, 1.0, 0.0),
+                vec3.fromValues(0.0, 1.0, 0.0),
+                vec3.fromValues(0.0, 1.0, 0.0)
             ],
             [0, 1, 2, 0, 2, 3]
         );
@@ -115,7 +191,7 @@ export class Geometry {
             indices.push(i + 2);
         }
 
-        return new Geometry(positions, normals, uvs, indices);
+        return new Geometry(positions, normals, uvs, [], [], indices);
     }
 
     public static Cube(width: number = 1, height: number = 1, depth: number = 1): Geometry {
@@ -174,7 +250,7 @@ export class Geometry {
             indices.push(i * 4 + 3);
     }
 
-        return new Geometry(positions, normals, uvs, indices);
+        return new Geometry(positions, normals, uvs, [], [], indices);
     }
 
     public static Sphere(segments: number = 32): Geometry {
@@ -224,7 +300,7 @@ export class Geometry {
             }
 
 
-        return new Geometry(positions, normals, uvs, indices);
+        return new Geometry(positions, normals, uvs, [], [], indices);
     }
 
     public static async Terrain(heightmapPath: string): Promise<Geometry> {
@@ -292,7 +368,7 @@ export class Geometry {
                     }
                 }
 
-                resolve(new Geometry(positions, normals, uvs, indices));
+                resolve(new Geometry(positions, normals, uvs, [], [], indices));
             }
         });
     }

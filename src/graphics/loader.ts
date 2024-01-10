@@ -24,44 +24,6 @@ export class Loader {
         return request.responseText;
     }
 
-    public static joinMeshes(meshes: {
-        name: any,
-        positions: ([number, number, number] | Float32Array)[],
-        normals: ([number, number, number] | Float32Array)[],
-        uvs: (Float32Array | [number, number])[],
-        indices: number[],
-        materialindex: any
-    }[]) {
-        const output: {
-            name: any,
-            positions: ([number, number, number] | Float32Array)[],
-            normals: ([number, number, number] | Float32Array)[],
-            uvs: (Float32Array | [number, number])[],
-            indices: number[],
-            materialindex: any
-        } = {
-            name: '',
-            positions: [],
-            normals: [],
-            uvs: [],
-            indices: [],
-            materialindex: 0
-        };
-
-        for (const mesh of meshes) {
-            const offset = output.positions.length;
-
-            output.name = mesh.name;
-            output.positions.push(...mesh.positions);
-            output.normals.push(...mesh.normals);
-            output.uvs.push(...mesh.uvs);
-            output.indices.push(...mesh.indices.map((i) => i + offset));
-            output.materialindex = mesh.materialindex;
-        }
-
-        return output;
-    }
-
     public static async loadFromFile(filePaths: string[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
         const output: {name: string, geometry: Geometry, material: Material}[] = [];
 
@@ -70,10 +32,12 @@ export class Loader {
         for (const mat of res.materials)
             materials.push(parseMaterial(mat, filePaths[0]?.split('/').slice(0, -1).join('/')));
 
-        const rawMeshes:{
+        const meshes:{
             name: any;
             positions: ([number, number, number] | Float32Array)[];
             normals: ([number, number, number] | Float32Array)[];
+            tangents: ([number, number, number] | Float32Array)[];
+            bitangents: ([number, number, number] | Float32Array)[];
             uvs: (Float32Array | [number, number])[];
             indices: number[];
             materialindex: any;
@@ -87,6 +51,9 @@ export class Loader {
             if (!uvs) throw new Error(`Mesh ${name} has no UVs`);
             const indices: number[] = m.faces.flat();
 
+            const tangents: number[] = m.tangents;
+            const bitangents: number[] = m.bitangents;
+
             const positions = [];
             for (let i = 0; i < vertices.length; i += 3)
                 positions.push(vec3.fromValues(vertices[i], vertices[i + 1], vertices[i + 2]));
@@ -99,19 +66,25 @@ export class Loader {
             for (let i = 0; i < uvs.length; i += 2)
                 uvsVec.push(vec2.fromValues(uvs[i], uvs[i + 1]));
 
-            rawMeshes.push({name, positions, normals: normalsVec, uvs: uvsVec, indices, materialindex: m.materialindex});
+            const tangentsVec = [];
+            for (let i = 0; i < tangents.length; i += 3)
+                tangentsVec.push(vec3.fromValues(tangents[i], tangents[i + 1], tangents[i + 2]));
+
+            const bitangentsVec = [];
+            for (let i = 0; i < bitangents.length; i += 3)
+                bitangentsVec.push(vec3.fromValues(bitangents[i], bitangents[i + 1], bitangents[i + 2]));
+
+            meshes.push({name,
+                         positions,
+                         normals: normalsVec,
+                         uvs: uvsVec,
+                         tangents: tangentsVec, 
+                         bitangents: bitangentsVec,
+                         indices, materialindex: m.materialindex});
         }
 
-        const joinedMeshes = [];
-        // join by same materialIndex
-        for (let i = 0; i < materials.length; i++) {
-            const meshes = rawMeshes.filter((m) => m.materialindex === i);
-            if (meshes.length > 0)
-                joinedMeshes.push(Loader.joinMeshes(meshes));
-        }
-
-        for (const mesh of joinedMeshes) {
-            const geometry = new Geometry(mesh.positions, mesh.normals, mesh.uvs, mesh.indices);
+        for (const mesh of meshes) {
+            const geometry = new Geometry(mesh.positions, mesh.normals, mesh.uvs, mesh.tangents, mesh.bitangents, mesh.indices);
             const matIndex = mesh.materialindex;
             const material = materials[matIndex].material;
             output.push({name: mesh.name, geometry, material});

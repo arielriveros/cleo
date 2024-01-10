@@ -114,12 +114,12 @@ export class Renderer {
             this._renderShadowMap(scene.models, node);
             this._shaderManager.bind('default');
             this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
-            this._shaderManager.setUniform('u_shadowMap', 3);
-            this._shadowMapFBO.depth.bind(3);
+            this._shaderManager.setUniform('u_shadowMap', 5);
+            this._shadowMapFBO.depth.bind(5);
             this._shaderManager.bind('default_instanced');
             this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
-            this._shaderManager.setUniform('u_shadowMap', 3);
-            this._shadowMapFBO.depth.bind(3);
+            this._shaderManager.setUniform('u_shadowMap', 5);
+            this._shadowMapFBO.depth.bind(5);
         }
 
         this._renderScene(scene.models, camera);
@@ -197,6 +197,14 @@ export class Renderer {
                 case 'a_texCoord':
                     attributes.push('uv');
                     break;
+                case 'tangent':
+                case 'a_tangent':
+                    attributes.push('tangent');
+                    break;
+                case 'bitangent':
+                case 'a_bitangent':
+                    attributes.push('bitangent');
+                    break;
                 default:
                     throw new Error(`Attribute ${attr.name} not supported`);
             }
@@ -249,6 +257,12 @@ export class Renderer {
                     break;
                 case 'emissiveMap':
                     slot = 2;
+                    break;
+                case 'normalMap':
+                    slot = 3;
+                    break;
+                case 'maskMap':
+                    slot = 4;
                     break;
             }
             this._shaderManager.setUniform(`u_material.${name}`, slot);
@@ -350,7 +364,7 @@ export class Renderer {
 
     private _applyPostProcessing(): void {
         const bloom = this._config.bloom || false;
-        if (bloom) this._bloomPass(5);
+        if (bloom) this._bloomPass(10);
 
 
         this._sceneFBO.unbind();

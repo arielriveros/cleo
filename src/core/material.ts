@@ -26,6 +26,8 @@ interface DefaultProperties {
         base?: Texture;
         specular?: Texture;
         emissive?: Texture;
+        normal?: Texture;
+        mask?: Texture;
     }
 }
 
@@ -96,6 +98,20 @@ export class Material {
             if (properties.textures?.emissive) {
                 const tex = properties.textures.emissive;
                 material.textures.set('emissiveMap', tex);
+            }
+
+            material.properties.set('hasNormalMap', properties.textures?.normal ? true : false);
+
+            if (properties.textures?.normal) {
+                const tex = properties.textures.normal;
+                material.textures.set('normalMap', tex);
+            }
+
+            material.properties.set('hasMaskMap', properties.textures?.mask ? true : false);
+
+            if (properties.textures?.mask) {
+                const tex = properties.textures.mask;
+                material.textures.set('maskMap', tex);
             }
 
             return material;

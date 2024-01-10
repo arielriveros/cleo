@@ -91,12 +91,15 @@ app.onPreInitialize = async () => {
 
     let instanceCount = 1000;
 
-    const instancedSpheres = new ModelNode('instancedSpheres',
+    const instancedCubes = new ModelNode('instancedCubes',
         new Model(
-            Geometry.Sphere(),
+            Geometry.Cube(),
             Material.Default({ 
-                textures: { base: new Texture().createFromFile('assets/world.png', {flipY: true}) } },
-                { castShadow: true })
+                textures: { 
+                    base: new Texture().createFromFile('assets/roma.png', {flipY: true}),
+                    normal: new Texture().createFromFile('assets/TestNormalMap.png'),
+                } },
+                { castShadow: false })
         )
     );
 
@@ -104,13 +107,12 @@ app.onPreInitialize = async () => {
         const position = vec3.fromValues(Math.random() * 50 - 25, Math.random() * 10 -5, Math.random() * 50 - 25);
         const rotation = vec3.fromValues(Math.random() * 180, Math.random() * 180, Math.random() * 180);
         const scale = vec3.fromValues(Math.random() * 0.25, Math.random() * 0.25, Math.random() * 0.25);
-        instancedSpheres.addInstance(position, rotation, scale)
+        instancedCubes.addInstance(position, rotation, scale)
     }
     
-    app.scene.addNode(instancedSpheres);
+    app.scene.addNode(instancedCubes);
 
     const sponza = new Node('sponza')
-    sponza.setBody(0)
 
     const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
     for (const result of sponzaModels) {
@@ -135,6 +137,18 @@ app.onPreInitialize = async () => {
             sponza.body?.attachShape(Shape.TriMesh(geometry, [1, 1, 1]))
     }
     app.scene.addNode(sponza);
+
+    const helmet = new Node('helmet')
+    helmet.setPosition([1, 2, 0]);
+    helmet.setUniformScale(0.5);
+    helmet.setBody(10).attachShape(Shape.Sphere(0.5));
+    const damagedHelmetModels = await Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']});
+    for (const result of damagedHelmetModels) {
+        result.model.material.config.castShadow = true;
+        const node = new ModelNode(result.name, result.model);
+        helmet.addChild(node);
+    }
+    app.scene.addNode(helmet);
 };
 
 app.onPostInitialize = () => {
@@ -176,6 +190,7 @@ app.onPostInitialize = () => {
     
     app.input.registerKeyPress('KeyZ', () => { shootSphere(); });
     app.input.registerKeyPress('KeyX', () => { spawnBox(); });
+    app.input.registerKeyPress('KeyP', () => {app.isPaused = !app.isPaused})
 };  
 
 app.onUpdate = (delta: number, time: number) => {
@@ -221,9 +236,9 @@ app.onUpdate = (delta: number, time: number) => {
     if (blueLight)
         blueLight.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
 
-    let instancedSpheres = app.scene.getNode('instancedSpheres')
-    if (instancedSpheres)
-        instancedSpheres.rotateY(0.01);
+    let instancedCubes = app.scene.getNode('instancedCubes')
+    if (instancedCubes)
+        instancedCubes.rotateY(0.01);
 }
 
 app.run();

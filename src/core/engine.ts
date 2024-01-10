@@ -26,6 +26,8 @@ export class Engine {
 
     private _scene!: Scene;
     private _camera!: Camera;
+
+    private _paused: boolean = true;
     
     public onUpdate: (delta: number, time: number) => void;
     public onPreInitialize: () => Promise<void>;
@@ -71,6 +73,7 @@ export class Engine {
         }
 
         this.onPostInitialize();
+        this._paused = false;
     }
 
     public run(): void {
@@ -84,8 +87,10 @@ export class Engine {
         const currentTimestamp = performance.now();
         const deltaTime = (currentTimestamp - this._lastTimestamp) / 1000;
         
-        this._scene.update();
-        this._physicsSystem.update(deltaTime);
+        if (!this._paused) {
+            this._scene.update();
+            this._physicsSystem.update(deltaTime);
+        }
 
         this._camera.update();
         this._renderer.render(this._camera, this._scene);
@@ -102,4 +107,6 @@ export class Engine {
     }
 
     public get input(): InputManager { return InputManager.instance; }
+    public get isPaused(): boolean { return this._paused; }
+    public set isPaused(paused: boolean) { this._paused = paused; }
 }
