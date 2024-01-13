@@ -130,11 +130,11 @@ function parseMaterial(mat: any, path?: string, type: 'basic' | 'default' = 'def
     const material = Material.Default({
         ambient, diffuse, specular, shininess, emissive, opacity,
         textures: {
-            base: diffuseMap ? new Texture().createFromFile(diffuseMap, {repeat: true}) : undefined,
-            specular: specularMap ? new Texture().createFromFile(specularMap, {repeat: true}) : undefined,
-            emissive: emissiveMap ? new Texture().createFromFile(emissiveMap, {repeat: true}) : undefined,
-            normal: normalMap ? new Texture().createFromFile(normalMap, {repeat: true}) : undefined,
-            mask: maskMap ? new Texture().createFromFile(maskMap, {repeat: true}) : undefined
+            base: diffuseMap ? new Texture({ repeat: true }).createFromFile(diffuseMap) : undefined,
+            specular: specularMap ? new Texture({ repeat: true }).createFromFile(specularMap) : undefined,
+            emissive: emissiveMap ? new Texture({ repeat: true }).createFromFile(emissiveMap) : undefined,
+            normal: normalMap ? new Texture({ repeat: true }).createFromFile(normalMap) : undefined,
+            mask: maskMap ? new Texture({ repeat: true }).createFromFile(maskMap) : undefined
         }}
     );
 

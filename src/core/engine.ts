@@ -106,6 +106,7 @@ export class Engine {
         this._camera.resize(this._renderer.canvas.width, this._renderer.canvas.height);
     }
 
+    public get renderer(): Renderer { return this._renderer; }
     public get input(): InputManager { return InputManager.instance; }
     public get isPaused(): boolean { return this._paused; }
     public set isPaused(paused: boolean) { this._paused = paused; }

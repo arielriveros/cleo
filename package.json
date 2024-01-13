@@ -19,7 +19,6 @@
     "webpack-dev-server": "^4.15.1"
   },
   "dependencies": {
-    "assimpjs": "0.0.10",
     "cannon-es": "^0.20.0",
     "gl-matrix": "^3.4.3"
   }

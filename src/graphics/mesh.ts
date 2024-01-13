@@ -39,21 +39,12 @@ export class Mesh {
         return this;
     }
 
-    public draw(mode: number = gl.TRIANGLES, instanceOptions: InstanceOptions = {instanced: false, instanceCount: 0}): void {
+    public draw(mode: number = gl.TRIANGLES): void {
         gl.bindVertexArray(this._vertexArray);
-
-        if (instanceOptions.instanced) {
-            if (this._indexBuffer && this._indexCount > 0)
-                gl.drawElementsInstanced(mode, this._indexCount, gl.UNSIGNED_SHORT, 0, instanceOptions.instanceCount);
-            else
-                gl.drawArraysInstanced(mode, 0, this._vertexCount, instanceOptions.instanceCount);
-        }
-        else {
-            if (this._indexBuffer && this._indexCount > 0)
-                gl.drawElements(mode, this._indexCount, gl.UNSIGNED_SHORT, 0);
-            else
-                gl.drawArrays(mode, 0, this._vertexCount);
-        }
+        if (this._indexBuffer && this._indexCount > 0)
+            gl.drawElements(mode, this._indexCount, gl.UNSIGNED_SHORT, 0);
+        else
+            gl.drawArrays(mode, 0, this._vertexCount);
 
         gl.bindVertexArray(null);
     }

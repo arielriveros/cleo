@@ -1,5 +1,11 @@
 import { gl } from './renderer';
-import { Texture } from './texture';
+import { Texture, TextureConfig } from './texture';
+
+interface FrameBufferOptions {
+    usage?: 'color' | 'depth';
+    colorAttachments?: number;
+    colorTextureOptions?: TextureConfig;
+}
 
 export class Framebuffer {
     private _id!: number;
@@ -7,17 +13,19 @@ export class Framebuffer {
     private _height: number;
     private _colors: Texture[];
     private _depth: Texture;
-    private _usage: 'color' | 'depth';
-    private _colorAttachments: number;
+    private _options: FrameBufferOptions;
 
-    constructor(usage?: 'color' | 'depth', colors?: number) {
+    constructor(options?: FrameBufferOptions) {
         this._id = gl.createFramebuffer() as number;
         this._width = 0;
         this._height = 0;
-        this._usage = usage || 'color';
+        this._options = {
+            usage: options?.usage || 'color',
+            colorAttachments: options?.colorAttachments || 1,
+            colorTextureOptions: options?.colorTextureOptions || undefined
+        };
         this._colors = [];
-        this._depth = new Texture('depth');
-        this._colorAttachments = colors || 1;
+        this._depth = new Texture({usage: 'depth', repeat: false, mipMap: false});
     }
 
     public create(width: number, height: number): Framebuffer {
@@ -26,23 +34,26 @@ export class Framebuffer {
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, this._id);
 
-        for (let i = 0; i < this._colorAttachments; i++) {
-            this._colors.push(new Texture('color'));
-            this._colors[i].create(width, height, {repeat: false});
+        const numColorAttachments = this._options.colorAttachments as number;
+        const usage = this._options.usage;
+
+        for (let i = 0; i < numColorAttachments; i++) {
+            this._colors.push(new Texture(this._options.colorTextureOptions));
+            this._colors[i].create(width, height);
             gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, this._colors[i].texture, 0);
         }
 
-        if (this._usage === 'color') { 
+        if (usage === 'color') { 
             const colorAttachments = [];
-            for (let i = 0; i < this._colorAttachments; i++)
+            for (let i = 0; i < numColorAttachments; i++)
                 colorAttachments.push(gl.COLOR_ATTACHMENT0 + i);
             gl.drawBuffers(colorAttachments);
         }
 
-        this._depth.create(width, height, {repeat: false});
+        this._depth.create(width, height);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this._depth.texture, 0);
 
-        if (this._usage === 'depth') {
+        if (usage === 'depth') {
             gl.drawBuffers([gl.NONE]);
             gl.readBuffer(gl.NONE);
         }

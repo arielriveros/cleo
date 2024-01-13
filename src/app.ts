@@ -37,10 +37,7 @@ app.onPreInitialize = async () => {
     ));
     crate.setPosition([-2, 1, 0]);
 
-    const sun = new LightNode('sun', new DirectionalLight({
-        diffuse: [1.2, 1.2, 1.2],
-        specular: [1.2, 1.2, 1.2]
-    }), true)
+    const sun = new LightNode('sun', new DirectionalLight({}), true)
     sun.setRotation([90, 0, 0]);
     
 
@@ -61,7 +58,7 @@ app.onPreInitialize = async () => {
         await Geometry.Terrain('assets/terrain_hm.jpg'),
         Material.Default({
             textures: {
-                base: new Texture().createFromFile('assets/terrain_tex.jpg', {flipY: true}),
+                base: new Texture({ flipY: true }).createFromFile('assets/terrain_tex.jpg'),
             },
             specular: [0.4, 0.4, 0.4],
             shininess: 64.0
@@ -72,48 +69,13 @@ app.onPreInitialize = async () => {
     const roomModel = await Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']});
     roomModel[0].model.material.config.castShadow = true;
     const room = new ModelNode('room', roomModel[0].model);
-    room.setY(1);
-    room.setBody(25)
-    .attachShape(Shape.TriMesh(roomModel[0].model.geometry, [1, 1, 1]))
+    room.setPosition([1, 1, 0]).setRotation([0, 180, 0]).setBody(0).attachShape(Shape.TriMesh(roomModel[0].model.geometry, [1, 1, 1]))
 
     const floor = new Node('floor');
-    floor.rotateX(-Math.PI/2);
-    floor.setBody(0)
-    .attachShape(Shape.Plane())
-    app.scene.addNode(floor);
-
-    app.scene.addNode(sun);
-    app.scene.addNode(pl1);
-    app.scene.addNode(room);
-    app.scene.addNode(crate);
-    app.scene.addNode(terrain)
-    app.scene.attachNode(pl2, 'crate');
-
-    let instanceCount = 1000;
-
-    const instancedCubes = new ModelNode('instancedCubes',
-        new Model(
-            Geometry.Cube(),
-            Material.Default({ 
-                textures: { 
-                    base: new Texture().createFromFile('assets/roma.png', {flipY: true}),
-                    normal: new Texture().createFromFile('assets/TestNormalMap.png'),
-                } },
-                { castShadow: false })
-        )
-    );
-
-    for (let i = 0; i < instanceCount; i++) {
-        const position = vec3.fromValues(Math.random() * 50 - 25, Math.random() * 10 -5, Math.random() * 50 - 25);
-        const rotation = vec3.fromValues(Math.random() * 180, Math.random() * 180, Math.random() * 180);
-        const scale = vec3.fromValues(Math.random() * 0.25, Math.random() * 0.25, Math.random() * 0.25);
-        instancedCubes.addInstance(position, rotation, scale)
-    }
-    
-    app.scene.addNode(instancedCubes);
+    floor.rotateX(-90).setBody(0).attachShape(Shape.Plane())
 
     const sponza = new Node('sponza')
-
+    sponza.setBody(0);
     const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
     for (const result of sponzaModels) {
         result.model.material.config.castShadow = true;
@@ -136,32 +98,45 @@ app.onPreInitialize = async () => {
             
             sponza.body?.attachShape(Shape.TriMesh(geometry, [1, 1, 1]))
     }
-    app.scene.addNode(sponza);
+
+    const backpack = new Node('backpack')
+    backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(Shape.Box(1, 2, 1));
+    const backpackModels = await Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
+    for (const result of backpackModels) {
+        result.model.material.config.castShadow = true;
+        const node = new ModelNode(result.name, result.model);
+        backpack.addChild(node);
+    }
 
     const helmet = new Node('helmet')
-    helmet.setPosition([1, 2, 0]);
-    helmet.setUniformScale(0.5);
-    helmet.setBody(10).attachShape(Shape.Sphere(0.5));
+    helmet.setPosition([1, 2, 0]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(Shape.Sphere(0.5));
+
     const damagedHelmetModels = await Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']});
     for (const result of damagedHelmetModels) {
         result.model.material.config.castShadow = true;
         const node = new ModelNode(result.name, result.model);
         helmet.addChild(node);
     }
+    app.scene.addNode(floor);
+    app.scene.addNode(sun);
+    app.scene.addNode(pl1);
+    app.scene.addNode(room);
+    app.scene.addNode(crate);
+    app.scene.addNode(terrain)
+    app.scene.attachNode(pl2, 'crate');
     app.scene.addNode(helmet);
+    app.scene.addNode(backpack);
+    app.scene.addNode(sponza);
 };
 
 app.onPostInitialize = () => {
-    let worldTexture = new Texture().createFromFile('assets/world.png', {flipY: true})
+    let worldTexture = new Texture({ flipY: true }).createFromFile('assets/world.png')
     const shootSphere = () => {
         const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
             Geometry.Sphere(),
             Material.Default({ textures: { base: worldTexture} }, { castShadow: true })
         ));
-        sphere.setUniformScale(0.25)
-        sphere.setPosition(app.camera.position);
-        sphere.setBody(5)
-        .attachShape(Shape.Sphere(0.25))
+        sphere.setUniformScale(0.25).setPosition(app.camera.position).setBody(5).attachShape(Shape.Sphere(0.25))
         const impulseVector = vec3.create();
         vec3.scale(impulseVector, app.camera.forward, 100);
         sphere.body?.impulse(impulseVector)
@@ -175,15 +150,17 @@ app.onPostInitialize = () => {
         const box = new ModelNode(`box${Math.random() * 1000}`, new Model(
             Geometry.Cube(),
             Material.Default({
+                emissive: [
+                    Math.random() > 0.5 ? 1 : 0,
+                    Math.random() > 0.5 ? 1 : 0,
+                    Math.random() > 0.5 ? 1 : 0],
                 textures: {
                     base: boxBaseTexture,
                     specular: boxSpecularTexture
                 }
             }, { castShadow: true })
         ));
-        box.setPosition([Math.random(), 5, Math.random()]);
-        box.setBody(Math.random() * 10)
-        .attachShape(Shape.Box(1, 1, 1))
+        box.setPosition([Math.random(), 5, Math.random()]).setBody(Math.random() * 10).attachShape(Shape.Box(1, 1, 1))
         app.scene.addNode(box);
     }
 
@@ -208,37 +185,28 @@ app.onUpdate = (delta: number, time: number) => {
     app.input.isKeyPressed('KeyE') && app.camera.moveUp(movement);
     app.input.isKeyPressed('KeyQ') && app.camera.moveUp(-movement);
 
+    app.input.isKeyPressed('Digit1') && (app.renderer.exposure -= 0.005);
+    app.input.isKeyPressed('Digit2') && (app.renderer.exposure += 0.005);
+    app.input.isKeyPressed('Digit3') && (app.renderer.chromaticAberrationStrength -= 0.001);
+    app.input.isKeyPressed('Digit4') && (app.renderer.chromaticAberrationStrength += 0.001);
+
     let sun = app.scene.getNode('sun')
     if (sun) {
-        app.input.isKeyPressed('ArrowLeft') && (sun.rotateZ(-0.01));
-        app.input.isKeyPressed('ArrowRight') && (sun.rotateZ(0.01));
-        app.input.isKeyPressed('ArrowUp') && (sun.rotateX(0.01));
-        app.input.isKeyPressed('ArrowDown') && (sun.rotateX(-0.01));
+        app.input.isKeyPressed('ArrowLeft') && (sun.rotateZ(-0.5));
+        app.input.isKeyPressed('ArrowRight') && (sun.rotateZ(0.5));
+        app.input.isKeyPressed('ArrowUp') && (sun.rotateX(0.5));
+        app.input.isKeyPressed('ArrowDown') && (sun.rotateX(-0.5));
     }
-
-    let backpack = app.scene.getNode('backpack')
-    if (backpack)
-        backpack.rotateY(0.01);
 
     let crate = app.scene.getNode('crate')
     if (crate) {
-        crate.setY(Math.sin(time*0.001) + 1);
-        crate.rotateX(0.01);
-        crate.rotateY(0.01);
-        let change = Math.sin(time * 0.005)/2 + 1;
+        crate.setY(Math.sin(time*0.001) + 1).rotateX(1).rotateY(1);
+        let change = Math.sin(time * 0.005)/2 + 0.5;
         (crate as ModelNode).model.material.properties.set('emissive', [0, change, 0]);
-        let light = app.scene.getNode('pointLight2') as LightNode;
-        if (light)
-            light.light.diffuse[1] = change;
+        (app.scene.getNode('pointLight2') as LightNode).light.diffuse[1] = change;
     }
 
-    let blueLight = app.scene.getNode('pointLight')
-    if (blueLight)
-        blueLight.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
-
-    let instancedCubes = app.scene.getNode('instancedCubes')
-    if (instancedCubes)
-        instancedCubes.rotateY(0.01);
+    app.scene.getNode('pointLight')?.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
 }
 
 app.run();

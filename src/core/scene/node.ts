@@ -2,6 +2,7 @@ import { mat4, vec3, quat } from "gl-matrix";
 import { Model } from "../../graphics/model";
 import { DirectionalLight, Light, PointLight } from "../lighting";
 import { Body } from "../../physics/body";
+import { ShaderManager } from "../../graphics/systems/shaderManager";
 
 export class Node {
     private readonly _name: string;
@@ -92,65 +93,77 @@ export class Node {
         return vec3.transformMat4(vec3.create(), vec3.create(), this.worldTransform);
     }
 
-    public setX(value: number): void {
+    public setX(value: number): Node {
         this._position[0] = value;
         this._updateTranslationMatrix();
+        return this;
     }
 
-    public addX(value: number): void {
+    public addX(value: number): Node {
         this._position[0] += value;
         this._updateTranslationMatrix();
+        return this;
     }
 
-    public setY(value: number): void {
+    public setY(value: number): Node {
         this._position[1] = value;
         this._updateTranslationMatrix();
+        return this;
     }
 
-    public addY(value: number): void {
+    public addY(value: number): Node {
         this._position[1] += value;
         this._updateTranslationMatrix();
+        return this;
     }
 
-    public setZ(value: number): void {
+    public setZ(value: number): Node {
         this._position[2] = value;
         this._updateTranslationMatrix();
+        return this;
     }
 
-    public addZ(value: number): void {
+    public addZ(value: number): Node {
         this._position[2] += value;
         this._updateTranslationMatrix();
+        return this;
     }
 
-    public setPosition(pos: vec3): void {
+    public setPosition(pos: vec3): Node {
         vec3.copy(this._position, pos);
         this._updateTranslationMatrix();
+        return this;
     }
 
     private _updateTranslationMatrix(): void {
         mat4.fromTranslation(this._translationMatrix, this._position);
     }
 
-    public rotateX(value: number): void {
-        this._rotateOnAxis([1, 0, 0], value);
+    public rotateX(value: number): Node {
+        this._rotateOnAxis([1, 0, 0], value * Math.PI / 180);
+        return this;
     }
 
-    public rotateY(value: number): void {
-        this._rotateOnAxis([0, 1, 0], value);
+    public rotateY(value: number): Node {
+        this._rotateOnAxis([0, 1, 0], value * Math.PI / 180);
+        return this;
     }
 
-    public rotateZ(value: number): void {
-        this._rotateOnAxis([0, 0, 1], value);
+    public rotateZ(value: number): Node {
+        this._rotateOnAxis([0, 0, 1], value * Math.PI / 180);
+        return this;
     }
 
-    public setRotation(value: vec3): void {
+    public setRotation(value: vec3): Node {
         quat.fromEuler(this._quaternion, value[0], value[1], value[2]);
         this._updateRotationMatrix();
+        return this;
     }
 
-    public setQuaternion(quaternion: quat): void {
+    public setQuaternion(quaternion: quat): Node {
         quat.copy(this._quaternion, quaternion);
         this._updateRotationMatrix();
+        return this;
     }
 
     private _rotateOnAxis(axis: vec3, value: number): void {
@@ -164,44 +177,52 @@ export class Node {
         mat4.fromQuat(this._rotationMatrix, this._quaternion);
     }
 
-    public setXScale(value: number): void {
+    public setXScale(value: number): Node {
         this._scale[0] = value;
         this._updateScaleMatrix();
+        return this;
     }
 
-    public addXScale(value: number): void {
+    public addXScale(value: number): Node {
         this._scale[0] += value;
         this._updateScaleMatrix();
+        return this;
     }
 
-    public setYScale(value: number): void {
+    public setYScale(value: number): Node {
         this._scale[1] = value;
         this._updateScaleMatrix();
+        return this;
     }
 
-    public addYScale(value: number): void {
+    public addYScale(value: number): Node {
         this._scale[1] += value;
         this._updateScaleMatrix();
+        return this;
     }
 
-    public setZScale(value: number): void {
+    public setZScale(value: number): Node {
         this._scale[2] = value;
         this._updateScaleMatrix();
+        return this;
     }
 
-    public addZScale(value: number): void {
+    public addZScale(value: number): Node {
         this._scale[2] += value;
         this._updateScaleMatrix();
+        return this;
     }
 
-    public setScale(scale: vec3): void {
+    public setScale(scale: vec3): Node {
         vec3.copy(this._scale, scale);
         this._updateScaleMatrix();
+        return this;
     }
 
-    public setUniformScale(value: number): void {
+    public setUniformScale(value: number): Node {
         vec3.set(this._scale, value, value, value);
         this._updateScaleMatrix();
+        return this;
     }
 
     private _updateScaleMatrix(): void {
@@ -210,7 +231,7 @@ export class Node {
 
 
     public get body(): Body | null { return this._body; }
-    public setBody(mass: number): Body {
+    public setBody(mass: number, linearDamping?: number, angularDamping?: number): Body {
         // when setting a non static body, detach from parent so that the body is not affected by the parent's transform
         if (this._parent && mass > 0) {
             this._parent.children.splice(this._parent.children.indexOf(this), 1);
@@ -221,7 +242,9 @@ export class Node {
             name: this._name,
             mass: mass,
             position: this._position,
-            quaternion: this._quaternion
+            quaternion: this._quaternion,
+            linearDamping: linearDamping,
+            angularDamping: angularDamping,
         });
 
         return this._body;
@@ -232,34 +255,52 @@ export class ModelNode extends Node {
     private _model: Model;
     private _initialized: boolean;
 
-    private _isInstanced: boolean = false;
-    private _instances: Node[] = [];
-    private _instancesDirty: boolean = false;
-
     constructor(name: string, model: Model) {
         super(name);
         this._model = model;
         this._initialized = false;
-        this._isInstanced = false;
     }
 
-    public addInstance(position: vec3 = [0, 0, 0], orientation: vec3 = [0, 0, 0], scale: vec3 = [1, 1, 1]): void {
-        this._isInstanced = true;
-        const node = new Node(`${this.name}_instance_${this._instances.length}`);
-        node.setPosition(position);
-        node.setRotation(orientation);
-        node.setScale(scale);
-        this._instances.push(node);
-        this._instancesDirty = true;
+    public initializeModel(): void {
+        const shader = ShaderManager.Instance.getShader(this._model.material.type);
+        this._model.mesh.initializeVAO(shader.attributes);
+        const attributes = [];
+
+        for (const attr of shader.attributes) {
+            switch (attr.name) {
+                case 'position':
+                case 'a_position':
+                    attributes.push('position');
+                    break;
+                case 'normal':
+                case 'a_normal':
+                    attributes.push('normal');
+                    break;
+                case 'uv':
+                case 'a_uv':
+                case 'texCoord':
+                case 'a_texCoord':
+                    attributes.push('uv');
+                    break;
+                case 'tangent':
+                case 'a_tangent':
+                    attributes.push('tangent');
+                    break;
+                case 'bitangent':
+                case 'a_bitangent':
+                    attributes.push('bitangent');
+                    break;
+                default:
+                    throw new Error(`Attribute ${attr.name} not supported`);
+            }
+        }
+
+        this._model.mesh.create(this._model.geometry.getData(attributes), this._model.geometry.vertexCount, this._model.geometry.indices);
+        this._initialized = true;
     }
 
     public get model(): Model { return this._model; }
     public get initialized(): boolean { return this._initialized; }
-    public set initialized(value: boolean) { this._initialized = value; }
-    public get instances(): Node[] { return this._instances; }
-    public get isInstanced(): boolean { return this._isInstanced; }
-    public get instancesDirty(): boolean { return this._instancesDirty; }
-    public set instancesDirty(value: boolean) { this._instancesDirty = value; }
 }
 
 export class LightNode extends Node {

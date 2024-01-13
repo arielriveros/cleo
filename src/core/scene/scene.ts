@@ -90,14 +90,14 @@ export class Scene {
         }
     }
  
-    public getNode(name: string): Node | null {
+    public getNode(name: string): Node | undefined {
         if (this._dirty)
             this.breadthFirstTraversal();
         for (const node of this._nodes) {
             if (node.name === name)
                 return node;
         }
-        return null;
+        return undefined;
     }
 
     // TODO: Move this to a LightManager class

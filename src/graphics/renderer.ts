@@ -1,4 +1,4 @@
-import { mat4, quat, vec3 } from 'gl-matrix';
+import { vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
@@ -22,10 +22,16 @@ export class Renderer {
     private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
 
+    private _exposure: number = 1.0;
+    private _chromaticAberrationStrength: number = 0.0;
+
     private _sceneFBO: Framebuffer;
     private _shadowMapFBO: Framebuffer;
+
+    // Post processing
+    private _compose_FBOs: Framebuffer[];
     private _blur_FBOs: Framebuffer[];
-    private _bloom_FBO: Framebuffer;
+    private _bloomFBO: Framebuffer;
 
     private _screenQuad: Mesh;
     
@@ -51,10 +57,11 @@ export class Renderer {
         this._shaderManager = ShaderManager.Instance;
 
         this._screenQuad = new Mesh();
-        this._sceneFBO = new Framebuffer('color', 2);
-        this._shadowMapFBO = new Framebuffer('depth');
-        this._blur_FBOs = [new Framebuffer('color'), new Framebuffer('color')]
-        this._bloom_FBO = new Framebuffer('color');
+        this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._shadowMapFBO = new Framebuffer({ usage: 'depth' });
+        this._bloomFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false } });
+        this._blur_FBOs = [new Framebuffer(), new Framebuffer()];
+        this._compose_FBOs = [new Framebuffer({ colorTextureOptions: {precision: 'high'}}), new Framebuffer({ colorTextureOptions: {precision: 'high'}})];
     }
 
     public preInitialize(): void {
@@ -64,26 +71,30 @@ export class Renderer {
         gl.enable(gl.DEPTH_TEST);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.DST_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.drawingBufferColorSpace = 'srgb';
+        if (!gl.getExtension('EXT_color_buffer_float'))
+            throw new Error('Rendering to floating point textures is not supported on this platform');
 
-        // Create default shaders
-        const basicShader = new Shader().createFromFiles('shaders/basic.vert', 'shaders/basic.frag');
-        const basicInstancedShader = new Shader().createFromFiles('shaders/basic_instanced.vert', 'shaders/basic.frag');
-        const defaultShader = new Shader().createFromFiles('shaders/default.vert', 'shaders/default.frag');
-        const defaultInstancedShader = new Shader().createFromFiles('shaders/default_instanced.vert', 'shaders/default.frag');
-        const screenShader = new Shader().createFromFiles('shaders/screen.vert', 'shaders/screen.frag');
-        const shadowMapShader = new Shader().createFromFiles('shaders/shadowMap.vert', 'shaders/shadowMap.frag');
-        const blurShader = new Shader().createFromFiles('shaders/screen.vert', 'shaders/gaussianBlur.frag');
-        const bloomShader = new Shader().createFromFiles('shaders/screen.vert', 'shaders/bloom.frag');
+        // Material shaders
+        const basicShader = new Shader().createFromFiles('shaders/materials/basic.vert', 'shaders/materials/basic.frag');
+        const defaultShader = new Shader().createFromFiles('shaders/materials/default.vert', 'shaders/materials/default.frag');
+        const shadowMapShader = new Shader().createFromFiles('shaders/shadows/shadowMap.vert', 'shaders/shadows/shadowMap.frag');
+        // Screen shaders
+        const screenShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/screen.frag');
+        const bloomShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/bloom.frag');
+        const blurShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/gaussianBlur.frag');
+        const chromaticAberrationShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/chromaticAberration.frag');
+        const composerShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/composer.frag');
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
-        this._shaderManager.addShader('basic_instanced', basicInstancedShader);
         this._shaderManager.addShader('default', defaultShader);
-        this._shaderManager.addShader('default_instanced', defaultInstancedShader);
-        this._shaderManager.addShader('screen', screenShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
-        this._shaderManager.addShader('blur', blurShader);
+        this._shaderManager.addShader('screen', screenShader);
         this._shaderManager.addShader('bloom', bloomShader);
+        this._shaderManager.addShader('blur', blurShader);
+        this._shaderManager.addShader('chromaticAberration', chromaticAberrationShader);
+        this._shaderManager.addShader('composer', composerShader);
 
         // Create framebuffers
         this._sceneFBO.create(this._canvas.width, this._canvas.height);
@@ -91,9 +102,11 @@ export class Renderer {
         const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || 2048;
         this._shadowMapFBO.create(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
 
-        this._blur_FBOs[0].create(this._canvas.width / 3, this._canvas.height / 3);
-        this._blur_FBOs[1].create(this._canvas.width / 3, this._canvas.height / 3);
-        this._bloom_FBO.create(this._canvas.width, this._canvas.height);
+        this._blur_FBOs[0].create(this._canvas.width / 2, this._canvas.height / 2);
+        this._blur_FBOs[1].create(this._canvas.width / 2, this._canvas.height / 2);
+        this._compose_FBOs[0].create(this._canvas.width, this._canvas.height);
+        this._compose_FBOs[1].create(this._canvas.width, this._canvas.height);
+        this._bloomFBO.create(this._canvas.width, this._canvas.height);
         
         // Create screen quad to render framebuffer to
         this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
@@ -106,9 +119,11 @@ export class Renderer {
     }
 
     public render(camera: Camera, scene: Scene): void {
+        // Set lighting
         for (const light of scene.lights)
             this._setLighting(light, scene.numPointLights);
         
+        // Render shadow maps
         for (const node of scene.lights) {
             if (!node.castShadows) continue;
             this._renderShadowMap(scene.models, node);
@@ -116,14 +131,12 @@ export class Renderer {
             this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
             this._shaderManager.setUniform('u_shadowMap', 5);
             this._shadowMapFBO.depth.bind(5);
-            this._shaderManager.bind('default_instanced');
-            this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
-            this._shaderManager.setUniform('u_shadowMap', 5);
-            this._shadowMapFBO.depth.bind(5);
         }
 
+        // Render scene to scene framebuffer
         this._renderScene(scene.models, camera);
 
+        // Apply post processing
         this._applyPostProcessing();
     }
 
@@ -134,12 +147,12 @@ export class Renderer {
         if (!gl) return;
         gl.viewport(0, 0, this._canvas.width, this._canvas.height);
 
-        if (this._sceneFBO)
-            this._sceneFBO.resize(this._canvas.width, this._canvas.height);
-
-        this._blur_FBOs[0].resize(this._canvas.width / 3, this._canvas.height / 3);
-        this._blur_FBOs[1].resize(this._canvas.width / 3, this._canvas.height / 3);
-        this._bloom_FBO.resize(this._canvas.width, this._canvas.height);
+        this._sceneFBO.resize(this._canvas.width, this._canvas.height);
+        this._blur_FBOs[0].resize(this._canvas.width / 2, this._canvas.height / 2);
+        this._blur_FBOs[1].resize(this._canvas.width / 2, this._canvas.height / 2);
+        this._compose_FBOs[0].resize(this._canvas.width, this._canvas.height);
+        this._compose_FBOs[1].resize(this._canvas.width, this._canvas.height);
+        this._bloomFBO.resize(this._canvas.width, this._canvas.height);
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
@@ -170,57 +183,13 @@ export class Renderer {
 
         for (const node of transparentDrawQueue)
             this._renderModel(node, camera);
-
-        // Unbind framebuffer
-        this._sceneFBO.unbind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    }
-
-    private _initializeModel(node: ModelNode): void {
-        const shader = ShaderManager.Instance.getShader(node.model.material.type);
-        node.model.mesh.initializeVAO(shader.attributes);
-        const attributes = [];
-
-        for (const attr of shader.attributes) {
-            switch (attr.name) {
-                case 'position':
-                case 'a_position':
-                    attributes.push('position');
-                    break;
-                case 'normal':
-                case 'a_normal':
-                    attributes.push('normal');
-                    break;
-                case 'uv':
-                case 'a_uv':
-                case 'texCoord':
-                case 'a_texCoord':
-                    attributes.push('uv');
-                    break;
-                case 'tangent':
-                case 'a_tangent':
-                    attributes.push('tangent');
-                    break;
-                case 'bitangent':
-                case 'a_bitangent':
-                    attributes.push('bitangent');
-                    break;
-                default:
-                    throw new Error(`Attribute ${attr.name} not supported`);
-            }
-        }
-
-        node.model.mesh.create(node.model.geometry.getData(attributes), node.model.geometry.vertexCount, node.model.geometry.indices);
     }
 
     private _renderModel(node: ModelNode, camera: Camera): void {
-        if (!node.initialized) {
-            this._initializeModel(node);
-            node.initialized = true;
-        }
+        if (!node.initialized)
+            node.initializeModel();
 
-        const instanced = node.isInstanced;
-        this._shaderManager.bind(`${node.model.material.type}${instanced ? '_instanced' : ''}`);
+        this._shaderManager.bind(node.model.material.type);
 
         this._shaderManager.setUniform('u_view', camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', camera.projectionMatrix);
@@ -228,17 +197,7 @@ export class Renderer {
 
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
-        if (!instanced)
-            this._shaderManager.setUniform('u_model', node.worldTransform);
-        else {
-            const instances = node.instances;
-            for (let i = 0; i < instances.length; i++) {
-                let transform = instances[i].localTransform;
-                let worldTransform = mat4.multiply(mat4.create(), node.worldTransform, transform);
-                
-                this._shaderManager.setUniform(`u_instances[${i}].model`, worldTransform);
-            }
-        }
+        this._shaderManager.setUniform('u_model', node.worldTransform);
 
         // Set Material releted uniforms on the model's shader type
         for (const [name, value] of node.model.material.properties)
@@ -286,7 +245,7 @@ export class Renderer {
         }
 
 
-        node.model.mesh.draw(gl.TRIANGLES, { instanced: instanced, instanceCount: node.instances.length});
+        node.model.mesh.draw(gl.TRIANGLES);
 
         gl.disable(gl.CULL_FACE);
 
@@ -309,27 +268,14 @@ export class Renderer {
         gl.cullFace(gl.FRONT);
         for (const node of models) {
             if (!node.model.material.config.castShadow) continue;
-            const instanced = node.isInstanced;
-            if (instanced) {
-                this._shaderManager.setUniform('u_isInstanced', true);
-                const instances = node.instances;
-                for (let i = 0; i < instances.length; i++) {
-                    let transform = instances[i].localTransform;
-                    let worldTransform = mat4.multiply(mat4.create(), node.worldTransform, transform);
-                    this._shaderManager.setUniform(`u_instances[${i}].model`, worldTransform);
-                }
-            }
-            else {
-                this._shaderManager.setUniform('u_isInstanced', false);
-                this._shaderManager.setUniform('u_model', node.worldTransform);
-            }
-            node.model.mesh.draw(gl.TRIANGLES, { instanced, instanceCount: node.instances.length});
+            this._shaderManager.setUniform('u_isInstanced', false);
+            this._shaderManager.setUniform('u_model', node.worldTransform);
+            node.model.mesh.draw(gl.TRIANGLES);
         }
         gl.cullFace(gl.BACK);
     }
 
     private _setLighting(node: LightNode, numPointLights: number): void {
-
         const setLights = (node: LightNode) => {
             switch (node.type) {
                 case 'directional':
@@ -356,43 +302,60 @@ export class Renderer {
         this._shaderManager.bind('default');
         this._shaderManager.setUniform('u_numPointLights', numPointLights);
         setLights(node);
-
-        this._shaderManager.bind('default_instanced');
-        this._shaderManager.setUniform('u_numPointLights', numPointLights);
-        setLights(node);
     }
 
     private _applyPostProcessing(): void {
-        const bloom = this._config.bloom || false;
-        if (bloom) this._bloomPass(10);
-
-
-        this._sceneFBO.unbind();
+        // First, render the scene framebuffer to the screen framebuffer
+        this._compose_FBOs[0].bind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); 
         this._shaderManager.bind('screen');
         this._shaderManager.setUniform('u_screenTexture', 0);
-        if (bloom)  this._bloom_FBO.colors[0].bind();
-        else        this._sceneFBO.colors[0].bind();
+        this._sceneFBO.colors[0].bind();
+        this._screenQuad.draw();
+
+        // Then, render the screen framebuffer to the bloom framebuffer
+        this._bloomPass(10);
+
+        // chromaticAberration
+        this._chromaticAberrationPass();
+
+        // Render to screen using default framebuffer
+        this._sceneFBO.unbind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._shaderManager.bind('screen');
+        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_screenTexture', 0);
+        this._compose_FBOs[1].colors[0].bind();
         this._screenQuad.draw();
     }
 
     private _bloomPass(iterations: number = 5): void {
+        this._bloomFBO.bind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._shaderManager.bind('bloom');
+        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_screenTexture', 0);
+        this._compose_FBOs[0].colors[0].bind();
+        this._screenQuad.draw();
+        // the bloom fbo contains 2 color textures: the original scene and the bright parts of the scene
+
+        // blur the bright parts of the scene
         for (let i = 0; i < iterations; i++) {
             // blur horizontal
             this._blur_FBOs[0].bind();
-            gl.viewport(0, 0, this._canvas.width / 3, this._canvas.height / 3);
+            gl.viewport(0, 0, this._canvas.width / 2, this._canvas.height / 2);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             this._shaderManager.bind('blur');
             this._shaderManager.setUniform('u_horizontal', true);
             this._shaderManager.setUniform('u_screenTexture', 0);
-            if (i === 0)
+            if (i === 0) // for first pass use the bright parts of the scene
+                this._bloomFBO.colors[1].bind();
+            else // for the rest of the passes use the previous pass's result
                 this._blur_FBOs[1].colors[0].bind();
-            else
-                this._sceneFBO.colors[1].bind();
             this._screenQuad.draw();
 
             // blur vertical
             this._blur_FBOs[1].bind();
-            gl.viewport(0, 0, this._canvas.width / 3 , this._canvas.height / 3);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             this._shaderManager.bind('blur');
             this._shaderManager.setUniform('u_horizontal', false);
@@ -401,15 +364,29 @@ export class Renderer {
             this._screenQuad.draw();
         }
 
-        this._bloom_FBO.bind();
+        this._compose_FBOs[0].bind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
-        this._shaderManager.bind('bloom');
-        this._shaderManager.setUniform('u_sceneTexture', 0);
-        this._sceneFBO.colors[0].bind();
-        this._shaderManager.setUniform('u_blurTexture', 1);
+        this._shaderManager.bind('composer');
+        this._shaderManager.setUniform('u_buffer1', 0);
+        this._bloomFBO.colors[0].bind();
+        this._shaderManager.setUniform('u_buffer2', 1);
         this._blur_FBOs[1].colors[0].bind(1);
         this._screenQuad.draw();
     }
-    
+
+    private _chromaticAberrationPass(): void {
+        this._compose_FBOs[1].bind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); 
+        this._shaderManager.bind('chromaticAberration');
+        this._shaderManager.setUniform('u_screenTexture', 0);
+        this._compose_FBOs[0].colors[0].bind();
+        this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
+        this._screenQuad.draw();   
+    }
+
+    public get exposure(): number { return this._exposure; }
+    public set exposure(exposure: number) { this._exposure = exposure; }
+
+    public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
+    public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
 }

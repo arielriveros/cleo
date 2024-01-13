@@ -1,27 +1,38 @@
 import { gl } from "./renderer";
 import { Loader } from './loader';
 
-interface TextureConfig {
+export interface TextureConfig {
     flipY?: boolean;
     repeat?: boolean;
+    usage?: 'color' | 'depth';
+    mipMap?: boolean;
+    mipMapFilter?: 'nearest' | 'linear';
+    precision?: 'low' | 'high';
 }
 
 export class Texture {
     private readonly _texture: WebGLTexture;
     private _width: number;
     private _height: number;
-    private _usage: 'color' | 'depth';
+    private _options: TextureConfig;
 
-    constructor(usage: 'color' | 'depth' = 'color') {
+    constructor(options?: TextureConfig) {
         this._texture = gl.createTexture() as WebGLTexture;
         this._width = 0;
         this._height = 0;
-        this._usage = usage;
+        this._options = {
+            flipY: options?.flipY || false,
+            repeat: options?.repeat || false,
+            usage: options?.usage || 'color',
+            mipMapFilter: options?.mipMapFilter || 'linear',
+            mipMap: options?.mipMap === undefined ? true : options.mipMap,
+            precision: options?.precision || 'low'
+        };
     }
 
-    public createFromFile(path: string, config?: TextureConfig): Texture {
+    public createFromFile(path: string): Texture {
         try {
-            Loader.loadImage(path).then((image) => this._create(image, config));
+            Loader.loadImage(path).then((image) => this._create(image));
             return this;
         }
         catch (e) {
@@ -29,8 +40,8 @@ export class Texture {
         }
     }
 
-    public create(width: number, height: number, config?: TextureConfig) {
-        this._create(null, config, width, height);
+    public create(width: number, height: number) {
+        this._create(null, width, height);
         return this;
     }
 
@@ -43,7 +54,7 @@ export class Texture {
         gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
-    private _create(data: HTMLImageElement | null, config?: TextureConfig, width: number = 0, height: number = 0): void {
+    private _create(data: HTMLImageElement | null, width: number = 0, height: number = 0): void {
         this.bind();
 
         if (data) {
@@ -56,43 +67,48 @@ export class Texture {
         }
 
         // Flip Y
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !config?.flipY || false);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._options.flipY);
 
-        if (data) {
-            gl.texImage2D(
-                gl.TEXTURE_2D,
-                0,
-                this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : gl.RGBA,
-                this._usage === 'depth' ? gl.DEPTH_COMPONENT : gl.RGBA,
-                this._usage === 'depth' ? gl.UNSIGNED_INT : gl.UNSIGNED_BYTE,
-                data);
-        }
-        else {
-            gl.texImage2D(
-                gl.TEXTURE_2D,
-                0,
-                this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : gl.RGBA,
-                this._width, this._height,
-                0,
-                this._usage === 'depth' ? gl.DEPTH_COMPONENT : gl.RGBA,
-                this._usage === 'depth' ? gl.UNSIGNED_INT : gl.UNSIGNED_BYTE,
-                null);
-        }
+        let internalFormat;
+        if (this._options.usage === 'depth')
+            internalFormat = gl.DEPTH_COMPONENT24;
+        else
+            internalFormat = this._options.precision === 'low' ? gl.RGBA8 : gl.RGBA16F;
 
-        if (this._usage === 'depth') {
+        let format = this._options.usage === 'depth' ? gl.DEPTH_COMPONENT : gl.RGBA;        
+        let type = this._options.usage === 'depth' ? gl.UNSIGNED_INT : this._options.precision === 'low' ? gl.UNSIGNED_BYTE : gl.FLOAT ;
+
+        if (data)
+            gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, format, type, data);
+        else
+            gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, this._width, this._height, 0, format, type, null);
+
+        if (this._options.usage === 'depth') {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         }
         else {
-            // Mipmapping
-            gl.generateMipmap(gl.TEXTURE_2D);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            let minFilter;
+            if (!this._options.mipMap)
+                minFilter = this._options.mipMapFilter === 'nearest' ? gl.NEAREST : gl.LINEAR;
+            else {
+                gl.generateMipmap(gl.TEXTURE_2D);
+                minFilter = this._options.mipMapFilter === 'nearest' ? gl.NEAREST_MIPMAP_NEAREST : gl.LINEAR_MIPMAP_LINEAR;
+            }
+
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             // Tex coordinates clamping to edge
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, config?.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, config?.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, this._options.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, this._options.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+        }
+
+        // check for errors
+        const error = gl.getError();
+        if (error !== gl.NO_ERROR) {
+            console.error(`Error creating texture: ${error} with usage ${this._options.usage}, internal format ${internalFormat}, format ${format}`);
         }
 
         this.unbind();
