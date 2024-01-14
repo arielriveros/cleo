@@ -7,6 +7,7 @@ import { PointLight } from '../core/lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
 import { Framebuffer } from './framebuffer';
+import { Geometry } from '../core/geometry';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -34,6 +35,7 @@ export class Renderer {
     private _bloomFBO: Framebuffer;
 
     private _screenQuad: Mesh;
+    private _skybox: Mesh;
     
     private _shaderManager: ShaderManager;
 
@@ -57,6 +59,9 @@ export class Renderer {
         this._shaderManager = ShaderManager.Instance;
 
         this._screenQuad = new Mesh();
+        this._skybox = new Mesh();
+
+        // Create framebuffers
         this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._shadowMapFBO = new Framebuffer({ usage: 'depth' });
         this._bloomFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false } });
@@ -70,6 +75,7 @@ export class Renderer {
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.enable(gl.DEPTH_TEST);
         gl.enable(gl.BLEND);
+        gl.depthFunc(gl.LEQUAL);
         gl.blendFunc(gl.DST_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.drawingBufferColorSpace = 'srgb';
         if (!gl.getExtension('EXT_color_buffer_float'))
@@ -78,22 +84,25 @@ export class Renderer {
         // Material shaders
         const basicShader = new Shader().createFromFiles('shaders/materials/basic.vert', 'shaders/materials/basic.frag');
         const defaultShader = new Shader().createFromFiles('shaders/materials/default.vert', 'shaders/materials/default.frag');
-        const shadowMapShader = new Shader().createFromFiles('shaders/shadows/shadowMap.vert', 'shaders/shadows/shadowMap.frag');
+        // Environment shaders
+        const shadowMapShader = new Shader().createFromFiles('shaders/environment/shadowMap.vert', 'shaders/environment/shadowMap.frag');
+        const skybox = new Shader().createFromFiles('shaders/environment/skybox.vert', 'shaders/environment/skybox.frag');
         // Screen shaders
         const screenShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/screen.frag');
         const bloomShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/bloom.frag');
         const blurShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/gaussianBlur.frag');
-        const chromaticAberrationShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/chromaticAberration.frag');
+        const chromaticAbShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/chromaticAberration.frag');
         const composerShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/composer.frag');
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
         this._shaderManager.addShader('default', defaultShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
+        this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('screen', screenShader);
         this._shaderManager.addShader('bloom', bloomShader);
         this._shaderManager.addShader('blur', blurShader);
-        this._shaderManager.addShader('chromaticAberration', chromaticAberrationShader);
+        this._shaderManager.addShader('chromaticAberration', chromaticAbShader);
         this._shaderManager.addShader('composer', composerShader);
 
         // Create framebuffers
@@ -111,6 +120,11 @@ export class Renderer {
         // Create screen quad to render framebuffer to
         this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
         this._screenQuad.create([-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1 ], 12, [0, 1, 2, 0, 2, 3]);
+
+        // Create skybox mesh
+        const cubeGeometry = Geometry.Cube(5, 5, 5);
+        this._skybox.initializeVAO(this._shaderManager.getShader('skybox').attributes);
+        this._skybox.create(cubeGeometry.getData(['position']), cubeGeometry.indices.length, cubeGeometry.indices);
     }
 
     public initialize(camera: Camera): void {
@@ -129,12 +143,19 @@ export class Renderer {
             this._renderShadowMap(scene.models, node);
             this._shaderManager.bind('default');
             this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
-            this._shaderManager.setUniform('u_shadowMap', 5);
-            this._shadowMapFBO.depth.bind(5);
+            this._shaderManager.setUniform('u_shadowMap', 6);
+            this._shadowMapFBO.depth.bind(6);
         }
 
+        // Set environment map
+        this._shaderManager.bind('default');
+        this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+        this._shaderManager.setUniform('u_envMap', 7);
+        scene.environmentMap?.bind(7);
+
+
         // Render scene to scene framebuffer
-        this._renderScene(scene.models, camera);
+        this._renderScene(scene, camera);
 
         // Apply post processing
         this._applyPostProcessing();
@@ -158,14 +179,24 @@ export class Renderer {
     public get canvas(): HTMLCanvasElement { return this._canvas; }
     public get context(): WebGL2RenderingContext { return gl; }
 
-    private _renderScene(models: Set<ModelNode>, camera: Camera): void {
+    private _renderScene(scene: Scene, camera: Camera): void {
         this._sceneFBO.bind();
         gl.viewport(0, 0, this._canvas.width, this._canvas.height);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+        if (scene.skybox) {
+            this._shaderManager.bind('skybox');
+            this._shaderManager.setUniform('u_view', camera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', camera.projectionMatrix);
+            this._shaderManager.setUniform('u_skybox', 0);
+            scene.skybox.bind(0);
+            this._skybox.draw();
+            scene.skybox.unbind();
+        }
+
         const transparentDrawQueue: ModelNode[] = [];
         
-        for (const node of models) {
+        for (const node of scene.models) {
             // Add to transparent draw queue if transparent so that it is drawn last
             if (node.model.material.config.transparent === true)
                 transparentDrawQueue.push(node);
@@ -222,6 +253,9 @@ export class Renderer {
                     break;
                 case 'maskMap':
                     slot = 4;
+                    break;
+                case 'reflectivityMap':
+                    slot = 5;
                     break;
             }
             this._shaderManager.setUniform(`u_material.${name}`, slot);

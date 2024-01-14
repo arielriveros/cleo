@@ -3,6 +3,7 @@ import { Texture } from "../texture";
 
 const DIFFUSE_TEXTURE = 1;
 const SPECULAR_TEXTURE = 2;
+const AMBIENT_TEXTURE = 3;
 
 const EMISSIVE_TEXTURE = 4;
 const NORMAL_TEXTURE = 5;
@@ -62,7 +63,7 @@ interface AiMaterialProperties {
     value: any;
 }
 
-function parseMaterial(mat: any, path?: string, type: 'basic' | 'default' = 'default'): {name: string, material: Material} {
+function parseMaterial(mat: any, path?: string): {name: string, material: Material} {
     const properties = mat.properties;
 
     const find = (property: AiMaterialProperties[], key: string): AiMaterialProperties[] => {
@@ -107,7 +108,7 @@ function parseMaterial(mat: any, path?: string, type: 'basic' | 'default' = 'def
 
         return undefined;
     }
-
+    
     const name = getString(properties, '?mat.name');
     const diffuse = getVec3(properties, '$clr.diffuse');
     const specular = getVec3(properties, '$clr.specular');
@@ -126,15 +127,18 @@ function parseMaterial(mat: any, path?: string, type: 'basic' | 'default' = 'def
     if (emissiveMap) emissiveMap = `${path}/${emissiveMap}`;
     let maskMap = getTexture(properties, MASK_TEXTURE);
     if (maskMap) maskMap = `${path}/${maskMap}`;
+    let reflectivityMap = getTexture(properties, AMBIENT_TEXTURE);
+    if (reflectivityMap) reflectivityMap = `${path}/${reflectivityMap}`;
 
     const material = Material.Default({
         ambient, diffuse, specular, shininess, emissive, opacity,
         textures: {
-            base: diffuseMap ? new Texture({ repeat: true }).createFromFile(diffuseMap) : undefined,
-            specular: specularMap ? new Texture({ repeat: true }).createFromFile(specularMap) : undefined,
-            emissive: emissiveMap ? new Texture({ repeat: true }).createFromFile(emissiveMap) : undefined,
-            normal: normalMap ? new Texture({ repeat: true }).createFromFile(normalMap) : undefined,
-            mask: maskMap ? new Texture({ repeat: true }).createFromFile(maskMap) : undefined
+            base: diffuseMap ? new Texture({ wrapping: 'repeat' }).createFromFile(diffuseMap) : undefined,
+            specular: specularMap ? new Texture({ wrapping: 'repeat' }).createFromFile(specularMap) : undefined,
+            emissive: emissiveMap ? new Texture({ wrapping: 'repeat' }).createFromFile(emissiveMap) : undefined,
+            normal: normalMap ? new Texture({ wrapping: 'repeat' }).createFromFile(normalMap) : undefined,
+            mask: maskMap ? new Texture({ wrapping: 'repeat' }).createFromFile(maskMap) : undefined,
+            reflectivity: reflectivityMap ? new Texture({ wrapping: 'repeat' }).createFromFile(reflectivityMap) : undefined
         }}
     );
 

@@ -254,6 +254,9 @@ export class Shader {
                 case 'sampler2D':
                     defaultValue = 0;
                     break;
+                case 'samplerCube':
+                    defaultValue = 0;
+                    break;
                 default:
                     throw new Error(`Uniform type ${type} not supported`);
             }

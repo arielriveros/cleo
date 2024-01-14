@@ -3,8 +3,8 @@ import { Loader } from './loader';
 
 export interface TextureConfig {
     flipY?: boolean;
-    repeat?: boolean;
     usage?: 'color' | 'depth';
+    wrapping?:  'clamp' | 'repeat' | 'mirror';
     mipMap?: boolean;
     mipMapFilter?: 'nearest' | 'linear';
     precision?: 'low' | 'high';
@@ -22,7 +22,7 @@ export class Texture {
         this._height = 0;
         this._options = {
             flipY: options?.flipY || false,
-            repeat: options?.repeat || false,
+            wrapping: options?.wrapping || 'clamp',
             usage: options?.usage || 'color',
             mipMapFilter: options?.mipMapFilter || 'linear',
             mipMap: options?.mipMap === undefined ? true : options.mipMap,
@@ -101,8 +101,25 @@ export class Texture {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             // Tex coordinates clamping to edge
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, this._options.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, this._options.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+
+            let wrapping;
+            switch (this._options.wrapping) {
+                case 'clamp':
+                    wrapping = gl.CLAMP_TO_EDGE;
+                    break;
+                case 'repeat':
+                    wrapping = gl.REPEAT;
+                    break;
+                case 'mirror':
+                    wrapping = gl.MIRRORED_REPEAT;
+                    break;
+                default:
+                    wrapping = gl.CLAMP_TO_EDGE;
+                    break;
+            }
+
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapping);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapping);
         }
 
         // check for errors

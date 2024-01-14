@@ -16,7 +16,7 @@ void main() {
 
     fragColor = vec4(color, 1.0);
 
-    if (color.r > 1.0 || color.g > 1.0 || color.b > 1.0)
+    if (color.r > 1.25 || color.g > 1.25 || color.b > 1.25)
         brightColor = vec4(color, 1.0);
     else
         brightColor = vec4(0.0, 0.0, 0.0, 1.0);

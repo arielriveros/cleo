@@ -25,7 +25,7 @@ export class Framebuffer {
             colorTextureOptions: options?.colorTextureOptions || undefined
         };
         this._colors = [];
-        this._depth = new Texture({usage: 'depth', repeat: false, mipMap: false});
+        this._depth = new Texture({usage: 'depth', mipMap: false});
     }
 
     public create(width: number, height: number): Framebuffer {

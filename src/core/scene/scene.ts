@@ -1,3 +1,4 @@
+import { Cubemap } from "../../graphics/cubemap";
 import { LightNode, ModelNode, Node } from "./node";
 
 export class Scene {
@@ -5,6 +6,8 @@ export class Scene {
     private _nodes: Set<Node>;
     private _lights: Set<LightNode>;
     private _models: Set<ModelNode>;
+    private _skybox: Cubemap | null = null;
+    private _environmentMap: Cubemap | null = null;
     private _dirty: boolean = true;
 
     // TODO: Move this to a LightManager class
@@ -132,6 +135,13 @@ export class Scene {
             this.breadthFirstTraversal();
         return this._models;
     }
+
+
+    public get skybox(): Cubemap | null { return this._skybox; }
+    public set skybox(cubemap: Cubemap | null) { this._skybox = cubemap; }
+
+    public get environmentMap(): Cubemap | null { return this._environmentMap; }
+    public set environmentMap(cubemap: Cubemap | null) { this._environmentMap = cubemap; }
 
     // TODO: Move this to a LightManager class
     public get numPointLights(): number { return this._numPointLights; }

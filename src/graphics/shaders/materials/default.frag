@@ -30,11 +30,15 @@ uniform struct Material {
     sampler2D maskMap;
 
     float opacity;
+
+    float reflectivity;
+    bool hasReflectivityMap;
+    sampler2D reflectivityMap;
 } u_material;
 
 // Lighting
 uniform vec3 u_viewPos;
-const int MAX_POINT_LIGHTS = 32;
+const int MAX_POINT_LIGHTS = 16;
 uniform int u_numPointLights;
 uniform sampler2D u_shadowMap;
 
@@ -56,6 +60,10 @@ struct PointLight {
     float quadratic;
 };
 
+// Environment
+uniform bool u_useEnvMap;
+uniform samplerCube u_envMap;
+
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 
 float shadowCalculation(vec4 fragPosLS) {
@@ -66,7 +74,7 @@ float shadowCalculation(vec4 fragPosLS) {
 
     float closestDepth = texture(u_shadowMap, projCoords.xy).r; 
     float currentDepth = projCoords.z;
-    float bias = 0.0025;
+    float bias = 0.00033;
     float shadow = 0.0;
 
     // pcf
@@ -82,25 +90,19 @@ float shadowCalculation(vec4 fragPosLS) {
     return shadow;
 }
 
-vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) {
+vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light, vec3 materialAmbient, vec3 materialDiffuse, vec3 materialSpecular) {
+
     //ambient
-    vec3 ambient = light.ambient * u_material.ambient;
-    if (u_material.hasBaseTexture)
-        ambient *= vec3(texture(u_material.baseTexture, fragTexCoord));
+    vec3 ambient = light.ambient * materialAmbient;
 
     // diffuse
     float diff = max(dot(normal, -light.direction), 0.0f);
-    vec3 diffuse = light.diffuse * diff * u_material.diffuse;
-    if (u_material.hasBaseTexture)
-        diffuse *= vec3(texture(u_material.baseTexture, fragTexCoord));
+    vec3 diffuse = light.diffuse * diff * materialDiffuse;
 
     // specular blinn phong
     vec3 halfwayDir = normalize(-light.direction + viewDir);
     float spec = pow(max(dot(normal, halfwayDir), 0.0f), u_material.shininess);
-    vec3 specular = light.specular * spec * u_material.specular;
-
-    if (u_material.hasSpecularMap)
-        specular *=  vec3(texture(u_material.specularMap, fragTexCoord));
+    vec3 specular = light.specular * spec * materialSpecular;
 
     // calculate shadow
     float shadow = shadowCalculation(fragPosLightSpace);
@@ -108,26 +110,19 @@ vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light) 
     return (ambient + (1.0 - shadow) * (diffuse + specular));
 }
 
-vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light) {
+vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light, vec3 materialAmbient, vec3 materialDiffuse, vec3 materialSpecular) {
     // ambient
-    vec3 ambient = light.ambient * u_material.ambient;
-    if (u_material.hasBaseTexture)
-        ambient *= vec3(texture(u_material.baseTexture, fragTexCoord));
+    vec3 ambient = light.ambient * materialAmbient;
 
     // diffuse
     vec3 lightDir = normalize(light.position - fragPos);
     float diff = max(dot(normal, lightDir), 0.0f);
-    vec3 diffuse = light.diffuse * diff * u_material.diffuse;
-    if (u_material.hasBaseTexture)
-        diffuse *= vec3(texture(u_material.baseTexture, fragTexCoord));
+    vec3 diffuse = light.diffuse * diff * materialDiffuse;
 
     // specular blinn phong
     vec3 halfwayDir = normalize(lightDir + viewDir);
     float spec = pow(max(dot(normal, halfwayDir), 0.0f), u_material.shininess);
-    vec3 specular = light.specular * spec * u_material.specular;
-
-    if (u_material.hasSpecularMap)
-        specular *=  vec3(texture(u_material.specularMap, fragTexCoord));
+    vec3 specular = light.specular * spec * materialSpecular;
 
     // attenuation
     float distance = length(light.position - fragPos);
@@ -158,18 +153,43 @@ void main() {
     }
     vec3 result = vec3(0.0);
 
-    result += computeDirectionalLight(normal, viewDir, u_dirLight);
+    vec3 ambient = u_material.ambient;
+    if (u_material.hasBaseTexture)
+        ambient *= vec3(texture(u_material.baseTexture, fragTexCoord));
+
+    vec3 diffuse = u_material.diffuse;
+    if (u_material.hasBaseTexture)
+        diffuse *= vec3(texture(u_material.baseTexture, fragTexCoord));
+
+    vec3 specular = u_material.specular;
+    if (u_material.hasSpecularMap)
+        specular *=  vec3(texture(u_material.specularMap, fragTexCoord));
+
+    
+
+    result += computeDirectionalLight(normal, viewDir, u_dirLight, ambient, diffuse, specular);
 
     for (int i = 0; i < u_numPointLights; i++) {
-        result += computePointLight(normal, viewDir, u_pointLights[i]);
+        result += computePointLight(normal, viewDir, u_pointLights[i], ambient, diffuse, specular);
+    }
+
+    if (u_useEnvMap) {
+        vec3 I = normalize(fragPos - u_viewPos);
+        vec3 R = reflect(I, normal);
+        vec3 reflection = vec3(texture(u_envMap, R)) * specular;
+        float reflectivity = u_material.reflectivity;
+        if (u_material.hasReflectivityMap)
+            reflectivity = texture(u_material.reflectivityMap, fragTexCoord).b; // b channel if using roughmetal workflow
+
+        result = mix(result, reflection, reflectivity / 2.0);
     }
 
     if (u_material.hasEmissiveMap)
-        result += vec3(texture(u_material.emissiveMap, fragTexCoord)) * u_material.emissive;
+        result += vec3(texture(u_material.emissiveMap, fragTexCoord));
 
     else
-        result += u_material.emissive;
-    
+        result += u_material.emissive;   
+
     float alpha = u_material.opacity;
     fragColor = vec4(result, alpha);
 }

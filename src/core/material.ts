@@ -21,6 +21,7 @@ interface DefaultProperties {
     emissive?: number[];
     shininess?: number;
     opacity?: number;
+    reflectivity?: number;
 
     textures?: {
         base?: Texture;
@@ -28,6 +29,7 @@ interface DefaultProperties {
         emissive?: Texture;
         normal?: Texture;
         mask?: Texture;
+        reflectivity?: Texture;
     }
 }
 
@@ -78,6 +80,7 @@ export class Material {
             material.properties.set('emissive', properties.emissive || [0.0, 0.0, 0.0]);
             material.properties.set('shininess', properties.shininess || 32.0);
             material.properties.set('opacity', properties.opacity || 1.0);
+            material.properties.set('reflectivity', properties.reflectivity || 0.0);
 
             material.properties.set('hasBaseTexture', properties.textures?.base ? true : false);
 
@@ -112,6 +115,13 @@ export class Material {
             if (properties.textures?.mask) {
                 const tex = properties.textures.mask;
                 material.textures.set('maskMap', tex);
+            }
+
+            material.properties.set('hasReflectivityMap', properties.textures?.reflectivity ? true : false);
+
+            if (properties.textures?.reflectivity) {
+                const tex = properties.textures.reflectivity;
+                material.textures.set('reflectivityMap', tex);
             }
 
             return material;

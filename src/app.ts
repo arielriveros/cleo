@@ -4,6 +4,7 @@ import { Geometry } from "./core/geometry";
 import { Material } from "./core/material";
 import { Model } from "./graphics/model";
 import { Texture } from "./graphics/texture";
+import { Cubemap } from "./graphics/cubemap";
 import { Node, LightNode, ModelNode } from "./core/scene/node";
 import { Scene } from "./core/scene/scene";
 import { DirectionalLight, PointLight } from "./core/lighting";
@@ -21,18 +22,39 @@ let app: Engine = new Engine({
 
 app.onPreInitialize = async () => { 
     app.camera = new Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000});
-    app.scene = new Scene();  
+    app.scene = new Scene();
+
+    const skybox = new Cubemap();
+    skybox.createFromFiles([
+        'assets/cubemaps/skybox/right.jpg',
+        'assets/cubemaps/skybox/left.jpg',
+        'assets/cubemaps/skybox/top.jpg',
+        'assets/cubemaps/skybox/bottom.jpg',
+        'assets/cubemaps/skybox/front.jpg',
+        'assets/cubemaps/skybox/back.jpg'
+    ]);
+
+    const envmap = new Cubemap();
+    envmap.createFromFiles([
+        'assets/cubemaps/envmap/right.jpg',
+        'assets/cubemaps/envmap/left.jpg',
+        'assets/cubemaps/envmap/top.jpg',
+        'assets/cubemaps/envmap/bottom.jpg',
+        'assets/cubemaps/envmap/front.jpg',
+        'assets/cubemaps/envmap/back.jpg'
+    ]);
 
     const crate = new ModelNode('crate', new Model(
         Geometry.Cube(),
         Material.Default({
-            opacity: 0.5,
+            reflectivity: 1.0,
             textures: {
-                base: new Texture().createFromFile('assets/cube_diff.png'),
-                specular: new Texture().createFromFile('assets/cube_spec.png'),
-                emissive: new Texture().createFromFile('assets/cube_emis.png')},
+                base: new Texture().createFromFile('assets/crateTextures/diff.png'),
+                specular: new Texture().createFromFile('assets/crateTextures/spec.png'),
+                emissive: new Texture().createFromFile('assets/crateTextures/emis.png'),
+                reflectivity: new Texture().createFromFile('assets/crateTextures/refl.png')}
             },
-            { transparent: true }
+            { castShadow: true }
         )
     ));
     crate.setPosition([-2, 1, 0]);
@@ -66,9 +88,10 @@ app.onPreInitialize = async () => {
     ));
     terrain.setY(-4);
     
+    const room = new Node('room');
     const roomModel = await Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']});
     roomModel[0].model.material.config.castShadow = true;
-    const room = new ModelNode('room', roomModel[0].model);
+    room.addChild(new ModelNode(roomModel[0].name, roomModel[0].model));
     room.setPosition([1, 1, 0]).setRotation([0, 180, 0]).setBody(0).attachShape(Shape.TriMesh(roomModel[0].model.geometry, [1, 1, 1]))
 
     const floor = new Node('floor');
@@ -100,23 +123,27 @@ app.onPreInitialize = async () => {
     }
 
     const backpack = new Node('backpack')
-    backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(Shape.Box(1, 2, 1));
+    /* backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(Shape.Box(1, 2, 1));
     const backpackModels = await Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
     for (const result of backpackModels) {
         result.model.material.config.castShadow = true;
         const node = new ModelNode(result.name, result.model);
         backpack.addChild(node);
-    }
+    } */
 
     const helmet = new Node('helmet')
     helmet.setPosition([1, 2, 0]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(Shape.Sphere(0.5));
-
+ 
     const damagedHelmetModels = await Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']});
     for (const result of damagedHelmetModels) {
         result.model.material.config.castShadow = true;
         const node = new ModelNode(result.name, result.model);
         helmet.addChild(node);
     }
+
+    app.scene.skybox = skybox;
+    app.scene.environmentMap = envmap;
+
     app.scene.addNode(floor);
     app.scene.addNode(sun);
     app.scene.addNode(pl1);
@@ -134,7 +161,7 @@ app.onPostInitialize = () => {
     const shootSphere = () => {
         const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
             Geometry.Sphere(),
-            Material.Default({ textures: { base: worldTexture} }, { castShadow: true })
+            Material.Default({ reflectivity: 0.5, textures: { base: worldTexture} }, { castShadow: true })
         ));
         sphere.setUniformScale(0.25).setPosition(app.camera.position).setBody(5).attachShape(Shape.Sphere(0.25))
         const impulseVector = vec3.create();
@@ -143,20 +170,20 @@ app.onPostInitialize = () => {
         app.scene.addNode(sphere);
     }
 
-    let boxBaseTexture = new Texture().createFromFile('assets/cube_diff.png');
-    let boxSpecularTexture = new Texture().createFromFile('assets/cube_spec.png');
+    let boxBaseTexture = new Texture().createFromFile('assets/crateTextures/diff.png');
+    let boxSpecularTexture = new Texture().createFromFile('assets/crateTextures/spec.png');
+    let boxEmissiveTexture = new Texture().createFromFile('assets/crateTextures/emis.png');
+    let boxReflectivityTexture = new Texture().createFromFile('assets/crateTextures/refl.png');
 
     const spawnBox = () => {
         const box = new ModelNode(`box${Math.random() * 1000}`, new Model(
             Geometry.Cube(),
             Material.Default({
-                emissive: [
-                    Math.random() > 0.5 ? 1 : 0,
-                    Math.random() > 0.5 ? 1 : 0,
-                    Math.random() > 0.5 ? 1 : 0],
                 textures: {
                     base: boxBaseTexture,
-                    specular: boxSpecularTexture
+                    specular: boxSpecularTexture,
+                    emissive: boxEmissiveTexture,
+                    reflectivity: boxReflectivityTexture
                 }
             }, { castShadow: true })
         ));
