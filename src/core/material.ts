@@ -6,6 +6,7 @@ interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
     transparent?: boolean;
     castShadow?: boolean;
+    wireframe?: boolean;
 }
 
 interface BasicProperties {
@@ -51,7 +52,8 @@ export class Material {
         this.config = {
             side: config?.side || 'front',
             transparent: config?.transparent || false,
-            castShadow: config?.castShadow || false
+            castShadow: config?.castShadow || false,
+            wireframe: config?.wireframe || false
         };
     }
 

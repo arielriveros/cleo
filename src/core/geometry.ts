@@ -253,7 +253,7 @@ export class Geometry {
         return new Geometry(positions, normals, uvs, [], [], indices);
     }
 
-    public static Sphere(segments: number = 32): Geometry {
+    public static Sphere(segments: number = 32, radius: number = 1): Geometry {
         const positions: vec3[] = [];
         const normals: vec3[] = [];
         const uvs: vec2[] = [];
@@ -269,9 +269,9 @@ export class Geometry {
                 let u = j / segments;
                 let theta = u * 2 * Math.PI;
 
-                const x = Math.cos(theta) * Math.sin(phi);
-                const y = Math.cos(phi);
-                const z = Math.sin(theta) * Math.sin(phi);
+                const x = Math.cos(theta) * Math.sin(phi) * radius;
+                const y = Math.cos(phi) * radius;
+                const z = Math.sin(theta) * Math.sin(phi) * radius;
 
                 let pos = vec3.fromValues(x, y, z);
                 let uv = vec2.fromValues((segments - j) / segments, v);

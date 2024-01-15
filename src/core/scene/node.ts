@@ -3,11 +3,13 @@ import { Model } from "../../graphics/model";
 import { DirectionalLight, Light, PointLight } from "../lighting";
 import { Body } from "../../physics/body";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
+import { Scene } from "./scene";
 
 export class Node {
     private readonly _name: string;
     private _parent: Node | null;
     private readonly _children: Node[];
+    private _scene: Scene | null;
     
     private readonly  _localTransform: mat4;
     private _worldTransform: mat4;
@@ -21,12 +23,19 @@ export class Node {
     private readonly _scale: vec3;
     private readonly _scaleMatrix: mat4;
 
+    private _markForRemoval: boolean = false;
+
     private _body: Body | null;
+
+    public onSpawn: (node: Node) => void = () => {};
+    public onCollision: (node: Node, other: Node) => void = () => {};
+    public onUpdate: (node: Node, delta: number, time: number) => void = () => {};
 
     constructor(name: string) {
         this._name = name;
         this._parent = null;
         this._children = [];
+        this._scene = null;
 
         this._localTransform = mat4.create();
         this._worldTransform = mat4.create();
@@ -44,26 +53,49 @@ export class Node {
     }
 
     public addChild(node: Node): void {
+        if (this.body && node.body) {
+            console.error('Cannot add a child to a node with a body');
+            return;
+        }
         node.parent = this;
         this._children.push(node);
     }
 
-    public update(): void {
+    public removeChild(node: Node): void {
+        node.parent = null;
+        this._children.splice(this._children.indexOf(node), 1);
+    }
+
+    public getChild(name: string): Node | null {
+        for (const child of this._children)
+            if (child.name === name)
+                return child;
+        return null;
+    }
+
+    public updateTransform(): void {
         if (this._parent)
             mat4.multiply(this._worldTransform, this._parent.worldTransform, this.localTransform);
         else
             this._worldTransform = this.localTransform; 
 
         for (const child of this._children)
-            child.update();
+            child.updateTransform();
+    }
+
+    public remove(): void {
+        this._markForRemoval = true;
+        for (const child of this._children)
+            child.remove();
     }
 
     public get name(): string { return this._name; }
+    public set parent(node: Node | null) { this._parent = node; }
     public get parent(): Node | null { return this._parent; }
     public get children(): Node[] { return this._children; }
-    
-
-    public set parent(node: Node | null) { this._parent = node; }
+    public get scene(): Scene | null { return this._scene; }
+    public set scene(scene: Scene | null) { this._scene = scene; }
+    public get markForRemoval(): boolean { return this._markForRemoval; }
 
     public get localTransform(): mat4 {
         mat4.multiply(this._localTransform, this._translationMatrix, this._rotationMatrix);
@@ -71,7 +103,10 @@ export class Node {
     }
 
     public get worldTransform(): mat4 {
-        return this._worldTransform;
+        if (this._parent)
+            return this._worldTransform;
+        else
+            return mat4.create();
     }
 
     public get forward(): vec3 {
@@ -136,6 +171,9 @@ export class Node {
     }
 
     private _updateTranslationMatrix(): void {
+        if (this._body)
+            this._body.setPosition(this._position);
+        
         mat4.fromTranslation(this._translationMatrix, this._position);
     }
 
@@ -174,6 +212,9 @@ export class Node {
     }
 
     private _updateRotationMatrix(): void {
+        if (this._body)
+            this._body.setQuaternion(this._quaternion);
+        
         mat4.fromQuat(this._rotationMatrix, this._quaternion);
     }
 
@@ -229,26 +270,31 @@ export class Node {
         mat4.fromScaling(this._scaleMatrix, this._scale);
     }
 
-
     public get body(): Body | null { return this._body; }
     public setBody(mass: number, linearDamping?: number, angularDamping?: number): Body {
         // when setting a non static body, detach from parent so that the body is not affected by the parent's transform
         if (this._parent && mass > 0) {
-            this._parent.children.splice(this._parent.children.indexOf(this), 1);
-            this._parent = null;
+            if (this._parent.body?.mass === 0) {
+                console.log('Cannot set a non static body to a child of a static body')
+            }
+            this._worldTransform = this.localTransform;
+            this._parent.removeChild(this);
         }
         
-        this._body = new Body({ 
-            name: this._name,
+        this._body = new Body({
             mass: mass,
-            position: this._position,
+            position: this._parent ? vec3.add(vec3.create(), this._parent.position, this._position) : this._position, //this._position,
             quaternion: this._quaternion,
             linearDamping: linearDamping,
-            angularDamping: angularDamping,
-        });
+            angularDamping: angularDamping
+        }, this);
 
         return this._body;
     }
+
+    public get position(): vec3 { return this._position; }
+    public get quaternion(): quat { return this._quaternion; }
+    public get scale(): vec3 { return this._scale; }
 }
 
 export class ModelNode extends Node {

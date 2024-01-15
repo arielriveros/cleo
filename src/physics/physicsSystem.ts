@@ -26,31 +26,10 @@ export class PhysicsSystem {
         this._world.allowSleep = true;
         this._world.quatNormalizeSkip = 0;
         this._world.quatNormalizeFast = true;
-
-        // Kill z plane
-        const quat = new Quaternion();
-        quat.setFromAxisAngle(new Vec3(1, 0, 0), -Math.PI / 2);
-        const killZPlane = new Body({
-            mass: 0,
-            position: [0, this._killZHeight, 0],
-            quaternion: [quat.x, quat.y, quat.z, quat.w]})
-        .attachShape(Shape.Plane());
-        this._world.addBody(killZPlane);
-
-        killZPlane.addEventListener('collide', (e: any) => {
-            const body = e.body;
-            if (!body) return;
-            const name = body.name;
-            if (!name) return;
-            this._scene.removeNodeByName(name);
-            // TODO: Remove from physics system, this does not work
-            //this._world.remove(body);
-        });
     }
 
     public update(deltaTime: number): void {
         this._world?.step(deltaTime);
-
         if (!this._scene) return;
         const nodes = this._scene.nodes;
         for (const node of nodes) {
@@ -65,6 +44,11 @@ export class PhysicsSystem {
 
             const quat = body.quaternion;
             node.setQuaternion([quat.x, quat.y, quat.z, quat.w]);
+
+            if (node.markForRemoval) {
+                this._world.removeBody(node.body);
+                node.body.removeEventListener('collide', node.body.onCollision);
+            }
         }
     }
 }

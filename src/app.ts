@@ -20,6 +20,26 @@ let app: Engine = new Engine({
     physics: {gravity: [0, -9.8, 0]}
 });
 
+let crate = new ModelNode('crate', new Model(
+    Geometry.Cube(),
+    Material.Default({
+        reflectivity: 1.0,
+        textures: {
+            base: new Texture().createFromFile('assets/crateTextures/diff.png'),
+            specular: new Texture().createFromFile('assets/crateTextures/spec.png'),
+            emissive: new Texture().createFromFile('assets/crateTextures/emis.png'),
+            reflectivity: new Texture().createFromFile('assets/crateTextures/refl.png')}
+        }, { castShadow: true }
+    )
+));
+crate.setPosition([-2, 1, 0]).setBody(0).attachShape(Shape.Box(1, 1, 1));
+crate.onUpdate = (node: Node, delta: number, time: number) => {
+    node.setY(Math.sin(time * 0.001) + 1).rotateX(1).rotateY(1);
+    let change = Math.sin(time * 0.005)/2 + 0.5;
+    (node as ModelNode).model.material.properties.set('emissive', [1, change * 2, 0]);
+    (node.getChild('pointLight2') as LightNode).light.diffuse[1] = change;
+}
+
 app.onPreInitialize = async () => { 
     app.camera = new Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000});
     app.scene = new Scene();
@@ -44,20 +64,7 @@ app.onPreInitialize = async () => {
         'assets/cubemaps/envmap/back.jpg'
     ]);
 
-    const crate = new ModelNode('crate', new Model(
-        Geometry.Cube(),
-        Material.Default({
-            reflectivity: 1.0,
-            textures: {
-                base: new Texture().createFromFile('assets/crateTextures/diff.png'),
-                specular: new Texture().createFromFile('assets/crateTextures/spec.png'),
-                emissive: new Texture().createFromFile('assets/crateTextures/emis.png'),
-                reflectivity: new Texture().createFromFile('assets/crateTextures/refl.png')}
-            },
-            { castShadow: true }
-        )
-    ));
-    crate.setPosition([-2, 1, 0]);
+    
 
     const sun = new LightNode('sun', new DirectionalLight({}), true)
     sun.setRotation([90, 0, 0]);
@@ -68,7 +75,9 @@ app.onPreInitialize = async () => {
         specular: [0.0, 0.0, 1.0],
         constant: 1.0
     }));
-    pl1.setPosition([2, 2, 2]);
+    pl1.setPosition([2, 2, 2]).onUpdate = (node: Node, delta: number, time: number) => {
+        node.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
+    }
 
     const pl2 = new LightNode('pointLight2', new PointLight({
         diffuse: [0.0, 1.0, 0.0],
@@ -91,15 +100,25 @@ app.onPreInitialize = async () => {
     const room = new Node('room');
     const roomModel = await Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']});
     roomModel[0].model.material.config.castShadow = true;
-    room.addChild(new ModelNode(roomModel[0].name, roomModel[0].model));
-    room.setPosition([1, 1, 0]).setRotation([0, 180, 0]).setBody(0).attachShape(Shape.TriMesh(roomModel[0].model.geometry, [1, 1, 1]))
+    const roomModelNode = new ModelNode(roomModel[0].name, roomModel[0].model);
+    roomModelNode.setPosition([1, 1, 1])//.setRotation([0, 180, 0])
+        .setBody(10)
+        .attachShape(Shape.Box(1.25, 0.2, 1.5), [0.1, 0, 0])
+        .attachShape(Shape.Box(1.25, 1, 0.2), [0.1, 0.5, 0.6])
+        .attachShape(Shape.Box(0.2, 1, 1.25), [-0.4, 0.5, -0.1])
+    roomModelNode.onUpdate = (node: Node, delta: number, time: number) => {
+        node.setXScale(Math.sin(time * 0.001) + 1)
+        .setYScale(Math.sin(time * 0.001) + 1);
+    }
+    room.addChild(roomModelNode);
+
 
     const floor = new Node('floor');
     floor.rotateX(-90).setBody(0).attachShape(Shape.Plane())
 
     const sponza = new Node('sponza')
     sponza.setBody(0);
-    const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
+    /* const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
     for (const result of sponzaModels) {
         result.model.material.config.castShadow = true;
         const node = new ModelNode(result.name, result.model);
@@ -120,7 +139,7 @@ app.onPreInitialize = async () => {
             }
             
             sponza.body?.attachShape(Shape.TriMesh(geometry, [1, 1, 1]))
-    }
+    } */
 
     const backpack = new Node('backpack')
     /* backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(Shape.Box(1, 2, 1));
@@ -132,7 +151,7 @@ app.onPreInitialize = async () => {
     } */
 
     const helmet = new Node('helmet')
-    helmet.setPosition([1, 2, 0]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(Shape.Sphere(0.5));
+    helmet.setPosition([1, 2, -2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(Shape.Sphere(0.5));
  
     const damagedHelmetModels = await Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']});
     for (const result of damagedHelmetModels) {
@@ -160,13 +179,17 @@ app.onPostInitialize = () => {
     let worldTexture = new Texture({ flipY: true }).createFromFile('assets/world.png')
     const shootSphere = () => {
         const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
-            Geometry.Sphere(),
+            Geometry.Sphere(32),
             Material.Default({ reflectivity: 0.5, textures: { base: worldTexture} }, { castShadow: true })
         ));
-        sphere.setUniformScale(0.25).setPosition(app.camera.position).setBody(5).attachShape(Shape.Sphere(0.25))
-        const impulseVector = vec3.create();
-        vec3.scale(impulseVector, app.camera.forward, 100);
-        sphere.body?.impulse(impulseVector)
+        sphere.setPosition(app.camera.position)
+              .setUniformScale(0.25)
+              .setBody(5).attachShape(Shape.Sphere(0.25)).onCollision = (node: Node) => { if (node.name === 'box') { node.remove(); }};
+        sphere.onSpawn = (node: Node) => {
+            const impulseVector = vec3.create();
+            vec3.scale(impulseVector, app.camera.forward, 100);
+            node.body?.impulse(impulseVector)
+        }
         app.scene.addNode(sphere);
     }
 
@@ -176,7 +199,7 @@ app.onPostInitialize = () => {
     let boxReflectivityTexture = new Texture().createFromFile('assets/crateTextures/refl.png');
 
     const spawnBox = () => {
-        const box = new ModelNode(`box${Math.random() * 1000}`, new Model(
+        const box = new ModelNode('box', new Model(
             Geometry.Cube(),
             Material.Default({
                 textures: {
@@ -187,6 +210,10 @@ app.onPostInitialize = () => {
                 }
             }, { castShadow: true })
         ));
+        box.onUpdate = (node: Node, delta: number, time: number) => {
+            let change = Math.cos(time * 0.005)/2 + 0.5;
+            (node as ModelNode).model.material.properties.set('emissive', [1, change, 0]);
+        }
         box.setPosition([Math.random(), 5, Math.random()]).setBody(Math.random() * 10).attachShape(Shape.Box(1, 1, 1))
         app.scene.addNode(box);
     }
@@ -224,16 +251,6 @@ app.onUpdate = (delta: number, time: number) => {
         app.input.isKeyPressed('ArrowUp') && (sun.rotateX(0.5));
         app.input.isKeyPressed('ArrowDown') && (sun.rotateX(-0.5));
     }
-
-    let crate = app.scene.getNode('crate')
-    if (crate) {
-        crate.setY(Math.sin(time*0.001) + 1).rotateX(1).rotateY(1);
-        let change = Math.sin(time * 0.005)/2 + 0.5;
-        (crate as ModelNode).model.material.properties.set('emissive', [0, change, 0]);
-        (app.scene.getNode('pointLight2') as LightNode).light.diffuse[1] = change;
-    }
-
-    app.scene.getNode('pointLight')?.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
 }
 
 app.run();

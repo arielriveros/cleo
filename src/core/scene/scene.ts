@@ -26,6 +26,8 @@ export class Scene {
     public addNode(node: Node): void {
         this._root.addChild(node);
         this._dirty = true;
+        node.scene = this;
+        node.onSpawn(node);
     }
 
     public removeNode(node: Node): void {
@@ -51,15 +53,21 @@ export class Scene {
         this._dirty = true;
     }
 
-    public update(): void {
+    public update(delta: number, time: number): void {
         if (this._dirty) {
             this.breadthFirstTraversal();
             for (const node of this._nodes)
                 if (node instanceof LightNode)
                     this._asignLightIndices();
         }
-        for (const node of this._nodes)
-            node.update();
+        for (const node of this._nodes) {
+            if (node.markForRemoval) {
+                this.removeNode(node);
+                continue;
+            }
+            node.updateTransform();
+            node.onUpdate(node, delta, time);
+        }
     }
     
     public breadthFirstTraversal(): void {

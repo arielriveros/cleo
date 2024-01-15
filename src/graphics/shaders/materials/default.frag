@@ -185,7 +185,7 @@ void main() {
     }
 
     if (u_material.hasEmissiveMap)
-        result += vec3(texture(u_material.emissiveMap, fragTexCoord));
+        result += vec3(texture(u_material.emissiveMap, fragTexCoord)) * u_material.emissive;
 
     else
         result += u_material.emissive;   

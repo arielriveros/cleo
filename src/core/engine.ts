@@ -67,7 +67,7 @@ export class Engine {
         this._renderer.initialize(this._camera);
 
         if (this._scene) {
-            this._scene.update();
+            this._scene.update(0, 0);
             this._physicsSystem.initialize(this._scene);
             this._ready = true;
         }
@@ -88,7 +88,7 @@ export class Engine {
         const deltaTime = (currentTimestamp - this._lastTimestamp) / 1000;
         
         if (!this._paused) {
-            this._scene.update();
+            this._scene.update(deltaTime, currentTimestamp);
             this._physicsSystem.update(deltaTime);
         }
 

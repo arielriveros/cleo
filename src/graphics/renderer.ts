@@ -279,7 +279,7 @@ export class Renderer {
         }
 
 
-        node.model.mesh.draw(gl.TRIANGLES);
+        node.model.mesh.draw(materialConfig.wireframe ? gl.LINE_STRIP : gl.TRIANGLES);
 
         gl.disable(gl.CULL_FACE);
 
