@@ -4,7 +4,7 @@ import { Shape as CannonShape,
 import { vec3 } from "gl-matrix";
 import { Geometry } from "../core/geometry";
 import { Model } from "../graphics/model";
-import { Material } from "../core/material";
+import { Material } from "../graphics/material";
 
 const EPSILON = 0.01;
 

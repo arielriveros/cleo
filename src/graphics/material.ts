@@ -1,6 +1,6 @@
-import { Shader } from "../graphics/shader";
-import { ShaderManager } from "../graphics/systems/shaderManager";
-import { Texture } from "../graphics/texture";
+import { Shader } from "./shader";
+import { ShaderManager } from "./systems/shaderManager";
+import { Texture } from "./texture";
 
 interface MaterialConfig {
     side?: 'front' | 'back' | 'double';

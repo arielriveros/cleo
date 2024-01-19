@@ -126,6 +126,8 @@ export class Scene {
         this._numPointLights = pointLights;
     }
 
+    public get root(): Node { return this._root; }
+
     public get nodes(): Set<Node> {
         if (this._dirty)
             this.breadthFirstTraversal();
@@ -143,7 +145,6 @@ export class Scene {
             this.breadthFirstTraversal();
         return this._models;
     }
-
 
     public get skybox(): Cubemap | null { return this._skybox; }
     public set skybox(cubemap: Cubemap | null) { this._skybox = cubemap; }

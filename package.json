@@ -1,22 +1,24 @@
 {
-  "name": "psypong",
+  "name": "cleo",
   "version": "1.0.0",
-  "description": "",
+  "description": "WebGL2 Game Engine",
+  "main": "cleo.js",
   "scripts": {
-    "build": "webpack",
-    "dev": "webpack serve"
+    "build": "webpack --mode=production --node-env=production",
+    "build:dev": "webpack --mode=development",
+    "watch": "webpack --watch"
   },
   "author": "Ariel Riveros",
   "license": "ISC",
   "devDependencies": {
     "@types/gl-matrix": "^3.2.0",
     "@types/webgl2": "0.0.10",
-    "copy-webpack-plugin": "^11.0.0",
+    "copy-webpack-plugin": "^12.0.2",
     "ts-loader": "^9.5.1",
+    "ts-shader-loader": "^2.0.2",
     "typescript": "^5.3.2",
     "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.4",
-    "webpack-dev-server": "^4.15.1"
+    "webpack-cli": "^5.1.4"
   },
   "dependencies": {
     "cannon-es": "^0.20.0",

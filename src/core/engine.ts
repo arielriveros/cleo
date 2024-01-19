@@ -4,7 +4,7 @@ import { PhysicsSystem } from "../physics/physicsSystem";
 import { Camera } from "./camera";
 import { Scene } from "./scene/scene";
 
-interface EngineConfig {
+interface CleoConfig {
     graphics?: {
         canvas?: HTMLCanvasElement;
         clearColor?: number[];
@@ -17,10 +17,11 @@ interface EngineConfig {
     }
 }
 
-export class Engine {
+export class CleoEngine {
     private _lastTimestamp: number = performance.now();
     private _ready: boolean = false;
     
+    private _viewport!: HTMLElement;
     private _renderer: Renderer;
     private _physicsSystem: PhysicsSystem;
 
@@ -33,13 +34,11 @@ export class Engine {
     public onPreInitialize: () => Promise<void>;
     public onPostInitialize: () => void;
 
-    constructor(config?: EngineConfig) {
-        this._renderer = new Renderer({
-            canvas: config?.graphics?.canvas || null,
-            clearColor: config?.graphics?.clearColor,
-            shadowMapResolution: config?.graphics?.shadowMapSize,
-            bloom: config?.graphics?.bloom
-        });
+    constructor(config?: CleoConfig) {
+        this._setViewport();
+        this._renderer = new Renderer( this._viewport, { clearColor: config?.graphics?.clearColor,
+                                                         shadowMapResolution: config?.graphics?.shadowMapSize,
+                                                         bloom: config?.graphics?.bloom });
         this._physicsSystem = new PhysicsSystem({
             gravity: config?.physics?.gravity || [0, -9.81, 0],
             killZHeight: config?.physics?.killZHeight || -100
@@ -88,9 +87,9 @@ export class Engine {
         const deltaTime = (currentTimestamp - this._lastTimestamp) / 1000;
         
         if (!this._paused) {
-            this._scene.update(deltaTime, currentTimestamp);
             this._physicsSystem.update(deltaTime);
         }
+        this._scene.update(deltaTime, currentTimestamp);
 
         this._camera.update();
         this._renderer.render(this._camera, this._scene);
@@ -106,6 +105,19 @@ export class Engine {
         this._camera.resize(this._renderer.canvas.width, this._renderer.canvas.height);
     }
 
+    private _setViewport(): void {
+        let viewport = document.getElementById('game-viewport');
+        if (!viewport) {
+            viewport = document.createElement('div');
+            viewport.id = 'game-viewport';
+            document.body.appendChild(viewport);
+        }
+        this._viewport = viewport;
+        this._viewport.style.display = 'flex';
+        this._viewport.style.position = 'relative';
+    }
+
+    public get viewport(): HTMLElement { return this._viewport; }
     public get renderer(): Renderer { return this._renderer; }
     public get input(): InputManager { return InputManager.instance; }
     public get isPaused(): boolean { return this._paused; }

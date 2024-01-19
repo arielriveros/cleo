@@ -1,4 +1,4 @@
-import { Material } from "../../core/material";
+import { Material } from "../material";
 import { Texture } from "../texture";
 
 const DIFFUSE_TEXTURE = 1;

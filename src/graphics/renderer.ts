@@ -3,17 +3,34 @@ import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
 import { LightNode, ModelNode } from '../core/scene/node';
-import { PointLight } from '../core/lighting';
+import { PointLight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
 import { Framebuffer } from './framebuffer';
 import { Geometry } from '../core/geometry';
 
+// Shaders Sources
+import BasicVertex from './shaders/materials/basic.vs'
+import BasicFragment from './shaders/materials/basic.fs'
+import DefaultVertex from './shaders/materials/default.vs'
+import DefaultFragment from './shaders/materials/default.fs'
+
+import ShadowMapVertex from './shaders/environment/shadowMap.vs'
+import ShadowMapFragment from './shaders/environment/shadowMap.fs'
+import SkyboxVertex from './shaders/environment/skybox.vs'
+import SkyboxFragment from './shaders/environment/skybox.fs'
+
+import ScreenVertex from './shaders/screen/screen.vs'
+import ScreenFragment from './shaders/screen/screen.fs'
+import Bloom from './shaders/screen/bloom.fs'
+import GaussianBlur from './shaders/screen/gaussianBlur.fs'
+import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
+import Composer from './shaders/screen/composer.fs'
+
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
 
 interface RendererConfig {
-    canvas: HTMLCanvasElement | null;
     clearColor?: number[];
     shadowMapResolution?: number;
     bloom?: boolean;
@@ -39,14 +56,12 @@ export class Renderer {
     
     private _shaderManager: ShaderManager;
 
-    constructor(config: RendererConfig) {
+    constructor(viewport: HTMLElement, config: RendererConfig) {
         this._config = config;
         // Create canvas
-        this._canvas = config.canvas? config.canvas : document.createElement('canvas');
-        this.resize();
-
-        // add the canvas to the document
-        document.body.appendChild(this._canvas);
+        this._canvas = document.createElement('canvas');      
+        // add the canvas to the game element
+        viewport.appendChild(this._canvas);
 
         // Check WebGL support
         if (!this._canvas.getContext('webgl2'))
@@ -82,17 +97,17 @@ export class Renderer {
             throw new Error('Rendering to floating point textures is not supported on this platform');
 
         // Material shaders
-        const basicShader = new Shader().createFromFiles('shaders/materials/basic.vert', 'shaders/materials/basic.frag');
-        const defaultShader = new Shader().createFromFiles('shaders/materials/default.vert', 'shaders/materials/default.frag');
+        const basicShader = new Shader().create(BasicVertex, BasicFragment);
+        const defaultShader = new Shader().create(DefaultVertex, DefaultFragment);
         // Environment shaders
-        const shadowMapShader = new Shader().createFromFiles('shaders/environment/shadowMap.vert', 'shaders/environment/shadowMap.frag');
-        const skybox = new Shader().createFromFiles('shaders/environment/skybox.vert', 'shaders/environment/skybox.frag');
+        const shadowMapShader = new Shader().create(ShadowMapVertex, ShadowMapFragment);
+        const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
         // Screen shaders
-        const screenShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/screen.frag');
-        const bloomShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/bloom.frag');
-        const blurShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/gaussianBlur.frag');
-        const chromaticAbShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/chromaticAberration.frag');
-        const composerShader = new Shader().createFromFiles('shaders/screen/screen.vert', 'shaders/screen/composer.frag');
+        const screenShader = new Shader().create(ScreenVertex, ScreenFragment);
+        const bloomShader = new Shader().create(ScreenVertex, Bloom);
+        const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
+        const chromaticAbShader = new Shader().create(ScreenVertex, ChromaticAberration);
+        const composerShader = new Shader().create(ScreenVertex, Composer);
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
@@ -125,6 +140,8 @@ export class Renderer {
         const cubeGeometry = Geometry.Cube(5, 5, 5);
         this._skybox.initializeVAO(this._shaderManager.getShader('skybox').attributes);
         this._skybox.create(cubeGeometry.getData(['position']), cubeGeometry.indices.length, cubeGeometry.indices);
+
+        this.resize();
     }
 
     public initialize(camera: Camera): void {
@@ -162,8 +179,9 @@ export class Renderer {
     }
 
     public resize() {
-        this._canvas.width = window.innerWidth;
-        this._canvas.height = window.innerHeight;
+        const viewport = document.getElementById('game-viewport') as HTMLElement;
+        this._canvas.width = viewport.clientWidth //window.innerWidth;
+        this._canvas.height = viewport.clientHeight//window.innerHeight;
 
         if (!gl) return;
         gl.viewport(0, 0, this._canvas.width, this._canvas.height);

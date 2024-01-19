@@ -1,17 +1,6 @@
-import { Camera } from "./core/camera";
-import { Engine } from "./core/engine";
-import { Geometry } from "./core/geometry";
-import { Material } from "./core/material";
-import { Model } from "./graphics/model";
-import { Texture } from "./graphics/texture";
-import { Cubemap } from "./graphics/cubemap";
-import { Node, LightNode, ModelNode } from "./core/scene/node";
-import { Scene } from "./core/scene/scene";
-import { DirectionalLight, PointLight } from "./core/lighting";
-import { Shape } from "./physics/shape";
-import { vec3 } from "gl-matrix";
+import { CleoEngine, Node, ModelNode, Model, Geometry, Material, Texture, Shape, Camera, Scene, Cubemap, LightNode, DirectionalLight, PointLight, Vec } from 'cleo';
 
-let app: Engine = new Engine({
+let app = new CleoEngine({
     graphics: {
         clearColor: [0.25, 0.05, 0.8, 1.0],
         shadowMapSize: 4096,
@@ -33,60 +22,61 @@ let crate = new ModelNode('crate', new Model(
     )
 ));
 crate.setPosition([-2, 1, 0]).setBody(0).attachShape(Shape.Box(1, 1, 1));
-crate.onUpdate = (node: Node, delta: number, time: number) => {
+crate.onUpdate = (node, delta, time) => {
     node.setY(Math.sin(time * 0.001) + 1).rotateX(1).rotateY(1);
     let change = Math.sin(time * 0.005)/2 + 0.5;
     (node as ModelNode).model.material.properties.set('emissive', [1, change * 2, 0]);
     (node.getChild('pointLight2') as LightNode).light.diffuse[1] = change;
 }
 
-app.onPreInitialize = async () => { 
-    app.camera = new Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000});
-    app.scene = new Scene();
+const camera: Camera = new Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000});
+const scene: Scene = new Scene();
 
-    const skybox = new Cubemap();
-    skybox.createFromFiles([
-        'assets/cubemaps/skybox/right.jpg',
-        'assets/cubemaps/skybox/left.jpg',
-        'assets/cubemaps/skybox/top.jpg',
-        'assets/cubemaps/skybox/bottom.jpg',
-        'assets/cubemaps/skybox/front.jpg',
-        'assets/cubemaps/skybox/back.jpg'
-    ]);
+app.camera = camera;
+app.scene = scene;
 
-    const envmap = new Cubemap();
-    envmap.createFromFiles([
-        'assets/cubemaps/envmap/right.jpg',
-        'assets/cubemaps/envmap/left.jpg',
-        'assets/cubemaps/envmap/top.jpg',
-        'assets/cubemaps/envmap/bottom.jpg',
-        'assets/cubemaps/envmap/front.jpg',
-        'assets/cubemaps/envmap/back.jpg'
-    ]);
+const skybox = new Cubemap();
+skybox.createFromFiles([
+    'assets/cubemaps/skybox/right.jpg',
+    'assets/cubemaps/skybox/left.jpg',
+    'assets/cubemaps/skybox/top.jpg',
+    'assets/cubemaps/skybox/bottom.jpg',
+    'assets/cubemaps/skybox/front.jpg',
+    'assets/cubemaps/skybox/back.jpg'
+]);
 
-    
+const envmap = new Cubemap();
+envmap.createFromFiles([
+    'assets/cubemaps/envmap/right.jpg',
+    'assets/cubemaps/envmap/left.jpg',
+    'assets/cubemaps/envmap/top.jpg',
+    'assets/cubemaps/envmap/bottom.jpg',
+    'assets/cubemaps/envmap/front.jpg',
+    'assets/cubemaps/envmap/back.jpg'
+]);
 
-    const sun = new LightNode('sun', new DirectionalLight({}), true)
-    sun.setRotation([90, 0, 0]);
-    
+const sun = new LightNode('sun', new DirectionalLight({}), true)
+sun.setRotation([90, 0, 0]);
 
-    const pl1 = new LightNode('pointLight', new PointLight({
-        diffuse: [0.0, 0.0, 1.0],
-        specular: [0.0, 0.0, 1.0],
-        constant: 1.0
-    }));
-    pl1.setPosition([2, 2, 2]).onUpdate = (node: Node, delta: number, time: number) => {
-        node.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
-    }
 
-    const pl2 = new LightNode('pointLight2', new PointLight({
-        diffuse: [0.0, 1.0, 0.0],
-        specular: [0.0, 1.0, 0.0],
-        constant: 2.0
-    }));
+const pl1 = new LightNode('pointLight', new PointLight({
+    diffuse: [0.0, 0.0, 1.0],
+    specular: [0.0, 0.0, 1.0],
+    constant: 1.0
+}));
+pl1.setPosition([2, 2, 2]).onUpdate = (node, delta, time) => {
+    node.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
+}
 
+const pl2 = new LightNode('pointLight2', new PointLight({
+    diffuse: [0.0, 1.0, 0.0],
+    specular: [0.0, 1.0, 0.0],
+    constant: 2.0
+}));
+
+Geometry.Terrain('assets/terrain_hm.jpg').then(terrainGeometry => {
     const terrain = new ModelNode('terrain', new Model(
-        await Geometry.Terrain('assets/terrain_hm.jpg'),
+        terrainGeometry,
         Material.Default({
             textures: {
                 base: new Texture({ flipY: true }).createFromFile('assets/terrain_tex.jpg'),
@@ -96,29 +86,34 @@ app.onPreInitialize = async () => {
         })
     ));
     terrain.setY(-4);
-    
+    app.scene.addNode(terrain);
+});
+
+Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']}).then(roomModel => {
     const room = new Node('room');
-    const roomModel = await Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']});
     roomModel[0].model.material.config.castShadow = true;
     const roomModelNode = new ModelNode(roomModel[0].name, roomModel[0].model);
-    roomModelNode.setPosition([1, 1, 1])//.setRotation([0, 180, 0])
+    roomModelNode.setPosition([1, 1, 1])
         .setBody(10)
         .attachShape(Shape.Box(1.25, 0.2, 1.5), [0.1, 0, 0])
         .attachShape(Shape.Box(1.25, 1, 0.2), [0.1, 0.5, 0.6])
         .attachShape(Shape.Box(0.2, 1, 1.25), [-0.4, 0.5, -0.1])
-    roomModelNode.onUpdate = (node: Node, delta: number, time: number) => {
+    roomModelNode.onUpdate = (node, delta, time) => {
         node.setXScale(Math.sin(time * 0.001) + 1)
         .setYScale(Math.sin(time * 0.001) + 1);
     }
     room.addChild(roomModelNode);
+    app.scene.addNode(room);
+});
 
 
-    const floor = new Node('floor');
-    floor.rotateX(-90).setBody(0).attachShape(Shape.Plane())
+const floor = new Node('floor');
+floor.rotateX(-90).setBody(0).attachShape(Shape.Plane())
 
+
+Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then(sponzaModels => {
     const sponza = new Node('sponza')
     sponza.setBody(0);
-    /* const sponzaModels = await Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']});
     for (const result of sponzaModels) {
         result.model.material.config.castShadow = true;
         const node = new ModelNode(result.name, result.model);
@@ -139,41 +134,47 @@ app.onPreInitialize = async () => {
             }
             
             sponza.body?.attachShape(Shape.TriMesh(geometry, [1, 1, 1]))
-    } */
+    }
+    app.scene.addNode(sponza);
+});
 
-    const backpack = new Node('backpack')
-    /* backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(Shape.Box(1, 2, 1));
-    const backpackModels = await Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
-    for (const result of backpackModels) {
-        result.model.material.config.castShadow = true;
-        const node = new ModelNode(result.name, result.model);
-        backpack.addChild(node);
-    } */
+const backpack = new Node('backpack')
+/* backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(Shape.Box(1, 2, 1));
+const backpackModels = await Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
+for (const result of backpackModels) {
+    result.model.material.config.castShadow = true;
+    const node = new ModelNode(result.name, result.model);
+    backpack.addChild(node);
+} */
 
-    const helmet = new Node('helmet')
-    helmet.setPosition([1, 2, -2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(Shape.Sphere(0.5));
- 
-    const damagedHelmetModels = await Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']});
+const helmet = new Node('helmet')
+helmet.setPosition([1, 2, -2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(Shape.Sphere(0.5));
+
+Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']}).then(damagedHelmetModels => {
     for (const result of damagedHelmetModels) {
         result.model.material.config.castShadow = true;
         const node = new ModelNode(result.name, result.model);
         helmet.addChild(node);
     }
 
-    app.scene.skybox = skybox;
-    app.scene.environmentMap = envmap;
-
-    app.scene.addNode(floor);
-    app.scene.addNode(sun);
-    app.scene.addNode(pl1);
-    app.scene.addNode(room);
-    app.scene.addNode(crate);
-    app.scene.addNode(terrain)
-    app.scene.attachNode(pl2, 'crate');
     app.scene.addNode(helmet);
-    app.scene.addNode(backpack);
-    app.scene.addNode(sponza);
-};
+});
+
+
+
+app.scene.skybox = skybox;
+app.scene.environmentMap = envmap;
+
+app.scene.addNode(floor);
+app.scene.addNode(sun);
+app.scene.addNode(pl1);
+
+app.scene.addNode(crate);
+
+app.scene.attachNode(pl2, 'crate');
+app.scene.addNode(helmet);
+app.scene.addNode(backpack);
+
 
 app.onPostInitialize = () => {
     let worldTexture = new Texture({ flipY: true }).createFromFile('assets/world.png')
@@ -184,10 +185,10 @@ app.onPostInitialize = () => {
         ));
         sphere.setPosition(app.camera.position)
               .setUniformScale(0.25)
-              .setBody(5).attachShape(Shape.Sphere(0.25)).onCollision = (node: Node) => { if (node.name === 'box') { node.remove(); }};
-        sphere.onSpawn = (node: Node) => {
-            const impulseVector = vec3.create();
-            vec3.scale(impulseVector, app.camera.forward, 100);
+              .setBody(5).attachShape(Shape.Sphere(0.25)).onCollision = node => { if (node.name === 'box') { node.remove(); }};
+        sphere.onSpawn = node => {
+            const impulseVector = Vec.vec3.create();
+            Vec.vec3.scale(impulseVector, app.camera.forward, 100);
             node.body?.impulse(impulseVector)
         }
         app.scene.addNode(sphere);
@@ -210,7 +211,7 @@ app.onPostInitialize = () => {
                 }
             }, { castShadow: true })
         ));
-        box.onUpdate = (node: Node, delta: number, time: number) => {
+        box.onUpdate = (node, delta, time) => {
             let change = Math.cos(time * 0.005)/2 + 0.5;
             (node as ModelNode).model.material.properties.set('emissive', [1, change, 0]);
         }
@@ -224,7 +225,7 @@ app.onPostInitialize = () => {
     app.input.registerKeyPress('KeyP', () => {app.isPaused = !app.isPaused})
 };  
 
-app.onUpdate = (delta: number, time: number) => {
+app.onUpdate = (delta, time) => {
     let mouse = app.input.mouse;
     let movement = delta * 2;
     if (mouse.buttons.Left) {

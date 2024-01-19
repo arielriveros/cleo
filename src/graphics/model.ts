@@ -1,5 +1,5 @@
 import { Mesh } from './mesh';
-import { Material } from '../core/material';
+import { Material } from './material';
 import { Geometry } from '../core/geometry';
 import { Loader } from './loader';
 

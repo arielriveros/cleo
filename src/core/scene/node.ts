@@ -1,7 +1,7 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { Model } from "../../graphics/model";
-import { DirectionalLight, Light, PointLight } from "../lighting";
 import { Body } from "../../physics/body";
+import { DirectionalLight, Light, PointLight } from "../../graphics/lighting";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
 
@@ -10,6 +10,7 @@ export class Node {
     private _parent: Node | null;
     private readonly _children: Node[];
     private _scene: Scene | null;
+    private readonly _nodeType: string;
     
     private readonly  _localTransform: mat4;
     private _worldTransform: mat4;
@@ -31,11 +32,12 @@ export class Node {
     public onCollision: (node: Node, other: Node) => void = () => {};
     public onUpdate: (node: Node, delta: number, time: number) => void = () => {};
 
-    constructor(name: string) {
+    constructor(name: string, type: string = 'node') {
         this._name = name;
         this._parent = null;
         this._children = [];
         this._scene = null;
+        this._nodeType = type;
 
         this._localTransform = mat4.create();
         this._worldTransform = mat4.create();
@@ -278,7 +280,11 @@ export class Node {
                 console.log('Cannot set a non static body to a child of a static body')
             }
             this._worldTransform = this.localTransform;
-            this._parent.removeChild(this);
+
+            if (this._parent && this._parent.name !== 'root') {
+                this._parent.removeChild(this);
+                this.scene?.root.addChild(this);
+            }
         }
         
         this._body = new Body({
@@ -293,8 +299,36 @@ export class Node {
     }
 
     public get position(): vec3 { return this._position; }
+    public get rotation(): vec3 { 
+        let x = this._quaternion[0], y = this._quaternion[1], z = this._quaternion[2], w = this._quaternion[3];
+        let x2 = x * x;
+        let y2 = y * y;
+        let z2 = z * z;
+        let w2 = w * w;
+        let unit = x2 + y2 + z2 + w2;
+        let test = x * w - y * z;
+        let out = vec3.create();
+        if (test > 0.499995 * unit) { //TODO: Use glmatrix.EPSILON
+            // singularity at the north pole
+            out[0] = Math.PI / 2;
+            out[1] = 2 * Math.atan2(y, x);
+            out[2] = 0;
+        } else if (test < -0.499995 * unit) { //TODO: Use glmatrix.EPSILON
+            // singularity at the south pole
+            out[0] = -Math.PI / 2;
+            out[1] = 2 * Math.atan2(y, x);
+            out[2] = 0;
+        } else {
+            out[0] = Math.asin(2 * (x * z - w * y));
+            out[1] = Math.atan2(2 * (x * w + y * z), 1 - 2 * (z2 + w2));
+            out[2] = Math.atan2(2 * (x * y + z * w), 1 - 2 * (y2 + z2));
+        }
+
+        return out;
+    }
     public get quaternion(): quat { return this._quaternion; }
     public get scale(): vec3 { return this._scale; }
+    public get nodeType(): string { return this._nodeType; }
 }
 
 export class ModelNode extends Node {
@@ -302,7 +336,7 @@ export class ModelNode extends Node {
     private _initialized: boolean;
 
     constructor(name: string, model: Model) {
-        super(name);
+        super(name, 'model');
         this._model = model;
         this._initialized = false;
     }
@@ -357,7 +391,7 @@ export class LightNode extends Node {
     private _castShadows: boolean;
 
     constructor(name: string, light: Light, castShadows: boolean = false) {
-        super(name);
+        super(name, 'light');
         this._light = light;
         this._index = -1;
         this._lightSpace = mat4.create();

@@ -1,7 +1,6 @@
 import { vec2, vec3 } from "gl-matrix";
 import { Geometry } from "../core/geometry";
-import { Material } from "../core/material";
-import { Texture } from "./texture";
+import { Material } from "./material";
 import { loadAssimpModel, parseMaterial } from "./utils/assimpLoader";
 
 export class Loader {

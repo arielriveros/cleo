@@ -48,11 +48,10 @@ export class Shader {
     public createFromFiles(vertexShaderPath: string, fragmentShaderPath: string): Shader {
         const vertexShaderSource = Loader.loadText(vertexShaderPath);
         const fragmentShaderSource = Loader.loadText(fragmentShaderPath);
-        this.create(vertexShaderSource, fragmentShaderSource);
-        return this;
+        return this.create(vertexShaderSource, fragmentShaderSource);
     }
 
-    public create(vertexSource: string, fragmentSource: string): void {
+    public create(vertexSource: string, fragmentSource: string): Shader {
         gl.shaderSource(this._vertexShader, vertexSource);
         gl.compileShader(this._vertexShader);
         gl.compileShader(this._vertexShader);
@@ -74,6 +73,8 @@ export class Shader {
 
         this.storeAttributes();
         this.storeUniforms();
+
+        return this;
     }
 
     public use(): void {

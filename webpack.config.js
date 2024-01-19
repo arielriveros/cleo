@@ -1,52 +1,50 @@
 const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 
-module.exports = {
-    entry: './src/app.ts',
+const isProduction = process.env.NODE_ENV == 'production';
+
+const config = {
+    entry: {
+        'cleo': path.resolve(__dirname, 'src/cleo.ts')
+    },
+    output: {
+        path: path.resolve(__dirname, 'dist'),
+        library: 'cleo',
+        libraryTarget: 'umd',
+        globalObject: 'this'
+    },
     module: {
         rules: [
             {
-                test: /\.ts$/,
-                use: 'ts-loader',
-                include: [ path.resolve(__dirname, 'src') ]
-            }
+                test: /\.(ts)$/,
+                exclude: /node_modules/,
+                loader: 'ts-loader'
+            },
+            {
+                test: /\.glsl|vs|fs$/,
+                exclude: /node_modules/,
+                loader: 'ts-shader-loader'
+              }
         ]
     },
+    
+    plugins: [
+        new CopyWebpackPlugin({patterns: [ { from: 'package.json', to: './' } ]}),
+    ],
     resolve: {
         extensions: ['.ts', '.js'],
         alias: {},
         fallback: {
             "fs": false,
-            "tls": false,
-            "net": false,
             "path": false,
-            "zlib": false,
-            "http": false,
-            "https": false,
-            "stream": false,
-            "crypto": false,
+            "crypto": false
           } 
     },
-    output: {
-        publicPath: 'auto',
-        filename: 'app.js',
-        path: path.resolve(__dirname, 'build')
-    },
-    mode: 'development',
-    devtool: 'inline-source-map',
-    devServer: {
-        static: {
-          directory: path.resolve(__dirname, 'build'),
-        },
-        hot: true,
-        compress: true,
-        port: 8080,
-      },
-    plugins: [
-        new CopyWebpackPlugin({patterns: [
-            { from: 'src/static', to: './' },
-            { from: 'src/assets', to: './assets'},
-            { from: 'src/graphics/shaders', to: './shaders' }
-        ]})
-    ]
+    devtool: 'source-map'
+};
+
+module.exports = () => {
+    if (isProduction) { config.mode = 'production'; } 
+    else { config.mode = 'development'; }
+    return config;
 };

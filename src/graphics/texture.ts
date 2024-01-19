@@ -15,6 +15,7 @@ export class Texture {
     private _width: number;
     private _height: number;
     private _options: TextureConfig;
+    private _data: HTMLImageElement | null = null;
 
     constructor(options?: TextureConfig) {
         this._texture = gl.createTexture() as WebGLTexture;
@@ -60,6 +61,7 @@ export class Texture {
         if (data) {
             this._width = data.width;
             this._height = data.height;
+            this._data = data;
         }
         else {
             this._width = width;
@@ -134,5 +136,6 @@ export class Texture {
     public get width(): number { return this._width; }
     public get height(): number { return this._height; }
     public get texture(): WebGLTexture { return this._texture; }
+    public get data(): HTMLImageElement | null { return this._data; }
 
 }

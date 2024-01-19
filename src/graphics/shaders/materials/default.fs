@@ -1,5 +1,6 @@
 #version 300 es
 
+#include "../constants.glsl";
 precision mediump float;
 
 in vec3 fragPos;
@@ -38,7 +39,7 @@ uniform struct Material {
 
 // Lighting
 uniform vec3 u_viewPos;
-const int MAX_POINT_LIGHTS = 16;
+
 uniform int u_numPointLights;
 uniform sampler2D u_shadowMap;
 

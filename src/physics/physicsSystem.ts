@@ -1,7 +1,5 @@
 import { Scene } from "../core/scene/scene";
-import { World, Vec3, Quaternion } from 'cannon-es';
-import { Body } from "./body";
-import { Shape } from "./shape";
+import { World } from 'cannon-es';
 
 interface PhysicsSystemConfig {
     gravity?: number[];
