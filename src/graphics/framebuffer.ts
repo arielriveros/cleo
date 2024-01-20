@@ -39,7 +39,7 @@ export class Framebuffer {
 
         for (let i = 0; i < numColorAttachments; i++) {
             this._colors.push(new Texture(this._options.colorTextureOptions));
-            this._colors[i].create(width, height);
+            this._colors[i].create(null, width, height);
             gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, this._colors[i].texture, 0);
         }
 
@@ -50,7 +50,7 @@ export class Framebuffer {
             gl.drawBuffers(colorAttachments);
         }
 
-        this._depth.create(width, height);
+        this._depth.create(null, width, height);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this._depth.texture, 0);
 
         if (usage === 'depth') {

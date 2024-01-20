@@ -1,7 +1,3 @@
-import { Shader } from "./shader";
-import { ShaderManager } from "./systems/shaderManager";
-import { Texture } from "./texture";
-
 interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
     transparent?: boolean;
@@ -11,7 +7,7 @@ interface MaterialConfig {
 
 interface BasicProperties {
     color?: number[];
-    texture?: Texture;
+    texture?: string;
     opacity?: number;
 }
 
@@ -25,30 +21,29 @@ interface DefaultProperties {
     reflectivity?: number;
 
     textures?: {
-        base?: Texture;
-        specular?: Texture;
-        emissive?: Texture;
-        normal?: Texture;
-        mask?: Texture;
-        reflectivity?: Texture;
+        base?: string;
+        specular?: string;
+        emissive?: string;
+        normal?: string;
+        mask?: string;
+        reflectivity?: string;
     }
 }
 
 enum MaterialType {
     Basic = 'basic',
-    Default = 'default',
-    Custom = 'custom'
+    Default = 'default'
 }
 
 export class Material {
     public type: MaterialType = MaterialType.Basic;
     public properties: Map<string, any>;
-    public textures: Map<string, Texture>;
+    public textures: Map<string, string>;
     public config: MaterialConfig;
 
     constructor(config?: MaterialConfig) {
         this.properties = new Map<string, any>();
-        this.textures = new Map<string, Texture>();
+        this.textures = new Map<string, string>();
         this.config = {
             side: config?.side || 'front',
             transparent: config?.transparent || false,
@@ -127,18 +122,5 @@ export class Material {
             }
 
             return material;
-    }
-
-    public static Custom(name: string, source: {vertexShader: string, fragmentShader: string }, properties: Map<string, any>, config?: MaterialConfig): Material {
-        const material = new Material(config);
-        material.type = MaterialType.Custom;
-        material.properties = properties;
-
-        const shader: Shader = new Shader();
-        shader.createFromFiles(source.vertexShader, source.fragmentShader);
-
-        ShaderManager.Instance.addShader(name, shader);
-
-        return material;
     }
 }

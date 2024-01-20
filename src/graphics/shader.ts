@@ -45,12 +45,6 @@ export class Shader {
         this._fragmentShader = fs;
     }
 
-    public createFromFiles(vertexShaderPath: string, fragmentShaderPath: string): Shader {
-        const vertexShaderSource = Loader.loadText(vertexShaderPath);
-        const fragmentShaderSource = Loader.loadText(fragmentShaderPath);
-        return this.create(vertexShaderSource, fragmentShaderSource);
-    }
-
     public create(vertexSource: string, fragmentSource: string): Shader {
         gl.shaderSource(this._vertexShader, vertexSource);
         gl.compileShader(this._vertexShader);

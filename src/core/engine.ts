@@ -72,7 +72,6 @@ export class CleoEngine {
         }
 
         this.onPostInitialize();
-        this._paused = false;
     }
 
     public run(): void {

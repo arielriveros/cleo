@@ -1,6 +1,6 @@
-import { CleoEngine, Node, ModelNode, Model, Geometry, Material, Texture, Shape, Camera, Scene, Cubemap, LightNode, DirectionalLight, PointLight, Vec } from 'cleo';
+import * as CLEO from 'cleo';
 
-let app = new CleoEngine({
+let app = new CLEO.CleoEngine({
     graphics: {
         clearColor: [0.25, 0.05, 0.8, 1.0],
         shadowMapSize: 4096,
@@ -9,33 +9,25 @@ let app = new CleoEngine({
     physics: {gravity: [0, -9.8, 0]}
 });
 
-let crate = new ModelNode('crate', new Model(
-    Geometry.Cube(),
-    Material.Default({
-        reflectivity: 1.0,
-        textures: {
-            base: new Texture().createFromFile('assets/crateTextures/diff.png'),
-            specular: new Texture().createFromFile('assets/crateTextures/spec.png'),
-            emissive: new Texture().createFromFile('assets/crateTextures/emis.png'),
-            reflectivity: new Texture().createFromFile('assets/crateTextures/refl.png')}
-        }, { castShadow: true }
-    )
-));
-crate.setPosition([-2, 1, 0]).setBody(0).attachShape(Shape.Box(1, 1, 1));
-crate.onUpdate = (node, delta, time) => {
-    node.setY(Math.sin(time * 0.001) + 1).rotateX(1).rotateY(1);
-    let change = Math.sin(time * 0.005)/2 + 0.5;
-    (node as ModelNode).model.material.properties.set('emissive', [1, change * 2, 0]);
-    (node.getChild('pointLight2') as LightNode).light.diffuse[1] = change;
+function loadAssets(): void {
+    app.isPaused = true;
+    CLEO.TextureManager.Instance.addTextureFromPathWithId('crateDiff', 'assets/crateTextures/diff.png');
+    CLEO.TextureManager.Instance.addTextureFromPathWithId('crateSpec', 'assets/crateTextures/spec.png');
+    CLEO.TextureManager.Instance.addTextureFromPathWithId('crateEmis', 'assets/crateTextures/emis.png');
+    CLEO.TextureManager.Instance.addTextureFromPathWithId('crateRefl', 'assets/crateTextures/refl.png');
+    CLEO.TextureManager.Instance.addTextureFromPathWithId('world', 'assets/world.png');
+    CLEO.TextureManager.Instance.addTextureFromPathWithId('terrain', 'assets/terrain_tex.jpg');
 }
 
-const camera: Camera = new Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000});
-const scene: Scene = new Scene();
+loadAssets();
+
+const camera: CLEO.Camera = new CLEO.Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000});
+const scene: CLEO.Scene = new CLEO.Scene();
 
 app.camera = camera;
 app.scene = scene;
 
-const skybox = new Cubemap();
+const skybox = new CLEO.Cubemap();
 skybox.createFromFiles([
     'assets/cubemaps/skybox/right.jpg',
     'assets/cubemaps/skybox/left.jpg',
@@ -45,7 +37,7 @@ skybox.createFromFiles([
     'assets/cubemaps/skybox/back.jpg'
 ]);
 
-const envmap = new Cubemap();
+const envmap = new CLEO.Cubemap();
 envmap.createFromFiles([
     'assets/cubemaps/envmap/right.jpg',
     'assets/cubemaps/envmap/left.jpg',
@@ -55,11 +47,11 @@ envmap.createFromFiles([
     'assets/cubemaps/envmap/back.jpg'
 ]);
 
-const sun = new LightNode('sun', new DirectionalLight({}), true)
+const sun = new CLEO.LightNode('sun', new CLEO.DirectionalLight({}), true)
 sun.setRotation([90, 0, 0]);
 
 
-const pl1 = new LightNode('pointLight', new PointLight({
+const pl1 = new CLEO.LightNode('pointLight', new CLEO.PointLight({
     diffuse: [0.0, 0.0, 1.0],
     specular: [0.0, 0.0, 1.0],
     constant: 1.0
@@ -68,19 +60,17 @@ pl1.setPosition([2, 2, 2]).onUpdate = (node, delta, time) => {
     node.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
 }
 
-const pl2 = new LightNode('pointLight2', new PointLight({
+const pl2 = new CLEO.LightNode('pointLight2', new CLEO.PointLight({
     diffuse: [0.0, 1.0, 0.0],
     specular: [0.0, 1.0, 0.0],
     constant: 2.0
 }));
 
-Geometry.Terrain('assets/terrain_hm.jpg').then(terrainGeometry => {
-    const terrain = new ModelNode('terrain', new Model(
+CLEO.Geometry.Terrain('assets/terrain_hm.jpg').then(terrainGeometry => {
+    const terrain = new CLEO.ModelNode('terrain', new CLEO.Model(
         terrainGeometry,
-        Material.Default({
-            textures: {
-                base: new Texture({ flipY: true }).createFromFile('assets/terrain_tex.jpg'),
-            },
+        CLEO.Material.Default({
+            textures: { base: 'terrain' },
             specular: [0.4, 0.4, 0.4],
             shininess: 64.0
         })
@@ -89,36 +79,56 @@ Geometry.Terrain('assets/terrain_hm.jpg').then(terrainGeometry => {
     app.scene.addNode(terrain);
 });
 
-Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']}).then(roomModel => {
-    const room = new Node('room');
+let crate = new CLEO.ModelNode('crate', new CLEO.Model(
+    CLEO.Geometry.Cube(),
+    CLEO.Material.Default({
+        reflectivity: 1.0,
+        textures: {
+            base: 'crateDiff',
+            specular: 'crateSpec',
+            emissive: 'crateEmis',
+            reflectivity: 'crateRefl' }
+        }, { castShadow: true } )
+));
+crate.setPosition([-2, 1, 0]).setBody(0).attachShape(CLEO.Shape.Box(1, 1, 1));
+crate.onUpdate = (node, delta, time) => {
+    node.setY(Math.sin(time * 0.001) + 1).rotateX(1).rotateY(1);
+    let change = Math.sin(time * 0.005)/2 + 0.5;
+    (node as CLEO.ModelNode).model.material.properties.set('emissive', [1, change * 2, 0]);
+    (node.getChild('pointLight2') as CLEO.LightNode).light.diffuse[1] = change;
+}
+crate.addChild(pl2);
+
+CLEO.Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']}).then(roomModel => {
+    const room = new CLEO.Node('room');
     roomModel[0].model.material.config.castShadow = true;
-    const roomModelNode = new ModelNode(roomModel[0].name, roomModel[0].model);
-    roomModelNode.setPosition([1, 1, 1])
+    const roomNode = new CLEO.ModelNode(roomModel[0].name, roomModel[0].model);
+    roomNode.setPosition([1, 1, 1])
         .setBody(10)
-        .attachShape(Shape.Box(1.25, 0.2, 1.5), [0.1, 0, 0])
-        .attachShape(Shape.Box(1.25, 1, 0.2), [0.1, 0.5, 0.6])
-        .attachShape(Shape.Box(0.2, 1, 1.25), [-0.4, 0.5, -0.1])
-    roomModelNode.onUpdate = (node, delta, time) => {
+        .attachShape(CLEO.Shape.Box(1.25, 0.2, 1.5), [0.1, 0, 0])
+        .attachShape(CLEO.Shape.Box(1.25, 1, 0.2), [0.1, 0.5, 0.6])
+        .attachShape(CLEO.Shape.Box(0.2, 1, 1.25), [-0.4, 0.5, -0.1])
+        roomNode.onUpdate = (node, delta, time) => {
         node.setXScale(Math.sin(time * 0.001) + 1)
         .setYScale(Math.sin(time * 0.001) + 1);
     }
-    room.addChild(roomModelNode);
+    room.addChild(roomNode);
     app.scene.addNode(room);
 });
 
 
-const floor = new Node('floor');
-floor.rotateX(-90).setBody(0).attachShape(Shape.Plane())
+const floor = new CLEO.Node('floor');
+floor.rotateX(-90).setBody(0).attachShape(CLEO.Shape.Plane())
 
 
-Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then(sponzaModels => {
-    const sponza = new Node('sponza')
+/* CLEO.Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then(sponzaModels => {
+    const sponza = new CLEO.Node('sponza')
     sponza.setBody(0);
     for (const result of sponzaModels) {
         result.model.material.config.castShadow = true;
-        const node = new ModelNode(result.name, result.model);
+        const node = new CLEO.ModelNode(result.name, result.model);
         sponza.addChild(node);
-        const geometry = new Geometry();
+        const geometry = new CLEO.Geometry();
         if (result.name === 'sponza_sponza_arch' ||
             result.name === 'sponza_sponza_bricks' ||
             result.name === 'sponza_sponza_ceiling' ||
@@ -133,27 +143,27 @@ Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mt
                 geometry.indices.push(...result.model.geometry.indices);
             }
             
-            sponza.body?.attachShape(Shape.TriMesh(geometry, [1, 1, 1]))
+            sponza.body?.attachShape(CLEO.Shape.TriMesh(geometry, [1, 1, 1]))
     }
     app.scene.addNode(sponza);
-});
+}); */
 
-const backpack = new Node('backpack')
-/* backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(Shape.Box(1, 2, 1));
-const backpackModels = await Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
+const backpack = new CLEO.Node('backpack')
+/* backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(CLEO.Shape.Box(1, 2, 1));
+const backpackModels = await CLEO.Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
 for (const result of backpackModels) {
     result.model.material.config.castShadow = true;
-    const node = new ModelNode(result.name, result.model);
+    const node = new CLEO.ModelNode(result.name, result.model);
     backpack.addChild(node);
 } */
 
-const helmet = new Node('helmet')
-helmet.setPosition([1, 2, -2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(Shape.Sphere(0.5));
+const helmet = new CLEO.Node('helmet')
+helmet.setPosition([1, 2, -2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(CLEO.Shape.Sphere(0.5));
 
-Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']}).then(damagedHelmetModels => {
+CLEO.Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']}).then(damagedHelmetModels => {
     for (const result of damagedHelmetModels) {
         result.model.material.config.castShadow = true;
-        const node = new ModelNode(result.name, result.model);
+        const node = new CLEO.ModelNode(result.name, result.model);
         helmet.addChild(node);
     }
 
@@ -165,57 +175,45 @@ Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/d
 app.scene.skybox = skybox;
 app.scene.environmentMap = envmap;
 
-app.scene.addNode(floor);
-app.scene.addNode(sun);
-app.scene.addNode(pl1);
-
-app.scene.addNode(crate);
-
-app.scene.attachNode(pl2, 'crate');
+app.scene.addNodes(floor, sun, pl1, crate);
 app.scene.addNode(helmet);
 app.scene.addNode(backpack);
 
 
 app.onPostInitialize = () => {
-    let worldTexture = new Texture({ flipY: true }).createFromFile('assets/world.png')
     const shootSphere = () => {
-        const sphere = new ModelNode(`sphere${Math.random() * 1000}`, new Model(
-            Geometry.Sphere(32),
-            Material.Default({ reflectivity: 0.5, textures: { base: worldTexture} }, { castShadow: true })
+        const sphere = new CLEO.ModelNode(`sphere${Math.random() * 1000}`, new CLEO.Model(
+            CLEO.Geometry.Sphere(32),
+            CLEO.Material.Default({ reflectivity: 0.5, textures: { base: 'world'} }, { castShadow: true })
         ));
         sphere.setPosition(app.camera.position)
-              .setUniformScale(0.25)
-              .setBody(5).attachShape(Shape.Sphere(0.25)).onCollision = node => { if (node.name === 'box') { node.remove(); }};
+                .setUniformScale(0.25)
+                .setBody(5).attachShape(CLEO.Shape.Sphere(0.25)).onCollision = node => { if (node.name === 'box') { node.remove(); }};
         sphere.onSpawn = node => {
-            const impulseVector = Vec.vec3.create();
-            Vec.vec3.scale(impulseVector, app.camera.forward, 100);
+            const impulseVector = CLEO.Vec.vec3.create();
+            CLEO.Vec.vec3.scale(impulseVector, app.camera.forward, 100);
             node.body?.impulse(impulseVector)
         }
         app.scene.addNode(sphere);
     }
 
-    let boxBaseTexture = new Texture().createFromFile('assets/crateTextures/diff.png');
-    let boxSpecularTexture = new Texture().createFromFile('assets/crateTextures/spec.png');
-    let boxEmissiveTexture = new Texture().createFromFile('assets/crateTextures/emis.png');
-    let boxReflectivityTexture = new Texture().createFromFile('assets/crateTextures/refl.png');
-
     const spawnBox = () => {
-        const box = new ModelNode('box', new Model(
-            Geometry.Cube(),
-            Material.Default({
+        const box = new CLEO.ModelNode('box', new CLEO.Model(
+            CLEO.Geometry.Cube(),
+            CLEO.Material.Default({
                 textures: {
-                    base: boxBaseTexture,
-                    specular: boxSpecularTexture,
-                    emissive: boxEmissiveTexture,
-                    reflectivity: boxReflectivityTexture
+                    base: 'crateDiff',
+                    specular: 'crateSpec',
+                    emissive: 'crateEmis',
+                    reflectivity: 'crateRefl'
                 }
             }, { castShadow: true })
         ));
         box.onUpdate = (node, delta, time) => {
             let change = Math.cos(time * 0.005)/2 + 0.5;
-            (node as ModelNode).model.material.properties.set('emissive', [1, change, 0]);
+            (node as CLEO.ModelNode).model.material.properties.set('emissive', [1, change, 0]);
         }
-        box.setPosition([Math.random(), 5, Math.random()]).setBody(Math.random() * 10).attachShape(Shape.Box(1, 1, 1))
+        box.setPosition([Math.random(), 5, Math.random()]).setBody(Math.random() * 10).attachShape(CLEO.Shape.Box(1, 1, 1))
         app.scene.addNode(box);
     }
 

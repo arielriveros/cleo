@@ -15,7 +15,7 @@ export class Texture {
     private _width: number;
     private _height: number;
     private _options: TextureConfig;
-    private _data: HTMLImageElement | null = null;
+    private _data: Uint8Array | null = null;
 
     constructor(options?: TextureConfig) {
         this._texture = gl.createTexture() as WebGLTexture;
@@ -31,21 +31,6 @@ export class Texture {
         };
     }
 
-    public createFromFile(path: string): Texture {
-        try {
-            Loader.loadImage(path).then((image) => this._create(image));
-            return this;
-        }
-        catch (e) {
-            throw new Error(`Error loading texture from path ${path}`);
-        }
-    }
-
-    public create(width: number, height: number) {
-        this._create(null, width, height);
-        return this;
-    }
-
     public bind(slot: number = 0): void {
         gl.activeTexture(gl.TEXTURE0 + slot);
         gl.bindTexture(gl.TEXTURE_2D, this._texture);
@@ -55,18 +40,12 @@ export class Texture {
         gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
-    private _create(data: HTMLImageElement | null, width: number = 0, height: number = 0): void {
+    public create(data: Uint8Array | null, width: number = 0, height: number = 0): void {
         this.bind();
 
-        if (data) {
-            this._width = data.width;
-            this._height = data.height;
-            this._data = data;
-        }
-        else {
-            this._width = width;
-            this._height = height;
-        }
+        this._data = data;
+        this._width = width;
+        this._height = height;
 
         // Flip Y
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._options.flipY);
@@ -80,10 +59,7 @@ export class Texture {
         let format = this._options.usage === 'depth' ? gl.DEPTH_COMPONENT : gl.RGBA;        
         let type = this._options.usage === 'depth' ? gl.UNSIGNED_INT : this._options.precision === 'low' ? gl.UNSIGNED_BYTE : gl.FLOAT ;
 
-        if (data)
-            gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, format, type, data);
-        else
-            gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, this._width, this._height, 0, format, type, null);
+        gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, this._width, this._height, 0, format, type, this._data);
 
         if (this._options.usage === 'depth') {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -133,9 +109,13 @@ export class Texture {
         this.unbind();
     }
 
+    public delete(): void {
+        gl.deleteTexture(this._texture);
+    }
+
+    public get data(): Uint8Array | null { return this._data; }
     public get width(): number { return this._width; }
     public get height(): number { return this._height; }
     public get texture(): WebGLTexture { return this._texture; }
-    public get data(): HTMLImageElement | null { return this._data; }
 
 }

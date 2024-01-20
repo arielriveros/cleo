@@ -96,7 +96,11 @@ export class Node {
     public get parent(): Node | null { return this._parent; }
     public get children(): Node[] { return this._children; }
     public get scene(): Scene | null { return this._scene; }
-    public set scene(scene: Scene | null) { this._scene = scene; }
+    public set scene(scene: Scene | null) {
+        this._scene = scene;
+        for (const child of this._children)
+            child.scene = scene;
+    }
     public get markForRemoval(): boolean { return this._markForRemoval; }
 
     public get localTransform(): mat4 {

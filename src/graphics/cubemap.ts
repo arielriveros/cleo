@@ -3,24 +3,45 @@ import { Loader } from './loader';
 
 export class Cubemap {
     private readonly _texture: WebGLTexture;
-    private _images: HTMLImageElement[];
-    private _width: number;
-    private _height: number;
+    private _images: {data: Uint8Array, width: number, height: number}[];
 
     constructor() {
         this._texture = gl.createTexture() as WebGLTexture;
-        this._width = 0;
-        this._height = 0;
         this._images = [];
+    }
+
+    private _loadImage(path: string): Promise<{data: Uint8Array, width: number, height: number}> {
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.src = path;
+            image.onload = () => {
+                const data = new Uint8Array(image.width * image.height * 4);
+                const canvas = document.createElement('canvas');
+                canvas.width = image.width;
+                canvas.height = image.height;
+                const context = canvas.getContext('2d');
+                if (!context) throw new Error('Failed to create canvas context');
+                context.drawImage(image, 0, 0);
+                const imageData = context.getImageData(0, 0, image.width, image.height);
+                data.set(imageData.data);
+                resolve({
+                    data: data,
+                    width: image.width,
+                    height: image.height
+                });
+            };
+            image.onerror = () => reject();
+        });
     }
 
     public createFromFiles(paths: string[]): Cubemap {
         try {
-            const promises = paths.map(path => Loader.loadImage(path));
-    
+            const promises = paths.map(path => this._loadImage(path));
             Promise.all(promises)
-                .then(images => this._images.push(...images))
-                .then(() => this._create());
+            .then(images => {
+                this._images = images;
+                this._create();
+            })
     
             return this;
         } catch (e) {
@@ -28,8 +49,8 @@ export class Cubemap {
         }
     }
 
-    public create(width: number, height: number) {
-        this._create(width, height);
+    public create() {
+        this._create();
         return this;
     }
 
@@ -42,17 +63,8 @@ export class Cubemap {
         gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
     }
 
-    private _create(width: number = 0, height: number = 0): void {
+    private _create(): void {
         this.bind();
-
-        if (this._images.length !== 6) {
-            this._width = this._images[0].width;
-            this._height = this._images[0].height;
-        }
-        else {
-            this._width = width;
-            this._height = height;
-        }
 
         // Flip Y
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -62,7 +74,8 @@ export class Cubemap {
         let type = gl.UNSIGNED_BYTE;
 
         for (let i = 0; i < this._images.length; i++) {
-            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, internalFormat, format, type, this._images[i]);
+            const image = this._images[i];
+            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, internalFormat, image.width, image.height, 0, format, type, image.data);
         }
 
         gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
@@ -80,8 +93,6 @@ export class Cubemap {
         this.unbind();
     }
 
-    public get width(): number { return this._width; }
-    public get height(): number { return this._height; }
     public get texture(): WebGLTexture { return this._texture; }
-
+    public get data(): {data: Uint8Array, width: number, height: number}[] { return this._images; }
 }

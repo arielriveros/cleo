@@ -30,6 +30,11 @@ export class Scene {
         node.onSpawn(node);
     }
 
+    public addNodes(...nodes: Node[]): void {
+        for (const node of nodes)
+            this.addNode(node);
+    }
+
     public removeNode(node: Node): void {
         if (node.parent)
             node.parent.children.splice(node.parent.children.indexOf(node), 1);
@@ -43,14 +48,6 @@ export class Scene {
             this.removeNode(node);
             this._dirty = true;
         }
-    }
-
-    public attachNode(node: Node, parent: string): void {
-        const parentNode = this.getNode(parent);
-        if (parentNode)
-            parentNode.addChild(node);
-        
-        this._dirty = true;
     }
 
     public update(delta: number, time: number): void {

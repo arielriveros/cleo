@@ -26,6 +26,7 @@ import Bloom from './shaders/screen/bloom.fs'
 import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
+import { TextureManager } from '../cleo';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -253,7 +254,6 @@ export class Renderer {
             this._shaderManager.setUniform(`u_material.${name}`, value);
 
         for (const [name, tex] of node.model.material.textures) {
-            
             let slot = 0;
             switch(name) {
                 case 'texture':
@@ -277,7 +277,7 @@ export class Renderer {
                     break;
             }
             this._shaderManager.setUniform(`u_material.${name}`, slot);
-            tex.bind(slot);
+            TextureManager.Instance.getTexture(tex).bind(slot);
         }
 
         const materialConfig = node.model.material.config;
@@ -303,7 +303,7 @@ export class Renderer {
 
         // unbind textures
         for (const [_, tex] of node.model.material.textures)
-            tex.unbind();
+            TextureManager.Instance.getTexture(tex).unbind();
     }
 
     private _renderShadowMap(models: Set<ModelNode>, light: LightNode): void {

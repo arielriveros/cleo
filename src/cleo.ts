@@ -10,6 +10,7 @@ export { Texture } from "./graphics/texture";
 export { Cubemap } from "./graphics/cubemap";
 export { Loader } from "./graphics/loader";
 export { InputManager } from "./input/inputManager";
+export { TextureManager } from "./graphics/systems/textureManager";
 export { Body } from "./physics/body";
 export { Model } from "./graphics/model";
 export { DirectionalLight, PointLight } from "./graphics/lighting";
