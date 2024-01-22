@@ -1,7 +1,3 @@
-import { Material } from "../material";
-import { Texture } from "../texture";
-import { TextureManager } from "../systems/textureManager";
-
 const DIFFUSE_TEXTURE = 1;
 const SPECULAR_TEXTURE = 2;
 const AMBIENT_TEXTURE = 3;
@@ -64,7 +60,25 @@ interface AiMaterialProperties {
     value: any;
 }
 
-async function parseMaterial(mat: any, path?: string): Promise<{name: string, material: Material}> {
+export interface OutputMaterial {
+    name: string;
+    diffuse: [number, number, number];
+    specular: [number, number, number];
+    ambient: [number, number, number];
+    emissive: [number, number, number];
+    shininess: number;
+    opacity: number;
+    texturesPaths: {
+        base?: {data: Uint8Array, width: number, height: number};
+        specular?: {data: Uint8Array, width: number, height: number};
+        normal?: {data: Uint8Array, width: number, height: number};
+        emissive?: {data: Uint8Array, width: number, height: number};
+        mask?: {data: Uint8Array, width: number, height: number};
+        reflectivity?: {data: Uint8Array, width: number, height: number};
+    }
+}
+
+async function parseMaterial(mat: any): Promise<{name: string, material: OutputMaterial}> {
     return new Promise((resolve, reject) => {
 
         const properties = mat.properties;
@@ -120,51 +134,26 @@ async function parseMaterial(mat: any, path?: string): Promise<{name: string, ma
         const shininess = getNumber(properties, '$mat.shininess');
         const opacity = getNumber(properties, '$mat.opacity');
 
-        let diffuseMap = getTexture(properties, DIFFUSE_TEXTURE);
-        if (diffuseMap) { 
-            let id = TextureManager.Instance.addTextureFromPath(`${path}/${diffuseMap}`, { wrapping: 'repeat' })
-            diffuseMap = id;
-        }
+        const diffuseMap = getTexture(properties, DIFFUSE_TEXTURE);
+        const specularMap = getTexture(properties, SPECULAR_TEXTURE);
+        const normalMap = getTexture(properties, NORMAL_TEXTURE);
+        const emissiveMap = getTexture(properties, EMISSIVE_TEXTURE);
+        const maskMap = getTexture(properties, MASK_TEXTURE);
+        const reflectivityMap = getTexture(properties, AMBIENT_TEXTURE);
 
-        let specularMap = getTexture(properties, SPECULAR_TEXTURE);
-        if(specularMap) {
-            let id = TextureManager.Instance.addTextureFromPath(`${path}/${specularMap}`, { wrapping: 'repeat' })
-            specularMap = id;
-        }
-
-        let normalMap = getTexture(properties, NORMAL_TEXTURE);
-        if (normalMap) {
-            let id = TextureManager.Instance.addTextureFromPath(`${path}/${normalMap}`, { wrapping: 'repeat' })
-            normalMap = id;
-        }
-        let emissiveMap = getTexture(properties, EMISSIVE_TEXTURE);
-        if (emissiveMap) {
-            let id = TextureManager.Instance.addTextureFromPath(`${path}/${emissiveMap}`, { wrapping: 'repeat' })
-            emissiveMap = id;
-        }
-        let maskMap = getTexture(properties, MASK_TEXTURE);
-        if (maskMap) {
-            let id = TextureManager.Instance.addTextureFromPath(`${path}/${maskMap}`, { wrapping: 'repeat' })
-            maskMap = id;
-        }
-        let reflectivityMap = getTexture(properties, AMBIENT_TEXTURE);
-        if (reflectivityMap) {
-            let id = TextureManager.Instance.addTextureFromPath(`${path}/${reflectivityMap}`, { wrapping: 'repeat' })
-            reflectivityMap = id;
-        }
-
-        const material = Material.Default({
-            ambient, diffuse, specular, shininess, emissive, opacity,
-            textures: {
+        const material: OutputMaterial = {
+            name,
+            diffuse, specular, ambient,
+            emissive, shininess, opacity,
+            texturesPaths: {
                 base: diffuseMap,
                 specular: specularMap,
                 normal: normalMap,
                 emissive: emissiveMap,
                 mask: maskMap,
                 reflectivity: reflectivityMap
-            }}
-        );
-    
+            }
+        }
         
         resolve({name, material});
     });

@@ -55,7 +55,7 @@ export class Body extends CannonBody {
         vec3.transformQuat(v, offset, q2);
         offset = v;
         this.addShape(shape.cShape, new Vec3(offset[0], offset[1], offset[2]), new Quaternion(q[0], q[1], q[2], q[3]));
-        if (shape.debugModel) {
+        /* if (shape.debugModel) {
             shape.debugModel.material.properties.set('color', [1, 0, 0]);
             const model = new ModelNode(`debug_shape ${Math.random()}`, shape.debugModel);
             model.onUpdate = (node: Node) => {
@@ -67,7 +67,7 @@ export class Body extends CannonBody {
                 node.setScale(inverseScale);
             }
             this.owner?.addChild(model);
-        }
+        } */
         return this;
     }
 

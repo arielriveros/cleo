@@ -11,12 +11,12 @@ let app = new CLEO.CleoEngine({
 
 function loadAssets(): void {
     app.isPaused = true;
-    CLEO.TextureManager.Instance.addTextureFromPathWithId('crateDiff', 'assets/crateTextures/diff.png');
-    CLEO.TextureManager.Instance.addTextureFromPathWithId('crateSpec', 'assets/crateTextures/spec.png');
-    CLEO.TextureManager.Instance.addTextureFromPathWithId('crateEmis', 'assets/crateTextures/emis.png');
-    CLEO.TextureManager.Instance.addTextureFromPathWithId('crateRefl', 'assets/crateTextures/refl.png');
-    CLEO.TextureManager.Instance.addTextureFromPathWithId('world', 'assets/world.png');
-    CLEO.TextureManager.Instance.addTextureFromPathWithId('terrain', 'assets/terrain_tex.jpg');
+    CLEO.TextureManager.Instance.addTextureFromPath('assets/crateTextures/diff.png', {}, 'crateDiff');
+    CLEO.TextureManager.Instance.addTextureFromPath('assets/crateTextures/spec.png', {}, 'crateSpec');
+    CLEO.TextureManager.Instance.addTextureFromPath('assets/crateTextures/emis.png', {}, 'crateEmis');
+    CLEO.TextureManager.Instance.addTextureFromPath('assets/crateTextures/refl.png', {}, 'crateRefl');
+    CLEO.TextureManager.Instance.addTextureFromPath('assets/world.png', {}, 'world');
+    CLEO.TextureManager.Instance.addTextureFromPath('assets/terrain_tex.jpg', {}, 'terrain');
 }
 
 loadAssets();
@@ -99,7 +99,7 @@ crate.onUpdate = (node, delta, time) => {
 }
 crate.addChild(pl2);
 
-CLEO.Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']}).then(roomModel => {
+/* CLEO.Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']}).then(roomModel => {
     const room = new CLEO.Node('room');
     roomModel[0].model.material.config.castShadow = true;
     const roomNode = new CLEO.ModelNode(roomModel[0].name, roomModel[0].model);
@@ -114,13 +114,14 @@ CLEO.Model.FromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/v
     }
     room.addChild(roomNode);
     app.scene.addNode(room);
-});
+}); */
 
 
 const floor = new CLEO.Node('floor');
 floor.rotateX(-90).setBody(0).attachShape(CLEO.Shape.Plane())
 
 
+//
 /* CLEO.Model.FromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then(sponzaModels => {
     const sponza = new CLEO.Node('sponza')
     sponza.setBody(0);
@@ -128,57 +129,67 @@ floor.rotateX(-90).setBody(0).attachShape(CLEO.Shape.Plane())
         result.model.material.config.castShadow = true;
         const node = new CLEO.ModelNode(result.name, result.model);
         sponza.addChild(node);
-        const geometry = new CLEO.Geometry();
-        if (result.name === 'sponza_sponza_arch' ||
-            result.name === 'sponza_sponza_bricks' ||
-            result.name === 'sponza_sponza_ceiling' ||
-            result.name === 'sponza_sponza_column_a' ||
-            result.name === 'sponza_sponza_column_b' ||
-            result.name === 'sponza_sponza_column_c' ||
-            result.name === 'sponza_sponza_flagpole' ||
-            result.name === 'sponza_sponza_roof' ||
-            result.name === 'sponza_sponza_vase' ||
-            result.name === 'sponza_sponza_vase_round') { 
-                geometry.positions.push(...result.model.geometry.positions);
-                geometry.indices.push(...result.model.geometry.indices);
-            }
-            
-            sponza.body?.attachShape(CLEO.Shape.TriMesh(geometry, [1, 1, 1]))
     }
     app.scene.addNode(sponza);
+    console.log("Sponza From File", performance.now() - time);
 }); */
 
-const backpack = new CLEO.Node('backpack')
-/* backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(CLEO.Shape.Box(1, 2, 1));
-const backpackModels = await CLEO.Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
-for (const result of backpackModels) {
-    result.model.material.config.castShadow = true;
-    const node = new CLEO.ModelNode(result.name, result.model);
-    backpack.addChild(node);
-} */
+/*
+CLEO.Model.FromJSON('assets/sponza/model.json').then((sponzaModels: CLEO.Model | CLEO.Model[]) => {
+    const sponza = new CLEO.Node('sponza');
+    if (Array.isArray(sponzaModels)) {
+        for (const m of sponzaModels) {
+            m.material.config.castShadow = true;
+            const node = new CLEO.ModelNode(Math.random().toString(), m);
+            sponza.addChild(node);
+        }
+    }
+    app.scene.addNode(sponza);
+    console.log("Sponza From JSON", performance.now() - time);
+});
+ */
+// Load model from file
 
-const helmet = new CLEO.Node('helmet')
-helmet.setPosition([1, 2, -2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(CLEO.Shape.Sphere(0.5));
+CLEO.Model.FromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']}).then(backpackModels => {
+    const backpack = new CLEO.Node('backpack')
+    backpack.setPosition([-1, 2, 0]).setUniformScale(0.5).setBody(10).attachShape(CLEO.Shape.Box(1, 2, 1));
+    for (const result of backpackModels) {
+        result.model.material.config.castShadow = true;
+        const node = new CLEO.ModelNode(result.name, result.model);
+        backpack.addChild(node);
+    }
+    app.scene.addNode(backpack);
+});
 
+CLEO.Model.FromJSON('assets/backpack/model.json').then(backpackModel => {
+    const backpack = new CLEO.ModelNode('backpack2', backpackModel as CLEO.Model);
+    backpack.setPosition([2, 1, -2]).setUniformScale(0.5).setBody(10).attachShape(CLEO.Shape.Box(1, 2, 1));
+    app.scene.addNode(backpack);
+});
+
+// Load model from file
 CLEO.Model.FromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']}).then(damagedHelmetModels => {
+    const helmet = new CLEO.Node('helmet')
+    helmet.setPosition([1, 2, -2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(CLEO.Shape.Sphere(0.5));
     for (const result of damagedHelmetModels) {
         result.model.material.config.castShadow = true;
         const node = new CLEO.ModelNode(result.name, result.model);
         helmet.addChild(node);
     }
-
     app.scene.addNode(helmet);
 });
 
 
+CLEO.Model.FromJSON('assets/damagedHelmet/model.json').then(helmetModel => {
+    const helmet = new CLEO.ModelNode('helmet2', helmetModel as CLEO.Model);
+    helmet.setPosition([1, 2, 2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(CLEO.Shape.Sphere(0.5));   
+    app.scene.addNode(helmet);
+});
+
 
 app.scene.skybox = skybox;
 app.scene.environmentMap = envmap;
-
 app.scene.addNodes(floor, sun, pl1, crate);
-app.scene.addNode(helmet);
-app.scene.addNode(backpack);
-
 
 app.onPostInitialize = () => {
     const shootSphere = () => {
@@ -221,6 +232,24 @@ app.onPostInitialize = () => {
     app.input.registerKeyPress('KeyZ', () => { shootSphere(); });
     app.input.registerKeyPress('KeyX', () => { spawnBox(); });
     app.input.registerKeyPress('KeyP', () => {app.isPaused = !app.isPaused})
+    app.input.registerKeyPress('KeyO', () => {
+        /* let sponzaModels = app.scene.getNode('sponza')?.children!;
+        let output = [];
+        for (const model of sponzaModels) 
+            output.push((model as CLEO.ModelNode).model.toJSON());
+        */
+
+        let helmetModel = app.scene.getNode('backpack')?.children![0] as CLEO.ModelNode;
+        helmetModel.model.toJSON().then(output => {
+            console.log(output);
+            const a = document.createElement('a');
+            const file = new Blob([JSON.stringify(output)], {type: 'text/plain'});
+            a.href = URL.createObjectURL(file);
+            a.download = 'model.json';
+            a.click();
+        });
+
+    })
 };  
 
 app.onUpdate = (delta, time) => {

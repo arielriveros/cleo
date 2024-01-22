@@ -1,10 +1,5 @@
 import { gl } from './renderer';
 
-interface InstanceOptions {
-    instanced: boolean;
-    instanceCount: number;
-}
-
 export class Mesh {
     private _vertexArray: WebGLVertexArrayObject;
     private _vertexBuffer: WebGLBuffer;

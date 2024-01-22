@@ -3,34 +3,19 @@ import { Loader } from './loader';
 
 export class Cubemap {
     private readonly _texture: WebGLTexture;
-    private _images: {data: Uint8Array, width: number, height: number}[];
+    private _images: HTMLImageElement[];
 
     constructor() {
         this._texture = gl.createTexture() as WebGLTexture;
         this._images = [];
     }
 
-    private _loadImage(path: string): Promise<{data: Uint8Array, width: number, height: number}> {
+    private _loadImage(path: string): Promise<HTMLImageElement> {
         return new Promise((resolve, reject) => {
-            const image = new Image();
-            image.src = path;
-            image.onload = () => {
-                const data = new Uint8Array(image.width * image.height * 4);
-                const canvas = document.createElement('canvas');
-                canvas.width = image.width;
-                canvas.height = image.height;
-                const context = canvas.getContext('2d');
-                if (!context) throw new Error('Failed to create canvas context');
-                context.drawImage(image, 0, 0);
-                const imageData = context.getImageData(0, 0, image.width, image.height);
-                data.set(imageData.data);
-                resolve({
-                    data: data,
-                    width: image.width,
-                    height: image.height
-                });
-            };
-            image.onerror = () => reject();
+            Loader.loadImage(path).then(image => {
+                resolve(image);
+            })
+            .catch(err => reject(err));
         });
     }
 
@@ -73,10 +58,8 @@ export class Cubemap {
         let format = gl.RGBA;
         let type = gl.UNSIGNED_BYTE;
 
-        for (let i = 0; i < this._images.length; i++) {
-            const image = this._images[i];
-            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, internalFormat, image.width, image.height, 0, format, type, image.data);
-        }
+        for (let i = 0; i < this._images.length; i++)
+            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, internalFormat, format, type, this._images[i]);
 
         gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
         gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
@@ -94,5 +77,5 @@ export class Cubemap {
     }
 
     public get texture(): WebGLTexture { return this._texture; }
-    public get data(): {data: Uint8Array, width: number, height: number}[] { return this._images; }
+    public get data(): HTMLImageElement[] { return this._images; }
 }
