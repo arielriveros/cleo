@@ -6,7 +6,6 @@ import { Scene } from "./scene/scene";
 
 interface CleoConfig {
     graphics?: {
-        canvas?: HTMLCanvasElement;
         clearColor?: number[];
         shadowMapSize?: number;
         bloom?: boolean;
@@ -35,10 +34,9 @@ export class CleoEngine {
     public onPostInitialize: () => void;
 
     constructor(config?: CleoConfig) {
-        this._setViewport();
-        this._renderer = new Renderer( this._viewport, { clearColor: config?.graphics?.clearColor,
-                                                         shadowMapResolution: config?.graphics?.shadowMapSize,
-                                                         bloom: config?.graphics?.bloom });
+        this._renderer = new Renderer( { clearColor: config?.graphics?.clearColor,
+                                         shadowMapResolution: config?.graphics?.shadowMapSize,
+                                         bloom: config?.graphics?.bloom });
         this._physicsSystem = new PhysicsSystem({
             gravity: config?.physics?.gravity || [0, -9.81, 0],
             killZHeight: config?.physics?.killZHeight || -100
@@ -48,11 +46,6 @@ export class CleoEngine {
         this.onPreInitialize = async () => {};
         this.onPostInitialize = () => {};
     }
-
-    public get scene(): Scene { return this._scene; }
-    public set scene(scene: Scene) { this._scene = scene; }
-    public get camera(): Camera { return this._camera; }
-    public set camera(camera: Camera) { this._camera = camera; }
 
     private async _initialize(): Promise<void> {
         if (this._ready) return;
@@ -64,14 +57,10 @@ export class CleoEngine {
         await this.onPreInitialize();
 
         this._renderer.initialize(this._camera);
-
-        if (this._scene) {
-            this._scene.update(0, 0);
-            this._physicsSystem.initialize(this._scene);
-            this._ready = true;
-        }
-
+        this._physicsSystem.initialize();
         this.onPostInitialize();
+
+        this._ready = true;
     }
 
     public run(): void {
@@ -88,10 +77,13 @@ export class CleoEngine {
         if (!this._paused) {
             this._physicsSystem.update(deltaTime);
         }
-        this._scene.update(deltaTime, currentTimestamp);
+
+        if (this._scene) {
+            this._scene.update(deltaTime, currentTimestamp);
+            this._renderer.render(this._camera, this._scene);
+        }
 
         this._camera.update();
-        this._renderer.render(this._camera, this._scene);
         this.onUpdate(deltaTime, currentTimestamp);
     
         this._lastTimestamp = currentTimestamp;
@@ -99,23 +91,26 @@ export class CleoEngine {
         requestAnimationFrame(this._gameLoop.bind(this));
     }
 
+    public setViewport(viewport: HTMLElement) {
+        this._viewport = viewport;
+        this._renderer.viewport = viewport;
+        //this._viewport.appendChild(this._renderer.viewport);
+    }
+
+    public setScene(scene: Scene) {
+        this._scene = scene;
+        this._scene.update(0, 0);
+        this._physicsSystem.scene = this._scene;
+    }
+    public setCamera(camera: Camera) { this._camera = camera; }
+
     public onResize(): void {
         this._renderer.resize();
         this._camera.resize(this._renderer.canvas.width, this._renderer.canvas.height);
     }
 
-    private _setViewport(): void {
-        let viewport = document.getElementById('game-viewport');
-        if (!viewport) {
-            viewport = document.createElement('div');
-            viewport.id = 'game-viewport';
-            document.body.appendChild(viewport);
-        }
-        this._viewport = viewport;
-        this._viewport.style.display = 'flex';
-        this._viewport.style.position = 'relative';
-    }
-
+    public get scene(): Scene { return this._scene; }
+    public get camera(): Camera { return this._camera; }
     public get viewport(): HTMLElement { return this._viewport; }
     public get renderer(): Renderer { return this._renderer; }
     public get input(): InputManager { return InputManager.instance; }

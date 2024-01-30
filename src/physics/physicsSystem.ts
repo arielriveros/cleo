@@ -17,8 +17,7 @@ export class PhysicsSystem {
         this._killZHeight = config?.killZHeight || -100;
     }
 
-    public initialize(scene: Scene): void {
-        this._scene = scene;
+    public initialize(): void {
         this._world = new World();
         this._world.gravity.set(this._gravity[0], this._gravity[1], this._gravity[2]);
         this._world.allowSleep = true;
@@ -27,8 +26,8 @@ export class PhysicsSystem {
     }
 
     public update(deltaTime: number): void {
-        this._world?.step(deltaTime);
         if (!this._scene) return;
+        this._world?.step(deltaTime);
         const nodes = this._scene.nodes;
         for (const node of nodes) {
             if (!node.body) continue;
@@ -48,5 +47,18 @@ export class PhysicsSystem {
                 node.body.removeEventListener('collide', node.body.onCollision);
             }
         }
+    }
+
+    public clear(): void {
+        if (!this._world) return;
+        this._world.bodies.forEach(body => {
+            this._world.removeBody(body);
+        });
+        this._world.bodies = [];
+    }
+
+    public set scene(scene: Scene) {
+        this.clear();
+        this._scene = scene;
     }
 }

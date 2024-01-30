@@ -40,6 +40,7 @@ interface RendererConfig {
 export class Renderer {
     private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
+    private _viewport: HTMLElement;
 
     private _exposure: number = 1.0;
     private _chromaticAberrationStrength: number = 0.0;
@@ -57,12 +58,10 @@ export class Renderer {
     
     private _shaderManager: ShaderManager;
 
-    constructor(viewport: HTMLElement, config: RendererConfig) {
+    constructor(config: RendererConfig) {
         this._config = config;
         // Create canvas
-        this._canvas = document.createElement('canvas');      
-        // add the canvas to the game element
-        viewport.appendChild(this._canvas);
+        this._canvas = document.createElement('canvas');
 
         // Check WebGL support
         if (!this._canvas.getContext('webgl2'))
@@ -180,9 +179,9 @@ export class Renderer {
     }
 
     public resize() {
-        const viewport = document.getElementById('game-viewport') as HTMLElement;
-        this._canvas.width = viewport.clientWidth //window.innerWidth;
-        this._canvas.height = viewport.clientHeight//window.innerHeight;
+        if (!this._viewport) return;
+        this._canvas.width = this._viewport.clientWidth;
+        this._canvas.height = this._viewport.clientHeight;
 
         if (!gl) return;
         gl.viewport(0, 0, this._canvas.width, this._canvas.height);
@@ -195,7 +194,11 @@ export class Renderer {
         this._bloomFBO.resize(this._canvas.width, this._canvas.height);
     }
 
-    public get canvas(): HTMLCanvasElement { return this._canvas; }
+    public set viewport(viewport: HTMLElement) {
+        if (this._viewport) this._viewport.removeChild(this._canvas);
+        this._viewport = viewport
+        this._viewport.appendChild(this._canvas);
+    }
     public get context(): WebGL2RenderingContext { return gl; }
 
     private _renderScene(scene: Scene, camera: Camera): void {
@@ -435,6 +438,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
         this._screenQuad.draw();   
     }
+
+    public get canvas(): HTMLCanvasElement { return this._canvas; }
 
     public get exposure(): number { return this._exposure; }
     public set exposure(exposure: number) { this._exposure = exposure; }

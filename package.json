@@ -6,7 +6,11 @@
   "scripts": {
     "build": "webpack --mode=production --node-env=production",
     "build:dev": "webpack --mode=development",
-    "watch": "webpack --watch"
+    "watch": "webpack --watch",
+    "dev:example": "cd example && npm run dev",
+    "editor": "cd editor && npm start",
+    "dev:editor": "concurrently \"npm run watch\" \"npm run editor\"",
+    "dev": "concurrently \"npm run watch\" \"npm run dev:example\""
   },
   "author": "Ariel Riveros",
   "license": "ISC",
@@ -14,7 +18,9 @@
     "@types/gl-matrix": "^3.2.0",
     "@types/uuid": "^9.0.7",
     "@types/webgl2": "0.0.10",
+    "concurrently": "^8.2.2",
     "copy-webpack-plugin": "^12.0.2",
+    "file-loader": "^6.2.0",
     "ts-loader": "^9.5.1",
     "ts-shader-loader": "^2.0.2",
     "typescript": "^5.3.2",

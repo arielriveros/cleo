@@ -1,0 +1,77 @@
+.content {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: calc(100% - 30px);
+    padding-top: 30px;
+}
+
+.topbar {
+    position: fixed;
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 30px;
+    background-color: #2d2d77;
+    color: white;
+    justify-content: space-between;
+}
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 20vw;
+    min-width: 200px;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.center {
+    display: flex;
+    flex-direction: column;
+    width: 50vw;
+}
+
+.collapsable {
+    width: 100%;
+    border: 1px solid #3b3b3b;
+    border-radius: 4px;
+    margin-bottom: 10px;
+}
+  
+.collapsableHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px;
+    cursor: pointer;
+    background-color: #3b3b3b;
+}
+
+.collapsableTitle {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.collapsableArrow {
+    font-size: 14px;
+    transition: transform 0.3s ease-in-out;
+}
+
+.collapsableArrow.collapsed {
+    transform: rotate(-90deg);
+}
+
+.collapsableContent {
+    background-color: #202020;
+    max-height: 100%;
+    overflow: hidden;
+
+    /* transition */
+    transition: max-height 0.5s ease-in-out;
+}
+
+.collapsableContent.collapsed {
+    max-height: 0;
+    padding: 0;
+}

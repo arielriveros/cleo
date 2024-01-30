@@ -1,5 +1,4 @@
 import { gl } from "./renderer";
-import { Loader } from './loader';
 
 export interface TextureConfig {
     flipY?: boolean;

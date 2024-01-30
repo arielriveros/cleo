@@ -4,12 +4,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 export class TextureManager {
     private static _instance: TextureManager | null = null;
-    private _isLoading: boolean;
     private _textures: Map<string, Texture>;
 
     private constructor() {
         this._textures = new Map<string, Texture>();
-        this._isLoading = false;
     }
 
     public static get Instance(): TextureManager {
@@ -25,11 +23,9 @@ export class TextureManager {
     }
 
     public addTextureFromPath(path: string, config?: TextureConfig, id?: string): string {
-        this._isLoading = true;
         const texture = new Texture(config);
         Loader.loadImage(path).then(image => {
             texture.create(image, image.width, image.height);
-            this._isLoading = false;
         });
         const identifier = id || uuidv4();
         return this.addTexture(texture, identifier);

@@ -4,35 +4,37 @@ import { Body } from "../../physics/body";
 import { DirectionalLight, Light, PointLight } from "../../graphics/lighting";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
+import { v4 as uuidv4 } from 'uuid';
 
 export class Node {
-    private readonly _name: string;
-    private _parent: Node | null;
-    private readonly _children: Node[];
-    private _scene: Scene | null;
-    private readonly _nodeType: string;
+    protected readonly _id: string = uuidv4();
+    protected readonly _name: string;
+    protected _parent: Node | null;
+    protected readonly _children: Node[];
+    protected _scene: Scene | null;
+    protected readonly _nodeType: 'node' | 'model' | 'light';
     
-    private readonly  _localTransform: mat4;
-    private _worldTransform: mat4;
+    protected readonly  _localTransform: mat4;
+    protected _worldTransform: mat4;
 
-    private readonly _position: vec3;
-    private readonly _translationMatrix: mat4;
+    protected readonly _position: vec3;
+    protected readonly _translationMatrix: mat4;
 
-    private readonly _quaternion: quat;
-    private readonly _rotationMatrix: mat4;
+    protected readonly _quaternion: quat;
+    protected readonly _rotationMatrix: mat4;
 
-    private readonly _scale: vec3;
-    private readonly _scaleMatrix: mat4;
+    protected readonly _scale: vec3;
+    protected readonly _scaleMatrix: mat4;
 
-    private _markForRemoval: boolean = false;
+    protected _markForRemoval: boolean = false;
 
-    private _body: Body | null;
+    protected _body: Body | null;
 
     public onSpawn: (node: Node) => void = () => {};
     public onCollision: (node: Node, other: Node) => void = () => {};
     public onUpdate: (node: Node, delta: number, time: number) => void = () => {};
 
-    constructor(name: string, type: string = 'node') {
+    constructor(name: string, type: 'node' | 'model' | 'light' = 'node') {
         this._name = name;
         this._parent = null;
         this._children = [];
@@ -55,22 +57,32 @@ export class Node {
     }
 
     public addChild(node: Node): void {
-        if (this.body && node.body) {
-            console.error('Cannot add a child to a node with a body');
-            return;
-        }
         node.parent = this;
         this._children.push(node);
+        if (this.scene) {
+            console.log('added child')
+            node.scene = this.scene;
+            this.scene.onChange();
+        }
     }
 
     public removeChild(node: Node): void {
         node.parent = null;
+        node.scene = null;
         this._children.splice(this._children.indexOf(node), 1);
     }
 
-    public getChild(name: string): Node | null {
+    public getChildByName(name: string): Node[] {
+        const nodes: Node[] = [];
         for (const child of this._children)
             if (child.name === name)
+                nodes.push(child);
+        return nodes;
+    }
+
+    public getChildById = (id: string): Node | null => {
+        for (const child of this._children)
+            if (child.id === id)
                 return child;
         return null;
     }
@@ -91,6 +103,44 @@ export class Node {
             child.remove();
     }
 
+    public serialize(): Promise<any> {
+        return new Promise((resolve, reject) => {
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        const node = new Node(json.name, json.type);
+        if (json.position)
+            node.setPosition(json.position);
+        if (json.rotation)
+            node.setRotation(json.rotation);
+        if (json.scale)
+            node.setScale(json.scale);
+        if (json.children) {
+            for (const child of json.children) {
+                if (child.type === 'model')
+                    ModelNode.parse(node, child);
+                else if (child.type === 'light')
+                    LightNode.parse(node, child);
+                else
+                    Node.parse(node, child);
+            }
+        }
+        
+        parent.addChild(node);
+    }
+
+    public get id(): string { return this._id; }
     public get name(): string { return this._name; }
     public set parent(node: Node | null) { this._parent = node; }
     public get parent(): Node | null { return this._parent; }
@@ -279,9 +329,9 @@ export class Node {
     public get body(): Body | null { return this._body; }
     public setBody(mass: number, linearDamping?: number, angularDamping?: number): Body {
         // when setting a non static body, detach from parent so that the body is not affected by the parent's transform
-        if (this._parent && mass > 0) {
+        /* if (this._parent && mass > 0) {
             if (this._parent.body?.mass === 0) {
-                console.log('Cannot set a non static body to a child of a static body')
+                console.warn('Cannot set a non static body to a child of a static body')
             }
             this._worldTransform = this.localTransform;
 
@@ -289,11 +339,11 @@ export class Node {
                 this._parent.removeChild(this);
                 this.scene?.root.addChild(this);
             }
-        }
+        } */
         
         this._body = new Body({
             mass: mass,
-            position: this._parent ? vec3.add(vec3.create(), this._parent.position, this._position) : this._position, //this._position,
+            position: vec3.transformMat4(vec3.create(), this._position, this._worldTransform),
             quaternion: this._quaternion,
             linearDamping: linearDamping,
             angularDamping: angularDamping
@@ -303,33 +353,33 @@ export class Node {
     }
 
     public get position(): vec3 { return this._position; }
-    public get rotation(): vec3 { 
-        let x = this._quaternion[0], y = this._quaternion[1], z = this._quaternion[2], w = this._quaternion[3];
-        let x2 = x * x;
-        let y2 = y * y;
-        let z2 = z * z;
-        let w2 = w * w;
-        let unit = x2 + y2 + z2 + w2;
-        let test = x * w - y * z;
+    public get rotation(): vec3 {
+        let rotMat: mat4 = mat4.fromQuat(mat4.create(), this._quaternion);
         let out = vec3.create();
-        if (test > 0.499995 * unit) { //TODO: Use glmatrix.EPSILON
-            // singularity at the north pole
-            out[0] = Math.PI / 2;
-            out[1] = 2 * Math.atan2(y, x);
-            out[2] = 0;
-        } else if (test < -0.499995 * unit) { //TODO: Use glmatrix.EPSILON
-            // singularity at the south pole
-            out[0] = -Math.PI / 2;
-            out[1] = 2 * Math.atan2(y, x);
-            out[2] = 0;
-        } else {
-            out[0] = Math.asin(2 * (x * z - w * y));
-            out[1] = Math.atan2(2 * (x * w + y * z), 1 - 2 * (z2 + w2));
-            out[2] = Math.atan2(2 * (x * y + z * w), 1 - 2 * (y2 + z2));
+        let m11 = rotMat[0], m12 = rotMat[1], m13 = rotMat[2];
+        let m21 = rotMat[4], m22 = rotMat[5], m23 = rotMat[6];
+        let m31 = rotMat[8], m32 = rotMat[9], m33 = rotMat[10];
+
+
+        out[1] = -Math.asin(Math.min(Math.max(m13, -1), 1));
+
+        if (Math.abs(m13) < 0.99999) {
+            out[0] = -Math.atan2(-m23, m33);
+            out[2] = Math.atan2(-m12, m11);
         }
+        else {
+            out[0] = -Math.atan2(m32, m11);
+            out[2] = 0;
+        }
+
+        out.forEach((value, index) => {
+            // convert to degrees and reduce precision
+            out[index] = Math.round(value * (180 / Math.PI) * 100) / 100;
+        });
 
         return out;
     }
+
     public get quaternion(): quat { return this._quaternion; }
     public get scale(): vec3 { return this._scale; }
     public get nodeType(): string { return this._nodeType; }
@@ -383,6 +433,41 @@ export class ModelNode extends Node {
         this._initialized = true;
     }
 
+    public serialize(): Promise<any> {
+        return new Promise((resolve, reject) => {
+            this._model.serialize().then(model => {
+                Promise.all(this._children.map(child => child.serialize())).then(children => {
+                    resolve({
+                        name: this._name,
+                        type: this._nodeType,
+                        position: [this._position[0], this._position[1], this._position[2]],
+                        rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                        scale: [this._scale[0], this._scale[1], this._scale[2]],
+                        children: children,
+                        model: model
+                    });
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        const node = new ModelNode(json.name, Model.parse(json.model));
+        node.setPosition(json.position);
+        node.setRotation(json.rotation);
+        node.setScale(json.scale);
+        for (const child of json.children) {
+            if (child.type === 'model')
+                ModelNode.parse(node, child);
+            else if (child.type === 'light')
+                LightNode.parse(node, child);
+            else
+                Node.parse(node, child);
+        }
+        
+        parent.addChild(node);
+    }
+
     public get model(): Model { return this._model; }
     public get initialized(): boolean { return this._initialized; }
 }
@@ -407,6 +492,86 @@ export class LightNode extends Node {
             this._type = 'point';
         else
             throw new Error("Light type not supported");
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve, reject) => {
+            let lightData = {};
+            switch (this._type) {
+                case 'directional':
+                    lightData = {
+                        diffuse: [this._light.diffuse[0], this._light.diffuse[1], this._light.diffuse[2]],
+                        specular: [this._light.specular[0], this._light.specular[1], this._light.specular[2]],
+                        ambient: [this._light.ambient[0], this._light.ambient[1], this._light.ambient[2]],
+                    };
+                    break;
+                case 'point':
+                    lightData = {
+                        diffuse: [this._light.diffuse[0], this._light.diffuse[1], this._light.diffuse[2]],
+                        specular: [this._light.specular[0], this._light.specular[1], this._light.specular[2]],
+                        ambient: [this._light.ambient[0], this._light.ambient[1], this._light.ambient[2]],
+                        linear: (this._light as PointLight).linear,
+                        quadratic: (this._light as PointLight).quadratic
+                    };
+                    break;
+                case 'spot':
+                    lightData = {
+                        diffuse: [this._light.diffuse[0], this._light.diffuse[1], this._light.diffuse[2]],
+                        specular: [this._light.specular[0], this._light.specular[1], this._light.specular[2]],
+                        ambient: [this._light.ambient[0], this._light.ambient[1], this._light.ambient[2]],
+                        /* 
+                        linear: (this._light as SpotLight).linear,
+                        quadratic: (this._light as SpotLight).quadratic,
+                        cutOff: (this._light as SpotLight).cutOff, */
+                    };
+                    break;
+            }
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children,
+                    lightType: this._type,
+                    light: lightData
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        let light;
+        switch (json.lightType) {
+            case 'directional':
+                light = new DirectionalLight({
+                    diffuse: json.light.diffuse,
+                    specular: json.light.specular,
+                    ambient: json.light.ambient,
+                });
+                break;
+            case 'point':
+                light = new PointLight({
+                    diffuse: json.light.diffuse,
+                    specular: json.light.specular,
+                    ambient: json.light.ambient,
+                    linear: json.light.linear,
+                    quadratic: json.light.quadratic
+                });
+                break;
+            default:
+                throw new Error(`Light ${json} of type ${json.type} not supported`);
+        }
+        const node = new LightNode(json.name, light, json.lightType === 'directional' ? true : false);
+        node.setPosition(json.position);
+        node.setRotation(json.rotation);
+        node.setScale(json.scale);
+        for (const child of json.children) {
+            Node.parse(node, child);
+        }
+        
+        parent.addChild(node);
     }
 
     public get light(): Light { return this._light; }

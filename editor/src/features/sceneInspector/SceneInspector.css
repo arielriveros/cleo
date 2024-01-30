@@ -1,0 +1,38 @@
+.sceneInspector {
+    display: flex;
+    flex-direction: column;
+    color: white;
+    background-color: #202020;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.sceneItem {
+    display: flex;
+    width: 90%;
+    height: 20px;
+    padding: 1px 5px;
+    margin-bottom: 1px;
+    border: 1px solid #3b3b3b;
+    border-radius: 2px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+
+    justify-content: space-between;
+}
+
+.sceneItemIcon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 5px;
+    vertical-align: middle;
+
+}
+
+.sceneItem:hover {
+    background-color: #2c2cff;
+    cursor: pointer;
+}

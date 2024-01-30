@@ -1,0 +1,11 @@
+.optionButton {
+    color: white;
+    height: 25px;
+    border: 1px solid #ccc;
+    background-color: #3b3b3b;
+    text-align: center;
+    width: 98px;
+    display: inline-block;
+    cursor: pointer;
+    margin: 2px 5px;
+}

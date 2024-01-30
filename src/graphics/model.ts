@@ -21,7 +21,7 @@ export class Model {
         this._mesh = new Mesh();
     }
 
-    public static FromFile(config: FromFileOptions): Promise<{name: string, model: Model}[]> {
+    public static fromFile(config: FromFileOptions): Promise<{name: string, model: Model}[]> {
         return new Promise<{name: string, model: Model}[]>((resolve, reject) => {
             Loader.loadModelsFromFile(config.filePaths)
             .then((meshes) => {
@@ -37,51 +37,60 @@ export class Model {
         });
     }
 
-    public static FromJSON(path: string): Promise<Model> {
+    public static fromJSONFile(path: string): Promise<Model> {
         return new Promise((resolve, reject) => {
             fetch(path)
             .then(res => res.json())
-            .then(data => {
-                const geometry = new Geometry(
-                    data.geometry.positions,
-                    data.geometry.normals,
-                    data.geometry.texCoords,
-                    data.geometry.tangents,
-                    data.geometry.bitangents,
-                    data.geometry.indices
-                );
-
-                let texData = data.material.textures;
-                let baseTexture = texData.base ? TextureManager.Instance.addTextureFromBase64(texData.base, { wrapping: 'repeat' }) : undefined;
-                let specularMap = texData.specular ? TextureManager.Instance.addTextureFromBase64(texData.specular, { wrapping: 'repeat' }) : undefined;
-                let normalMap = texData.normal ? TextureManager.Instance.addTextureFromBase64(texData.normal, { wrapping: 'repeat' }) : undefined;
-                let emissiveMap = texData.emissive ? TextureManager.Instance.addTextureFromBase64(texData.emissive, { wrapping: 'repeat' }) : undefined;
-                let maskMap = texData.mask ? TextureManager.Instance.addTextureFromBase64(texData.mask, { wrapping: 'repeat' }) : undefined;
-                let reflectivityMap = texData.reflectivity ? TextureManager.Instance.addTextureFromBase64(texData.reflectivity, { wrapping: 'repeat' }) : undefined;
-                
-                let material = Material.Default({
-                    diffuse: data.material.diffuse,
-                    specular: data.material.specular,
-                    ambient: data.material.ambient,
-                    emissive: data.material.emissive,
-                    shininess: data.material.shininess,
-                    opacity: data.material.opacity,
-                    textures: {
-                        base: baseTexture,
-                        specular: specularMap,
-                        normal: normalMap,
-                        emissive: emissiveMap,
-                        mask: maskMap,
-                        reflectivity: reflectivityMap
-                    }
-                });
-                resolve(new Model(geometry, material));
-            })
+            .then(data => resolve(Model.parse(data)) )
             .catch(err => reject(err));
         })
     }
 
-    public async toJSON(): Promise<any> {
+    public static parse(data: any): Model {
+        const geometry = new Geometry(
+            data.geometry.positions,
+            data.geometry.normals,
+            data.geometry.texCoords,
+            data.geometry.tangents,
+            data.geometry.bitangents,
+            data.geometry.indices
+        );
+
+        let texData = data.material.textures;
+        let baseTexture = texData.base ? TextureManager.Instance.addTextureFromBase64(texData.base, { wrapping: 'repeat' }) : undefined;
+        let specularMap = texData.specular ? TextureManager.Instance.addTextureFromBase64(texData.specular, { wrapping: 'repeat' }) : undefined;
+        let normalMap = texData.normal ? TextureManager.Instance.addTextureFromBase64(texData.normal, { wrapping: 'repeat' }) : undefined;
+        let emissiveMap = texData.emissive ? TextureManager.Instance.addTextureFromBase64(texData.emissive, { wrapping: 'repeat' }) : undefined;
+        let maskMap = texData.mask ? TextureManager.Instance.addTextureFromBase64(texData.mask, { wrapping: 'repeat' }) : undefined;
+        let reflectivityMap = texData.reflectivity ? TextureManager.Instance.addTextureFromBase64(texData.reflectivity, { wrapping: 'repeat' }) : undefined;
+        
+        let material = Material.Default({
+            diffuse: data.material.diffuse,
+            specular: data.material.specular,
+            ambient: data.material.ambient,
+            emissive: data.material.emissive,
+            shininess: data.material.shininess,
+            opacity: data.material.opacity,
+            textures: {
+                base: baseTexture,
+                specular: specularMap,
+                normal: normalMap,
+                emissive: emissiveMap,
+                mask: maskMap,
+                reflectivity: reflectivityMap
+            }},
+            {
+                side: data.material.config?.side,
+                wireframe: data.material.config?.wireframe,
+                transparent: data.material.config?.transparent,
+                castShadow: data.material.config?.castShadow
+            }
+            );
+
+        return new Model(geometry, material);
+    }
+
+    public async serialize(): Promise<any> {
         let geometry = {
             positions: this._geometry.positions,
             normals: this._geometry.normals,
@@ -111,6 +120,12 @@ export class Model {
                 emissive: serialize('emissiveMap'),
                 mask: serialize('maskMap'),
                 reflectivity: serialize('reflectivityMap')
+            },
+            config: {
+                side: this._material.config.side,
+                wireframe: this._material.config.wireframe,
+                transparent: this._material.config.transparent,
+                castShadow: this._material.config.castShadow,
             }
         };
 

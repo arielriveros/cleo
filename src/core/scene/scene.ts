@@ -2,7 +2,7 @@ import { Cubemap } from "../../graphics/cubemap";
 import { LightNode, ModelNode, Node } from "./node";
 
 export class Scene {
-    private _root: Node;
+    private _root: Node = new Node('root');
     private _nodes: Set<Node>;
     private _lights: Set<LightNode>;
     private _models: Set<ModelNode>;
@@ -12,21 +12,25 @@ export class Scene {
 
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
+    public onChangeEvent: ((scene: Scene) => void) | null;
 
     constructor() {
-        this._root = new Node('root');
         this._nodes = new Set();
         this._lights = new Set();
         this._models = new Set();
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
+
+        this.onChangeEvent = null;
     }
 
     public addNode(node: Node): void {
         this._root.addChild(node);
-        this._dirty = true;
+        this.onChange();
         node.scene = this;
+        for (const child of node.children)
+            child.scene = this;
         node.onSpawn(node);
     }
 
@@ -39,14 +43,14 @@ export class Scene {
         if (node.parent)
             node.parent.children.splice(node.parent.children.indexOf(node), 1);
         node.parent = null;
-        this._dirty = true;
+        this.onChange();
     }
 
     public removeNodeByName(name: string): void {
-        const node = this.getNode(name);
-        if (node) {
-            this.removeNode(node);
-            this._dirty = true;
+        const nodesToRemove = this.getNodesByName(name);
+        if (nodesToRemove.length > 0) {
+            for (const node of nodesToRemove)
+                this.removeNode(node);
         }
     }
 
@@ -96,16 +100,58 @@ export class Scene {
             if (node instanceof ModelNode)
                 this._models.add(node);
         }
+
+        console.log(this._nodes);
     }
  
-    public getNode(name: string): Node | undefined {
+    public getNodesByName(name: string): Node[] {
+        if (this._dirty)
+            this.breadthFirstTraversal();
+
+        const nodes: Node[] = [];
+        for (const node of this._nodes) {
+            if (node.name === name)
+                nodes.push(node);
+        }
+
+        return nodes;
+    }
+
+    public getNodeById(id: string): Node | undefined {
         if (this._dirty)
             this.breadthFirstTraversal();
         for (const node of this._nodes) {
-            if (node.name === name)
+            if (node.id === id)
                 return node;
         }
         return undefined;
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve, reject) => {
+            this._root.serialize().then((json: any) => {
+                resolve(json);
+            });
+        });
+    }
+
+    public fromJSON(path: string): Promise<Scene> {
+        return new Promise((resolve, reject) => {
+            fetch(path).then((response: Response) => {
+                response.json().then((json: any) => {
+                    this.parse(json);
+                    resolve(this);
+                });
+            });
+        });
+    }
+
+    public parse(json: any): void {
+        // change the root node entirely not just its children
+        this._root = new Node('root');
+        this._root.scene = this;
+        this._dirty = true;
+        Node.parse(this._root, json);
     }
 
     // TODO: Move this to a LightManager class
@@ -123,7 +169,15 @@ export class Scene {
         this._numPointLights = pointLights;
     }
 
+    public onChange() {
+        this._dirty = true;
+        if (this.onChangeEvent)
+            this.onChangeEvent(this);
+    }
+
     public get root(): Node { return this._root; }
+    public get dirty(): boolean { return this._dirty; }
+    public set dirty(value: boolean) { this._dirty = value; }
 
     public get nodes(): Set<Node> {
         if (this._dirty)

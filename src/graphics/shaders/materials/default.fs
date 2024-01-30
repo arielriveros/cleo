@@ -75,7 +75,7 @@ float shadowCalculation(vec4 fragPosLS) {
 
     float closestDepth = texture(u_shadowMap, projCoords.xy).r; 
     float currentDepth = projCoords.z;
-    float bias = 0.00033;
+    float bias = 0.001;
     float shadow = 0.0;
 
     // pcf
@@ -186,10 +186,10 @@ void main() {
     }
 
     if (u_material.hasEmissiveMap)
-        result += vec3(texture(u_material.emissiveMap, fragTexCoord)) * u_material.emissive;
+        result += vec3(texture(u_material.emissiveMap, fragTexCoord)) * u_material.emissive * 1.25;
 
     else
-        result += u_material.emissive;   
+        result += u_material.emissive * 1.25;
 
     float alpha = u_material.opacity;
     fragColor = vec4(result, alpha);
