@@ -33,6 +33,7 @@ export class Node {
     public onSpawn: (node: Node) => void = () => {};
     public onCollision: (node: Node, other: Node) => void = () => {};
     public onUpdate: (node: Node, delta: number, time: number) => void = () => {};
+    public onChange: () => void = () => {};
 
     constructor(name: string, type: 'node' | 'model' | 'light' = 'node') {
         this._name = name;
@@ -59,17 +60,21 @@ export class Node {
     public addChild(node: Node): void {
         node.parent = this;
         this._children.push(node);
+        node.onChange = this.onChange;
+        node.onSpawn(node);
         if (this.scene) {
-            console.log('added child')
             node.scene = this.scene;
-            this.scene.onChange();
+            for (const child of node.children)
+                child.onSpawn(child);
         }
+        this.onChange();
     }
 
     public removeChild(node: Node): void {
         node.parent = null;
         node.scene = null;
         this._children.splice(this._children.indexOf(node), 1);
+        this.onChange();
     }
 
     public getChildByName(name: string): Node[] {
@@ -87,14 +92,12 @@ export class Node {
         return null;
     }
 
-    public updateTransform(): void {
+    public updateWorldTransform(): void {
         if (this._parent)
             mat4.multiply(this._worldTransform, this._parent.worldTransform, this.localTransform);
-        else
-            this._worldTransform = this.localTransform; 
 
         for (const child of this._children)
-            child.updateTransform();
+            child.updateWorldTransform();
     }
 
     public remove(): void {
@@ -162,7 +165,7 @@ export class Node {
         if (this._parent)
             return this._worldTransform;
         else
-            return mat4.create();
+            return this.localTransform;
     }
 
     public get forward(): vec3 {
@@ -328,18 +331,7 @@ export class Node {
 
     public get body(): Body | null { return this._body; }
     public setBody(mass: number, linearDamping?: number, angularDamping?: number): Body {
-        // when setting a non static body, detach from parent so that the body is not affected by the parent's transform
-        /* if (this._parent && mass > 0) {
-            if (this._parent.body?.mass === 0) {
-                console.warn('Cannot set a non static body to a child of a static body')
-            }
-            this._worldTransform = this.localTransform;
-
-            if (this._parent && this._parent.name !== 'root') {
-                this._parent.removeChild(this);
-                this.scene?.root.addChild(this);
-            }
-        } */
+        // TODO: when setting a non static body, detach from parent so that the body is not affected by the parent's transform
         
         this._body = new Body({
             mass: mass,
@@ -354,6 +346,7 @@ export class Node {
 
     public get position(): vec3 { return this._position; }
     public get rotation(): vec3 {
+        // FIX: Some rotations are not correct
         let rotMat: mat4 = mat4.fromQuat(mat4.create(), this._quaternion);
         let out = vec3.create();
         let m11 = rotMat[0], m12 = rotMat[1], m13 = rotMat[2];

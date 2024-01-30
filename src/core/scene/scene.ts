@@ -12,9 +12,11 @@ export class Scene {
 
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
-    public onChangeEvent: ((scene: Scene) => void) | null;
+    public onChange: ((scene: Scene) => void) | null;
 
     constructor() {
+        this._root.scene = this;
+        this._root.onChange = this._onChange.bind(this);
         this._nodes = new Set();
         this._lights = new Set();
         this._models = new Set();
@@ -22,12 +24,11 @@ export class Scene {
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
 
-        this.onChangeEvent = null;
+        this.onChange = null;
     }
 
     public addNode(node: Node): void {
         this._root.addChild(node);
-        this.onChange();
         node.scene = this;
         for (const child of node.children)
             child.scene = this;
@@ -43,7 +44,6 @@ export class Scene {
         if (node.parent)
             node.parent.children.splice(node.parent.children.indexOf(node), 1);
         node.parent = null;
-        this.onChange();
     }
 
     public removeNodeByName(name: string): void {
@@ -66,7 +66,7 @@ export class Scene {
                 this.removeNode(node);
                 continue;
             }
-            node.updateTransform();
+            node.updateWorldTransform();
             node.onUpdate(node, delta, time);
         }
     }
@@ -100,8 +100,6 @@ export class Scene {
             if (node instanceof ModelNode)
                 this._models.add(node);
         }
-
-        console.log(this._nodes);
     }
  
     public getNodesByName(name: string): Node[] {
@@ -148,10 +146,12 @@ export class Scene {
 
     public parse(json: any): void {
         // change the root node entirely not just its children
-        this._root = new Node('root');
-        this._root.scene = this;
+        let newScene = new Node('root');
+        newScene.scene = this;
+        newScene.onChange = this._onChange.bind(this);
+        Node.parse(newScene, json);
         this._dirty = true;
-        Node.parse(this._root, json);
+        this._root = newScene.getChildByName('root')[0] as Node;
     }
 
     // TODO: Move this to a LightManager class
@@ -169,15 +169,13 @@ export class Scene {
         this._numPointLights = pointLights;
     }
 
-    public onChange() {
+    private _onChange() {
         this._dirty = true;
-        if (this.onChangeEvent)
-            this.onChangeEvent(this);
+        if (this.onChange)
+            this.onChange(this);
     }
 
     public get root(): Node { return this._root; }
-    public get dirty(): boolean { return this._dirty; }
-    public set dirty(value: boolean) { this._dirty = value; }
 
     public get nodes(): Set<Node> {
         if (this._dirty)

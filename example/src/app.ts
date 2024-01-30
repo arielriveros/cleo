@@ -247,6 +247,11 @@ app.onUpdate = (delta, time) => {
         (crate as CLEO.ModelNode).model.material.properties.set('emissive', [1, change * 2, 0]);
         (crate.getChildByName('pointLight2')[0] as CLEO.LightNode).light.diffuse[1] = change;
     }
+
+    let root = app.scene.root;
+    if (root) {
+        root.rotateY(0.1);
+    }
 }
 
 app.run();

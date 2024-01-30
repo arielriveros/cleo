@@ -39,7 +39,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const scene = new Scene();
         setScene(scene);
 
-        scene.onChangeEvent = () => { setSceneChanged( (prev) => !prev ) };
+        scene.onChange = () => { console.log('change'); setSceneChanged( (prev) => !prev ) };
 
         const camera = new Camera({
             position: [0, 0.5, -2],

@@ -21,28 +21,29 @@ export default function NodeInspector() {
   }, [selectedNode])
 
   return (
-    <Sidebar width='30vw'> {
-      node && 
-        <div className='nodeInspector'>
-            <Collapsable title='Node Information'>
-              Name: {node.name}
-              <br />
-              Id: {node.id}
-              <br />
-              Type: { node.nodeType.charAt(0).toUpperCase() + node.nodeType.slice(1) }
-              <br />
-              Children: {node.children.length}
-            </Collapsable>
+    <Sidebar width='30vw'> 
+      <div className='nodeInspector'>
+      { node && 
+        <>
+          <Collapsable title='Node Information'>
+            Name: {node.name}
+            <br />
+            Id: {node.id}
+            <br />
+            Type: { node.nodeType.charAt(0).toUpperCase() + node.nodeType.slice(1) }
+            <br />
+            Children: {node.children.length}
+          </Collapsable>
 
-            <TransformEditor node={node} />
-            <AddNew node={node} />
+          <TransformEditor node={node} />
+          <AddNew node={node} />
 
-            {
-              node.nodeType === 'model' &&
-                <MaterialEditor node={node as ModelNode} />
-            }
-            
-        </div>
-    } </Sidebar>
+          {
+            node.nodeType === 'model' &&
+              <MaterialEditor node={node as ModelNode} />
+          }
+        </>
+      } </div>
+    </Sidebar>
   )
 }
