@@ -5,6 +5,9 @@ import { Node } from 'cleo';
 import Sidebar from '../../components/Sidebar'
 import ModelIcon from '../../icons/model.png'
 import LightIcon from '../../icons/light.png'
+import SkyboxIcon from '../../icons/skybox.png'
+import Collapsable from '../../components/Collapsable';
+import AddNew from './AddNew';
 import './SceneInspector.css'
 
 interface SceneNodeItemProps {
@@ -16,11 +19,14 @@ interface SceneNodeItemProps {
     onExpand?: (nodeId: string) => void;
 }
 function SceneNodeItem(props: SceneNodeItemProps) {
+    const { selectedNode } = useCleoEngine();
+
     return (
-        <span className='sceneItem' onClick={() => props.onSelect(props.nodeId)}>
+        <span className={`sceneItem ${selectedNode === props.nodeId ? 'selected' : ''}`} onClick={() => props.onSelect(props.nodeId)}>
             <div>
                 {props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='sceneItemIcon' /> }
                 {props.nodeType === 'light' && <img src={LightIcon} alt='light' className='sceneItemIcon' /> }
+                {props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='sceneItemIcon' /> }
                 {props.nodeName}
             </div>
             {props.children && props.children.length > 0 && <div onClick={() => props.onExpand && props.onExpand(props.nodeId)}>+</div>}
@@ -28,7 +34,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
     )
 }
 
-function SceneListRecursive(props: { node: { id: string, name: string, type: string, children: any[]}, setSelectedNode: (nodeId: string) => void}) {
+function SceneListRecursive(props: { node: { id: string, name: string, type: string, children: any[]}, setSelectedNode: (nodeId: string | null) => void}) {
     const [isVisible, setIsVisible] = useState(true);
     const expand = () => {
       setIsVisible(!isVisible);
@@ -54,7 +60,7 @@ function SceneListRecursive(props: { node: { id: string, name: string, type: str
 
 
 export default function SceneInspector() {
-    const { instance, sceneChanged, setSelectedNode } = useCleoEngine()
+    const { scene, sceneChanged, setSelectedNode } = useCleoEngine()
     const [ nodes, setNodes ] = useState<{ id: string, name: string, type: string, children: any[]} | null>(null);
 
     // generate a recursive list of id nodes where each node has a list of children
@@ -69,14 +75,17 @@ export default function SceneInspector() {
     }
 
     useEffect(() => {
-        if (instance?.scene)
-            setNodes(generateNodeList(instance.scene.root));
+        if (scene)
+            setNodes(generateNodeList(scene.root));
     }, [sceneChanged])
     return (
         <Sidebar width='20vw'>
-            <div className='sceneInspector'>{
-                nodes && <SceneListRecursive node={nodes} setSelectedNode={setSelectedNode}/>
-            }</div>
+            <div className='sceneInspector'>
+            <AddNew />
+            <Collapsable title='Scene'>
+                { nodes && <SceneListRecursive node={nodes} setSelectedNode={setSelectedNode}/> }
+            </Collapsable>
+            </div>
         </Sidebar>
 
     )

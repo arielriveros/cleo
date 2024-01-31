@@ -1,5 +1,5 @@
 import { Loader } from "../loader";
-import { Texture, TextureConfig } from "../texture";
+import { CubemapFaces, Texture, TextureConfig } from "../texture";
 import { v4 as uuidv4 } from 'uuid';
 
 export class TextureManager {
@@ -61,9 +61,50 @@ export class TextureManager {
         canvas.width = texture.width;
         canvas.height = texture.height;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(texture.data, 0, 0);
+        ctx.drawImage(texture.data as HTMLImageElement, 0, 0);
 
         return canvas.toDataURL('image/png', 1.0);
+    }
+
+    public serializeCubeMap(texture: Texture): {
+        positiveX: string,
+        negativeX: string,
+        positiveY: string,
+        negativeY: string,
+        positiveZ: string,
+        negativeZ: string
+    } {
+        if (!texture) return undefined;
+
+        const base64Images = [];
+
+        const canvas = document.createElement('canvas');
+        const data = texture.data as CubemapFaces;
+        const images = [
+            data.posX,
+            data.negX,
+            data.posY,
+            data.negY,
+            data.posZ,
+            data.negZ
+        ];
+
+        for (let i = 0; i < images.length; i++) {
+            canvas.width = images[i].width;
+            canvas.height = images[i].height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(images[i], 0, 0);
+            base64Images.push(canvas.toDataURL('image/png', 1.0));
+        }
+        
+        return {
+            positiveX: base64Images[0],
+            negativeX: base64Images[1],
+            positiveY: base64Images[2],
+            negativeY: base64Images[3],
+            positiveZ: base64Images[4],
+            negativeZ: base64Images[5]
+        }
     }
 
     public removeTexture(id: string): void {

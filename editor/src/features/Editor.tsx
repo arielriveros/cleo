@@ -20,6 +20,7 @@ export default function Editor() {
         if (data) {
           const json = JSON.parse(data as string);
           scene?.parse(json);
+          console.log(json);
         }
       };
     }

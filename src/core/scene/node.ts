@@ -1,10 +1,13 @@
 import { mat4, vec3, quat } from "gl-matrix";
-import { Model } from "../../graphics/model";
 import { Body } from "../../physics/body";
+import { Model } from "../../graphics/model";
 import { DirectionalLight, Light, PointLight } from "../../graphics/lighting";
+import { Skybox } from "../../graphics/skybox";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
 import { v4 as uuidv4 } from 'uuid';
+
+type NodeType = 'node' | 'model' | 'light' | 'skybox';
 
 export class Node {
     protected readonly _id: string = uuidv4();
@@ -12,7 +15,7 @@ export class Node {
     protected _parent: Node | null;
     protected readonly _children: Node[];
     protected _scene: Scene | null;
-    protected readonly _nodeType: 'node' | 'model' | 'light';
+    protected readonly _nodeType: NodeType;
     
     protected readonly  _localTransform: mat4;
     protected _worldTransform: mat4;
@@ -35,7 +38,7 @@ export class Node {
     public onUpdate: (node: Node, delta: number, time: number) => void = () => {};
     public onChange: () => void = () => {};
 
-    constructor(name: string, type: 'node' | 'model' | 'light' = 'node') {
+    constructor(name: string, type: NodeType = 'node') {
         this._name = name;
         this._parent = null;
         this._children = [];
@@ -123,6 +126,7 @@ export class Node {
 
     public static parse(parent: Node, json: any) {
         const node = new Node(json.name, json.type);
+        node.onChange = parent.onChange;
         if (json.position)
             node.setPosition(json.position);
         if (json.rotation)
@@ -135,6 +139,8 @@ export class Node {
                     ModelNode.parse(node, child);
                 else if (child.type === 'light')
                     LightNode.parse(node, child);
+                else if (child.type === 'skybox')
+                    SkyboxNode.parse(node, child);
                 else
                     Node.parse(node, child);
             }
@@ -428,17 +434,16 @@ export class ModelNode extends Node {
 
     public serialize(): Promise<any> {
         return new Promise((resolve, reject) => {
-            this._model.serialize().then(model => {
-                Promise.all(this._children.map(child => child.serialize())).then(children => {
-                    resolve({
-                        name: this._name,
-                        type: this._nodeType,
-                        position: [this._position[0], this._position[1], this._position[2]],
-                        rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
-                        scale: [this._scale[0], this._scale[1], this._scale[2]],
-                        children: children,
-                        model: model
-                    });
+            const model = this._model.serialize()
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children,
+                    model: model
                 });
             });
         });
@@ -450,12 +455,7 @@ export class ModelNode extends Node {
         node.setRotation(json.rotation);
         node.setScale(json.scale);
         for (const child of json.children) {
-            if (child.type === 'model')
-                ModelNode.parse(node, child);
-            else if (child.type === 'light')
-                LightNode.parse(node, child);
-            else
-                Node.parse(node, child);
+            Node.parse(node, child);
         }
         
         parent.addChild(node);
@@ -584,4 +584,62 @@ export class LightNode extends Node {
     }
     public get castShadows(): boolean { return this._castShadows; }
     public set castShadows(value: boolean) { this._castShadows = value; }
+}
+
+export class SkyboxNode extends Node {
+    private readonly _skybox: Skybox
+    private _initialized: boolean;
+
+    constructor(name: string, skybox: Skybox) {
+        super(name, 'skybox');
+        this._skybox = skybox;
+        this._initialized = false;
+    }
+
+    public initializeSkybox(): void {
+        this._skybox.mesh.initializeVAO(ShaderManager.Instance.getShader('skybox').attributes);
+        this._skybox.mesh.create(this._skybox.box.getData(['position']), this._skybox.box.indices.length, this._skybox.box.indices);
+        this._initialized = true;
+    }
+
+    public static parse(parent: Node, json: any) {
+        Skybox.fromBase64({
+            posX: json.skybox.faces.positiveX,
+            negX: json.skybox.faces.negativeX,
+            posY: json.skybox.faces.positiveY,
+            negY: json.skybox.faces.negativeY,
+            posZ: json.skybox.faces.positiveZ,
+            negZ: json.skybox.faces.negativeZ
+        }).then(skybox => {
+            const node = new SkyboxNode(json.name, skybox);
+            node.setPosition(json.position);
+            node.setRotation(json.rotation);
+            node.setScale(json.scale);
+            for (const child of json.children) {
+                Node.parse(node, child);
+            }
+            
+            parent.addChild(node);
+        });
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve, reject) => {
+            const skybox = this._skybox.serialize()
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children,
+                    skybox: skybox
+                });
+            });
+        });
+    }
+
+    public get skybox(): Skybox { return this._skybox; }
+    public get initialized(): boolean { return this._initialized; }
 }

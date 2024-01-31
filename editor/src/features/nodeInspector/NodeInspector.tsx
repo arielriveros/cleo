@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { ModelNode, Node } from 'cleo'
+import { ModelNode, Node, SkyboxNode } from 'cleo'
 import Collapsable from '../../components/Collapsable'
 import Sidebar from '../../components/Sidebar'
 import TransformEditor from './TransformEditor'
-import AddNew from './AddNew'
-import './NodeInspector.css'
 import MaterialEditor from './MaterialEditor'
+import SkyboxEditor from './SkyboxEditor'
+import './NodeInspector.css'
 
 export default function NodeInspector() {
-  const { instance, selectedNode } = useCleoEngine()
+  const { scene, selectedNode } = useCleoEngine()
   const [node, setNode] = useState<Node | null>(null)
 
   useEffect(() => {
-    if (instance?.scene && selectedNode) {
-      const node = instance.scene.getNodeById(selectedNode)
+    if (scene && selectedNode) {
+      const node = scene.getNodeById(selectedNode)
       if (node) setNode(node)
     }
 
@@ -36,12 +36,9 @@ export default function NodeInspector() {
           </Collapsable>
 
           <TransformEditor node={node} />
-          <AddNew node={node} />
 
-          {
-            node.nodeType === 'model' &&
-              <MaterialEditor node={node as ModelNode} />
-          }
+          { node.nodeType === 'model' && <MaterialEditor node={node as ModelNode} /> }
+          { node.nodeType === 'skybox' && <SkyboxEditor node={node as SkyboxNode} /> }
         </>
       } </div>
     </Sidebar>

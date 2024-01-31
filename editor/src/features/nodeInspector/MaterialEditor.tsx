@@ -1,56 +1,63 @@
-import { useState, useEffect, useReducer, useRef } from 'react'
-import { ModelNode, Vec, TextureManager, Texture, Model } from 'cleo'
+import { useState, useEffect } from 'react'
+import { ModelNode, Vec, TextureManager, Texture, Model, Material } from 'cleo'
 import Collapsable from '../../components/Collapsable'
 import './MaterialEditor.css'
 
-function TextureInspector(props: { tex: string, model: Model }) {
+function TextureInspector(props: { tex: string, material: Material }) {
     const [texture, setTexture] = useState<Texture | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [img, setImg] = useState<HTMLImageElement | null>(null);
     useEffect(() => {
-        const texId = props.model.material.textures.get(props.tex);
+        const texId = props.material.textures.get(props.tex);
         setTexture(texId ? TextureManager.Instance.getTexture(texId) : null);
-    }, [props.model, props.tex, texture])
+    }, [props.material, props.tex])
 
     useEffect(() => {
-        if (loading) {
-            setTimeout(() => {
-                if (loading) {
-                    setLoading(false);
-                }
-            }, 10);
-        }
-    }, [loading, setLoading]);
+        setImg(texture ? (texture.data as HTMLImageElement | null) : null);
+    }, [texture])
 
     return (
-        <>
-            {texture && !loading && <img src={texture.data?.src} width={100} height={100} />}
+        <div className='textureInspector'>
+            {img && <img className='texImage' src={img.src} />}
+            <button className='textureDelete' onClick={() => {
+                TextureManager.Instance.removeTexture(props.material.textures.get(props.tex)!);
+                props.material.textures.delete(props.tex);
+                if (props.tex === 'baseTexture')
+                    props.material.properties.set('hasBaseTexture', false)
+                else
+                    props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, false)
+
+                setTexture(null);
+                setImg(null);
+            } }> ✕ </button>
             <label htmlFor={`${props.tex}-upload`} className="textureFileUpload">
                 Upload
             </label>
             <input id={`${props.tex}-upload`} type='file' onChange={(e) => {
                 const file = e.target.files?.item(0);
-                setLoading(true);
                 if (file) {
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         const data = e.target?.result;
-                        if (data) {
-                            TextureManager.Instance.removeTexture(props.model.material.textures.get(props.tex)!);
-                            const texId = TextureManager.Instance.addTextureFromBase64(data as string);
-                            props.model.material.textures.set(props.tex, texId);
-                            if (props.tex === 'baseTexture')
-                                props.model.material.properties.set('hasBaseTexture', true)
+                        const img = new Image();
+                        img.src = data as string;
+                        img.onload = () => {
+                            setImg(img);
+                            if (texture) texture.updateImg(img);
                             else {
-                                props.model.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, true)
+                                const tex = TextureManager.Instance.addTextureFromData(img);
+                                props.material.textures.set(props.tex, tex);
+                                if (props.tex === 'baseTexture')
+                                    props.material.properties.set('hasBaseTexture', true)
+                                else {
+                                    props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, true)
+                                }
                             }
-                            const texture = TextureManager.Instance.getTexture(texId);
-                            setTexture(texture);
                         }
                     }
                     reader.readAsDataURL(file);
                 }
             }} />
-        </>
+        </div>
     )
 }
 
@@ -145,13 +152,13 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 </tr>
                 <tr>
                     <td>
-                        <TextureInspector tex={'baseTexture'} model={model} />
+                        <TextureInspector tex={'baseTexture'} material={model.material} />
                     </td>
                     <td>
-                        <TextureInspector tex={'specularMap'} model={model} />
+                        <TextureInspector tex={'specularMap'} material={model.material} />
                     </td>
                     <td>
-                        <TextureInspector tex={'normalMap'} model={model} />
+                        <TextureInspector tex={'normalMap'} material={model.material} />
                     </td>
                 </tr>
                 <tr>
@@ -161,13 +168,13 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 </tr>
                 <tr>
                     <td>
-                        <TextureInspector tex={'emissiveMap'} model={model} />
+                        <TextureInspector tex={'emissiveMap'} material={model.material} />
                     </td>
                     <td>
-                        <TextureInspector tex={'maskMap'} model={model} />
+                        <TextureInspector tex={'maskMap'} material={model.material} />
                     </td>
                     <td>
-                        <TextureInspector tex={'reflectivityMap'} model={model} />
+                        <TextureInspector tex={'reflectivityMap'} material={model.material} />
                     </td>
                 </tr>
             </tbody>

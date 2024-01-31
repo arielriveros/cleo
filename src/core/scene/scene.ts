@@ -1,13 +1,13 @@
-import { Cubemap } from "../../graphics/cubemap";
-import { LightNode, ModelNode, Node } from "./node";
+import { Texture } from "../../cleo";
+import { LightNode, ModelNode, Node, SkyboxNode } from "./node";
 
 export class Scene {
     private _root: Node = new Node('root');
     private _nodes: Set<Node>;
     private _lights: Set<LightNode>;
     private _models: Set<ModelNode>;
-    private _skybox: Cubemap | null = null;
-    private _environmentMap: Cubemap | null = null;
+    private _skybox: SkyboxNode | null;
+    private _environmentMap: Texture | null = null;
     private _dirty: boolean = true;
 
     // TODO: Move this to a LightManager class
@@ -20,6 +20,7 @@ export class Scene {
         this._nodes = new Set();
         this._lights = new Set();
         this._models = new Set();
+        this._skybox = null;
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
@@ -92,13 +93,21 @@ export class Scene {
         this._nodes = visited;
         this._dirty = false;
 
+        this._filterByType();
+    }
+
+    private _filterByType(): void {
+        // This seems unoptimized, TODO: Fix later
         this._lights = new Set();
         this._models = new Set();
+        this._skybox = null;
         for (const node of this._nodes) {
             if (node instanceof LightNode)
                 this._lights.add(node);
             if (node instanceof ModelNode)
                 this._models.add(node);
+            if (node instanceof SkyboxNode)
+                this._skybox = node;
         }
     }
  
@@ -195,11 +204,14 @@ export class Scene {
         return this._models;
     }
 
-    public get skybox(): Cubemap | null { return this._skybox; }
-    public set skybox(cubemap: Cubemap | null) { this._skybox = cubemap; }
+    public get skybox(): SkyboxNode | null {
+        if (this._dirty)
+            this.breadthFirstTraversal();
+        return this._skybox;
+    }
 
-    public get environmentMap(): Cubemap | null { return this._environmentMap; }
-    public set environmentMap(cubemap: Cubemap | null) { this._environmentMap = cubemap; }
+    public get environmentMap(): Texture | null { return this._environmentMap; }
+    public set environmentMap(envMapTex: Texture | null) { this._environmentMap = envMapTex; }
 
     // TODO: Move this to a LightManager class
     public get numPointLights(): number { return this._numPointLights; }

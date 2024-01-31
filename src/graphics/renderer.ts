@@ -2,7 +2,7 @@ import { vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
-import { LightNode, ModelNode } from '../core/scene/node';
+import { LightNode, ModelNode, SkyboxNode } from '../core/scene/node';
 import { PointLight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
@@ -54,7 +54,6 @@ export class Renderer {
     private _bloomFBO: Framebuffer;
 
     private _screenQuad: Mesh;
-    private _skybox: Mesh;
     
     private _shaderManager: ShaderManager;
 
@@ -74,7 +73,6 @@ export class Renderer {
         this._shaderManager = ShaderManager.Instance;
 
         this._screenQuad = new Mesh();
-        this._skybox = new Mesh();
 
         // Create framebuffers
         this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
@@ -135,11 +133,6 @@ export class Renderer {
         // Create screen quad to render framebuffer to
         this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
         this._screenQuad.create([-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1 ], 12, [0, 1, 2, 0, 2, 3]);
-
-        // Create skybox mesh
-        const cubeGeometry = Geometry.Cube(5, 5, 5);
-        this._skybox.initializeVAO(this._shaderManager.getShader('skybox').attributes);
-        this._skybox.create(cubeGeometry.getData(['position']), cubeGeometry.indices.length, cubeGeometry.indices);
 
         this.resize();
     }
@@ -211,9 +204,12 @@ export class Renderer {
             this._shaderManager.setUniform('u_view', camera.viewMatrix);
             this._shaderManager.setUniform('u_projection', camera.projectionMatrix);
             this._shaderManager.setUniform('u_skybox', 0);
-            scene.skybox.bind(0);
-            this._skybox.draw();
-            scene.skybox.unbind();
+            let skyboxNode = scene.skybox as SkyboxNode;
+            if (!skyboxNode.initialized)
+                skyboxNode.initializeSkybox();
+            skyboxNode.skybox.texture.bind(0);
+            skyboxNode.skybox.mesh.draw();
+            skyboxNode.skybox.texture.unbind();
         }
 
         const transparentDrawQueue: ModelNode[] = [];

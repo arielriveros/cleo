@@ -34,27 +34,41 @@ const dirLight = new CLEO.LightNode('dirLight', new CLEO.DirectionalLight({}), t
 dirLight.setRotation([90, 0, 0]);
 scene1.addNode(dirLight);
 
-const skybox = new CLEO.Cubemap();
-scene1.skybox = skybox.createFromFiles([
-    'assets/cubemaps/skybox/right.jpg',
-    'assets/cubemaps/skybox/left.jpg',
-    'assets/cubemaps/skybox/top.jpg',
-    'assets/cubemaps/skybox/bottom.jpg',
-    'assets/cubemaps/skybox/front.jpg',
-    'assets/cubemaps/skybox/back.jpg'
-]);
-
-const envmap = new CLEO.Cubemap();
-scene1.environmentMap = envmap.createFromFiles([
+const scene2 = new CLEO.Scene();
+const envmap = new CLEO.Texture({target: 'cubemap', flipY: true});
+Promise.all([
     'assets/cubemaps/envmap/right.jpg',
     'assets/cubemaps/envmap/left.jpg',
     'assets/cubemaps/envmap/top.jpg',
     'assets/cubemaps/envmap/bottom.jpg',
     'assets/cubemaps/envmap/front.jpg',
-    'assets/cubemaps/envmap/back.jpg'
-]);
+    'assets/cubemaps/envmap/back.jpg']
+.map(path => CLEO.Loader.loadImage(path)))
+.then(images => {
+    envmap.create({
+        posX: images[0],
+        negX: images[1],
+        posY: images[2],
+        negY: images[3],
+        posZ: images[4],
+        negZ: images[5]
+    }, images[0].width, images[0].height);
+});
 
-let scene2 = new CLEO.Scene();
+scene2.environmentMap = envmap;
+
+CLEO.Skybox.fromFiles({
+    posX: 'assets/cubemaps/skybox/right.jpg',
+    negX: 'assets/cubemaps/skybox/left.jpg',
+    posY: 'assets/cubemaps/skybox/top.jpg',
+    negY: 'assets/cubemaps/skybox/bottom.jpg',
+    posZ: 'assets/cubemaps/skybox/front.jpg',
+    negZ: 'assets/cubemaps/skybox/back.jpg'
+}).then(skybox => {
+    scene1.addNode(new CLEO.SkyboxNode('skybox', skybox));
+    scene2.addNode(new CLEO.SkyboxNode('skybox', skybox));
+});
+
 const sun = new CLEO.LightNode('sun', new CLEO.DirectionalLight({}), true)
 sun.setRotation([90, 0, 0]);
 
@@ -127,19 +141,6 @@ CLEO.Model.fromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/v
 const floor = new CLEO.Node('floor');
 floor.rotateX(-90).setBody(0).attachShape(CLEO.Shape.Plane())
 
-// Load node from JSON
-const sponza = new CLEO.Node('sponza');
-CLEO.Model.fromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then(sponzaModel => {
-    sponzaModel.forEach(model => {
-        const modelNode = new CLEO.ModelNode(model.name, model.model);
-        modelNode.model.material.config.castShadow = true;
-        sponza.addChild(modelNode);
-    });
-    scene1.addNode(sponza);
-});
-// Load model from file
-
-
 // Load models from json file
 CLEO.Model.fromJSONFile('assets/backpack/model.json').then(backpackModel => {
     const backpack = new CLEO.ModelNode('backpack2', backpackModel as CLEO.Model);
@@ -154,9 +155,20 @@ CLEO.Model.fromJSONFile('assets/damagedHelmet/model.json').then(helmetModel => {
     scene2.addNode(helmet);
 });
 
+// Load node from File
+/* const sponza = new CLEO.Node('sponza');
+CLEO.Model.fromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then(sponzaModel => {
+    sponzaModel.forEach(model => {
+        const modelNode = new CLEO.ModelNode(model.name, model.model);
+        modelNode.model.material.config.castShadow = true;
+        sponza.addChild(modelNode);
+    });
+    scene1.addNode(sponza);
+}); */
+
 scene2.addNodes(floor, sun, pl1, crate);
 
-app.setScene(scene1);
+app.setScene(scene2);
 
 app.onPostInitialize = () => {
     const shootSphere = () => {
@@ -246,11 +258,6 @@ app.onUpdate = (delta, time) => {
         let change = Math.sin(time * 0.005)/2 + 0.5;
         (crate as CLEO.ModelNode).model.material.properties.set('emissive', [1, change * 2, 0]);
         (crate.getChildByName('pointLight2')[0] as CLEO.LightNode).light.diffuse[1] = change;
-    }
-
-    let root = app.scene.root;
-    if (root) {
-        root.rotateY(0.1);
     }
 }
 

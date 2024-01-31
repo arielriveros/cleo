@@ -90,7 +90,7 @@ export class Model {
         return new Model(geometry, material);
     }
 
-    public async serialize(): Promise<any> {
+    public serialize(): any {
         let geometry = {
             positions: this._geometry.positions,
             normals: this._geometry.normals,
@@ -100,7 +100,7 @@ export class Model {
             indices: this._geometry.indices
         };
 
-        const serialize = (texId: string): string => {
+        const serializeTex = (texId: string): string => {
             const texture = this._material.textures.get(texId);
             if (!texture) return undefined;
             return TextureManager.Instance.serializeTexture(texture);
@@ -114,12 +114,12 @@ export class Model {
             shininess: this._material.properties.get('shininess'),
             opacity: this._material.properties.get('opacity'),
             textures: {
-                base: serialize('baseTexture'),
-                specular:  serialize('specularMap'),
-                normal: serialize('normalMap'),
-                emissive: serialize('emissiveMap'),
-                mask: serialize('maskMap'),
-                reflectivity: serialize('reflectivityMap')
+                base: serializeTex('baseTexture'),
+                specular:  serializeTex('specularMap'),
+                normal: serializeTex('normalMap'),
+                emissive: serializeTex('emissiveMap'),
+                mask: serializeTex('maskMap'),
+                reflectivity: serializeTex('reflectivityMap')
             },
             config: {
                 side: this._material.config.side,
@@ -128,8 +128,6 @@ export class Model {
                 castShadow: this._material.config.castShadow,
             }
         };
-
-        console.log(material)
 
         return { geometry, material };        
     }
