@@ -15,48 +15,52 @@ function TextureInspector(props: { tex: string, material: Material }) {
         setImg(texture ? (texture.data as HTMLImageElement | null) : null);
     }, [texture])
 
+    const deleteTexture = () => {
+        TextureManager.Instance.removeTexture(props.material.textures.get(props.tex)!);
+        props.material.textures.delete(props.tex);
+        if (props.tex === 'baseTexture')
+            props.material.properties.set('hasBaseTexture', false)
+        else
+            props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, false)
+
+        setTexture(null);
+        setImg(null);
+    }
+
+    const onTextureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.item(0);
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const data = e.target?.result;
+                const img = new Image();
+                img.src = data as string;
+                img.onload = () => {
+                    setImg(img);
+                    if (texture) texture.updateImg(img);
+                    else {
+                        const tex = TextureManager.Instance.addTextureFromData(img);
+                        props.material.textures.set(props.tex, tex);
+                        if (props.tex === 'baseTexture')
+                            props.material.properties.set('hasBaseTexture', true)
+                        else {
+                            props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, true)
+                        }
+                    }
+                }
+            }
+            reader.readAsDataURL(file);
+        }
+    }
+
     return (
         <div className='textureInspector'>
             {img && <img className='texImage' src={img.src} />}
-            <button className='textureDelete' onClick={() => {
-                TextureManager.Instance.removeTexture(props.material.textures.get(props.tex)!);
-                props.material.textures.delete(props.tex);
-                if (props.tex === 'baseTexture')
-                    props.material.properties.set('hasBaseTexture', false)
-                else
-                    props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, false)
-
-                setTexture(null);
-                setImg(null);
-            } }> ✕ </button>
+            <button className='textureDelete' onClick={() => deleteTexture()}> ✕ </button>
             <label htmlFor={`${props.tex}-upload`} className="textureFileUpload">
                 Upload
             </label>
-            <input id={`${props.tex}-upload`} type='file' onChange={(e) => {
-                const file = e.target.files?.item(0);
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const data = e.target?.result;
-                        const img = new Image();
-                        img.src = data as string;
-                        img.onload = () => {
-                            setImg(img);
-                            if (texture) texture.updateImg(img);
-                            else {
-                                const tex = TextureManager.Instance.addTextureFromData(img);
-                                props.material.textures.set(props.tex, tex);
-                                if (props.tex === 'baseTexture')
-                                    props.material.properties.set('hasBaseTexture', true)
-                                else {
-                                    props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, true)
-                                }
-                            }
-                        }
-                    }
-                    reader.readAsDataURL(file);
-                }
-            }} />
+            <input id={`${props.tex}-upload`} type='file' onChange={ e => onTextureUpload(e)} />
         </div>
     )
 }

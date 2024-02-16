@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 type NodeType = 'node' | 'model' | 'light' | 'skybox';
 
 export class Node {
-    protected readonly _id: string = uuidv4();
+    protected readonly _id: string;
     protected readonly _name: string;
     protected _parent: Node | null;
     protected readonly _children: Node[];
@@ -29,17 +29,20 @@ export class Node {
     protected readonly _scale: vec3;
     protected readonly _scaleMatrix: mat4;
 
+    protected _hasStarted: boolean = false;
     protected _markForRemoval: boolean = false;
 
     protected _body: Body | null;
 
-    public onSpawn: (node: Node) => void = () => {};
+    public onStart: (node: Node) => void = (node: Node) => {};
+    public onSpawn: (node: Node) => void = (node: Node) => {};
+    public onUpdate: (node: Node, delta: number, time: number) => void = (node: Node, delta: number, time: number) => {};
     public onCollision: (node: Node, other: Node) => void = () => {};
-    public onUpdate: (node: Node, delta: number, time: number) => void = () => {};
     public onChange: () => void = () => {};
 
-    constructor(name: string, type: NodeType = 'node') {
+    constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
         this._name = name;
+        this._id = id;
         this._parent = null;
         this._children = [];
         this._scene = null;
@@ -65,6 +68,8 @@ export class Node {
         this._children.push(node);
         node.onChange = this.onChange;
         node.onSpawn(node);
+        if (this._hasStarted)
+            node.start();
         if (this.scene) {
             node.scene = this.scene;
             for (const child of node.children)
@@ -109,30 +114,49 @@ export class Node {
             child.remove();
     }
 
+    public start(): void {
+        this._hasStarted = true;
+        this.onStart(this);
+        for (const child of this._children)
+            child.start();
+    }
+
     public serialize(): Promise<any> {
         return new Promise((resolve, reject) => {
             Promise.all(this._children.map(child => child.serialize())).then(children => {
                 resolve({
+                    id: this._id,
                     name: this._name,
                     type: this._nodeType,
                     position: [this._position[0], this._position[1], this._position[2]],
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
-                    children: children
+                    children: children,
+                    scripts: {
+                        onStart: this.onStart.toString(),
+                        onSpawn: this.onSpawn.toString(),
+                        onUpdate: this.onUpdate.toString()
+                    }
                 });
             });
         });
     }
 
     public static parse(parent: Node, json: any) {
-        const node = new Node(json.name, json.type);
+        const node = new Node(json.name, json.type, json.id);
         node.onChange = parent.onChange;
-        if (json.position)
-            node.setPosition(json.position);
-        if (json.rotation)
-            node.setRotation(json.rotation);
-        if (json.scale)
-            node.setScale(json.scale);
+        node.setPosition(json.position);
+        node.setRotation(json.rotation);
+        node.setScale(json.scale);
+        if (json.scripts) {
+            if (json.scripts.start)
+                node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
+            if (json.scripts.spawn)
+                node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
+            if (json.scripts.update)
+                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
+        }
+
         if (json.children) {
             for (const child of json.children) {
                 if (child.type === 'model')
@@ -160,6 +184,7 @@ export class Node {
         for (const child of this._children)
             child.scene = scene;
     }
+    public get hasStarted(): boolean { return this._hasStarted; }
     public get markForRemoval(): boolean { return this._markForRemoval; }
 
     public get localTransform(): mat4 {
@@ -388,8 +413,8 @@ export class ModelNode extends Node {
     private _model: Model;
     private _initialized: boolean;
 
-    constructor(name: string, model: Model) {
-        super(name, 'model');
+    constructor(name: string, model: Model, id: string = uuidv4()) {
+        super(name, 'model', id);
         this._model = model;
         this._initialized = false;
     }
@@ -438,6 +463,7 @@ export class ModelNode extends Node {
             Promise.all(this._children.map(child => child.serialize())).then(children => {
                 resolve({
                     name: this._name,
+                    id: this._id,
                     type: this._nodeType,
                     position: [this._position[0], this._position[1], this._position[2]],
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
@@ -450,10 +476,18 @@ export class ModelNode extends Node {
     }
 
     public static parse(parent: Node, json: any) {
-        const node = new ModelNode(json.name, Model.parse(json.model));
+        const node = new ModelNode(json.name, Model.parse(json.model), json.id);
         node.setPosition(json.position);
         node.setRotation(json.rotation);
         node.setScale(json.scale);
+        if (json.scripts) {
+            if (json.scripts.start)
+                node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
+            if (json.scripts.spawn)
+                node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
+            if (json.scripts.update)
+                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
+        }
         for (const child of json.children) {
             Node.parse(node, child);
         }
@@ -472,8 +506,8 @@ export class LightNode extends Node {
     private _lightSpace: mat4;
     private _castShadows: boolean;
 
-    constructor(name: string, light: Light, castShadows: boolean = false) {
-        super(name, 'light');
+    constructor(name: string, light: Light, castShadows: boolean = false, id: string = uuidv4()) {
+        super(name, 'light', id);
         this._light = light;
         this._index = -1;
         this._lightSpace = mat4.create();
@@ -522,6 +556,7 @@ export class LightNode extends Node {
             Promise.all(this._children.map(child => child.serialize())).then(children => {
                 resolve({
                     name: this._name,
+                    id: this._id,
                     type: this._nodeType,
                     position: [this._position[0], this._position[1], this._position[2]],
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
@@ -556,10 +591,18 @@ export class LightNode extends Node {
             default:
                 throw new Error(`Light ${json} of type ${json.type} not supported`);
         }
-        const node = new LightNode(json.name, light, json.lightType === 'directional' ? true : false);
+        const node = new LightNode(json.name, light, json.lightType === 'directional' ? true : false, json.id);
         node.setPosition(json.position);
         node.setRotation(json.rotation);
         node.setScale(json.scale);
+        if (json.scripts) {
+            if (json.scripts.start)
+                node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
+            if (json.scripts.spawn)
+                node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
+            if (json.scripts.update)
+                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
+        }
         for (const child of json.children) {
             Node.parse(node, child);
         }
@@ -590,8 +633,8 @@ export class SkyboxNode extends Node {
     private readonly _skybox: Skybox
     private _initialized: boolean;
 
-    constructor(name: string, skybox: Skybox) {
-        super(name, 'skybox');
+    constructor(name: string, skybox: Skybox, id: string = uuidv4()) {
+        super(name, 'skybox', id);
         this._skybox = skybox;
         this._initialized = false;
     }
@@ -611,10 +654,18 @@ export class SkyboxNode extends Node {
             posZ: json.skybox.faces.positiveZ,
             negZ: json.skybox.faces.negativeZ
         }).then(skybox => {
-            const node = new SkyboxNode(json.name, skybox);
+            const node = new SkyboxNode(json.name, skybox, json.id);
             node.setPosition(json.position);
             node.setRotation(json.rotation);
             node.setScale(json.scale);
+            if (json.scripts) {
+                if (json.scripts.start)
+                    node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
+                if (json.scripts.spawn)
+                    node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
+                if (json.scripts.update)
+                    node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
+            }
             for (const child of json.children) {
                 Node.parse(node, child);
             }
@@ -629,6 +680,7 @@ export class SkyboxNode extends Node {
             Promise.all(this._children.map(child => child.serialize())).then(children => {
                 resolve({
                     name: this._name,
+                    id: this._id,
                     type: this._nodeType,
                     position: [this._position[0], this._position[1], this._position[2]],
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],

@@ -66,6 +66,16 @@ export class TextureManager {
         return canvas.toDataURL('image/png', 1.0);
     }
 
+    public serializeTextureData(): any {
+        const textures: {id: string, data: string, config: any}[] = []; // Define index signature for textures object
+        this._textures.forEach((texture, id) => {
+            textures.push({
+                id, data: this.serializeTexture(id), config: texture.config
+            });
+        });
+        return textures;
+    }
+
     public serializeCubeMap(texture: Texture): {
         positiveX: string,
         negativeX: string,

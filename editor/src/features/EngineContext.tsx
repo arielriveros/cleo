@@ -1,19 +1,33 @@
-import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, Node } from "cleo";
 import { createContext, useContext, useState, useRef, useEffect } from "react";
+import { CleoEngine, Scene, Camera, LightNode, DirectionalLight } from "cleo";
 
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
     instance: CleoEngine | null;
-    scene: Scene | null;
+    editorScene: Scene | null;
     sceneChanged: boolean;
     selectedNode: string | null;
     setSelectedNode: (node: string | null) => void;
+    mode: 'scene' | 'script';
+    setMode: (mode: 'scene' | 'script') => void;
+    selectedScript: string | null;
+    setSelectedScript: (script: string | null) => void;
+    scripts: Map<string, {
+        start: string;
+        update: string;
+        spawn: string;
+    }>;
   }>({
     instance: null,
-    scene: null,
+    editorScene: null,
     sceneChanged: false,
     selectedNode: null,
     setSelectedNode: () => {},
+    mode: 'scene',
+    setMode: () => {},
+    selectedScript: null,
+    setSelectedScript: () => {},
+    scripts: new Map(),
   });
   
   // Create a custom hook to access the engine and scene from anywhere
@@ -23,9 +37,12 @@ export const useCleoEngine = () => {
 
 export function EngineProvider(props: { children: React.ReactNode }) {
     const instanceRef = useRef<CleoEngine | null>(null);
-    const [scene, setScene] = useState<Scene | null>(null);
+    const editorSceneRef = useRef<Scene | null>(null);
     const [selectedNode, setSelectedNode] = useState<string | null>(null);
     const [sceneChanged, setSceneChanged] = useState<boolean>(false);
+    const [mode, setMode] = useState<'scene' | 'script'>('scene');
+    const [selectedScript, setSelectedScript] = useState<string | null>(null);
+    const scriptsRef = useRef(new Map<string, {start: string; update: string; spawn: string;}>());
 
     useEffect(() => {
         const engine = new CleoEngine({
@@ -35,22 +52,26 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         });
 
         instanceRef.current = engine;
+        instanceRef.current.isPaused = false;
 
         const scene = new Scene();
-        setScene(scene);
+        editorSceneRef.current = scene;
 
-        scene.onChange = () => { console.log('change'); setSceneChanged( (prev) => !prev ) };
+        scene.onChange = () => { setSceneChanged( (prev) => !prev ) };
 
-        const camera = new Camera({
-            position: [0, 0.5, -2],
-        });
-
+        // Setting a simple scene
         const dirLight = new LightNode('dirLight', new DirectionalLight({}));
+
         dirLight.rotateX(45);
         dirLight.rotateY(30);
         scene.addNode(dirLight);
 
+        // Setting the editor scene and camera
         engine.setScene(scene);
+
+        const camera = new Camera({
+            position: [0, 0.5, -2],
+        });
         engine.setCamera(camera);
         
         engine.onUpdate = (deltaTime) => {
@@ -72,7 +93,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }, []);
 
     return (
-    <EngineContext.Provider value={{ instance: instanceRef.current, scene, sceneChanged, selectedNode, setSelectedNode }}>
+    <EngineContext.Provider value={{
+            instance: instanceRef.current,
+            editorScene: editorSceneRef.current, sceneChanged,
+            selectedNode, setSelectedNode,
+            mode, setMode,
+            selectedScript, setSelectedScript,
+            scripts: scriptsRef.current
+        }}>
         {props.children}
     </EngineContext.Provider>
     );

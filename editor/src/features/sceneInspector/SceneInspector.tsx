@@ -60,7 +60,7 @@ function SceneListRecursive(props: { node: { id: string, name: string, type: str
 
 
 export default function SceneInspector() {
-    const { scene, sceneChanged, setSelectedNode } = useCleoEngine()
+    const { editorScene, sceneChanged, setSelectedNode } = useCleoEngine()
     const [ nodes, setNodes ] = useState<{ id: string, name: string, type: string, children: any[]} | null>(null);
 
     // generate a recursive list of id nodes where each node has a list of children
@@ -75,8 +75,8 @@ export default function SceneInspector() {
     }
 
     useEffect(() => {
-        if (scene)
-            setNodes(generateNodeList(scene.root));
+        if (editorScene)
+            setNodes(generateNodeList(editorScene.root));
     }, [sceneChanged])
     return (
         <Sidebar width='20vw'>

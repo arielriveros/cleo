@@ -37,15 +37,6 @@ export class Model {
         });
     }
 
-    public static fromJSONFile(path: string): Promise<Model> {
-        return new Promise((resolve, reject) => {
-            fetch(path)
-            .then(res => res.json())
-            .then(data => resolve(Model.parse(data)) )
-            .catch(err => reject(err));
-        })
-    }
-
     public static parse(data: any): Model {
         const geometry = new Geometry(
             data.geometry.positions,
@@ -57,12 +48,12 @@ export class Model {
         );
 
         let texData = data.material.textures;
-        let baseTexture = texData.base ? TextureManager.Instance.addTextureFromBase64(texData.base, { wrapping: 'repeat' }) : undefined;
-        let specularMap = texData.specular ? TextureManager.Instance.addTextureFromBase64(texData.specular, { wrapping: 'repeat' }) : undefined;
-        let normalMap = texData.normal ? TextureManager.Instance.addTextureFromBase64(texData.normal, { wrapping: 'repeat' }) : undefined;
-        let emissiveMap = texData.emissive ? TextureManager.Instance.addTextureFromBase64(texData.emissive, { wrapping: 'repeat' }) : undefined;
-        let maskMap = texData.mask ? TextureManager.Instance.addTextureFromBase64(texData.mask, { wrapping: 'repeat' }) : undefined;
-        let reflectivityMap = texData.reflectivity ? TextureManager.Instance.addTextureFromBase64(texData.reflectivity, { wrapping: 'repeat' }) : undefined;
+        let baseTexture = texData.base;
+        let specularMap = texData.specular;
+        let normalMap = texData.normal;
+        let emissiveMap = texData.emissive;
+        let maskMap = texData.mask;
+        let reflectivityMap = texData.reflectivity;
         
         let material = Material.Default({
             diffuse: data.material.diffuse,
@@ -100,12 +91,6 @@ export class Model {
             indices: this._geometry.indices
         };
 
-        const serializeTex = (texId: string): string => {
-            const texture = this._material.textures.get(texId);
-            if (!texture) return undefined;
-            return TextureManager.Instance.serializeTexture(texture);
-        }
-
         let material = {
             diffuse: this._material.properties.get('diffuse'),
             specular: this._material.properties.get('specular'),
@@ -114,12 +99,12 @@ export class Model {
             shininess: this._material.properties.get('shininess'),
             opacity: this._material.properties.get('opacity'),
             textures: {
-                base: serializeTex('baseTexture'),
-                specular:  serializeTex('specularMap'),
-                normal: serializeTex('normalMap'),
-                emissive: serializeTex('emissiveMap'),
-                mask: serializeTex('maskMap'),
-                reflectivity: serializeTex('reflectivityMap')
+                base: this._material.textures.get('baseTexture'),
+                specular:  this._material.textures.get('specularMap'),
+                normal: this._material.textures.get('normalMap'),
+                emissive: this._material.textures.get('emissiveMap'),
+                mask: this._material.textures.get('maskMap'),
+                reflectivity: this._material.textures.get('reflectivityMap')
             },
             config: {
                 side: this._material.config.side,

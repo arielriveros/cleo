@@ -1,15 +1,39 @@
 import { useCleoEngine } from "./EngineContext";
+import { Scene } from "cleo";
 import EngineViewport from "./EngineViewport";
 import Center from "../components/Center";
 import Content from "../components/Content";
 import Topbar from "../components/Topbar";
 import SceneInspector from "./sceneInspector/SceneInspector";
 import NodeInspector from "./nodeInspector/NodeInspector";
+import ScriptEditor from "./scriptEditor/ScriptEditor";
 import './Editor.css'
 
 export default function Editor() {
 
-  const { scene } = useCleoEngine();
+  const { instance, editorScene, mode, setMode, setSelectedScript, scripts } = useCleoEngine();
+
+  const setScripts = (json: any) => {
+    const scene = json.scene;
+
+    const rootScript = scripts.get(scene.id);
+    if(rootScript) {
+      scene.scripts = rootScript;
+    }
+
+    const iterateChildren = (children: any[]) => {
+      children.forEach((child: any) => {
+        const nodeScripts = scripts.get(child.id);
+        if(nodeScripts) {
+          child.scripts = nodeScripts;
+        }
+
+        iterateChildren(child.children);
+      });
+    }
+
+    iterateChildren(scene.children);
+  }
 
   const onLoad = (filelist: FileList | null) => {
     if (filelist) {
@@ -19,15 +43,14 @@ export default function Editor() {
         const data = e.target?.result;
         if (data) {
           const json = JSON.parse(data as string);
-          scene?.parse(json);
-          console.log(json);
+          editorScene?.parse(json);
         }
       };
     }
   };
 
   const onSave = () => {
-    scene?.serialize().then((json) => {
+    editorScene?.serialize().then((json) => {
       if (json) {
         const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -39,6 +62,39 @@ export default function Editor() {
     });
   };
 
+  const onPlay = () => {
+    if (!instance)
+      return;
+
+    setMode('scene');
+    setSelectedScript(null);
+    const newScene = new Scene();
+    editorScene?.serialize(false).then(json => {
+      // Clear debugging nodes from the editor scene
+      // ... TODO
+
+      // Assign the scripts to the new scene
+      setScripts(json);
+
+      // Parse the scene from the editor
+      newScene.parse(json, false);
+      // Set the new scene to the engine then start it
+      instance.setScene(newScene);
+      instance.isPaused = false;
+      instance.scene.start();
+    });
+  }
+
+  const onStop = () => {
+    if (instance)
+      instance.setScene(editorScene as Scene);
+  }
+
+  const onPause = () => {
+    if (instance)
+      instance.isPaused = !instance.isPaused || false;
+  }
+
   return (
     <>
       <Topbar>
@@ -48,13 +104,27 @@ export default function Editor() {
           <input type='file' id='load-scene-file' name='file' onChange={(e) => onLoad(e.target.files)} />
         </div>
         <div>
-          <div className='optionButton'>Play</div>
+          <div className='optionButton' onClick={() => onPlay()}>Play</div>
+          <div className='optionButton' onClick={() => onPause()}>Pause</div>
+          <div className='optionButton' onClick={() => onStop()}>Stop</div>
         </div>
+        <div>
+          <select value={mode} onChange={
+            e => {
+              setMode(e.target.value as 'scene' | 'script');
+              setSelectedScript(null);
+            }}>
+            <option value='scene'>Scene</option>
+            <option value='script'>Scripts</option>
+          </select>
+        </div>
+        <div />
       </Topbar>
       <Content>
         <SceneInspector />
         <Center>
-          <EngineViewport />
+        { mode === 'scene' && <EngineViewport /> }
+        { mode === 'script' && <ScriptEditor /> }
         </Center>
         <NodeInspector />
       </Content>

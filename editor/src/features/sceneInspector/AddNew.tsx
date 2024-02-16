@@ -5,20 +5,20 @@ import { useEffect, useState } from 'react';
 
 export default function AddNew() {
     const [node, setNode] = useState<Node | null>(null)
-    const { scene, selectedNode } = useCleoEngine();
+    const { editorScene, selectedNode } = useCleoEngine();
 
     useEffect(() => {
-        if (scene && selectedNode) {
-            const node = scene.getNodeById(selectedNode)
+        if (editorScene && selectedNode) {
+            const node = editorScene.getNodeById(selectedNode)
             if (node) setNode(node)
         }
     }, [selectedNode])
 
     const addNode = (newNode: Node) => {
         if (node?.name === 'root')
-        scene?.addNode(newNode);
+            editorScene?.addNode(newNode);
         else
-        node?.addChild(newNode);
+            node?.addChild(newNode);
     }
     
     const addCube = () => {

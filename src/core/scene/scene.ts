@@ -1,4 +1,4 @@
-import { Texture } from "../../cleo";
+import { Texture, TextureManager } from "../../cleo";
 import { LightNode, ModelNode, Node, SkyboxNode } from "./node";
 
 export class Scene {
@@ -9,6 +9,7 @@ export class Scene {
     private _skybox: SkyboxNode | null;
     private _environmentMap: Texture | null = null;
     private _dirty: boolean = true;
+    private _hasStarted: boolean = false;
 
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
@@ -28,12 +29,26 @@ export class Scene {
         this.onChange = null;
     }
 
+    public start(): void {
+        if (this._hasStarted) return;
+
+        // TODO: Store the initial state of the scene and allow to reset it
+        for (const node of this._nodes)
+            node.start();
+
+        this._hasStarted = true;
+    }
+
+    public stop(): void {
+        this._hasStarted = false;
+        // TODO: Reset the initial state of the scene
+    }
+
     public addNode(node: Node): void {
-        this._root.addChild(node);
         node.scene = this;
-        for (const child of node.children)
-            child.scene = this;
-        node.onSpawn(node);
+        this._root.addChild(node);
+        /* for (const child of node.children)
+            child.scene = this; */
     }
 
     public addNodes(...nodes: Node[]): void {
@@ -42,9 +57,7 @@ export class Scene {
     }
 
     public removeNode(node: Node): void {
-        if (node.parent)
-            node.parent.children.splice(node.parent.children.indexOf(node), 1);
-        node.parent = null;
+        this._root.removeChild(node);
     }
 
     public removeNodeByName(name: string): void {
@@ -68,7 +81,8 @@ export class Scene {
                 continue;
             }
             node.updateWorldTransform();
-            node.onUpdate(node, delta, time);
+            if (this._hasStarted && node.onUpdate)
+                node.onUpdate(node, delta, time);
         }
     }
     
@@ -134,31 +148,27 @@ export class Scene {
         return undefined;
     }
 
-    public serialize(): Promise<any> {
+    public serialize(storeTextures: boolean = true): Promise<any> {
+        const output: {scene: any, textures: any} = {scene: {}, textures: {}};
         return new Promise((resolve, reject) => {
             this._root.serialize().then((json: any) => {
-                resolve(json);
+                output.scene = json;
+                if (storeTextures)
+                    output.textures = TextureManager.Instance.serializeTextureData();
+                resolve(output);
             });
         });
     }
 
-    public fromJSON(path: string): Promise<Scene> {
-        return new Promise((resolve, reject) => {
-            fetch(path).then((response: Response) => {
-                response.json().then((json: any) => {
-                    this.parse(json);
-                    resolve(this);
-                });
-            });
-        });
-    }
-
-    public parse(json: any): void {
+    public parse(json: any, loadTextures: boolean = true): void {
         // change the root node entirely not just its children
         let newScene = new Node('root');
         newScene.scene = this;
         newScene.onChange = this._onChange.bind(this);
-        Node.parse(newScene, json);
+        Node.parse(newScene, json.scene);
+        if (loadTextures)
+            for (const texture of json.textures)
+                TextureManager.Instance.addTextureFromBase64(texture.data, texture.config, texture.id);
         this._dirty = true;
         this._root = newScene.getChildByName('root')[0] as Node;
     }

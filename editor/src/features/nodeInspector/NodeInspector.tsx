@@ -7,14 +7,15 @@ import TransformEditor from './TransformEditor'
 import MaterialEditor from './MaterialEditor'
 import SkyboxEditor from './SkyboxEditor'
 import './NodeInspector.css'
+import ScriptSelector from './ScriptSelector'
 
 export default function NodeInspector() {
-  const { scene, selectedNode } = useCleoEngine()
+  const { editorScene, selectedNode } = useCleoEngine()
   const [node, setNode] = useState<Node | null>(null)
 
   useEffect(() => {
-    if (scene && selectedNode) {
-      const node = scene.getNodeById(selectedNode)
+    if (editorScene && selectedNode) {
+      const node = editorScene.getNodeById(selectedNode)
       if (node) setNode(node)
     }
 
@@ -39,6 +40,8 @@ export default function NodeInspector() {
 
           { node.nodeType === 'model' && <MaterialEditor node={node as ModelNode} /> }
           { node.nodeType === 'skybox' && <SkyboxEditor node={node as SkyboxNode} /> }
+
+          <ScriptSelector />
         </>
       } </div>
     </Sidebar>

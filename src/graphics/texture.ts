@@ -196,4 +196,15 @@ export class Texture {
     public get width(): number { return this._width; }
     public get height(): number { return this._height; }
     public get texture(): WebGLTexture { return this._texture; }
+    public get config(): TextureConfig {
+        return {
+            flipY: this._flipY,
+            usage: this._usage,
+            wrapping: this._wrapping === gl.CLAMP_TO_EDGE ? 'clamp' : this._wrapping === gl.REPEAT ? 'repeat' : 'mirror',
+            mipMap: this._mipMap,
+            mipMapFilter: this._minFilter === gl.NEAREST_MIPMAP_NEAREST ? 'nearest' : 'linear',
+            precision: this._precision,
+            target: this._target === gl.TEXTURE_2D ? 'texture2D' : 'cubemap'
+        }
+    }
 }
