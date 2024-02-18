@@ -6,8 +6,9 @@ import { Skybox } from "../../graphics/skybox";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
 import { v4 as uuidv4 } from 'uuid';
+import { Camera } from "../camera";
 
-type NodeType = 'node' | 'model' | 'light' | 'skybox';
+type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera';
 
 export class Node {
     protected readonly _id: string;
@@ -120,6 +121,9 @@ export class Node {
         for (const child of this._children)
             child.start();
     }
+    public update(delta: number, time: number): void {
+        this.onUpdate(this, delta, time);
+    }
 
     public serialize(): Promise<any> {
         return new Promise((resolve, reject) => {
@@ -133,6 +137,7 @@ export class Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     scripts: {
+                        // TODO: Only serialize the function body
                         onStart: this.onStart.toString(),
                         onSpawn: this.onSpawn.toString(),
                         onUpdate: this.onUpdate.toString()
@@ -165,6 +170,8 @@ export class Node {
                     LightNode.parse(node, child);
                 else if (child.type === 'skybox')
                     SkyboxNode.parse(node, child);
+                else if (child.type === 'camera')
+                    CameraNode.parse(node, child);
                 else
                     Node.parse(node, child);
             }
@@ -258,6 +265,32 @@ export class Node {
         vec3.copy(this._position, pos);
         this._updateTranslationMatrix();
         return this;
+    }
+
+    public addForward(value: number) {
+        vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.forward, value));
+        this._updateTranslationMatrix();
+    }
+
+    public addRight(value: number) {
+        // normalize forward vector
+        vec3.normalize(this.forward, this.forward);
+        // normalize right vector
+        let right = vec3.cross(vec3.create(), this.forward, vec3.fromValues(0, 1, 0));
+        vec3.normalize(right, right);
+        // move along right vector
+        vec3.add(this._position, this._position, vec3.scale(vec3.create(), right, value));
+        this._updateTranslationMatrix();
+    }
+
+    public addUp(value: number) {
+        vec3.normalize(this.forward, this.forward);
+        let right = vec3.cross(vec3.create(), this.forward, vec3.fromValues(0, 1, 0));
+        vec3.normalize(right, right);
+        let up = vec3.cross(vec3.create(), right, this.forward);
+        vec3.normalize(up, up);
+        vec3.add(this._position, this._position, vec3.scale(vec3.create(), up, value));
+        this._updateTranslationMatrix();
     }
 
     private _updateTranslationMatrix(): void {
@@ -488,8 +521,19 @@ export class ModelNode extends Node {
             if (json.scripts.update)
                 node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
         }
-        for (const child of json.children) {
-            Node.parse(node, child);
+        if (json.children) {
+            for (const child of json.children) {
+                if (child.type === 'model')
+                    ModelNode.parse(node, child);
+                else if (child.type === 'light')
+                    LightNode.parse(node, child);
+                else if (child.type === 'skybox')
+                    SkyboxNode.parse(node, child);
+                else if (child.type === 'camera')
+                    CameraNode.parse(node, child);
+                else
+                    Node.parse(node, child);
+            }
         }
         
         parent.addChild(node);
@@ -603,8 +647,19 @@ export class LightNode extends Node {
             if (json.scripts.update)
                 node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
         }
-        for (const child of json.children) {
-            Node.parse(node, child);
+        if (json.children) {
+            for (const child of json.children) {
+                if (child.type === 'model')
+                    ModelNode.parse(node, child);
+                else if (child.type === 'light')
+                    LightNode.parse(node, child);
+                else if (child.type === 'skybox')
+                    SkyboxNode.parse(node, child);
+                else if (child.type === 'camera')
+                    CameraNode.parse(node, child);
+                else
+                    Node.parse(node, child);
+            }
         }
         
         parent.addChild(node);
@@ -666,8 +721,19 @@ export class SkyboxNode extends Node {
                 if (json.scripts.update)
                     node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
             }
-            for (const child of json.children) {
-                Node.parse(node, child);
+            if (json.children) {
+                for (const child of json.children) {
+                    if (child.type === 'model')
+                        ModelNode.parse(node, child);
+                    else if (child.type === 'light')
+                        LightNode.parse(node, child);
+                    else if (child.type === 'skybox')
+                        SkyboxNode.parse(node, child);
+                    else if (child.type === 'camera')
+                        CameraNode.parse(node, child);
+                    else
+                        Node.parse(node, child);
+                }
             }
             
             parent.addChild(node);
@@ -694,4 +760,83 @@ export class SkyboxNode extends Node {
 
     public get skybox(): Skybox { return this._skybox; }
     public get initialized(): boolean { return this._initialized; }
+}
+
+export class CameraNode extends Node {
+    private readonly _camera: Camera;
+    private _active: boolean;
+
+    constructor(name: string, camera: Camera, id: string = uuidv4()) {
+        super(name, 'camera', id);
+        this._camera = camera;
+        this._active = true;
+    }
+
+    public update(delta: number, time: number): void {
+        super.update(delta, time);
+        this._camera.position = this.worldPosition;
+        this._camera.eye = this.forward;
+    }
+
+    public static parse(parent: Node, json: any) {
+        const node = new CameraNode(json.name, new Camera({
+            fov: json.camera.fov,
+            near: json.camera.near,
+            far: json.camera.far
+        }), json.id);
+        node.setPosition(json.position);
+        node.setRotation(json.rotation);
+        node.setScale(json.scale);
+        node.active = json.active;
+        if (json.scripts) {
+            if (json.scripts.start)
+                node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
+            if (json.scripts.spawn)
+                node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
+            if (json.scripts.update)
+                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
+        }
+        if (json.children) {
+            for (const child of json.children) {
+                if (child.type === 'model')
+                    ModelNode.parse(node, child);
+                else if (child.type === 'light')
+                    LightNode.parse(node, child);
+                else if (child.type === 'skybox')
+                    SkyboxNode.parse(node, child);
+                else if (child.type === 'camera')
+                    CameraNode.parse(node, child);
+                else
+                    Node.parse(node, child);
+            }
+        }
+        
+        parent.addChild(node);
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve, reject) => {
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    id: this._id,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children,
+                    camera: {
+                        fov: this._camera.fov,
+                        near: this._camera.near,
+                        far: this._camera.far
+                    },
+                    active: this._active
+                });
+            });
+        });
+    }
+
+    public get camera(): Camera { return this._camera; }
+    public get active(): boolean { return this._active; }
+    public set active(value: boolean) { this._active = value; }
 }

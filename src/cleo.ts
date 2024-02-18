@@ -2,7 +2,7 @@ export { CleoEngine } from "./core/engine";
 export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";
 export { Scene } from "./core/scene/scene";
-export { Node, ModelNode, LightNode, SkyboxNode } from "./core/scene/node";
+export { Node, ModelNode, LightNode, SkyboxNode, CameraNode } from "./core/scene/node";
 export { Mesh } from "./graphics/mesh";
 export { Material } from "./graphics/material";
 export { Renderer } from "./graphics/renderer";

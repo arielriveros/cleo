@@ -3,6 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useEffect, useState } from 'react'
 import { Node } from 'cleo';
 import Sidebar from '../../components/Sidebar'
+import CameraIcon from '../../icons/camera.png'
 import ModelIcon from '../../icons/model.png'
 import LightIcon from '../../icons/light.png'
 import SkyboxIcon from '../../icons/skybox.png'
@@ -24,6 +25,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
     return (
         <span className={`sceneItem ${selectedNode === props.nodeId ? 'selected' : ''}`} onClick={() => props.onSelect(props.nodeId)}>
             <div>
+                {props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='sceneItemIcon' /> }
                 {props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='sceneItemIcon' /> }
                 {props.nodeType === 'light' && <img src={LightIcon} alt='light' className='sceneItemIcon' /> }
                 {props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='sceneItemIcon' /> }
@@ -40,6 +42,7 @@ function SceneListRecursive(props: { node: { id: string, name: string, type: str
       setIsVisible(!isVisible);
     };
     return (
+        props.node.name.includes('__debug__') ? null : 
         <div style={{ paddingLeft: 5 }}>
             <SceneNodeItem
                 key={props.node.id}
@@ -54,7 +57,7 @@ function SceneListRecursive(props: { node: { id: string, name: string, type: str
                 props.node.children.map( child => { return <SceneListRecursive key={child.id} node={child} setSelectedNode={props.setSelectedNode}/> })
             : <></>
             }
-      </div>    
+        </div>    
     );
   }
 
@@ -70,7 +73,7 @@ export default function SceneInspector() {
             id: node.id,
             name: node.name,
             type: node.nodeType,
-            children: node.children.map((child: Node) => generateNodeList(child))
+            children: node.children.filter((child: Node) => !child.name.includes('__debug__')).map((child: Node) => generateNodeList(child))
         }
     }
 

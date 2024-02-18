@@ -13,6 +13,21 @@ export default function Editor() {
 
   const { instance, editorScene, mode, setMode, setSelectedScript, scripts } = useCleoEngine();
 
+  const clearDebuggingNodes = (json: any) => {
+    const iterateChildren = (children: any[]) => {
+        return children.filter((child: any) => {
+            if (child.name.includes('__debug__')) {
+                console.log('removing debugging node', child.name);
+                return false;
+            }
+            child.children = iterateChildren(child.children);
+            return true;
+        });
+    }
+
+    json.children = iterateChildren(json.children);
+}
+
   const setScripts = (json: any) => {
     const scene = json.scene;
 
@@ -52,6 +67,10 @@ export default function Editor() {
   const onSave = () => {
     editorScene?.serialize().then((json) => {
       if (json) {
+        // Clear debugging nodes from the editor scene
+        clearDebuggingNodes(json.scene)
+        // Assign the scripts to the new scene
+        setScripts(json);
         const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -71,13 +90,12 @@ export default function Editor() {
     const newScene = new Scene();
     editorScene?.serialize(false).then(json => {
       // Clear debugging nodes from the editor scene
-      // ... TODO
-
+      clearDebuggingNodes(json.scene)
       // Assign the scripts to the new scene
       setScripts(json);
-
       // Parse the scene from the editor
       newScene.parse(json, false);
+      console.log('newScene', newScene);
       // Set the new scene to the engine then start it
       instance.setScene(newScene);
       instance.isPaused = false;

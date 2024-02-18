@@ -42,6 +42,8 @@ export class Renderer {
     private _canvas: HTMLCanvasElement;
     private _viewport: HTMLElement;
 
+    private _activeCamera: Camera;
+
     private _exposure: number = 1.0;
     private _chromaticAberrationStrength: number = 0.0;
 
@@ -137,12 +139,11 @@ export class Renderer {
         this.resize();
     }
 
-    public initialize(camera: Camera): void {
-        // Initialize camera
-        camera.resize(this._canvas.width, this._canvas.height);
-    }
-
-    public render(camera: Camera, scene: Scene): void {
+    public render(scene: Scene): void {
+        // Set active camera
+        if (!scene.activeCamera) return;
+        this._activeCamera = scene.activeCamera.camera;
+        this._activeCamera.resize(this._canvas.width, this._canvas.height);
         // Set lighting
         for (const light of scene.lights)
             this._setLighting(light, scene.numPointLights);
@@ -165,13 +166,13 @@ export class Renderer {
 
 
         // Render scene to scene framebuffer
-        this._renderScene(scene, camera);
+        this._renderScene(scene);
 
         // Apply post processing
         this._applyPostProcessing();
     }
 
-    public resize() {
+    public resize(): void {
         if (!this._viewport) return;
         this._canvas.width = this._viewport.clientWidth;
         this._canvas.height = this._viewport.clientHeight;
@@ -194,15 +195,15 @@ export class Renderer {
     }
     public get context(): WebGL2RenderingContext { return gl; }
 
-    private _renderScene(scene: Scene, camera: Camera): void {
+    private _renderScene(scene: Scene): void {
         this._sceneFBO.bind();
         gl.viewport(0, 0, this._canvas.width, this._canvas.height);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         if (scene.skybox) {
             this._shaderManager.bind('skybox');
-            this._shaderManager.setUniform('u_view', camera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', camera.projectionMatrix);
+            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
             this._shaderManager.setUniform('u_skybox', 0);
             let skyboxNode = scene.skybox as SkyboxNode;
             if (!skyboxNode.initialized)
@@ -219,30 +220,30 @@ export class Renderer {
             if (node.model.material.config.transparent === true)
                 transparentDrawQueue.push(node);
             else
-                this._renderModel(node, camera);
+                this._renderModel(node);
         }
 
         // Sort transparent draw queue by distance to camera
         transparentDrawQueue.sort((a, b) => {
-            const aDist = vec3.distance(camera.position, a.worldPosition);
-            const bDist = vec3.distance(camera.position, b.worldPosition);
+            const aDist = vec3.distance(this._activeCamera.position, a.worldPosition);
+            const bDist = vec3.distance(this._activeCamera.position, b.worldPosition);
 
             return bDist - aDist;
         });
 
         for (const node of transparentDrawQueue)
-            this._renderModel(node, camera);
+            this._renderModel(node);
     }
 
-    private _renderModel(node: ModelNode, camera: Camera): void {
+    private _renderModel(node: ModelNode): void {
         if (!node.initialized)
             node.initializeModel();
 
         this._shaderManager.bind(node.model.material.type);
 
-        this._shaderManager.setUniform('u_view', camera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', camera.projectionMatrix);
-        this._shaderManager.setUniform('u_viewPos', camera.position);
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
 
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction

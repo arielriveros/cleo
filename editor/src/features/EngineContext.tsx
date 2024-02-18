@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, Camera, LightNode, DirectionalLight } from "cleo";
+import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, ModelNode } from "cleo";
 
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
@@ -59,36 +59,34 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
         scene.onChange = () => { setSceneChanged( (prev) => !prev ) };
 
-        // Setting a simple scene
-        const dirLight = new LightNode('dirLight', new DirectionalLight({}));
+        
+        const debugCameraNode = new CameraNode('__debug__Camera', new Camera());
+        debugCameraNode.active = true;
 
-        dirLight.rotateX(45);
-        dirLight.rotateY(30);
-        scene.addNode(dirLight);
+        debugCameraNode.setPosition([0, 0.5, -2]);
+        debugCameraNode.onUpdate = (node, delta, time) => {
+            let mouse = InputManager.instance.mouse;
+            let movement = delta * 2;
+            if (mouse.buttons.Left) {
+                node.rotateX( mouse.velocity[1] * movement * 5);
+                node.rotateY(-mouse.velocity[0] * movement * 5);
+            }
+        
+            InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
+            InputManager.instance.isKeyPressed('KeyS') && node.addForward(-movement);
+            InputManager.instance.isKeyPressed('KeyA') && node.addRight(-movement);
+            InputManager.instance.isKeyPressed('KeyD') && node.addRight(movement);
+            InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
+            InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
+        }
+        scene.addNode(debugCameraNode);
 
         // Setting the editor scene and camera
         engine.setScene(scene);
-
-        const camera = new Camera({
-            position: [0, 0.5, -2],
-        });
-        engine.setCamera(camera);
+        scene.start();
         
-        engine.onUpdate = (deltaTime) => {
-            const speed = 2 * deltaTime;
-            let mouse = engine.input.mouse;
-            if (mouse.buttons.Left) {
-                engine.camera.rotation[0] -= mouse.velocity[1] * speed / 10;
-                engine.camera.rotation[1] -= mouse.velocity[0] * speed / 10;
-            }
-            engine.input.isKeyPressed('KeyW') && camera.moveForward(speed);
-            engine.input.isKeyPressed('KeyS') && camera.moveForward(-speed);
-            engine.input.isKeyPressed('KeyA') && camera.moveRight(-speed);
-            engine.input.isKeyPressed('KeyD') && camera.moveRight(speed);
-            engine.input.isKeyPressed('KeyE') && camera.moveUp(speed);
-            engine.input.isKeyPressed('KeyQ') && camera.moveUp(-speed);
-        }
-
+        engine.onUpdate = (deltaTime) => {}
+        
         engine.run();
     }, []);
 

@@ -1,7 +1,6 @@
 import { Renderer } from "../graphics/renderer";
 import { InputManager } from "../input/inputManager";
 import { PhysicsSystem } from "../physics/physicsSystem";
-import { Camera } from "./camera";
 import { Scene } from "./scene/scene";
 
 interface CleoConfig {
@@ -25,7 +24,6 @@ export class CleoEngine {
     private _physicsSystem: PhysicsSystem;
 
     private _scene!: Scene;
-    private _camera!: Camera;
 
     private _paused: boolean = true;
     
@@ -56,7 +54,6 @@ export class CleoEngine {
         this._renderer.preInitialize();
         await this.onPreInitialize();
 
-        this._renderer.initialize(this._camera);
         this._physicsSystem.initialize();
         this.onPostInitialize();
 
@@ -80,10 +77,9 @@ export class CleoEngine {
 
         if (this._scene) {
             this._scene.update(deltaTime, currentTimestamp);
-            this._renderer.render(this._camera, this._scene);
+            this._renderer.render(this._scene);
         }
 
-        this._camera.update();
         this.onUpdate(deltaTime, currentTimestamp);
     
         this._lastTimestamp = currentTimestamp;
@@ -94,7 +90,6 @@ export class CleoEngine {
     public setViewport(viewport: HTMLElement) {
         this._viewport = viewport;
         this._renderer.viewport = viewport;
-        //this._viewport.appendChild(this._renderer.viewport);
     }
 
     public setScene(scene: Scene) {
@@ -102,15 +97,12 @@ export class CleoEngine {
         this._scene.update(0, 0);
         this._physicsSystem.scene = this._scene;
     }
-    public setCamera(camera: Camera) { this._camera = camera; }
 
     public onResize(): void {
         this._renderer.resize();
-        this._camera.resize(this._renderer.canvas.width, this._renderer.canvas.height);
     }
 
     public get scene(): Scene { return this._scene; }
-    public get camera(): Camera { return this._camera; }
     public get viewport(): HTMLElement { return this._viewport; }
     public get renderer(): Renderer { return this._renderer; }
     public get input(): InputManager { return InputManager.instance; }

@@ -1,4 +1,5 @@
 import * as CLEO from 'cleo';
+import { CameraNode } from 'cleo';
 
 let app = new CLEO.CleoEngine({
     graphics: {
@@ -15,7 +16,6 @@ if (!element) {
     element.id = 'game-viewport';
 }
 app.setViewport(element);
-app.setCamera(new CLEO.Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000}));
 
 const scene1: CLEO.Scene = new CLEO.Scene();
 const scene2 = new CLEO.Scene();
@@ -149,7 +149,7 @@ async function loadAssets(): Promise<void> {
     scene2.addNode(helmet);
     
     // Load node from File
-    const sponza = new CLEO.Node('sponza');
+    /* const sponza = new CLEO.Node('sponza');
     CLEO.Model.fromFile({filePaths: ['assets/sponza/sponza.obj', 'assets/sponza/sponza.mtl']}).then(sponzaModel => {
         sponzaModel.forEach(model => {
             const modelNode = new CLEO.ModelNode(model.name, model.model);
@@ -157,9 +157,33 @@ async function loadAssets(): Promise<void> {
             sponza.addChild(modelNode);
         });
         scene2.addNode(sponza);
-    });
+    }); */
     
     scene2.addNodes(floor, sun, pl1, crate);
+
+    const cameraNode1 = new CLEO.CameraNode('camera', new CLEO.Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000}));
+    cameraNode1.active = true;
+
+    const cameraNode2 = new CLEO.CameraNode('camera2', new CLEO.Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000}));
+    cameraNode2.active = true;
+    cameraNode2.onUpdate = (node, delta, time) => {
+        let mouse = app.input.mouse;
+        let movement = delta * 2;
+        if (mouse.buttons.Left) {
+            (node as CameraNode).camera.rotation[0] -= mouse.velocity[1] * movement / 10;
+            (node as CameraNode).camera.rotation[1] -= mouse.velocity[0] * movement / 10;
+        }
+    
+        app.input.isKeyPressed('KeyW') && (node as CameraNode).camera.moveForward(movement);
+        app.input.isKeyPressed('KeyS') && (node as CameraNode).camera.moveForward(-movement);
+        app.input.isKeyPressed('KeyA') && (node as CameraNode).camera.moveRight(-movement);
+        app.input.isKeyPressed('KeyD') && (node as CameraNode).camera.moveRight(movement);
+        app.input.isKeyPressed('KeyE') && (node as CameraNode).camera.moveUp(movement);
+        app.input.isKeyPressed('KeyQ') && (node as CameraNode).camera.moveUp(-movement);
+    }
+    
+    scene1.addNode(cameraNode1);
+    scene2.addNode(cameraNode2);
 }
 
 app.setScene(scene2);
@@ -171,12 +195,12 @@ app.onPostInitialize = () => {
             CLEO.Geometry.Sphere(32),
             CLEO.Material.Default({ reflectivity: 0.5, textures: { base: 'world'} }, { castShadow: true })
         ));
-        sphere.setPosition(app.camera.position)
+        sphere.setPosition(/* app.camera.position */[0, 0, 0])
                 .setUniformScale(0.25)
                 .setBody(5).attachShape(CLEO.Shape.Sphere(0.25)).onCollision = node => { if (node.name === 'box') { node.remove(); }};
         sphere.onStart = node => {
             const impulseVector = CLEO.Vec.vec3.create();
-            CLEO.Vec.vec3.scale(impulseVector, app.camera.forward, 100);
+            CLEO.Vec.vec3.scale(impulseVector, /* app.camera.forward */[0, 1, 0], 100);
             node.body?.impulse(impulseVector)
         }
         sphere.onSpawn = () => { console.log('sphere spawned')}
@@ -224,19 +248,6 @@ app.onPostInitialize = () => {
 };  
 
 app.onUpdate = (delta, time) => {
-    let mouse = app.input.mouse;
-    let movement = delta * 2;
-    if (mouse.buttons.Left) {
-        app.camera.rotation[0] -= mouse.velocity[1] * movement / 10;
-        app.camera.rotation[1] -= mouse.velocity[0] * movement / 10;
-    }
-
-    app.input.isKeyPressed('KeyW') && app.camera.moveForward(movement);
-    app.input.isKeyPressed('KeyS') && app.camera.moveForward(-movement);
-    app.input.isKeyPressed('KeyA') && app.camera.moveRight(-movement);
-    app.input.isKeyPressed('KeyD') && app.camera.moveRight(movement);
-    app.input.isKeyPressed('KeyE') && app.camera.moveUp(movement);
-    app.input.isKeyPressed('KeyQ') && app.camera.moveUp(-movement);
 
     app.input.isKeyPressed('Digit1') && (app.renderer.exposure -= 0.005);
     app.input.isKeyPressed('Digit2') && (app.renderer.exposure += 0.005);

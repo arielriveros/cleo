@@ -1,9 +1,10 @@
 import { Texture, TextureManager } from "../../cleo";
-import { LightNode, ModelNode, Node, SkyboxNode } from "./node";
+import { CameraNode, LightNode, ModelNode, Node, SkyboxNode } from "./node";
 
 export class Scene {
     private _root: Node = new Node('root');
     private _nodes: Set<Node>;
+    private _cameras: Set<CameraNode>;
     private _lights: Set<LightNode>;
     private _models: Set<ModelNode>;
     private _skybox: SkyboxNode | null;
@@ -72,8 +73,7 @@ export class Scene {
         if (this._dirty) {
             this.breadthFirstTraversal();
             for (const node of this._nodes)
-                if (node instanceof LightNode)
-                    this._asignLightIndices();
+                if (node instanceof LightNode) this._asignLightIndices();
         }
         for (const node of this._nodes) {
             if (node.markForRemoval) {
@@ -81,8 +81,8 @@ export class Scene {
                 continue;
             }
             node.updateWorldTransform();
-            if (this._hasStarted && node.onUpdate)
-                node.onUpdate(node, delta, time);
+            if (this._hasStarted)
+                node.update(delta, time);
         }
     }
     
@@ -112,6 +112,7 @@ export class Scene {
 
     private _filterByType(): void {
         // This seems unoptimized, TODO: Fix later
+        this._cameras = new Set();
         this._lights = new Set();
         this._models = new Set();
         this._skybox = null;
@@ -122,6 +123,8 @@ export class Scene {
                 this._models.add(node);
             if (node instanceof SkyboxNode)
                 this._skybox = node;
+            if (node instanceof CameraNode)
+                this._cameras.add(node);
         }
     }
  
@@ -200,6 +203,14 @@ export class Scene {
         if (this._dirty)
             this.breadthFirstTraversal();
         return this._nodes;
+    }
+
+    public get activeCamera(): CameraNode {
+        if (this._dirty)
+            this.breadthFirstTraversal();
+        for (const camera of this._cameras)
+            if (camera.active)
+                return camera;
     }
 
     public get lights(): Set<LightNode> {

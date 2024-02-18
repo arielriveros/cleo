@@ -1,4 +1,4 @@
-import { Geometry, Material, Model, Node, ModelNode, LightNode, DirectionalLight, PointLight, SkyboxNode, Skybox } from 'cleo'
+import { Geometry, Material, Model, Node, ModelNode, LightNode, DirectionalLight, PointLight, SkyboxNode, Skybox, CameraNode, Camera } from 'cleo'
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
 import { useEffect, useState } from 'react';
@@ -19,6 +19,15 @@ export default function AddNew() {
             editorScene?.addNode(newNode);
         else
             node?.addChild(newNode);
+    }
+
+    const addCamera = () => { 
+        const cameraNode = new CameraNode('camera', new Camera({}));
+        cameraNode.active = true;
+        const debugCameraModel = new ModelNode('__debug__CameraModel', new Model(Geometry.Cube(), Material.Basic({}, {wireframe: true})) )
+        debugCameraModel.setUniformScale(0.2);
+        cameraNode.addChild(debugCameraModel);
+        addNode(cameraNode);
     }
     
     const addCube = () => {
@@ -58,6 +67,12 @@ export default function AddNew() {
     return (
         <Collapsable title='Add'>
             <button onClick={() => addNode(new Node('node')) }>Empty Node</button>
+            <div>
+                Cameras
+                <div>
+                    <button onClick={() => addCamera() }>Camera</button>
+                </div>
+            </div>
             <div>
                 Basic Shapes
                 <div>
