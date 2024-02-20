@@ -25,6 +25,7 @@ export class Node {
     protected readonly _translationMatrix: mat4;
 
     protected readonly _quaternion: quat;
+    protected readonly _euler: vec3;
     protected readonly _rotationMatrix: mat4;
 
     protected readonly _scale: vec3;
@@ -55,6 +56,7 @@ export class Node {
         this._position = vec3.create();
         this._translationMatrix = mat4.create();
 
+        this._euler = vec3.create();
         this._quaternion = quat.create();
         this._rotationMatrix = mat4.create();
 
@@ -207,22 +209,18 @@ export class Node {
     }
 
     public get forward(): vec3 {
-        // transpose(inverse(worldTransform))
-        let rotTransform = mat4.create();
-        if (this._parent)
-            mat4.multiply(this._worldTransform, this._parent.worldTransform, this.localTransform);
-        else
-            this._worldTransform = this.localTransform;
-        mat4.transpose(rotTransform, this.worldTransform);
-        mat4.invert(rotTransform, rotTransform);
         let forward = vec3.fromValues(0, 0, 1);
-        vec3.transformMat4(forward, forward, rotTransform);
-        vec3.normalize(forward, forward);
+        vec3.transformMat4(forward, forward, this._rotationMatrix);
         return forward;
     }
 
     public get worldPosition(): vec3 {
         return vec3.transformMat4(vec3.create(), vec3.create(), this.worldTransform);
+    }
+
+    public get worldForward(): vec3 {
+        let wForward = vec3.add(vec3.create(), this.worldPosition, this.forward);
+        return wForward;
     }
 
     public setX(value: number): Node {
@@ -301,43 +299,38 @@ export class Node {
     }
 
     public rotateX(value: number): Node {
-        this._rotateOnAxis([1, 0, 0], value * Math.PI / 180);
+        this._euler[0] += value;
+        this._updateRotationMatrix();
         return this;
     }
-
+    
     public rotateY(value: number): Node {
-        this._rotateOnAxis([0, 1, 0], value * Math.PI / 180);
+        this._euler[1] += value;
+        this._updateRotationMatrix();
         return this;
     }
-
+    
     public rotateZ(value: number): Node {
-        this._rotateOnAxis([0, 0, 1], value * Math.PI / 180);
+        this._euler[2] += value;
+        this._updateRotationMatrix();
         return this;
     }
-
+    
     public setRotation(value: vec3): Node {
-        quat.fromEuler(this._quaternion, value[0], value[1], value[2]);
+        vec3.copy(this._euler, value);
         this._updateRotationMatrix();
         return this;
     }
 
     public setQuaternion(quaternion: quat): Node {
         quat.copy(this._quaternion, quaternion);
-        this._updateRotationMatrix();
+        mat4.fromQuat(this._rotationMatrix, this._quaternion);
         return this;
     }
-
-    private _rotateOnAxis(axis: vec3, value: number): void {
-        const q = quat.create();
-        quat.setAxisAngle(q, axis, value);
-        quat.multiply(this._quaternion, q, this._quaternion);
-        this._updateRotationMatrix();
-    }
-
+    
     private _updateRotationMatrix(): void {
-        if (this._body)
-            this._body.setQuaternion(this._quaternion);
-        
+        quat.fromEuler(this._quaternion, this._euler[0], this._euler[1], this._euler[2]);
+        if (this._body) this._body.setQuaternion(this._quaternion);
         mat4.fromQuat(this._rotationMatrix, this._quaternion);
     }
 
@@ -409,33 +402,7 @@ export class Node {
     }
 
     public get position(): vec3 { return this._position; }
-    public get rotation(): vec3 {
-        // FIX: Some rotations are not correct
-        let rotMat: mat4 = mat4.fromQuat(mat4.create(), this._quaternion);
-        let out = vec3.create();
-        let m11 = rotMat[0], m12 = rotMat[1], m13 = rotMat[2];
-        let m21 = rotMat[4], m22 = rotMat[5], m23 = rotMat[6];
-        let m31 = rotMat[8], m32 = rotMat[9], m33 = rotMat[10];
-
-
-        out[1] = -Math.asin(Math.min(Math.max(m13, -1), 1));
-
-        if (Math.abs(m13) < 0.99999) {
-            out[0] = -Math.atan2(-m23, m33);
-            out[2] = Math.atan2(-m12, m11);
-        }
-        else {
-            out[0] = -Math.atan2(m32, m11);
-            out[2] = 0;
-        }
-
-        out.forEach((value, index) => {
-            // convert to degrees and reduce precision
-            out[index] = Math.round(value * (180 / Math.PI) * 100) / 100;
-        });
-
-        return out;
-    }
+    public get rotation(): vec3 { return this._euler; }
 
     public get quaternion(): quat { return this._quaternion; }
     public get scale(): vec3 { return this._scale; }
@@ -775,7 +742,7 @@ export class CameraNode extends Node {
     public update(delta: number, time: number): void {
         super.update(delta, time);
         this._camera.position = this.worldPosition;
-        this._camera.eye = this.forward;
+        this._camera.eye = this.worldForward;
     }
 
     public static parse(parent: Node, json: any) {

@@ -7,12 +7,12 @@ interface CaperaProperties {
 }
 
 export class Camera {
-    private _position: vec3;
-    private _eye: vec3;
-    private _fov: number;
-    private _near: number;
-    private _far: number;
-    private _ratio: number;
+    private _position: vec3 = vec3.create();
+    private _eye: vec3 = vec3.create();
+    private _fov: number = 45;
+    private _near: number = 0.1;
+    private _far: number = 100;
+    private _ratio: number = 1;
 
 
     constructor(properties: CaperaProperties = {}) {
@@ -35,7 +35,7 @@ export class Camera {
     public get far(): number { return this._far; }
 
     public get viewMatrix(): mat4 {
-        return mat4.lookAt(mat4.create(), this._position, vec3.add(vec3.create(), this._position, this._eye), vec3.fromValues(0, 1, 0));
+        return mat4.lookAt(mat4.create(), this._position, this._eye, vec3.fromValues(0, 1, 0));
     }
 
     public get projectionMatrix(): mat4 {

@@ -1,5 +1,4 @@
 import * as CLEO from 'cleo';
-import { CameraNode } from 'cleo';
 
 let app = new CLEO.CleoEngine({
     graphics: {
@@ -161,33 +160,37 @@ async function loadAssets(): Promise<void> {
     
     scene2.addNodes(floor, sun, pl1, crate);
 
-    const cameraNode1 = new CLEO.CameraNode('camera', new CLEO.Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000}));
+    const cameraNode1 = new CLEO.CameraNode('camera', new CLEO.Camera({far: 1000}));
+    cameraNode1.setPosition([0, 1, 5]);
+    cameraNode1.setRotation([0, 45, 0]);
     cameraNode1.active = true;
 
-    const cameraNode2 = new CLEO.CameraNode('camera2', new CLEO.Camera({position: [0, 1, 5], rotation: [0, Math.PI, 0], far: 1000}));
+    const cameraNode2 = new CLEO.CameraNode('camera2', new CLEO.Camera({far: 1000}));
+    cameraNode2.setPosition([0, 1, 5]);
+    cameraNode2.setRotation([0, 45, 0]);
     cameraNode2.active = true;
     cameraNode2.onUpdate = (node, delta, time) => {
         let mouse = app.input.mouse;
         let movement = delta * 2;
         if (mouse.buttons.Left) {
-            (node as CameraNode).camera.rotation[0] -= mouse.velocity[1] * movement / 10;
-            (node as CameraNode).camera.rotation[1] -= mouse.velocity[0] * movement / 10;
+            node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
         }
     
-        app.input.isKeyPressed('KeyW') && (node as CameraNode).camera.moveForward(movement);
-        app.input.isKeyPressed('KeyS') && (node as CameraNode).camera.moveForward(-movement);
-        app.input.isKeyPressed('KeyA') && (node as CameraNode).camera.moveRight(-movement);
-        app.input.isKeyPressed('KeyD') && (node as CameraNode).camera.moveRight(movement);
-        app.input.isKeyPressed('KeyE') && (node as CameraNode).camera.moveUp(movement);
-        app.input.isKeyPressed('KeyQ') && (node as CameraNode).camera.moveUp(-movement);
+        app.input.isKeyPressed('KeyW') && node.addForward(movement);
+        app.input.isKeyPressed('KeyS') && node.addForward(-movement);
+        app.input.isKeyPressed('KeyA') && node.addRight(-movement);
+        app.input.isKeyPressed('KeyD') && node.addRight(movement);
+        app.input.isKeyPressed('KeyE') && node.addY(movement);
+        app.input.isKeyPressed('KeyQ') && node.addY(-movement);
     }
     
     scene1.addNode(cameraNode1);
     scene2.addNode(cameraNode2);
+
 }
 
 app.setScene(scene2);
-loadAssets().then(() => { app.isPaused = false; });
+loadAssets().then(() => { app.isPaused = false; app.scene.start(); });
 
 app.onPostInitialize = () => {
     const shootSphere = () => {

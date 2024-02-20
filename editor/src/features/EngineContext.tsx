@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, ModelNode } from "cleo";
+import { Light } from "cleo/graphics/lighting";
 
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
@@ -55,10 +56,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         instanceRef.current.isPaused = false;
 
         const scene = new Scene();
-        editorSceneRef.current = scene;
-
         scene.onChange = () => { setSceneChanged( (prev) => !prev ) };
-
+        editorSceneRef.current = scene;
         
         const debugCameraNode = new CameraNode('__debug__Camera', new Camera());
         debugCameraNode.active = true;
@@ -68,8 +67,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             let mouse = InputManager.instance.mouse;
             let movement = delta * 2;
             if (mouse.buttons.Left) {
-                node.rotateX( mouse.velocity[1] * movement * 5);
-                node.rotateY(-mouse.velocity[0] * movement * 5);
+                node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
             }
         
             InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
@@ -81,11 +79,44 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         }
         scene.addNode(debugCameraNode);
 
+        const lightNode = new LightNode('light', new DirectionalLight({}));
+        lightNode.setRotation([45, 45, 0]);
+        scene.addNode(lightNode);
+
+        const cameraNode = new CameraNode('camera', new Camera({}));
+        cameraNode.active = true;
+        const debugCameraModel = new ModelNode('__debug__CameraModel', new Model(Geometry.Cube(), Material.Basic({}, {wireframe: true})) )
+        debugCameraModel.setUniformScale(0.2);
+        cameraNode.addChild(debugCameraModel);
+        cameraNode.setPosition([0, 0, -2]);
+        scene.addNode(cameraNode);
+
+        const box1 = new ModelNode('box', new Model(Geometry.Cube(), Material.Default({diffuse: [1, 0, 0]})));
+        box1.setPosition([1, 0, 0]);
+        scene.addNode(box1);
+
+        const box2 = new ModelNode('box', new Model(Geometry.Cube(), Material.Default({})));
+        box2.setPosition([-1, 0, 0]);
+        box2.setUniformScale(0.5);
+        scene.addNode(box2);
+
         // Setting the editor scene and camera
         engine.setScene(scene);
         scene.start();
         
-        engine.onUpdate = (deltaTime) => {}
+        engine.onUpdate = (deltaTime) => {
+            const box1 = scene.getNodesByName('box')[0];
+            const box2 = scene.getNodesByName('box')[1];
+            const debugCamera = scene.getNodesByName('__debug__Camera')[0];
+            if (box1 && box2 && debugCamera) {
+                /* let pos = debugCamera.worldForward;
+                box2.setPosition([pos[0], pos[1], pos[2]]);
+                let pos2 = box2.worldForward;
+                box1.setPosition([pos2[0], pos2[1], pos2[2]]); */
+                //box1.rotateX(deltaTime * 10).rotateY(deltaTime * 10);
+            }
+
+        }
         
         engine.run();
     }, []);
