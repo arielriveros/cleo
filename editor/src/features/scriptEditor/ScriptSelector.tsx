@@ -3,11 +3,10 @@ import Collapsable from '../../components/Collapsable';
 
 export default function ScriptSelector() {
 
-    const { setMode, selectedScript, setSelectedScript } = useCleoEngine();
+    const { selectedScript, setSelectedScript } = useCleoEngine();
 
     const onScriptSelected = (script: string) => {
         setSelectedScript(script);
-        setMode('script');
     };
 
     return (

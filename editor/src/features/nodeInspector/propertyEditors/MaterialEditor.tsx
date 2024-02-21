@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { ModelNode, Vec, TextureManager, Texture, Model, Material } from 'cleo'
-import Collapsable from '../../components/Collapsable'
+import Collapsable from '../../../components/Collapsable'
 import './MaterialEditor.css'
 
 function TextureInspector(props: { tex: string, material: Material }) {
@@ -101,7 +101,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     return (
         <Collapsable title='Material'>
         <div className='materialEditor'>
-        <h4>Colors</h4>
+        <h5>Colors</h5>
             <table>
                 <tbody>
                     <tr>
@@ -146,7 +146,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                     </tr>
                 </tbody>
             </table>
-        <h4>Textures</h4>
+        <h5>Textures</h5>
         <table>
             <tbody>
                 <tr>
@@ -183,8 +183,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 </tr>
             </tbody>
         </table>
-        </div>
-        <h4>Options</h4>
+        <h5>Options</h5>
         <table>
             <tbody>
                 <tr>
@@ -221,6 +220,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 </tr>
             </tbody>
         </table>
+        </div>
         </Collapsable>
     )
 }

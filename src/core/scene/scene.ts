@@ -33,7 +33,6 @@ export class Scene {
     public start(): void {
         if (this._hasStarted) return;
 
-        // TODO: Store the initial state of the scene and allow to reset it
         for (const node of this._nodes)
             node.start();
 
@@ -42,14 +41,11 @@ export class Scene {
 
     public stop(): void {
         this._hasStarted = false;
-        // TODO: Reset the initial state of the scene
     }
 
     public addNode(node: Node): void {
         node.scene = this;
         this._root.addChild(node);
-        /* for (const child of node.children)
-            child.scene = this; */
     }
 
     public addNodes(...nodes: Node[]): void {
@@ -61,7 +57,7 @@ export class Scene {
         this._root.removeChild(node);
     }
 
-    public removeNodeByName(name: string): void {
+    public removeNodesByName(name: string): void {
         const nodesToRemove = this.getNodesByName(name);
         if (nodesToRemove.length > 0) {
             for (const node of nodesToRemove)
@@ -69,13 +65,16 @@ export class Scene {
         }
     }
 
+    public removeNodeById(id: string): void {
+        const nodeToRemove = this.getNodeById(id);
+        if (nodeToRemove)
+            this.removeNode(nodeToRemove);
+    }
+
     public update(delta: number, time: number): void {
-        if (this._dirty) {
-            this.breadthFirstTraversal();
-            for (const node of this._nodes)
-                if (node instanceof LightNode) this._asignLightIndices();
-        }
         for (const node of this._nodes) {
+            if (node instanceof LightNode) this._asignLightIndices();
+
             if (node.markForRemoval) {
                 this.removeNode(node);
                 continue;
@@ -86,7 +85,7 @@ export class Scene {
         }
     }
     
-    public breadthFirstTraversal(): void {
+    private _breadthFirstTraversal(): void {
         const visited: Set<Node> = new Set();
         const queue: Node[] = [];
 
@@ -130,7 +129,7 @@ export class Scene {
  
     public getNodesByName(name: string): Node[] {
         if (this._dirty)
-            this.breadthFirstTraversal();
+            this._breadthFirstTraversal();
 
         const nodes: Node[] = [];
         for (const node of this._nodes) {
@@ -143,7 +142,7 @@ export class Scene {
 
     public getNodeById(id: string): Node | undefined {
         if (this._dirty)
-            this.breadthFirstTraversal();
+            this._breadthFirstTraversal();
         for (const node of this._nodes) {
             if (node.id === id)
                 return node;
@@ -201,13 +200,13 @@ export class Scene {
 
     public get nodes(): Set<Node> {
         if (this._dirty)
-            this.breadthFirstTraversal();
+            this._breadthFirstTraversal();
         return this._nodes;
     }
 
     public get activeCamera(): CameraNode {
         if (this._dirty)
-            this.breadthFirstTraversal();
+            this._breadthFirstTraversal();
         for (const camera of this._cameras)
             if (camera.active)
                 return camera;
@@ -215,19 +214,19 @@ export class Scene {
 
     public get lights(): Set<LightNode> {
         if (this._dirty)
-            this.breadthFirstTraversal();
+            this._breadthFirstTraversal();
         return this._lights;
     }
 
     public get models(): Set<ModelNode> {
         if (this._dirty)
-            this.breadthFirstTraversal();
+            this._breadthFirstTraversal();
         return this._models;
     }
 
     public get skybox(): SkyboxNode | null {
         if (this._dirty)
-            this.breadthFirstTraversal();
+            this._breadthFirstTraversal();
         return this._skybox;
     }
 

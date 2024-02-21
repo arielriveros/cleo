@@ -67,6 +67,12 @@ export class Node {
     }
 
     public addChild(node: Node): void {
+        // if the node already has a parent, remove it from the parent's children
+        if (node.parent) {
+            node.parent.removeChild(node);
+            this.onChange();
+        }
+        
         node.parent = this;
         this._children.push(node);
         node.onChange = this.onChange;
@@ -75,8 +81,10 @@ export class Node {
             node.start();
         if (this.scene) {
             node.scene = this.scene;
-            for (const child of node.children)
+            for (const child of node.children) {
                 child.onSpawn(child);
+                child.scene = this.scene;
+            }
         }
         this.onChange();
     }
@@ -149,8 +157,7 @@ export class Node {
         });
     }
 
-    public static parse(parent: Node, json: any) {
-        const node = new Node(json.name, json.type, json.id);
+    protected static _commonParse(node: Node, parent: Node, json: any) {
         node.onChange = parent.onChange;
         node.setPosition(json.position);
         node.setRotation(json.rotation);
@@ -178,8 +185,12 @@ export class Node {
                     Node.parse(node, child);
             }
         }
-        
         parent.addChild(node);
+    }
+
+    public static parse(parent: Node, json: any) {
+        const node = new Node(json.name, json.type, json.id);
+        Node._commonParse(node, parent, json);
     }
 
     public get id(): string { return this._id; }
@@ -211,6 +222,7 @@ export class Node {
     public get forward(): vec3 {
         let forward = vec3.fromValues(0, 0, 1);
         vec3.transformMat4(forward, forward, this._rotationMatrix);
+        vec3.normalize(forward, forward);
         return forward;
     }
 
@@ -219,8 +231,11 @@ export class Node {
     }
 
     public get worldForward(): vec3 {
-        let wForward = vec3.add(vec3.create(), this.worldPosition, this.forward);
-        return wForward;
+        // get the forward vector of the node in world space
+        let forward = vec3.fromValues(0, 0, 1);
+        //vec3.transformMat4(forward, forward, this._rotationMatrix);
+        vec3.transformMat4(forward, forward, this._worldTransform);
+        return forward;
     }
 
     public setX(value: number): Node {
@@ -266,6 +281,7 @@ export class Node {
     }
 
     public addForward(value: number) {
+        //vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.worldForward, value));
         vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.forward, value));
         this._updateTranslationMatrix();
     }
@@ -392,7 +408,7 @@ export class Node {
         
         this._body = new Body({
             mass: mass,
-            position: vec3.transformMat4(vec3.create(), this._position, this._worldTransform),
+            position: this.worldPosition,
             quaternion: this._quaternion,
             linearDamping: linearDamping,
             angularDamping: angularDamping
@@ -477,33 +493,7 @@ export class ModelNode extends Node {
 
     public static parse(parent: Node, json: any) {
         const node = new ModelNode(json.name, Model.parse(json.model), json.id);
-        node.setPosition(json.position);
-        node.setRotation(json.rotation);
-        node.setScale(json.scale);
-        if (json.scripts) {
-            if (json.scripts.start)
-                node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
-            if (json.scripts.spawn)
-                node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
-            if (json.scripts.update)
-                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
-        }
-        if (json.children) {
-            for (const child of json.children) {
-                if (child.type === 'model')
-                    ModelNode.parse(node, child);
-                else if (child.type === 'light')
-                    LightNode.parse(node, child);
-                else if (child.type === 'skybox')
-                    SkyboxNode.parse(node, child);
-                else if (child.type === 'camera')
-                    CameraNode.parse(node, child);
-                else
-                    Node.parse(node, child);
-            }
-        }
-        
-        parent.addChild(node);
+        Node._commonParse(node, parent, json);
     }
 
     public get model(): Model { return this._model; }

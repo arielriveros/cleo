@@ -334,7 +334,7 @@ export class Renderer {
                     this._shaderManager.setUniform('u_dirLight.diffuse', node.light.diffuse);
                     this._shaderManager.setUniform('u_dirLight.specular', node.light.specular);
                     this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
-                    this._shaderManager.setUniform('u_dirLight.direction', node.forward);
+                    this._shaderManager.setUniform('u_dirLight.direction', node.worldForward);
                     break;
                 case 'point':
                     this._shaderManager.setUniform(`u_pointLights[${node.index}].position`, node.worldPosition);

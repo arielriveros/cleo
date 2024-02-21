@@ -18,23 +18,35 @@ interface SceneNodeItemProps {
     children?: string[];
     onSelect: (nodeId: string) => void;
     onExpand?: (nodeId: string) => void;
-}
-function SceneNodeItem(props: SceneNodeItemProps) {
+    onDragStart: (event: React.DragEvent<HTMLDivElement>, nodeId: string) => void;
+  }
+  
+  function SceneNodeItem(props: SceneNodeItemProps) {
     const { selectedNode } = useCleoEngine();
-
+  
+    const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+      event.dataTransfer.setData('text/plain', props.nodeId);
+      props.onDragStart(event, props.nodeId);
+    };
+  
     return (
-        <span className={`sceneItem ${selectedNode === props.nodeId ? 'selected' : ''}`} onClick={() => props.onSelect(props.nodeId)}>
-            <div>
-                {props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='sceneItemIcon' /> }
-                {props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='sceneItemIcon' /> }
-                {props.nodeType === 'light' && <img src={LightIcon} alt='light' className='sceneItemIcon' /> }
-                {props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='sceneItemIcon' /> }
-                {props.nodeName}
-            </div>
-            {props.children && props.children.length > 0 && <div onClick={() => props.onExpand && props.onExpand(props.nodeId)}>+</div>}
-        </span>
-    )
-}
+      <div
+        id={props.nodeId}
+        className={`sceneItem ${selectedNode === props.nodeId ? 'selected' : ''}`}
+        onClick={() => props.onSelect(props.nodeId)}
+        draggable={true}
+        onDragStart={handleDragStart} >
+        <div>
+          { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='sceneItemIcon' /> }
+          { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='sceneItemIcon' /> }
+          { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='sceneItemIcon' /> }
+          { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='sceneItemIcon' /> }
+          { props.nodeName }
+        </div>
+        { props.children && props.children.length > 0 && <div onClick={() => props.onExpand && props.onExpand(props.nodeId)}>+</div> }
+      </div>
+    );
+  }
 
 function SceneListRecursive(props: { node: { id: string, name: string, type: string, children: any[]}, setSelectedNode: (nodeId: string | null) => void}) {
     const [isVisible, setIsVisible] = useState(true);
@@ -52,6 +64,7 @@ function SceneListRecursive(props: { node: { id: string, name: string, type: str
                 onSelect={props.setSelectedNode}
                 onExpand={expand}
                 children={props.node.children}
+                onDragStart={(event, nodeId) => console.log('drag start', nodeId)}
                 />
             { isVisible ? 
                 props.node.children.map( child => { return <SceneListRecursive key={child.id} node={child} setSelectedNode={props.setSelectedNode}/> })
@@ -73,9 +86,42 @@ export default function SceneInspector() {
             id: node.id,
             name: node.name,
             type: node.nodeType,
-            children: node.children.filter((child: Node) => !child.name.includes('__debug__')).map((child: Node) => generateNodeList(child))
+            children: node.children.filter((child: Node) => !(child.name.includes('__debug__') || child.name.includes('__editor__'))).map((child: Node) => generateNodeList(child))
         }
     }
+
+    const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+    };
+    
+    const handleDrop: React.DragEventHandler<HTMLDivElement> = (event) => {
+            event.preventDefault();
+        
+            // Find the closest parent div with the class 'sceneItem'
+            const targetElement = (event.target as HTMLDivElement).closest('.sceneItem');
+        
+            if (targetElement) {
+                const targetId = targetElement.id;
+                const draggedId = event.dataTransfer.getData('text/plain');
+
+                if (draggedId === targetId) return; // Don't allow dropping onto the same node
+        
+                // Implement logic to update the hierarchy, e.g., update the parent of the dragged node
+                console.log(`Node ${draggedId} dropped onto ${targetId}`);
+                const draggedNode = editorScene?.getNodeById(draggedId);
+                const targetNode = editorScene?.getNodeById(targetId);
+
+                if (draggedNode && targetNode) {
+                  // check if the dragged node is a parent of the target node
+                  if (targetNode.parent?.id === draggedNode.id) {
+                    console.log('Cannot drop a parent node onto its child');
+                    return;
+                  }
+                  
+                  targetNode.addChild(draggedNode);
+                }
+            }
+        };
 
     useEffect(() => {
         if (editorScene)
@@ -83,7 +129,7 @@ export default function SceneInspector() {
     }, [sceneChanged])
     return (
         <Sidebar width='20vw'>
-            <div className='sceneInspector'>
+            <div className='sceneInspector' onDragOver={handleDragOver} onDrop={handleDrop}>
             <AddNew />
             <Collapsable title='Scene'>
                 { nodes && <SceneListRecursive node={nodes} setSelectedNode={setSelectedNode}/> }

@@ -15,10 +15,7 @@ export default function AddNew() {
     }, [selectedNode])
 
     const addNode = (newNode: Node) => {
-        if (node?.name === 'root')
-            editorScene?.addNode(newNode);
-        else
-            node?.addChild(newNode);
+        node?.addChild(newNode);
     }
 
     const addCamera = () => { 
@@ -64,6 +61,14 @@ export default function AddNew() {
         })
     }
 
+    const addPointLight = () => {
+        const pointLightNode = new LightNode('point light', new PointLight({}));
+        const debugPointLightModel = new ModelNode('__debug__LightModel', new Model(Geometry.Sphere(8), Material.Basic({}, {wireframe: true})) )
+        debugPointLightModel.setUniformScale(0.2);
+        pointLightNode.addChild(debugPointLightModel);
+        addNode(pointLightNode);
+    }
+
     return (
         <Collapsable title='Add'>
             <button onClick={() => addNode(new Node('node')) }>Empty Node</button>
@@ -86,7 +91,7 @@ export default function AddNew() {
                 Lights
                 <div>
                     <button onClick={() => addNode(new LightNode('directional light', new DirectionalLight({}))) }>Directional Light</button>
-                    <button onClick={() => addNode(new LightNode('point light', new PointLight({}))) }>Point Light</button>
+                    <button onClick={() => addPointLight() }>Point Light</button>
                 </div>
             </div>
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Node } from 'cleo';
-import Collapsable from '../../components/Collapsable';
+import Collapsable from '../../../components/Collapsable';
 import './TransformEditor.css';
 
 export default function TransformEditor(props: {node: Node}) {

@@ -58,7 +58,7 @@ export default function ScriptEditor() {
     if (editorViewRef.current) {
       editorViewRef.current.dispatch({ changes: { from: 0, to: editorViewRef.current.state.doc.length, insert: scriptText }})
     }
-  }, [selectedScript, scriptText])
+  }, [selectedScript, scriptText, selectedNode])
 
   useEffect(() => {
     if (!selectedNode || !selectedScript) return
@@ -83,6 +83,6 @@ export default function ScriptEditor() {
 }, [editorScript])
 
   return (
-    <div ref={editorRef} style={{width: '100%', height: '100%'}} />
+    <div ref={editorRef} style={{width: '100%', backgroundColor: 'white', color: 'black'}} />
   )
 }

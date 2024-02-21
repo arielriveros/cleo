@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { ModelNode, Node, SkyboxNode } from 'cleo'
-import Collapsable from '../../components/Collapsable'
-import Sidebar from '../../components/Sidebar'
-import TransformEditor from './TransformEditor'
-import MaterialEditor from './MaterialEditor'
-import SkyboxEditor from './SkyboxEditor'
+import { Node } from 'cleo'
+import Sidebar from "../../components/Sidebar";
+import Tabs, { Tab } from "../../components/Tabs";
+import PropertyEditor from './propertyEditors/PropertyEditor';
 import './NodeInspector.css'
-import ScriptSelector from './ScriptSelector'
+import ScriptSelector from '../scriptEditor/ScriptSelector';
+import ScriptEditor from '../scriptEditor/ScriptEditor';
+import PhysicsEditor from './physicsEditors/PhysicsEditor';
 
 export default function NodeInspector() {
-  const { editorScene, selectedNode } = useCleoEngine()
+  const { editorScene, selectedNode, selectedScript } = useCleoEngine()
   const [node, setNode] = useState<Node | null>(null)
+  const [selectedTab, setSelectedTab] = useState<'Properties' | 'Scripts' | 'Physics'>('Properties')
 
   useEffect(() => {
     if (editorScene && selectedNode) {
@@ -22,28 +23,20 @@ export default function NodeInspector() {
   }, [selectedNode])
 
   return (
-    <Sidebar width='30vw'> 
-      <div className='nodeInspector'>
-      { node && 
-        <>
-          <Collapsable title='Node Information'>
-            Name: {node.name}
-            <br />
-            Id: {node.id}
-            <br />
-            Type: { node.nodeType.charAt(0).toUpperCase() + node.nodeType.slice(1) }
-            <br />
-            Children: {node.children.length}
-          </Collapsable>
-
-          <TransformEditor node={node} />
-
-          { node.nodeType === 'model' && <MaterialEditor node={node as ModelNode} /> }
-          { node.nodeType === 'skybox' && <SkyboxEditor node={node as SkyboxNode} /> }
-
-          <ScriptSelector />
-        </>
-      } </div>
+    <Sidebar width='25vw'>
+      <Tabs>
+        <Tab title='Properties' onClick={()=>{setSelectedTab('Properties')}} selected={selectedTab === 'Properties'}/>
+        <Tab title='Scripts' onClick={()=>{setSelectedTab('Scripts')}} selected={selectedTab === 'Scripts'}/>
+        <Tab title='Physics' onClick={()=>{setSelectedTab('Physics')}} selected={selectedTab === 'Physics'}/>
+      </Tabs>
+    <div className='nodeInspector'>
+      {selectedTab === 'Properties' && node && <PropertyEditor node={node}/>}
+      {selectedTab === 'Scripts' && <>
+        <ScriptSelector />
+        { selectedScript && <ScriptEditor /> }
+      </>}
+      {selectedTab === 'Physics' && node && <PhysicsEditor node={node} />}
+    </div>
     </Sidebar>
   )
 }

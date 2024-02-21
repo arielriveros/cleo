@@ -17,7 +17,6 @@ if (!element) {
 app.setViewport(element);
 
 const scene1: CLEO.Scene = new CLEO.Scene();
-const scene2 = new CLEO.Scene();
 
 async function loadAssets(): Promise<void> {
     app.isPaused = true;
@@ -52,7 +51,7 @@ async function loadAssets(): Promise<void> {
         }, images[0].width, images[0].height);
     });
 
-    scene2.environmentMap = envmap;
+    scene1.environmentMap = envmap;
 
     const skybox = await CLEO.Skybox.fromFiles({
         posX: 'assets/cubemaps/skybox/right.jpg',
@@ -62,9 +61,7 @@ async function loadAssets(): Promise<void> {
         posZ: 'assets/cubemaps/skybox/front.jpg',
         negZ: 'assets/cubemaps/skybox/back.jpg'
     })
-
     scene1.addNode(new CLEO.SkyboxNode('skybox', skybox));
-    scene2.addNode(new CLEO.SkyboxNode('skybox', skybox));
     
     const sun = new CLEO.LightNode('sun', new CLEO.DirectionalLight({}), true)
     sun.setRotation([90, 0, 0]);
@@ -74,7 +71,7 @@ async function loadAssets(): Promise<void> {
         specular: [0.0, 0.0, 1.0],
         constant: 1.0
     }));
-    pl1.setPosition([2, 2, 2]).onUpdate = (node, delta, time) => {
+    pl1.setPosition([0, 0, 0]).onUpdate = (node, delta, time) => {
         node.setPosition([Math.sin(time*0.005) * 2, 0, Math.cos(time*0.005) * 2]);
     }
     
@@ -94,7 +91,7 @@ async function loadAssets(): Promise<void> {
         })
     ));
     terrain.setY(-4);
-    scene2.addNode(terrain);
+    scene1.addNode(terrain);
     
     let crate = new CLEO.ModelNode('crate', new CLEO.Model(
         CLEO.Geometry.Cube(),
@@ -126,10 +123,6 @@ async function loadAssets(): Promise<void> {
         .attachShape(CLEO.Shape.Box(1.25, 0.2, 1.5), [0.1, 0, 0])
         .attachShape(CLEO.Shape.Box(1.25, 1, 0.2), [0.1, 0.5, 0.6])
         .attachShape(CLEO.Shape.Box(0.2, 1, 1.25), [-0.4, 0.5, -0.1])
-        roomNode.onUpdate = (node, delta, time) => {
-        node.setXScale(Math.sin(time * 0.001) + 1)
-        .setYScale(Math.sin(time * 0.001) + 1);
-    }
     room.addChild(roomNode);
     scene1.addNode(room);
     
@@ -139,13 +132,13 @@ async function loadAssets(): Promise<void> {
     const backpackModel = await CLEO.Model.fromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
     const backpack = new CLEO.ModelNode('backpack2', backpackModel[0].model);
     backpack.setPosition([2, 1, -2]).setUniformScale(0.5).setBody(10).attachShape(CLEO.Shape.Box(1, 2, 1));
-    scene2.addNode(backpack);
+    scene1.addNode(backpack);
     
     const helmetModel = await CLEO.Model.fromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']});
     const helmet = new CLEO.ModelNode('helmet2', helmetModel[0].model);
     helmetModel[0].model.material.config.castShadow = true;
     helmet.setPosition([1, 2, 2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(CLEO.Shape.Sphere(0.5));   
-    scene2.addNode(helmet);
+    scene1.addNode(helmet);
     
     // Load node from File
     /* const sponza = new CLEO.Node('sponza');
@@ -155,21 +148,16 @@ async function loadAssets(): Promise<void> {
             modelNode.model.material.config.castShadow = true;
             sponza.addChild(modelNode);
         });
-        scene2.addNode(sponza);
-    }); */
-    
-    scene2.addNodes(floor, sun, pl1, crate);
+        scene1.addNode(sponza);
+    });
+     */
+    scene1.addNodes(floor, sun, pl1, crate);
 
     const cameraNode1 = new CLEO.CameraNode('camera', new CLEO.Camera({far: 1000}));
     cameraNode1.setPosition([0, 1, 5]);
-    cameraNode1.setRotation([0, 45, 0]);
+    cameraNode1.setRotation([0, 180, 0]);
     cameraNode1.active = true;
-
-    const cameraNode2 = new CLEO.CameraNode('camera2', new CLEO.Camera({far: 1000}));
-    cameraNode2.setPosition([0, 1, 5]);
-    cameraNode2.setRotation([0, 45, 0]);
-    cameraNode2.active = true;
-    cameraNode2.onUpdate = (node, delta, time) => {
+    cameraNode1.onUpdate = (node, delta, time) => {
         let mouse = app.input.mouse;
         let movement = delta * 2;
         if (mouse.buttons.Left) {
@@ -185,25 +173,25 @@ async function loadAssets(): Promise<void> {
     }
     
     scene1.addNode(cameraNode1);
-    scene2.addNode(cameraNode2);
-
 }
 
-app.setScene(scene2);
+app.setScene(scene1);
 loadAssets().then(() => { app.isPaused = false; app.scene.start(); });
 
 app.onPostInitialize = () => {
     const shootSphere = () => {
+        if (!app.scene.activeCamera) return;
         const sphere = new CLEO.ModelNode(`sphere${Math.random() * 1000}`, new CLEO.Model(
             CLEO.Geometry.Sphere(32),
             CLEO.Material.Default({ reflectivity: 0.5, textures: { base: 'world'} }, { castShadow: true })
         ));
-        sphere.setPosition(/* app.camera.position */[0, 0, 0])
+        
+        sphere.setPosition(app.scene.activeCamera.position)
                 .setUniformScale(0.25)
                 .setBody(5).attachShape(CLEO.Shape.Sphere(0.25)).onCollision = node => { if (node.name === 'box') { node.remove(); }};
         sphere.onStart = node => {
             const impulseVector = CLEO.Vec.vec3.create();
-            CLEO.Vec.vec3.scale(impulseVector, /* app.camera.forward */[0, 1, 0], 100);
+            CLEO.Vec.vec3.scale(impulseVector, app.scene.activeCamera.forward, 100);
             node.body?.impulse(impulseVector)
         }
         sphere.onSpawn = () => { console.log('sphere spawned')}
@@ -234,7 +222,6 @@ app.onPostInitialize = () => {
     app.input.registerKeyPress('KeyZ', () => { shootSphere(); });
     app.input.registerKeyPress('KeyX', () => { spawnBox(); });
     app.input.registerKeyPress('KeyP', () => {app.isPaused = !app.isPaused})
-    app.input.registerKeyPress('KeyL', () => {app.setScene(app.scene === scene1 ? scene2 : scene1);})
     app.input.registerKeyPress('KeyI', () => {app.scene.start()});
     app.input.registerKeyPress('KeyO', () => {
         app.scene.serialize().then((json) => {

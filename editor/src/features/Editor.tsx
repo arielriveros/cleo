@@ -6,18 +6,22 @@ import Content from "../components/Content";
 import Topbar from "../components/Topbar";
 import SceneInspector from "./sceneInspector/SceneInspector";
 import NodeInspector from "./nodeInspector/NodeInspector";
-import ScriptEditor from "./scriptEditor/ScriptEditor";
 import './Editor.css'
+
 
 export default function Editor() {
 
-  const { instance, editorScene, mode, setMode, setSelectedScript, scripts } = useCleoEngine();
+  const { instance, editorScene, scripts } = useCleoEngine();
 
   const clearDebuggingNodes = (json: any) => {
     const iterateChildren = (children: any[]) => {
         return children.filter((child: any) => {
             if (child.name.includes('__debug__')) {
                 console.log('removing debugging node', child.name);
+                return false;
+            }
+            if (child.name.includes('__editor__')) {
+                console.log('removing editor node', child.name);
                 return false;
             }
             child.children = iterateChildren(child.children);
@@ -85,8 +89,6 @@ export default function Editor() {
     if (!instance)
       return;
 
-    setMode('scene');
-    setSelectedScript(null);
     const newScene = new Scene();
     editorScene?.serialize(false).then(json => {
       // Clear debugging nodes from the editor scene
@@ -95,7 +97,7 @@ export default function Editor() {
       setScripts(json);
       // Parse the scene from the editor
       newScene.parse(json, false);
-      console.log('newScene', newScene);
+      console.log('Starting scene: ', newScene);
       // Set the new scene to the engine then start it
       instance.setScene(newScene);
       instance.isPaused = false;
@@ -126,23 +128,12 @@ export default function Editor() {
           <div className='optionButton' onClick={() => onPause()}>Pause</div>
           <div className='optionButton' onClick={() => onStop()}>Stop</div>
         </div>
-        <div>
-          <select value={mode} onChange={
-            e => {
-              setMode(e.target.value as 'scene' | 'script');
-              setSelectedScript(null);
-            }}>
-            <option value='scene'>Scene</option>
-            <option value='script'>Scripts</option>
-          </select>
-        </div>
         <div />
       </Topbar>
       <Content>
         <SceneInspector />
         <Center>
-        { mode === 'scene' && <EngineViewport /> }
-        { mode === 'script' && <ScriptEditor /> }
+          <EngineViewport />
         </Center>
         <NodeInspector />
       </Content>

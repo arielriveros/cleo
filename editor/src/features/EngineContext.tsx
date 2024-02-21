@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, ModelNode } from "cleo";
-import { Light } from "cleo/graphics/lighting";
 
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
@@ -9,8 +8,6 @@ const EngineContext = createContext<{
     sceneChanged: boolean;
     selectedNode: string | null;
     setSelectedNode: (node: string | null) => void;
-    mode: 'scene' | 'script';
-    setMode: (mode: 'scene' | 'script') => void;
     selectedScript: string | null;
     setSelectedScript: (script: string | null) => void;
     scripts: Map<string, {
@@ -24,8 +21,6 @@ const EngineContext = createContext<{
     sceneChanged: false,
     selectedNode: null,
     setSelectedNode: () => {},
-    mode: 'scene',
-    setMode: () => {},
     selectedScript: null,
     setSelectedScript: () => {},
     scripts: new Map(),
@@ -59,7 +54,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         scene.onChange = () => { setSceneChanged( (prev) => !prev ) };
         editorSceneRef.current = scene;
         
-        const debugCameraNode = new CameraNode('__debug__Camera', new Camera());
+        const debugCameraNode = new CameraNode('__editor__Camera', new Camera());
         debugCameraNode.active = true;
 
         debugCameraNode.setPosition([0, 0.5, -2]);
@@ -68,14 +63,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             let movement = delta * 2;
             if (mouse.buttons.Left) {
                 node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
+                InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
+                InputManager.instance.isKeyPressed('KeyS') && node.addForward(-movement);
+                InputManager.instance.isKeyPressed('KeyA') && node.addRight(-movement);
+                InputManager.instance.isKeyPressed('KeyD') && node.addRight(movement);
+                InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
+                InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
             }
-        
-            InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
-            InputManager.instance.isKeyPressed('KeyS') && node.addForward(-movement);
-            InputManager.instance.isKeyPressed('KeyA') && node.addRight(-movement);
-            InputManager.instance.isKeyPressed('KeyD') && node.addRight(movement);
-            InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
-            InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
         }
         scene.addNode(debugCameraNode);
 
@@ -105,17 +99,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         scene.start();
         
         engine.onUpdate = (deltaTime) => {
-            const box1 = scene.getNodesByName('box')[0];
+            /* const camera = scene.getNodesByName('__editor__Camera')[0];
             const box2 = scene.getNodesByName('box')[1];
-            const debugCamera = scene.getNodesByName('__debug__Camera')[0];
-            if (box1 && box2 && debugCamera) {
-                /* let pos = debugCamera.worldForward;
-                box2.setPosition([pos[0], pos[1], pos[2]]);
-                let pos2 = box2.worldForward;
-                box1.setPosition([pos2[0], pos2[1], pos2[2]]); */
-                //box1.rotateX(deltaTime * 10).rotateY(deltaTime * 10);
-            }
+            if (camera && box2) {
+                const forward = camera.forward;
+                box2.setPosition([forward[0], forward[1], forward[2]]);
 
+            } */
         }
         
         engine.run();
@@ -126,7 +116,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             instance: instanceRef.current,
             editorScene: editorSceneRef.current, sceneChanged,
             selectedNode, setSelectedNode,
-            mode, setMode,
             selectedScript, setSelectedScript,
             scripts: scriptsRef.current
         }}>
