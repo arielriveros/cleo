@@ -1,7 +1,8 @@
-import { Geometry, Material, Model, Node, ModelNode, LightNode, DirectionalLight, PointLight, SkyboxNode, Skybox, CameraNode, Camera } from 'cleo'
+import { Geometry, Material, Model, Node, ModelNode, LightNode, DirectionalLight, PointLight, SkyboxNode, Skybox, CameraNode, Camera, Vec } from 'cleo'
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
 import { useEffect, useState } from 'react';
+import { CameraGeometry } from '../../utils/EditorModels';
 
 export default function AddNew() {
     const [node, setNode] = useState<Node | null>(null)
@@ -21,9 +22,24 @@ export default function AddNew() {
     const addCamera = () => { 
         const cameraNode = new CameraNode('camera', new Camera({}));
         cameraNode.active = true;
-        const debugCameraModel = new ModelNode('__debug__CameraModel', new Model(Geometry.Cube(), Material.Basic({}, {wireframe: true})) )
-        debugCameraModel.setUniformScale(0.2);
+        const cameraModel = new Model(
+            new Geometry( CameraGeometry.positions, undefined, CameraGeometry.texCoords, undefined, undefined, CameraGeometry.indices, false),
+            Material.Basic({color: [0.2, 0.2, 0.75]})
+        );
+        const debugCameraModel = new ModelNode('__debug__CameraModel', cameraModel);
+        debugCameraModel.onUpdate = (node) => {
+            // Get the scale from the world matrix of the parent node
+            if (!node.parent) return;
+            const compensationScale = Vec.mat4.getScaling(Vec.vec3.create(), node.parent.worldTransform);
+
+            // Inverse scale to get the compensation scale
+            Vec.vec3.inverse(compensationScale, compensationScale);
+        
+            // Set the scale of the camera model with the compensation
+            node.setScale(compensationScale);
+        };
         cameraNode.addChild(debugCameraModel);
+        
         addNode(cameraNode);
     }
     

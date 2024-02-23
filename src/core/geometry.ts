@@ -15,7 +15,8 @@ export class Geometry {
         uvs: [number, number][] = [],
         tangents: [number, number, number][] = [],
         bitangents: [number, number, number][] = [],
-        indices: number[] = []
+        indices: number[] = [],
+        calculateTangents: boolean = true
     ) {
         this._positions = positions;
         this._normals = normals;
@@ -24,7 +25,7 @@ export class Geometry {
         this._bitangents = bitangents;        
         this._indices = indices;
 
-        if (this._tangents.length === 0 || this._bitangents.length === 0)
+        if ((this._tangents.length === 0 || this._bitangents.length === 0) && calculateTangents)
             this._calculateTangents();
     }
 

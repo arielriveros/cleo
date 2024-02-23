@@ -297,7 +297,16 @@ export class Renderer {
         }
 
 
-        node.model.mesh.draw(materialConfig.wireframe ? gl.LINE_STRIP : gl.TRIANGLES);
+        let mode;
+        switch (materialConfig.wireframe) {
+            case true:
+                mode = gl.LINES;
+                break;
+            case false:
+                mode = gl.TRIANGLES;
+                break;
+        }
+        node.model.mesh.draw(mode);
 
         gl.disable(gl.CULL_FACE);
 
