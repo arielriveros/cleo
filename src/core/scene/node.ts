@@ -738,9 +738,14 @@ export class CameraNode extends Node {
 
     public static parse(parent: Node, json: any) {
         const node = new CameraNode(json.name, new Camera({
+            type: json.camera.type,
             fov: json.camera.fov,
             near: json.camera.near,
-            far: json.camera.far
+            far: json.camera.far,
+            left: json.camera.left,
+            right: json.camera.right,
+            bottom: json.camera.bottom,
+            top: json.camera.top
         }), json.id);
         node.setPosition(json.position);
         node.setRotation(json.rotation);
@@ -784,9 +789,14 @@ export class CameraNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     camera: {
+                        type: this._camera.type,
                         fov: this._camera.fov,
                         near: this._camera.near,
-                        far: this._camera.far
+                        far: this._camera.far,
+                        left: this._camera.left,
+                        right: this._camera.right,
+                        bottom: this._camera.bottom,
+                        top: this._camera.top
                     },
                     active: this._active
                 });

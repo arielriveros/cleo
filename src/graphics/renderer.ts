@@ -203,7 +203,11 @@ export class Renderer {
         if (scene.skybox) {
             this._shaderManager.bind('skybox');
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            // Orthographic cameras don't work with skybox, so we use the perspective camera for the skybox
+            const prevType = this._activeCamera.type;
+            this._activeCamera.type = 'perspective';
             this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            this._activeCamera.type = prevType;
             this._shaderManager.setUniform('u_skybox', 0);
             let skyboxNode = scene.skybox as SkyboxNode;
             if (!skyboxNode.initialized)
