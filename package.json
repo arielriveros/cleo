@@ -6,6 +6,7 @@
   "scripts": {
     "build": "webpack --mode=production --node-env=production",
     "build:dev": "webpack --mode=development",
+    "build:editor": "cd editor && npm run build",
     "watch": "webpack --watch",
     "dev:example": "cd example && npm run dev",
     "editor": "cd editor && npm start",
