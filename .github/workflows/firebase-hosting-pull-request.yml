@@ -16,6 +16,7 @@ jobs:
       - run: npm ci && npm run build && npm run install:editor && npm run build:editor
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
+          entryPoint: /editor
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}'
           projectId: cleo-editor
