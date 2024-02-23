@@ -120,4 +120,8 @@ export class TextureManager {
     public removeTexture(id: string): void {
         this._textures.delete(id);
     }
+
+    public get textures(): Map<string, Texture> {
+        return this._textures;
+    }
 }

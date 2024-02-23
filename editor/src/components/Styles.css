@@ -12,7 +12,7 @@
     flex-direction: row;
     width: 100%;
     height: 30px;
-    background-color: #2d2d77;
+    background: linear-gradient(90deg, rgb(24, 0, 68), #3f3fb4, rgb(24, 0, 68));
     color: white;
     justify-content: space-between;
 }
@@ -21,21 +21,35 @@
     display: flex;
     flex-direction: column;
     width: 20vw;
-    min-width: 200px;
     overflow-x: hidden;
     overflow-y: auto;
+    user-select: none;
+}
+
+.sidebar-resizer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 2px;
+    height: 100%;
+    cursor: ew-resize;
+    background-color: #2d2d77;
+}
+
+.sidebar-resizer:hover {
+    width: 5px;
+    background-color: #3f3fb4;
 }
 
 .center {
     display: flex;
     flex-direction: column;
-    width: 55vw;
+    width: 100%;
 }
 
 .collapsable {
     width: 100%;
-    border: 1px solid #3b3b3b;
-    border-radius: 4px;
     margin-bottom: 10px;
 }
   
@@ -43,7 +57,9 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 5px;
+    padding: 2px 5px;
+    border-top: 1px solid #2d2d77;
+    border-radius: 4px 4px 0 0;
     cursor: pointer;
     background-color: #3b3b3b;
 }

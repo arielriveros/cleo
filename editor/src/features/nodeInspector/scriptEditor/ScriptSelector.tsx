@@ -1,5 +1,5 @@
-import { useCleoEngine } from '../EngineContext'
-import Collapsable from '../../components/Collapsable';
+import { useCleoEngine } from '../../EngineContext'
+import Collapsable from '../../../components/Collapsable';
 
 export default function ScriptSelector() {
 

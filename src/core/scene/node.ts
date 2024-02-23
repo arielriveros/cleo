@@ -12,7 +12,7 @@ type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera';
 
 export class Node {
     protected readonly _id: string;
-    protected readonly _name: string;
+    protected _name: string;
     protected _parent: Node | null;
     protected readonly _children: Node[];
     protected _scene: Scene | null;
@@ -195,6 +195,7 @@ export class Node {
 
     public get id(): string { return this._id; }
     public get name(): string { return this._name; }
+    public set name(name: string) { this._name = name; }
     public set parent(node: Node | null) { this._parent = node; }
     public get parent(): Node | null { return this._parent; }
     public get children(): Node[] { return this._children; }

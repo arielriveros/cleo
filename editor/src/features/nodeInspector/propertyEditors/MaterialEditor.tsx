@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
-import { ModelNode, Vec, TextureManager, Texture, Model, Material } from 'cleo'
+import { ModelNode, Vec, TextureManager, Texture, Material } from 'cleo'
+import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
 import './MaterialEditor.css'
 
 function TextureInspector(props: { tex: string, material: Material }) {
+    const { eventEmmiter } = useCleoEngine();
     const [texture, setTexture] = useState<Texture | null>(null);
     const [img, setImg] = useState<HTMLImageElement | null>(null);
     useEffect(() => {
@@ -23,6 +25,7 @@ function TextureInspector(props: { tex: string, material: Material }) {
         else
             props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, false)
 
+        eventEmmiter.emit("texturesChanged");
         setTexture(null);
         setImg(null);
     }
@@ -47,6 +50,7 @@ function TextureInspector(props: { tex: string, material: Material }) {
                             props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, true)
                         }
                     }
+                    eventEmmiter.emit("texturesChanged");
                 }
             }
             reader.readAsDataURL(file);

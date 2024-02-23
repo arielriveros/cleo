@@ -6,7 +6,7 @@ import { CameraGeometry } from '../../utils/EditorModels';
 
 export default function AddNew() {
     const [node, setNode] = useState<Node | null>(null)
-    const { editorScene, selectedNode } = useCleoEngine();
+    const { editorScene, selectedNode, setSelectedNode } = useCleoEngine();
 
     useEffect(() => {
         if (editorScene && selectedNode) {
@@ -17,6 +17,7 @@ export default function AddNew() {
 
     const addNode = (newNode: Node) => {
         node?.addChild(newNode);
+        setSelectedNode(newNode.id);
     }
 
     const addCamera = () => { 

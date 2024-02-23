@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react'
-import { useCleoEngine } from '../EngineContext'
+import { useCleoEngine } from '../../EngineContext'
 import { basicSetup } from "codemirror"
 import { javascript } from '@codemirror/lang-javascript'
 import { EditorView } from "@codemirror/view"

@@ -1,4 +1,11 @@
-.optionButton {
+.file-controls {
+    top: 0;
+    left: 0;
+    display: flex;
+    height: 100%;
+}
+
+.option-button {
     color: white;
     height: 25px;
     border: 1px solid #ccc;
@@ -8,4 +15,38 @@
     display: inline-block;
     cursor: pointer;
     margin: 2px 5px;
+}
+
+.media-controls {
+    bottom: 0;
+    display: flex;
+    height: 100%;
+}
+
+.media-button {
+    color: white;
+    background-color: #2c2cff;
+    cursor: pointer;
+    width: 30px;
+    height: 30px;
+    margin: 0 2px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+}
+
+.media-button:hover {
+    background-color: #3f3fb4;
+}
+
+.media-button:disabled {
+    background-color: #3b3b3b;
+    cursor: not-allowed;
+}
+
+.media-icon {
+    display: inline-block;
+    height: 100%;
+    width: 100%;
+    vertical-align: middle;
 }

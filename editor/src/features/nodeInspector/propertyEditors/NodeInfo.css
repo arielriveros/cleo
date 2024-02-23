@@ -1,0 +1,15 @@
+.node-info {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  padding: 5px 10px;
+}
+
+.info-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  padding: 5px 20px;
+  border: 1px solid #3f3fb4;
+  user-select: text;
+}

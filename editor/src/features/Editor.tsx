@@ -1,141 +1,73 @@
+import { useEffect, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
 import { Scene } from "cleo";
 import EngineViewport from "./EngineViewport";
 import Center from "../components/Center";
 import Content from "../components/Content";
-import Topbar from "../components/Topbar";
 import SceneInspector from "./sceneInspector/SceneInspector";
 import NodeInspector from "./nodeInspector/NodeInspector";
+import Sidebar, { SidebarResizer } from "../components/Sidebar";
 import './Editor.css'
-
+import MenuBar from "./MenuBar";
 
 export default function Editor() {
+  const { instance, playState } = useCleoEngine();
+  const [sidebarDimensions, setSidebarDimensions] = useState({left: 20, right: 25});
+  const [sidebarMinDimensions, setSidebarMinDimensions] = useState({left: 12, right: 21});
+  
 
-  const { instance, editorScene, scripts } = useCleoEngine();
+  useEffect(() => {
 
-  const clearDebuggingNodes = (json: any) => {
-    const iterateChildren = (children: any[]) => {
-        return children.filter((child: any) => {
-            if (child.name.includes('__debug__')) {
-                console.log('removing debugging node', child.name);
-                return false;
-            }
-            if (child.name.includes('__editor__')) {
-                console.log('removing editor node', child.name);
-                return false;
-            }
-            child.children = iterateChildren(child.children);
-            return true;
-        });
+    if (playState === 'stopped') {
+      setSidebarDimensions({left: 20, right: 25});
+      setSidebarMinDimensions({left: 12, right: 21});
     }
 
-    json.children = iterateChildren(json.children);
-}
-
-  const setScripts = (json: any) => {
-    const scene = json.scene;
-
-    const rootScript = scripts.get(scene.id);
-    if(rootScript) {
-      scene.scripts = rootScript;
+    if (playState === 'playing' || playState === 'paused') {
+      setSidebarDimensions({left: 0, right: 0});
+      setSidebarMinDimensions({left: 0, right: 0});
     }
+    
+  }, [playState]);
 
-    const iterateChildren = (children: any[]) => {
-      children.forEach((child: any) => {
-        const nodeScripts = scripts.get(child.id);
-        if(nodeScripts) {
-          child.scripts = nodeScripts;
-        }
+  useEffect(() => {
+    if (!instance) return;
 
-        iterateChildren(child.children);
-      });
-    }
+    console.log(sidebarDimensions);
 
-    iterateChildren(scene.children);
-  }
+    if (sidebarDimensions.left < sidebarMinDimensions.left)
+      setSidebarDimensions({left: sidebarMinDimensions.left, right: sidebarDimensions.right});
 
-  const onLoad = (filelist: FileList | null) => {
-    if (filelist) {
-      const reader = new FileReader();
-      reader.readAsText(filelist[0]);
-      reader.onload = (e) => {
-        const data = e.target?.result;
-        if (data) {
-          const json = JSON.parse(data as string);
-          editorScene?.parse(json);
-        }
-      };
-    }
-  };
+    if (sidebarDimensions.right < sidebarMinDimensions.right)
+      setSidebarDimensions({left: sidebarDimensions.left, right: sidebarMinDimensions.right});
 
-  const onSave = () => {
-    editorScene?.serialize().then((json) => {
-      if (json) {
-        // Clear debugging nodes from the editor scene
-        clearDebuggingNodes(json.scene)
-        // Assign the scripts to the new scene
-        setScripts(json);
-        const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'scene.json';
-        a.click();
-      }
-    });
-  };
+    instance.renderer.resize();
 
-  const onPlay = () => {
-    if (!instance)
-      return;
-
-    const newScene = new Scene();
-    editorScene?.serialize(false).then(json => {
-      // Clear debugging nodes from the editor scene
-      clearDebuggingNodes(json.scene)
-      // Assign the scripts to the new scene
-      setScripts(json);
-      // Parse the scene from the editor
-      newScene.parse(json, false);
-      console.log('Starting scene: ', newScene);
-      // Set the new scene to the engine then start it
-      instance.setScene(newScene);
-      instance.isPaused = false;
-      instance.scene.start();
-    });
-  }
-
-  const onStop = () => {
-    if (instance)
-      instance.setScene(editorScene as Scene);
-  }
-
-  const onPause = () => {
-    if (instance)
-      instance.isPaused = !instance.isPaused || false;
-  }
+  }, [sidebarDimensions]);
 
   return (
     <>
-      <Topbar>
-        <div>
-          <div className='optionButton' onClick={() => onSave()}>Save</div>
-          <label htmlFor='load-scene-file' className='optionButton'>Load</label>
-          <input type='file' id='load-scene-file' name='file' onChange={(e) => onLoad(e.target.files)} />
-        </div>
-        <div>
-          <div className='optionButton' onClick={() => onPlay()}>Play</div>
-          <div className='optionButton' onClick={() => onPause()}>Pause</div>
-          <div className='optionButton' onClick={() => onStop()}>Stop</div>
-        </div>
-        <div />
-      </Topbar>
+      <MenuBar />
       <Content>
-        <SceneInspector />
-        <Center>
+        <Sidebar width={`${sidebarDimensions.left}vw`} minWidth={`${sidebarMinDimensions.left}vw`}>
+          <SceneInspector />
+        </Sidebar>
+        <SidebarResizer 
+          onDrag={ e => {
+            setSidebarDimensions({left: 100 * e.clientX / window.innerWidth, right: sidebarDimensions.right});
+          }}
+        />
+        <Center width={`${100 - sidebarDimensions.left - sidebarDimensions.right}vw`}>
           <EngineViewport />
         </Center>
-        <NodeInspector />
+        <SidebarResizer
+          onDrag={ e => {
+            setSidebarDimensions({left: sidebarDimensions.left, right: 100 - (100 * e.clientX) / window.innerWidth});
+          }}
+        />
+        <Sidebar width={`${sidebarDimensions.right}vw`} minWidth={`${sidebarMinDimensions.right}vw`}>
+          <NodeInspector />
+        </Sidebar>
       </Content>
     </>
   );

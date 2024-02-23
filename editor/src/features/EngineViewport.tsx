@@ -10,8 +10,7 @@ export default function EngineViewport() {
         viewportRef.current.style.height = "100%";
         viewportRef.current.style.backgroundColor = "black";
         instance.setViewport(viewportRef.current);
-
-        setTimeout(() => instance.renderer.resize(), 1);
+        instance.renderer.resize()
     }
     }, [instance, viewportRef]);
 
