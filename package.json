@@ -9,6 +9,7 @@
     "build:editor": "cd editor && npm run build",
     "watch": "webpack --watch",
     "dev:example": "cd example && npm run dev",
+    "install:editor": "cd editor && npm ci",
     "editor": "cd editor && npm start",
     "dev:editor": "concurrently \"npm run watch\" \"npm run editor\"",
     "dev": "concurrently \"npm run watch\" \"npm run dev:example\""
