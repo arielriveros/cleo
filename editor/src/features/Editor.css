@@ -50,3 +50,11 @@
     width: 100%;
     vertical-align: middle;
 }
+
+.dimension-controls {
+    display: flex;
+    height: 100%;
+    align-items: center;
+    justify-content: space-between;
+    width: 100px;
+}

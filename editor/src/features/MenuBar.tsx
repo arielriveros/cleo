@@ -6,7 +6,7 @@ import { useCleoEngine } from "./EngineContext";
 import { Scene } from "cleo";
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, playState, setPlayState } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, playState, setPlayState, setDimension } = useCleoEngine();
   const clearDebuggingNodes = (json: any) => {
     const iterateChildren = (children: any[]) => {
         return children.filter((child: any) => {
@@ -116,40 +116,42 @@ export default function MenuBar() {
 
   const onStop = () => {
     if (!instance) return;
-
-    
     instance.setScene(editorScene as Scene);
-
     setPlayState('stopped');
   }
 
   const onPause = () => {
     if (!instance) return
-    
     instance.isPaused = !instance.isPaused || false;
-    if (instance.isPaused) {
+    if (instance.isPaused)
       setPlayState('paused');
-    }
   }
   return (
     <Topbar>
-        <div className='file-controls'>
-          <div className='option-button' onClick={() => onSave()}>Save</div>
-          <label htmlFor='load-scene-file' className='option-button'>Load</label>
-          <input type='file' id='load-scene-file' name='file' onChange={(e) => onLoad(e.target.files)} />
-        </div>
-        <div className='media-controls'>
-          <button className='media-button' disabled={playState==='playing'} onClick={() => onPlay()}>
-            <img src={PlayIcon} alt='Play' className='media-icon' />
-          </button>
-          <button className='media-button' disabled={playState==='paused' || playState==='stopped'} onClick={() => onPause()}>
-            <img src={PauseIcon} alt='Pause' className='media-icon' />
-          </button>
-          <button className='media-button' disabled={playState==='stopped'} onClick={() => onStop()}>
-            <img src={StopIcon} alt='Stop' className='media-icon' />
-          </button>
-        </div>
-        <div />
-      </Topbar>
+      <div className='file-controls'>
+        <div className='option-button' onClick={() => onSave()}>Save</div>
+        <label htmlFor='load-scene-file' className='option-button'>Load</label>
+        <input type='file' id='load-scene-file' name='file' onChange={(e) => onLoad(e.target.files)} />
+      </div>
+      <div className='media-controls'>
+        <button className='media-button' disabled={playState==='playing'} onClick={() => onPlay()}>
+          <img src={PlayIcon} alt='Play' className='media-icon' />
+        </button>
+        <button className='media-button' disabled={playState==='paused' || playState==='stopped'} onClick={() => onPause()}>
+          <img src={PauseIcon} alt='Pause' className='media-icon' />
+        </button>
+        <button className='media-button' disabled={playState==='stopped'} onClick={() => onStop()}>
+          <img src={StopIcon} alt='Stop' className='media-icon' />
+        </button>
+      </div>
+      <div className='dimension-controls'>
+        <p>Mode</p>
+        <select disabled={ playState==='playing' } onChange={(e) => setDimension(e.target.value as '2D' | '3D')}>
+          <option value='3D'>3D</option>
+          <option value='2D'>2D</option>
+        </select>
+      </div>
+      <div />
+    </Topbar>
   )
 }

@@ -36,6 +36,8 @@ const EngineContext = createContext<{
     selectedNode: string | null;
     playState: 'playing' | 'paused' | 'stopped';
     setPlayState: (state: 'playing' | 'paused' | 'stopped') => void;
+    dimension: '2D' | '3D';
+    setDimension: (dimension: '2D' | '3D') => void;
     setSelectedNode: (node: string | null) => void;
     selectedScript: string | null;
     setSelectedScript: (script: string | null) => void;
@@ -58,6 +60,8 @@ const EngineContext = createContext<{
     selectedNode: null,
     playState: 'stopped',
     setPlayState: () => {},
+    dimension: '3D',
+    setDimension: () => {},
     setSelectedNode: () => {},
     selectedScript: null,
     setSelectedScript: () => {},
@@ -76,6 +80,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const textureManagerRef = useRef<TextureManager | null>(null);
     const eventEmmiter = useRef(new EventEmitter());
     const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
+    const [dimension, setDimension] = useState<'2D' | '3D'>('3D');
     const [selectedNode, setSelectedNode] = useState<string | null>(null);
     const [selectedScript, setSelectedScript] = useState<string | null>(null);
     const scriptsRef = useRef(new Map<string, { start: string, update: string, spawn: string, collision: string }>());
@@ -101,19 +106,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         editorCameraNode.active = true;
         editorCameraNode.setPosition([4, 4, 4]);
         editorCameraNode.setRotation([30, -135, 0]);
-        editorCameraNode.onUpdate = (node, delta, time) => {
-            let mouse = InputManager.instance.mouse;
-            let movement = delta * 2;
-            if (mouse.buttons.Left) {
-                node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
-                InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
-                InputManager.instance.isKeyPressed('KeyS') && node.addForward(-movement);
-                InputManager.instance.isKeyPressed('KeyA') && node.addRight(-movement);
-                InputManager.instance.isKeyPressed('KeyD') && node.addRight(movement);
-                InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
-                InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
-            }
-        }
         editorSceneRef.current.addNode(editorCameraNode);
 
         const geometry = GridGeometry(200);
@@ -205,11 +197,64 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         engine.run();
     }, []);
 
+    useEffect(() => {
+        if (!instanceRef.current) return;
+        // change camera to 2D
+        let cameraNode = instanceRef.current.scene.activeCamera;
+        if (dimension === '2D') {
+            cameraNode.camera.type = 'orthographic';
+            cameraNode.camera.top = 4;
+            cameraNode.camera.bottom = -4;
+            cameraNode.camera.left = -4;
+            cameraNode.camera.right = 4;
+            cameraNode.setZ(10).setRotation([0, 180, 0]);
+            cameraNode.onUpdate = (node, delta, time) => {
+                let mouse = InputManager.instance.mouse;
+                let movement = delta;
+                if (mouse.buttons.Left) {
+                    node.addX(-mouse.velocity[0] * movement);
+                    node.addY(mouse.velocity[1] * movement);
+
+                    InputManager.instance.isKeyPressed('KeyW') && node.addY(movement * 10);
+                    InputManager.instance.isKeyPressed('KeyS') && node.addY(-movement * 10);
+                    InputManager.instance.isKeyPressed('KeyA') && node.addX(-movement * 10);
+                    InputManager.instance.isKeyPressed('KeyD') && node.addX(movement * 10);
+                }
+            };
+
+            // Rotate Grid
+            const grid = editorSceneRef.current.getNodesByName('__editor__Grid')[0];
+            grid.setRotation([90, 0, 0]);
+        }
+        else {
+            cameraNode.camera.type = 'perspective';
+            cameraNode.onUpdate = (node, delta, time) => {
+                let mouse = InputManager.instance.mouse;
+                let movement = delta * 2;
+                if (mouse.buttons.Left) {
+                    node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
+                    InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
+                    InputManager.instance.isKeyPressed('KeyS') && node.addForward(-movement);
+                    InputManager.instance.isKeyPressed('KeyA') && node.addRight(-movement);
+                    InputManager.instance.isKeyPressed('KeyD') && node.addRight(movement);
+                    InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
+                    InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
+                }
+            };
+
+            // Rotate Grid
+            const grid = editorSceneRef.current.getNodesByName('__editor__Grid')[0];
+            grid.setRotation([0, 0, 0]);
+        }
+
+    }, [dimension]);
+
     return (
     <EngineContext.Provider value={{
             instance: instanceRef.current,
             editorScene: editorSceneRef.current,
             playState, setPlayState,
+            dimension, setDimension,
             eventEmmiter: eventEmmiter.current,
             selectedNode, setSelectedNode,
             selectedScript, setSelectedScript,

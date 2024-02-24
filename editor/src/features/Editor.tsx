@@ -1,15 +1,13 @@
 import { useEffect, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
-import { Scene } from "cleo";
 import EngineViewport from "./EngineViewport";
 import Center from "../components/Center";
 import Content from "../components/Content";
-import SceneInspector from "./sceneInspector/SceneInspector";
 import NodeInspector from "./nodeInspector/NodeInspector";
 import Sidebar, { SidebarResizer } from "../components/Sidebar";
-import './Editor.css'
 import MenuBar from "./MenuBar";
 import Explorer from "./sceneInspector/Explorer";
+import './Editor.css'
 
 export default function Editor() {
   const { instance, playState } = useCleoEngine();
@@ -18,7 +16,6 @@ export default function Editor() {
   
 
   useEffect(() => {
-
     if (playState === 'stopped') {
       setSidebarDimensions({left: 20, right: 25});
       setSidebarMinDimensions({left: 12, right: 21});
