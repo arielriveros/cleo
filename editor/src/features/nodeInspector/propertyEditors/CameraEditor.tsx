@@ -1,7 +1,7 @@
 import { CameraNode } from 'cleo'
 import { useState, useEffect } from 'react'
 import Collapsable from '../../../components/Collapsable'
-import './CameraEditor.css'
+import './Styles.css'
 
 export default function CameraEditor(props: {node: CameraNode}) {
   const [type, setType] = useState<'perspective' | 'orthographic'>(props.node.camera.type)

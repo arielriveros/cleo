@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Texture, TextureManager } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import Collapsable from '../../components/Collapsable'
-import './TextureExplorer.css'
+import './Styles.css'
 
 function TextureItem({ textureName }: { textureName: string }) {
   return (

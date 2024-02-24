@@ -123,7 +123,7 @@ export class Renderer {
         // Create framebuffers
         this._sceneFBO.create(this._canvas.width, this._canvas.height);
 
-        const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || 2048;
+        const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || 4096;
         this._shadowMapFBO.create(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
 
         this._blur_FBOs[0].create(this._canvas.width / 2, this._canvas.height / 2);
@@ -332,7 +332,8 @@ export class Renderer {
         // Render scene
         gl.cullFace(gl.FRONT);
         for (const node of models) {
-            if (!node.model.material.config.castShadow) continue;
+            if (!node.model.material.config.castShadow || node.model.material.config.wireframe) continue;
+            if (node.name.includes('__editor__')) console.log('rendering editor node', node.name);
             this._shaderManager.setUniform('u_isInstanced', false);
             this._shaderManager.setUniform('u_model', node.worldTransform);
             node.model.mesh.draw(gl.TRIANGLES);

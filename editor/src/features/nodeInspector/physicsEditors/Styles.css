@@ -1,0 +1,41 @@
+.body-editor {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #053a5f;
+  padding: 10px 20px;
+  border-radius: 5px;
+}
+
+.body-editor-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.shape-editor {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #053a5f;
+  padding: 10px 20px;
+  border-radius: 5px;
+}
+
+.shape-editor-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.number-input {
+  width: 50%;
+  padding: 5px;
+  border: 1px solid #053a5f;
+  border-radius: 5px;
+}
+
+.shape-editor-row-input {
+  display: flex;
+  width: 50%;
+  padding: 5px;
+  border-radius: 5px;
+}

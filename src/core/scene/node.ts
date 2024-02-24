@@ -7,6 +7,7 @@ import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
 import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
+import { Shape } from "../../cleo";
 
 type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera';
 
@@ -39,7 +40,7 @@ export class Node {
     public onStart: (node: Node) => void = (node: Node) => {};
     public onSpawn: (node: Node) => void = (node: Node) => {};
     public onUpdate: (node: Node, delta: number, time: number) => void = (node: Node, delta: number, time: number) => {};
-    public onCollision: (node: Node, other: Node) => void = () => {};
+    public onCollision: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
     public onChange: () => void = () => {};
 
     constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
@@ -112,7 +113,7 @@ export class Node {
     }
 
     public updateWorldTransform(): void {
-        if (this._parent)
+        if (this._parent) // TODO: Handle when the node has a body
             mat4.multiply(this._worldTransform, this._parent.worldTransform, this.localTransform);
 
         for (const child of this._children)
@@ -169,6 +170,43 @@ export class Node {
                 node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
             if (json.scripts.update)
                 node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
+            if (json.scripts.collision)
+                node.onCollision = new Function('node', 'other', json.scripts.collision) as (node: Node, other: Node) => void
+
+        }
+
+        if (json.body) {
+            node.setBody(json.body.mass, json.body.linearDamping, json.body.angularDamping);
+            for (const shape of json.body.shapes) {
+                switch (shape.type) {
+                    case 'box':
+                        node._body.attachShape(
+                            Shape.Box(shape.width, shape.height, shape.depth),
+                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+                        );
+                        break;
+                    case 'sphere':
+                        node._body.attachShape(
+                            Shape.Sphere(shape.radius),
+                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+                        );
+                        break;
+                    case 'plane':
+                        node._body.attachShape(
+                            Shape.Plane(),
+                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+                        );
+                        break;
+                    /* case 'cylinder':
+                        node._body.attachShape(Shape.Cylinder(shape.radiusTop, shape.radiusBottom, shape.height, shape.numSegments));
+                        break; */
+                    default:
+                        console.error(`Shape type ${shape.type} not supported`);
+                }
+            }
         }
 
         if (json.children) {
@@ -405,15 +443,21 @@ export class Node {
 
     public get body(): Body | null { return this._body; }
     public setBody(mass: number, linearDamping?: number, angularDamping?: number): Body {
-        // TODO: when setting a non static body, detach from parent so that the body is not affected by the parent's transform
+        // TODO: Handle the case where the node is a child of another node
         
         this._body = new Body({
             mass: mass,
             position: this.worldPosition,
-            quaternion: this._quaternion,
+            quaternion: this._quaternion, // TODO: Set the world quaternion
             linearDamping: linearDamping,
             angularDamping: angularDamping
         }, this);
+
+        // handle onCollision event
+        this._body.addEventListener('collide', (event: any) => {
+            if (event.body instanceof Body)
+                this.onCollision(this, event.body.owner);
+        });
 
         return this._body;
     }
@@ -594,31 +638,7 @@ export class LightNode extends Node {
                 throw new Error(`Light ${json} of type ${json.type} not supported`);
         }
         const node = new LightNode(json.name, light, json.lightType === 'directional' ? true : false, json.id);
-        node.setPosition(json.position);
-        node.setRotation(json.rotation);
-        node.setScale(json.scale);
-        if (json.scripts) {
-            if (json.scripts.start)
-                node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
-            if (json.scripts.spawn)
-                node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
-            if (json.scripts.update)
-                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
-        }
-        if (json.children) {
-            for (const child of json.children) {
-                if (child.type === 'model')
-                    ModelNode.parse(node, child);
-                else if (child.type === 'light')
-                    LightNode.parse(node, child);
-                else if (child.type === 'skybox')
-                    SkyboxNode.parse(node, child);
-                else if (child.type === 'camera')
-                    CameraNode.parse(node, child);
-                else
-                    Node.parse(node, child);
-            }
-        }
+        Node._commonParse(node, parent, json);
         
         parent.addChild(node);
     }
@@ -668,32 +688,7 @@ export class SkyboxNode extends Node {
             negZ: json.skybox.faces.negativeZ
         }).then(skybox => {
             const node = new SkyboxNode(json.name, skybox, json.id);
-            node.setPosition(json.position);
-            node.setRotation(json.rotation);
-            node.setScale(json.scale);
-            if (json.scripts) {
-                if (json.scripts.start)
-                    node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
-                if (json.scripts.spawn)
-                    node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
-                if (json.scripts.update)
-                    node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
-            }
-            if (json.children) {
-                for (const child of json.children) {
-                    if (child.type === 'model')
-                        ModelNode.parse(node, child);
-                    else if (child.type === 'light')
-                        LightNode.parse(node, child);
-                    else if (child.type === 'skybox')
-                        SkyboxNode.parse(node, child);
-                    else if (child.type === 'camera')
-                        CameraNode.parse(node, child);
-                    else
-                        Node.parse(node, child);
-                }
-            }
-            
+            Node._commonParse(node, parent, json);
             parent.addChild(node);
         });
     }
@@ -747,33 +742,8 @@ export class CameraNode extends Node {
             bottom: json.camera.bottom,
             top: json.camera.top
         }), json.id);
-        node.setPosition(json.position);
-        node.setRotation(json.rotation);
-        node.setScale(json.scale);
+        Node._commonParse(node, parent, json);
         node.active = json.active;
-        if (json.scripts) {
-            if (json.scripts.start)
-                node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
-            if (json.scripts.spawn)
-                node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
-            if (json.scripts.update)
-                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
-        }
-        if (json.children) {
-            for (const child of json.children) {
-                if (child.type === 'model')
-                    ModelNode.parse(node, child);
-                else if (child.type === 'light')
-                    LightNode.parse(node, child);
-                else if (child.type === 'skybox')
-                    SkyboxNode.parse(node, child);
-                else if (child.type === 'camera')
-                    CameraNode.parse(node, child);
-                else
-                    Node.parse(node, child);
-            }
-        }
-        
         parent.addChild(node);
     }
 

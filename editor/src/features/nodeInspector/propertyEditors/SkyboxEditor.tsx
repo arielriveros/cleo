@@ -2,7 +2,7 @@ import { useState, useEffect, useReducer, useRef } from 'react'
 import { Texture, Skybox, SkyboxNode } from 'cleo'
 import { CubemapFaces } from 'cleo/graphics/texture';
 import Collapsable from '../../../components/Collapsable'
-import './SkyboxEditor.css'
+import './Styles.css'
 
 function FaceEditor(props: { faceName: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ', texture: Texture }) {
     const [img, setImg] = useState<HTMLImageElement | null>(null);

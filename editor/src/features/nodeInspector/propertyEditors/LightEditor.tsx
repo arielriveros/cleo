@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { LightNode, ModelNode, Vec } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import './MaterialEditor.css'
+import './Styles.css'
 
 export default function LightEditor(props: {node: LightNode}) {
 

@@ -33,8 +33,6 @@ export default function Editor() {
   useEffect(() => {
     if (!instance) return;
 
-    console.log(sidebarDimensions);
-
     if (sidebarDimensions.left < sidebarMinDimensions.left)
       setSidebarDimensions({left: sidebarMinDimensions.left, right: sidebarDimensions.right});
 

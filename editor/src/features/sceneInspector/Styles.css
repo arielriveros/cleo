@@ -48,3 +48,24 @@
 .sceneItem.selected:hover {
     cursor: default;
 }
+
+.texture-explorer {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding-left: 10px;
+}
+
+.texture-item {
+    display: flex;
+    width: 90%;
+    height: 20px;
+    padding: 1px 5px;
+    margin-bottom: 1px;
+    border: 1px solid #3b3b3b;
+    border-radius: 2px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    justify-content: space-between;
+}

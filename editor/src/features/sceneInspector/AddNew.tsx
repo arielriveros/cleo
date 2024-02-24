@@ -25,7 +25,7 @@ export default function AddNew() {
         cameraNode.active = true;
         const cameraModel = new Model(
             new Geometry( CameraGeometry.positions, undefined, CameraGeometry.texCoords, undefined, undefined, CameraGeometry.indices, false),
-            Material.Basic({color: [0.2, 0.2, 0.75]})
+            Material.Basic({color: [0.2, 0.2, 0.75]}, { castShadow: false })
         );
         const debugCameraModel = new ModelNode('__debug__CameraModel', cameraModel);
         debugCameraModel.onUpdate = (node) => {

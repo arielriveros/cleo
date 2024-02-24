@@ -20,7 +20,7 @@ export class PhysicsSystem {
     public initialize(): void {
         this._world = new World();
         this._world.gravity.set(this._gravity[0], this._gravity[1], this._gravity[2]);
-        this._world.allowSleep = true;
+        this._world.allowSleep = false;
         this._world.quatNormalizeSkip = 0;
         this._world.quatNormalizeFast = true;
     }
@@ -30,7 +30,7 @@ export class PhysicsSystem {
         this._world?.step(deltaTime);
         const nodes = this._scene.nodes;
         for (const node of nodes) {
-            if (!node.body || !node.hasStarted) continue;
+            if (!node.body /* || !node.hasStarted */) continue;
             const body = node.body;
 
             if (this._world.bodies.indexOf(body) === -1)
@@ -44,7 +44,7 @@ export class PhysicsSystem {
 
             if (node.markForRemoval) {
                 this._world.removeBody(node.body);
-                node.body.removeEventListener('collide', node.body.onCollision);
+                node.body.removeEventListener('collide', node.onCollision);
             }
         }
     }

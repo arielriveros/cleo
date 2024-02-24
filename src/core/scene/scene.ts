@@ -31,6 +31,7 @@ export class Scene {
     }
 
     public start(): void {
+        console.log('Scene start');
         if (this._hasStarted) return;
 
         for (const node of this._nodes)

@@ -8,7 +8,7 @@ import SkyboxIcon from '../../icons/skybox.png'
 import Collapsable from '../../components/Collapsable';
 import AddNew from './AddNew';
 import TextureExplorer from './TextureExplorer';
-import './SceneInspector.css'
+import './Styles.css'
 
 interface SceneNodeItemProps {
   nodeId: string;

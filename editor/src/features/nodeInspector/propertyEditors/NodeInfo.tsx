@@ -3,7 +3,7 @@ import { Node } from 'cleo'
 import { useState, useEffect } from 'react';
 import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
-import './NodeInfo.css'
+import './Styles.css'
 
 export default function NodeInfo(props: {node: Node}) {
   const { eventEmmiter, setSelectedNode } = useCleoEngine();

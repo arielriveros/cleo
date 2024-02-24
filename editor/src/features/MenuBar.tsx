@@ -6,7 +6,7 @@ import { useCleoEngine } from "./EngineContext";
 import { Scene } from "cleo";
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, playState, setPlayState } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, playState, setPlayState } = useCleoEngine();
   const clearDebuggingNodes = (json: any) => {
     const iterateChildren = (children: any[]) => {
         return children.filter((child: any) => {
@@ -28,24 +28,32 @@ export default function MenuBar() {
 
   const setScripts = (json: any) => {
     const scene = json.scene;
-
     const rootScript = scripts.get(scene.id);
-    if(rootScript) {
-      scene.scripts = rootScript;
-    }
+
+    if(rootScript) scene.scripts = rootScript;
 
     const iterateChildren = (children: any[]) => {
       children.forEach((child: any) => {
         const nodeScripts = scripts.get(child.id);
-        if(nodeScripts) {
-          child.scripts = nodeScripts;
-        }
-
+        if(nodeScripts) child.scripts = nodeScripts;
         iterateChildren(child.children);
       });
     }
-
     iterateChildren(scene.children);
+  }
+
+  const setBodies = (json: any) => {
+    const scene = json.scene;
+
+    const iterateChildren = (children: any[]) => {
+      children.forEach((child: any) => {
+        const body = bodies.get(child.id);
+        if(body) child.body = body;
+        iterateChildren(child.children);
+      });
+    }
+    iterateChildren(scene.children);
+
   }
 
   const onLoad = (filelist: FileList | null) => {
@@ -69,6 +77,8 @@ export default function MenuBar() {
         clearDebuggingNodes(json.scene)
         // Assign the scripts to the new scene
         setScripts(json);
+        // Assign the bodies to the new scene
+        setBodies(json);
         const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -88,6 +98,8 @@ export default function MenuBar() {
       clearDebuggingNodes(json.scene)
       // Assign the scripts to the new scene
       setScripts(json);
+      // Assign the bodies to the new scene
+      setBodies(json);
       // Parse the scene from the editor
       newScene.parse(json, false);
       console.log('Starting scene: ', newScene);

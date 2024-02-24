@@ -16,8 +16,6 @@ export class Body extends CannonBody {
     private readonly _name: string;
     private readonly _owner: Node | null = null;
 
-    public onCollision: (other: Node) => void = () => {};
-
     constructor(config?: BodyConfig, owner?: Node) {
         super(
             {
@@ -33,10 +31,7 @@ export class Body extends CannonBody {
         this._owner = owner || null;
         this._name = this._owner ? this._owner.name : 'body';
         this.sleepTimeLimit = 0.1;
-        this.addEventListener('collide', (event: any) => {
-            if (event.body instanceof Body)
-                this.onCollision(event.body.owner);
-        });
+
     }
 
     public impulse(impulse: vec3, relativePoint: vec3 = vec3.create()): void {

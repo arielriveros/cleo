@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { ModelNode, Vec, TextureManager, Texture, Material } from 'cleo'
 import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
-import './MaterialEditor.css'
+import './Styles.css'
 
 function TextureInspector(props: { tex: string, material: Material }) {
     const { eventEmmiter } = useCleoEngine();

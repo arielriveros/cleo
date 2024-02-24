@@ -37,7 +37,7 @@ export default function ScriptEditor() {
 
       if (selectedScript) {
         if (!scripts.get(selectedNode))
-          scripts.set(selectedNode, {start: '// Start script', update: '// Update Script', spawn: '// Spawn Script'})
+          scripts.set(selectedNode, {start: '// Start script', update: '// Update Script', spawn: '// Spawn Script', collision: '// Collision Script'})
       }
 
       switch (selectedScript) {
@@ -49,6 +49,9 @@ export default function ScriptEditor() {
           break
         case 'OnUpdate':
           setScriptText(scripts.get(selectedNode)?.update || '')
+          break
+        case 'OnCollision':
+          setScriptText(scripts.get(selectedNode)?.collision || '')
           break
       }
     }
@@ -76,6 +79,11 @@ export default function ScriptEditor() {
       case 'OnUpdate':
         if (scripts.get(selectedNode)) {
           scripts.get(selectedNode)!.update = editorScript
+        }
+        break
+      case 'OnCollision':
+        if (scripts.get(selectedNode)) {
+          scripts.get(selectedNode)!.collision = editorScript
         }
         break
     }

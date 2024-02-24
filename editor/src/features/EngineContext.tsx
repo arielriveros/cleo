@@ -1,7 +1,32 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, ModelNode, Vec, TextureManager } from "cleo";
+import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, ModelNode, Vec, TextureManager, Body } from "cleo";
 import { CameraGeometry, GridGeometry } from "../utils/EditorModels";
 import EventEmitter from "events";  // Import EventEmitter
+
+type BoxShapeDescription = {
+    type: 'box';
+    offset: number[];
+    rotation: number[];
+
+    width: number;
+    height: number;
+    depth: number;
+};
+
+type SphereShapeDescription = {
+    type: 'sphere';
+    offset: number[];
+    rotation: number[];
+
+    radius: number;
+};
+type PlaneShapeDescription = {
+    type: 'plane';
+    offset: number[];
+    rotation: number[];
+};
+
+export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | PlaneShapeDescription;
 
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
@@ -18,6 +43,13 @@ const EngineContext = createContext<{
         start: string;
         update: string;
         spawn: string;
+        collision: string;
+    }>;
+    bodies: Map<string, {
+        mass: number;
+        linearDamping: number;
+        angularDamping: number;
+        shapes: ShapeDescription[];
     }>;
   }>({
     instance: null,
@@ -29,7 +61,8 @@ const EngineContext = createContext<{
     setSelectedNode: () => {},
     selectedScript: null,
     setSelectedScript: () => {},
-    scripts: new Map()
+    scripts: new Map(),
+    bodies: new Map(),
   });
   
   // Create a custom hook to access the engine and scene from anywhere
@@ -45,7 +78,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
     const [selectedNode, setSelectedNode] = useState<string | null>(null);
     const [selectedScript, setSelectedScript] = useState<string | null>(null);
-    const scriptsRef = useRef(new Map<string, {start: string; update: string; spawn: string;}>());
+    const scriptsRef = useRef(new Map<string, { start: string, update: string, spawn: string, collision: string }>());
+    const bodiesRef = useRef(new Map<string, { mass: number, linearDamping: number, angularDamping: number, shapes: ShapeDescription[] }>());
 
     useEffect(() => {
         const engine = new CleoEngine({
@@ -65,7 +99,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             far: 10000
         }));
         editorCameraNode.active = true;
-        editorCameraNode.setPosition([2, 2, 2]);
+        editorCameraNode.setPosition([4, 4, 4]);
         editorCameraNode.setRotation([30, -135, 0]);
         editorCameraNode.onUpdate = (node, delta, time) => {
             let mouse = InputManager.instance.mouse;
@@ -112,13 +146,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
         const lightNode = new LightNode('light', new DirectionalLight({}));
         lightNode.setRotation([45, 45, 0]);
+        lightNode.castShadows = true;
         editorSceneRef.current.addNode(lightNode);
+
+        scriptsRef.current.set(lightNode.id, { start: '', update: 'node.rotateY(-10 * delta)', spawn: '', collision: ''});
 
         const cameraNode = new CameraNode('camera', new Camera({}));
         cameraNode.active = true;
         const cameraModel = new Model(new Geometry(
             CameraGeometry.positions, undefined, CameraGeometry.texCoords, 
-            undefined, undefined, CameraGeometry.indices, false), Material.Basic({color: [0.2, 0.2, 0.75]}));
+            undefined, undefined, CameraGeometry.indices, false), Material.Basic({color: [0.2, 0.2, 0.75]}, { castShadow: false }));
         const debugCameraModel = new ModelNode('__debug__CameraModel', cameraModel);
         debugCameraModel.onUpdate = (node) => {
             // Get the scale from the world matrix of the parent node
@@ -132,17 +169,34 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             node.setScale(compensationScale);
         };
         cameraNode.addChild(debugCameraModel);
-        cameraNode.setPosition([0, 0, -2]);
+        cameraNode.setPosition([0, 2, -5]).setRotation([30, 0, 0]);
         editorSceneRef.current.addNode(cameraNode);
 
-        const box1 = new ModelNode('box', new Model(Geometry.Cube(), Material.Default({diffuse: [1, 0, 0]})));
-        box1.setPosition([1, 0, 0]);
+        const box1 = new ModelNode('physical box', new Model(Geometry.Cube(), Material.Default({diffuse: [1, 0, 0]})));
+        box1.setPosition([-1, 3, 0]).setRotation([45, 0, 45]);
         editorSceneRef.current.addNode(box1);
 
+        bodiesRef.current.set(box1.id, {
+            mass: 1,
+            linearDamping: 0.01,
+            angularDamping: 0.01,
+            shapes: [ { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ]
+        });
+
+        scriptsRef.current.set(box1.id, { start: '', update: '', spawn: '', collision: 'console.log(`${node.name} collided with ${other.name}`)'});
+
         const box2 = new ModelNode('box', new Model(Geometry.Cube(), Material.Default({})));
-        box2.setPosition([-1, 0, 0]);
-        box2.setUniformScale(0.5);
+        box2.setPosition([1, 0, 0]).setUniformScale(0.5);
         editorSceneRef.current.addNode(box2);
+
+        const plane = new ModelNode('plane', new Model(Geometry.Quad(), Material.Default({diffuse: [0, 0.45, 0.1], specular: [0.2, 0.2, 0.2]})));
+        plane.setPosition([0, -1, 0]).setRotation([-90, 0, 0]).setScale([10, 10, 1]);
+        editorSceneRef.current.addNode(plane);
+
+        bodiesRef.current.set(plane.id, {
+            mass: 0, linearDamping: 0, angularDamping: 0,
+            shapes: [ { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] } ]
+        });
 
         // Setting the editor scene and camera
         engine.setScene(editorSceneRef.current);
@@ -160,6 +214,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             selectedNode, setSelectedNode,
             selectedScript, setSelectedScript,
             scripts: scriptsRef.current,
+            bodies: bodiesRef.current
         }}>
         {props.children}
     </EngineContext.Provider>

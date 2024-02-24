@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Node } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
-import './TransformEditor.css';
+import './Styles.css'
 
 interface AxisInputProps {
   node: Node;
