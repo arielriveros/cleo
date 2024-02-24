@@ -30,7 +30,7 @@ export class PhysicsSystem {
         this._world?.step(deltaTime);
         const nodes = this._scene.nodes;
         for (const node of nodes) {
-            if (!node.body /* || !node.hasStarted */) continue;
+            if (!node.body || !node.hasStarted) continue;
             const body = node.body;
 
             if (this._world.bodies.indexOf(body) === -1)

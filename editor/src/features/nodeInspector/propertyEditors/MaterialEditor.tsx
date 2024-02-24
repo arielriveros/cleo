@@ -8,14 +8,15 @@ function TextureInspector(props: { tex: string, material: Material }) {
     const { eventEmmiter } = useCleoEngine();
     const [texture, setTexture] = useState<Texture | null>(null);
     const [img, setImg] = useState<HTMLImageElement | null>(null);
+
     useEffect(() => {
         const texId = props.material.textures.get(props.tex);
         setTexture(texId ? TextureManager.Instance.getTexture(texId) : null);
     }, [props.material, props.tex])
 
     useEffect(() => {
-        setImg(texture ? (texture.data as HTMLImageElement | null) : null);
-    }, [texture])
+        setImg(texture?.data as HTMLImageElement | null);
+    }, [texture, props.tex, props.material])
 
     const deleteTexture = () => {
         TextureManager.Instance.removeTexture(props.material.textures.get(props.tex)!);

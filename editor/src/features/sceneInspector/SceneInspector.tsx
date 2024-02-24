@@ -144,7 +144,6 @@ export default function SceneInspector() {
         <Collapsable title='Scene'>
             { nodes && <SceneListRecursive node={nodes} setSelectedNode={setSelectedNode}/> }
         </Collapsable>
-        <TextureExplorer />
       </div>
     )
 }

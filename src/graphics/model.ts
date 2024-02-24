@@ -2,10 +2,14 @@ import { Mesh } from './mesh';
 import { Material } from './material';
 import { Geometry } from '../core/geometry';
 import { Loader } from './loader';
-import { TextureManager } from '../cleo';
+
+interface FromPathptions {
+    filePaths: string[];
+    material?: Material;
+}
 
 interface FromFileOptions {
-    filePaths: string[];
+    files: File[]
     material?: Material;
 }
 
@@ -21,9 +25,25 @@ export class Model {
         this._mesh = new Mesh();
     }
 
+    public static fromPath(config: FromPathptions): Promise<{name: string, model: Model}[]> {
+        return new Promise<{name: string, model: Model}[]>((resolve, reject) => {
+            Loader.loadModelsFromPath(config.filePaths)
+            .then((meshes) => {
+                const models: {name: string, model: Model}[] = [];
+                for (const mesh of meshes)
+                    models.push({
+                        name: mesh.name,
+                        model: new Model( mesh.geometry, config?.material ? config.material : mesh.material)
+                    });
+                resolve(models);
+            })
+            .catch(err => reject(err));
+        });
+    }
+
     public static fromFile(config: FromFileOptions): Promise<{name: string, model: Model}[]> {
         return new Promise<{name: string, model: Model}[]>((resolve, reject) => {
-            Loader.loadModelsFromFile(config.filePaths)
+            Loader.loadModelsFromFile(config.files)
             .then((meshes) => {
                 const models: {name: string, model: Model}[] = [];
                 for (const mesh of meshes)

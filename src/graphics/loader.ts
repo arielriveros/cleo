@@ -1,10 +1,10 @@
 import { Geometry } from "../core/geometry";
 import { Material } from "./material";
-import { OutputMaterial, loadAssimpModel, parseMaterial } from "./utils/assimpLoader";
+import { OutputMaterial, loadAssimpModel, loadAssimpModelFromFiles, parseMaterial } from "./utils/assimpLoader";
 import { TextureManager } from "./systems/textureManager";
 
 export class Loader {
-    public static async loadModelsFromFile(filePaths: string[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
+    public static async loadModelsFromPath(filePaths: string[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
         return new Promise(async (resolve, reject) => {
             const output: {name: string, geometry: Geometry, material?: Material }[] = [];
     
@@ -111,6 +111,113 @@ export class Loader {
             });
         });
 
+    }
+
+    public static async loadModelsFromFile(files: File[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
+        return new Promise(async (resolve, reject) => {
+            const output: {name: string, geometry: Geometry, material?: Material }[] = [];
+    
+            const res = await loadAssimpModelFromFiles(files);
+
+            const materials: { name: string; material: OutputMaterial; }[] = [];
+
+            const relativePath = files[0]?.name.split('/').slice(0, -1).join('/');
+
+            Promise.all( res.materials.map(async (mat: any) => { materials.push(await parseMaterial(mat)); } ) )
+            .then(() => {
+                const meshes:{
+                    name: any;
+                    positions: ([number, number, number] | Float32Array)[];
+                    normals: ([number, number, number] | Float32Array)[];
+                    tangents: ([number, number, number] | Float32Array)[];
+                    bitangents: ([number, number, number] | Float32Array)[];
+                    uvs: (Float32Array | [number, number])[];
+                    indices: number[];
+                    materialindex: any;
+                }[] = []
+                for (const m of res.meshes) {
+                    const name = m.name;
+                    const vertices: number[] = m.vertices;
+                    const normals: number[] = m.normals;
+                    if (!normals) throw new Error(`Mesh ${name} has no normals`);
+                    const uvs: number[] = m.texturecoords[0];
+                    if (!uvs) throw new Error(`Mesh ${name} has no UVs`);
+                    const indices: number[] = m.faces.flat();
+        
+                    const tangents: number[] = m.tangents;
+                    const bitangents: number[] = m.bitangents;
+        
+                    const positions: [number, number, number][] = [];
+                    for (let i = 0; i < vertices.length; i += 3)
+                        positions.push([vertices[i], vertices[i + 1], vertices[i + 2]]);
+        
+                    const normalsVec: [number, number, number][] = [];
+                    for (let i = 0; i < normals.length; i += 3)
+                        normalsVec.push([normals[i], normals[i + 1], normals[i + 2]]);
+        
+                    const uvsVec: [number, number][] = [];
+                    for (let i = 0; i < uvs.length; i += 2)
+                        uvsVec.push([uvs[i], uvs[i + 1]]);
+        
+                    const tangentsVec: [number, number, number][] = [];
+                    for (let i = 0; i < tangents.length; i += 3)
+                        tangentsVec.push([tangents[i], tangents[i + 1], tangents[i + 2]]);
+        
+                    const bitangentsVec: [number, number, number][] = [];
+                    for (let i = 0; i < bitangents.length; i += 3)
+                        bitangentsVec.push([bitangents[i], bitangents[i + 1], bitangents[i + 2]]);
+
+                    meshes.push({name,
+                                 positions,
+                                 normals: normalsVec,
+                                 uvs: uvsVec,
+                                 tangents: tangentsVec, 
+                                 bitangents: bitangentsVec,
+                                 indices, materialindex: m.materialindex});
+                }
+
+                for (const mesh of meshes) {
+                    const geometry = new Geometry(
+                        mesh.positions as [number, number, number][],
+                        mesh.normals as [number, number, number][],
+                        mesh.uvs as [number, number][],
+                        mesh.tangents as [number, number, number][],
+                        mesh.bitangents as [number, number, number][],
+                        mesh.indices);
+                    const matIndex = mesh.materialindex;
+                    const materialDescription = materials[matIndex].material;
+
+                    const material = Material.Default({
+                        diffuse: materialDescription.diffuse,
+                        specular: materialDescription.specular,
+                        ambient: materialDescription.ambient,
+                        emissive: materialDescription.emissive,
+                        shininess: materialDescription.shininess,
+                        opacity: materialDescription.opacity,
+                        textures: {
+                            base: materialDescription.texturesPaths.base?.split(/[\/\\]/).pop(),
+                            specular: materialDescription.texturesPaths.specular?.split(/[\/\\]/).pop(),
+                            normal: materialDescription.texturesPaths.normal?.split(/[\/\\]/).pop(),
+                            emissive: materialDescription.texturesPaths.emissive?.split(/[\/\\]/).pop(),
+                            mask: materialDescription.texturesPaths.mask?.split(/[\/\\]/).pop(),
+                            reflectivity: materialDescription.texturesPaths.reflectivity?.split(/[\/\\]/).pop()
+                        }
+                    });
+
+                    output.push({name: mesh.name, geometry, material});
+                }
+
+                const models: {name: string, geometry: Geometry, material: Material}[] = [];
+                for (const m of output) {
+                    models.push({
+                        name: m.name,
+                        geometry: m.geometry,
+                        material: m.material
+                    });
+                }
+                resolve(models);
+            });
+        });
     }
 
     public static async loadImage(path: string): Promise<HTMLImageElement> {

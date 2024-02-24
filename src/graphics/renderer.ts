@@ -281,7 +281,9 @@ export class Renderer {
                     break;
             }
             this._shaderManager.setUniform(`u_material.${name}`, slot);
-            TextureManager.Instance.getTexture(tex).bind(slot);
+            const textureToBind = TextureManager.Instance.getTexture(tex);
+            if (!textureToBind) continue;
+            textureToBind.bind(slot);
         }
 
         const materialConfig = node.model.material.config;
@@ -315,8 +317,11 @@ export class Renderer {
         gl.disable(gl.CULL_FACE);
 
         // unbind textures
-        for (const [_, tex] of node.model.material.textures)
-            TextureManager.Instance.getTexture(tex).unbind();
+        for (const [_, tex] of node.model.material.textures) {
+            const textureToUnbind = TextureManager.Instance.getTexture(tex);
+            if (!textureToUnbind) continue;
+            textureToUnbind.unbind();
+        }
     }
 
     private _renderShadowMap(models: Set<ModelNode>, light: LightNode): void {

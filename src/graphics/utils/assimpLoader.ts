@@ -52,6 +52,47 @@ async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: 
     }
 }
 
+async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[], materials: any[] }> {
+    try {
+        const ajs = await assimpjs();
+
+        // Create a new file list object and add the files
+        let fileList = new ajs.FileList();
+        
+        for (let file of files) {
+            const arrayBuffer = await file.arrayBuffer();
+            fileList.AddFile(file.name, new Uint8Array(arrayBuffer));
+        }
+        
+        // Convert file list to assimp json
+        let result = ajs.ConvertFileList(fileList, 'assjson');
+
+        // Check if the conversion succeeded
+        if (!result.IsSuccess() || result.FileCount() == 0) {
+            console.error(result.GetErrorCode());
+            throw new Error('Conversion failed');
+        }
+
+        // Get the result file and convert to string
+        let resultFile = result.GetFile(0);
+        let jsonContent = new TextDecoder().decode(resultFile.GetContent());
+
+        // Parse the result JSON
+        let resultJson = JSON.parse(jsonContent);
+
+        const materials: any[] = resultJson.materials;
+        const meshes: any[] = resultJson.meshes;
+
+        let output: { meshes: any[]; materials: any[]; };
+        output = { meshes, materials };
+        return output;
+    }
+    catch (error) {
+        console.error(error);
+        throw error;
+    }
+}
+
 interface AiMaterialProperties {
     key: string;
     type: string;
@@ -69,12 +110,12 @@ export interface OutputMaterial {
     shininess: number;
     opacity: number;
     texturesPaths: {
-        base?: {data: Uint8Array, width: number, height: number};
-        specular?: {data: Uint8Array, width: number, height: number};
-        normal?: {data: Uint8Array, width: number, height: number};
-        emissive?: {data: Uint8Array, width: number, height: number};
-        mask?: {data: Uint8Array, width: number, height: number};
-        reflectivity?: {data: Uint8Array, width: number, height: number};
+        base?: string;
+        specular?: string;
+        normal?: string;
+        emissive?: string;
+        mask?: string;
+        reflectivity?: string;
     }
 }
 
@@ -159,4 +200,4 @@ async function parseMaterial(mat: any): Promise<{name: string, material: OutputM
     });
 }
 
-export { loadAssimpModel, parseMaterial };
+export { loadAssimpModel, loadAssimpModelFromFiles, parseMaterial };

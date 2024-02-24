@@ -9,6 +9,7 @@ import NodeInspector from "./nodeInspector/NodeInspector";
 import Sidebar, { SidebarResizer } from "../components/Sidebar";
 import './Editor.css'
 import MenuBar from "./MenuBar";
+import Explorer from "./sceneInspector/Explorer";
 
 export default function Editor() {
   const { instance, playState } = useCleoEngine();
@@ -48,7 +49,7 @@ export default function Editor() {
       <MenuBar />
       <Content>
         <Sidebar width={`${sidebarDimensions.left}vw`} minWidth={`${sidebarMinDimensions.left}vw`}>
-          <SceneInspector />
+          <Explorer />
         </Sidebar>
         <SidebarResizer 
           onDrag={ e => {

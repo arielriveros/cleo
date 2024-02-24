@@ -106,7 +106,9 @@ export default function MenuBar() {
       // Set the new scene to the engine then start it
       instance.setScene(newScene);
       instance.isPaused = false;
-      instance.scene.start();
+
+      // add a little delay to make sure the scene is set before starting it
+      setTimeout(() => { instance.scene.start(); } , 100);
 
       setPlayState('playing');
     });

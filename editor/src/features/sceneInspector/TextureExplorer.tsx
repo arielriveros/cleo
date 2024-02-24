@@ -29,11 +29,36 @@ export default function TextureExplorer() {
         eventEmmiter.off("texturesChanged", handleTexturesChanged); // Remove the listener on component unmount
     };
 
-}, [eventEmmiter]);
+  }, [eventEmmiter]);
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files) {
+      const filesArray = Array.from(files);
+      for (const file of filesArray) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const data = e.target?.result;
+          const name = file.name;
+          if (data) {
+            TextureManager.Instance.addTextureFromBase64(data as string, { wrapping: 'repeat' }, name);
+            eventEmmiter.emit('texturesChanged');
+          }
+        }
+        reader.readAsDataURL(file);
+      }
+    }
+  }
 
   return (
     <Collapsable title='Textures'>
       <div className="texture-explorer">
+        <div>
+          <b>Upload Textures</b>
+          <br/>
+          <label htmlFor="file-upload" className="custom-file-upload"> Upload Files </label>
+          <input id="file-upload" type="file" multiple accept='.png, .jpg, .jpeg, .tga, .bmp' onChange={handleFileUpload} />
+        </div>
         {
           texturesList.map((textureName, index) => {
             return <TextureItem key={index} textureName={textureName} />

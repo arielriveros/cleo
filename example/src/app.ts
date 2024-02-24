@@ -114,7 +114,7 @@ async function loadAssets(): Promise<void> {
     crate.addChild(pl2);
     
     // Load model from obj file
-    const roomModel = await CLEO.Model.fromFile({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']})
+    const roomModel = await CLEO.Model.fromPath({filePaths: ['assets/viking_room/viking_room.obj', 'assets/viking_room/viking_room.mtl']})
     const room = new CLEO.Node('room');
     roomModel[0].model.material.config.castShadow = true;
     const roomNode = new CLEO.ModelNode(roomModel[0].name, roomModel[0].model);
@@ -129,12 +129,12 @@ async function loadAssets(): Promise<void> {
     const floor = new CLEO.Node('floor');
     floor.rotateX(-90).setBody(0).attachShape(CLEO.Shape.Plane())
     
-    const backpackModel = await CLEO.Model.fromFile({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
+    const backpackModel = await CLEO.Model.fromPath({filePaths: ['assets/backpack/backpack.obj', 'assets/backpack/backpack.mtl']});
     const backpack = new CLEO.ModelNode('backpack2', backpackModel[0].model);
     backpack.setPosition([2, 1, -2]).setUniformScale(0.5).setBody(10).attachShape(CLEO.Shape.Box(1, 2, 1));
     scene1.addNode(backpack);
     
-    const helmetModel = await CLEO.Model.fromFile({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']});
+    const helmetModel = await CLEO.Model.fromPath({filePaths: ['assets/damagedHelmet/damaged_helmet.obj', 'assets/damagedHelmet/damaged_helmet.mtl']});
     const helmet = new CLEO.ModelNode('helmet2', helmetModel[0].model);
     helmetModel[0].model.material.config.castShadow = true;
     helmet.setPosition([1, 2, 2]).setUniformScale(0.5).setBody(20, 0.5, 0.5).attachShape(CLEO.Shape.Sphere(0.5));   
@@ -185,16 +185,18 @@ app.onPostInitialize = () => {
             CLEO.Geometry.Sphere(32),
             CLEO.Material.Default({ reflectivity: 0.5, textures: { base: 'world'} }, { castShadow: true })
         ));
-        
-        sphere.setPosition(app.scene.activeCamera.position)
-                .setUniformScale(0.25)
-                .setBody(5).attachShape(CLEO.Shape.Sphere(0.25)).onCollision = node => { if (node.name === 'box') { node.remove(); }};
         sphere.onStart = node => {
             const impulseVector = CLEO.Vec.vec3.create();
             CLEO.Vec.vec3.scale(impulseVector, app.scene.activeCamera.forward, 100);
             node.body?.impulse(impulseVector)
         }
         sphere.onSpawn = () => { console.log('sphere spawned')}
+        sphere.onCollision = (node, other) => { if (other.name === 'box') other.remove(); };
+        
+        sphere.setPosition(app.scene.activeCamera.position)
+              .setUniformScale(0.25)
+              .setBody(5).attachShape(CLEO.Shape.Sphere(0.25))
+        
         app.scene.addNode(sphere);
     }
 

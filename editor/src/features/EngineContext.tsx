@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, ModelNode, Vec, TextureManager, Body } from "cleo";
+import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, ModelNode, Vec, TextureManager } from "cleo";
 import { CameraGeometry, GridGeometry } from "../utils/EditorModels";
 import EventEmitter from "events";  // Import EventEmitter
 
