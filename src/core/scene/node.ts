@@ -271,11 +271,20 @@ export class Node {
         return vec3.transformMat4(vec3.create(), vec3.create(), this.worldTransform);
     }
 
+    public get worldQuaternion(): quat {
+        let worldRotation = quat.create();
+        mat4.getRotation(worldRotation, this._worldTransform);
+        return worldRotation;
+    }
+
     public get worldForward(): vec3 {
         // get the forward vector of the node in world space
         let forward = vec3.fromValues(0, 0, 1);
         //vec3.transformMat4(forward, forward, this._rotationMatrix);
-        vec3.transformMat4(forward, forward, this._worldTransform);
+        // get world rotation
+        let worldRotation = this.worldQuaternion;
+        vec3.transformQuat(forward, forward, worldRotation);
+        //vec3.transformMat4(forward, forward, this._worldTransform);
         return forward;
     }
 
@@ -667,7 +676,7 @@ export class LightNode extends Node {
     public get lightSpace(): mat4 {
         const lightView = mat4.create();
         const lightProjection = mat4.create();
-        const lightPos = vec3.scale(vec3.create(), this.forward, -50);
+        const lightPos = vec3.scale(vec3.create(), this.worldForward, -50);
         if (this._type === 'directional') {
             // TODO: Change look at position to be the center of where the camera is looking
             mat4.lookAt(lightView, lightPos, [0, 0, 0], [0, 1, 0]);
@@ -745,7 +754,7 @@ export class CameraNode extends Node {
     public update(delta: number, time: number): void {
         super.update(delta, time);
         this._camera.position = this.worldPosition;
-        this._camera.eye = this.worldForward;
+        this._camera.eye = vec3.add(vec3.create(), this.worldPosition, this.worldForward);
     }
 
     public static parse(parent: Node, json: any) {

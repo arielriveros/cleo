@@ -367,7 +367,7 @@ export class Renderer {
                     break;
                 case 'spotlight':
                     this._shaderManager.setUniform(`u_spotlights[${node.index}].position`, node.worldPosition);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].direction`, node.forward);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].direction`, node.worldForward);
                     this._shaderManager.setUniform(`u_spotlights[${node.index}].diffuse`, node.light.diffuse);
                     this._shaderManager.setUniform(`u_spotlights[${node.index}].specular`, node.light.specular);
                     this._shaderManager.setUniform(`u_spotlights[${node.index}].ambient`, node.light.ambient);

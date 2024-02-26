@@ -23,6 +23,12 @@ export default function TransformEditor(props: {node: Node}) {
 
   }, [position, rotation, scale]);
 
+  const reset = () => {
+    setPosition([0, 0, 0]);
+    setRotation([0, 0, 0]);
+    setScale([1, 1, 1]);
+  }
+
   return (
     <Collapsable title='Transform'>
       <div className='transform-container'>
@@ -69,8 +75,17 @@ export default function TransformEditor(props: {node: Node}) {
                   </div>
                 </td>
               </tr>
+              <tr>
+                <td> World Quaternion </td>
+                <td>
+                  <div className='inline'>
+                    {Array.from(props.node.worldQuaternion).map((value, index) => ( <p key={index}>{value.toFixed(2)}</p> ))}
+                  </div>
+                </td>
+              </tr>
             </tbody>
           </table>
+          <button onClick={reset}>Reset</button>
         </div>
       </div>
     </Collapsable>

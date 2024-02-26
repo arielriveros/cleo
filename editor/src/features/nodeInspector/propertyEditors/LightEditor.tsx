@@ -23,14 +23,15 @@ export function ColorInput(props: ColorInputProps) {
   )
 };
 
-
 export default function LightEditor(props: {node: LightNode}) {
 
+  // TODO: Move to utils
   const compToHex = (c: number) => {
     var hex = c.toString(16);
     return hex.length == 1 ? "0" + hex : hex;
   };
 
+  // TODO: Move to utils
   const vec3ToHex = (vec: Vec.vec3) => {
     return "#" + compToHex(Math.round(vec[0] * 255)) + compToHex(Math.round(vec[1] * 255)) + compToHex(Math.round(vec[2] * 255));
   };
@@ -40,12 +41,58 @@ export default function LightEditor(props: {node: LightNode}) {
   const [diffuse, setDiffuse] = useState(vec3ToHex(light.diffuse));
   const [specular, setSpecular] = useState(vec3ToHex(light.specular));
   const [ambient, setAmbient] = useState(vec3ToHex(light.ambient));
+  const [properties, setProperties] = useState<{constant?: number, linear?: number, quadratic?: number, cutOff?: number, outerCutOff?: number}>({
+    constant: 0,
+    linear: 0,
+    quadratic: 0,
+    cutOff: 0,
+    outerCutOff: 0
+  });
 
   useEffect(() => {
     setDiffuse(vec3ToHex(light.diffuse));
     setSpecular(vec3ToHex(light.specular));
     setAmbient(vec3ToHex(light.ambient));
+
+    if (props.node.light instanceof PointLight) {
+      setProperties({
+        constant: (props.node.light as PointLight).constant,
+        linear: (props.node.light as PointLight).linear,
+        quadratic: (props.node.light as PointLight).quadratic
+      });
+    }
+
+    if (props.node.light instanceof Spotlight) {
+      setProperties({
+        constant: (props.node.light as Spotlight).constant,
+        linear: (props.node.light as Spotlight).linear,
+        quadratic: (props.node.light as Spotlight).quadratic,
+        cutOff: (props.node.light as Spotlight).cutOff,
+        outerCutOff: (props.node.light as Spotlight).outerCutOff
+      });
+    }
+
   }, [props.node])
+
+  useEffect(() => {
+    if (props.node.light instanceof PointLight) {
+      (props.node.light as PointLight).constant = properties.constant!;
+      (props.node.light as PointLight).linear = properties.linear!;
+      (props.node.light as PointLight).quadratic = properties.quadratic!;
+    }
+    if (props.node.light instanceof Spotlight) {
+      (props.node.light as Spotlight).constant = properties.constant!;
+      (props.node.light as Spotlight).linear = properties.linear!;
+      (props.node.light as Spotlight).quadratic = properties.quadratic!;
+      if (properties.cutOff! > properties.outerCutOff!) {
+        // Outer cut off should be greater than cut off
+        setProperties({...properties, outerCutOff: properties.cutOff! + 0.01});
+        return;
+      }
+      (props.node.light as Spotlight).cutOff = properties.cutOff!;
+      (props.node.light as Spotlight).outerCutOff = properties.outerCutOff!;
+    }
+  }, [properties])
 
   useEffect(() => {
     const debugModel = props.node.getChildByName('__debug__LightModel');
@@ -102,19 +149,20 @@ export default function LightEditor(props: {node: LightNode}) {
           <h3>Point Light</h3>
           <div>
             {/* TODO, light properties should be managed as a state, not directly */}
-            <label>Constant</label>
-            <input type='range' className='materialInput' value={props.node.light.constant} min='0' max='1' step='0.01' onChange={(e) => {
-              (props.node.light as PointLight).constant = parseFloat(e.target.value);
+            <label>Constant: {properties.constant}</label>
+            <input type='range' className='materialInput' value={properties.constant} min='0' max='1' step='0.01' onChange={(e) => {
+              setProperties({...properties, constant: parseFloat(e.target.value)});
+            }} />
+            
+
+            <label>Linear: {properties.linear}</label>
+            <input type='range' className='materialInput' value={properties.linear} min='0' max='1' step='0.01' onChange={(e) => {
+              setProperties({...properties, linear: parseFloat(e.target.value)});
             }} />
 
-            <label>Linear</label>
-            <input type='range' className='materialInput' value={props.node.light.linear} min='0' max='1' step='0.01' onChange={(e) => {
-              (props.node.light as PointLight).linear = parseFloat(e.target.value);
-            }} />
-
-            <label>Quadratic</label>
-            <input type='range' className='materialInput' value={props.node.light.quadratic} min='0' max='1' step='0.01' onChange={(e) => {
-              (props.node.light as PointLight).quadratic = parseFloat(e.target.value);
+            <label>Quadratic: {properties.quadratic}</label>
+            <input type='range' className='materialInput' value={properties.quadratic} min='0' max='1' step='0.01' onChange={(e) => {
+              setProperties({...properties, quadratic: parseFloat(e.target.value)});
             }} />
           </div>
         </div>
@@ -124,31 +172,30 @@ export default function LightEditor(props: {node: LightNode}) {
           <h3>Spot Light</h3>
           <div>
             {/* TODO, light properties should be managed as a state, not directly */}
-            <label>Constant</label>
-            <input type='range' className='materialInput' value={props.node.light.constant} min='0' max='1' step='0.01' onChange={(e) => {
-              (props.node.light as Spotlight).constant = parseFloat(e.target.value);
+            <label>Constant: {properties.constant}</label>
+            <input type='range' className='materialInput' value={properties.constant} min='0' max='1' step='0.1' onChange={(e) => {
+              setProperties({...properties, constant: parseFloat(e.target.value)});
             }} />
 
-            <label>Linear</label>
-            <input type='range' className='materialInput' value={props.node.light.linear} min='0' max='1' step='0.01' onChange={(e) => {
-              (props.node.light as Spotlight).linear = parseFloat(e.target.value);
+            <label>Linear: {properties.linear}</label>
+            <input type='range' className='materialInput' value={properties.linear} min='0' max='1' step='0.01' onChange={(e) => {
+              setProperties({...properties, linear: parseFloat(e.target.value)});
             }} />
 
-            <label>Quadratic</label>
-            <input type='range' className='materialInput' value={props.node.light.quadratic} min='0' max='1' step='0.01' onChange={(e) => {
-              (props.node.light as Spotlight).quadratic = parseFloat(e.target.value);
+            <label>Quadratic: {properties.quadratic}</label>
+            <input type='range' className='materialInput' value={properties.quadratic} min='0' max='1' step='0.001' onChange={(e) => {
+              setProperties({...properties, quadratic: parseFloat(e.target.value)});
             }} />
 
-            <label>Cut Off</label>
-            <input type='range' className='materialInput' value={props.node.light.cutOff} min='0' max='180' step='0.01' onChange={(e) => {
-              (props.node.light as Spotlight).cutOff = parseFloat(e.target.value);
+            <label>Cut Off: {properties.cutOff?.toFixed(2)}</label>
+            <input type='range' className='materialInput' value={properties.cutOff} min='0' max='60' step='0.01' onChange={(e) => {
+              setProperties({...properties, cutOff: parseFloat(e.target.value)});
             }} />
 
-            <label>Outer Cut Off</label>
-            <input type='range' className='materialInput' value={props.node.light.outerCutOff} min='0' max='180' step='0.01' onChange={(e) => {
-              (props.node.light as Spotlight).outerCutOff = parseFloat(e.target.value);
+            <label>Outer Cut Off: {properties.outerCutOff?.toFixed(2)}</label>
+            <input type='range' className='materialInput' value={properties.outerCutOff} min='0' max='60' step='0.01' onChange={(e) => {
+              setProperties({...properties, outerCutOff: parseFloat(e.target.value)});
             }} />
-          
           </div>
         </div>
       }
