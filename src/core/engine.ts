@@ -76,7 +76,7 @@ export class CleoEngine {
         }
 
         if (this._scene) {
-            this._scene.update(deltaTime, currentTimestamp);
+            this._scene.update(deltaTime, currentTimestamp, this._paused);
             this._renderer.render(this._scene);
         }
 
@@ -94,7 +94,7 @@ export class CleoEngine {
 
     public setScene(scene: Scene) {
         this._scene = scene;
-        this._scene.update(0, 0);
+        this._scene.update(0, 0, true);
         this._physicsSystem.scene = this._scene;
     }
 

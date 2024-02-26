@@ -1,5 +1,5 @@
 html, body {
-    font-family: system-ui;
+    font-family: Consolas, monaco, monospace;
     height: 100%;
     width: 100%;
     padding: 0;
@@ -28,4 +28,9 @@ html, body {
 
 input[type="file"] {
   display: none;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  background: #053a5f;
+  height: 1rem;
 }

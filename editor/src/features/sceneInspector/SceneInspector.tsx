@@ -16,7 +16,6 @@ interface SceneNodeItemProps {
   children?: string[];
   onSelect: (nodeId: string) => void;
   onExpand?: (nodeId: string) => void;
-  onDragStart: (event: React.DragEvent<HTMLDivElement>, nodeId: string) => void;
 }
   
 function SceneNodeItem(props: SceneNodeItemProps) {
@@ -24,7 +23,6 @@ function SceneNodeItem(props: SceneNodeItemProps) {
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     event.dataTransfer.setData('text/plain', props.nodeId);
-    props.onDragStart(event, props.nodeId);
   };
 
   return (
@@ -48,101 +46,97 @@ function SceneNodeItem(props: SceneNodeItemProps) {
 
 function SceneListRecursive(props: { node: { id: string, name: string, type: string, children: any[]}, setSelectedNode: (nodeId: string | null) => void}) {
   const [isVisible, setIsVisible] = useState(true);
-  const expand = () => {
-    setIsVisible(!isVisible);
-  };
+
   return (
-      props.node.name.includes('__debug__') ? null : 
-      <div style={{ paddingLeft: 5 }}>
-          <SceneNodeItem
-              key={props.node.id}
-              nodeId={props.node.id}
-              nodeName={props.node.name}
-              nodeType={props.node.type}
-              onSelect={props.setSelectedNode}
-              onExpand={expand}
-              children={props.node.children}
-              onDragStart={(event, nodeId) => console.log('drag start', nodeId)}
-              />
-          { isVisible ? 
-              props.node.children.map( child => { return <SceneListRecursive key={child.id} node={child} setSelectedNode={props.setSelectedNode}/> })
-          : <></>
-          }
-      </div>    
+    props.node.name.includes('__debug__') ? null : 
+    <div style={{ paddingLeft: 5 }}>
+      <SceneNodeItem
+        key={props.node.id}
+        nodeId={props.node.id}
+        nodeName={props.node.name}
+        nodeType={props.node.type}
+        onSelect={props.setSelectedNode}
+        onExpand={() => setIsVisible(!isVisible) }
+        children={props.node.children}
+        />
+      { isVisible ? 
+        props.node.children.map( child => { return <SceneListRecursive key={child.id} node={child} setSelectedNode={props.setSelectedNode}/> })
+      : <></>
+      }
+    </div>    
   );
 }
 
 
 export default function SceneInspector() {
-    const { editorScene, eventEmmiter, setSelectedNode } = useCleoEngine()
-    const [ nodes, setNodes ] = useState<{ id: string, name: string, type: string, children: any[]} | null>(null);
+  const { editorScene, eventEmmiter, bodies } = useCleoEngine()
+  const [ nodes, setNodes ] = useState<{ id: string, name: string, type: string, children: any[]} | null>(null);
 
-    // generate a recursive list of id nodes where each node has a list of children
-    // { id: 'root', children: [{ id: 'child1', children: [{ id: 'child3', children: [] }] }, { id: 'child2', children: [] }] }
-    function generateNodeList(node: Node): { id: string, name: string, type: string, children: any[]} {
-        return {
-            id: node.id,
-            name: node.name,
-            type: node.nodeType,
-            children: node.children.filter((child: Node) => !(child.name.includes('__debug__') || child.name.includes('__editor__'))).map((child: Node) => generateNodeList(child))
-        }
+  // generate a recursive list of id nodes where each node has a list of children
+  // { id: 'root', children: [{ id: 'child1', children: [{ id: 'child3', children: [] }] }, { id: 'child2', children: [] }] }
+  function generateNodeList(node: Node): { id: string, name: string, type: string, children: any[]} {
+    return {
+      id: node.id,
+      name: node.name,
+      type: node.nodeType,
+      children: node.children.filter((child: Node) => !(child.name.includes('__debug__') || child.name.includes('__editor__'))).map((child: Node) => generateNodeList(child))
     }
+  }
 
-    const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-        event.preventDefault();
-    };
-    
-    const handleDrop: React.DragEventHandler<HTMLDivElement> = (event) => {
-            event.preventDefault();
-        
-            // Find the closest parent div with the class 'sceneItem'
-            const targetElement = (event.target as HTMLDivElement).closest('.sceneItem');
-        
-            if (targetElement) {
-                const targetId = targetElement.id;
-                const draggedId = event.dataTransfer.getData('text/plain');
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => { event.preventDefault() };
+  
+  const handleDrop: React.DragEventHandler<HTMLDivElement> = (event) => {
+    event.preventDefault();
 
-                if (draggedId === targetId) return; // Don't allow dropping onto the same node
-        
-                // Implement logic to update the hierarchy, e.g., update the parent of the dragged node
-                console.log(`Node ${draggedId} dropped onto ${targetId}`);
-                const draggedNode = editorScene?.getNodeById(draggedId);
-                const targetNode = editorScene?.getNodeById(targetId);
+    // Find the closest parent div with the class 'sceneItem'
+    const targetElement = (event.target as HTMLDivElement).closest('.sceneItem');
 
-                if (draggedNode && targetNode) {
-                  // check if the dragged node is a parent of the target node
-                  if (targetNode.parent?.id === draggedNode.id) {
-                    console.log('Cannot drop a parent node onto its child');
-                    return;
-                  }
-                  
-                  targetNode.addChild(draggedNode);
-                }
-            }
-        };
+    if (targetElement) {
+      const targetId = targetElement.id;
+      const draggedId = event.dataTransfer.getData('text/plain');
 
-      useEffect(() => {
-        const handleSceneChanged = () => {
-          if (editorScene) {
-              setNodes(generateNodeList(editorScene.root));
-              setSelectedNode(editorScene.root.id);
-          }
-        };
+      if (draggedId === targetId) return; // Don't allow dropping onto the same node
 
-        eventEmmiter.on('sceneChanged', handleSceneChanged);
+      // Implement logic to update the hierarchy, e.g., update the parent of the dragged node
+      const draggedNode = editorScene?.getNodeById(draggedId);
+      const targetNode = editorScene?.getNodeById(targetId);
 
-        return () => {
-            eventEmmiter.off("sceneChanged", handleSceneChanged); // Remove the listener on component unmount
-        };
+      if (!(draggedNode && targetNode)) return;
 
-    }, [eventEmmiter, editorScene]);
+      // check if the dragged node is a parent of the target node
+      if (targetNode.parent?.id === draggedNode.id) {
+        console.log('Cannot drop a parent node onto its child');
+        return;
+      }
 
-    return (
-      <div className='sceneInspector' onDragOver={handleDragOver} onDrop={handleDrop}>
-        <AddNew />
-        <Collapsable title='Scene'>
-            { nodes && <SceneListRecursive node={nodes} setSelectedNode={setSelectedNode}/> }
-        </Collapsable>
-      </div>
-    )
+      // check if the dragged node contains a body
+      // TODO: Temporary solution, in the future inner nodes should be able to have bodies
+      const body = bodies.get(draggedNode.id);
+      if (body) {
+        console.log('Cannot move a node with a body');
+        return;
+      }
+      
+      targetNode.addChild(draggedNode);
+    }
+  };
+
+  useEffect(() => {
+    const handleSceneChanged = () => { if (editorScene) setNodes(generateNodeList(editorScene.root)) };
+    eventEmmiter.on('sceneChanged', handleSceneChanged);
+    return () => { eventEmmiter.off("sceneChanged", handleSceneChanged) }; // Remove the listener on component unmount
+  }, [eventEmmiter, editorScene]);
+
+  const handleSelectNode = (nodeId: string | null) => {
+    eventEmmiter.emit('selectNode', nodeId);
+  }
+
+  return (
+    <div className='sceneInspector' onDragOver={handleDragOver} onDrop={handleDrop}>
+      <AddNew />
+      <Collapsable title='Scene'>
+        { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode}/> }
+      </Collapsable>
+    </div>
+  )
 }

@@ -1,20 +1,20 @@
+import { useEffect } from 'react';
+import Tabs, { Tab } from '../../../components/Tabs';
 import { useCleoEngine } from '../../EngineContext'
-import Collapsable from '../../../components/Collapsable';
 
 export default function ScriptSelector() {
+  const { selectedScript, eventEmmiter } = useCleoEngine();
 
-    const { selectedScript, setSelectedScript } = useCleoEngine();
+  useEffect(() => {
+    return () => { eventEmmiter.emit('selectScript', null) }
+  }, [eventEmmiter])
 
-    const onScriptSelected = (script: string) => {
-        setSelectedScript(script);
-    };
-
-    return (
-        <Collapsable title='Scripts'>
-            <button onClick={() => onScriptSelected('OnSpawn')} disabled={selectedScript === 'OnSpawn'}>OnSpawn</button>
-            <button onClick={() => onScriptSelected('OnStart')} disabled={selectedScript === 'OnStart'}>OnStart</button>
-            <button onClick={() => onScriptSelected('OnUpdate')} disabled={selectedScript === 'OnUpdate'}>OnUpdate</button>
-            <button onClick={() => onScriptSelected('OnCollision')} disabled={selectedScript === 'OnCollision'}>OnCollision</button>
-        </Collapsable>
-    )
+  return (
+    <Tabs>
+      <Tab title='OnSpawn' onClick={() => eventEmmiter.emit('selectScript', 'OnSpawn')} selected={selectedScript === 'OnSpawn'}/>
+      <Tab title='OnStart' onClick={() => eventEmmiter.emit('selectScript', 'OnStart')} selected={selectedScript === 'OnStart'}/>
+      <Tab title='OnUpdate' onClick={() => eventEmmiter.emit('selectScript', 'OnUpdate')} selected={selectedScript === 'OnUpdate'}/>
+      <Tab title='OnCollision' onClick={() => eventEmmiter.emit('selectScript', 'OnCollision')} selected={selectedScript === 'OnCollision'}/>
+    </Tabs>
+  )
 }

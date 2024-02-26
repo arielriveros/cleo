@@ -18,9 +18,9 @@ export class Node {
     protected readonly _children: Node[];
     protected _scene: Scene | null;
     protected readonly _nodeType: NodeType;
-    
+
     protected readonly  _localTransform: mat4;
-    protected _worldTransform: mat4;
+    protected _worldTransform: mat4
 
     protected readonly _position: vec3;
     protected readonly _translationMatrix: mat4;
@@ -112,13 +112,22 @@ export class Node {
         return null;
     }
 
-    public updateWorldTransform(): void {
-        if (this._parent) // TODO: Handle when the node has a body
-            mat4.multiply(this._worldTransform, this._parent.worldTransform, this.localTransform);
+    public updateTransforms(parentWorldTransform: mat4 | null = null): void {
+        // Update local transform
+        mat4.multiply(this._localTransform, this._translationMatrix, this._rotationMatrix);
+        mat4.multiply(this._localTransform, this._localTransform, this._scaleMatrix);
+    
+        // Update world transform
+        if (parentWorldTransform)
+            mat4.multiply(this._worldTransform, parentWorldTransform, this._localTransform);
+        else
+            mat4.copy(this._worldTransform, this._localTransform);
 
-        for (const child of this._children)
-            child.updateWorldTransform();
+        for (const child of this._children) {
+            child.updateTransforms(this._worldTransform);
+        }
     }
+    
 
     public remove(): void {
         this._markForRemoval = true;
@@ -133,6 +142,7 @@ export class Node {
             child.start();
     }
     public update(delta: number, time: number): void {
+        // check if game is paused
         this.onUpdate(this, delta, time);
     }
 
@@ -163,15 +173,16 @@ export class Node {
         node.setPosition(json.position);
         node.setRotation(json.rotation);
         node.setScale(json.scale);
+        parent.updateTransforms();
         if (json.scripts) {
             if (json.scripts.start)
-                node.onStart = new Function('node', json.scripts.start) as (node: Node) => void
+                node.onStart = new Function('node', json.scripts.start).bind(this) as (node: Node) => void
             if (json.scripts.spawn)
-                node.onSpawn = new Function('node', json.scripts.spawn) as (node: Node) => void
+                node.onSpawn = new Function('node', json.scripts.spawn).bind(this) as (node: Node) => void
             if (json.scripts.update)
-                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update) as (node: Node, delta: number, time: number) => void
+                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update).bind(this) as (node: Node, delta: number, time: number) => void
             if (json.scripts.collision)
-                node.onCollision = new Function('node', 'other', json.scripts.collision) as (node: Node, other: Node) => void
+                node.onCollision = new Function('node', 'other', json.scripts.collision).bind(this) as (node: Node, other: Node) => void
 
         }
 
@@ -246,17 +257,8 @@ export class Node {
     public get hasStarted(): boolean { return this._hasStarted; }
     public get markForRemoval(): boolean { return this._markForRemoval; }
 
-    public get localTransform(): mat4 {
-        mat4.multiply(this._localTransform, this._translationMatrix, this._rotationMatrix);
-        return mat4.multiply(this._localTransform, this._localTransform, this._scaleMatrix);
-    }
-
-    public get worldTransform(): mat4 {
-        if (this._parent)
-            return this._worldTransform;
-        else
-            return this.localTransform;
-    }
+    public get localTransform(): mat4 { return this._localTransform; }
+    public get worldTransform(): mat4 { return this._worldTransform; }
 
     public get forward(): vec3 {
         let forward = vec3.fromValues(0, 0, 1);
@@ -447,8 +449,8 @@ export class Node {
         
         this._body = new Body({
             mass: mass,
-            position: this.worldPosition,
-            quaternion: this._quaternion, // TODO: Set the world quaternion
+            position: this._position, // TODO: Set the world position, problem when parsing because world position is not set yet
+            quaternion: this._quaternion, // TODO: Set the world quaternion, same as above
             linearDamping: linearDamping,
             angularDamping: angularDamping
         }, this);

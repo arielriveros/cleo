@@ -34,8 +34,7 @@ export class Scene {
         console.log('Scene start');
         if (this._hasStarted) return;
 
-        for (const node of this._nodes)
-            node.start();
+        this._root.start();
 
         this._hasStarted = true;
     }
@@ -72,7 +71,8 @@ export class Scene {
             this.removeNode(nodeToRemove);
     }
 
-    public update(delta: number, time: number): void {
+    public update(delta: number, time: number, paused: boolean): void {
+        this._root.updateTransforms();
         for (const node of this._nodes) {
             if (node instanceof LightNode) this._asignLightIndices();
 
@@ -80,8 +80,8 @@ export class Scene {
                 this.removeNode(node);
                 continue;
             }
-            node.updateWorldTransform();
-            if (this._hasStarted)
+            
+            if (this._hasStarted && !paused)
                 node.update(delta, time);
         }
     }

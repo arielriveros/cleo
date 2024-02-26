@@ -4,9 +4,23 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 import { useCleoEngine } from "./EngineContext";
 import { Scene } from "cleo";
+import { useEffect, useState } from "react";
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, playState, setPlayState, setDimension } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, eventEmmiter } = useCleoEngine();
+  const [started, setStarted] = useState(false);
+  const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
+
+  useEffect(() => {
+    const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
+      if (state === 'play') setPlayState('playing');
+      if (state === 'pause') setPlayState('paused');
+      if (state === 'stop') setPlayState('stopped');
+    }
+    eventEmmiter.on('setPlayState', handlePlayState);
+    return () => { eventEmmiter.off('setPlayState', handlePlayState) };
+  }, [eventEmmiter]);
+  
   const clearDebuggingNodes = (json: any) => {
     const iterateChildren = (children: any[]) => {
         return children.filter((child: any) => {
@@ -92,6 +106,11 @@ export default function MenuBar() {
   const onPlay = () => {
     if (!instance) return;
 
+    if (started) {
+      eventEmmiter.emit('setPlayState', 'play');
+      return;
+    }
+
     const newScene = new Scene();
     editorScene?.serialize(false).then(json => {
       // Clear debugging nodes from the editor scene
@@ -110,22 +129,22 @@ export default function MenuBar() {
       // add a little delay to make sure the scene is set before starting it
       setTimeout(() => { instance.scene.start(); } , 100);
 
-      setPlayState('playing');
+      eventEmmiter.emit('setPlayState', 'play');
+      setStarted(true);
     });
   }
 
   const onStop = () => {
+    setStarted(false);
     if (!instance) return;
     instance.setScene(editorScene as Scene);
-    setPlayState('stopped');
+    eventEmmiter.emit('setPlayState', 'stop');
   }
 
   const onPause = () => {
-    if (!instance) return
-    instance.isPaused = !instance.isPaused || false;
-    if (instance.isPaused)
-      setPlayState('paused');
+    eventEmmiter.emit('setPlayState', 'pause');
   }
+
   return (
     <Topbar>
       <div className='file-controls'>
@@ -146,7 +165,7 @@ export default function MenuBar() {
       </div>
       <div className='dimension-controls'>
         <p>Mode</p>
-        <select disabled={ playState==='playing' } onChange={(e) => setDimension(e.target.value as '2D' | '3D')}>
+        <select disabled={ playState==='playing' || playState==='paused' } onChange={(e) => eventEmmiter.emit('changeDimension', (e.target.value as '2D' | '3D'))}>
           <option value='3D'>3D</option>
           <option value='2D'>2D</option>
         </select>

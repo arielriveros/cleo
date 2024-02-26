@@ -1,96 +1,15 @@
-import React, { useEffect } from 'react'
-import { useCleoEngine } from '../../EngineContext'
-import { basicSetup } from "codemirror"
-import { javascript } from '@codemirror/lang-javascript'
-import { EditorView } from "@codemirror/view"
-import { EditorState } from "@codemirror/state"
+import Collapsable from '../../../components/Collapsable'
+import ScriptSelector from './ScriptSelector'
+import CodeEditor from './CodeEditor'
+import ScriptDescription from './ScriptDescription'
 
 export default function ScriptEditor() {
-  const editorRef = React.useRef<HTMLDivElement>(null)
-  const {editorScene, selectedNode, selectedScript, scripts} = useCleoEngine()
-  const [scriptText, setScriptText] = React.useState('// Script Editor')
-  const [editorScript, setEditorScript] = React.useState('' as string)
-  const editorViewRef = React.useRef<EditorView | null>(null)
-
-  useEffect(() => {
-    if (!editorRef.current) return;
-    editorViewRef.current = new EditorView({
-      state: EditorState.create({
-        doc: scriptText,
-        extensions: [
-          basicSetup,
-          javascript(),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              setEditorScript(update.state.doc.toString())
-            }
-          }),
-        ],
-      }),      
-      parent: editorRef.current
-    });
-
-  }, [])
-
-  useEffect(() => {
-    if (editorScene && selectedNode) {
-
-      if (selectedScript) {
-        if (!scripts.get(selectedNode))
-          scripts.set(selectedNode, {start: '// Start script', update: '// Update Script', spawn: '// Spawn Script', collision: '// Collision Script'})
-      }
-
-      switch (selectedScript) {
-        case 'OnSpawn':
-          setScriptText(scripts.get(selectedNode)?.spawn || '')
-          break
-        case 'OnStart':
-          setScriptText(scripts.get(selectedNode)?.start || '')
-          break
-        case 'OnUpdate':
-          setScriptText(scripts.get(selectedNode)?.update || '')
-          break
-        case 'OnCollision':
-          setScriptText(scripts.get(selectedNode)?.collision || '')
-          break
-      }
-    }
-  }, [selectedNode, selectedScript])
-
-  useEffect(() => {
-    if (editorViewRef.current) {
-      editorViewRef.current.dispatch({ changes: { from: 0, to: editorViewRef.current.state.doc.length, insert: scriptText }})
-    }
-  }, [selectedScript, scriptText, selectedNode])
-
-  useEffect(() => {
-    if (!selectedNode || !selectedScript) return
-    switch (selectedScript) {
-      case 'OnSpawn':
-        if (scripts.get(selectedNode)) {
-          scripts.get(selectedNode)!.spawn = editorScript
-        }
-        break
-      case 'OnStart':
-        if (scripts.get(selectedNode)) {
-          scripts.get(selectedNode)!.start = editorScript
-        }
-        break
-      case 'OnUpdate':
-        if (scripts.get(selectedNode)) {
-          scripts.get(selectedNode)!.update = editorScript
-        }
-        break
-      case 'OnCollision':
-        if (scripts.get(selectedNode)) {
-          scripts.get(selectedNode)!.collision = editorScript
-        }
-        break
-    }
-
-}, [editorScript])
 
   return (
-    <div ref={editorRef} style={{width: '100%', backgroundColor: 'white', color: 'black'}} />
+    <Collapsable title='Script Editor'>
+      <ScriptSelector />
+      <ScriptDescription />
+      <CodeEditor />
+    </Collapsable>
   )
 }

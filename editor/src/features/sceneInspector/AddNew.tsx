@@ -32,7 +32,7 @@ function AddButton(props: AddButtonProps) {
 
 export default function AddNew() {
   const [node, setNode] = useState<Node | null>(null)
-  const { editorScene, selectedNode, setSelectedNode } = useCleoEngine();
+  const { editorScene, selectedNode, eventEmmiter } = useCleoEngine();
 
   useEffect(() => {
     if (editorScene && selectedNode) {
@@ -43,7 +43,7 @@ export default function AddNew() {
 
   const addNode = (newNode: Node) => {
     node?.addChild(newNode);
-    setSelectedNode(newNode.id);
+    eventEmmiter.emit('selectNode', newNode.id);
   }
 
   const addCamera = (type: 'perspective' | 'orthographic') => { 

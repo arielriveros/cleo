@@ -29,9 +29,7 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
-    "@codemirror/lang-javascript": "^6.2.1",
     "cannon-es": "^0.20.0",
-    "codemirror": "^6.0.1",
     "gl-matrix": "^3.4.3",
     "uuid": "^9.0.1"
   }

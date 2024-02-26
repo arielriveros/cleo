@@ -6,7 +6,7 @@ import Collapsable from '../../../components/Collapsable'
 import './Styles.css'
 
 export default function NodeInfo(props: {node: Node}) {
-  const { eventEmmiter, setSelectedNode } = useCleoEngine();
+  const { eventEmmiter } = useCleoEngine();
   const [nodeName, setNodeName] = useState(props.node.name);
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export default function NodeInfo(props: {node: Node}) {
       return;
     }
     if (nodeName === 'root') {
-      console.warn('Cannot rename root node');
+      console.warn('"root" name is reserved for the root node');
       setNodeName(props.node.name);
       return;
     }
@@ -32,24 +32,36 @@ export default function NodeInfo(props: {node: Node}) {
     }
     props.node.name = nodeName
     eventEmmiter.emit('sceneChanged');
-    setSelectedNode(props.node.id);
+    eventEmmiter.emit('selectNode', props.node.id);
   }
 
   return (
     <Collapsable title='Node Information'>
       <div className='node-info'>
-        <div className='info-item'>
-          <b>Name:</b> { props.node.name !== 'root' ? <input value={nodeName} onChange={(e) => setNodeName(e.target.value)} onBlur={handleNodeNameChange} /> : props.node.name }
-        </div>
-        <div className='info-item'>
-          <b>ID:</b> {props.node.id}
-        </div>
-        <div className='info-item'>
-        <b>Type:</b> { props.node.nodeType.charAt(0).toUpperCase() + props.node.nodeType.slice(1) }
-        </div>
-        <div className='info-item'>
-          <b>Children:</b> {props.node.children.filter((child) => !(child.name.includes('__debug__') || child.name.includes('__editor__'))).length}
-        </div>
+        <table>
+          <colgroup>
+            <col span={1} style={{width: '25%'}} />
+            <col span={1} style={{width: '75%'}} />
+          </colgroup>
+          <tbody>
+            <tr>
+              <td> Name </td>
+              <td> { props.node.name !== 'root' ? <input value={nodeName} onChange={(e) => setNodeName(e.target.value)} onBlur={handleNodeNameChange} /> : props.node.name } </td>
+            </tr>
+            <tr>
+              <td> ID </td>
+              <td> {props.node.id} </td>
+            </tr>
+            <tr>
+              <td> Type </td>
+              <td> { props.node.nodeType.charAt(0).toUpperCase() + props.node.nodeType.slice(1) } </td>
+            </tr>
+            <tr>
+              <td> Children </td>
+              <td> {props.node.children.filter((child) => !(child.name.includes('__debug__') || child.name.includes('__editor__'))).length} </td>
+            </tr>
+          </tbody>
+        </table>
         { props.node.name !== 'root' &&
           <ButtonWithConfirm onClick={() => props.node.remove()}>Delete</ButtonWithConfirm>
         }

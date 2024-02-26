@@ -30,10 +30,7 @@ export default function NodeInspector() {
       </Tabs>
       <div className='nodeInspector'>
         {selectedTab === 'Properties' && node && <PropertyEditor node={node}/>}
-        {selectedTab === 'Scripts' && <>
-          <ScriptSelector />
-          { selectedScript && <ScriptEditor /> }
-        </>}
+        {selectedTab === 'Scripts' && <ScriptEditor /> }
         {selectedTab === 'Physics' && node && <PhysicsEditor node={node} />}
       </div>
     </>

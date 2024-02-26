@@ -198,7 +198,7 @@ export class Geometry {
         return new Geometry(positions, normals, uvs, [], [], indices);
     }
 
-    public static Cube(width: number = 1, height: number = 1, depth: number = 1): Geometry {
+    public static Cube(width: number = 1, height: number = 1, depth: number = 1, asWireframe: boolean = false): Geometry {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];
         const uvs: [number, number][] = [];
@@ -216,12 +216,12 @@ export class Geometry {
         ];
 
         const faces = [
-            [0, 1, 2, 3],
-            [1, 5, 6, 2],
-            [5, 4, 7, 6],
-            [4, 0, 3, 7],
-            [3, 2, 6, 7],
-            [4, 5, 1, 0]
+            [0, 1, 2, 3], // front
+            [1, 5, 6, 2], // right
+            [5, 4, 7, 6], // back
+            [4, 0, 3, 7], // left
+            [3, 2, 6, 7], // top
+            [4, 5, 1, 0]  // bottom
         ];
 
         const faceNormals: [number, number, number][] = [
@@ -240,21 +240,31 @@ export class Geometry {
             [0.0, 1.0]
         ];
 
+
         for (let i = 0; i < faces.length; i++) {
             for (let j = 0; j < faces[i].length; j++) {
                 positions.push(vertices[faces[i][j]]);
                 normals.push(faceNormals[i]);
                 uvs.push(faceUVs[j]);
             }
-            indices.push(i * 4 + 0);
-            indices.push(i * 4 + 1);
-            indices.push(i * 4 + 2);
-            indices.push(i * 4 + 0);
-            indices.push(i * 4 + 2);
-            indices.push(i * 4 + 3);
-    }
+            if (!asWireframe) {
+                indices.push(i * 4 + 0);
+                indices.push(i * 4 + 1);
+                indices.push(i * 4 + 2);
+                indices.push(i * 4 + 0);
+                indices.push(i * 4 + 2);
+                indices.push(i * 4 + 3);
+            }
+        }
 
-        return new Geometry(positions, normals, uvs, [], [], indices);
+        if (asWireframe) {
+            indices.push(0, 1, 1, 2, 2, 3, 3, 0);
+            indices.push(1, 5, 5, 6, 6, 2);
+            indices.push(0, 9, 9, 10, 10, 3);
+            indices.push(5, 9, 6, 10);
+        }
+        
+        return new Geometry(positions, normals, uvs, [], [], indices, !asWireframe);
     }
 
     public static Sphere(segments: number = 32, radius: number = 1): Geometry {
