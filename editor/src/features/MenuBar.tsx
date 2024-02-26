@@ -1,10 +1,10 @@
+import { useEffect, useState } from "react";
+import { Scene } from "cleo";
+import { useCleoEngine } from "./EngineContext";
 import Topbar from "../components/Topbar";
 import PlayIcon from '../icons/play.png'
 import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
-import { useCleoEngine } from "./EngineContext";
-import { Scene } from "cleo";
-import { useEffect, useState } from "react";
 
 export default function MenuBar() {
   const { instance, editorScene, scripts, bodies, eventEmmiter } = useCleoEngine();
@@ -23,18 +23,18 @@ export default function MenuBar() {
   
   const clearDebuggingNodes = (json: any) => {
     const iterateChildren = (children: any[]) => {
-        return children.filter((child: any) => {
-            if (child.name.includes('__debug__')) {
-                console.log('removing debugging node', child.name);
-                return false;
-            }
-            if (child.name.includes('__editor__')) {
-                console.log('removing editor node', child.name);
-                return false;
-            }
-            child.children = iterateChildren(child.children);
-            return true;
-        });
+      return children.filter((child: any) => {
+        if (child.name.includes('__debug__')) {
+          console.log('removing debugging node', child.name);
+          return false;
+        }
+        if (child.name.includes('__editor__')) {
+          console.log('removing editor node', child.name);
+          return false;
+        }
+        child.children = iterateChildren(child.children);
+        return true;
+      });
     }
 
     json.children = iterateChildren(json.children);

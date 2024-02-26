@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { ModelNode, Vec, TextureManager, Texture, Material } from 'cleo'
+import { ModelNode, TextureManager, Texture, Material } from 'cleo'
 import { useCleoEngine } from '../../EngineContext';
+import { colorToVec3, vec3ToHex } from '../../../utils/UtilFunctions';
 import Collapsable from '../../../components/Collapsable'
 import './Styles.css'
 
@@ -71,20 +72,6 @@ function TextureInspector(props: { tex: string, material: Material }) {
 }
 
 export default function MaterialEditor(props: {node: ModelNode}) {
-
-    const colorToVec3 = (color: string) => {
-        return color.match(/[A-Za-z0-9]{2}/g)!.map(function(v) { return parseInt(v, 16) / 255});
-    };
-
-    const compToHex = (c: number) => {
-        var hex = c.toString(16);
-        return hex.length == 1 ? "0" + hex : hex;
-    };
-
-    const vec3ToHex = (vec: Vec.vec3) => {
-        return "#" + compToHex(Math.round(vec[0] * 255)) + compToHex(Math.round(vec[1] * 255)) + compToHex(Math.round(vec[2] * 255));
-    };
-
     const model = props.node.model;
     const material = model.material;
 

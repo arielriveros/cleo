@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, ModelNode, Vec, TextureManager } from "cleo";
+import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager } from "cleo";
 import { CameraGeometry, GridGeometry } from "../utils/EditorModels";
-import EventEmitter from "events";  // Import EventEmitter
+import EventEmitter from "events";
 
 type BoxShapeDescription = {
   type: 'box';
@@ -144,6 +144,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         angularDamping: 0.01,
         shapes: [ { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ]
     });
+    // add debug shape for the box body
+    const debugNode = new Node(`__debug__body_${physicalBox.id}`);
+    debugNode.onUpdate = (node) => {
+        node.setPosition(physicalBox.position);
+        node.setRotation(physicalBox.rotation);
+    };
+    const debugModel = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
+    const modelNode = new ModelNode(`__debug__shape_0`, debugModel)
+    debugNode?.addChild(modelNode);
+    editorSceneRef.current.addNode(debugNode);
+
     bodiesRef.current.set(plane.id, {
         mass: 0, linearDamping: 0, angularDamping: 0,
         shapes: [ { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] } ]

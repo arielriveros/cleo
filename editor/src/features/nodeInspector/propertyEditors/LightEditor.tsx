@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { LightNode, ModelNode, PointLight, Spotlight, Vec } from 'cleo'
+import { LightNode, ModelNode, PointLight, Spotlight } from 'cleo'
+import { vec3ToHex } from '../../../utils/UtilFunctions';
 import Collapsable from '../../../components/Collapsable'
 import './Styles.css'
 
@@ -24,18 +25,6 @@ export function ColorInput(props: ColorInputProps) {
 };
 
 export default function LightEditor(props: {node: LightNode}) {
-
-  // TODO: Move to utils
-  const compToHex = (c: number) => {
-    var hex = c.toString(16);
-    return hex.length == 1 ? "0" + hex : hex;
-  };
-
-  // TODO: Move to utils
-  const vec3ToHex = (vec: Vec.vec3) => {
-    return "#" + compToHex(Math.round(vec[0] * 255)) + compToHex(Math.round(vec[1] * 255)) + compToHex(Math.round(vec[2] * 255));
-  };
-
   const light = props.node.light;
 
   const [diffuse, setDiffuse] = useState(vec3ToHex(light.diffuse));
