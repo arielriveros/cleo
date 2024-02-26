@@ -1,4 +1,4 @@
-import { Geometry, Material, Model, Node, ModelNode, LightNode, DirectionalLight, PointLight, SkyboxNode, Skybox, CameraNode, Camera, Vec } from 'cleo'
+import { Geometry, Material, Model, Node, ModelNode, LightNode, DirectionalLight, PointLight, SkyboxNode, Skybox, CameraNode, Camera, Vec, Spotlight } from 'cleo'
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
 import { useEffect, useState } from 'react';
@@ -12,6 +12,7 @@ import EmptyIcon from '../../icons/empty.png'
 import ImportIcon from '../../icons/import.png'
 import PointLightIcon from '../../icons/point-light.png'
 import DirectionalLightIcon from '../../icons/directional-light.png'
+import SpotlightIcon from '../../icons/spotlight.png'
 import './Styles.css'
 
 interface AddButtonProps {
@@ -105,10 +106,20 @@ export default function AddNew() {
 
   const addPointLight = () => {
     const pointLightNode = new LightNode('point light', new PointLight({}));
+    // TODO: Change model to a sprite
     const debugPointLightModel = new ModelNode('__debug__LightModel', new Model(Geometry.Sphere(8), Material.Basic({}, {wireframe: true})) )
     debugPointLightModel.setUniformScale(0.2);
     pointLightNode.addChild(debugPointLightModel);
     addNode(pointLightNode);
+  }
+
+  const addSpotlight = () => {
+    const spotlightNode = new LightNode('spot light', new Spotlight({}));
+    // TODO: Change model to a sprite
+    const debugSpotlightModel = new ModelNode('__debug__LightModel', new Model(Geometry.Sphere(8), Material.Basic({}, {wireframe: true})) )
+    debugSpotlightModel.setUniformScale(0.2);
+    spotlightNode.addChild(debugSpotlightModel);
+    addNode(spotlightNode);
   }
 
 
@@ -162,6 +173,7 @@ export default function AddNew() {
           <div className='node-button-container'>
             <AddButton onClick={() => addNode(new LightNode('directional light', new DirectionalLight({}), true)) } label='Directional' icon={DirectionalLightIcon} />
             <AddButton onClick={() => addPointLight()} label='Point' icon={PointLightIcon} />
+            <AddButton onClick={() => addSpotlight()} label='Spotlight' icon={SpotlightIcon} />
           </div>
         </div>
         <div className='node-category'>

@@ -10,23 +10,26 @@ import Explorer from "./sceneInspector/Explorer";
 import './Editor.css'
 
 export default function Editor() {
-  const { instance, playState } = useCleoEngine();
+  const { instance, eventEmmiter } = useCleoEngine();
   const [sidebarDimensions, setSidebarDimensions] = useState({left: 20, right: 25});
   const [sidebarMinDimensions, setSidebarMinDimensions] = useState({left: 12, right: 21});
   
 
   useEffect(() => {
-    if (playState === 'stopped') {
-      setSidebarDimensions({left: 20, right: 25});
-      setSidebarMinDimensions({left: 12, right: 21});
+    const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
+      if (state === 'stop') {
+        setSidebarDimensions({left: 20, right: 25});
+        setSidebarMinDimensions({left: 12, right: 21});
+      }
+  
+      if (state === 'play' || state === 'pause') {
+        setSidebarDimensions({left: 0, right: 0});
+        setSidebarMinDimensions({left: 0, right: 0});
+      }
     }
-
-    if (playState === 'playing' || playState === 'paused') {
-      setSidebarDimensions({left: 0, right: 0});
-      setSidebarMinDimensions({left: 0, right: 0});
-    }
-    
-  }, [playState]);
+    eventEmmiter.on('setPlayState', handlePlayState);
+    return () => { eventEmmiter.off('setPlayState', handlePlayState) };    
+  }, [eventEmmiter]);
 
   useEffect(() => {
     if (!instance) return;

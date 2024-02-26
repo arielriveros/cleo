@@ -13,6 +13,6 @@ export { InputManager } from "./input/inputManager";
 export { TextureManager } from "./graphics/systems/textureManager";
 export { Body } from "./physics/body";
 export { Model } from "./graphics/model";
-export { DirectionalLight, PointLight } from "./graphics/lighting";
+export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
 export * as Vec from "gl-matrix";

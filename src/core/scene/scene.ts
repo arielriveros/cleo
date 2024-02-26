@@ -14,6 +14,7 @@ export class Scene {
 
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
+    private _numSpotlights: number;
     public onChange: ((scene: Scene) => void) | null;
 
     constructor() {
@@ -26,6 +27,7 @@ export class Scene {
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
+        this._numSpotlights = 0;
 
         this.onChange = null;
     }
@@ -180,15 +182,22 @@ export class Scene {
     private _asignLightIndices(): void {
         const nodes = this.nodes;
         let pointLights = 0;
+        let spotlights = 0;
         for (const node of nodes) {
             if (node instanceof LightNode) {
                 if (node.type === 'point') {
                     node.index = pointLights;
                     pointLights++;
                 }
+
+                if (node.type === 'spotlight') {
+                    node.index = spotlights;
+                    spotlights++;
+                }
             }
         }
         this._numPointLights = pointLights;
+        this._numSpotlights = spotlights;
     }
 
     private _onChange() {
@@ -236,4 +245,5 @@ export class Scene {
 
     // TODO: Move this to a LightManager class
     public get numPointLights(): number { return this._numPointLights; }
+    public get numSpotlights(): number { return this._numSpotlights; }
 }

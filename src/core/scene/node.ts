@@ -1,7 +1,7 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { Body } from "../../physics/body";
 import { Model } from "../../graphics/model";
-import { DirectionalLight, Light, PointLight } from "../../graphics/lighting";
+import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Skybox } from "../../graphics/skybox";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
@@ -549,7 +549,7 @@ export class ModelNode extends Node {
 
 export class LightNode extends Node {
     private readonly _light: Light
-    private readonly _type: 'directional' | 'point' | 'spot';
+    private readonly _type: 'directional' | 'point' | 'spotlight';
     private _index: number;
     private _lightSpace: mat4;
     private _castShadows: boolean;
@@ -565,6 +565,8 @@ export class LightNode extends Node {
             this._type = 'directional';
         else if (light instanceof PointLight)
             this._type = 'point';
+        else if (light instanceof Spotlight)
+            this._type = 'spotlight';
         else
             throw new Error("Light type not supported");
     }
@@ -585,19 +587,21 @@ export class LightNode extends Node {
                         diffuse: [this._light.diffuse[0], this._light.diffuse[1], this._light.diffuse[2]],
                         specular: [this._light.specular[0], this._light.specular[1], this._light.specular[2]],
                         ambient: [this._light.ambient[0], this._light.ambient[1], this._light.ambient[2]],
+                        constant: (this._light as PointLight).constant,
                         linear: (this._light as PointLight).linear,
                         quadratic: (this._light as PointLight).quadratic
                     };
                     break;
-                case 'spot':
+                case 'spotlight':
                     lightData = {
                         diffuse: [this._light.diffuse[0], this._light.diffuse[1], this._light.diffuse[2]],
                         specular: [this._light.specular[0], this._light.specular[1], this._light.specular[2]],
                         ambient: [this._light.ambient[0], this._light.ambient[1], this._light.ambient[2]],
-                        /* 
-                        linear: (this._light as SpotLight).linear,
-                        quadratic: (this._light as SpotLight).quadratic,
-                        cutOff: (this._light as SpotLight).cutOff, */
+                        constant: (this._light as PointLight).constant,
+                        linear: (this._light as Spotlight).linear,
+                        quadratic: (this._light as Spotlight).quadratic,
+                        cutOff: (this._light as Spotlight).cutOff,
+                        outerCutOff: (this._light as Spotlight).outerCutOff
                     };
                     break;
             }
@@ -636,6 +640,17 @@ export class LightNode extends Node {
                     quadratic: json.light.quadratic
                 });
                 break;
+            case 'spotlight':
+                light = new Spotlight({
+                    diffuse: json.light.diffuse,
+                    specular: json.light.specular,
+                    ambient: json.light.ambient,
+                    linear: json.light.linear,
+                    quadratic: json.light.quadratic,
+                    cutOff: json.light.cutOff,
+                    outerCutOff: json.light.outerCutOff
+                });
+                break;
             default:
                 throw new Error(`Light ${json} of type ${json.type} not supported`);
         }
@@ -646,7 +661,7 @@ export class LightNode extends Node {
     }
 
     public get light(): Light { return this._light; }
-    public get type(): 'directional' | 'point' | 'spot' { return this._type; }
+    public get type(): 'directional' | 'point' | 'spotlight' { return this._type; }
     public get index(): number { return this._index; }
     public set index(value: number) { this._index = value; }
     public get lightSpace(): mat4 {

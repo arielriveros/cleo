@@ -3,7 +3,7 @@ import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
 import { LightNode, ModelNode, SkyboxNode } from '../core/scene/node';
-import { PointLight } from './lighting';
+import { PointLight, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
 import { Framebuffer } from './framebuffer';
@@ -146,7 +146,7 @@ export class Renderer {
         this._activeCamera.resize(this._canvas.width, this._canvas.height);
         // Set lighting
         for (const light of scene.lights)
-            this._setLighting(light, scene.numPointLights);
+            this._setLighting(light, scene.numPointLights, scene.numSpotlights);
         
         // Render shadow maps
         for (const node of scene.lights) {
@@ -346,8 +346,9 @@ export class Renderer {
         gl.cullFace(gl.BACK);
     }
 
-    private _setLighting(node: LightNode, numPointLights: number): void {
+    private _setLighting(node: LightNode, numPointLights: number, numSpotlights: number): void {
         const setLights = (node: LightNode) => {
+            // console.log(node.type)
             switch (node.type) {
                 case 'directional':
                     this._shaderManager.setUniform('u_dirLight.diffuse', node.light.diffuse);
@@ -364,7 +365,17 @@ export class Renderer {
                     this._shaderManager.setUniform(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
                     this._shaderManager.setUniform(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
                     break;
-                case 'spot':
+                case 'spotlight':
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].position`, node.worldPosition);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].direction`, node.forward);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].diffuse`, node.light.diffuse);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].specular`, node.light.specular);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].ambient`, node.light.ambient);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].constant`, (node.light as Spotlight).constant);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].linear`, (node.light as Spotlight).linear);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].quadratic`, (node.light as Spotlight).quadratic);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].cutOff`, (node.light as Spotlight).cutOff * Math.PI / 180);
+                    this._shaderManager.setUniform(`u_spotlights[${node.index}].outerCutOff`, (node.light as Spotlight).outerCutOff * Math.PI / 180);
                     break;
             }
         }
@@ -372,6 +383,7 @@ export class Renderer {
         // TODO: Add support for different shaders that support lighting
         this._shaderManager.bind('default');
         this._shaderManager.setUniform('u_numPointLights', numPointLights);
+        this._shaderManager.setUniform('u_numSpotlights', numSpotlights);
         setLights(node);
     }
 
