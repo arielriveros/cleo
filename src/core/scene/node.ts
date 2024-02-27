@@ -1,5 +1,5 @@
 import { mat4, vec3, quat } from "gl-matrix";
-import { Body } from "../../physics/body";
+import { RigidBody } from "../../physics/body";
 import { Model } from "../../graphics/model";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Skybox } from "../../graphics/skybox";
@@ -35,7 +35,7 @@ export class Node {
     protected _hasStarted: boolean = false;
     protected _markForRemoval: boolean = false;
 
-    protected _body: Body | null;
+    protected _body: RigidBody | null;
 
     public onStart: (node: Node) => void = (node: Node) => {};
     public onSpawn: (node: Node) => void = (node: Node) => {};
@@ -170,10 +170,7 @@ export class Node {
 
     protected static _commonParse(node: Node, parent: Node, json: any) {
         node.onChange = parent.onChange;
-        node.setPosition(json.position);
-        node.setRotation(json.rotation);
-        node.setScale(json.scale);
-        parent.updateTransforms();
+        node.updateTransforms(parent.worldTransform);
         if (json.scripts) {
             if (json.scripts.start)
                 node.onStart = new Function('node', json.scripts.start).bind(this) as (node: Node) => void
@@ -183,11 +180,16 @@ export class Node {
                 node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update).bind(this) as (node: Node, delta: number, time: number) => void
             if (json.scripts.collision)
                 node.onCollision = new Function('node', 'other', json.scripts.collision).bind(this) as (node: Node, other: Node) => void
-
         }
 
         if (json.body) {
-            node.setBody(json.body.mass, json.body.linearDamping, json.body.angularDamping);
+            node.setBody(
+                json.body.mass,
+                json.body.linearDamping,
+                json.body.angularDamping,
+                json.body.linearConstraints,
+                json.body.angularConstraints
+            );
             for (const shape of json.body.shapes) {
                 switch (shape.type) {
                     case 'box':
@@ -211,9 +213,13 @@ export class Node {
                             vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
                         );
                         break;
-                    /* case 'cylinder':
-                        node._body.attachShape(Shape.Cylinder(shape.radiusTop, shape.radiusBottom, shape.height, shape.numSegments));
-                        break; */
+                    case 'cylinder':
+                        node._body.attachShape(
+                            Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments),
+                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+                        );
+                        break;
                     default:
                         console.error(`Shape type ${shape.type} not supported`);
                 }
@@ -234,6 +240,9 @@ export class Node {
                     Node.parse(node, child);
             }
         }
+        node.setPosition(json.position);
+        node.setRotation(json.rotation);
+        node.setScale(json.scale);
         parent.addChild(node);
     }
 
@@ -452,21 +461,27 @@ export class Node {
         mat4.fromScaling(this._scaleMatrix, this._scale);
     }
 
-    public get body(): Body | null { return this._body; }
-    public setBody(mass: number, linearDamping?: number, angularDamping?: number): Body {
+    public get body(): RigidBody | null { return this._body; }
+    public setBody(
+        mass: number,
+        linearDamping?: number,
+        angularDamping?: number,
+        linearConstraints?: [number, number, number],
+        angularConstraints?: [number, number, number]
+    ): RigidBody {
         // TODO: Handle the case where the node is a child of another node
-        
-        this._body = new Body({
-            mass: mass,
-            position: this._position, // TODO: Set the world position, problem when parsing because world position is not set yet
-            quaternion: this._quaternion, // TODO: Set the world quaternion, same as above
-            linearDamping: linearDamping,
-            angularDamping: angularDamping
+        this._body = new RigidBody({
+            mass,
+            linearDamping,
+            angularDamping,
+            position: this.worldPosition, // TODO: Set the world position, problem when parsing because world position is not set yet
+            quaternion: this.worldQuaternion, // TODO: Set the world quaternion, same as above
+            linearConstraints, angularConstraints
         }, this);
 
         // handle onCollision event
         this._body.addEventListener('collide', (event: any) => {
-            if (event.body instanceof Body)
+            if (event.body instanceof RigidBody)
                 this.onCollision(this, event.body.owner);
         });
 

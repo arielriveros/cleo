@@ -20,13 +20,32 @@ type SphereShapeDescription = {
 
   radius: number;
 };
+
+type CylinderShapeDescription = {
+  type: 'cylinder';
+  offset: number[];
+  rotation: number[];
+
+  radius: number;
+  height: number;
+  numSegments: number;
+};
+
 type PlaneShapeDescription = {
   type: 'plane';
   offset: number[];
   rotation: number[];
 };
 
-export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | PlaneShapeDescription;
+export type BodyDescription = {
+  mass: number;
+  linearDamping: number;
+  angularDamping: number;
+  linearConstraints: [number, number, number];
+  angularConstraints: [number, number, number];
+  shapes: ShapeDescription[];
+}
+export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | PlaneShapeDescription;
 
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
@@ -41,12 +60,7 @@ const EngineContext = createContext<{
     spawn: string;
     collision: string;
   }>;
-  bodies: Map<string, {
-    mass: number;
-    linearDamping: number;
-    angularDamping: number;
-    shapes: ShapeDescription[];
-  }>;
+  bodies: Map<string, BodyDescription>;
   }>({
   instance: null,
   editorScene: new Scene(),
@@ -71,7 +85,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedScript, setSelectedScript] = useState<string | null>(null);
   const scriptsRef = useRef(new Map<string, { start: string, update: string, spawn: string, collision: string }>());
-  const bodiesRef = useRef(new Map<string, { mass: number, linearDamping: number, angularDamping: number, shapes: ShapeDescription[] }>());
+  const bodiesRef = useRef(new Map<string, BodyDescription>());
 
   const setupInitialScene = () => {
     const editorCameraNode = new CameraNode('__editor__Camera', new Camera({ far: 10000 }));
@@ -142,6 +156,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         mass: 1,
         linearDamping: 0.01,
         angularDamping: 0.01,
+        linearConstraints: [1, 1, 1],
+        angularConstraints: [1, 1, 1],
         shapes: [ { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ]
     });
     // add debug shape for the box body
@@ -156,7 +172,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editorSceneRef.current.addNode(debugNode);
 
     bodiesRef.current.set(plane.id, {
-        mass: 0, linearDamping: 0, angularDamping: 0,
+        mass: 0,
+        linearDamping: 0, angularDamping: 0,
+        linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1],
         shapes: [ { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] } ]
     });
 

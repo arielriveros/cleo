@@ -27,6 +27,7 @@ export default function ShapeEditor(props: {
                     <input
                       type='number'
                       value={props.shape.width}
+                      step={0.01}
                       onChange={(e) =>
                         props.setShape({
                           ...props.shape,
@@ -44,6 +45,7 @@ export default function ShapeEditor(props: {
                     <input
                       type='number'
                       value={props.shape.height}
+                      step={0.01}
                       onChange={(e) =>
                         props.setShape({
                           ...props.shape,
@@ -61,6 +63,7 @@ export default function ShapeEditor(props: {
                     <input
                       type='number'
                       value={props.shape.depth}
+                      step={0.01}
                       onChange={(e) =>
                         props.setShape({
                           ...props.shape,
@@ -88,10 +91,75 @@ export default function ShapeEditor(props: {
                     <input
                       type='number'
                       value={props.shape.radius}
+                      step={0.01}
                       onChange={(e) =>
                         props.setShape({
                           ...props.shape,
                           radius: parseFloat(e.target.value),
+                        })
+                      }
+                    />
+                  </td>
+                </tr>
+              </>
+            )}
+
+            {props.shape.type === 'cylinder' && (
+              <>
+                <tr>
+                  <td colSpan={2}>
+                    <b>Cylinder</b>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <label>Radius</label>
+                  </td>
+                  <td>
+                    <input
+                      type='number'
+                      value={props.shape.radius}
+                      step={0.01}
+                      onChange={(e) =>
+                        props.setShape({
+                          ...props.shape,
+                          radius: parseFloat(e.target.value),
+                        })
+                      }
+                    />
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <label>Height</label>
+                  </td>
+                  <td>
+                    <input
+                      type='number'
+                      value={props.shape.height}
+                      step={0.01}
+                      onChange={(e) =>
+                        props.setShape({
+                          ...props.shape,
+                          height: parseFloat(e.target.value),
+                        })
+                      }
+                    />
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <label>Segments</label>
+                  </td>
+                  <td>
+                    <input
+                      type='number'
+                      value={props.shape.numSegments}
+                      step={1}
+                      onChange={(e) =>
+                        props.setShape({
+                          ...props.shape,
+                          numSegments: parseInt(e.target.value),
                         })
                       }
                     />

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Geometry, Material, Model, ModelNode, Node, Vec } from 'cleo'
-import { ShapeDescription, useCleoEngine } from '../../EngineContext';
+import { BodyDescription, useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
 import ShapeEditor from './ShapeEditor';
 import './Styles.css'
 
 export default function PhysicsEditor(props: {node: Node}) {
   const { bodies, eventEmmiter } = useCleoEngine();
-  const [properties, setProperties] = useState<{mass: number; linearDamping: number; angularDamping: number; shapes: ShapeDescription[] } | null>(null)
+  const [properties, setProperties] = useState<BodyDescription | null>(null)
   const [sceneChanged, setSceneChanged] = useState(false);
 
   useEffect(() => {
@@ -28,6 +28,8 @@ export default function PhysicsEditor(props: {node: Node}) {
         mass: body.mass,
         linearDamping: body.linearDamping,
         angularDamping: body.angularDamping,
+        linearConstraints: body.linearConstraints,
+        angularConstraints: body.angularConstraints,
         shapes: body.shapes
       })
 
@@ -37,7 +39,13 @@ export default function PhysicsEditor(props: {node: Node}) {
 
   useEffect(() => {
     if (properties) {
-      bodies.set(props.node.id, { mass: properties.mass, linearDamping: properties.linearDamping, angularDamping: properties.angularDamping, shapes: properties.shapes})
+      bodies.set(props.node.id, {
+        mass: properties.mass,
+        linearDamping: properties.linearDamping,
+        angularDamping: properties.angularDamping,
+        linearConstraints: properties.linearConstraints,
+        angularConstraints: properties.angularConstraints,
+        shapes: properties.shapes})
       // Check if scene contains a debug node for this body, if not, create one
       if (!props.node.scene?.getNodesByName(`__debug__body_${props.node.id}`)[0]) {
         const node = new Node(`__debug__body_${props.node.id}`)
@@ -65,6 +73,9 @@ export default function PhysicsEditor(props: {node: Node}) {
           case 'sphere':
             model = new Model(Geometry.Sphere(8, shape.radius), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
             break;
+          case 'cylinder':
+            model = new Model(Geometry.Cylinder(12, shape.radius, shape.height), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
+            break;
           case 'plane':
             model = null;
             break;
@@ -90,6 +101,9 @@ export default function PhysicsEditor(props: {node: Node}) {
       if (modelNode && shape.type === 'sphere') {
         modelNode.setUniformScale(shape.radius);
       }
+      if (modelNode && shape.type === 'cylinder') {
+        modelNode.setScale(Vec.vec3.fromValues(shape.radius, shape.height, shape.radius));
+      }
     })
   }, [properties?.shapes] )
 
@@ -101,6 +115,9 @@ export default function PhysicsEditor(props: {node: Node}) {
         break;
       case 'sphere':
         setProperties({...properties, shapes: [...properties.shapes, { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }]});
+        break;
+      case 'cylinder':
+        setProperties({...properties, shapes: [...properties.shapes, { type: 'cylinder', radius: 1, height: 1, numSegments: 16, offset: [0, 0, 0], rotation: [0, 0, 0] }]});
         break;
       case 'plane':
         setProperties({...properties, shapes: [...properties.shapes, { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] }]});
@@ -141,7 +158,13 @@ export default function PhysicsEditor(props: {node: Node}) {
             props.node.parent?.name !== 'root' ? <p> Can only add rigid bodies to nodes at root level. </p> :
           <>
             <p>Node does not have a rigid body</p> 
-            <button onClick={() => setProperties({ mass: 0, linearDamping: 0, angularDamping: 0, shapes: [] })}>Add Rigid Body</button>
+            <button onClick={() => setProperties({
+              mass: 0,
+              linearDamping: 0,
+              angularDamping: 0,
+              linearConstraints: [1, 1, 1],
+              angularConstraints: [1, 1, 1],
+              shapes: [] })}> Add Rigid Body </button>
           </>
         } </>
         : <>
@@ -166,6 +189,28 @@ export default function PhysicsEditor(props: {node: Node}) {
                 { properties.angularDamping }
               </div>
             </div>
+            <div className='body-editor-row'>
+              <label>Linear Constraints</label>
+              <div>
+                <label>X</label>
+                <input type='checkbox' checked={properties.linearConstraints[0] === 1} onChange={(e) => setProperties({...properties, linearConstraints: [e.target.checked ? 1 : 0, properties.linearConstraints[1], properties.linearConstraints[2]]})} />
+                <label>Y</label>
+                <input type='checkbox' checked={properties.linearConstraints[1] === 1} onChange={(e) => setProperties({...properties, linearConstraints: [properties.linearConstraints[0], e.target.checked ? 1 : 0, properties.linearConstraints[2]]})} />
+                <label>Z</label>
+                <input type='checkbox' checked={properties.linearConstraints[2] === 1} onChange={(e) => setProperties({...properties, linearConstraints: [properties.linearConstraints[0], properties.linearConstraints[1], e.target.checked ? 1 : 0]})} />
+              </div>
+            </div>
+            <div className='body-editor-row'>
+              <label>Angular Constraints</label>
+              <div>
+                <label>X</label>
+                <input type='checkbox' checked={properties.angularConstraints[0] === 1} onChange={(e) => setProperties({...properties, angularConstraints: [e.target.checked ? 1 : 0, properties.angularConstraints[1], properties.angularConstraints[2]]})} />
+                <label>Y</label>
+                <input type='checkbox' checked={properties.angularConstraints[1] === 1} onChange={(e) => setProperties({...properties, angularConstraints: [properties.angularConstraints[0], e.target.checked ? 1 : 0, properties.angularConstraints[2]]})} />
+                <label>Z</label>
+                <input type='checkbox' checked={properties.angularConstraints[2] === 1} onChange={(e) => setProperties({...properties, angularConstraints: [properties.angularConstraints[0], properties.angularConstraints[1], e.target.checked ? 1 : 0]})} />
+              </div>
+            </div>
             <button onClick={() => removeBody()}>Remove Rigid Body</button>
         </>
         }
@@ -175,6 +220,7 @@ export default function PhysicsEditor(props: {node: Node}) {
       <Collapsable title='Collision Shapes'>
         <button onClick={() => addShape('box')}>Add Box</button>
         <button onClick={() => addShape('sphere')}>Add Sphere</button>
+        <button onClick={() => addShape('cylinder')}>Add Cylinder</button>
         <button onClick={() => addShape('plane')}>Add Plane</button>
         { properties.shapes.map((shape, i) => 
           <ShapeEditor key={i} shape={shape} setShape={(newShape: any) => {

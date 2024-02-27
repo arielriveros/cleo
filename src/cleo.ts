@@ -11,7 +11,7 @@ export { Texture } from "./graphics/texture";
 export { Loader } from "./graphics/loader";
 export { InputManager } from "./input/inputManager";
 export { TextureManager } from "./graphics/systems/textureManager";
-export { Body } from "./physics/body";
+export { RigidBody as Body, Trigger } from "./physics/body";
 export { Model } from "./graphics/model";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";

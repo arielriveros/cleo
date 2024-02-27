@@ -317,6 +317,94 @@ export class Geometry {
         return new Geometry(positions, normals, uvs, [], [], indices);
     }
 
+    public static Cylinder(segments: number = 32, radius: number = 1, height: number = 1): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+    
+        const halfHeight = height / 2;
+    
+        // side vertices
+        for (let i = 0; i <= segments; i++) {
+            const theta = (i / segments) * 2 * Math.PI;
+            const sinTheta = Math.sin(theta);
+            const cosTheta = Math.cos(theta);
+    
+            for (let j = 0; j <= 1; j++) {
+                const sign = j === 0 ? -1 : 1; // Switch between top and bottom
+                const x = cosTheta * radius;
+                const y = sign * halfHeight;
+                const z = sinTheta * radius;
+    
+                const u = i / segments;
+                const v = (1 + sign) / 2; // Map top to 1 and bottom to 0
+    
+                const normal = vec3.normalize(vec3.create(), vec3.fromValues(x, 0, z));
+    
+                positions.push([x, y, z]);
+                normals.push([normal[0], normal[1], normal[2]]);
+                uvs.push([u, v]);
+            }
+        }
+    
+        // side indices
+        for (let i = 0; i < segments; ++i) {
+            for (let j = 0; j < 1; ++j) {
+                const k1 = i * 2 + j;
+                const k2 = k1 + 2;
+    
+                indices.push(k1);
+                indices.push(k1 + 1);
+                indices.push(k2);
+    
+                indices.push(k2);
+                indices.push(k1 + 1);
+                indices.push(k2 + 1);
+            }
+        }
+
+        // top vertices
+        const angle = 2 * Math.PI / segments;
+        for (let i = 0; i <= segments; i++) {
+            const x = radius * Math.cos(angle * i);
+            const y = halfHeight;
+            const z = radius * Math.sin(angle * i);
+
+            positions.push([x, y, z]);
+            normals.push([0.0, 1.0, 0.0]);
+            uvs.push([0.5 + x / radius / 2, 0.5 + z / radius / 2]);
+        }
+
+        // top indices
+        for (let i = 0; i < segments; i++) {
+            indices.push(positions.length - 1);
+            indices.push(positions.length - i - 2);
+            indices.push(positions.length - i - 3);
+        }
+
+        // bottom vertices
+        for (let i = 0; i <= segments; i++) {
+            const x = radius * Math.cos(angle * i);
+            const y = -halfHeight;
+            const z = radius * Math.sin(angle * i);
+
+            positions.push([x, y, z]);
+            normals.push([0.0, -1.0, 0.0]);
+            uvs.push([0.5 + x / radius / 2, 0.5 + z / radius / 2]);
+        }
+
+        // bottom indices
+        for (let i = 0; i < segments; i++) {
+            indices.push(positions.length - 1);
+            indices.push(positions.length - i - 3);
+            indices.push(positions.length - i - 2);
+        }
+
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
     public static async Terrain(heightmapPath: string): Promise<Geometry> {
         return new Promise<Geometry>((resolve, reject) => {
             const positions: [number, number, number][] = [];

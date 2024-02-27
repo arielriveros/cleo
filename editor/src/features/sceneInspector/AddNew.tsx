@@ -8,6 +8,7 @@ import SkyboxIcon from '../../icons/skybox.png'
 import CubeIcon from '../../icons/cube.png'
 import PlaneIcon from '../../icons/plane.png'
 import SphereIcon from '../../icons/sphere.png'
+import CylinderIcon from '../../icons/cylinder.png'
 import EmptyIcon from '../../icons/empty.png'
 import ImportIcon from '../../icons/import.png'
 import PointLightIcon from '../../icons/point-light.png'
@@ -78,7 +79,14 @@ export default function AddNew() {
 
   const addSphere = () => {
     const sphereNode = new ModelNode('sphere', new Model(Geometry.Sphere(), Material.Default({})));
+    sphereNode.setUniformScale(0.5);
     addNode(sphereNode);
+  }
+
+  const addCylinder = () => {
+    const cylinderNode = new ModelNode('cylinder', new Model(Geometry.Cylinder(16), Material.Default({})));
+    cylinderNode.setScale([0.5, 1, 0.5]);
+    addNode(cylinderNode);
   }
 
   const addPlane = () => {
@@ -144,6 +152,7 @@ export default function AddNew() {
           <div className='node-button-container'>
             <AddButton onClick={() => addCube()} label='Cube' icon={CubeIcon} />
             <AddButton onClick={() => addSphere()} label='Sphere' icon={SphereIcon} />
+            <AddButton onClick={() => addCylinder()} label='Cylinder' icon={CylinderIcon} />
             <AddButton onClick={() => addPlane()} label='Plane' icon={PlaneIcon} />
             <div className='add-container'>
               <label className='add-node-button' htmlFor="file">
