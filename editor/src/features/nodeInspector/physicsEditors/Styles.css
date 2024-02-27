@@ -1,7 +1,6 @@
 .body-editor {
   display: flex;
   flex-direction: column;
-  border: 1px solid #053a5f;
   padding: 10px 20px;
   border-radius: 5px;
 }

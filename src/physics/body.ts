@@ -17,29 +17,29 @@ interface BodyConfig {
     allowSleep?: boolean;
     isTrigger?: boolean;
 }
-class Body extends CannonBody {
+class CBody extends CannonBody {
     private readonly _name: string;
     private readonly _owner: Node | null = null;
 
     constructor(config: BodyConfig) {
-        super({
-            mass: config?.mass || 0,
-            position: new Vec3(config.position[0], config.position[1], config.position[2]),
-            quaternion: new Quaternion(config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]),
-            linearDamping: config.linearDamping || 0.25,
-            angularDamping: config.angularDamping || 0.25,
-            linearFactor: new Vec3(config.linearFactor[0], config.linearFactor[1], config.linearFactor[2]),
-            angularFactor: new Vec3(config.angularFactor[0], config.angularFactor[1], config.angularFactor[2]),
-            allowSleep: config.allowSleep || true,
-            material: undefined,
-            isTrigger: config.isTrigger || false,
-        });
-        this.sleepTimeLimit = 0.1;
-        this._owner = config.owner || null;
-        this._name = config.name || 'body';
+      super({
+        mass: config?.mass || 0,
+        position: new Vec3(config.position[0], config.position[1], config.position[2]),
+        quaternion: new Quaternion(config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]),
+        linearDamping: config.linearDamping || 0.25,
+        angularDamping: config.angularDamping || 0.25,
+        linearFactor: config?.linearFactor ? new Vec3(config.linearFactor[0], config.linearFactor[1], config.linearFactor[2]) : new Vec3(1, 1, 1),
+        angularFactor: config?.angularFactor ? new Vec3(config.angularFactor[0], config.angularFactor[1], config.angularFactor[2]) : new Vec3(1, 1, 1),
+        allowSleep: config.allowSleep || true,
+        material: undefined,
+        isTrigger: config.isTrigger || false,
+      });
+      this.sleepTimeLimit = 0.1;
+      this._owner = config.owner || null;
+      this._name = config.name || 'body';
     }
 
-    public attachShape(shape: Shape, offset: vec3 = [0, 0, 0], orientation: vec3 = [0, 0, 0]): Body {
+    public attachShape(shape: Shape, offset: vec3 = [0, 0, 0], orientation: vec3 = [0, 0, 0]): CBody {
         let q = quat.create();
         quat.fromEuler(q, orientation[0], orientation[1], orientation[2]);
         let q2 = quat.create();
@@ -74,22 +74,21 @@ interface RigidBodyConfig {
     allowSleep?: boolean;
 }
 
-export class RigidBody extends Body {
+export class RigidBody extends CBody {
   constructor(config?: RigidBodyConfig, owner?: Node) {
-    super(
-      {
-        name: owner?.name || 'rigidBody',
-        owner: owner,
-        mass: config?.mass || 0,
-        position: config?.position ? [config.position[0], config.position[1], config.position[2]] : [0, 0, 0],
-        quaternion: config?.quaternion ? [config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]] : [0, 0, 0, 1],
-        linearDamping: config?.linearDamping || 0.25,
-        angularDamping: config?.angularDamping || 0.25,
-        linearFactor: config?.linearConstraints || [1, 1, 1],
-        angularFactor: config?.angularConstraints || [1, 1, 1],
-        allowSleep: config?.allowSleep || true,
-      }
-    );
+    super({
+      name: owner?.name || 'rigidBody',
+      owner: owner,
+      mass: config?.mass || 0,
+      position: config?.position ? [config.position[0], config.position[1], config.position[2]] : [0, 0, 0],
+      quaternion: config?.quaternion ? [config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]] : [0, 0, 0, 1],
+      linearDamping: config?.linearDamping || 0.25,
+      angularDamping: config?.angularDamping || 0.25,
+      linearFactor: config?.linearConstraints || [1, 1, 1],
+      angularFactor: config?.angularConstraints || [1, 1, 1],
+      allowSleep: config?.allowSleep || true,
+      isTrigger: false
+    });
   }
 
   public impulse(impulse: vec3, relativePoint: vec3 = vec3.create()): void {
@@ -104,17 +103,15 @@ interface TriggerConfig {
   position?: vec3;
   quaternion?: quat;
 }
-export class Trigger extends Body {
+export class Trigger extends CBody {
   constructor(config?: TriggerConfig, owner?: Node) {
-    super(
-      {
-        name: owner?.name || 'trigger',
-        owner: owner,
-        mass: 0,
-        position: config?.position ? [config.position[0], config.position[1], config.position[2]] : [0, 0, 0],
-        quaternion: config?.quaternion ? [config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]] : [0, 0, 0, 1],
-        isTrigger: true,
-      }
-    );
+    super({
+      name: owner?.name || 'trigger',
+      owner: owner,
+      mass: 0,
+      position: config?.position ? [config.position[0], config.position[1], config.position[2]] : [0, 0, 0],
+      quaternion: config?.quaternion ? [config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]] : [0, 0, 0, 1],
+      isTrigger: true
+    });
   }
 }

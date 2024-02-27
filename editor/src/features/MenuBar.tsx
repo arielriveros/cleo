@@ -7,7 +7,7 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, eventEmmiter } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, triggers, eventEmmiter } = useCleoEngine();
   const [started, setStarted] = useState(false);
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
 
@@ -63,6 +63,9 @@ export default function MenuBar() {
       children.forEach((child: any) => {
         const body = bodies.get(child.id);
         if(body) child.body = body;
+
+        const trigger = triggers.get(child.id);
+        if(trigger) child.trigger = trigger;
         iterateChildren(child.children);
       });
     }

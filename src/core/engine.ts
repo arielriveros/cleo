@@ -17,6 +17,7 @@ interface CleoConfig {
 
 export class CleoEngine {
     private _lastTimestamp: number = performance.now();
+    private _timeSinceStart: number = 0;
     private _ready: boolean = false;
     
     private _viewport!: HTMLElement;
@@ -73,14 +74,15 @@ export class CleoEngine {
         
         if (!this._paused) {
             this._physicsSystem.update(deltaTime);
+            this._timeSinceStart += deltaTime * 1000;
         }
 
         if (this._scene) {
-            this._scene.update(deltaTime, currentTimestamp, this._paused);
+            this._scene.update(deltaTime, this._timeSinceStart, this._paused);
             this._renderer.render(this._scene);
         }
 
-        this.onUpdate(deltaTime, currentTimestamp);
+        this.onUpdate(deltaTime, this._timeSinceStart);
     
         this._lastTimestamp = currentTimestamp;
         InputManager.instance.resetMouseVelocity();

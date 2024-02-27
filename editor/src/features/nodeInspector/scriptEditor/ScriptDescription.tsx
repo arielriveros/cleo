@@ -20,6 +20,9 @@ export default function ScriptDescription() {
       case 'OnCollision':
         setScriptDescription('This script will be executed when the node collides with another node.')
         break
+      case 'OnTrigger':
+        setScriptDescription('This script will be executed when the node is triggered by another node.')
+        break
       default:
         setScriptDescription('')
     }

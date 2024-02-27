@@ -23,6 +23,7 @@ export class PhysicsSystem {
         this._world.allowSleep = false;
         this._world.quatNormalizeSkip = 0;
         this._world.quatNormalizeFast = true;
+        this._world.accumulator = 1 / 60;
     }
 
     public update(deltaTime: number): void {
@@ -30,22 +31,37 @@ export class PhysicsSystem {
         this._world?.step(deltaTime);
         const nodes = this._scene.nodes;
         for (const node of nodes) {
-            if (!node.body || !node.hasStarted) continue;
-            const body = node.body;
+            if (!(node.body || node.trigger) || !node.hasStarted) continue;
+            const bodyToAdd = node.body || node.trigger;
 
-            if (this._world.bodies.indexOf(body) === -1)
-                this._world.addBody(body);
+            // If body is not in the world, add it
+            if (this._world.bodies.indexOf(bodyToAdd) === -1)
+                this._world.addBody(bodyToAdd);
 
-            const pos = body.position;
-            node.setPosition([pos.x, pos.y, pos.z]);
-
-            const quat = body.quaternion;
-            node.setQuaternion([quat.x, quat.y, quat.z, quat.w]);
-
+            // If node is marked for removal, remove it from the world
             if (node.markForRemoval) {
-                this._world.removeBody(node.body);
-                node.body.removeEventListener('collide', node.onCollision);
+                this._world.removeBody(bodyToAdd);
+                bodyToAdd.removeEventListener('collide', node.onCollision);
             }
+
+            // If node contains a body, update the position and quaternion of itself
+            if (node.body) {
+                const pos = node.body.position;
+                node.setPosition([pos.x, pos.y, pos.z]);
+    
+                const quat = node.body.quaternion;
+                node.setQuaternion([quat.x, quat.y, quat.z, quat.w]);
+            }
+
+            if (node.trigger) {
+                // update the position and quaternion of the trigger
+                const pos = node.worldPosition;
+                node.trigger.position.set(pos[0], pos[1], pos[2]);
+
+                const quat = node.worldQuaternion;
+                node.trigger.quaternion.set(quat[0], quat[1], quat[2], quat[3]);
+            }
+            
         }
     }
 

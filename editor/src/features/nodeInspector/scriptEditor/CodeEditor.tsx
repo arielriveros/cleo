@@ -16,24 +16,19 @@ export default function CodeEditor() {
     if (!selectedNode || !selectedScript) return
     switch (selectedScript) {
       case 'OnSpawn':
-        if (scripts.get(selectedNode)) {
-          scripts.get(selectedNode)!.spawn = editorScript
-        }
+        scripts.get(selectedNode)!.spawn = editorScript
         break
       case 'OnStart':
-        if (scripts.get(selectedNode)) {
-          scripts.get(selectedNode)!.start = editorScript
-        }
+        scripts.get(selectedNode)!.start = editorScript
         break
       case 'OnUpdate':
-        if (scripts.get(selectedNode)) {
-          scripts.get(selectedNode)!.update = editorScript
-        }
+        scripts.get(selectedNode)!.update = editorScript
         break
       case 'OnCollision':
-        if (scripts.get(selectedNode)) {
-          scripts.get(selectedNode)!.collision = editorScript
-        }
+        scripts.get(selectedNode)!.collision = editorScript
+        break
+      case 'OnTrigger':
+        scripts.get(selectedNode)!.trigger = editorScript
         break
     }
 
@@ -62,7 +57,7 @@ export default function CodeEditor() {
   useEffect(() => {
     if (selectedNode) {
       if (selectedScript && !scripts.get(selectedNode))
-        scripts.set(selectedNode, {start: '', update: '', spawn: '', collision: ''})
+        scripts.set(selectedNode, {start: '', update: '', spawn: '', collision: '', trigger: ''})
 
       switch (selectedScript) {
         case 'OnSpawn':
@@ -76,6 +71,9 @@ export default function CodeEditor() {
           break
         case 'OnCollision':
           setScriptText(scripts.get(selectedNode)?.collision || '')
+          break
+        case 'OnTrigger':
+          setScriptText(scripts.get(selectedNode)?.trigger || '')
           break
       }
     }

@@ -1,5 +1,5 @@
 import { mat4, vec3, quat } from "gl-matrix";
-import { RigidBody } from "../../physics/body";
+import { RigidBody, Trigger } from "../../physics/body";
 import { Model } from "../../graphics/model";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Skybox } from "../../graphics/skybox";
@@ -36,11 +36,13 @@ export class Node {
     protected _markForRemoval: boolean = false;
 
     protected _body: RigidBody | null;
+    protected _trigger: Trigger | null;
 
     public onStart: (node: Node) => void = (node: Node) => {};
     public onSpawn: (node: Node) => void = (node: Node) => {};
     public onUpdate: (node: Node, delta: number, time: number) => void = (node: Node, delta: number, time: number) => {};
     public onCollision: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
+    public onTrigger: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
     public onChange: () => void = () => {};
 
     constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
@@ -171,6 +173,7 @@ export class Node {
     protected static _commonParse(node: Node, parent: Node, json: any) {
         node.onChange = parent.onChange;
         node.updateTransforms(parent.worldTransform);
+        if (json.scripts?.trigger) console.log(json.scripts.trigger);
         if (json.scripts) {
             if (json.scripts.start)
                 node.onStart = new Function('node', json.scripts.start).bind(this) as (node: Node) => void
@@ -180,6 +183,45 @@ export class Node {
                 node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update).bind(this) as (node: Node, delta: number, time: number) => void
             if (json.scripts.collision)
                 node.onCollision = new Function('node', 'other', json.scripts.collision).bind(this) as (node: Node, other: Node) => void
+            if (json.scripts.trigger)
+                node.onTrigger = new Function('node', 'other', json.scripts.trigger).bind(this) as (node: Node, other: Node) => void
+        }
+
+        const setShapes = (shapes: any, target: RigidBody | Trigger) => {
+            for (const shape of shapes) {
+                switch (shape.type) {
+                    case 'box':
+                        target.attachShape(
+                            Shape.Box(shape.width, shape.height, shape.depth),
+                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+                        );
+                        break;
+                    case 'sphere':
+                        target.attachShape(
+                            Shape.Sphere(shape.radius),
+                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+                        );
+                        break;
+                    case 'plane':
+                        target.attachShape(
+                            Shape.Plane(),
+                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+                        );
+                        break;
+                    case 'cylinder':
+                        target.attachShape(
+                            Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments),
+                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+                        );
+                        break;
+                    default:
+                        console.error(`Shape type ${shape.type} not supported`);
+                }
+            }
         }
 
         if (json.body) {
@@ -190,40 +232,12 @@ export class Node {
                 json.body.linearConstraints,
                 json.body.angularConstraints
             );
-            for (const shape of json.body.shapes) {
-                switch (shape.type) {
-                    case 'box':
-                        node._body.attachShape(
-                            Shape.Box(shape.width, shape.height, shape.depth),
-                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-                        );
-                        break;
-                    case 'sphere':
-                        node._body.attachShape(
-                            Shape.Sphere(shape.radius),
-                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-                        );
-                        break;
-                    case 'plane':
-                        node._body.attachShape(
-                            Shape.Plane(),
-                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-                        );
-                        break;
-                    case 'cylinder':
-                        node._body.attachShape(
-                            Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments),
-                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-                        );
-                        break;
-                    default:
-                        console.error(`Shape type ${shape.type} not supported`);
-                }
-            }
+            setShapes(json.body.shapes, node._body);
+        }
+
+        if (json.trigger) {
+            node.setTrigger();
+            setShapes(json.trigger.shapes, node._trigger);
         }
 
         if (json.children) {
@@ -481,11 +495,26 @@ export class Node {
 
         // handle onCollision event
         this._body.addEventListener('collide', (event: any) => {
-            if (event.body instanceof RigidBody)
+            if (event.body instanceof RigidBody || event.body instanceof Trigger)
                 this.onCollision(this, event.body.owner);
         });
 
         return this._body;
+    }
+
+    public get trigger(): Trigger | null { return this._trigger; }
+    public setTrigger(): void {
+        this._trigger = new Trigger({
+            position: this.worldPosition,
+            quaternion: this.worldQuaternion
+        }, this);
+
+        // handle onTrigger event
+        this._trigger.addEventListener('collide', (event: any) => {
+            if (event.body instanceof RigidBody || event.body instanceof Trigger)
+                this.onTrigger(this, event.body.owner);
+        });
+
     }
 
     public get position(): vec3 { return this._position; }

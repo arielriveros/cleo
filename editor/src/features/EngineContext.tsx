@@ -47,6 +47,14 @@ export type BodyDescription = {
 }
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | PlaneShapeDescription;
 
+type ScriptsDescription = {
+  start: string;
+  update: string;
+  spawn: string;
+  collision: string;
+  trigger: string;
+};
+
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
   instance: CleoEngine | null;
@@ -59,16 +67,19 @@ const EngineContext = createContext<{
     update: string;
     spawn: string;
     collision: string;
+    trigger: string;
   }>;
   bodies: Map<string, BodyDescription>;
+  triggers: Map<string, { shapes: ShapeDescription[]; }>;
   }>({
-  instance: null,
-  editorScene: new Scene(),
-  eventEmmiter: new EventEmitter(),
-  selectedNode: null,
-  selectedScript: null,
-  scripts: new Map(),
-  bodies: new Map(),
+    instance: null,
+    editorScene: new Scene(),
+    eventEmmiter: new EventEmitter(),
+    selectedNode: null,
+    selectedScript: null,
+    scripts: new Map(),
+    bodies: new Map(),
+    triggers: new Map()
   });
   
   // Create a custom hook to access the engine and scene from anywhere
@@ -81,11 +92,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editorSceneRef = useRef<Scene>(new Scene());
   const textureManagerRef = useRef<TextureManager | null>(null);
   const eventEmmiter = useRef(new EventEmitter());
-  const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedScript, setSelectedScript] = useState<string | null>(null);
-  const scriptsRef = useRef(new Map<string, { start: string, update: string, spawn: string, collision: string }>());
+  const scriptsRef = useRef(new Map<string, ScriptsDescription>());
   const bodiesRef = useRef(new Map<string, BodyDescription>());
+  const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
 
   const setupInitialScene = () => {
     const editorCameraNode = new CameraNode('__editor__Camera', new Camera({ far: 10000 }));
@@ -148,12 +159,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const plane = new ModelNode('plane', new Model(Geometry.Quad(), Material.Default({diffuse: [0, 0.45, 0.1], specular: [0.2, 0.2, 0.2]})));
     plane.setPosition([0, -1, 0]).setRotation([-90, 0, 0]).setScale([10, 10, 1]);
 
+    const triggerSphere = new ModelNode('trigger sphere', new Model(Geometry.Sphere(), Material.Default({diffuse: [0, 0, 1]})));
+    triggerSphere.setPosition([3, 0.5, 0]).setUniformScale(0.5);
+
     // Example nodes
-    editorSceneRef.current.addNodes(lightNode, cameraNode, physicalBox, box2, plane);
+    editorSceneRef.current.addNodes(lightNode, cameraNode, physicalBox, box2, plane, triggerSphere);
 
     // Example bodies
     bodiesRef.current.set(physicalBox.id, {
-        mass: 1,
+      mass: 1,
         linearDamping: 0.01,
         angularDamping: 0.01,
         linearConstraints: [1, 1, 1],
@@ -172,15 +186,39 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editorSceneRef.current.addNode(debugNode);
 
     bodiesRef.current.set(plane.id, {
-        mass: 0,
-        linearDamping: 0, angularDamping: 0,
-        linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1],
-        shapes: [ { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] } ]
+      mass: 0,
+      linearDamping: 0, angularDamping: 0,
+      linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1],
+      shapes: [ { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] } ]
     });
 
+    // Example triggers
+    triggersRef.current.set(triggerSphere.id, { shapes: [ { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ] });
+    // add debug shape for the trigger
+    const debugTriggerNode = new Node(`__debug__trigger_${triggerSphere.id}`);
+    debugTriggerNode.onUpdate = (node) => {
+      node.setPosition(triggerSphere.worldPosition);
+      node.setQuaternion(triggerSphere.worldQuaternion);
+    };
+
+    const debugTriggerModel = new Model(Geometry.Sphere(8), Material.Basic({color: [0, 1, 0]}, {wireframe: true}));
+    const triggerModelNode = new ModelNode(`__debug__shape_0`, debugTriggerModel);
+    debugTriggerNode?.addChild(triggerModelNode);
+    editorSceneRef.current.addNode(debugTriggerNode);
+
     // Example scripts
-    scriptsRef.current.set(physicalBox.id, { start: '', update: '', spawn: '', collision: 'console.log(`${node.name} collided with ${other.name}`)'});
-    scriptsRef.current.set(lightNode.id, { start: '', update: 'node.rotateY(-10 * delta)', spawn: '', collision: ''});
+    scriptsRef.current.set(physicalBox.id, {
+      start: '', update: '', spawn: '', trigger: '',
+      collision: 'console.log(`${node.name} collided with ${other.name}`)'});
+    scriptsRef.current.set(lightNode.id, {
+      start: '', trigger: '', spawn: '', collision: '',
+      update: 'node.rotateY(-10 * delta)'});
+    scriptsRef.current.set(triggerSphere.id, {
+      start: '', spawn: '', collision: '',
+      update: 'node.setX(Math.cos(time / 800) * 5)',
+      trigger: 'console.log(`${other.name} triggered ${node.name}`);\nconst newColor = [Math.random(), Math.random(), Math.random()];\nnode.model.material.properties.set("diffuse", newColor);'
+    });
+        
   };
 
   useEffect(() => {
@@ -267,14 +305,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!instanceRef.current) return;
       if (state === 'play') {
         instanceRef.current.isPaused = false;
-        setPlayState('playing');
       }
       else if (state === 'pause') {
         instanceRef.current.isPaused = true;
-        setPlayState('paused');
       }
       else if (state === 'stop') {
-        setPlayState('stopped');
         instanceRef.current.isPaused = false; // Unpause for editor scene
       }
     });
@@ -304,7 +339,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       eventEmmiter: eventEmmiter.current,
       selectedNode, selectedScript,
       scripts: scriptsRef.current,
-      bodies: bodiesRef.current
+      bodies: bodiesRef.current,
+      triggers: triggersRef.current
     }}>
     {props.children}
   </EngineContext.Provider>

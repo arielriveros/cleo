@@ -15,6 +15,7 @@ export default function ScriptSelector() {
       <Tab title='OnStart' onClick={() => eventEmmiter.emit('selectScript', 'OnStart')} selected={selectedScript === 'OnStart'}/>
       <Tab title='OnUpdate' onClick={() => eventEmmiter.emit('selectScript', 'OnUpdate')} selected={selectedScript === 'OnUpdate'}/>
       <Tab title='OnCollision' onClick={() => eventEmmiter.emit('selectScript', 'OnCollision')} selected={selectedScript === 'OnCollision'}/>
+      <Tab title='OnTrigger' onClick={() => eventEmmiter.emit('selectScript', 'OnTrigger')} selected={selectedScript === 'OnTrigger'}/>
     </Tabs>
   )
 }

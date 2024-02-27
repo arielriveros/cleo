@@ -10,6 +10,7 @@ import PlaneIcon from '../../icons/plane.png'
 import SphereIcon from '../../icons/sphere.png'
 import CylinderIcon from '../../icons/cylinder.png'
 import EmptyIcon from '../../icons/empty.png'
+import TriggerIcon from '../../icons/trigger.png'
 import ImportIcon from '../../icons/import.png'
 import PointLightIcon from '../../icons/point-light.png'
 import DirectionalLightIcon from '../../icons/directional-light.png'
@@ -34,7 +35,7 @@ function AddButton(props: AddButtonProps) {
 
 export default function AddNew() {
   const [node, setNode] = useState<Node | null>(null)
-  const { editorScene, selectedNode, eventEmmiter } = useCleoEngine();
+  const { editorScene, selectedNode, eventEmmiter, triggers } = useCleoEngine();
 
   useEffect(() => {
     if (editorScene && selectedNode) {
@@ -46,6 +47,13 @@ export default function AddNew() {
   const addNode = (newNode: Node) => {
     node?.addChild(newNode);
     eventEmmiter.emit('selectNode', newNode.id);
+  }
+
+  const addTrigger = () => {
+    // Just an empty node with a trigger
+    const triggerNode = new Node('trigger');
+    triggers.set(triggerNode.id, { shapes: [] });
+    addNode(triggerNode);
   }
 
   const addCamera = (type: 'perspective' | 'orthographic') => { 
@@ -138,6 +146,7 @@ export default function AddNew() {
           Common
           <div className='node-button-container'>
             <AddButton onClick={() => addNode(new Node('node')) } label='Empty' icon={EmptyIcon} />
+            <AddButton onClick={() => addTrigger()} label='Trigger' icon={TriggerIcon} />
           </div>
         </div>
         <div className='node-category'>
@@ -145,6 +154,14 @@ export default function AddNew() {
           <div className='node-button-container'>
             <AddButton onClick={() => addCamera('perspective')} label='Perspective' icon={CameraIcon} />
             <AddButton onClick={() => addCamera('orthographic')} label='Orthographic' icon={CameraIcon} />
+          </div>
+        </div>
+        <div className='node-category'>
+          Lights
+          <div className='node-button-container'>
+            <AddButton onClick={() => addNode(new LightNode('directional light', new DirectionalLight({}), true)) } label='Directional' icon={DirectionalLightIcon} />
+            <AddButton onClick={() => addPointLight()} label='Point' icon={PointLightIcon} />
+            <AddButton onClick={() => addSpotlight()} label='Spotlight' icon={SpotlightIcon} />
           </div>
         </div>
         <div className='node-category'>
@@ -175,14 +192,6 @@ export default function AddNew() {
               }} />
               Import
             </div>
-          </div>
-        </div>
-        <div className='node-category'>
-          Lights
-          <div className='node-button-container'>
-            <AddButton onClick={() => addNode(new LightNode('directional light', new DirectionalLight({}), true)) } label='Directional' icon={DirectionalLightIcon} />
-            <AddButton onClick={() => addPointLight()} label='Point' icon={PointLightIcon} />
-            <AddButton onClick={() => addSpotlight()} label='Spotlight' icon={SpotlightIcon} />
           </div>
         </div>
         <div className='node-category'>
