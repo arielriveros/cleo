@@ -6,16 +6,16 @@ export default function ScriptSelector() {
   const { selectedScript, eventEmmiter } = useCleoEngine();
 
   useEffect(() => {
-    return () => { eventEmmiter.emit('selectScript', null) }
+    return () => { eventEmmiter.emit('SELECT_SCRIPT', null) }
   }, [eventEmmiter])
 
   return (
     <Tabs>
-      <Tab title='OnSpawn' onClick={() => eventEmmiter.emit('selectScript', 'OnSpawn')} selected={selectedScript === 'OnSpawn'}/>
-      <Tab title='OnStart' onClick={() => eventEmmiter.emit('selectScript', 'OnStart')} selected={selectedScript === 'OnStart'}/>
-      <Tab title='OnUpdate' onClick={() => eventEmmiter.emit('selectScript', 'OnUpdate')} selected={selectedScript === 'OnUpdate'}/>
-      <Tab title='OnCollision' onClick={() => eventEmmiter.emit('selectScript', 'OnCollision')} selected={selectedScript === 'OnCollision'}/>
-      <Tab title='OnTrigger' onClick={() => eventEmmiter.emit('selectScript', 'OnTrigger')} selected={selectedScript === 'OnTrigger'}/>
+      <Tab title='OnSpawn' onClick={() => eventEmmiter.emit('SELECT_SCRIPT', 'OnSpawn')} selected={selectedScript === 'OnSpawn'}/>
+      <Tab title='OnStart' onClick={() => eventEmmiter.emit('SELECT_SCRIPT', 'OnStart')} selected={selectedScript === 'OnStart'}/>
+      <Tab title='OnUpdate' onClick={() => eventEmmiter.emit('SELECT_SCRIPT', 'OnUpdate')} selected={selectedScript === 'OnUpdate'}/>
+      <Tab title='OnCollision' onClick={() => eventEmmiter.emit('SELECT_SCRIPT', 'OnCollision')} selected={selectedScript === 'OnCollision'}/>
+      <Tab title='OnTrigger' onClick={() => eventEmmiter.emit('SELECT_SCRIPT', 'OnTrigger')} selected={selectedScript === 'OnTrigger'}/>
     </Tabs>
   )
 }

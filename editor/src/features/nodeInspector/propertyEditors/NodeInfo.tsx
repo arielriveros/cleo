@@ -31,8 +31,8 @@ export default function NodeInfo(props: {node: Node}) {
       return;
     }
     props.node.name = nodeName
-    eventEmmiter.emit('sceneChanged');
-    eventEmmiter.emit('selectNode', props.node.id);
+    eventEmmiter.emit('SCENE_CHANGED');
+    eventEmmiter.emit('SELECT_NODE', props.node.id);
   }
 
   return (

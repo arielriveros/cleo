@@ -17,8 +17,8 @@ export default function MenuBar() {
       if (state === 'pause') setPlayState('paused');
       if (state === 'stop') setPlayState('stopped');
     }
-    eventEmmiter.on('setPlayState', handlePlayState);
-    return () => { eventEmmiter.off('setPlayState', handlePlayState) };
+    eventEmmiter.on('SET_PLAY_STATE', handlePlayState);
+    return () => { eventEmmiter.off('SET_PLAY_STATE', handlePlayState) };
   }, [eventEmmiter]);
   
   const clearDebuggingNodes = (json: any) => {
@@ -110,7 +110,7 @@ export default function MenuBar() {
     if (!instance) return;
 
     if (started) {
-      eventEmmiter.emit('setPlayState', 'play');
+      eventEmmiter.emit('SET_PLAY_STATE', 'play');
       return;
     }
 
@@ -132,7 +132,7 @@ export default function MenuBar() {
       // add a little delay to make sure the scene is set before starting it
       setTimeout(() => { instance.scene.start(); } , 100);
 
-      eventEmmiter.emit('setPlayState', 'play');
+      eventEmmiter.emit('SET_PLAY_STATE', 'play');
       setStarted(true);
     });
   }
@@ -141,11 +141,11 @@ export default function MenuBar() {
     setStarted(false);
     if (!instance) return;
     instance.setScene(editorScene as Scene);
-    eventEmmiter.emit('setPlayState', 'stop');
+    eventEmmiter.emit('SET_PLAY_STATE', 'stop');
   }
 
   const onPause = () => {
-    eventEmmiter.emit('setPlayState', 'pause');
+    eventEmmiter.emit('SET_PLAY_STATE', 'pause');
   }
 
   return (

@@ -46,7 +46,7 @@ export default function AddNew() {
 
   const addNode = (newNode: Node) => {
     node?.addChild(newNode);
-    eventEmmiter.emit('selectNode', newNode.id);
+    eventEmmiter.emit('SELECT_NODE', newNode.id);
   }
 
   const addTrigger = () => {

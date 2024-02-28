@@ -23,10 +23,10 @@ export default function TextureExplorer() {
       setTexturesList(textureNames);
     };
     
-    eventEmmiter.on('texturesChanged', handleTexturesChanged);
+    eventEmmiter.on('TEXTURES_CHANGED', handleTexturesChanged);
 
     return () => {
-        eventEmmiter.off("texturesChanged", handleTexturesChanged); // Remove the listener on component unmount
+        eventEmmiter.off('TEXTURES_CHANGED', handleTexturesChanged); // Remove the listener on component unmount
     };
 
   }, [eventEmmiter]);
@@ -42,7 +42,7 @@ export default function TextureExplorer() {
           const name = file.name;
           if (data) {
             TextureManager.Instance.addTextureFromBase64(data as string, { wrapping: 'repeat' }, name);
-            eventEmmiter.emit('texturesChanged');
+            eventEmmiter.emit('TEXTURES_CHANGED');
           }
         }
         reader.readAsDataURL(file);
@@ -52,12 +52,12 @@ export default function TextureExplorer() {
 
   return (
     <Collapsable title='Textures'>
-      <div className="texture-explorer">
+      <div className='texture-explorer'>
         <div>
           <b>Upload Textures</b>
           <br/>
-          <label htmlFor="file-upload" className="custom-file-upload"> Upload Files </label>
-          <input id="file-upload" type="file" multiple accept='.png, .jpg, .jpeg, .tga, .bmp' onChange={handleFileUpload} />
+          <label htmlFor='file-upload' className='custom-file-upload'> Upload Files </label>
+          <input id='file-upload' type='file' multiple accept='.png, .jpg, .jpeg, .tga, .bmp' onChange={handleFileUpload} />
         </div>
         {
           texturesList.map((textureName, index) => {

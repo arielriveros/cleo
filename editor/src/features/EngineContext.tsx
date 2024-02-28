@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager } from "cleo";
 import { CameraGeometry, GridGeometry } from "../utils/EditorModels";
+import NullImage from '../images/null.png';
 import EventEmitter from "events";
 
 type BoxShapeDescription = {
@@ -233,9 +234,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       
 
       textureManagerRef.current = TextureManager.Instance;
-      editorSceneRef.current.onChange = () => { eventEmmiter.current.emit('sceneChanged') }; // Emit the "sceneChanged" event 
+      editorSceneRef.current.onChange = () => { eventEmmiter.current.emit('SCENE_CHANGED') }; // Emit the "sceneChanged" event 
       
       setupInitialScene();
+
+      textureManagerRef.current.addTextureFromBase64(NullImage, {}, 'Null');
+      eventEmmiter.current.emit('TEXTURES_CHANGED');
 
       // Setting the editor scene and camera
       engine.setScene(editorSceneRef.current);
@@ -249,7 +253,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Event handling
   useEffect(() => {
-    eventEmmiter.current.on('changeDimension', (dimension: '2D' | '3D') => {
+    eventEmmiter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
       if (!instanceRef.current) return;
 
       // change camera to 2D
@@ -301,7 +305,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
     });
 
-    eventEmmiter.current.on('setPlayState', (state: 'play' | 'pause' | 'stop') => {
+    eventEmmiter.current.on('SET_PLAY_STATE', (state: 'play' | 'pause' | 'stop') => {
       if (!instanceRef.current) return;
       if (state === 'play') {
         instanceRef.current.isPaused = false;
@@ -314,18 +318,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
     });
 
-    eventEmmiter.current.on('selectNode', (node: string | null) => {
+    eventEmmiter.current.on('SELECT_NODE', (node: string | null) => {
       setSelectedNode(node);
     });
 
-    eventEmmiter.current.on('selectScript', (script: string | null) => {
+    eventEmmiter.current.on('SELECT_SCRIPT', (script: string | null) => {
       setSelectedScript(script);
     });
 
     // Default values
-    eventEmmiter.current.emit('changeDimension', '3D');
-    eventEmmiter.current.emit('setPlayState', 'stop');
-    eventEmmiter.current.emit('selectScript', null);
+    eventEmmiter.current.emit('CHANGE_DIMENSION', '3D');
+    eventEmmiter.current.emit('SET_PLAY_STATE', 'stop');
+    eventEmmiter.current.emit('SELECT_SCRIPT', null);
 
     return () => {
       eventEmmiter.current.removeAllListeners();

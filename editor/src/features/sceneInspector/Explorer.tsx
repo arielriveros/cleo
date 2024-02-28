@@ -10,10 +10,10 @@ export default function Explorer() {
 
   useEffect(() => {
     if (selectedTab === 'Scene') 
-      eventEmmiter.emit('sceneChanged')
+      eventEmmiter.emit('SCENE_CHANGED')
 
     if (selectedTab === 'Assets')
-      eventEmmiter.emit('texturesChanged')
+      eventEmmiter.emit('TEXTURES_CHANGED')
   }, [selectedTab])
   return (
     <>

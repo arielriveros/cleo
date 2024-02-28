@@ -123,12 +123,12 @@ export default function SceneInspector() {
 
   useEffect(() => {
     const handleSceneChanged = () => { if (editorScene) setNodes(generateNodeList(editorScene.root)) };
-    eventEmmiter.on('sceneChanged', handleSceneChanged);
-    return () => { eventEmmiter.off("sceneChanged", handleSceneChanged) }; // Remove the listener on component unmount
+    eventEmmiter.on('SCENE_CHANGED', handleSceneChanged);
+    return () => { eventEmmiter.off("SCENE_CHANGED", handleSceneChanged) }; // Remove the listener on component unmount
   }, [eventEmmiter, editorScene]);
 
   const handleSelectNode = (nodeId: string | null) => {
-    eventEmmiter.emit('selectNode', nodeId);
+    eventEmmiter.emit('SELECT_NODE', nodeId);
   }
 
   return (

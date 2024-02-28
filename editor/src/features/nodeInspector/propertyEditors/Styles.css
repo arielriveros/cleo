@@ -10,14 +10,7 @@ th {
     padding: 10px;
 }
 
-.materialColors {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    
-}
-
-.textureInspector {
+.texture-inspector {
     display: flex;
     position: relative;
     flex-direction: column;
@@ -27,7 +20,7 @@ th {
     border: 1px solid #ccc;
 }
 
-.texImage {
+.tex-image {
     width: 100%;
     height: 100%;
     background-size: contain;
@@ -35,19 +28,46 @@ th {
     background-position: center;
 }
 
-.textureFileUpload {
+.texture-missing {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    font-size: 10px;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.texture-missing span {
+    color: red;
+    background-color: black;
+    text-align: center;
+    width: 100%;
+    white-space: wrap;
+    overflow: hidden;
+    text-overflow: clip;
+}
+
+.texture-select {
     display: none;
 }
 
-.textureDelete {
+.texture-delete {
     display: none;
 }
 
-.textureInspector:hover .textureFileUpload {
+.texture-upload {
+    display: none;
+}
+
+.texture-inspector:hover .texture-select {
     position: absolute;
     bottom: 0;
     border: 1px solid #ccc;
     background-color: #3b3b3b;
+    color: white;
     text-align: center;
     width: 98px;
     height: 22px;
@@ -55,7 +75,7 @@ th {
     cursor: pointer;
 }
 
-.textureInspector:hover .textureDelete {
+.texture-inspector:hover .texture-delete {
     position: absolute;
     top: 0;
     right: 0;
@@ -68,7 +88,20 @@ th {
     cursor: pointer;
 }
 
-.materialInput {
+.texture-inspector:hover .texture-upload {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: 1px solid #ccc;
+    background-color: #3b3b3b;
+    color: white;
+    width: 25px;
+    height: 25px;
+    display: inline-block;
+    cursor: pointer;
+}
+
+.material-input {
     width: 100%;
     margin-bottom: 10px;
 }
@@ -88,12 +121,12 @@ td {
     border: 1px solid #ccc;
 }
 
-.textureFileUpload {
+.texture-select {
     display: none;
 }
 
 
-.skyboxFace:hover .textureFileUpload{
+.skyboxFace:hover .texture-select{
     position: absolute;
     bottom: 0;
     border: 1px solid #ccc;

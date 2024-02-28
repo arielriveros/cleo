@@ -27,8 +27,8 @@ export default function Editor() {
         setSidebarMinDimensions({left: 0, right: 0});
       }
     }
-    eventEmmiter.on('setPlayState', handlePlayState);
-    return () => { eventEmmiter.off('setPlayState', handlePlayState) };    
+    eventEmmiter.on('SET_PLAY_STATE', handlePlayState);
+    return () => { eventEmmiter.off('SET_PLAY_STATE', handlePlayState) };    
   }, [eventEmmiter]);
 
   useEffect(() => {

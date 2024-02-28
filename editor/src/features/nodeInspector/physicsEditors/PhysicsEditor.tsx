@@ -13,8 +13,8 @@ export default function PhysicsEditor(props: {node: Node}) {
 
   useEffect(() => {
     const handleSceneChanged = () => { setSceneChanged(true); };
-    eventEmmiter.on('sceneChanged', handleSceneChanged);
-    return () => { eventEmmiter.off('sceneChanged', handleSceneChanged) };
+    eventEmmiter.on('SCENE_CHANGED', handleSceneChanged);
+    return () => { eventEmmiter.off('SCENE_CHANGED', handleSceneChanged) };
   }, [eventEmmiter]);
 
   useEffect(() => {
