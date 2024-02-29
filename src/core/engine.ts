@@ -1,6 +1,7 @@
 import { Renderer } from "../graphics/renderer";
 import { InputManager } from "../input/inputManager";
 import { PhysicsSystem } from "../physics/physicsSystem";
+import { Logger } from "./logger";
 import { Scene } from "./scene/scene";
 
 interface CleoConfig {
@@ -12,7 +13,8 @@ interface CleoConfig {
     physics?: {
         gravity?: number[];
         killZHeight?: number;
-    }
+    },
+    loggerListener?: (log: { type: 'log' | 'info' | 'warning' | 'error', scope: string, message: string }) => void;
 }
 
 export class CleoEngine {
@@ -33,6 +35,10 @@ export class CleoEngine {
     public onPostInitialize: () => void;
 
     constructor(config?: CleoConfig) {
+        if (config?.loggerListener)
+            Logger.eventEmitter.on('log', config.loggerListener);
+            //Logger.on('log', config.loggerListener);
+
         this._renderer = new Renderer( { clearColor: config?.graphics?.clearColor,
                                          shadowMapResolution: config?.graphics?.shadowMapSize,
                                          bloom: config?.graphics?.bloom });
@@ -59,9 +65,11 @@ export class CleoEngine {
         this.onPostInitialize();
 
         this._ready = true;
+        Logger.info('Engine Ready')
     }
 
     public run(): void {
+        Logger.info('Engine starting');
         if (!this._ready)
             this._initialize();
 

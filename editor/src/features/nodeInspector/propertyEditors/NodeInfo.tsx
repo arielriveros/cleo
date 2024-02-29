@@ -1,5 +1,5 @@
 import { ButtonWithConfirm } from '../../../components/Button'
-import { Node } from 'cleo'
+import { Logger, Node } from 'cleo'
 import { useState, useEffect } from 'react';
 import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
@@ -16,17 +16,22 @@ export default function NodeInfo(props: {node: Node}) {
   const handleNodeNameChange = () => {
     if (nodeName === props.node.name) return;
     if (nodeName === '') {
-      console.warn('Node name cannot be empty');
+      Logger.warn('Node name cannot be empty', 'Editor');
       setNodeName(props.node.name);
       return;
     }
     if (nodeName === 'root') {
-      console.warn('"root" name is reserved for the root node');
+      Logger.warn('"root" name is reserved for the root node', 'Editor');
       setNodeName(props.node.name);
       return;
     }
-    if (nodeName.includes('__debug__') || nodeName.includes('__editor__')) {
-      console.warn('Node name cannot contain "__debug__" or "__editor__"');
+    if (nodeName.includes('__debug__')) {
+      Logger.warn('Node name cannot contain "__debug__"', 'Editor');
+      setNodeName(props.node.name);
+      return;
+    }
+    if (nodeName.includes('__editor__')) {
+      Logger.warn('Node name cannot contain "__editor__"', 'Editor');
       setNodeName(props.node.name);
       return;
     }

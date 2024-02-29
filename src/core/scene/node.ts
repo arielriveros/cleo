@@ -8,6 +8,7 @@ import { Scene } from "./scene";
 import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
 import { Shape } from "../../cleo";
+import { Logger } from "../logger";
 
 type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera';
 
@@ -173,7 +174,6 @@ export class Node {
     protected static _commonParse(node: Node, parent: Node, json: any) {
         node.onChange = parent.onChange;
         node.updateTransforms(parent.worldTransform);
-        if (json.scripts?.trigger) console.log(json.scripts.trigger);
         if (json.scripts) {
             if (json.scripts.start)
                 node.onStart = new Function('node', json.scripts.start).bind(this) as (node: Node) => void
@@ -565,7 +565,9 @@ export class ModelNode extends Node {
                     attributes.push('bitangent');
                     break;
                 default:
-                    throw new Error(`Attribute ${attr.name} not supported`);
+                    const errMsg = `Attribute ${attr.name} not supported`;
+                    Logger.error(errMsg)
+                    throw new Error(errMsg);
             }
         }
 
@@ -620,8 +622,11 @@ export class LightNode extends Node {
             this._type = 'point';
         else if (light instanceof Spotlight)
             this._type = 'spotlight';
-        else
-            throw new Error("Light type not supported");
+        else {
+            const errMsg = "Light type not supported";
+            Logger.error(errMsg)
+            throw new Error(errMsg);
+        }
     }
 
     public serialize(): Promise<any> {
@@ -705,7 +710,9 @@ export class LightNode extends Node {
                 });
                 break;
             default:
-                throw new Error(`Light ${json} of type ${json.type} not supported`);
+                const errMsg = `Light ${json} of type ${json.type} not supported`;
+                Logger.error(errMsg);
+                throw new Error(errMsg);
         }
         const node = new LightNode(json.name, light, json.lightType === 'directional' ? true : false, json.id);
         Node._commonParse(node, parent, json);

@@ -1,5 +1,6 @@
 import { Texture, TextureManager } from "../../cleo";
 import { CameraNode, LightNode, ModelNode, Node, SkyboxNode } from "./node";
+import { Logger } from '../logger'
 
 export class Scene {
     private _root: Node = new Node('root');
@@ -33,16 +34,17 @@ export class Scene {
     }
 
     public start(): void {
-        console.log('Scene start');
         if (this._hasStarted) return;
-
+        
         this._root.start();
-
+        
         this._hasStarted = true;
+        Logger.info('Scene starting');
     }
 
     public stop(): void {
         this._hasStarted = false;
+        Logger.info('Scene stopped');
     }
 
     public addNode(node: Node): void {
@@ -153,25 +155,25 @@ export class Scene {
         return undefined;
     }
 
-    public serialize(storeTextures: boolean = true): Promise<any> {
+    public serialize(useCache: boolean = false): Promise<any> {
         const output: {scene: any, textures: any} = {scene: {}, textures: {}};
         return new Promise((resolve, reject) => {
             this._root.serialize().then((json: any) => {
                 output.scene = json;
-                if (storeTextures)
+                if (!useCache)
                     output.textures = TextureManager.Instance.serializeTextureData();
                 resolve(output);
             });
         });
     }
 
-    public parse(json: any, loadTextures: boolean = true): void {
+    public parse(json: any, useCache: boolean = false): void {
         // change the root node entirely not just its children
         let newScene = new Node('root');
         newScene.scene = this;
         newScene.onChange = this._onChange.bind(this);
         Node.parse(newScene, json.scene);
-        if (loadTextures)
+        if (!useCache)
             for (const texture of json.textures)
                 TextureManager.Instance.addTextureFromBase64(texture.data, texture.config, texture.id);
         this._dirty = true;

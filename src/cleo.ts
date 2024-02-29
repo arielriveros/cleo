@@ -3,6 +3,7 @@ export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";
 export { Scene } from "./core/scene/scene";
 export { Node, ModelNode, LightNode, SkyboxNode, CameraNode } from "./core/scene/node";
+export { Logger } from "./core/logger";
 export { Mesh } from "./graphics/mesh";
 export { Material } from "./graphics/material";
 export { Renderer } from "./graphics/renderer";

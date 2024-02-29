@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Scene } from "cleo";
+import { Scene, Logger } from "cleo";
 import { useCleoEngine } from "./EngineContext";
 import Topbar from "../components/Topbar";
 import PlayIcon from '../icons/play.png'
@@ -25,11 +25,11 @@ export default function MenuBar() {
     const iterateChildren = (children: any[]) => {
       return children.filter((child: any) => {
         if (child.name.includes('__debug__')) {
-          console.log('removing debugging node', child.name);
+          Logger.info(`Removing debugging node ${child.name}`, 'Editor');
           return false;
         }
         if (child.name.includes('__editor__')) {
-          console.log('removing editor node', child.name);
+          Logger.info(`Removing editor node ${child.name}`, 'Editor');
           return false;
         }
         child.children = iterateChildren(child.children);
@@ -124,7 +124,6 @@ export default function MenuBar() {
       setBodies(json);
       // Parse the scene from the editor
       newScene.parse(json, false);
-      console.log('Starting scene: ', newScene);
       // Set the new scene to the engine then start it
       instance.setScene(newScene);
       instance.isPaused = false;
@@ -168,7 +167,7 @@ export default function MenuBar() {
       </div>
       <div className='dimension-controls'>
         <p>Mode</p>
-        <select disabled={ playState==='playing' || playState==='paused' } onChange={(e) => eventEmmiter.emit('changeDimension', (e.target.value as '2D' | '3D'))}>
+        <select disabled={ playState==='playing' || playState==='paused' } onChange={(e) => eventEmmiter.emit('CHANGE_DIMENSION', (e.target.value as '2D' | '3D'))}>
           <option value='3D'>3D</option>
           <option value='2D'>2D</option>
         </select>

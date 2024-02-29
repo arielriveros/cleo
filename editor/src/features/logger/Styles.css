@@ -1,0 +1,64 @@
+.logger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  background-color: #202020;
+  color: #fff;
+}
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 10%;
+  height: 100%;
+  border-right: solid 1px #3f3fb4;
+}
+
+.filter-button {
+  height: 100%;
+  width: 100%;
+  background-color: #3f3fb4;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  margin: 1px 0;
+  border: solid 1px #3b3b3b;
+}
+
+.filter-button.disabled {
+  background-color: #3b3b3b;
+}
+
+.logs-container {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.log {
+  display: flex;
+  align-items: center;
+  border-top: solid 1px #2c2c2c;
+  transition: background-color 0.3s;
+  margin: 0 2px;
+  font-size: small;
+  font-weight: lighter;
+}
+
+.log.log-info {
+  color: rgb(150, 150, 255)
+}
+
+.log.log-warning {
+  color: rgb(255, 255, 150)
+}
+
+.log.log-error {
+  color: rgb(255, 150, 150)
+}

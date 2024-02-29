@@ -7,24 +7,24 @@ import NodeInspector from "./nodeInspector/NodeInspector";
 import Sidebar, { SidebarResizer } from "../components/Sidebar";
 import MenuBar from "./MenuBar";
 import Explorer from "./sceneInspector/Explorer";
+import BottomBar, { BottomBarResizer } from "../components/BottomBar";
+import Logger from "./logger/Logger";
 import './Editor.css'
 
 export default function Editor() {
   const { instance, eventEmmiter } = useCleoEngine();
-  const [sidebarDimensions, setSidebarDimensions] = useState({left: 20, right: 25});
-  const [sidebarMinDimensions, setSidebarMinDimensions] = useState({left: 12, right: 21});
-  
+  const [barsDimensions, setBarsDimensions] = useState({
+    left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15
+  });
 
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
       if (state === 'stop') {
-        setSidebarDimensions({left: 20, right: 25});
-        setSidebarMinDimensions({left: 12, right: 21});
+        setBarsDimensions({left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15});
       }
   
       if (state === 'play' || state === 'pause') {
-        setSidebarDimensions({left: 0, right: 0});
-        setSidebarMinDimensions({left: 0, right: 0});
+        setBarsDimensions({left: 0, right: 0, minLeft: 0, minRight: 0, height: 0, minHeight: 0});
       }
     }
     eventEmmiter.on('SET_PLAY_STATE', handlePlayState);
@@ -34,37 +34,45 @@ export default function Editor() {
   useEffect(() => {
     if (!instance) return;
 
-    if (sidebarDimensions.left < sidebarMinDimensions.left)
-      setSidebarDimensions({left: sidebarMinDimensions.left, right: sidebarDimensions.right});
+    if (barsDimensions.left < barsDimensions.minLeft)
+      setBarsDimensions({...barsDimensions, left: barsDimensions.minLeft, right: barsDimensions.right});
 
-    if (sidebarDimensions.right < sidebarMinDimensions.right)
-      setSidebarDimensions({left: sidebarDimensions.left, right: sidebarMinDimensions.right});
+    if (barsDimensions.right < barsDimensions.minRight)
+      setBarsDimensions({...barsDimensions, left: barsDimensions.left, right: barsDimensions.minRight});
 
     instance.renderer.resize();
 
-  }, [sidebarDimensions]);
+  }, [barsDimensions]);
 
   return (
     <>
       <MenuBar />
       <Content>
-        <Sidebar width={`${sidebarDimensions.left}vw`} minWidth={`${sidebarMinDimensions.left}vw`}>
+        <Sidebar width={`${barsDimensions.left}vw`} minWidth={`${barsDimensions.minLeft}vw`}>
           <Explorer />
         </Sidebar>
         <SidebarResizer 
           onDrag={ e => {
-            setSidebarDimensions({left: 100 * e.clientX / window.innerWidth, right: sidebarDimensions.right});
+            setBarsDimensions({...barsDimensions, left: 100 * e.clientX / window.innerWidth, right: barsDimensions.right});
           }}
         />
-        <Center width={`${100 - sidebarDimensions.left - sidebarDimensions.right}vw`}>
-          <EngineViewport />
+        <Center width={`${100 - barsDimensions.left - barsDimensions.right}vw`}>
+          <div style={{height: `${100 - barsDimensions.height}vh`}}>
+            <EngineViewport />
+          </div>
+          <BottomBarResizer onDrag={ e => {
+            setBarsDimensions({...barsDimensions, height: 100 - (100 * e.clientY) / window.innerHeight});
+          }} />
+          <BottomBar height={`${barsDimensions.height}vh`} minHeight={`${barsDimensions.minHeight}vh`}>
+            <Logger />
+          </BottomBar>
         </Center>
         <SidebarResizer
           onDrag={ e => {
-            setSidebarDimensions({left: sidebarDimensions.left, right: 100 - (100 * e.clientX) / window.innerWidth});
+            setBarsDimensions({...barsDimensions, left: barsDimensions.left, right: 100 - (100 * e.clientX) / window.innerWidth});
           }}
         />
-        <Sidebar width={`${sidebarDimensions.right}vw`} minWidth={`${sidebarMinDimensions.right}vw`}>
+        <Sidebar width={`${barsDimensions.right}vw`} minWidth={`${barsDimensions.minRight}vw`}>
           <NodeInspector />
         </Sidebar>
       </Content>

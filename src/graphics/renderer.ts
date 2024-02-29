@@ -27,6 +27,7 @@ import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
 import { TextureManager } from '../cleo';
+import { Logger } from '../core/logger';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -93,8 +94,11 @@ export class Renderer {
         gl.depthFunc(gl.LEQUAL);
         gl.blendFunc(gl.DST_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.drawingBufferColorSpace = 'srgb';
-        if (!gl.getExtension('EXT_color_buffer_float'))
-            throw new Error('Rendering to floating point textures is not supported on this platform');
+        if (!gl.getExtension('EXT_color_buffer_float')) {
+            const msg = 'Rendering to floating point textures is not supported on this platform';
+            Logger.warn(msg)
+            throw new Error(msg);
+        }
 
         // Material shaders
         const basicShader = new Shader().create(BasicVertex, BasicFragment);
@@ -137,6 +141,8 @@ export class Renderer {
         this._screenQuad.create([-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1 ], 12, [0, 1, 2, 0, 2, 3]);
 
         this.resize();
+
+        Logger.info('Renderer ready')
     }
 
     public render(scene: Scene): void {
@@ -164,7 +170,6 @@ export class Renderer {
         this._shaderManager.setUniform('u_envMap', 7);
         scene.environmentMap?.bind(7);
 
-
         // Render scene to scene framebuffer
         this._renderScene(scene);
 
@@ -186,6 +191,8 @@ export class Renderer {
         this._compose_FBOs[0].resize(this._canvas.width, this._canvas.height);
         this._compose_FBOs[1].resize(this._canvas.width, this._canvas.height);
         this._bloomFBO.resize(this._canvas.width, this._canvas.height);
+
+        Logger.info(`Resized to ${this._canvas.width}x${this._canvas.height}`)
     }
 
     public set viewport(viewport: HTMLElement) {
@@ -338,7 +345,6 @@ export class Renderer {
         gl.cullFace(gl.FRONT);
         for (const node of models) {
             if (!node.model.material.config.castShadow || node.model.material.config.wireframe) continue;
-            if (node.name.includes('__editor__')) console.log('rendering editor node', node.name);
             this._shaderManager.setUniform('u_isInstanced', false);
             this._shaderManager.setUniform('u_model', node.worldTransform);
             node.model.mesh.draw(gl.TRIANGLES);

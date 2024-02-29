@@ -227,6 +227,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           graphics: {
               clearColor: [0.65, 0.65, 0.71, 1.0],
           },
+          loggerListener: (log) => {
+            eventEmmiter.current.emit('LOG', log);
+          }
       });
 
       instanceRef.current = engine;

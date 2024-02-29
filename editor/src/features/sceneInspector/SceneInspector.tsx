@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Node } from 'cleo';
+import { Logger, Node } from 'cleo';
 import CameraIcon from '../../icons/camera.png'
 import ModelIcon from '../../icons/model.png'
 import LightIcon from '../../icons/light.png'
@@ -105,7 +105,7 @@ export default function SceneInspector() {
 
       // check if the dragged node is a parent of the target node
       if (targetNode.parent?.id === draggedNode.id) {
-        console.log('Cannot drop a parent node onto its child');
+        Logger.warn('Cannot move a node to its child', 'Editor');
         return;
       }
 
@@ -113,7 +113,7 @@ export default function SceneInspector() {
       // TODO: Temporary solution, in the future inner nodes should be able to have bodies
       const body = bodies.get(draggedNode.id);
       if (body) {
-        console.log('Cannot move a node with a body');
+        Logger.warn('Cannot move a node with a body', 'Editor');
         return;
       }
       
