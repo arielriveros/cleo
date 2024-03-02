@@ -19,7 +19,7 @@ export default function TextureExplorer() {
   useEffect(() => {
     const handleTexturesChanged = () => {
       const textures: Map<string, Texture> = TextureManager.Instance.textures;
-      const textureNames = Array.from(textures.keys());
+      const textureNames = Array.from(textures.keys()).filter(key => !(key.includes('__editor__') || key.includes('__debug__')))
       setTexturesList(textureNames);
     };
     

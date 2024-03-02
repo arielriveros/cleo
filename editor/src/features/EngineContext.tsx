@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager } from "cleo";
+import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager, SpriteNode, Sprite } from "cleo";
 import { CameraGeometry, GridGeometry } from "../utils/EditorModels";
 import NullImage from '../images/null.png';
+import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
 
 type BoxShapeDescription = {
@@ -135,7 +136,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editorSceneRef.current.addNodes(editorCameraNode, editorGridNode, xAxis, Yaxis, Zaxis);
 
     const lightNode = new LightNode('light', new DirectionalLight({}));
-    lightNode.setRotation([45, 45, 0]);
+    const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
+    debugLightIcon.setUniformScale(0.5);
+    /* TODO: Add arrow model for direction debugging */
+    lightNode.addChild(debugLightIcon);
+    lightNode.setPosition([0, 1, 0]).setRotation([45, 45, 0]);
     lightNode.castShadows = true;
 
     const cameraNode = new CameraNode('camera', new Camera({}));
@@ -236,12 +241,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       instanceRef.current.isPaused = false;
       
 
-      textureManagerRef.current = TextureManager.Instance;
       editorSceneRef.current.onChange = () => { eventEmmiter.current.emit('SCENE_CHANGED') }; // Emit the "sceneChanged" event 
       
       setupInitialScene();
 
-      textureManagerRef.current.addTextureFromBase64(NullImage, {}, 'Null');
+      TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
+      TextureManager.Instance.addTextureFromBase64(LightIcon, {
+        mipMap: false
+      }, '__editor__light_icon');
       eventEmmiter.current.emit('TEXTURES_CHANGED');
 
       // Setting the editor scene and camera

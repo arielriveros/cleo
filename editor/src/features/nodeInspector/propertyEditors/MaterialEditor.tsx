@@ -1,146 +1,10 @@
 import { useState, useEffect } from 'react';
-import { ModelNode, TextureManager, Material } from 'cleo';
+import { ModelNode } from 'cleo';
 import { useCleoEngine } from '../../EngineContext';
 import { colorToVec3, vec3ToHex } from '../../../utils/UtilFunctions';
-import ImportIcon from '../../../icons/import.png';
 import Collapsable from '../../../components/Collapsable';
-import NullImage from '../../../images/null.png';
+import TextureInspector from './TextureInspector';
 import './Styles.css';
-
-function TextureInspector(props: { tex: string, material: Material }) {
-  const { eventEmmiter } = useCleoEngine();
-  const [texture, setTexture] = useState<string | null>(null);
-  const [img, setImg] = useState<HTMLImageElement | null>(null);
-  const [texturesIds, setTexturesIds] = useState<string[]>([]);
-  const [textureMissing, setTextureMissing] = useState(false);
-
-  useEffect(() => {
-    const texId = props.material.textures.get(props.tex);
-    setTexture(texId ? texId : null);
-  }, [props.material, props.tex])
-
-  useEffect(() => {
-    if (texture) {
-      const tex = TextureManager.Instance.getTexture(texture);
-      if (tex) {
-        setImg(tex.data as HTMLImageElement);
-        setTextureMissing(false);
-      }
-      else {
-        // Missing texture from the texture manager
-        const img = new Image();
-        img.src = NullImage;
-        setImg(img);
-        setTextureMissing(true);
-      }
-    }
-    else setImg(null)
-  }, [texture])
-
-  const deleteTexture = () => {
-      props.material.textures.delete(props.tex);
-      if (props.tex === 'baseTexture')
-        props.material.properties.set('hasBaseTexture', false)
-      else
-        props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, false)
-
-      setTexture(null);
-  }
-
-  const onTextureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.item(0);
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const data = e.target?.result;
-            const img = new Image();
-            img.src = data as string;
-            img.onload = () => {
-              let texName = file.name;
-              // if texture exists, change the name
-              let i = 1;
-              while (TextureManager.Instance.getTexture(texName)) {
-                texName = `${file.name.split('.')[0]}_${i}.${file.name.split('.')[1]}`;
-                i++;
-              }
-
-              TextureManager.Instance.addTextureFromData(img, { wrapping: 'repeat' }, texName);
-              onTextureSelect(texName);
-              eventEmmiter.emit("TEXTURES_CHANGED");
-            }
-          }
-        reader.readAsDataURL(file);
-      }
-  }
-
-  const onTextureSelect = (textureId: string) => {
-      if (textureId === 'None') {
-          deleteTexture();
-          return;
-      }
-
-      props.material.textures.set(props.tex, textureId);
-      if (props.tex === 'baseTexture')
-          props.material.properties.set('hasBaseTexture', true)
-      else {
-          props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, true)
-      }
-      setTexture(textureId);
-  }
-
-  useEffect(() => { eventEmmiter.emit('TEXTURES_CHANGED') }, [])
-
-  useEffect(() => {
-      const handleTexturesChanged = () => {
-          setTexturesIds(Array.from(TextureManager.Instance.textures.keys()));
-          if (textureMissing) {
-              // check if missing texture is now available
-              if (texture && TextureManager.Instance.getTexture(texture)) {
-                  setTextureMissing(false);
-                  // add a little delay to avoid the texture not being available
-                  setTimeout(() => setImg(TextureManager.Instance.getTexture(texture).data as HTMLImageElement), 300);
-                  setImg(TextureManager.Instance.getTexture(texture).data as HTMLImageElement);
-              }
-          }
-      }
-      eventEmmiter.on("TEXTURES_CHANGED", handleTexturesChanged);
-      return () => {
-          eventEmmiter.off("TEXTURES_CHANGED", handleTexturesChanged);
-      }
-  }, [eventEmmiter, textureMissing, texture]);
-
-  return (
-    <div className='texture-inspector'>
-      {img && <img className='tex-image' src={img.src} />}
-      <button className='texture-delete' onClick={() => deleteTexture()}> ✕ </button>
-        <select 
-          className='texture-select'
-          name="textures"
-          id="textures"
-          onChange={e => onTextureSelect(e.target.value)}
-          value={texture ? texture : 'None'}
-        >
-          <option value='None' >None</option>
-          {
-            texturesIds.map((key, i) => {
-              return <option key={i} value={key}>{key}</option>
-            })
-          }
-        </select>
-      
-      <label htmlFor={`${props.tex}-upload`} className="texture-upload" title="Upload an image as texture">
-          <img src={ImportIcon} alt="upload" width='20' height='20' />
-      </label>
-      <input id={`${props.tex}-upload`} type='file' onChange={ e => onTextureUpload(e)} />
-      {
-        textureMissing && texture && <div className='texture-missing' title={texture}>
-          <span> Missing </span>
-          <span> {texture} </span>
-        </div>
-      }
-    </div>
-  )
-}
 
 export default function MaterialEditor(props: {node: ModelNode}) {
   const model = props.node.model;
@@ -160,6 +24,10 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     setEmission(vec3ToHex(material.properties.get('emissive')));
 
   }, [props.node])
+
+  const { eventEmmiter } = useCleoEngine();
+
+  useEffect(() => { eventEmmiter.emit('TEXTURES_CHANGED') }, [])
 
   return (
     <Collapsable title='Material'>

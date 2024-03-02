@@ -1,4 +1,21 @@
-import { Geometry, Material, Model, Node, ModelNode, LightNode, DirectionalLight, PointLight, SkyboxNode, Skybox, CameraNode, Camera, Vec, Spotlight } from 'cleo'
+import {
+  Geometry,
+  Material,
+  Model,
+  Node,
+  ModelNode,
+  LightNode,
+  DirectionalLight,
+  PointLight,
+  SkyboxNode,
+  Skybox,
+  CameraNode,
+  Camera,
+  Vec,
+  Spotlight,
+  SpriteNode,
+  Sprite
+} from 'cleo'
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
 import { useEffect, useState } from 'react';
@@ -15,6 +32,7 @@ import ImportIcon from '../../icons/import.png'
 import PointLightIcon from '../../icons/point-light.png'
 import DirectionalLightIcon from '../../icons/directional-light.png'
 import SpotlightIcon from '../../icons/spotlight.png'
+import SpriteIcon from '../../icons/static-sprite.png'
 import './Styles.css'
 
 interface AddButtonProps {
@@ -53,6 +71,20 @@ export default function AddNew() {
     // Just an empty node with a trigger
     const triggerNode = new Node('trigger');
     triggers.set(triggerNode.id, { shapes: [] });
+    
+    triggers.set(triggerNode.id, { shapes: [ { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ] });
+    // add debug shape for the trigger
+    const debugTriggerNode = new Node(`__debug__trigger_${triggerNode.id}`);
+    debugTriggerNode.onUpdate = (node) => {
+      node.setPosition(triggerNode.worldPosition);
+      node.setQuaternion(triggerNode.worldQuaternion);
+    };
+
+    const debugTriggerModel = new Model(Geometry.Sphere(8), Material.Basic({color: [0, 1, 0]}, {wireframe: true}));
+    const triggerModelNode = new ModelNode(`__debug__shape_0`, debugTriggerModel);
+    debugTriggerNode?.addChild(triggerModelNode);
+    editorScene.addNode(debugTriggerNode);
+
     addNode(triggerNode);
   }
 
@@ -120,22 +152,34 @@ export default function AddNew() {
     })
   }
 
+  const addDirectionalLight = () => {
+    const directionalLightNode = new LightNode('directional light', new DirectionalLight({}), true);
+    const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
+    debugLightIcon.setUniformScale(0.5);
+    /* TODO: Add arrow model for direction debugging */
+    directionalLightNode.addChild(debugLightIcon);
+  }
+
   const addPointLight = () => {
     const pointLightNode = new LightNode('point light', new PointLight({}));
-    // TODO: Change model to a sprite
-    const debugPointLightModel = new ModelNode('__debug__LightModel', new Model(Geometry.Sphere(8), Material.Basic({}, {wireframe: true})) )
-    debugPointLightModel.setUniformScale(0.2);
-    pointLightNode.addChild(debugPointLightModel);
+    const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
+    debugLightIcon.setUniformScale(0.5);
+    pointLightNode.addChild(debugLightIcon);
     addNode(pointLightNode);
   }
 
   const addSpotlight = () => {
     const spotlightNode = new LightNode('spot light', new Spotlight({}));
-    // TODO: Change model to a sprite
-    const debugSpotlightModel = new ModelNode('__debug__LightModel', new Model(Geometry.Sphere(8), Material.Basic({}, {wireframe: true})) )
-    debugSpotlightModel.setUniformScale(0.2);
-    spotlightNode.addChild(debugSpotlightModel);
+    const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
+    debugLightIcon.setUniformScale(0.5);
+    spotlightNode.addChild(debugLightIcon);
     addNode(spotlightNode);
+  }
+
+  const addSprite = () => {
+    const sprite = new Sprite(Material.Basic({}));
+    const spriteNode = new SpriteNode('sprite', sprite, 'spherical');
+    addNode(spriteNode);
   }
 
 
@@ -159,9 +203,15 @@ export default function AddNew() {
         <div className='node-category'>
           Lights
           <div className='node-button-container'>
-            <AddButton onClick={() => addNode(new LightNode('directional light', new DirectionalLight({}), true)) } label='Directional' icon={DirectionalLightIcon} />
+            <AddButton onClick={() => addDirectionalLight() } label='Directional' icon={DirectionalLightIcon} />
             <AddButton onClick={() => addPointLight()} label='Point' icon={PointLightIcon} />
             <AddButton onClick={() => addSpotlight()} label='Spotlight' icon={SpotlightIcon} />
+          </div>
+        </div>
+        <div className='node-category'>
+          Sprites
+          <div className='node-button-container'>
+            <AddButton onClick={() => addSprite()} label='Static' icon={SpriteIcon} />
           </div>
         </div>
         <div className='node-category'>

@@ -5,6 +5,7 @@ import CameraIcon from '../../icons/camera.png'
 import ModelIcon from '../../icons/model.png'
 import LightIcon from '../../icons/light.png'
 import SkyboxIcon from '../../icons/skybox.png'
+import SpriteIcon from '../../icons/sprite.png'
 import Collapsable from '../../components/Collapsable';
 import AddNew from './AddNew';
 import './Styles.css'
@@ -35,6 +36,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
       <div>
         { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='sceneItemIcon' /> }
         { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='sceneItemIcon' /> }
+        { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='sceneItemIcon' /> }
         { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='sceneItemIcon' /> }
         { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='sceneItemIcon' /> }
         { props.nodeName }

@@ -1,6 +1,7 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../physics/body";
 import { Model } from "../../graphics/model";
+import { Sprite } from "../../graphics/sprite";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Skybox } from "../../graphics/skybox";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
@@ -10,41 +11,41 @@ import { Camera } from "../camera";
 import { Shape } from "../../cleo";
 import { Logger } from "../logger";
 
-type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera';
+type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite';
 
 export class Node {
-    protected readonly _id: string;
-    protected _name: string;
-    protected _parent: Node | null;
-    protected readonly _children: Node[];
-    protected _scene: Scene | null;
-    protected readonly _nodeType: NodeType;
+  protected readonly _id: string;
+  protected _name: string;
+  protected _parent: Node | null;
+  protected readonly _children: Node[];
+  protected _scene: Scene | null;
+  protected readonly _nodeType: NodeType;
 
-    protected readonly  _localTransform: mat4;
-    protected _worldTransform: mat4
+  protected readonly  _localTransform: mat4;
+  protected _worldTransform: mat4
 
-    protected readonly _position: vec3;
-    protected readonly _translationMatrix: mat4;
+  protected readonly _position: vec3;
+  protected readonly _translationMatrix: mat4;
 
-    protected readonly _quaternion: quat;
-    protected readonly _euler: vec3;
-    protected readonly _rotationMatrix: mat4;
+  protected readonly _quaternion: quat;
+  protected readonly _euler: vec3;
+  protected readonly _rotationMatrix: mat4;
 
-    protected readonly _scale: vec3;
-    protected readonly _scaleMatrix: mat4;
+  protected readonly _scale: vec3;
+  protected readonly _scaleMatrix: mat4;
 
-    protected _hasStarted: boolean = false;
-    protected _markForRemoval: boolean = false;
+  protected _hasStarted: boolean = false;
+  protected _markForRemoval: boolean = false;
 
-    protected _body: RigidBody | null;
-    protected _trigger: Trigger | null;
+  protected _body: RigidBody | null;
+  protected _trigger: Trigger | null;
 
-    public onStart: (node: Node) => void = (node: Node) => {};
-    public onSpawn: (node: Node) => void = (node: Node) => {};
-    public onUpdate: (node: Node, delta: number, time: number) => void = (node: Node, delta: number, time: number) => {};
-    public onCollision: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
-    public onTrigger: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
-    public onChange: () => void = () => {};
+  public onStart: (node: Node) => void = (node: Node) => {};
+  public onSpawn: (node: Node) => void = (node: Node) => {};
+  public onUpdate: (node: Node, delta: number, time: number) => void = (node: Node, delta: number, time: number) => {};
+  public onCollision: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
+  public onTrigger: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
+  public onChange: () => void = () => {};
 
     constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
         this._name = name;
@@ -117,8 +118,7 @@ export class Node {
 
     public updateTransforms(parentWorldTransform: mat4 | null = null): void {
         // Update local transform
-        mat4.multiply(this._localTransform, this._translationMatrix, this._rotationMatrix);
-        mat4.multiply(this._localTransform, this._localTransform, this._scaleMatrix);
+        mat4.fromRotationTranslationScale(this._localTransform, this._quaternion, this._position, this._scale);
     
         // Update world transform
         if (parentWorldTransform)
@@ -250,6 +250,8 @@ export class Node {
                     SkyboxNode.parse(node, child);
                 else if (child.type === 'camera')
                     CameraNode.parse(node, child);
+                else if (child.type === 'sprite')
+                    SpriteNode.parse(node, child);
                 else
                     Node.parse(node, child);
             }
@@ -300,6 +302,12 @@ export class Node {
         return worldRotation;
     }
 
+    public get worldScale(): vec3 {
+        let worldScale = vec3.create();
+        mat4.getScaling(worldScale, this._worldTransform);
+        return worldScale;
+    }
+
     public get worldForward(): vec3 {
         // get the forward vector of the node in world space
         let forward = vec3.fromValues(0, 0, 1);
@@ -307,7 +315,8 @@ export class Node {
         // get world rotation
         let worldRotation = this.worldQuaternion;
         vec3.transformQuat(forward, forward, worldRotation);
-        //vec3.transformMat4(forward, forward, this._worldTransform);
+        // normalize
+        vec3.normalize(forward, forward);
         return forward;
     }
 
@@ -854,4 +863,90 @@ export class CameraNode extends Node {
     public get camera(): Camera { return this._camera; }
     public get active(): boolean { return this._active; }
     public set active(value: boolean) { this._active = value; }
+}
+
+export class SpriteNode extends Node {
+    private _sprite: Sprite;
+    private _initialized: boolean;
+    private _constraints: 'free' | 'spherical' | 'cylindrical';
+
+    constructor(name: string, sprite: Sprite, constraints: 'free' | 'spherical' | 'cylindrical' = 'spherical', id: string = uuidv4()) {
+        super(name, 'sprite', id);
+        this._sprite = sprite;
+        this._initialized = false;
+        this._constraints = constraints;
+    }
+
+    public initializeSprite(): void {
+        const shader = ShaderManager.Instance.getShader(this._sprite.material.type);
+        this._sprite.mesh.initializeVAO(shader.attributes);
+
+        const attributes = [];
+        for (const attr of shader.attributes) {
+            switch (attr.name) {
+                case 'position':
+                case 'a_position':
+                    attributes.push('position');
+                    break;
+                case 'normal':
+                case 'a_normal':
+                    attributes.push('normal');
+                    break;
+                case 'uv':
+                case 'a_uv':
+                case 'texCoord':
+                case 'a_texCoord':
+                    attributes.push('uv');
+                    break;
+                case 'tangent':
+                case 'a_tangent':
+                    attributes.push('tangent');
+                    break;
+                case 'bitangent':
+                case 'a_bitangent':
+                    attributes.push('bitangent');
+                    break;
+                default:
+                    const errMsg = `Attribute ${attr.name} not supported`;
+                    Logger.error(errMsg)
+                    throw new Error(errMsg);
+            }
+        }
+
+        this._sprite.mesh.create(this._sprite.geometry.getData(attributes), this._sprite.geometry.vertexCount, this._sprite.geometry.indices);
+        this._initialized = true;
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve, reject) => {
+            const sprite = {
+                constraints: this._constraints,
+                material: this._sprite.serialize()
+            }
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    id: this._id,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children,
+                    sprite: sprite
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        const sprite = new SpriteNode(json.name, Sprite.parse(json.sprite.material), json.id);
+        sprite.constraints = json.sprite.constraints;
+        Node._commonParse(sprite, parent, json);
+        parent.addChild(sprite);
+    }
+
+    public get sprite(): Sprite { return this._sprite; }
+    public get initialized(): boolean { return this._initialized; }
+    public get constraints(): 'free' | 'spherical' | 'cylindrical' { return this._constraints; }
+    public set constraints(value: 'free' | 'spherical' | 'cylindrical') { this._constraints = value; }
 }

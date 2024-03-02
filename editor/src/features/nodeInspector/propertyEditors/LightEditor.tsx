@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LightNode, ModelNode, PointLight, Spotlight } from 'cleo'
+import { LightNode, ModelNode, PointLight, Spotlight, SpriteNode } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import Collapsable from '../../../components/Collapsable'
 import './Styles.css'
@@ -84,9 +84,9 @@ export default function LightEditor(props: {node: LightNode}) {
   }, [properties])
 
   useEffect(() => {
-    const debugModel = props.node.getChildByName('__debug__LightModel');
-    if (debugModel[0])
-      (debugModel[0] as ModelNode).model.material.properties.set('color', light.diffuse);
+    const editorSprite = props.node.getChildByName('__editor__LightSprite');
+    if (editorSprite[0])
+      (editorSprite[0] as SpriteNode).sprite.material.properties.set('color', light.diffuse);
   }, [props.node, diffuse])
 
   return (

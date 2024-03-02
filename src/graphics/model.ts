@@ -111,6 +111,7 @@ export class Model {
             indices: this._geometry.indices
         };
 
+        /* TODO: serialize for different types of materials */
         let material = {
             diffuse: this._material.properties.get('diffuse'),
             specular: this._material.properties.get('specular'),

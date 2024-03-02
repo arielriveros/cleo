@@ -88,6 +88,7 @@ export default function MenuBar() {
   };
 
   const onSave = () => {
+    /* TODO: Remove __editor__ and __debug__ textures */
     editorScene?.serialize().then((json) => {
       if (json) {
         // Clear debugging nodes from the editor scene
@@ -115,7 +116,7 @@ export default function MenuBar() {
     }
 
     const newScene = new Scene();
-    editorScene?.serialize(false).then(json => {
+    editorScene?.serialize(true).then(json => {
       // Clear debugging nodes from the editor scene
       clearDebuggingNodes(json.scene)
       // Assign the scripts to the new scene
@@ -123,7 +124,7 @@ export default function MenuBar() {
       // Assign the bodies to the new scene
       setBodies(json);
       // Parse the scene from the editor
-      newScene.parse(json, false);
+      newScene.parse(json, true);
       // Set the new scene to the engine then start it
       instance.setScene(newScene);
       instance.isPaused = false;

@@ -1,5 +1,5 @@
 import { Texture, TextureManager } from "../../cleo";
-import { CameraNode, LightNode, ModelNode, Node, SkyboxNode } from "./node";
+import { CameraNode, LightNode, ModelNode, Node, SkyboxNode, SpriteNode } from "./node";
 import { Logger } from '../logger'
 
 export class Scene {
@@ -8,6 +8,7 @@ export class Scene {
     private _cameras: Set<CameraNode>;
     private _lights: Set<LightNode>;
     private _models: Set<ModelNode>;
+    private _sprites: Set<SpriteNode>;
     private _skybox: SkyboxNode | null;
     private _environmentMap: Texture | null = null;
     private _dirty: boolean = true;
@@ -24,6 +25,7 @@ export class Scene {
         this._nodes = new Set();
         this._lights = new Set();
         this._models = new Set();
+        this._sprites = new Set();
         this._skybox = null;
 
         // TODO: Move this to a LightManager class
@@ -119,12 +121,15 @@ export class Scene {
         this._cameras = new Set();
         this._lights = new Set();
         this._models = new Set();
+        this._sprites = new Set();
         this._skybox = null;
         for (const node of this._nodes) {
             if (node instanceof LightNode)
                 this._lights.add(node);
             if (node instanceof ModelNode)
                 this._models.add(node);
+            if (node instanceof SpriteNode)
+                this._sprites.add(node);
             if (node instanceof SkyboxNode)
                 this._skybox = node;
             if (node instanceof CameraNode)
@@ -234,6 +239,12 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._models;
+    }
+
+    public get sprites(): Set<SpriteNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._sprites;
     }
 
     public get skybox(): SkyboxNode | null {
