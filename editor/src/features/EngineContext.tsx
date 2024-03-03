@@ -195,8 +195,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editorSceneRef.current.addNode(debugTriggerNode);
 
     // Example scripts
-    scriptsRef.current.set(physicalBox.id, "function onCollision(other) {\n  console.log(`${node.name} collided with ${other.name}`);\n}");
-    scriptsRef.current.set(triggerSphere.id, "function onUpdate(delta, time) {\n  node.setX(Math.sin(time / 800) * 5);\n}\n\nfunction onTrigger(other) {\n  console.log(`${other.name} triggered ${node.name}`);\n  const newColor = [Math.random(), Math.random(), Math.random()];\n  node.model.material.properties.set('diffuse', newColor);\n}");
+    scriptsRef.current.set(physicalBox.id, "function onStart() {\n  logger('Box Started');\n}\n\nfunction onCollision(other) {\n  logger(`${node.name} collided with ${other.name}`);\n}");
+    scriptsRef.current.set(triggerSphere.id, "function onUpdate(delta, time) {\n  node.setX(Math.sin(time / 800) * 5);\n}\n\nfunction onTrigger(other) {\n  logger(`${other.name} triggered ${node.name}`);\n  const newColor = [Math.random(), Math.random(), Math.random()];\n  node.model.material.properties.set('diffuse', newColor);\n}");
   };
 
   useEffect(() => {

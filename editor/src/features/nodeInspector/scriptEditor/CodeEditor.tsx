@@ -6,8 +6,11 @@ import { useCleoEngine } from '../../EngineContext'
 import './Styles.css'
 
 const description = `/*
-// Global objects 
-// node: Node - The node that this script is attached to
+Global objects 
+node: Node - The node that this script is attached to
+
+Global functions
+logger(text: string) - Logs a message to the console
 
 // This function will be executed when the node is spawned even before the scene starts.
 function onStart() {}

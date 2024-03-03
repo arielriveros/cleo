@@ -40,11 +40,11 @@ export class Node {
   protected _body: RigidBody | null;
   protected _trigger: Trigger | null;
 
-  public onStart: (node: Node) => void = (node: Node) => {};
-  public onSpawn: (node: Node) => void = (node: Node) => {};
-  public onUpdate: (node: Node, delta: number, time: number) => void = (node: Node, delta: number, time: number) => {};
-  public onCollision: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
-  public onTrigger: (node: Node, other: Node) => void = (node: Node, other: Node) => {};
+  public onStart: (node: Node, logger: (text: string) => void) => void = () => {};
+  public onSpawn: (node: Node, logger: (text: string) => void) => void = () => {};
+  public onUpdate: (node: Node, delta: number, time: number, logger: (text: string)=>void) => void = () => {};
+  public onCollision: (node: Node, other: Node, logger: (text: string) => void) => void = () => {};
+  public onTrigger: (node: Node, other: Node, logger: (text: string) => void) => void = () => {};
   public onChange: () => void = () => {};
 
     constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
@@ -81,13 +81,13 @@ export class Node {
         node.parent = this;
         this._children.push(node);
         node.onChange = this.onChange;
-        node.onSpawn(node);
+        node.onSpawn(node, Logger.log);
         if (this._hasStarted)
             node.start();
         if (this.scene) {
             node.scene = this.scene;
             for (const child of node.children) {
-                child.onSpawn(child);
+                child.onSpawn(child, Logger.log);
                 child.scene = this.scene;
             }
         }
@@ -141,7 +141,7 @@ export class Node {
     public start(): void {
         try {
             this._hasStarted = true;
-            this.onStart(this);
+            this.onStart(this, (t) => Logger.log(t, 'Script'));
             for (const child of this._children)
                 child.start();
         } catch (error) {
@@ -150,7 +150,7 @@ export class Node {
     }
     public update(delta: number, time: number): void {
         try {
-            this.onUpdate(this, delta, time);
+            this.onUpdate(this, delta, time, (t) => Logger.log(t, 'Script'));
         } catch (error) {
             Logger.error(`Error in onUpdate function for node ${this._name}: ${error}`);
         }
@@ -220,11 +220,11 @@ export class Node {
             }
         }
     
-        node.onStart = createFunction(onStartBody, ['node']) as (node: Node) => void;
-        node.onSpawn = createFunction(onSpawnBody, ['node']) as (node: Node) => void;
-        node.onUpdate = createFunction(onUpdateBody, ['node', 'delta', 'time']) as (node: Node, delta: number, time: number) => void;
-        node.onCollision = createFunction(onCollisionBody, ['node', 'other']) as (node: Node, other: Node) => void;
-        node.onTrigger = createFunction(onTriggerBody, ['node', 'other']) as (node: Node, other: Node) => void;
+        node.onStart = createFunction(onStartBody, ['node', 'logger']) as (node: Node, logger: (text: string) => void) => void;
+        node.onSpawn = createFunction(onSpawnBody, ['node', 'logger']) as (node: Node, logger: (text: string) => void) => void;
+        node.onUpdate = createFunction(onUpdateBody, ['node', 'delta', 'time', 'logger']) as (node: Node, delta: number, time: number, logger: (text: string) => void) => void;
+        node.onCollision = createFunction(onCollisionBody, ['node', 'other', 'logger']) as (node: Node, other: Node, logger: (text: string) => void) => void;
+        node.onTrigger = createFunction(onTriggerBody, ['node', 'other', 'logger']) as (node: Node, other: Node, logger: (text: string) => void) => void;
     }
 
     protected static _commonParse(node: Node, parent: Node, json: any) {
@@ -552,7 +552,7 @@ export class Node {
         // handle onCollision event
         this._body.addEventListener('collide', (event: any) => {
             if (event.body instanceof RigidBody || event.body instanceof Trigger)
-                this.onCollision(this, event.body.owner);
+                this.onCollision(this, event.body.owner, (t) => Logger.log(t, 'Script'));
         });
 
         return this._body;
@@ -568,7 +568,7 @@ export class Node {
         // handle onTrigger event
         this._trigger.addEventListener('collide', (event: any) => {
             if (event.body instanceof RigidBody || event.body instanceof Trigger)
-                this.onTrigger(this, event.body.owner);
+                this.onTrigger(this, event.body.owner, (t) => Logger.log(t, 'Script'));
         });
 
     }

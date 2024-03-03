@@ -37,11 +37,11 @@ export class Scene {
 
     public start(): void {
         if (this._hasStarted) return;
+        Logger.info('Scene starting');
         
         this._root.start();
         
         this._hasStarted = true;
-        Logger.info('Scene starting');
     }
 
     public stop(): void {
