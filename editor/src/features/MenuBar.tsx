@@ -110,6 +110,8 @@ export default function MenuBar() {
   const onPlay = () => {
     if (!instance) return;
 
+    instance.input.preventDefault();
+
     if (started) {
       eventEmmiter.emit('SET_PLAY_STATE', 'play');
       return;
@@ -141,6 +143,8 @@ export default function MenuBar() {
     setStarted(false);
     if (!instance) return;
     instance.setScene(editorScene as Scene);
+    instance.input.clear(); // Clear any registered input that might be left from the game
+    instance.physics.clear(); // Clear any physics bodies that might be left from the game
     eventEmmiter.emit('SET_PLAY_STATE', 'stop');
   }
 

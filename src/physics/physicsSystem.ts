@@ -25,7 +25,6 @@ export class PhysicsSystem {
       this._world.allowSleep = false;
       this._world.quatNormalizeSkip = 0;
       this._world.quatNormalizeFast = true;
-      this._world.accumulator = 1 / 60;
     } catch (e) {
       Logger.error(e.toString());
     }
@@ -76,9 +75,14 @@ export class PhysicsSystem {
   public clear(): void {
     if (!this._world) return;
     this._world.bodies.forEach(body => {
+      body.velocity.set(0, 0, 0);
+      body.angularVelocity.set(0, 0, 0);
+      body.force.set(0, 0, 0);
+      body.torque.set(0, 0, 0);
       this._world.removeBody(body);
     });
     this._world.bodies = [];
+    this._world.clearForces();
   }
 
   public set scene(scene: Scene) {

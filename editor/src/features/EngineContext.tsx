@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager, SpriteNode, Sprite } from "cleo";
 import { CameraGeometry, GridGeometry } from "../utils/EditorModels";
 import NullImage from '../images/null.png';
+import DinosaurImage from '../images/dinosaur.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
 
@@ -141,8 +142,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const physicalBox = new ModelNode('physical box', new Model(Geometry.Cube(), Material.Default({diffuse: [1, 0, 1]})));
     physicalBox.setPosition([-1, 3, 0]).setRotation([45, 0, 45]);
 
-    const box2 = new ModelNode('box', new Model(Geometry.Cube(), Material.Default({})));
-    box2.setPosition([1, 0, 0]).setUniformScale(0.5);
+    const playable = new Node('playable');
+    playable.setPosition([1, 0, 0]);
+
+    const spriteNode = new SpriteNode('sprite', new Sprite(Material.Basic({
+      texture: 'dinosaur.png'
+    })));
+    playable.addChild(spriteNode);
+    playable.addChild(cameraNode);
 
     const plane = new ModelNode('plane', new Model(Geometry.Quad(), Material.Default({diffuse: [0, 0.45, 0.1], specular: [0.2, 0.2, 0.2]})));
     plane.setPosition([0, -1, 0]).setRotation([-90, 0, 0]).setScale([10, 10, 1]);
@@ -151,7 +158,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     triggerSphere.setPosition([3, 0.5, 0]).setUniformScale(0.5);
 
     // Example nodes
-    editorSceneRef.current.addNodes(lightNode, cameraNode, physicalBox, box2, plane, triggerSphere);
+    editorSceneRef.current.addNodes(lightNode, physicalBox, playable, plane, triggerSphere);
 
     // Example bodies
     bodiesRef.current.set(physicalBox.id, {
@@ -180,6 +187,26 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       shapes: [ { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] } ]
     });
 
+    // add debug shape for the playable node
+    const debugPlayableNode = new Node(`__debug__playable_${playable.id}`);
+    debugPlayableNode.onUpdate = (node) => {
+      node.setPosition(playable.position);
+      node.setRotation(playable.rotation);
+    };
+    const debugPlayableModel = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
+    const playableModelNode = new ModelNode(`__debug__shape_0`, debugPlayableModel);
+    debugPlayableNode?.addChild(playableModelNode);
+    editorSceneRef.current.addNode(debugPlayableNode);
+
+    bodiesRef.current.set(playable.id, {
+      mass: 1,
+      linearDamping: 0.01,
+      angularDamping: 0.01,
+      linearConstraints: [1, 1, 0],
+      angularConstraints: [0, 0, 0],
+      shapes: [ { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ]
+    });
+
     // Example triggers
     triggersRef.current.set(triggerSphere.id, { shapes: [ { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ] });
     // add debug shape for the trigger
@@ -195,8 +222,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editorSceneRef.current.addNode(debugTriggerNode);
 
     // Example scripts
+    scriptsRef.current.set(playable.id, "function onStart() {\n  global.logger('Player started');\n  const jump = () => {\n    node.body.impulse([0, 10, 0]);\n    global.logger('Jumping!');\n  }\n  global.input.registerKeyPress('Space', jump)\n}\n\nfunction onUpdate(delta, time) {\n  if (global.input.isKeyPressed('KeyD')) {\n    node.addX(delta * -2);\n  }\n  if (global.input.isKeyPressed('KeyA')) {\n    node.addX(delta * 2);\n  }\n}");
     scriptsRef.current.set(cameraNode.id, "function onUpdate(delta, time) {\n  let mouseMovement = global.input.mouse.velocity;\n  let deltaFix = -delta * 10;\n  node.rotateY(mouseMovement[0] * deltaFix);\n}");
-    scriptsRef.current.set(physicalBox.id, "function onStart() {\n  global.logger('Box Started');\n}\n\nfunction onCollision(other) {\n  global.logger(`${node.name} collided with ${other.name}`);\n}");
+    scriptsRef.current.set(physicalBox.id, "function onCollision(other) {\n  global.logger(`${node.name} collided with ${other.name}`);\n}");
     scriptsRef.current.set(triggerSphere.id, "function onUpdate(delta, time) {\n  node.setX(Math.sin(time / 800) * 5);\n}\n\nfunction onTrigger(other) {\n  global.logger(`${other.name} triggered ${node.name}`);\n  const newColor = [Math.random(), Math.random(), Math.random()];\n  node.model.material.properties.set('diffuse', newColor);\n}");
   };
 
@@ -219,6 +247,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setupInitialScene();
 
       TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
+      TextureManager.Instance.addTextureFromBase64(DinosaurImage, {}, 'dinosaur.png');
       TextureManager.Instance.addTextureFromBase64(LightIcon, {
         mipMap: false
       }, '__editor__light_icon');

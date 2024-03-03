@@ -1,7 +1,7 @@
 import { Body as CannonBody, Vec3, Quaternion} from 'cannon-es'
 import { quat, vec3 } from 'gl-matrix';
 import { Shape } from './shape';
-import { ModelNode, Node } from '../core/scene/node';
+import { Node } from '../core/scene/node';
 
 
 interface BodyConfig {
@@ -89,6 +89,13 @@ export class RigidBody extends CBody {
       allowSleep: config?.allowSleep || true,
       isTrigger: false
     });
+  }
+
+  public reset(): void {
+    this.velocity.set(0, 0, 0);
+    this.angularVelocity.set(0, 0, 0);
+    this.force.set(0, 0, 0);
+    this.torque.set(0, 0, 0);
   }
 
   public impulse(impulse: vec3, relativePoint: vec3 = vec3.create()): void {

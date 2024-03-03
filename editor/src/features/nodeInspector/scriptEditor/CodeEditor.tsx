@@ -17,9 +17,9 @@ global {
 }
 
 // This function will be executed when the node is spawned even before the scene starts.
-function onStart() {}
-// This function will be executed when the node is started, if the scene has already started this function will be executed immediately after the node is added to the scene.
 function onSpawn() {}
+// This function will be executed when the node is started, if the scene has already started this function will be executed immediately after the node is added to the scene.
+function onStart() {}
 // This function will be executed after rendering the frame.
 function onUpdate(delta, time) {}
 

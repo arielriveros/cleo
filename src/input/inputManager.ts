@@ -32,6 +32,7 @@ export class InputManager {
         position: vec2.create(), 
         velocity: vec2.create()
     };
+    private static _prevetDefault: boolean = false;
     private static _keysInfo: KeysInfo = {};
     private constructor() {}
 
@@ -47,6 +48,7 @@ export class InputManager {
     }
 
     private _onMouseMove(event: MouseEvent) {
+        if (InputManager._prevetDefault) event.preventDefault();
         const mouseInfo = InputManager._mouseInfo;
         const lastPosition = vec2.clone(mouseInfo.position);
     
@@ -61,6 +63,7 @@ export class InputManager {
     }
 
     private _onMouseDown(event: MouseEvent) {
+        if (InputManager._prevetDefault) event.preventDefault();
         const mouseInfo = InputManager._mouseInfo;
         switch (event.button) {
             case 0:
@@ -81,6 +84,7 @@ export class InputManager {
     }
 
     private _onMouseUp(event: MouseEvent) {
+        if (InputManager._prevetDefault) event.preventDefault();
         const mouseInfo = InputManager._mouseInfo;
         switch (event.button) {
             case 0:
@@ -101,6 +105,7 @@ export class InputManager {
     }
 
     private _onKeyDown(event: KeyboardEvent) {
+        if (InputManager._prevetDefault) event.preventDefault();
         const keysInfo = InputManager._keysInfo;
         if (!keysInfo[event.code]) return;
         keysInfo[event.code].pressed = true;
@@ -111,6 +116,7 @@ export class InputManager {
     }
 
     private _onKeyUp(event: KeyboardEvent) {
+        if (InputManager._prevetDefault) event.preventDefault();
         const keysInfo = InputManager._keysInfo;
         if (!keysInfo[event.code]) return;
         keysInfo[event.code].pressed = false;
@@ -148,8 +154,22 @@ export class InputManager {
         return InputManager._keysInfo[key].pressed;
     }
 
+    public preventDefault() {
+        InputManager._prevetDefault = true;
+    }
+
     public registerKeyPress(key: string, onPress: () => void) {
         if (!InputManager._keysInfo[key]) return;
         InputManager._keysInfo[key].onPress = onPress;
+    }
+
+    public unregisterKeyPress(key: string) {
+        if (!InputManager._keysInfo[key]) return;
+        InputManager._keysInfo[key].onPress = () => {};
+    }
+
+    public clear() {
+        InputManager.instance._initKeys();
+        InputManager._prevetDefault = false;
     }
 }
