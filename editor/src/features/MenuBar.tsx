@@ -44,12 +44,12 @@ export default function MenuBar() {
     const scene = json.scene;
     const rootScript = scripts.get(scene.id);
 
-    if(rootScript) scene.scripts = rootScript;
+    if(rootScript) scene.script = rootScript;
 
     const iterateChildren = (children: any[]) => {
       children.forEach((child: any) => {
-        const nodeScripts = scripts.get(child.id);
-        if(nodeScripts) child.scripts = nodeScripts;
+        const nodeScript = scripts.get(child.id);
+        if(nodeScript) child.script = nodeScript;
         iterateChildren(child.children);
       });
     }

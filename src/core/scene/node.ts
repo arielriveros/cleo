@@ -139,14 +139,21 @@ export class Node {
     }
 
     public start(): void {
-        this._hasStarted = true;
-        this.onStart(this);
-        for (const child of this._children)
-            child.start();
+        try {
+            this._hasStarted = true;
+            this.onStart(this);
+            for (const child of this._children)
+                child.start();
+        } catch (error) {
+            Logger.error(`Error in onStart function for node ${this._name}: ${error}`);
+        }
     }
     public update(delta: number, time: number): void {
-        // check if game is paused
-        this.onUpdate(this, delta, time);
+        try {
+            this.onUpdate(this, delta, time);
+        } catch (error) {
+            Logger.error(`Error in onUpdate function for node ${this._name}: ${error}`);
+        }
     }
 
     public serialize(): Promise<any> {
@@ -171,21 +178,61 @@ export class Node {
         });
     }
 
+    private static _findToken(script: string, token: string): string | null {
+        let beginIndex = script.indexOf(token);
+        if (beginIndex === -1)
+            return null;
+        while (script[beginIndex] !== '{')
+            beginIndex++;
+    
+        let endIndex = beginIndex;
+        let count = 0;
+        while (endIndex < script.length) {
+            if (script[endIndex] === '{') 
+                count++;
+            else if (script[endIndex] === '}') 
+                count--;
+            if (count === 0)
+                break;
+            endIndex++;
+        }
+    
+        if (endIndex === script.length) {
+            return null;
+        }
+    
+        return script.substring(beginIndex + 1, endIndex);
+    }
+
+    private static _parseScript(node: Node, script: string): void {
+        const onStartBody: string | null = Node._findToken(script, 'onStart');
+        const onSpawnBody: string | null = Node._findToken(script, 'onSpawn');
+        const onUpdateBody: string | null = Node._findToken(script, 'onUpdate');
+        const onCollisionBody: string | null = Node._findToken(script, 'onCollision');
+        const onTriggerBody: string | null = Node._findToken(script, 'onTrigger');
+        
+        function createFunction(body: string | null, parameterNames: string[]): Function {
+            try {
+                return body ? new Function(...parameterNames, body) : () => {};
+            } catch (error) {
+                Logger.error(`Error creating function: ${error}`);
+                return () => {};
+            }
+        }
+    
+        node.onStart = createFunction(onStartBody, ['node']) as (node: Node) => void;
+        node.onSpawn = createFunction(onSpawnBody, ['node']) as (node: Node) => void;
+        node.onUpdate = createFunction(onUpdateBody, ['node', 'delta', 'time']) as (node: Node, delta: number, time: number) => void;
+        node.onCollision = createFunction(onCollisionBody, ['node', 'other']) as (node: Node, other: Node) => void;
+        node.onTrigger = createFunction(onTriggerBody, ['node', 'other']) as (node: Node, other: Node) => void;
+    }
+
     protected static _commonParse(node: Node, parent: Node, json: any) {
         node.onChange = parent.onChange;
         node.updateTransforms(parent.worldTransform);
-        if (json.scripts) {
-            if (json.scripts.start)
-                node.onStart = new Function('node', json.scripts.start).bind(this) as (node: Node) => void
-            if (json.scripts.spawn)
-                node.onSpawn = new Function('node', json.scripts.spawn).bind(this) as (node: Node) => void
-            if (json.scripts.update)
-                node.onUpdate = new Function('node', 'delta', 'time', json.scripts.update).bind(this) as (node: Node, delta: number, time: number) => void
-            if (json.scripts.collision)
-                node.onCollision = new Function('node', 'other', json.scripts.collision).bind(this) as (node: Node, other: Node) => void
-            if (json.scripts.trigger)
-                node.onTrigger = new Function('node', 'other', json.scripts.trigger).bind(this) as (node: Node, other: Node) => void
-        }
+
+        if (json.script)
+            Node._parseScript(node, json.script);
 
         const setShapes = (shapes: any, target: RigidBody | Trigger) => {
             for (const shape of shapes) {

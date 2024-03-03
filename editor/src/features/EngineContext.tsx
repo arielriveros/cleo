@@ -49,28 +49,13 @@ export type BodyDescription = {
 }
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | PlaneShapeDescription;
 
-type ScriptsDescription = {
-  start: string;
-  update: string;
-  spawn: string;
-  collision: string;
-  trigger: string;
-};
-
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
   instance: CleoEngine | null;
   editorScene: Scene;
   eventEmmiter: EventEmitter;
   selectedNode: string | null;
-  selectedScript: string | null;
-  scripts: Map<string, {
-    start: string;
-    update: string;
-    spawn: string;
-    collision: string;
-    trigger: string;
-  }>;
+  scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[]; }>;
   }>({
@@ -78,7 +63,6 @@ const EngineContext = createContext<{
     editorScene: new Scene(),
     eventEmmiter: new EventEmitter(),
     selectedNode: null,
-    selectedScript: null,
     scripts: new Map(),
     bodies: new Map(),
     triggers: new Map()
@@ -92,11 +76,9 @@ export const useCleoEngine = () => {
 export function EngineProvider(props: { children: React.ReactNode }) {
   const instanceRef = useRef<CleoEngine | null>(null);
   const editorSceneRef = useRef<Scene>(new Scene());
-  const textureManagerRef = useRef<TextureManager | null>(null);
   const eventEmmiter = useRef(new EventEmitter());
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [selectedScript, setSelectedScript] = useState<string | null>(null);
-  const scriptsRef = useRef(new Map<string, ScriptsDescription>());
+  const scriptsRef = useRef(new Map<string, string>());
   const bodiesRef = useRef(new Map<string, BodyDescription>());
   const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
 
@@ -213,18 +195,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editorSceneRef.current.addNode(debugTriggerNode);
 
     // Example scripts
-    scriptsRef.current.set(physicalBox.id, {
-      start: '', update: '', spawn: '', trigger: '',
-      collision: 'console.log(`${node.name} collided with ${other.name}`)'});
-    scriptsRef.current.set(lightNode.id, {
-      start: '', trigger: '', spawn: '', collision: '',
-      update: 'node.rotateY(-10 * delta)'});
-    scriptsRef.current.set(triggerSphere.id, {
-      start: '', spawn: '', collision: '',
-      update: 'node.setX(Math.cos(time / 800) * 5)',
-      trigger: 'console.log(`${other.name} triggered ${node.name}`);\nconst newColor = [Math.random(), Math.random(), Math.random()];\nnode.model.material.properties.set("diffuse", newColor);'
-    });
-        
+    scriptsRef.current.set(physicalBox.id, "function onCollision(other) {\n  console.log(`${node.name} collided with ${other.name}`);\n}");
+    scriptsRef.current.set(triggerSphere.id, "function onUpdate(delta, time) {\n  node.setX(Math.sin(time / 800) * 5);\n}\n\nfunction onTrigger(other) {\n  console.log(`${other.name} triggered ${node.name}`);\n  const newColor = [Math.random(), Math.random(), Math.random()];\n  node.model.material.properties.set('diffuse', newColor);\n}");
   };
 
   useEffect(() => {
@@ -332,10 +304,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setSelectedNode(node);
     });
 
-    eventEmmiter.current.on('SELECT_SCRIPT', (script: string | null) => {
-      setSelectedScript(script);
-    });
-
     // Default values
     eventEmmiter.current.emit('CHANGE_DIMENSION', '3D');
     eventEmmiter.current.emit('SET_PLAY_STATE', 'stop');
@@ -351,7 +319,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       instance: instanceRef.current,
       editorScene: editorSceneRef.current,
       eventEmmiter: eventEmmiter.current,
-      selectedNode, selectedScript,
+      selectedNode,
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current

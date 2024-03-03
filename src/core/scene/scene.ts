@@ -78,17 +78,21 @@ export class Scene {
     }
 
     public update(delta: number, time: number, paused: boolean): void {
-        this._root.updateTransforms();
-        for (const node of this._nodes) {
-            if (node instanceof LightNode) this._asignLightIndices();
-
-            if (node.markForRemoval) {
-                this.removeNode(node);
-                continue;
+        try {
+            this._root.updateTransforms();
+            for (const node of this._nodes) {
+                if (node instanceof LightNode) this._asignLightIndices();
+    
+                if (node.markForRemoval) {
+                    this.removeNode(node);
+                    continue;
+                }
+                
+                if (this._hasStarted && !paused)
+                    node.update(delta, time);
             }
-            
-            if (this._hasStarted && !paused)
-                node.update(delta, time);
+        } catch (e) {
+            Logger.error(e);
         }
     }
     

@@ -53,48 +53,60 @@ export class CleoEngine {
     }
 
     private async _initialize(): Promise<void> {
-        if (this._ready) return;
-
-        InputManager.initialize(this._renderer.canvas);
-        window.addEventListener('resize', this.onResize.bind(this));
-        
-        this._renderer.preInitialize();
-        await this.onPreInitialize();
-
-        this._physicsSystem.initialize();
-        this.onPostInitialize();
-
-        this._ready = true;
-        Logger.info('Engine Ready')
+        try {
+            if (this._ready) return;
+    
+            InputManager.initialize(this._renderer.canvas);
+            window.addEventListener('resize', this.onResize.bind(this));
+            
+            this._renderer.preInitialize();
+            await this.onPreInitialize();
+    
+            this._physicsSystem.initialize();
+            this.onPostInitialize();
+    
+            this._ready = true;
+            Logger.info('Engine Ready')
+        } catch (e) {
+            Logger.error(e);
+        }
     }
 
     public run(): void {
-        Logger.info('Engine starting');
-        if (!this._ready)
-            this._initialize();
-
-        this._gameLoop();
+        try {
+            Logger.info('Engine starting');
+            if (!this._ready)
+                this._initialize();
+    
+            this._gameLoop();
+        } catch (e) {
+            Logger.error(e);
+        }
     }
 
     private _gameLoop(): void {
-        const currentTimestamp = performance.now();
-        const deltaTime = (currentTimestamp - this._lastTimestamp) / 1000;
-        
-        if (!this._paused) {
-            this._physicsSystem.update(deltaTime);
-            this._timeSinceStart += deltaTime * 1000;
-        }
-
-        if (this._scene) {
-            this._scene.update(deltaTime, this._timeSinceStart, this._paused);
-            this._renderer.render(this._scene);
-        }
-
-        this.onUpdate(deltaTime, this._timeSinceStart);
+        try {
+            const currentTimestamp = performance.now();
+            const deltaTime = (currentTimestamp - this._lastTimestamp) / 1000;
+            
+            if (!this._paused) {
+                this._physicsSystem.update(deltaTime);
+                this._timeSinceStart += deltaTime * 1000;
+            }
     
-        this._lastTimestamp = currentTimestamp;
-        InputManager.instance.resetMouseVelocity();
-        requestAnimationFrame(this._gameLoop.bind(this));
+            if (this._scene) {
+                this._scene.update(deltaTime, this._timeSinceStart, this._paused);
+                this._renderer.render(this._scene);
+            }
+    
+            this.onUpdate(deltaTime, this._timeSinceStart);
+        
+            this._lastTimestamp = currentTimestamp;
+            InputManager.instance.resetMouseVelocity();
+            requestAnimationFrame(this._gameLoop.bind(this));
+        } catch (e) {
+            Logger.error(e);
+        }
     }
 
     public setViewport(viewport: HTMLElement) {

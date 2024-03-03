@@ -5,46 +5,66 @@ import { EditorState } from "@codemirror/state"
 import { useCleoEngine } from '../../EngineContext'
 import './Styles.css'
 
+const description = `/*
+// Global objects 
+// node: Node - The node that this script is attached to
+
+// This function will be executed when the node is spawned even before the scene starts.
+function onStart() {}
+// This function will be executed when the node is started, if the scene has already started this function will be executed immediately after the node is added to the scene.
+function onSpawn() {}
+// This function will be executed after rendering the frame.
+function onUpdate(delta, time) {}
+
+// This function will be executed when the node collides with another node.
+function onCollision(other) {}
+// This function will be executed when the node is triggered by another node.
+function onTrigger(other) {}
+*/`;
+
 export default function CodeEditor() {
+  const {selectedNode, scripts} = useCleoEngine()
   const editorRef = React.useRef<HTMLDivElement>(null)
   const editorViewRef = React.useRef<EditorView | null>(null)
-  const [scriptText, setScriptText] = React.useState('// Script Editor')
-  const [editorScript, setEditorScript] = React.useState('' as string)
-  const {selectedNode, selectedScript, scripts} = useCleoEngine()
+  const [editorText, setEditorText] = React.useState('')
+  const [scriptText, setScriptText] = React.useState<string | null>(null)
+  const [hasScript, setHasScript] = React.useState(false)
+  
 
   useEffect(() => {
-    if (!selectedNode || !selectedScript) return
-    switch (selectedScript) {
-      case 'OnSpawn':
-        scripts.get(selectedNode)!.spawn = editorScript
-        break
-      case 'OnStart':
-        scripts.get(selectedNode)!.start = editorScript
-        break
-      case 'OnUpdate':
-        scripts.get(selectedNode)!.update = editorScript
-        break
-      case 'OnCollision':
-        scripts.get(selectedNode)!.collision = editorScript
-        break
-      case 'OnTrigger':
-        scripts.get(selectedNode)!.trigger = editorScript
-        break
-    }
+    if (!selectedNode || !scriptText) return
+    scripts.set(selectedNode, scriptText)
 
-  }, [editorScript])
+  }, [scriptText])
+
+  useEffect(() => {
+    if (editorViewRef.current) {
+      editorViewRef.current.dispatch({ changes: { from: 0, to: editorViewRef.current.state.doc.length, insert: editorText }})
+    }
+  }, [editorText])
+
+  useEffect(() => {
+    if (!selectedNode) return
+
+    setHasScript(scripts.has(selectedNode))
+
+    const script = scripts.get(selectedNode);
+    if(script) {
+      setEditorText(script);
+    }
+  }, [selectedNode, hasScript])
 
   useEffect(() => {
     if (!editorRef.current) return;
     editorViewRef.current = new EditorView({
       state: EditorState.create({
-        doc: scriptText,
+        doc: editorText,
         extensions: [
           basicSetup,
           javascript(),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
-              setEditorScript(update.state.doc.toString())
+              setScriptText(update.state.doc.toString())
             }
           }),
         ],
@@ -54,38 +74,29 @@ export default function CodeEditor() {
 
   }, [])
 
-  useEffect(() => {
-    if (selectedNode) {
-      if (selectedScript && !scripts.get(selectedNode))
-        scripts.set(selectedNode, {start: '', update: '', spawn: '', collision: '', trigger: ''})
+  const handleAddScript = () => {
+    if (!selectedNode) return;
+    scripts.set(selectedNode, description);
+    setEditorText(description);
+    setScriptText(description);
+    setHasScript(true);
+  }
 
-      switch (selectedScript) {
-        case 'OnSpawn':
-          setScriptText(scripts.get(selectedNode)?.spawn || '')
-          break
-        case 'OnStart':
-          setScriptText(scripts.get(selectedNode)?.start || '')
-          break
-        case 'OnUpdate':
-          setScriptText(scripts.get(selectedNode)?.update || '')
-          break
-        case 'OnCollision':
-          setScriptText(scripts.get(selectedNode)?.collision || '')
-          break
-        case 'OnTrigger':
-          setScriptText(scripts.get(selectedNode)?.trigger || '')
-          break
-      }
-    }
-  }, [selectedNode, selectedScript])
+  const handleDeleteScript = () => {
+    if (!selectedNode) return;
+    scripts.delete(selectedNode);
+    setEditorText('');
+    setScriptText(null);
+    setHasScript(false);
+  }
 
-  useEffect(() => {
-    if (editorViewRef.current) {
-      editorViewRef.current.dispatch({ changes: { from: 0, to: editorViewRef.current.state.doc.length, insert: scriptText }})
-    }
-  }, [selectedScript, scriptText, selectedNode])
-  
   return (
-    <div ref={editorRef} style={{width: '100%', backgroundColor: 'white', color: 'black'}} />
+    <>
+      {!hasScript && <button onClick={handleAddScript}>Add Script</button>}
+      <div style={{display: hasScript ?  'block' : 'none'}}>
+        <div ref={editorRef} style={{width: '100%', backgroundColor: 'white', color: 'black'}} />
+      </div>
+      {hasScript && <button onClick={handleDeleteScript}>Delete Script</button>}
+    </>
   )
 }
