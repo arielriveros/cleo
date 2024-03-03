@@ -8,10 +8,15 @@ import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
 import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
-import { Shape } from "../../cleo";
+import { InputManager, Shape } from "../../cleo";
 import { Logger } from "../logger";
 
 type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite';
+
+interface GlobalState {
+    input: InputManager;
+    logger: (text: string) => void;
+}
 
 export class Node {
   protected readonly _id: string;
@@ -40,545 +45,550 @@ export class Node {
   protected _body: RigidBody | null;
   protected _trigger: Trigger | null;
 
-  public onStart: (node: Node, logger: (text: string) => void) => void = () => {};
-  public onSpawn: (node: Node, logger: (text: string) => void) => void = () => {};
-  public onUpdate: (node: Node, delta: number, time: number, logger: (text: string)=>void) => void = () => {};
-  public onCollision: (node: Node, other: Node, logger: (text: string) => void) => void = () => {};
-  public onTrigger: (node: Node, other: Node, logger: (text: string) => void) => void = () => {};
+  public onStart: (node: Node, global: GlobalState) => void = () => {};
+  public onSpawn: (node: Node, global: GlobalState) => void = () => {};
+  public onUpdate: (node: Node, delta: number, time: number, global: GlobalState) => void = () => {};
+  public onCollision: (node: Node, other: Node, global: GlobalState) => void = () => {};
+  public onTrigger: (node: Node, other: Node, global: GlobalState) => void = () => {};
   public onChange: () => void = () => {};
 
-    constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
-        this._name = name;
-        this._id = id;
-        this._parent = null;
-        this._children = [];
-        this._scene = null;
-        this._nodeType = type;
+  private _globalStateObject: GlobalState = {
+    input: InputManager.instance,
+    logger: (t)=>Logger.log(t, 'Script')
+  }
 
-        this._localTransform = mat4.create();
-        this._worldTransform = mat4.create();
+  constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
+    this._name = name;
+    this._id = id;
+    this._parent = null;
+    this._children = [];
+    this._scene = null;
+    this._nodeType = type;
 
-        this._position = vec3.create();
-        this._translationMatrix = mat4.create();
+    this._localTransform = mat4.create();
+    this._worldTransform = mat4.create();
 
-        this._euler = vec3.create();
-        this._quaternion = quat.create();
-        this._rotationMatrix = mat4.create();
+    this._position = vec3.create();
+    this._translationMatrix = mat4.create();
 
-        this._scale = vec3.fromValues(1, 1, 1);
-        this._scaleMatrix = mat4.create();
+    this._euler = vec3.create();
+    this._quaternion = quat.create();
+    this._rotationMatrix = mat4.create();
 
-        this._body = null;
-    }
+    this._scale = vec3.fromValues(1, 1, 1);
+    this._scaleMatrix = mat4.create();
 
-    public addChild(node: Node): void {
-        // if the node already has a parent, remove it from the parent's children
-        if (node.parent) {
-            node.parent.removeChild(node);
-            this.onChange();
-        }
-        
-        node.parent = this;
-        this._children.push(node);
-        node.onChange = this.onChange;
-        node.onSpawn(node, Logger.log);
-        if (this._hasStarted)
-            node.start();
-        if (this.scene) {
-            node.scene = this.scene;
-            for (const child of node.children) {
-                child.onSpawn(child, Logger.log);
-                child.scene = this.scene;
-            }
-        }
-        this.onChange();
-    }
+    this._body = null;
+  }
 
-    public removeChild(node: Node): void {
-        node.parent = null;
-        node.scene = null;
-        this._children.splice(this._children.indexOf(node), 1);
-        this.onChange();
-    }
-
-    public getChildByName(name: string): Node[] {
-        const nodes: Node[] = [];
-        for (const child of this._children)
-            if (child.name === name)
-                nodes.push(child);
-        return nodes;
-    }
-
-    public getChildById = (id: string): Node | null => {
-        for (const child of this._children)
-            if (child.id === id)
-                return child;
-        return null;
-    }
-
-    public updateTransforms(parentWorldTransform: mat4 | null = null): void {
-        // Update local transform
-        mat4.fromRotationTranslationScale(this._localTransform, this._quaternion, this._position, this._scale);
-    
-        // Update world transform
-        if (parentWorldTransform)
-            mat4.multiply(this._worldTransform, parentWorldTransform, this._localTransform);
-        else
-            mat4.copy(this._worldTransform, this._localTransform);
-
-        for (const child of this._children) {
-            child.updateTransforms(this._worldTransform);
-        }
+  public addChild(node: Node): void {
+    // if the node already has a parent, remove it from the parent's children
+    if (node.parent) {
+      node.parent.removeChild(node);
+      this.onChange();
     }
     
-
-    public remove(): void {
-        this._markForRemoval = true;
-        for (const child of this._children)
-            child.remove();
+    node.parent = this;
+    this._children.push(node);
+    node.onChange = this.onChange;
+    node.onSpawn(node, this._globalStateObject);
+    if (this._hasStarted)
+      node.start();
+    if (this.scene) {
+      node.scene = this.scene;
+      for (const child of node.children) {
+        child.onSpawn(child, this._globalStateObject);
+        child.scene = this.scene;
+      }
     }
+    this.onChange();
+  }
 
-    public start(): void {
-        try {
-            this._hasStarted = true;
-            this.onStart(this, (t) => Logger.log(t, 'Script'));
-            for (const child of this._children)
-                child.start();
-        } catch (error) {
-            Logger.error(`Error in onStart function for node ${this._name}: ${error}`);
-        }
-    }
-    public update(delta: number, time: number): void {
-        try {
-            this.onUpdate(this, delta, time, (t) => Logger.log(t, 'Script'));
-        } catch (error) {
-            Logger.error(`Error in onUpdate function for node ${this._name}: ${error}`);
-        }
-    }
+  public removeChild(node: Node): void {
+    node.parent = null;
+    node.scene = null;
+    this._children.splice(this._children.indexOf(node), 1);
+    this.onChange();
+  }
 
-    public serialize(): Promise<any> {
-        return new Promise((resolve, reject) => {
-            Promise.all(this._children.map(child => child.serialize())).then(children => {
-                resolve({
-                    id: this._id,
-                    name: this._name,
-                    type: this._nodeType,
-                    position: [this._position[0], this._position[1], this._position[2]],
-                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
-                    scale: [this._scale[0], this._scale[1], this._scale[2]],
-                    children: children,
-                    scripts: {
-                        // TODO: Only serialize the function body
-                        onStart: this.onStart.toString(),
-                        onSpawn: this.onSpawn.toString(),
-                        onUpdate: this.onUpdate.toString()
-                    }
-                });
-            });
+  public getChildByName(name: string): Node[] {
+    const nodes: Node[] = [];
+    for (const child of this._children)
+      if (child.name === name)
+        nodes.push(child);
+    return nodes;
+  }
+
+  public getChildById = (id: string): Node | null => {
+    for (const child of this._children)
+      if (child.id === id)
+        return child;
+    return null;
+  }
+
+  public updateTransforms(parentWorldTransform: mat4 | null = null): void {
+    // Update local transform
+    mat4.fromRotationTranslationScale(this._localTransform, this._quaternion, this._position, this._scale);
+
+    // Update world transform
+    if (parentWorldTransform)
+      mat4.multiply(this._worldTransform, parentWorldTransform, this._localTransform);
+    else
+      mat4.copy(this._worldTransform, this._localTransform);
+
+    for (const child of this._children) {
+      child.updateTransforms(this._worldTransform);
+    }
+  }  
+
+  public remove(): void {
+    this._markForRemoval = true;
+    for (const child of this._children)
+      child.remove();
+  }
+
+  public start(): void {
+    try {
+      this._hasStarted = true;
+      this.onStart(this, this._globalStateObject);
+      for (const child of this._children)
+        child.start();
+    } catch (error) {
+      Logger.error(`Error in onStart function for node ${this._name}: ${error}`);
+    }
+  }
+
+  public update(delta: number, time: number): void {
+    try {
+      this.onUpdate(this, delta, time, this._globalStateObject);
+    } catch (error) {
+      Logger.error(`Error in onUpdate function for node ${this._name}: ${error}`);
+    }
+  }
+
+  public serialize(): Promise<any> {
+    return new Promise((resolve, reject) => {
+      Promise.all(this._children.map(child => child.serialize())).then(children => {
+        resolve({
+          id: this._id,
+          name: this._name,
+          type: this._nodeType,
+          position: [this._position[0], this._position[1], this._position[2]],
+          rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+          scale: [this._scale[0], this._scale[1], this._scale[2]],
+          children: children,
+          scripts: {
+            // TODO: Only serialize the function body
+            onStart: this.onStart.toString(),
+            onSpawn: this.onSpawn.toString(),
+            onUpdate: this.onUpdate.toString()
+          }
         });
+      });
+    });
+  }
+
+  private static _findToken(script: string, token: string): string | null {
+    let beginIndex = script.indexOf(token);
+    if (beginIndex === -1)
+      return null;
+    while (script[beginIndex] !== '{')
+      beginIndex++;
+
+    let endIndex = beginIndex;
+    let count = 0;
+    while (endIndex < script.length) {
+      if (script[endIndex] === '{') 
+        count++;
+      else if (script[endIndex] === '}') 
+        count--;
+      if (count === 0)
+        break;
+      endIndex++;
     }
 
-    private static _findToken(script: string, token: string): string | null {
-        let beginIndex = script.indexOf(token);
-        if (beginIndex === -1)
-            return null;
-        while (script[beginIndex] !== '{')
-            beginIndex++;
-    
-        let endIndex = beginIndex;
-        let count = 0;
-        while (endIndex < script.length) {
-            if (script[endIndex] === '{') 
-                count++;
-            else if (script[endIndex] === '}') 
-                count--;
-            if (count === 0)
-                break;
-            endIndex++;
-        }
-    
-        if (endIndex === script.length) {
-            return null;
-        }
-    
-        return script.substring(beginIndex + 1, endIndex);
+    if (endIndex === script.length) {
+      return null;
     }
 
-    private static _parseScript(node: Node, script: string): void {
-        const onStartBody: string | null = Node._findToken(script, 'onStart');
-        const onSpawnBody: string | null = Node._findToken(script, 'onSpawn');
-        const onUpdateBody: string | null = Node._findToken(script, 'onUpdate');
-        const onCollisionBody: string | null = Node._findToken(script, 'onCollision');
-        const onTriggerBody: string | null = Node._findToken(script, 'onTrigger');
-        
-        function createFunction(body: string | null, parameterNames: string[]): Function {
-            try {
-                return body ? new Function(...parameterNames, body) : () => {};
-            } catch (error) {
-                Logger.error(`Error creating function: ${error}`);
-                return () => {};
-            }
-        }
+    return script.substring(beginIndex + 1, endIndex);
+  }
+
+  private static _parseScript(node: Node, script: string): void {
+    const onStartBody: string | null = Node._findToken(script, 'onStart');
+    const onSpawnBody: string | null = Node._findToken(script, 'onSpawn');
+    const onUpdateBody: string | null = Node._findToken(script, 'onUpdate');
+    const onCollisionBody: string | null = Node._findToken(script, 'onCollision');
+    const onTriggerBody: string | null = Node._findToken(script, 'onTrigger');
     
-        node.onStart = createFunction(onStartBody, ['node', 'logger']) as (node: Node, logger: (text: string) => void) => void;
-        node.onSpawn = createFunction(onSpawnBody, ['node', 'logger']) as (node: Node, logger: (text: string) => void) => void;
-        node.onUpdate = createFunction(onUpdateBody, ['node', 'delta', 'time', 'logger']) as (node: Node, delta: number, time: number, logger: (text: string) => void) => void;
-        node.onCollision = createFunction(onCollisionBody, ['node', 'other', 'logger']) as (node: Node, other: Node, logger: (text: string) => void) => void;
-        node.onTrigger = createFunction(onTriggerBody, ['node', 'other', 'logger']) as (node: Node, other: Node, logger: (text: string) => void) => void;
+    function createFunction(body: string | null, parameterNames: string[]): Function {
+      try {
+        return body ? new Function(...parameterNames, body) : () => {};
+      } catch (error) {
+        Logger.error(`Error creating function: ${error}`);
+        return () => {};
+      }
     }
 
-    protected static _commonParse(node: Node, parent: Node, json: any) {
-        node.onChange = parent.onChange;
-        node.updateTransforms(parent.worldTransform);
+    node.onStart = createFunction(onStartBody, ['node', 'global']) as (node: Node, global: GlobalState) => void;
+    node.onSpawn = createFunction(onSpawnBody, ['node', 'global']) as (node: Node, global: GlobalState) => void;
+    node.onUpdate = createFunction(onUpdateBody, ['node', 'delta', 'time', 'global']) as (node: Node, delta: number, time: number, global: GlobalState) => void;
+    node.onCollision = createFunction(onCollisionBody, ['node', 'other', 'global']) as (node: Node, other: Node, global: GlobalState) => void;
+    node.onTrigger = createFunction(onTriggerBody, ['node', 'other', 'global']) as (node: Node, other: Node, global: GlobalState) => void;
+  }
 
-        if (json.script)
-            Node._parseScript(node, json.script);
+  protected static _commonParse(node: Node, parent: Node, json: any) {
+    node.onChange = parent.onChange;
+    node.updateTransforms(parent.worldTransform);
 
-        const setShapes = (shapes: any, target: RigidBody | Trigger) => {
-            for (const shape of shapes) {
-                switch (shape.type) {
-                    case 'box':
-                        target.attachShape(
-                            Shape.Box(shape.width, shape.height, shape.depth),
-                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-                        );
-                        break;
-                    case 'sphere':
-                        target.attachShape(
-                            Shape.Sphere(shape.radius),
-                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-                        );
-                        break;
-                    case 'plane':
-                        target.attachShape(
-                            Shape.Plane(),
-                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-                        );
-                        break;
-                    case 'cylinder':
-                        target.attachShape(
-                            Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments),
-                            vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-                            vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-                        );
-                        break;
-                    default:
-                        console.error(`Shape type ${shape.type} not supported`);
-                }
-            }
-        }
+    if (json.script)
+      Node._parseScript(node, json.script);
 
-        if (json.body) {
-            node.setBody(
-                json.body.mass,
-                json.body.linearDamping,
-                json.body.angularDamping,
-                json.body.linearConstraints,
-                json.body.angularConstraints
+    const setShapes = (shapes: any, target: RigidBody | Trigger) => {
+      for (const shape of shapes) {
+        switch (shape.type) {
+          case 'box':
+            target.attachShape(
+              Shape.Box(shape.width, shape.height, shape.depth),
+              vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+              vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
             );
-            setShapes(json.body.shapes, node._body);
+            break;
+          case 'sphere':
+            target.attachShape(
+              Shape.Sphere(shape.radius),
+              vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+              vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+            );
+            break;
+          case 'plane':
+            target.attachShape(
+              Shape.Plane(),
+              vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+              vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+            );
+            break;
+          case 'cylinder':
+            target.attachShape(
+              Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments),
+              vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
+              vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+            );
+            break;
+          default:
+            console.error(`Shape type ${shape.type} not supported`);
         }
-
-        if (json.trigger) {
-            node.setTrigger();
-            setShapes(json.trigger.shapes, node._trigger);
-        }
-
-        if (json.children) {
-            for (const child of json.children) {
-                if (child.type === 'model')
-                    ModelNode.parse(node, child);
-                else if (child.type === 'light')
-                    LightNode.parse(node, child);
-                else if (child.type === 'skybox')
-                    SkyboxNode.parse(node, child);
-                else if (child.type === 'camera')
-                    CameraNode.parse(node, child);
-                else if (child.type === 'sprite')
-                    SpriteNode.parse(node, child);
-                else
-                    Node.parse(node, child);
-            }
-        }
-        node.setPosition(json.position);
-        node.setRotation(json.rotation);
-        node.setScale(json.scale);
-        parent.addChild(node);
+      }
     }
 
-    public static parse(parent: Node, json: any) {
-        const node = new Node(json.name, json.type, json.id);
-        Node._commonParse(node, parent, json);
+    if (json.body) {
+      node.setBody(
+        json.body.mass,
+        json.body.linearDamping,
+        json.body.angularDamping,
+        json.body.linearConstraints,
+        json.body.angularConstraints
+      );
+      setShapes(json.body.shapes, node._body);
     }
 
-    public get id(): string { return this._id; }
-    public get name(): string { return this._name; }
-    public set name(name: string) { this._name = name; }
-    public set parent(node: Node | null) { this._parent = node; }
-    public get parent(): Node | null { return this._parent; }
-    public get children(): Node[] { return this._children; }
-    public get scene(): Scene | null { return this._scene; }
-    public set scene(scene: Scene | null) {
-        this._scene = scene;
-        for (const child of this._children)
-            child.scene = scene;
-    }
-    public get hasStarted(): boolean { return this._hasStarted; }
-    public get markForRemoval(): boolean { return this._markForRemoval; }
-
-    public get localTransform(): mat4 { return this._localTransform; }
-    public get worldTransform(): mat4 { return this._worldTransform; }
-
-    public get forward(): vec3 {
-        let forward = vec3.fromValues(0, 0, 1);
-        vec3.transformMat4(forward, forward, this._rotationMatrix);
-        vec3.normalize(forward, forward);
-        return forward;
+    if (json.trigger) {
+      node.setTrigger();
+      setShapes(json.trigger.shapes, node._trigger);
     }
 
-    public get worldPosition(): vec3 {
-        return vec3.transformMat4(vec3.create(), vec3.create(), this.worldTransform);
+    if (json.children) {
+      for (const child of json.children) {
+        if (child.type === 'model')
+          ModelNode.parse(node, child);
+        else if (child.type === 'light')
+          LightNode.parse(node, child);
+        else if (child.type === 'skybox')
+          SkyboxNode.parse(node, child);
+        else if (child.type === 'camera')
+          CameraNode.parse(node, child);
+        else if (child.type === 'sprite')
+          SpriteNode.parse(node, child);
+        else
+          Node.parse(node, child);
+      }
     }
+    node.setPosition(json.position);
+    node.setRotation(json.rotation);
+    node.setScale(json.scale);
+    parent.addChild(node);
+  }
 
-    public get worldQuaternion(): quat {
-        let worldRotation = quat.create();
-        mat4.getRotation(worldRotation, this._worldTransform);
-        return worldRotation;
-    }
+  public static parse(parent: Node, json: any) {
+    const node = new Node(json.name, json.type, json.id);
+    Node._commonParse(node, parent, json);
+  }
 
-    public get worldScale(): vec3 {
-        let worldScale = vec3.create();
-        mat4.getScaling(worldScale, this._worldTransform);
-        return worldScale;
-    }
+  public get id(): string { return this._id; }
+  public get name(): string { return this._name; }
+  public set name(name: string) { this._name = name; }
+  public set parent(node: Node | null) { this._parent = node; }
+  public get parent(): Node | null { return this._parent; }
+  public get children(): Node[] { return this._children; }
+  public get scene(): Scene | null { return this._scene; }
+  public set scene(scene: Scene | null) {
+    this._scene = scene;
+    for (const child of this._children)
+      child.scene = scene;
+  }
+  public get hasStarted(): boolean { return this._hasStarted; }
+  public get markForRemoval(): boolean { return this._markForRemoval; }
 
-    public get worldForward(): vec3 {
-        // get the forward vector of the node in world space
-        let forward = vec3.fromValues(0, 0, 1);
-        //vec3.transformMat4(forward, forward, this._rotationMatrix);
-        // get world rotation
-        let worldRotation = this.worldQuaternion;
-        vec3.transformQuat(forward, forward, worldRotation);
-        // normalize
-        vec3.normalize(forward, forward);
-        return forward;
-    }
+  public get localTransform(): mat4 { return this._localTransform; }
+  public get worldTransform(): mat4 { return this._worldTransform; }
 
-    public setX(value: number): Node {
-        this._position[0] = value;
-        this._updateTranslationMatrix();
-        return this;
-    }
+  public get forward(): vec3 {
+    let forward = vec3.fromValues(0, 0, 1);
+    vec3.transformMat4(forward, forward, this._rotationMatrix);
+    vec3.normalize(forward, forward);
+    return forward;
+  }
 
-    public addX(value: number): Node {
-        this._position[0] += value;
-        this._updateTranslationMatrix();
-        return this;
-    }
+  public get worldPosition(): vec3 {
+    return vec3.transformMat4(vec3.create(), vec3.create(), this.worldTransform);
+  }
 
-    public setY(value: number): Node {
-        this._position[1] = value;
-        this._updateTranslationMatrix();
-        return this;
-    }
+  public get worldQuaternion(): quat {
+    let worldRotation = quat.create();
+    mat4.getRotation(worldRotation, this._worldTransform);
+    return worldRotation;
+  }
 
-    public addY(value: number): Node {
-        this._position[1] += value;
-        this._updateTranslationMatrix();
-        return this;
-    }
+  public get worldScale(): vec3 {
+    let worldScale = vec3.create();
+    mat4.getScaling(worldScale, this._worldTransform);
+    return worldScale;
+  }
 
-    public setZ(value: number): Node {
-        this._position[2] = value;
-        this._updateTranslationMatrix();
-        return this;
-    }
+  public get worldForward(): vec3 {
+    // get the forward vector of the node in world space
+    let forward = vec3.fromValues(0, 0, 1);
+    //vec3.transformMat4(forward, forward, this._rotationMatrix);
+    // get world rotation
+    let worldRotation = this.worldQuaternion;
+    vec3.transformQuat(forward, forward, worldRotation);
+    // normalize
+    vec3.normalize(forward, forward);
+    return forward;
+  }
 
-    public addZ(value: number): Node {
-        this._position[2] += value;
-        this._updateTranslationMatrix();
-        return this;
-    }
+  public setX(value: number): Node {
+    this._position[0] = value;
+    this._updateTranslationMatrix();
+    return this;
+  }
 
-    public setPosition(pos: vec3): Node {
-        vec3.copy(this._position, pos);
-        this._updateTranslationMatrix();
-        return this;
-    }
+  public addX(value: number): Node {
+    this._position[0] += value;
+    this._updateTranslationMatrix();
+    return this;
+  }
 
-    public addForward(value: number) {
-        //vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.worldForward, value));
-        vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.forward, value));
-        this._updateTranslationMatrix();
-    }
+  public setY(value: number): Node {
+    this._position[1] = value;
+    this._updateTranslationMatrix();
+    return this;
+  }
 
-    public addRight(value: number) {
-        // normalize forward vector
-        vec3.normalize(this.forward, this.forward);
-        // normalize right vector
-        let right = vec3.cross(vec3.create(), this.forward, vec3.fromValues(0, 1, 0));
-        vec3.normalize(right, right);
-        // move along right vector
-        vec3.add(this._position, this._position, vec3.scale(vec3.create(), right, value));
-        this._updateTranslationMatrix();
-    }
+  public addY(value: number): Node {
+    this._position[1] += value;
+    this._updateTranslationMatrix();
+    return this;
+  }
 
-    public addUp(value: number) {
-        vec3.normalize(this.forward, this.forward);
-        let right = vec3.cross(vec3.create(), this.forward, vec3.fromValues(0, 1, 0));
-        vec3.normalize(right, right);
-        let up = vec3.cross(vec3.create(), right, this.forward);
-        vec3.normalize(up, up);
-        vec3.add(this._position, this._position, vec3.scale(vec3.create(), up, value));
-        this._updateTranslationMatrix();
-    }
+  public setZ(value: number): Node {
+    this._position[2] = value;
+    this._updateTranslationMatrix();
+    return this;
+  }
 
-    private _updateTranslationMatrix(): void {
-        if (this._body)
-            this._body.setPosition(this._position);
-        
-        mat4.fromTranslation(this._translationMatrix, this._position);
-    }
+  public addZ(value: number): Node {
+    this._position[2] += value;
+    this._updateTranslationMatrix();
+    return this;
+  }
 
-    public rotateX(value: number): Node {
-        this._euler[0] += value;
-        this._updateRotationMatrix();
-        return this;
-    }
+  public setPosition(pos: vec3): Node {
+    vec3.copy(this._position, pos);
+    this._updateTranslationMatrix();
+    return this;
+  }
+
+  public addForward(value: number) {
+    //vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.worldForward, value));
+    vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.forward, value));
+    this._updateTranslationMatrix();
+  }
+
+  public addRight(value: number) {
+    // normalize forward vector
+    vec3.normalize(this.forward, this.forward);
+    // normalize right vector
+    let right = vec3.cross(vec3.create(), this.forward, vec3.fromValues(0, 1, 0));
+    vec3.normalize(right, right);
+    // move along right vector
+    vec3.add(this._position, this._position, vec3.scale(vec3.create(), right, value));
+    this._updateTranslationMatrix();
+  }
+
+  public addUp(value: number) {
+    vec3.normalize(this.forward, this.forward);
+    let right = vec3.cross(vec3.create(), this.forward, vec3.fromValues(0, 1, 0));
+    vec3.normalize(right, right);
+    let up = vec3.cross(vec3.create(), right, this.forward);
+    vec3.normalize(up, up);
+    vec3.add(this._position, this._position, vec3.scale(vec3.create(), up, value));
+    this._updateTranslationMatrix();
+  }
+
+  private _updateTranslationMatrix(): void {
+    if (this._body)
+      this._body.setPosition(this._position);
     
-    public rotateY(value: number): Node {
-        this._euler[1] += value;
-        this._updateRotationMatrix();
-        return this;
-    }
-    
-    public rotateZ(value: number): Node {
-        this._euler[2] += value;
-        this._updateRotationMatrix();
-        return this;
-    }
-    
-    public setRotation(value: vec3): Node {
-        vec3.copy(this._euler, value);
-        this._updateRotationMatrix();
-        return this;
-    }
+    mat4.fromTranslation(this._translationMatrix, this._position);
+  }
 
-    public setQuaternion(quaternion: quat): Node {
-        quat.copy(this._quaternion, quaternion);
-        mat4.fromQuat(this._rotationMatrix, this._quaternion);
-        return this;
-    }
-    
-    private _updateRotationMatrix(): void {
-        quat.fromEuler(this._quaternion, this._euler[0], this._euler[1], this._euler[2]);
-        if (this._body) this._body.setQuaternion(this._quaternion);
-        mat4.fromQuat(this._rotationMatrix, this._quaternion);
-    }
+  public rotateX(value: number): Node {
+    this._euler[0] += value;
+    this._updateRotationMatrix();
+    return this;
+  }
+  
+  public rotateY(value: number): Node {
+    this._euler[1] += value;
+    this._updateRotationMatrix();
+    return this;
+  }
+  
+  public rotateZ(value: number): Node {
+    this._euler[2] += value;
+    this._updateRotationMatrix();
+    return this;
+  }
+  
+  public setRotation(value: vec3): Node {
+    vec3.copy(this._euler, value);
+    this._updateRotationMatrix();
+    return this;
+  }
 
-    public setXScale(value: number): Node {
-        this._scale[0] = value;
-        this._updateScaleMatrix();
-        return this;
-    }
+  public setQuaternion(quaternion: quat): Node {
+    quat.copy(this._quaternion, quaternion);
+    mat4.fromQuat(this._rotationMatrix, this._quaternion);
+    return this;
+  }
+  
+  private _updateRotationMatrix(): void {
+    quat.fromEuler(this._quaternion, this._euler[0], this._euler[1], this._euler[2]);
+    if (this._body) this._body.setQuaternion(this._quaternion);
+    mat4.fromQuat(this._rotationMatrix, this._quaternion);
+  }
 
-    public addXScale(value: number): Node {
-        this._scale[0] += value;
-        this._updateScaleMatrix();
-        return this;
-    }
+  public setXScale(value: number): Node {
+    this._scale[0] = value;
+    this._updateScaleMatrix();
+    return this;
+  }
 
-    public setYScale(value: number): Node {
-        this._scale[1] = value;
-        this._updateScaleMatrix();
-        return this;
-    }
+  public addXScale(value: number): Node {
+    this._scale[0] += value;
+    this._updateScaleMatrix();
+    return this;
+  }
 
-    public addYScale(value: number): Node {
-        this._scale[1] += value;
-        this._updateScaleMatrix();
-        return this;
-    }
+  public setYScale(value: number): Node {
+    this._scale[1] = value;
+    this._updateScaleMatrix();
+    return this;
+  }
 
-    public setZScale(value: number): Node {
-        this._scale[2] = value;
-        this._updateScaleMatrix();
-        return this;
-    }
+  public addYScale(value: number): Node {
+    this._scale[1] += value;
+    this._updateScaleMatrix();
+    return this;
+  }
 
-    public addZScale(value: number): Node {
-        this._scale[2] += value;
-        this._updateScaleMatrix();
-        return this;
-    }
+  public setZScale(value: number): Node {
+    this._scale[2] = value;
+    this._updateScaleMatrix();
+    return this;
+  }
 
-    public setScale(scale: vec3): Node {
-        vec3.copy(this._scale, scale);
-        this._updateScaleMatrix();
-        return this;
-    }
+  public addZScale(value: number): Node {
+    this._scale[2] += value;
+    this._updateScaleMatrix();
+    return this;
+  }
 
-    public setUniformScale(value: number): Node {
-        vec3.set(this._scale, value, value, value);
-        this._updateScaleMatrix();
-        return this;
-    }
+  public setScale(scale: vec3): Node {
+    vec3.copy(this._scale, scale);
+    this._updateScaleMatrix();
+    return this;
+  }
 
-    private _updateScaleMatrix(): void {
-        mat4.fromScaling(this._scaleMatrix, this._scale);
-    }
+  public setUniformScale(value: number): Node {
+    vec3.set(this._scale, value, value, value);
+    this._updateScaleMatrix();
+    return this;
+  }
 
-    public get body(): RigidBody | null { return this._body; }
-    public setBody(
-        mass: number,
-        linearDamping?: number,
-        angularDamping?: number,
-        linearConstraints?: [number, number, number],
-        angularConstraints?: [number, number, number]
-    ): RigidBody {
-        // TODO: Handle the case where the node is a child of another node
-        this._body = new RigidBody({
-            mass,
-            linearDamping,
-            angularDamping,
-            position: this.worldPosition, // TODO: Set the world position, problem when parsing because world position is not set yet
-            quaternion: this.worldQuaternion, // TODO: Set the world quaternion, same as above
-            linearConstraints, angularConstraints
-        }, this);
+  private _updateScaleMatrix(): void {
+    mat4.fromScaling(this._scaleMatrix, this._scale);
+  }
 
-        // handle onCollision event
-        this._body.addEventListener('collide', (event: any) => {
-            if (event.body instanceof RigidBody || event.body instanceof Trigger)
-                this.onCollision(this, event.body.owner, (t) => Logger.log(t, 'Script'));
-        });
+  public get body(): RigidBody | null { return this._body; }
+  public setBody(
+    mass: number,
+    linearDamping?: number,
+    angularDamping?: number,
+    linearConstraints?: [number, number, number],
+    angularConstraints?: [number, number, number]
+  ): RigidBody {
+    // TODO: Handle the case where the node is a child of another node
+    this._body = new RigidBody({
+      mass,
+      linearDamping,
+      angularDamping,
+      position: this.worldPosition, // TODO: Set the world position, problem when parsing because world position is not set yet
+      quaternion: this.worldQuaternion, // TODO: Set the world quaternion, same as above
+      linearConstraints, angularConstraints
+    }, this);
 
-        return this._body;
-    }
+    // handle onCollision event
+    this._body.addEventListener('collide', (event: any) => {
+      if (event.body instanceof RigidBody || event.body instanceof Trigger)
+        this.onCollision(this, event.body.owner, this._globalStateObject);
+    });
 
-    public get trigger(): Trigger | null { return this._trigger; }
-    public setTrigger(): void {
-        this._trigger = new Trigger({
-            position: this.worldPosition,
-            quaternion: this.worldQuaternion
-        }, this);
+    return this._body;
+  }
 
-        // handle onTrigger event
-        this._trigger.addEventListener('collide', (event: any) => {
-            if (event.body instanceof RigidBody || event.body instanceof Trigger)
-                this.onTrigger(this, event.body.owner, (t) => Logger.log(t, 'Script'));
-        });
+  public get trigger(): Trigger | null { return this._trigger; }
+  public setTrigger(): void {
+    this._trigger = new Trigger({
+      position: this.worldPosition,
+      quaternion: this.worldQuaternion
+    }, this);
 
-    }
+    // handle onTrigger event
+    this._trigger.addEventListener('collide', (event: any) => {
+      if (event.body instanceof RigidBody || event.body instanceof Trigger)
+        this.onTrigger(this, event.body.owner, this._globalStateObject);
+    });
 
-    public get position(): vec3 { return this._position; }
-    public get rotation(): vec3 { return this._euler; }
+  }
 
-    public get quaternion(): quat { return this._quaternion; }
-    public get scale(): vec3 { return this._scale; }
-    public get nodeType(): string { return this._nodeType; }
+  public get position(): vec3 { return this._position; }
+  public get rotation(): vec3 { return this._euler; }
+
+  public get quaternion(): quat { return this._quaternion; }
+  public get scale(): vec3 { return this._scale; }
+  public get nodeType(): string { return this._nodeType; }
 }
 
 export class ModelNode extends Node {
