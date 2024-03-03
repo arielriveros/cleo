@@ -1,8 +1,9 @@
 import React, { useEffect } from 'react'
 import { EditorView, basicSetup } from "codemirror"
-import { javascript } from '@codemirror/lang-javascript'
+import { javascript, javascriptLanguage, scopeCompletionSource } from '@codemirror/lang-javascript'
 import { EditorState } from "@codemirror/state"
 import { useCleoEngine } from '../../EngineContext'
+import { InputManager, Logger, ModelNode, Node } from 'cleo'
 import './Styles.css'
 
 const description = `/*
@@ -29,7 +30,7 @@ function onTrigger(other) {}
 */`;
 
 export default function CodeEditor() {
-  const {selectedNode, scripts} = useCleoEngine()
+  const {selectedNode, scripts, editorScene} = useCleoEngine()
   const editorRef = React.useRef<HTMLDivElement>(null)
   const editorViewRef = React.useRef<EditorView | null>(null)
   const [editorText, setEditorText] = React.useState('')
@@ -68,6 +69,15 @@ export default function CodeEditor() {
         extensions: [
           basicSetup,
           javascript(),
+          javascriptLanguage.data.of({
+            autocomplete: scopeCompletionSource({
+              global: {
+                input: InputManager.prototype,
+                logger: (text: string) => Logger.log(text)
+              },
+              node: editorScene.getNodeById(selectedNode!)?.nodeType === 'model' ? ModelNode.prototype : Node.prototype
+            }),
+          }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               setScriptText(update.state.doc.toString())
