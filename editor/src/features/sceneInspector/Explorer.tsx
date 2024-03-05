@@ -5,15 +5,15 @@ import TextureExplorer from './TextureExplorer'
 import { useCleoEngine } from '../EngineContext'
 
 export default function Explorer() {
-  const { eventEmmiter } = useCleoEngine()
+  const { eventEmitter: eventEmitter } = useCleoEngine()
   const [selectedTab, setSelectedTab] = useState<'Scene' | 'Assets'>('Scene')
 
   useEffect(() => {
     if (selectedTab === 'Scene') 
-      eventEmmiter.emit('SCENE_CHANGED')
+      eventEmitter.emit('SCENE_CHANGED')
 
     if (selectedTab === 'Assets')
-      eventEmmiter.emit('TEXTURES_CHANGED')
+      eventEmitter.emit('TEXTURES_CHANGED')
   }, [selectedTab])
   return (
     <>

@@ -1,4 +1,4 @@
-import { Texture, TextureManager } from "../../cleo";
+import { CleoEngine, Texture, TextureManager } from "../../cleo";
 import { CameraNode, LightNode, ModelNode, Node, SkyboxNode, SpriteNode } from "./node";
 import { Logger } from '../logger'
 
@@ -17,11 +17,9 @@ export class Scene {
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
     private _numSpotlights: number;
-    public onChange: ((scene: Scene) => void) | null;
 
     constructor() {
         this._root.scene = this;
-        this._root.onChange = this._onChange.bind(this);
         this._nodes = new Set();
         this._lights = new Set();
         this._models = new Set();
@@ -32,7 +30,7 @@ export class Scene {
         this._numPointLights = 0;
         this._numSpotlights = 0;
 
-        this.onChange = null;
+        CleoEngine.eventEmitter.on('SCENE_CHANGED', () => this._onChange());
     }
 
     public start(): void {
@@ -180,7 +178,6 @@ export class Scene {
         // change the root node entirely not just its children
         let newScene = new Node('root');
         newScene.scene = this;
-        newScene.onChange = this._onChange.bind(this);
         Node.parse(newScene, json.scene);
         if (!useCache)
             for (const texture of json.textures)
@@ -213,8 +210,6 @@ export class Scene {
 
     private _onChange() {
         this._dirty = true;
-        if (this.onChange)
-            this.onChange(this);
     }
 
     public get root(): Node { return this._root; }

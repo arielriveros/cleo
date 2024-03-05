@@ -10,12 +10,12 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
   const sprite = props.node.sprite;
   const material = sprite.material;
 
-  const { eventEmmiter } = useCleoEngine();
+  const { eventEmitter: eventEmitter } = useCleoEngine();
   const [constraints, setConstraints] = useState<'free' | 'spherical' | 'cylindrical'>(props.node.constraints);
   const [color, setColor] = useState(vec3ToHex(material.properties.get('color')));
   const [opacity, setOpacity] = useState(material.properties.get('opacity'));
 
-  useEffect(() => { eventEmmiter.emit('TEXTURES_CHANGED') }, [])
+  useEffect(() => { eventEmitter.emit('TEXTURES_CHANGED') }, [])
 
   useEffect(() => {
     setConstraints(props.node.constraints);

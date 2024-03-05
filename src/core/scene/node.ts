@@ -8,7 +8,7 @@ import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
 import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
-import { InputManager, Shape } from "../../cleo";
+import { CleoEngine, InputManager, Shape } from "../../cleo";
 import { Logger } from "../logger";
 
 type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite';
@@ -45,12 +45,13 @@ export class Node {
   protected _body: RigidBody | null;
   protected _trigger: Trigger | null;
 
+  protected _visible: boolean;
+
   public onStart: (node: Node, global: GlobalState) => void = () => {};
   public onSpawn: (node: Node, global: GlobalState) => void = () => {};
   public onUpdate: (node: Node, delta: number, time: number, global: GlobalState) => void = () => {};
   public onCollision: (node: Node, other: Node, global: GlobalState) => void = () => {};
   public onTrigger: (node: Node, other: Node, global: GlobalState) => void = () => {};
-  public onChange: () => void = () => {};
 
   private _globalStateObject: GlobalState = {
     input: InputManager.instance,
@@ -79,18 +80,20 @@ export class Node {
     this._scaleMatrix = mat4.create();
 
     this._body = null;
+    this._trigger = null;
+
+    this._visible = true;
   }
 
   public addChild(node: Node): void {
     // if the node already has a parent, remove it from the parent's children
     if (node.parent) {
       node.parent.removeChild(node);
-      this.onChange();
+      CleoEngine.eventEmitter.emit('SCENE_CHANGED');
     }
     
     node.parent = this;
     this._children.push(node);
-    node.onChange = this.onChange;
     node.onSpawn(node, this._globalStateObject);
     if (this._hasStarted)
       node.start();
@@ -101,14 +104,14 @@ export class Node {
         child.scene = this.scene;
       }
     }
-    this.onChange();
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED');
   }
 
   public removeChild(node: Node): void {
     node.parent = null;
     node.scene = null;
     this._children.splice(this._children.indexOf(node), 1);
-    this.onChange();
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED');
   }
 
   public getChildByName(name: string): Node[] {
@@ -238,7 +241,6 @@ export class Node {
   }
 
   protected static _commonParse(node: Node, parent: Node, json: any) {
-    node.onChange = parent.onChange;
     node.updateTransforms(parent.worldTransform);
 
     if (json.script)
@@ -589,6 +591,13 @@ export class Node {
   public get quaternion(): quat { return this._quaternion; }
   public get scale(): vec3 { return this._scale; }
   public get nodeType(): string { return this._nodeType; }
+  public get visible(): boolean { return this._visible; }
+  public set visible(value: boolean) {
+    this._visible = value;
+    for (const child of this._children)
+      child.visible = value;
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+  }
 }
 
 export class ModelNode extends Node {
@@ -666,6 +675,14 @@ export class ModelNode extends Node {
 
     public get model(): Model { return this._model; }
     public get initialized(): boolean { return this._initialized; }
+    public get visible(): boolean { return super.visible; }
+    public set visible(value: boolean) {
+      super.visible = value;
+      this._model.material.config.castShadow = value;
+      for (const child of this._children)
+        child.visible = value;
+      CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+    }
 }
 
 export class LightNode extends Node {

@@ -1,14 +1,24 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Logger, Node } from 'cleo';
+import { Logger, ModelNode, Node } from 'cleo';
 import CameraIcon from '../../icons/camera.png'
 import ModelIcon from '../../icons/model.png'
 import LightIcon from '../../icons/light.png'
 import SkyboxIcon from '../../icons/skybox.png'
 import SpriteIcon from '../../icons/sprite.png'
+import VisibleIcon from '../../icons/visible.png'
+import HiddenIcon from '../../icons/hidden.png'
 import Collapsable from '../../components/Collapsable';
 import AddNew from './AddNew';
 import './Styles.css'
+
+interface NodeDescription {
+  id: string;
+  name: string;
+  type: string;
+  visible: boolean;
+  children: any[];
+}
 
 interface SceneNodeItemProps {
   nodeId: string;
@@ -16,7 +26,10 @@ interface SceneNodeItemProps {
   nodeType?: string;
   children?: string[];
   onSelect: (nodeId: string) => void;
-  onExpand?: (nodeId: string) => void;
+  expanded?: boolean;
+  visible?: boolean;
+  onSetVisibility: (nodeId: string) => void;
+  onExpand: (nodeId: string) => void;
 }
   
 function SceneNodeItem(props: SceneNodeItemProps) {
@@ -29,40 +42,57 @@ function SceneNodeItem(props: SceneNodeItemProps) {
   return (
     <div
       id={props.nodeId}
-      className={`sceneItem ${selectedNode === props.nodeId ? 'selected' : ''}`}
+      className={`scene-item ${selectedNode === props.nodeId ? 'selected' : ''}`}
       onClick={() => props.onSelect(props.nodeId)}
       draggable={true}
       onDragStart={handleDragStart} >
       <div>
-        { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='sceneItemIcon' /> }
-        { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='sceneItemIcon' /> }
-        { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='sceneItemIcon' /> }
-        { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='sceneItemIcon' /> }
-        { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='sceneItemIcon' /> }
+        { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='scene-item-icon' /> }
+        { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='scene-item-icon' /> }
+        { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='scene-item-icon' /> }
+        { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='scene-item-icon' /> }
+        { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='scene-item-icon' /> }
         { props.nodeName }
       </div>
-      { props.children && props.children.length > 0 && <div onClick={() => props.onExpand && props.onExpand(props.nodeId)}>+</div> }
+      <div className='scene-item-options-container'>
+        <img 
+          onClick={ () => props.onSetVisibility(props.nodeId) }
+          src={props.visible ? VisibleIcon : HiddenIcon} alt='visible' className='scene-item-visible-icon' />
+        { props.children && props.children.length > 0 && 
+          <div className='scene-item-expand-button' onClick={() => props.onExpand(props.nodeId)}>
+            { props.expanded ? '>' : '∨' }
+          </div>
+        }
+      </div>
     </div>
   );
 }
 
-function SceneListRecursive(props: { node: { id: string, name: string, type: string, children: any[]}, setSelectedNode: (nodeId: string | null) => void}) {
-  const [isVisible, setIsVisible] = useState(true);
+interface SceneListRecursiveProps {
+  node: NodeDescription;
+  setSelectedNode: (nodeId: string | null) => void;
+  handleSetVisibility: (nodeId: string) => void;
+}
+function SceneListRecursive(props: SceneListRecursiveProps) {
+  const [expanded, setIsExpanded] = useState(true);
 
   return (
     props.node.name.includes('__debug__') ? null : 
-    <div style={{ paddingLeft: 5 }}>
+    <div style={{ paddingLeft: 10 }}>
       <SceneNodeItem
         key={props.node.id}
         nodeId={props.node.id}
         nodeName={props.node.name}
         nodeType={props.node.type}
         onSelect={props.setSelectedNode}
-        onExpand={() => setIsVisible(!isVisible) }
+        expanded={expanded}
+        onExpand={() => setIsExpanded(!expanded) }
+        visible={props.node.visible}
+        onSetVisibility={props.handleSetVisibility}
         children={props.node.children}
         />
-      { isVisible ? 
-        props.node.children.map( child => { return <SceneListRecursive key={child.id} node={child} setSelectedNode={props.setSelectedNode}/> })
+      { expanded ? 
+        props.node.children.map( child => { return <SceneListRecursive key={child.id} node={child} setSelectedNode={props.setSelectedNode} handleSetVisibility={props.handleSetVisibility} /> })
       : <></>
       }
     </div>    
@@ -71,16 +101,16 @@ function SceneListRecursive(props: { node: { id: string, name: string, type: str
 
 
 export default function SceneInspector() {
-  const { editorScene, eventEmmiter, bodies } = useCleoEngine()
-  const [ nodes, setNodes ] = useState<{ id: string, name: string, type: string, children: any[]} | null>(null);
+  const { editorScene, eventEmitter, bodies } = useCleoEngine()
+  const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
 
   // generate a recursive list of id nodes where each node has a list of children
-  // { id: 'root', children: [{ id: 'child1', children: [{ id: 'child3', children: [] }] }, { id: 'child2', children: [] }] }
-  function generateNodeList(node: Node): { id: string, name: string, type: string, children: any[]} {
+  function generateNodeList(node: Node): NodeDescription {
     return {
       id: node.id,
       name: node.name,
       type: node.nodeType,
+      visible: node.visible,
       children: node.children.filter((child: Node) => !(child.name.includes('__debug__') || child.name.includes('__editor__'))).map((child: Node) => generateNodeList(child))
     }
   }
@@ -91,7 +121,7 @@ export default function SceneInspector() {
     event.preventDefault();
 
     // Find the closest parent div with the class 'sceneItem'
-    const targetElement = (event.target as HTMLDivElement).closest('.sceneItem');
+    const targetElement = (event.target as HTMLDivElement).closest('.scene-item');
 
     if (targetElement) {
       const targetId = targetElement.id;
@@ -125,19 +155,24 @@ export default function SceneInspector() {
 
   useEffect(() => {
     const handleSceneChanged = () => { if (editorScene) setNodes(generateNodeList(editorScene.root)) };
-    eventEmmiter.on('SCENE_CHANGED', handleSceneChanged);
-    return () => { eventEmmiter.off("SCENE_CHANGED", handleSceneChanged) }; // Remove the listener on component unmount
-  }, [eventEmmiter, editorScene]);
+    eventEmitter.on('SCENE_CHANGED', handleSceneChanged);
+    return () => { eventEmitter.off("SCENE_CHANGED", handleSceneChanged) }; // Remove the listener on component unmount
+  }, [eventEmitter, editorScene]);
 
   const handleSelectNode = (nodeId: string | null) => {
-    eventEmmiter.emit('SELECT_NODE', nodeId);
+    eventEmitter.emit('SELECT_NODE', nodeId);
+  }
+
+  const handleSetVisibility = (nodeId: string) => {
+    const node = editorScene?.getNodeById(nodeId);
+    if (node) node.visible = !node.visible;
   }
 
   return (
     <div className='sceneInspector' onDragOver={handleDragOver} onDrop={handleDrop}>
       <AddNew />
       <Collapsable title='Scene'>
-        { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode}/> }
+        { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode} handleSetVisibility={handleSetVisibility} /> }
       </Collapsable>
     </div>
   )

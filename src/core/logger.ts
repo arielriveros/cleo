@@ -1,4 +1,4 @@
-import { EventEmitter } from 'events';
+import { CleoEngine } from "./engine";
 
 interface Log {
   type: 'log' | 'info' | 'warning' | 'error';
@@ -10,11 +10,9 @@ interface Log {
 export class Logger {
   private static _instance: Logger | null = null;
   private _logs: Log[];
-  private _eventEmitter: EventEmitter;
 
   private constructor() {
     this._logs = [];
-    this._eventEmitter = new EventEmitter();
   }
 
   public static get Instance(): Logger {
@@ -26,10 +24,6 @@ export class Logger {
 
   public static get logs() {
     return Logger.Instance._logs;
-  }
-
-  public static get eventEmitter() {
-    return Logger.Instance._eventEmitter;
   }
 
   private static logInternal(type: Log['type'], message: string, scope: string = 'Runtime') {
@@ -54,7 +48,7 @@ export class Logger {
     const log: Log = { type, scope, message, timeStamp };
     Logger.logs.push(log);
 
-    Logger.Instance._eventEmitter.emit('log', log);
+    CleoEngine.eventEmitter.emit('LOG', log);
   }
 
   public static log(message: string, scope: string = 'Runtime') {
@@ -75,13 +69,5 @@ export class Logger {
 
   public static clear() {
     Logger.Instance._logs = [];
-  }
-
-  public static on(event: 'log' | 'info' | 'warning' | 'error', listener: (log: Log) => void) {
-    Logger.Instance._eventEmitter.on(event, listener);
-  }
-
-  public static off(event: 'log' | 'info' | 'warning' | 'error', listener: (log: Log) => void) {
-    Logger.Instance._eventEmitter.off(event, listener);
   }
 }

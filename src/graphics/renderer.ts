@@ -227,6 +227,7 @@ export class Renderer {
         const transparentDrawQueue: ModelNode[] = [];
         
         for (const node of scene.models) {
+            if (!node.visible) continue;
             // Add to transparent draw queue if transparent so that it is drawn last
             if (node.model.material.config.transparent === true)
                 transparentDrawQueue.push(node);
@@ -254,8 +255,10 @@ export class Renderer {
             return bDist - aDist;
         });
 
-        for (const node of spriteNodes)
+        for (const node of spriteNodes) {
+            if (!node.visible) continue;
             this._renderSprite(node);
+        }
     }
 
     private _renderModel(node: ModelNode): void {

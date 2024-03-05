@@ -25,9 +25,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   }, [props.node])
 
-  const { eventEmmiter } = useCleoEngine();
+  const { eventEmitter: eventEmitter } = useCleoEngine();
 
-  useEffect(() => { eventEmmiter.emit('TEXTURES_CHANGED') }, [])
+  useEffect(() => { eventEmitter.emit('TEXTURES_CHANGED') }, [])
 
   return (
     <Collapsable title='Material'>

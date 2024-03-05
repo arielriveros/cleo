@@ -6,16 +6,16 @@ import ShapeEditor from './ShapeEditor';
 import './Styles.css'
 
 export default function PhysicsEditor(props: {node: Node}) {
-  const { bodies, triggers, eventEmmiter } = useCleoEngine();
+  const { bodies, triggers, eventEmitter: eventEmitter } = useCleoEngine();
   const [bodyProperties, setBodyProperties] = useState<BodyDescription | null>(null)
   const [triggerProperties, setTriggerProperties] = useState<{shapes: ShapeDescription[]} | null>(null);
   const [sceneChanged, setSceneChanged] = useState(false);
 
   useEffect(() => {
     const handleSceneChanged = () => { setSceneChanged(true); };
-    eventEmmiter.on('SCENE_CHANGED', handleSceneChanged);
-    return () => { eventEmmiter.off('SCENE_CHANGED', handleSceneChanged) };
-  }, [eventEmmiter]);
+    eventEmitter.on('SCENE_CHANGED', handleSceneChanged);
+    return () => { eventEmitter.off('SCENE_CHANGED', handleSceneChanged) };
+  }, [eventEmitter]);
 
   useEffect(() => {
     if(sceneChanged) setSceneChanged(false)

@@ -11,7 +11,7 @@ function TextureItem({ textureName }: { textureName: string }) {
 }
 
 export default function TextureExplorer() {
-  const { eventEmmiter } = useCleoEngine();
+  const { eventEmitter: eventEmitter } = useCleoEngine();
 
   const [texturesList, setTexturesList] = useState<string[]>([]);
 
@@ -23,13 +23,13 @@ export default function TextureExplorer() {
       setTexturesList(textureNames);
     };
     
-    eventEmmiter.on('TEXTURES_CHANGED', handleTexturesChanged);
+    eventEmitter.on('TEXTURES_CHANGED', handleTexturesChanged);
 
     return () => {
-        eventEmmiter.off('TEXTURES_CHANGED', handleTexturesChanged); // Remove the listener on component unmount
+        eventEmitter.off('TEXTURES_CHANGED', handleTexturesChanged); // Remove the listener on component unmount
     };
 
-  }, [eventEmmiter]);
+  }, [eventEmitter]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -42,7 +42,7 @@ export default function TextureExplorer() {
           const name = file.name;
           if (data) {
             TextureManager.Instance.addTextureFromBase64(data as string, { wrapping: 'repeat' }, name);
-            eventEmmiter.emit('TEXTURES_CHANGED');
+            eventEmitter.emit('TEXTURES_CHANGED');
           }
         }
         reader.readAsDataURL(file);

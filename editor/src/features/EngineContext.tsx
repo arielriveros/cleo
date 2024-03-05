@@ -54,7 +54,7 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 const EngineContext = createContext<{
   instance: CleoEngine | null;
   editorScene: Scene;
-  eventEmmiter: EventEmitter;
+  eventEmitter: EventEmitter;
   selectedNode: string | null;
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
@@ -62,7 +62,7 @@ const EngineContext = createContext<{
   }>({
     instance: null,
     editorScene: new Scene(),
-    eventEmmiter: new EventEmitter(),
+    eventEmitter: new EventEmitter(),
     selectedNode: null,
     scripts: new Map(),
     bodies: new Map(),
@@ -77,7 +77,7 @@ export const useCleoEngine = () => {
 export function EngineProvider(props: { children: React.ReactNode }) {
   const instanceRef = useRef<CleoEngine | null>(null);
   const editorSceneRef = useRef<Scene>(new Scene());
-  const eventEmmiter = useRef(new EventEmitter());
+  const eventEmitter = useRef(new EventEmitter());
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const scriptsRef = useRef(new Map<string, string>());
   const bodiesRef = useRef(new Map<string, BodyDescription>());
@@ -233,16 +233,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           graphics: {
               clearColor: [0.65, 0.65, 0.71, 1.0],
           },
-          loggerListener: (log) => {
-            eventEmmiter.current.emit('LOG', log);
-          }
       });
 
       instanceRef.current = engine;
       instanceRef.current.isPaused = false;
-      
 
-      editorSceneRef.current.onChange = () => { eventEmmiter.current.emit('SCENE_CHANGED') }; // Emit the "sceneChanged" event 
+      CleoEngine.eventEmitter.on('LOG', (log) => { eventEmitter.current.emit('LOG', log) });
+      CleoEngine.eventEmitter.on('SCENE_CHANGED', () => { eventEmitter.current.emit('SCENE_CHANGED') });
       
       setupInitialScene();
 
@@ -251,7 +248,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       TextureManager.Instance.addTextureFromBase64(LightIcon, {
         mipMap: false
       }, '__editor__light_icon');
-      eventEmmiter.current.emit('TEXTURES_CHANGED');
+      eventEmitter.current.emit('TEXTURES_CHANGED');
 
       // Setting the editor scene and camera
       engine.setScene(editorSceneRef.current);
@@ -265,7 +262,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Event handling
   useEffect(() => {
-    eventEmmiter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
+    eventEmitter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
       if (!instanceRef.current) return;
 
       // change camera to 2D
@@ -317,7 +314,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
     });
 
-    eventEmmiter.current.on('SET_PLAY_STATE', (state: 'play' | 'pause' | 'stop') => {
+    eventEmitter.current.on('SET_PLAY_STATE', (state: 'play' | 'pause' | 'stop') => {
       if (!instanceRef.current) return;
       if (state === 'play') {
         instanceRef.current.isPaused = false;
@@ -330,25 +327,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
     });
 
-    eventEmmiter.current.on('SELECT_NODE', (node: string | null) => {
+    eventEmitter.current.on('SELECT_NODE', (node: string | null) => {
       setSelectedNode(node);
     });
 
     // Default values
-    eventEmmiter.current.emit('CHANGE_DIMENSION', '3D');
-    eventEmmiter.current.emit('SET_PLAY_STATE', 'stop');
-    eventEmmiter.current.emit('SELECT_SCRIPT', null);
+    eventEmitter.current.emit('CHANGE_DIMENSION', '3D');
+    eventEmitter.current.emit('SET_PLAY_STATE', 'stop');
+    eventEmitter.current.emit('SELECT_SCRIPT', null);
 
     return () => {
-      eventEmmiter.current.removeAllListeners();
+      eventEmitter.current.removeAllListeners();
     }
-  }, [eventEmmiter]);
+  }, [eventEmitter]);
 
   return (
   <EngineContext.Provider value={{
       instance: instanceRef.current,
       editorScene: editorSceneRef.current,
-      eventEmmiter: eventEmmiter.current,
+      eventEmitter: eventEmitter.current,
       selectedNode,
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,

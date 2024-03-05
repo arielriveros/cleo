@@ -6,7 +6,7 @@ import Collapsable from '../../../components/Collapsable'
 import './Styles.css'
 
 export default function NodeInfo(props: {node: Node}) {
-  const { eventEmmiter } = useCleoEngine();
+  const { eventEmitter: eventEmitter } = useCleoEngine();
   const [nodeName, setNodeName] = useState(props.node.name);
 
   useEffect(() => {
@@ -36,8 +36,8 @@ export default function NodeInfo(props: {node: Node}) {
       return;
     }
     props.node.name = nodeName
-    eventEmmiter.emit('SCENE_CHANGED');
-    eventEmmiter.emit('SELECT_NODE', props.node.id);
+    eventEmitter.emit('SCENE_CHANGED');
+    eventEmitter.emit('SELECT_NODE', props.node.id);
   }
 
   return (

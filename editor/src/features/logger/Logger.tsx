@@ -3,7 +3,7 @@ import { useCleoEngine } from '../EngineContext';
 import './Styles.css';
 
 export default function Logger() {
-  const { eventEmmiter } = useCleoEngine();
+  const { eventEmitter: eventEmitter } = useCleoEngine();
   const [filter, setFilter] = useState({
     log: true,
     info: true,
@@ -20,12 +20,12 @@ export default function Logger() {
       setLogs((prevLogs) => [log, ...prevLogs]);
     };
 
-    eventEmmiter.on('LOG', handleLog);
+    eventEmitter.on('LOG', handleLog);
 
     return () => {
-      eventEmmiter.off('LOG', handleLog);
+      eventEmitter.off('LOG', handleLog);
     };
-  }, [eventEmmiter]);
+  }, [eventEmitter]);
 
   return (
     <div className='logger'>

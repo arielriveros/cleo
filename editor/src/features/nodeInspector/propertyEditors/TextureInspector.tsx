@@ -5,7 +5,7 @@ import ImportIcon from '../../../icons/import.png';
 import NullImage from '../../../images/null.png';
 
 export default function TextureInspector(props: { tex: string, material: Material }) {
-  const { eventEmmiter } = useCleoEngine();
+  const { eventEmitter: eventEmitter } = useCleoEngine();
   const [texture, setTexture] = useState<string | null>(null);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [texturesIds, setTexturesIds] = useState<string[]>([]);
@@ -63,7 +63,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
 
         TextureManager.Instance.addTextureFromData(img, { wrapping: 'repeat' }, texName);
         onTextureSelect(texName);
-        eventEmmiter.emit("TEXTURES_CHANGED");
+        eventEmitter.emit("TEXTURES_CHANGED");
       }
     }
     reader.readAsDataURL(file);
@@ -95,11 +95,11 @@ export default function TextureInspector(props: { tex: string, material: Materia
         }
       }
     }
-    eventEmmiter.on("TEXTURES_CHANGED", handleTexturesChanged);
+    eventEmitter.on("TEXTURES_CHANGED", handleTexturesChanged);
     return () => {
-      eventEmmiter.off("TEXTURES_CHANGED", handleTexturesChanged);
+      eventEmitter.off("TEXTURES_CHANGED", handleTexturesChanged);
     }
-  }, [eventEmmiter, textureMissing, texture]);
+  }, [eventEmitter, textureMissing, texture]);
 
   return (
     <div className='texture-inspector'>

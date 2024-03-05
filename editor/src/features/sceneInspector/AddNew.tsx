@@ -53,7 +53,7 @@ function AddButton(props: AddButtonProps) {
 
 export default function AddNew() {
   const [node, setNode] = useState<Node | null>(null)
-  const { editorScene, selectedNode, eventEmmiter, triggers } = useCleoEngine();
+  const { editorScene, selectedNode, eventEmitter: eventEmitter, triggers } = useCleoEngine();
 
   useEffect(() => {
     if (editorScene && selectedNode) {
@@ -64,7 +64,7 @@ export default function AddNew() {
 
   const addNode = (newNode: Node) => {
     node?.addChild(newNode);
-    eventEmmiter.emit('SELECT_NODE', newNode.id);
+    eventEmitter.emit('SELECT_NODE', newNode.id);
   }
 
   const addTrigger = () => {

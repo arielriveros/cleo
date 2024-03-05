@@ -7,7 +7,7 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, triggers, eventEmmiter } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, triggers, eventEmitter: eventEmitter } = useCleoEngine();
   const [started, setStarted] = useState(false);
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
 
@@ -17,9 +17,9 @@ export default function MenuBar() {
       if (state === 'pause') setPlayState('paused');
       if (state === 'stop') setPlayState('stopped');
     }
-    eventEmmiter.on('SET_PLAY_STATE', handlePlayState);
-    return () => { eventEmmiter.off('SET_PLAY_STATE', handlePlayState) };
-  }, [eventEmmiter]);
+    eventEmitter.on('SET_PLAY_STATE', handlePlayState);
+    return () => { eventEmitter.off('SET_PLAY_STATE', handlePlayState) };
+  }, [eventEmitter]);
   
   const clearDebuggingNodes = (json: any) => {
     const iterateChildren = (children: any[]) => {
@@ -113,7 +113,7 @@ export default function MenuBar() {
     instance.input.preventDefault();
 
     if (started) {
-      eventEmmiter.emit('SET_PLAY_STATE', 'play');
+      eventEmitter.emit('SET_PLAY_STATE', 'play');
       return;
     }
 
@@ -134,7 +134,7 @@ export default function MenuBar() {
       // add a little delay to make sure the scene is set before starting it
       setTimeout(() => { instance.scene.start(); } , 100);
 
-      eventEmmiter.emit('SET_PLAY_STATE', 'play');
+      eventEmitter.emit('SET_PLAY_STATE', 'play');
       setStarted(true);
     });
   }
@@ -145,11 +145,11 @@ export default function MenuBar() {
     instance.setScene(editorScene as Scene);
     instance.input.clear(); // Clear any registered input that might be left from the game
     instance.physics.clear(); // Clear any physics bodies that might be left from the game
-    eventEmmiter.emit('SET_PLAY_STATE', 'stop');
+    eventEmitter.emit('SET_PLAY_STATE', 'stop');
   }
 
   const onPause = () => {
-    eventEmmiter.emit('SET_PLAY_STATE', 'pause');
+    eventEmitter.emit('SET_PLAY_STATE', 'pause');
   }
 
   return (
@@ -172,7 +172,7 @@ export default function MenuBar() {
       </div>
       <div className='dimension-controls'>
         <p>Mode</p>
-        <select disabled={ playState==='playing' || playState==='paused' } onChange={(e) => eventEmmiter.emit('CHANGE_DIMENSION', (e.target.value as '2D' | '3D'))}>
+        <select disabled={ playState==='playing' || playState==='paused' } onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', (e.target.value as '2D' | '3D'))}>
           <option value='3D'>3D</option>
           <option value='2D'>2D</option>
         </select>

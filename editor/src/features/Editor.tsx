@@ -12,7 +12,7 @@ import Logger from "./logger/Logger";
 import './Editor.css'
 
 export default function Editor() {
-  const { instance, eventEmmiter } = useCleoEngine();
+  const { instance, eventEmitter } = useCleoEngine();
   const [barsDimensions, setBarsDimensions] = useState({
     left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15
   });
@@ -27,9 +27,9 @@ export default function Editor() {
         setBarsDimensions({left: 0, right: 0, minLeft: 0, minRight: 0, height: 0, minHeight: 0});
       }
     }
-    eventEmmiter.on('SET_PLAY_STATE', handlePlayState);
-    return () => { eventEmmiter.off('SET_PLAY_STATE', handlePlayState) };    
-  }, [eventEmmiter]);
+    eventEmitter.on('SET_PLAY_STATE', handlePlayState);
+    return () => { eventEmitter.off('SET_PLAY_STATE', handlePlayState) };    
+  }, [eventEmitter]);
 
   useEffect(() => {
     if (!instance) return;
