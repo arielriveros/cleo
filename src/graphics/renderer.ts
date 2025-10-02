@@ -14,6 +14,8 @@ import BasicVertex from './shaders/materials/basic.vs'
 import BasicFragment from './shaders/materials/basic.fs'
 import DefaultVertex from './shaders/materials/default.vs'
 import DefaultFragment from './shaders/materials/default.fs'
+import OutlineVertex from './shaders/materials/outline.vs'
+import OutlineFragment from './shaders/materials/outline.fs'
 
 import ShadowMapVertex from './shaders/environment/shadowMap.vs'
 import ShadowMapFragment from './shaders/environment/shadowMap.fs'
@@ -47,6 +49,7 @@ export class Renderer {
 
     private _exposure: number = 1.0;
     private _chromaticAberrationStrength: number = 0.0;
+    private _selectedNodeId: string | null = null;
 
     private _sceneFBO: Framebuffer;
     private _shadowMapFBO: Framebuffer;
@@ -112,6 +115,8 @@ export class Renderer {
         const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
         const chromaticAbShader = new Shader().create(ScreenVertex, ChromaticAberration);
         const composerShader = new Shader().create(ScreenVertex, Composer);
+        // Outline shader
+        const outlineShader = new Shader().create(OutlineVertex, OutlineFragment);
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
@@ -123,6 +128,7 @@ export class Renderer {
         this._shaderManager.addShader('blur', blurShader);
         this._shaderManager.addShader('chromaticAberration', chromaticAbShader);
         this._shaderManager.addShader('composer', composerShader);
+        this._shaderManager.addShader('outline', outlineShader);
 
         // Create framebuffers
         this._sceneFBO.create(this._canvas.width, this._canvas.height);
@@ -202,6 +208,17 @@ export class Renderer {
     }
     public get context(): WebGL2RenderingContext { return gl; }
 
+    public setSelectedNode(nodeId: string | null): void {
+        this._selectedNodeId = nodeId;
+    }
+
+    private _collectAllChildren(node: any, allNodes: any[]): void {
+        allNodes.push(node);
+        for (const child of node.children) {
+            this._collectAllChildren(child, allNodes);
+        }
+    }
+
     private _renderScene(scene: Scene): void {
         this._sceneFBO.bind();
         gl.viewport(0, 0, this._canvas.width, this._canvas.height);
@@ -225,14 +242,33 @@ export class Renderer {
         }
 
         const transparentDrawQueue: ModelNode[] = [];
+        const selectedNodes: ModelNode[] = [];
         
+        // First pass: collect selected nodes and render non-selected models
         for (const node of scene.models) {
             if (!node.visible) continue;
-            // Add to transparent draw queue if transparent so that it is drawn last
-            if (node.model.material.config.transparent === true)
-                transparentDrawQueue.push(node);
-            else
-                this._renderModel(node);
+            
+            // Check if this node is selected
+            if (this._selectedNodeId && node.id === this._selectedNodeId) {
+                selectedNodes.push(node);
+            } else {
+                // Add to transparent draw queue if transparent so that it is drawn last
+                if (node.model.material.config.transparent === true)
+                    transparentDrawQueue.push(node);
+                else
+                    this._renderModel(node);
+            }
+        }
+
+        // Render outlines for selected nodes FIRST (before the selected objects)
+        if (selectedNodes.length > 0) {
+            this._renderOutlines(selectedNodes);
+        }
+
+        // Now render the selected objects normally
+        for (const node of selectedNodes) {
+            if (!node.visible) continue;
+            this._renderModel(node);
         }
 
         // Sort transparent draw queue by distance to camera
@@ -247,16 +283,39 @@ export class Renderer {
             this._renderModel(node);
 
         const spriteNodes = Array.from(scene.sprites);
-        // sort sprites by distance to camera, same as transparent models
-        spriteNodes.sort((a, b) => {
+        const selectedSprites: SpriteNode[] = [];
+        const nonSelectedSprites: SpriteNode[] = [];
+        
+        // Separate selected and non-selected sprites
+        for (const node of spriteNodes) {
+            if (!node.visible) continue;
+            
+            if (this._selectedNodeId && node.id === this._selectedNodeId) {
+                selectedSprites.push(node);
+            } else {
+                nonSelectedSprites.push(node);
+            }
+        }
+
+        // Sort non-selected sprites by distance to camera
+        nonSelectedSprites.sort((a, b) => {
             const aDist = vec3.distance(this._activeCamera.position, a.worldPosition);
             const bDist = vec3.distance(this._activeCamera.position, b.worldPosition);
-
             return bDist - aDist;
         });
 
-        for (const node of spriteNodes) {
-            if (!node.visible) continue;
+        // Render non-selected sprites first
+        for (const node of nonSelectedSprites) {
+            this._renderSprite(node);
+        }
+
+        // Render outlines for selected sprites
+        if (selectedSprites.length > 0) {
+            this._renderSpriteOutlines(selectedSprites);
+        }
+
+        // Render selected sprites normally
+        for (const node of selectedSprites) {
             this._renderSprite(node);
         }
     }
@@ -612,4 +671,182 @@ export class Renderer {
 
     public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
     public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
+
+    private _renderOutlines(selectedNodes: ModelNode[]): void {
+        // Collect all nodes including children
+        const allNodesToOutline: any[] = [];
+        for (const node of selectedNodes) {
+            this._collectAllChildren(node, allNodesToOutline);
+        }
+
+        // Enable stencil testing for outline rendering
+        gl.enable(gl.STENCIL_TEST);
+        
+        // First pass: write to stencil buffer for selected objects and their children
+        gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+        gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
+        gl.stencilMask(0xFF);
+        
+        // Render selected objects to stencil buffer (invisible)
+        gl.colorMask(false, false, false, false);
+        gl.disable(gl.DEPTH_TEST);
+        
+        this._shaderManager.bind('outline');
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_outlineColor', [0.0, 1.0, 0.0]);
+        this._shaderManager.setUniform('u_outlineWidth', 0.02);
+
+        for (const node of allNodesToOutline) {
+            if (!node.initialized || !node.model) continue;
+            this._shaderManager.setUniform('u_model', node.worldTransform);
+            node.model.mesh.draw(gl.TRIANGLES);
+        }
+
+        // Second pass: render outline where stencil is NOT 1
+        gl.colorMask(true, true, true, true);
+        gl.stencilFunc(gl.NOTEQUAL, 1, 0xFF);
+        gl.stencilMask(0x00);
+        gl.disable(gl.DEPTH_TEST);
+
+        // Render slightly larger outline
+        for (const node of allNodesToOutline) {
+            if (!node.initialized || !node.model) continue;
+
+            // Create a scaled transform matrix for the outline
+            const outlineTransform = mat4.create();
+            mat4.copy(outlineTransform, node.worldTransform);
+            
+            // Scale the transform matrix by 1.05 to make the outline slightly larger
+            mat4.scale(outlineTransform, outlineTransform, [1.05, 1.05, 1.05]);
+
+            this._shaderManager.setUniform('u_model', outlineTransform);
+            node.model.mesh.draw(gl.TRIANGLES);
+        }
+
+        // Restore settings
+        gl.stencilMask(0xFF);
+        gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
+        gl.enable(gl.DEPTH_TEST);
+        gl.disable(gl.STENCIL_TEST);
+    }
+
+    private _renderSpriteOutlines(selectedSprites: SpriteNode[]): void {
+        // Collect all nodes including children
+        const allNodesToOutline: any[] = [];
+        for (const node of selectedSprites) {
+            this._collectAllChildren(node, allNodesToOutline);
+        }
+
+        // Enable stencil testing for outline rendering
+        gl.enable(gl.STENCIL_TEST);
+        
+        // First pass: write to stencil buffer for selected sprites and their children
+        gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+        gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
+        gl.stencilMask(0xFF);
+        
+        // Render selected sprites to stencil buffer (invisible)
+        gl.colorMask(false, false, false, false);
+        gl.disable(gl.DEPTH_TEST);
+        
+        this._shaderManager.bind('outline');
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_outlineColor', [0.0, 1.0, 0.0]);
+        this._shaderManager.setUniform('u_outlineWidth', 0.02);
+
+        for (const node of allNodesToOutline) {
+            if (!node.initialized || !node.sprite) continue;
+            
+            // Apply the same transform logic as _renderSprite
+            const spriteMatrix = mat4.clone(node.worldTransform);
+            const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
+
+            if (constraints === 'spherical') {
+                spriteMatrix[0] = this._activeCamera.viewMatrix[0];
+                spriteMatrix[1] = this._activeCamera.viewMatrix[4];
+                spriteMatrix[2] = this._activeCamera.viewMatrix[8];
+                spriteMatrix[4] = this._activeCamera.viewMatrix[1];
+                spriteMatrix[5] = this._activeCamera.viewMatrix[5];
+                spriteMatrix[6] = this._activeCamera.viewMatrix[9];
+                spriteMatrix[8] = this._activeCamera.viewMatrix[2];
+                spriteMatrix[9] = this._activeCamera.viewMatrix[6];
+                spriteMatrix[10] = this._activeCamera.viewMatrix[10];
+                // reapply scaling
+                mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
+            }
+            else if (constraints === 'cylindrical') {
+                spriteMatrix[0] = this._activeCamera.viewMatrix[0];
+                spriteMatrix[1] = this._activeCamera.viewMatrix[4];
+                spriteMatrix[2] = this._activeCamera.viewMatrix[8];
+                spriteMatrix[4] = 0;
+                spriteMatrix[5] = 1;
+                spriteMatrix[6] = 0;
+                spriteMatrix[8] = this._activeCamera.viewMatrix[2];
+                spriteMatrix[9] = this._activeCamera.viewMatrix[6];
+                spriteMatrix[10] = this._activeCamera.viewMatrix[10];
+                // reapply scaling
+                mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
+            }
+
+            this._shaderManager.setUniform('u_model', spriteMatrix);
+            node.sprite.mesh.draw(gl.TRIANGLES);
+        }
+
+        // Second pass: render outline where stencil is NOT 1
+        gl.colorMask(true, true, true, true);
+        gl.stencilFunc(gl.NOTEQUAL, 1, 0xFF);
+        gl.stencilMask(0x00);
+        gl.disable(gl.DEPTH_TEST);
+
+        // Render slightly larger outline
+        for (const node of allNodesToOutline) {
+            if (!node.initialized || !node.sprite) continue;
+
+            // Create a scaled transform matrix for the outline with same constraints
+            const outlineTransform = mat4.create();
+            mat4.copy(outlineTransform, node.worldTransform);
+            const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
+
+            if (constraints === 'spherical') {
+                outlineTransform[0] = this._activeCamera.viewMatrix[0];
+                outlineTransform[1] = this._activeCamera.viewMatrix[4];
+                outlineTransform[2] = this._activeCamera.viewMatrix[8];
+                outlineTransform[4] = this._activeCamera.viewMatrix[1];
+                outlineTransform[5] = this._activeCamera.viewMatrix[5];
+                outlineTransform[6] = this._activeCamera.viewMatrix[9];
+                outlineTransform[8] = this._activeCamera.viewMatrix[2];
+                outlineTransform[9] = this._activeCamera.viewMatrix[6];
+                outlineTransform[10] = this._activeCamera.viewMatrix[10];
+                // reapply scaling with outline scale
+                mat4.scale(outlineTransform, outlineTransform, [node.worldScale[0] * 1.05, node.worldScale[1] * 1.05, node.worldScale[2] * 1.05]);
+            }
+            else if (constraints === 'cylindrical') {
+                outlineTransform[0] = this._activeCamera.viewMatrix[0];
+                outlineTransform[1] = this._activeCamera.viewMatrix[4];
+                outlineTransform[2] = this._activeCamera.viewMatrix[8];
+                outlineTransform[4] = 0;
+                outlineTransform[5] = 1;
+                outlineTransform[6] = 0;
+                outlineTransform[8] = this._activeCamera.viewMatrix[2];
+                outlineTransform[9] = this._activeCamera.viewMatrix[6];
+                outlineTransform[10] = this._activeCamera.viewMatrix[10];
+                // reapply scaling with outline scale
+                mat4.scale(outlineTransform, outlineTransform, [node.worldScale[0] * 1.05, node.worldScale[1] * 1.05, node.worldScale[2] * 1.05]);
+            } else {
+                // For 'free' constraint, just scale the transform matrix
+                mat4.scale(outlineTransform, outlineTransform, [1.05, 1.05, 1.05]);
+            }
+
+            this._shaderManager.setUniform('u_model', outlineTransform);
+            node.sprite.mesh.draw(gl.TRIANGLES);
+        }
+
+        // Restore settings
+        gl.stencilMask(0xFF);
+        gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
+        gl.enable(gl.DEPTH_TEST);
+        gl.disable(gl.STENCIL_TEST);
+    }
 }

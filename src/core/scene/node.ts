@@ -712,7 +712,7 @@ export class ModelNode extends Node {
     public getBoundingBox(): { min: vec3, max: vec3 } {
         const position = this.worldPosition;
         const scale = this.worldScale;
-        
+
         // Get the model's geometry bounds
         const geometry = this._model.geometry;
         const positions = geometry.positions;
@@ -729,34 +729,32 @@ export class ModelNode extends Node {
             return { min, max };
         }
         
-        // Calculate bounding box from geometry vertices
+        // Calculate bounding box from geometry vertices with proper transformation
         let minX = Infinity, minY = Infinity, minZ = Infinity;
         let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
         
+        // Use the world transform matrix directly (already includes position, rotation, scale)
+        const transform = this.worldTransform;
+        
         for (let i = 0; i < positions.length; i++) {
             const vertex = positions[i];
-            const x = vertex[0] * scale[0];
-            const y = vertex[1] * scale[1];
-            const z = vertex[2] * scale[2];
             
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            minZ = Math.min(minZ, z);
-            maxX = Math.max(maxX, x);
-            maxY = Math.max(maxY, y);
-            maxZ = Math.max(maxZ, z);
+            // Transform vertex using the world transform matrix
+            const transformedVertex = vec3.create();
+            // Ensure vertex is a Float32Array for gl-matrix compatibility
+            const vertexVec = (vertex instanceof Float32Array) ? vertex : vec3.fromValues(vertex[0], vertex[1], vertex[2]);
+            vec3.transformMat4(transformedVertex, vertexVec, transform);
+
+            minX = Math.min(minX, transformedVertex[0]);
+            minY = Math.min(minY, transformedVertex[1]);
+            minZ = Math.min(minZ, transformedVertex[2]);
+            maxX = Math.max(maxX, transformedVertex[0]);
+            maxY = Math.max(maxY, transformedVertex[1]);
+            maxZ = Math.max(maxZ, transformedVertex[2]);
         }
         
-        const min = vec3.fromValues(
-            position[0] + minX,
-            position[1] + minY,
-            position[2] + minZ
-        );
-        const max = vec3.fromValues(
-            position[0] + maxX,
-            position[1] + maxY,
-            position[2] + maxZ
-        );
+        const min = vec3.fromValues(minX, minY, minZ);
+        const max = vec3.fromValues(maxX, maxY, maxZ);
         
         return { min, max };
     }
@@ -1069,8 +1067,8 @@ export class CameraNode extends Node {
         const position = this.worldPosition;
         const scale = this.worldScale;
         
-        // Camera has a small bounding box
-        const radius = Math.max(scale[0], scale[1], scale[2]) * 0.2;
+        // Camera has a larger bounding box for easier selection
+        const radius = Math.max(scale[0], scale[1], scale[2]) * 0.5;
         
         const min = vec3.fromValues(
             position[0] - radius,

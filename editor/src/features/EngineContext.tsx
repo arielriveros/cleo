@@ -331,53 +331,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       console.log('SELECT_NODE event received:', node);
       setSelectedNode(node);
       
-      // Add visual feedback for selected node
-      if (node && editorSceneRef.current) {
-        const selectedNodeObj = editorSceneRef.current.getNodeById(node);
-        console.log('Selected node object:', selectedNodeObj);
-        
-        if (selectedNodeObj) {
-          try {
-            // Remove any existing selection outline
-            const existingOutline = editorSceneRef.current.getNodesByName('__selection__outline');
-            existingOutline.forEach(outline => editorSceneRef.current.removeNode(outline));
-            
-            // Create selection outline for any node type
-            const outlineModel = new Model(
-              Geometry.Cube(1.1, 1.1, 1.1, true), 
-              Material.Basic({color: [0, 1, 0]}, {wireframe: true, side: 'double'})
-            );
-            const outlineNode = new ModelNode('__selection__outline', outlineModel);
-            
-            // Position the outline to match the selected node
-            outlineNode.setPosition(selectedNodeObj.worldPosition);
-            outlineNode.setQuaternion(selectedNodeObj.worldQuaternion);
-            outlineNode.setScale(selectedNodeObj.worldScale);
-            
-            // Add update function to keep outline in sync with selected node
-            outlineNode.onUpdate = (node) => {
-              if (selectedNodeObj) {
-                node.setPosition(selectedNodeObj.worldPosition);
-                node.setQuaternion(selectedNodeObj.worldQuaternion);
-                node.setScale(selectedNodeObj.worldScale);
-              }
-            };
-            
-            editorSceneRef.current.addNode(outlineNode);
-            console.log('Selection outline created for node:', selectedNodeObj.name);
-          } catch (error) {
-            console.warn('Failed to create selection outline:', error);
-          }
-        }
-      } else {
-        // Remove selection outline when no node is selected
-        try {
-          const existingOutline = editorSceneRef.current.getNodesByName('__selection__outline');
-          existingOutline.forEach(outline => editorSceneRef.current.removeNode(outline));
-          console.log('Selection outline removed');
-        } catch (error) {
-          console.warn('Failed to remove selection outline:', error);
-        }
+      // Use stencil-based outlining instead of creating outline nodes
+      if (instanceRef.current && instanceRef.current.renderer) {
+        instanceRef.current.renderer.setSelectedNode(node);
+        console.log('Selection updated in renderer:', node);
       }
     });
 
