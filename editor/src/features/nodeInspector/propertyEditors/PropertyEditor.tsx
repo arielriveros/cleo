@@ -8,11 +8,13 @@ import CameraEditor from './CameraEditor'
 import SpriteEditor from './SpriteEditor'
 
 export default function PropertyEditor(props: {node: Node}) {
+  // Check if the node is the root node
+  const isRootNode = props.node.id === 'root' || props.node.name === 'root';
 
   return (
     <>
         <NodeInfo node={props.node} />
-        <TransformEditor node={props.node} />
+        {!isRootNode && <TransformEditor node={props.node} />}
 
         { props.node.nodeType === 'model' && <MaterialEditor node={props.node as ModelNode} /> }
         { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }

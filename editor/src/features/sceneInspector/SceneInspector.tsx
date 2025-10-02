@@ -101,7 +101,7 @@ function SceneListRecursive(props: SceneListRecursiveProps) {
 
 
 export default function SceneInspector() {
-  const { editorScene, eventEmitter, bodies } = useCleoEngine()
+  const { editorScene, eventEmitter, bodies, isPlayMode } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
 
   // generate a recursive list of id nodes where each node has a list of children
@@ -160,10 +160,14 @@ export default function SceneInspector() {
   }, [eventEmitter, editorScene]);
 
   const handleSelectNode = (nodeId: string | null) => {
+    // Don't allow node selection during play mode
+    if (isPlayMode) return;
     eventEmitter.emit('SELECT_NODE', nodeId);
   }
 
   const handleSetVisibility = (nodeId: string) => {
+    // Don't allow visibility changes during play mode
+    if (isPlayMode) return;
     const node = editorScene?.getNodeById(nodeId);
     if (node) node.visible = !node.visible;
   }

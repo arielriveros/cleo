@@ -243,13 +243,18 @@ export class Renderer {
 
         const transparentDrawQueue: ModelNode[] = [];
         const selectedNodes: ModelNode[] = [];
+        const gizmoNodes: ModelNode[] = [];
         
-        // First pass: collect selected nodes and render non-selected models
+        // First pass: collect selected nodes, gizmo nodes, and render non-selected models
         for (const node of scene.models) {
             if (!node.visible) continue;
             
+            // Check if this is a gizmo node and it's visible
+            if ((node as any).isGizmo && node.visible) {
+                gizmoNodes.push(node);
+            }
             // Check if this node is selected
-            if (this._selectedNodeId && node.id === this._selectedNodeId) {
+            else if (this._selectedNodeId && node.id === this._selectedNodeId) {
                 selectedNodes.push(node);
             } else {
                 // Add to transparent draw queue if transparent so that it is drawn last
@@ -281,6 +286,11 @@ export class Renderer {
 
         for (const node of transparentDrawQueue)
             this._renderModel(node);
+
+        // Render gizmo nodes last (on top of everything)
+        if (gizmoNodes.length > 0) {
+            this._renderGizmos(gizmoNodes);
+        }
 
         const spriteNodes = Array.from(scene.sprites);
         const selectedSprites: SpriteNode[] = [];
@@ -536,6 +546,8 @@ export class Renderer {
         gl.cullFace(gl.FRONT);
         for (const node of models) {
             if (!node.model.material.config.castShadow || node.model.material.config.wireframe) continue;
+            // Skip gizmo nodes from shadow casting
+            if ((node as any).isGizmo) continue;
             this._shaderManager.setUniform('u_isInstanced', false);
             this._shaderManager.setUniform('u_model', node.worldTransform);
             node.model.mesh.draw(gl.TRIANGLES);
@@ -694,7 +706,7 @@ export class Renderer {
         this._shaderManager.bind('outline');
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
-        this._shaderManager.setUniform('u_outlineColor', [0.0, 1.0, 0.0]);
+        this._shaderManager.setUniform('u_outlineColor', [1.0, 0.0, 1.0]);
         this._shaderManager.setUniform('u_outlineWidth', 0.02);
 
         for (const node of allNodesToOutline) {
@@ -753,7 +765,7 @@ export class Renderer {
         this._shaderManager.bind('outline');
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
-        this._shaderManager.setUniform('u_outlineColor', [0.0, 1.0, 0.0]);
+        this._shaderManager.setUniform('u_outlineColor', [1.0, 0.0, 1.0]);
         this._shaderManager.setUniform('u_outlineWidth', 0.02);
 
         for (const node of allNodesToOutline) {
@@ -848,5 +860,66 @@ export class Renderer {
         gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
         gl.enable(gl.DEPTH_TEST);
         gl.disable(gl.STENCIL_TEST);
+    }
+
+    private _renderGizmos(gizmoNodes: ModelNode[]): void {
+        // Disable depth testing for gizmos to render on top
+        gl.disable(gl.DEPTH_TEST);
+        
+        // Render each gizmo node
+        for (const node of gizmoNodes) {
+            if (!node.visible) continue;
+            
+            if (!node.initialized)
+                node.initializeModel();
+
+            this._shaderManager.bind(node.model.material.type);
+
+            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+
+            // Set Transform related uniforms
+            this._shaderManager.setUniform('u_model', node.worldTransform);
+
+            // Set Material related uniforms
+            for (const [name, value] of node.model.material.properties)
+                this._shaderManager.setUniform(`u_material.${name}`, value);
+
+            for (const [name, tex] of node.model.material.textures) {
+                let slot = 0;
+                switch(name) {
+                    case 'texture':
+                    case 'baseTexture':
+                        slot = 0;
+                        break;
+                    case 'specularMap':
+                        slot = 1;
+                        break;
+                    case 'emissiveMap':
+                        slot = 2;
+                        break;
+                    case 'normalMap':
+                        slot = 3;
+                        break;
+                    case 'maskMap':
+                        slot = 4;
+                        break;
+                    case 'reflectivityMap':
+                        slot = 5;
+                        break;
+                }
+                this._shaderManager.setUniform(`u_material.${name}`, slot);
+                const textureToBind = TextureManager.Instance.getTexture(tex);
+                if (!textureToBind) continue;
+                textureToBind.bind(slot);
+            }
+
+            // Draw the mesh
+            node.model.mesh.draw();
+        }
+        
+        // Re-enable depth testing
+        gl.enable(gl.DEPTH_TEST);
     }
 }

@@ -182,7 +182,8 @@ export class Raycaster {
             }
             
             // Skip editor debug nodes, debug shape nodes, editor grid, and editor camera
-            if (node.name.startsWith('__editor__') || 
+            // But allow gizmo nodes to be raycastable
+            if ((node.name.startsWith('__editor__') && !node.name.includes('gizmo')) || 
                 node.name.startsWith('__debug__') || 
                 node.name.startsWith('__debug__shape_')) {
                 console.log(`Skipping editor/debug node: ${node.name}`);

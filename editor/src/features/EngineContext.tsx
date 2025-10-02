@@ -56,6 +56,8 @@ const EngineContext = createContext<{
   editorScene: Scene;
   eventEmitter: EventEmitter;
   selectedNode: string | null;
+  isGizmoDragging: boolean;
+  isPlayMode: boolean;
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[]; }>;
@@ -64,6 +66,8 @@ const EngineContext = createContext<{
     editorScene: new Scene(),
     eventEmitter: new EventEmitter(),
     selectedNode: null,
+    isGizmoDragging: false,
+    isPlayMode: false,
     scripts: new Map(),
     bodies: new Map(),
     triggers: new Map()
@@ -79,6 +83,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editorSceneRef = useRef<Scene>(new Scene());
   const eventEmitter = useRef(new EventEmitter());
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [isGizmoDragging, setIsGizmoDragging] = useState(false);
+  const [isPlayMode, setIsPlayMode] = useState(false);
+  const isGizmoDraggingRef = useRef(false);
   const scriptsRef = useRef(new Map<string, string>());
   const bodiesRef = useRef(new Map<string, BodyDescription>());
   const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
@@ -277,7 +284,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         cameraNode.onUpdate = (node, delta, time) => {
             let mouse = InputManager.instance.mouse;
             let movement = delta;
-            if (mouse.buttons.Left) {
+            // Only allow camera controls when not dragging gizmo
+            if (mouse.buttons.Left && !isGizmoDraggingRef.current) {
                 node.addX(-mouse.velocity[0] * movement);
                 node.addY(mouse.velocity[1] * movement);
 
@@ -297,7 +305,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         cameraNode.onUpdate = (node, delta, time) => {
           let mouse = InputManager.instance.mouse;
           let movement = delta * 2;
-          if (mouse.buttons.Left) {
+          // Only allow camera controls when not dragging gizmo
+          if (mouse.buttons.Left && !isGizmoDraggingRef.current) {
             node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
             InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
             InputManager.instance.isKeyPressed('KeyS') && node.addForward(-movement);
@@ -318,12 +327,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!instanceRef.current) return;
       if (state === 'play') {
         instanceRef.current.isPaused = false;
+        setIsPlayMode(true);
       }
       else if (state === 'pause') {
         instanceRef.current.isPaused = true;
+        setIsPlayMode(true);
       }
       else if (state === 'stop') {
         instanceRef.current.isPaused = false; // Unpause for editor scene
+        setIsPlayMode(false);
       }
     });
 
@@ -336,6 +348,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         instanceRef.current.renderer.setSelectedNode(node);
         console.log('Selection updated in renderer:', node);
       }
+    });
+
+    eventEmitter.current.on('GIZMO_DRAG_START', (data: { axis: string, nodeId: string }) => {
+      console.log('GIZMO_DRAG_START event received:', data);
+      setIsGizmoDragging(true);
+      isGizmoDraggingRef.current = true;
+    });
+
+    eventEmitter.current.on('GIZMO_DRAG_END', (data: { axis: string | null, nodeId: string | null }) => {
+      console.log('GIZMO_DRAG_END event received:', data);
+      setIsGizmoDragging(false);
+      isGizmoDraggingRef.current = false;
     });
 
     // Default values
@@ -354,6 +378,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       editorScene: editorSceneRef.current,
       eventEmitter: eventEmitter.current,
       selectedNode,
+      isGizmoDragging,
+      isPlayMode,
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current
