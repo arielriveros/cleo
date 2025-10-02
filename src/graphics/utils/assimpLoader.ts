@@ -8,13 +8,37 @@ const MASK_TEXTURE = 8;
 
 const assimpjs = require('./assimpjs');
 
+/**
+ * Determines the correct base path for assets based on the current environment
+ * @param path The original path (e.g., '/assets/damagedHelmet/damaged_helmet.obj')
+ * @returns The corrected path for the current environment
+ */
+function resolveAssetPath(path: string): string {
+  // If the path already starts with http/https, use it as-is (for deployed scenarios)
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  
+  // For local development, use the public folder
+  if (path.startsWith('/assets/')) {
+    return path; // This works for local development with public folder
+  }
+  
+  // For deployed scenarios, try to construct the full URL
+  // This handles cases where the app is deployed to a subdirectory
+  const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+  return baseUrl + path;
+}
+
 async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: any[], materials: any[] }> {
     try {
         const ajs = await assimpjs();
 
         // Fetch the files to import
         let files = [...urls];
-        const responses = await Promise.all(files.map(file => fetch(file)));
+        // Resolve asset paths for both local and deployed scenarios
+        const resolvedFiles = files.map(file => resolveAssetPath(file));
+        const responses = await Promise.all(resolvedFiles.map(file => fetch(file)));
         const arrayBuffers = await Promise.all(responses.map(res => res.arrayBuffer()));
 
         // Create a new file list object and add the files

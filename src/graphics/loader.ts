@@ -3,6 +3,28 @@ import { Material } from "./material";
 import { OutputMaterial, loadAssimpModel, loadAssimpModelFromFiles, parseMaterial } from "./utils/assimpLoader";
 import { TextureManager } from "./systems/textureManager";
 
+/**
+ * Determines the correct base path for assets based on the current environment
+ * @param path The original path (e.g., '/assets/damagedHelmet/damaged_helmet.obj')
+ * @returns The corrected path for the current environment
+ */
+function resolveAssetPath(path: string): string {
+  // If the path already starts with http/https, use it as-is (for deployed scenarios)
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  
+  // For local development, use the public folder
+  if (path.startsWith('/assets/')) {
+    return path; // This works for local development with public folder
+  }
+  
+  // For deployed scenarios, try to construct the full URL
+  // This handles cases where the app is deployed to a subdirectory
+  const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+  return baseUrl + path;
+}
+
 export class Loader {
     public static async loadModelsFromPath(filePaths: string[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
         return new Promise(async (resolve, reject) => {
@@ -223,7 +245,7 @@ export class Loader {
     public static async loadImage(path: string): Promise<HTMLImageElement> {
         return new Promise((resolve, reject) => {
             const image = new Image();
-            image.src = path;
+            image.src = resolveAssetPath(path);
             image.onload = () => resolve(image);
             image.onerror = (err) => reject(err);
         });
@@ -232,7 +254,7 @@ export class Loader {
     public static ImageToArray(path: string): Promise<{data: Uint8Array, width: number, height: number}> {
         return new Promise((resolve, reject) => {
             const image = new Image();
-            image.src = path;
+            image.src = resolveAssetPath(path);
             image.onload = () => {
                 const data = new Uint8Array(image.width * image.height * 4);
                 const canvas = document.createElement('canvas');
