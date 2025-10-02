@@ -132,7 +132,7 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
 
     // Handle mouse interactions
     const handleMouseDown = (event: MouseEvent) => {
-        if (!selectedNodeId || !instance || !editorScene || !viewportRef.current) return;
+        if (!selectedNodeId || !instance || !instance.scene || !editorScene || !viewportRef.current) return;
 
         // Only handle left mouse button
         if (event.button !== 0) return;

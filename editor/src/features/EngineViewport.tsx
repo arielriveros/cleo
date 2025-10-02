@@ -123,10 +123,11 @@ export default function EngineViewport() {
         };
 
         const viewport = viewportRef.current;
-        viewport.addEventListener('mousedown', handleMouseDown);
-        viewport.addEventListener('mousemove', handleMouseMove);
-        viewport.addEventListener('mouseup', handleMouseUp);
-        viewport.addEventListener('click', handleClick);
+        // Use capture: false to allow events to bubble to the canvas
+        viewport.addEventListener('mousedown', handleMouseDown, false);
+        viewport.addEventListener('mousemove', handleMouseMove, false);
+        viewport.addEventListener('mouseup', handleMouseUp, false);
+        viewport.addEventListener('click', handleClick, false);
 
         return () => {
             viewport.removeEventListener('mousedown', handleMouseDown);

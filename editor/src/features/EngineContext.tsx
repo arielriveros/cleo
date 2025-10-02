@@ -90,7 +90,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const bodiesRef = useRef(new Map<string, BodyDescription>());
   const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
 
-  const setupInitialScene = () => {
+  const setupInitialScene = async () => {
     const editorCameraNode = new CameraNode('__editor__Camera', new Camera({ far: 10000 }));
     editorCameraNode.active = true;
     editorCameraNode.setPosition([4, 4, 4]).setRotation([30, -135, 0]);
@@ -125,6 +125,50 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Adding editor nodes to the scene
     editorSceneRef.current.addNodes(editorCameraNode, editorGridNode, xAxis, Yaxis, Zaxis);
 
+    // Load damaged helmet model
+    try {
+      const helmetModels = await Model.fromPath({
+        filePaths: [
+          '/assets/damagedHelmet/damaged_helmet.obj',
+          '/assets/damagedHelmet/damaged_helmet.mtl'
+        ]
+      });
+      
+      if (helmetModels.length > 0) {
+        const helmetModel = helmetModels[0];
+        const helmetNode = new ModelNode('damagedHelmet', helmetModel.model);
+        helmetNode.setPosition([-1, 3, 0]);
+        helmetNode.setRotation([0, 180, 0]);
+        helmetNode.setScale([1, 1, 1]);
+        editorSceneRef.current.addNodes(helmetNode);
+        
+        // Add physics body for the helmet
+        bodiesRef.current.set(helmetNode.id, {
+          mass: 1,
+          linearDamping: 0.01,
+          angularDamping: 0.8,
+          linearConstraints: [1, 1, 1],
+          angularConstraints: [1, 1, 1],
+          shapes: [ { type: 'sphere', radius: 0.5, offset: [0, 0, 0], rotation: [0, 0, 0] } ]
+        });
+        
+        // Add debug shape for the helmet body
+        const debugHelmetNode = new Node(`__debug__body_${helmetNode.id}`);
+        debugHelmetNode.onUpdate = (node) => {
+          node.setPosition(helmetNode.position);
+          node.setRotation(helmetNode.rotation);
+        };
+        const debugHelmetModel = new Model(Geometry.Sphere(8), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
+        const helmetModelNode = new ModelNode(`__debug__shape_0`, debugHelmetModel);
+        debugHelmetNode?.addChild(helmetModelNode);
+        editorSceneRef.current.addNode(debugHelmetNode);
+        
+        console.log('Damaged helmet model loaded successfully with physics');
+      }
+    } catch (error) {
+      console.error('Failed to load damaged helmet model:', error);
+    }
+
     const lightNode = new LightNode('light', new DirectionalLight({}));
     const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
     debugLightIcon.setUniformScale(0.5);
@@ -147,7 +191,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     cameraNode.setPosition([0, 2, -5]).setRotation([30, 0, 0]);
 
     const physicalBox = new ModelNode('physical box', new Model(Geometry.Cube(), Material.Default({diffuse: [1, 0, 1]})));
-    physicalBox.setPosition([-1, 3, 0]).setRotation([45, 0, 45]);
+    physicalBox.setPosition([1, 3, 0]).setRotation([45, 0, 45]);
 
     const playable = new Node('playable');
     playable.setPosition([1, 0, 0]);
@@ -236,41 +280,53 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-      const engine = new CleoEngine({
-          graphics: {
-              clearColor: [0.65, 0.65, 0.71, 1.0],
-          },
-      });
+      const initializeEngine = async () => {
+          const engine = new CleoEngine({
+              graphics: {
+                  clearColor: [0.65, 0.65, 0.71, 1.0],
+              },
+          });
 
-      instanceRef.current = engine;
-      instanceRef.current.isPaused = false;
+          instanceRef.current = engine;
+          instanceRef.current.isPaused = false;
 
-      CleoEngine.eventEmitter.on('LOG', (log) => { eventEmitter.current.emit('LOG', log) });
-      CleoEngine.eventEmitter.on('SCENE_CHANGED', () => { eventEmitter.current.emit('SCENE_CHANGED') });
-      
-      setupInitialScene();
+          CleoEngine.eventEmitter.on('LOG', (log) => { eventEmitter.current.emit('LOG', log) });
+          CleoEngine.eventEmitter.on('SCENE_CHANGED', () => { eventEmitter.current.emit('SCENE_CHANGED') });
+          
+          await setupInitialScene();
 
-      TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
-      TextureManager.Instance.addTextureFromBase64(DinosaurImage, {}, 'dinosaur.png');
-      TextureManager.Instance.addTextureFromBase64(LightIcon, {
-        mipMap: false
-      }, '__editor__light_icon');
-      eventEmitter.current.emit('TEXTURES_CHANGED');
+          TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
+          TextureManager.Instance.addTextureFromBase64(DinosaurImage, {}, 'dinosaur.png');
+          TextureManager.Instance.addTextureFromBase64(LightIcon, {
+            mipMap: false
+          }, '__editor__light_icon');
+          eventEmitter.current.emit('TEXTURES_CHANGED');
 
-      // Setting the editor scene and camera
-      engine.setScene(editorSceneRef.current);
-      editorSceneRef.current.start();
+          // Setting the editor scene and camera
+          engine.setScene(editorSceneRef.current);
+          editorSceneRef.current.start();
 
-      setSelectedNode(editorSceneRef.current.root.id);
-      
-      engine.run();
+          setSelectedNode(editorSceneRef.current.root.id);
+          
+          engine.run();
+      };
 
+      initializeEngine();
   }, []);
 
   // Event handling
   useEffect(() => {
     eventEmitter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
       if (!instanceRef.current) return;
+
+      // Wait for scene to be ready
+      if (!instanceRef.current.scene) {
+        console.log('Scene not ready yet, retrying...');
+        setTimeout(() => {
+          eventEmitter.current.emit('CHANGE_DIMENSION', dimension);
+        }, 100);
+        return;
+      }
 
       // change camera to 2D
       let cameraNode = instanceRef.current.scene.activeCamera;
@@ -361,6 +417,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setIsGizmoDragging(false);
       isGizmoDraggingRef.current = false;
     });
+
+    // Reset gizmo dragging state
+    isGizmoDraggingRef.current = false;
+    setIsGizmoDragging(false);
 
     // Default values
     eventEmitter.current.emit('CHANGE_DIMENSION', '3D');
