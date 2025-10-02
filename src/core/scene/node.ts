@@ -598,6 +598,28 @@ export class Node {
       child.visible = value;
     CleoEngine.eventEmitter.emit('SCENE_CHANGED');
   }
+
+  /**
+   * Get the bounding box for this node
+   * Default implementation returns a unit cube
+   * Should be overridden by subclasses for more accurate bounding boxes
+   */
+  public getBoundingBox(): { min: vec3, max: vec3 } {
+    const position = this.worldPosition;
+    const scale = this.worldScale;
+    
+    // Default to unit cube
+    const halfSize = vec3.create();
+    vec3.scale(halfSize, vec3.fromValues(0.5, 0.5, 0.5), 1);
+    vec3.multiply(halfSize, halfSize, scale);
+    
+    const min = vec3.create();
+    const max = vec3.create();
+    vec3.subtract(min, position, halfSize);
+    vec3.add(max, position, halfSize);
+    
+    return { min, max };
+  }
 }
 
 export class ModelNode extends Node {
@@ -682,6 +704,61 @@ export class ModelNode extends Node {
       for (const child of this._children)
         child.visible = value;
       CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+    }
+
+    /**
+     * Get bounding box for ModelNode based on the model's geometry
+     */
+    public getBoundingBox(): { min: vec3, max: vec3 } {
+        const position = this.worldPosition;
+        const scale = this.worldScale;
+        
+        // Get the model's geometry bounds
+        const geometry = this._model.geometry;
+        const positions = geometry.positions;
+        
+        if (!positions || positions.length === 0) {
+            // Fallback to unit cube if no geometry
+            const halfSize = vec3.create();
+            vec3.scale(halfSize, vec3.fromValues(0.5, 0.5, 0.5), 1);
+            vec3.multiply(halfSize, halfSize, scale);
+            const min = vec3.create();
+            const max = vec3.create();
+            vec3.subtract(min, position, halfSize);
+            vec3.add(max, position, halfSize);
+            return { min, max };
+        }
+        
+        // Calculate bounding box from geometry vertices
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        
+        for (let i = 0; i < positions.length; i++) {
+            const vertex = positions[i];
+            const x = vertex[0] * scale[0];
+            const y = vertex[1] * scale[1];
+            const z = vertex[2] * scale[2];
+            
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            minZ = Math.min(minZ, z);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            maxZ = Math.max(maxZ, z);
+        }
+        
+        const min = vec3.fromValues(
+            position[0] + minX,
+            position[1] + minY,
+            position[2] + minZ
+        );
+        const max = vec3.fromValues(
+            position[0] + maxX,
+            position[1] + maxY,
+            position[2] + maxZ
+        );
+        
+        return { min, max };
     }
 }
 
@@ -820,6 +897,31 @@ export class LightNode extends Node {
     }
     public get castShadows(): boolean { return this._castShadows; }
     public set castShadows(value: boolean) { this._castShadows = value; }
+
+    /**
+     * Get bounding box for LightNode - returns a sphere bounding box
+     */
+    public getBoundingBox(): { min: vec3, max: vec3 } {
+        const position = this.worldPosition;
+        const scale = this.worldScale;
+        
+        // For lights, use a sphere bounding box
+        // Use the largest scale component as the radius
+        const radius = Math.max(scale[0], scale[1], scale[2]) * 0.5;
+        
+        const min = vec3.fromValues(
+            position[0] - radius,
+            position[1] - radius,
+            position[2] - radius
+        );
+        const max = vec3.fromValues(
+            position[0] + radius,
+            position[1] + radius,
+            position[2] + radius
+        );
+        
+        return { min, max };
+    }
 }
 
 export class SkyboxNode extends Node {
@@ -873,6 +975,28 @@ export class SkyboxNode extends Node {
 
     public get skybox(): Skybox { return this._skybox; }
     public get initialized(): boolean { return this._initialized; }
+
+    /**
+     * Get bounding box for SkyboxNode - returns a large sphere bounding box
+     */
+    public getBoundingBox(): { min: vec3, max: vec3 } {
+        const position = this.worldPosition;
+        // Skybox is typically very large, use a large bounding box
+        const radius = 1000; // Large radius for skybox
+        
+        const min = vec3.fromValues(
+            position[0] - radius,
+            position[1] - radius,
+            position[2] - radius
+        );
+        const max = vec3.fromValues(
+            position[0] + radius,
+            position[1] + radius,
+            position[2] + radius
+        );
+        
+        return { min, max };
+    }
 }
 
 export class CameraNode extends Node {
@@ -937,6 +1061,30 @@ export class CameraNode extends Node {
     public get camera(): Camera { return this._camera; }
     public get active(): boolean { return this._active; }
     public set active(value: boolean) { this._active = value; }
+
+    /**
+     * Get bounding box for CameraNode - returns a small sphere bounding box
+     */
+    public getBoundingBox(): { min: vec3, max: vec3 } {
+        const position = this.worldPosition;
+        const scale = this.worldScale;
+        
+        // Camera has a small bounding box
+        const radius = Math.max(scale[0], scale[1], scale[2]) * 0.2;
+        
+        const min = vec3.fromValues(
+            position[0] - radius,
+            position[1] - radius,
+            position[2] - radius
+        );
+        const max = vec3.fromValues(
+            position[0] + radius,
+            position[1] + radius,
+            position[2] + radius
+        );
+        
+        return { min, max };
+    }
 }
 
 export class SpriteNode extends Node {
@@ -1023,4 +1171,28 @@ export class SpriteNode extends Node {
     public get initialized(): boolean { return this._initialized; }
     public get constraints(): 'free' | 'spherical' | 'cylindrical' { return this._constraints; }
     public set constraints(value: 'free' | 'spherical' | 'cylindrical') { this._constraints = value; }
+
+    /**
+     * Get bounding box for SpriteNode - returns a small sphere bounding box
+     */
+    public getBoundingBox(): { min: vec3, max: vec3 } {
+        const position = this.worldPosition;
+        const scale = this.worldScale;
+        
+        // Sprite has a small bounding box
+        const radius = Math.max(scale[0], scale[1], scale[2]) * 0.3;
+        
+        const min = vec3.fromValues(
+            position[0] - radius,
+            position[1] - radius,
+            position[2] - radius
+        );
+        const max = vec3.fromValues(
+            position[0] + radius,
+            position[1] + radius,
+            position[2] + radius
+        );
+        
+        return { min, max };
+    }
 }

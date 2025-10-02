@@ -17,4 +17,5 @@ export { Model } from "./graphics/model";
 export { Sprite } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
+export { Raycaster } from "./core/raycaster";
 export * as Vec from "gl-matrix";

@@ -7,20 +7,25 @@ import TextureInspector from './TextureInspector';
 import './Styles.css';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
+  // Safety check to ensure the node has a model
+  if (!props.node.model) {
+    return <div>No model available for this node.</div>;
+  }
+  
   const model = props.node.model;
   const material = model.material;
 
   const [diffuse, setDiffuse] = useState(vec3ToHex(material.properties.get('diffuse')));
   const [specular, setSpecular] = useState(vec3ToHex(material.properties.get('specular')));
   const [ambient, setAmbient] = useState(vec3ToHex(material.properties.get('ambient')));
-  const [shininess, setShininess] = useState(material.properties.get('shininess'));
+  const [shininess, setShininess] = useState(material.properties.get('shininess') || 32);
   const [emission, setEmission] = useState(vec3ToHex(material.properties.get('emissive')));
 
   useEffect(() => {
     setDiffuse(vec3ToHex(material.properties.get('diffuse')));
     setSpecular(vec3ToHex(material.properties.get('specular')));
     setAmbient(vec3ToHex(material.properties.get('ambient')));
-    setShininess(material.properties.get('shininess'));
+    setShininess(material.properties.get('shininess') || 32);
     setEmission(vec3ToHex(material.properties.get('emissive')));
 
   }, [props.node])
