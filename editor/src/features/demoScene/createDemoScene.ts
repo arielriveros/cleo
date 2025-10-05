@@ -1,4 +1,4 @@
-import { Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite } from 'cleo';
+import { Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite, Texture, Loader, Skybox, SkyboxNode } from 'cleo';
 import { CameraGeometry, GridGeometry } from '../../utils/EditorModels';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 
@@ -41,6 +41,47 @@ export async function createDemoScene(params: {
   zAxis.setPosition([0, 0.001, 100]);
 
   scene.addNodes(editorCameraNode, editorGridNode, xAxis, yAxis, zAxis);
+
+  // Environment map (cubemap) just like in the example app
+  try {
+    const envmap = new Texture({ target: 'cubemap', flipY: true });
+    const images = await Promise.all([
+      '/assets/cubemaps/envmap/right.jpg',
+      '/assets/cubemaps/envmap/left.jpg',
+      '/assets/cubemaps/envmap/top.jpg',
+      '/assets/cubemaps/envmap/bottom.jpg',
+      '/assets/cubemaps/envmap/front.jpg',
+      '/assets/cubemaps/envmap/back.jpg'
+    ].map(path => Loader.loadImage(path)));
+
+    envmap.create({
+      posX: images[0],
+      negX: images[1],
+      posY: images[2],
+      negY: images[3],
+      posZ: images[4],
+      negZ: images[5]
+    }, images[0].width, images[0].height);
+
+    scene.environmentMap = envmap;
+  } catch (e) {
+    console.error('Failed to load environment map:', e);
+  }
+
+  // Skybox just like in the example app
+  try {
+    const skybox = await Skybox.fromFiles({
+      posX: '/assets/cubemaps/skybox/right.jpg',
+      negX: '/assets/cubemaps/skybox/left.jpg',
+      posY: '/assets/cubemaps/skybox/top.jpg',
+      negY: '/assets/cubemaps/skybox/bottom.jpg',
+      posZ: '/assets/cubemaps/skybox/front.jpg',
+      negZ: '/assets/cubemaps/skybox/back.jpg'
+    });
+    scene.addNode(new SkyboxNode('skybox', skybox));
+  } catch (e) {
+    console.error('Failed to load skybox:', e);
+  }
 
   // Load Damaged Helmet
   try {
@@ -91,7 +132,7 @@ export async function createDemoScene(params: {
   const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({ color: [1, 1, 1], texture: '__editor__light_icon' })));
   debugLightIcon.setUniformScale(0.5);
   lightNode.addChild(debugLightIcon);
-  lightNode.setPosition([0, 1, 0]).setRotation([45, 45, 0]);
+  lightNode.setPosition([0, 1, 0]).setRotation([100, 25, 0]);
   lightNode.castShadows = true;
 
   // A controllable camera node with debug mesh
@@ -122,13 +163,31 @@ export async function createDemoScene(params: {
   playable.addChild(spriteNode);
   playable.addChild(cameraNode);
 
-  const plane = new ModelNode('plane', new Model(Geometry.Quad(), Material.Default({ diffuse: [0, 0.45, 0.1], specular: [0.2, 0.2, 0.2] })));
+  const plane = new Node('plane');
   plane.setPosition([0, -1, 0]).setRotation([-90, 0, 0]).setScale([10, 10, 1]);
 
   const triggerSphere = new ModelNode('trigger sphere', new Model(Geometry.Sphere(), Material.Default({ diffuse: [0, 0, 1] })));
   triggerSphere.setPosition([3, 0.5, 0]).setUniformScale(0.5);
 
   scene.addNodes(lightNode, physicalBox, playable, plane, triggerSphere);
+
+  try {
+    const sponzaModels = await Model.fromPath({ filePaths: [
+      '/assets/sponza/sponza.obj',
+      '/assets/sponza/sponza.mtl'
+    ]});
+    const sponza = new Node('sponza');
+    sponza.setScale([2, 2, 2]);
+    sponza.setY( -1 );
+    sponzaModels.forEach(model => {
+      const modelNode = new ModelNode(model.name, model.model);
+      modelNode.model.material.config.castShadow = true;
+      sponza.addChild(modelNode);
+    });
+    scene.addNode(sponza);
+  } catch (e) {
+    console.error('Failed to load sponza model:', e);
+  }
 
   // Bodies
   bodies.set(physicalBox.id, {

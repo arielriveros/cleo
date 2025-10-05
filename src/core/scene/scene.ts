@@ -167,6 +167,14 @@ export class Scene {
         return new Promise((resolve, reject) => {
             this._root.serialize().then((json: any) => {
                 output.scene = json;
+                if (this._environmentMap) {
+                    try {
+                        output.scene.environmentMap = TextureManager.Instance.serializeCubeMap(this._environmentMap);
+                    } catch (e) {
+                        Logger.error('Failed to serialize environment map');
+                    }
+                }
+                // Serialize 2D textures unless using cache
                 if (!useCache)
                     output.textures = TextureManager.Instance.serializeTextureData();
                 resolve(output);
@@ -179,6 +187,29 @@ export class Scene {
         let newScene = new Node('root');
         newScene.scene = this;
         Node.parse(newScene, json.scene);
+
+        // Recreate environment map if present
+        const env = json.scene?.environmentMap;
+        if (env) {
+            const createImage = (src: string): Promise<HTMLImageElement> => {
+                return new Promise((resolve) => { const img = new Image(); img.src = src; img.onload = () => resolve(img); });
+            }
+            Promise.all([
+                createImage(env.positiveX),
+                createImage(env.negativeX),
+                createImage(env.positiveY),
+                createImage(env.negativeY),
+                createImage(env.positiveZ),
+                createImage(env.negativeZ)
+            ]).then(images => {
+                const tex = new Texture({ target: 'cubemap', flipY: true });
+                tex.create({
+                    posX: images[0], negX: images[1], posY: images[2], negY: images[3], posZ: images[4], negZ: images[5]
+                }, images[0].width, images[0].height);
+                this._environmentMap = tex;
+            }).catch(err => Logger.error(err));
+        }
+
         if (!useCache)
             for (const texture of json.textures)
                 TextureManager.Instance.addTextureFromBase64(texture.data, texture.config, texture.id);
