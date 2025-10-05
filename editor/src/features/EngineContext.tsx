@@ -5,6 +5,7 @@ import NullImage from '../images/null.png';
 import DinosaurImage from '../images/dinosaur.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
+import { createDemoScene } from './demoScene/createDemoScene';
 
 type BoxShapeDescription = {
   type: 'box';
@@ -91,192 +92,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
 
   const setupInitialScene = async () => {
-    const editorCameraNode = new CameraNode('__editor__Camera', new Camera({ far: 10000 }));
-    editorCameraNode.active = true;
-    editorCameraNode.setPosition([4, 4, 4]).setRotation([30, -135, 0]);
-
-    const geometry = GridGeometry(200);
-    const editorGridNode = new ModelNode('__editor__Grid', new Model(
-        new Geometry(geometry.positions, undefined, geometry.texCoords, undefined, undefined, geometry.indices, false),
-        Material.Basic({color: [0.75, 0.75, 0.75]}, {wireframe: true}))
-    );
-
-
-    const xAxis = new ModelNode('__editor__Xaxis', new Model(
-        new Geometry([[-200, 0, 0], [200, 0, 0]], undefined, undefined, undefined, undefined, [0, 1], false),
-        Material.Basic({color: [1, 0, 0]}, {wireframe: true}))
-    );
-    xAxis.setPosition([100, 0.001, 0]);
-
-
-
-    const Yaxis = new ModelNode('__editor__Yaxis', new Model(
-        new Geometry([[0, -200, 0], [0, 200, 0]], undefined, undefined, undefined, undefined, [0, 1], false),
-        Material.Basic({color: [0, 1, 0]}, {wireframe: true}))
-    );
-    Yaxis.setPosition([0, 100, 0.001]);
-
-    const Zaxis = new ModelNode('__editor__Zaxis', new Model(
-        new Geometry([[0, 0, -200], [0, 0, 200]], undefined, undefined, undefined, undefined, [0, 1], false),
-        Material.Basic({color: [0, 0, 1]}, {wireframe: true}))
-    );
-    Zaxis.setPosition([0, 0.001, 100]);
-
-    // Adding editor nodes to the scene
-    editorSceneRef.current.addNodes(editorCameraNode, editorGridNode, xAxis, Yaxis, Zaxis);
-
-    // Load damaged helmet model
-    try {
-      const helmetModels = await Model.fromPath({
-        filePaths: [
-          '/assets/damagedHelmet/damaged_helmet.obj',
-          '/assets/damagedHelmet/damaged_helmet.mtl'
-        ]
-      });
-      
-      if (helmetModels.length > 0) {
-        const helmetModel = helmetModels[0];
-        const helmetNode = new ModelNode('damagedHelmet', helmetModel.model);
-        helmetNode.setPosition([-1, 3, 0]);
-        helmetNode.setRotation([0, 180, 0]);
-        helmetNode.setScale([1, 1, 1]);
-        editorSceneRef.current.addNodes(helmetNode);
-        
-        // Add physics body for the helmet
-        bodiesRef.current.set(helmetNode.id, {
-          mass: 1,
-          linearDamping: 0.01,
-          angularDamping: 0.8,
-          linearConstraints: [1, 1, 1],
-          angularConstraints: [1, 1, 1],
-          shapes: [ { type: 'sphere', radius: 0.5, offset: [0, 0, 0], rotation: [0, 0, 0] } ]
-        });
-        
-        // Add debug shape for the helmet body
-        const debugHelmetNode = new Node(`__debug__body_${helmetNode.id}`);
-        debugHelmetNode.onUpdate = (node) => {
-          node.setPosition(helmetNode.position);
-          node.setRotation(helmetNode.rotation);
-        };
-        const debugHelmetModel = new Model(Geometry.Sphere(8), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
-        const helmetModelNode = new ModelNode(`__debug__shape_0`, debugHelmetModel);
-        debugHelmetNode?.addChild(helmetModelNode);
-        editorSceneRef.current.addNode(debugHelmetNode);
-        
-        console.log('Damaged helmet model loaded successfully with physics');
-      }
-    } catch (error) {
-      console.error('Failed to load damaged helmet model:', error);
-    }
-
-    const lightNode = new LightNode('light', new DirectionalLight({}));
-    const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
-    debugLightIcon.setUniformScale(0.5);
-    /* TODO: Add arrow model for direction debugging */
-    lightNode.addChild(debugLightIcon);
-    lightNode.setPosition([0, 1, 0]).setRotation([45, 45, 0]);
-    lightNode.castShadows = true;
-
-    const cameraNode = new CameraNode('camera', new Camera({}));
-    cameraNode.active = true;
-    const cameraModel = new Model(new Geometry(
-      CameraGeometry.positions, undefined, CameraGeometry.texCoords, 
-      undefined, undefined, CameraGeometry.indices, false), Material.Basic({color: [0.2, 0.2, 0.75]}, { castShadow: false }));
-    const debugCameraModel = new ModelNode('__debug__CameraModel', cameraModel);
-    debugCameraModel.onUpdate = (node) => {
-      // Ignore scaling
-      Vec.mat4.scale(node.worldTransform, node.worldTransform, Vec.vec3.inverse(Vec.vec3.create(), Vec.mat4.getScaling(Vec.vec3.create(), node.worldTransform)));
-    };
-    cameraNode.addChild(debugCameraModel);
-    cameraNode.setPosition([0, 2, -5]).setRotation([30, 0, 0]);
-
-    const physicalBox = new ModelNode('physical box', new Model(Geometry.Cube(), Material.Default({diffuse: [1, 0, 1]})));
-    physicalBox.setPosition([1, 3, 0]).setRotation([45, 0, 45]);
-
-    const playable = new Node('playable');
-    playable.setPosition([1, 0, 0]);
-
-    const spriteNode = new SpriteNode('sprite', new Sprite(Material.Basic({
-      texture: 'dinosaur.png'
-    })));
-    playable.addChild(spriteNode);
-    playable.addChild(cameraNode);
-
-    const plane = new ModelNode('plane', new Model(Geometry.Quad(), Material.Default({diffuse: [0, 0.45, 0.1], specular: [0.2, 0.2, 0.2]})));
-    plane.setPosition([0, -1, 0]).setRotation([-90, 0, 0]).setScale([10, 10, 1]);
-
-    const triggerSphere = new ModelNode('trigger sphere', new Model(Geometry.Sphere(), Material.Default({diffuse: [0, 0, 1]})));
-    triggerSphere.setPosition([3, 0.5, 0]).setUniformScale(0.5);
-
-    // Example nodes
-    editorSceneRef.current.addNodes(lightNode, physicalBox, playable, plane, triggerSphere);
-
-    // Example bodies
-    bodiesRef.current.set(physicalBox.id, {
-      mass: 1,
-        linearDamping: 0.01,
-        angularDamping: 0.01,
-        linearConstraints: [1, 1, 1],
-        angularConstraints: [1, 1, 1],
-        shapes: [ { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ]
+    await createDemoScene({
+      scene: editorSceneRef.current,
+      scripts: scriptsRef.current,
+      bodies: bodiesRef.current,
+      triggers: triggersRef.current,
     });
-    // add debug shape for the box body
-    const debugNode = new Node(`__debug__body_${physicalBox.id}`);
-    debugNode.onUpdate = (node) => {
-        node.setPosition(physicalBox.position);
-        node.setRotation(physicalBox.rotation);
-    };
-    const debugModel = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
-    const modelNode = new ModelNode(`__debug__shape_0`, debugModel)
-    debugNode?.addChild(modelNode);
-    editorSceneRef.current.addNode(debugNode);
-
-    bodiesRef.current.set(plane.id, {
-      mass: 0,
-      linearDamping: 0, angularDamping: 0,
-      linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1],
-      shapes: [ { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] } ]
-    });
-
-    // add debug shape for the playable node
-    const debugPlayableNode = new Node(`__debug__playable_${playable.id}`);
-    debugPlayableNode.onUpdate = (node) => {
-      node.setPosition(playable.position);
-      node.setRotation(playable.rotation);
-    };
-    const debugPlayableModel = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
-    const playableModelNode = new ModelNode(`__debug__shape_0`, debugPlayableModel);
-    debugPlayableNode?.addChild(playableModelNode);
-    editorSceneRef.current.addNode(debugPlayableNode);
-
-    bodiesRef.current.set(playable.id, {
-      mass: 1,
-      linearDamping: 0.01,
-      angularDamping: 0.01,
-      linearConstraints: [1, 1, 0],
-      angularConstraints: [0, 0, 0],
-      shapes: [ { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ]
-    });
-
-    // Example triggers
-    triggersRef.current.set(triggerSphere.id, { shapes: [ { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ] });
-    // add debug shape for the trigger
-    const debugTriggerNode = new Node(`__debug__trigger_${triggerSphere.id}`);
-    debugTriggerNode.onUpdate = (node) => {
-      node.setPosition(triggerSphere.worldPosition);
-      node.setQuaternion(triggerSphere.worldQuaternion);
-    };
-
-    const debugTriggerModel = new Model(Geometry.Sphere(8), Material.Basic({color: [0, 1, 0]}, {wireframe: true}));
-    const triggerModelNode = new ModelNode(`__debug__shape_0`, debugTriggerModel);
-    debugTriggerNode?.addChild(triggerModelNode);
-    editorSceneRef.current.addNode(debugTriggerNode);
-
-    // Example scripts
-    scriptsRef.current.set(playable.id, "function onStart() {\n  global.logger('Player started');\n  const jump = () => {\n    node.body.impulse([0, 10, 0]);\n    global.logger('Jumping!');\n  }\n  global.input.registerKeyPress('Space', jump)\n}\n\nfunction onUpdate(delta, time) {\n  if (global.input.isKeyPressed('KeyD')) {\n    node.addX(delta * -2);\n  }\n  if (global.input.isKeyPressed('KeyA')) {\n    node.addX(delta * 2);\n  }\n}");
-    scriptsRef.current.set(cameraNode.id, "function onUpdate(delta, time) {\n  let mouseMovement = global.input.mouse.velocity;\n  let deltaFix = -delta * 10;\n  node.rotateY(mouseMovement[0] * deltaFix);\n}");
-    scriptsRef.current.set(physicalBox.id, "function onCollision(other) {\n  global.logger(`${node.name} collided with ${other.name}`);\n}");
-    scriptsRef.current.set(triggerSphere.id, "function onUpdate(delta, time) {\n  node.setX(Math.sin(time / 800) * 5);\n}\n\nfunction onTrigger(other) {\n  global.logger(`${other.name} triggered ${node.name}`);\n  const newColor = [Math.random(), Math.random(), Math.random()];\n  node.model.material.properties.set('diffuse', newColor);\n}");
   };
 
   useEffect(() => {
@@ -338,9 +159,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         cameraNode.camera.right = 4;
         cameraNode.setZ(10).setRotation([0, 180, 0]);
         cameraNode.onUpdate = (node, delta, time) => {
-            let mouse = InputManager.instance.mouse;
-            let movement = delta;
-            // Only allow camera controls when not dragging gizmo
+            const mouse = InputManager.instance.mouse;
+            const movement = delta;
+            // Pan with left button when not dragging gizmo
             if (mouse.buttons.Left && !isGizmoDraggingRef.current) {
                 node.addX(-mouse.velocity[0] * movement);
                 node.addY(mouse.velocity[1] * movement);
@@ -349,6 +170,34 @@ export function EngineProvider(props: { children: React.ReactNode }) {
                 InputManager.instance.isKeyPressed('KeyS') && node.addY(-movement * 10);
                 InputManager.instance.isKeyPressed('KeyA') && node.addX(-movement * 10);
                 InputManager.instance.isKeyPressed('KeyD') && node.addX(movement * 10);
+            }
+            // Zoom with mouse wheel by scaling ortho extents
+            if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0) {
+              const step = -mouse.wheel.deltaY * 0.001; // wheel up -> zoom in
+              const factor = Math.max(0.1, 1 + step); // avoid inverting
+              const cam = cameraNode.camera;
+              cam.top *= factor;
+              cam.bottom *= factor;
+              cam.left *= factor;
+              cam.right *= factor;
+              // Clamp minimal extent to avoid zero frustum
+              const minExtent = 0.1;
+              if (Math.abs(cam.top) < minExtent) {
+                const sign = cam.top >= 0 ? 1 : -1;
+                cam.top = sign * minExtent;
+              }
+              if (Math.abs(cam.bottom) < minExtent) {
+                const sign = cam.bottom >= 0 ? 1 : -1;
+                cam.bottom = sign * minExtent;
+              }
+              if (Math.abs(cam.left) < minExtent) {
+                const sign = cam.left >= 0 ? 1 : -1;
+                cam.left = sign * minExtent;
+              }
+              if (Math.abs(cam.right) < minExtent) {
+                const sign = cam.right >= 0 ? 1 : -1;
+                cam.right = sign * minExtent;
+              }
             }
         };
 
@@ -359,9 +208,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       else {
         cameraNode.camera.type = 'perspective';
         cameraNode.onUpdate = (node, delta, time) => {
-          let mouse = InputManager.instance.mouse;
-          let movement = delta * 2;
-          // Only allow camera controls when not dragging gizmo
+          const mouse = InputManager.instance.mouse;
+          const movement = delta * 2;
+          // Rotate and move with left button when not dragging gizmo
           if (mouse.buttons.Left && !isGizmoDraggingRef.current) {
             node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
             InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
@@ -370,6 +219,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             InputManager.instance.isKeyPressed('KeyD') && node.addRight(movement);
             InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
             InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
+          }
+          // Zoom with mouse wheel by dollying the camera forward/backward
+          if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0) {
+            const zoom = -mouse.wheel.deltaY * 0.01; // wheel up -> move forward
+            node.addForward(zoom);
           }
         };
 

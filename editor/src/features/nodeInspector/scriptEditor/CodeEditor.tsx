@@ -7,26 +7,33 @@ import { InputManager, Logger, ModelNode, Node } from 'cleo'
 import './Styles.css'
 
 const description = `/*
-// This is a global object that contains all the functions and variables that can be used anywhere in the script.
-global {
-  logger(text: string) - Logs a message to the console
-  input: {
-    keys - An object containing the state of all keys
-    mouse - An object containing the state of the mouse
-  }
+// You can write full JavaScript here. Define helpers and export handlers.
+// Two ways to declare handlers:
+// 1) Top-level functions named onSpawn/onStart/onUpdate/onCollision/onTrigger
+// 2) Or export them using module.exports = { onStart, onUpdate, ... }
+// A minimal runtime is available:
+//  - node: the current Node instance (e.g., node.addX(1))
+//  - global.input: InputManager singleton
+//  - global.logger(text): log to the engine console
+//  - console.log/warn/error: forwarded to engine logs
+
+function helperJump() {
+  node.body && node.body.impulse([0, 8, 0]);
 }
 
-// This function will be executed when the node is spawned even before the scene starts.
-function onSpawn() {}
-// This function will be executed when the node is started, if the scene has already started this function will be executed immediately after the node is added to the scene.
-function onStart() {}
-// This function will be executed after rendering the frame.
-function onUpdate(delta, time) {}
+function onStart(node, global) {
+  global.logger('Started: ' + node.name);
+}
 
-// This function will be executed when the node collides with another node.
-function onCollision(other) {}
-// This function will be executed when the node is triggered by another node.
-function onTrigger(other) {}
+function onUpdate(node, delta, time, global) {
+  if (global.input.isKeyPressed('Space')) helperJump();
+}
+
+// Alternatively, using module.exports:
+// module.exports = {
+//   onStart(node, global) { /* ... */ },
+//   onUpdate(node, delta, time, global) { /* ... */ }
+// };
 */`;
 
 export default function CodeEditor() {

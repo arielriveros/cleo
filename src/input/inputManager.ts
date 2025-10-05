@@ -9,6 +9,8 @@ interface MouseInfo {
     }
     position: vec2;
     velocity: vec2;
+    // Wheel deltas accumulated each frame
+    wheel: { deltaX: number; deltaY: number };
 }
 
 interface KeyInfo {
@@ -30,7 +32,8 @@ export class InputManager {
             Right: false,
             Middle: false },
         position: vec2.create(), 
-        velocity: vec2.create()
+        velocity: vec2.create(),
+        wheel: { deltaX: 0, deltaY: 0 }
     };
     private static _prevetDefault: boolean = false;
     private static _keysInfo: KeysInfo = {};
@@ -43,6 +46,10 @@ export class InputManager {
         InputManager._canvas.onmousemove = InputManager.instance._onMouseMove;
         InputManager._canvas.onmousedown = InputManager.instance._onMouseDown;
         InputManager._canvas.onmouseup = InputManager.instance._onMouseUp;
+        // Capture wheel events for zoom/scroll interactions
+        InputManager._canvas.onwheel = InputManager.instance._onWheel as any;
+        // Also capture wheel globally to avoid overlay issues
+        window.onwheel = InputManager.instance._onWheel as any;
         window.onkeydown = InputManager.instance._onKeyDown;
         window.onkeyup = InputManager.instance._onKeyUp;
     }
@@ -104,6 +111,14 @@ export class InputManager {
         }
     }
 
+    private _onWheel(event: WheelEvent) {
+        if (InputManager._prevetDefault) event.preventDefault();
+        const mouseInfo = InputManager._mouseInfo;
+        // Accumulate deltas so multiple wheel events in a frame are captured
+        mouseInfo.wheel.deltaX += event.deltaX || 0;
+        mouseInfo.wheel.deltaY += event.deltaY || 0;
+    }
+
     private _onKeyDown(event: KeyboardEvent) {
         if (InputManager._prevetDefault) event.preventDefault();
         const keysInfo = InputManager._keysInfo;
@@ -137,6 +152,9 @@ export class InputManager {
     public resetMouseVelocity() {
         InputManager._mouseInfo.velocity[0] = 0;
         InputManager._mouseInfo.velocity[1] = 0;
+        // Also reset wheel deltas each frame
+        InputManager._mouseInfo.wheel.deltaX = 0;
+        InputManager._mouseInfo.wheel.deltaY = 0;
     }
     
     public static get instance(): InputManager {

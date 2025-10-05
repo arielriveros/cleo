@@ -218,26 +218,98 @@ export class Node {
   }
 
   private static _parseScript(node: Node, script: string): void {
-    const onStartBody: string | null = Node._findToken(script, 'onStart');
-    const onSpawnBody: string | null = Node._findToken(script, 'onSpawn');
-    const onUpdateBody: string | null = Node._findToken(script, 'onUpdate');
-    const onCollisionBody: string | null = Node._findToken(script, 'onCollision');
-    const onTriggerBody: string | null = Node._findToken(script, 'onTrigger');
-    
-    function createFunction(body: string | null, parameterNames: string[]): Function {
-      try {
-        return body ? new Function(...parameterNames, body) : () => {};
-      } catch (error) {
-        Logger.error(`Error creating function: ${error}`);
-        return () => {};
-      }
-    }
+    // Compile the entire script once, allowing helper functions and variables
+    // Scripts can either:
+    // 1) Define top-level functions: function onStart() {}, function onUpdate(...) {}, etc.
+    // 2) Export handlers via module.exports = { onStart, onUpdate, onSpawn, onCollision, onTrigger }
+    try {
+      const factory = new Function(
+        'node',
+        'global',
+        'Logger',
+        'InputManager',
+        `"use strict";
+         const console = {
+           log: (...args) => global.logger(args.map(a => String(a)).join(' ')),
+           warn: (...args) => Logger.warn(args.map(a => String(a)).join(' '), 'Script'),
+           error: (...args) => Logger.error(args.map(a => String(a)).join(' '), 'Script')
+         };
+         let exports = {};
+         let module = { exports };
+         try { ${script} } catch (__e) {
+           Logger.error('Error evaluating script for node ' + node.name + ': ' + __e);
+         }
+         const exported = (module && module.exports && typeof module.exports === 'object') ? module.exports : null;
+         const pick = (name) => {
+           const fromExports = exported && typeof exported[name] === 'function' ? exported[name] : null;
+           if (fromExports) return fromExports;
+           try {
+             // eslint-disable-next-line no-undef
+             if (typeof eval(name) === 'function') {
+               // eslint-disable-next-line no-undef
+               return eval(name);
+             }
+           } catch(_) {}
+           return null;
+         };
+         return {
+           onStart:   pick('onStart'),
+           onSpawn:   pick('onSpawn'),
+           onUpdate:  pick('onUpdate'),
+           onCollision: pick('onCollision'),
+           onTrigger: pick('onTrigger')
+         };`
+      ) as (node: Node, global: GlobalState, Logger: any, InputManager: any) => any;
 
-    node.onStart = createFunction(onStartBody, ['node', 'global']) as (node: Node, global: GlobalState) => void;
-    node.onSpawn = createFunction(onSpawnBody, ['node', 'global']) as (node: Node, global: GlobalState) => void;
-    node.onUpdate = createFunction(onUpdateBody, ['node', 'delta', 'time', 'global']) as (node: Node, delta: number, time: number, global: GlobalState) => void;
-    node.onCollision = createFunction(onCollisionBody, ['node', 'other', 'global']) as (node: Node, other: Node, global: GlobalState) => void;
-    node.onTrigger = createFunction(onTriggerBody, ['node', 'other', 'global']) as (node: Node, other: Node, global: GlobalState) => void;
+      const handlers = factory(node, node._globalStateObject, Logger, InputManager) || {};
+
+      const adaptStartLike = (fn: any) => {
+        if (typeof fn !== 'function') return () => {};
+        const ar = fn.length;
+        return (n: Node, g: GlobalState) => {
+          try {
+            if (ar >= 2) fn(n, g);           // (node, global)
+            else if (ar === 1) fn(n);        // (node)
+            else fn();                        // () with closure access to node/global
+          } catch (e) { Logger.error(`Error in script onStart/onSpawn for node ${n.name}: ${e}`); }
+        };
+      };
+
+      const adaptUpdate = (fn: any) => {
+        if (typeof fn !== 'function') return () => {};
+        const ar = fn.length;
+        return (n: Node, d: number, t: number, g: GlobalState) => {
+          try {
+            if (ar >= 4) fn(n, d, t, g);     // (node, delta, time, global)
+            else if (ar === 3) fn(n, d, t);  // (node, delta, time)
+            else if (ar === 2) fn(d, t);     // (delta, time)
+            else if (ar === 1) fn(d);        // (delta)
+            else fn();                        // () with closure access
+          } catch (e) { Logger.error(`Error in script onUpdate for node ${n.name}: ${e}`); }
+        };
+      };
+
+      const adaptOther = (fn: any) => {
+        if (typeof fn !== 'function') return () => {};
+        const ar = fn.length;
+        return (n: Node, other: Node, g: GlobalState) => {
+          try {
+            if (ar >= 3) fn(n, other, g);    // (node, other, global)
+            else if (ar === 2) fn(other, g); // (other, global)
+            else if (ar === 1) fn(other);    // (other)
+            else fn();                        // () with closure access
+          } catch (e) { Logger.error(`Error in script event for node ${n.name}: ${e}`); }
+        };
+      };
+
+      node.onStart = adaptStartLike(handlers.onStart) as (node: Node, global: GlobalState) => void;
+      node.onSpawn = adaptStartLike(handlers.onSpawn) as (node: Node, global: GlobalState) => void;
+      node.onUpdate = adaptUpdate(handlers.onUpdate) as (node: Node, delta: number, time: number, global: GlobalState) => void;
+      node.onCollision = adaptOther(handlers.onCollision) as (node: Node, other: Node, global: GlobalState) => void;
+      node.onTrigger = adaptOther(handlers.onTrigger) as (node: Node, other: Node, global: GlobalState) => void;
+    } catch (error) {
+      Logger.error(`Error parsing script for node ${node.name}: ${error}`);
+    }
   }
 
   protected static _commonParse(node: Node, parent: Node, json: any) {

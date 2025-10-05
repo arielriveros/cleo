@@ -12,6 +12,7 @@
     "sourceMap": true,
     "outDir": "dist",
     "declarationDir": "dist",
+    "ignoreDeprecations": "6.0"
   },
   "files": ["src/cleo.ts", "src/glsl.d.ts"],
 }
