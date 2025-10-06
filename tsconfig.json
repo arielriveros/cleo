@@ -2,7 +2,7 @@
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
     "noImplicitAny": true,
-    "removeComments": true,
+    "removeComments": true, 
     "preserveConstEnums": true,
     "moduleResolution": "node",
     "module": "es6",
@@ -11,8 +11,7 @@
     "declaration": true,
     "sourceMap": true,
     "outDir": "dist",
-    "declarationDir": "dist",
-    "ignoreDeprecations": "6.0"
+    "declarationDir": "dist"
   },
   "files": ["src/cleo.ts", "src/glsl.d.ts"],
 }
