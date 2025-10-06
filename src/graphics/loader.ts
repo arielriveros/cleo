@@ -1,6 +1,7 @@
 import { Geometry } from "../core/geometry";
 import { Material } from "./material";
 import { OutputMaterial, loadAssimpModel, loadAssimpModelFromFiles, parseMaterial } from "./utils/assimpLoader";
+import { GLTFLoader } from "./utils/gltfLoader";
 import { TextureManager } from "./systems/textureManager";
 
 /**
@@ -11,6 +12,14 @@ import { TextureManager } from "./systems/textureManager";
 
 export class Loader {
     public static async loadModelsFromPath(filePaths: string[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
+        // Check if this is a GLTF file
+        const mainFile = filePaths[0];
+        if (mainFile && mainFile.toLowerCase().endsWith('.gltf')) {
+            const gltfLoader = new GLTFLoader();
+            return await gltfLoader.loadFromPath(mainFile);
+        }
+
+        // Fall back to Assimp loader for other formats
         return new Promise(async (resolve, reject) => {
             const output: {name: string, geometry: Geometry, material?: Material }[] = [];
     
@@ -20,7 +29,7 @@ export class Loader {
 
             const relativePath = filePaths[0]?.split('/').slice(0, -1).join('/');
     
-            Promise.all( res.materials.map(async (mat: any) => { materials.push(await parseMaterial(mat)); } ) )
+            Promise.all( res.materials.map(async (mat: any) => { materials.push(await parseMaterial(mat, res.textures)); } ) )
             .then(() => {
                 const meshes:{
                     name: any;
@@ -73,53 +82,87 @@ export class Loader {
                                  indices, materialindex: m.materialindex});
                 }
 
-                for (const mesh of meshes) {
-                    const geometry = new Geometry(
-                        mesh.positions as [number, number, number][],
-                        mesh.normals as [number, number, number][],
-                        mesh.uvs as [number, number][],
-                        mesh.tangents as [number, number, number][],
-                        mesh.bitangents as [number, number, number][],
-                        mesh.indices);
-                    const matIndex = mesh.materialindex;
-                    const materialDescription = materials[matIndex].material;
+                // Move helper functions to top-level scope of loadModelsFromPath
+                const validateBase64Image = async (base64: string): Promise<boolean> => {
+                    return new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => resolve(true);
+                        img.onerror = () => resolve(false);
+                        img.src = base64;
+                    });
+                };
 
-                    const material = Material.Default({
-                        diffuse: materialDescription.diffuse,
-                        specular: materialDescription.specular,
-                        ambient: materialDescription.ambient,
-                        emissive: materialDescription.emissive,
-                        shininess: materialDescription.shininess,
-                        opacity: materialDescription.opacity,
-                        textures: {
-                            base: materialDescription.texturesPaths.base ? TextureManager.Instance.addTextureFromPath(`${relativePath}/${materialDescription.texturesPaths.base}`, { wrapping: 'repeat' }) : undefined,
-                            specular: materialDescription.texturesPaths.specular ? TextureManager.Instance.addTextureFromPath(`${relativePath}/${materialDescription.texturesPaths.specular}`, { wrapping: 'repeat' }) : undefined,
-                            normal: materialDescription.texturesPaths.normal ? TextureManager.Instance.addTextureFromPath(`${relativePath}/${materialDescription.texturesPaths.normal}`, { wrapping: 'repeat' }) : undefined,
-                            emissive: materialDescription.texturesPaths.emissive ? TextureManager.Instance.addTextureFromPath(`${relativePath}/${materialDescription.texturesPaths.emissive}`, { wrapping: 'repeat' }) : undefined,
-                            mask: materialDescription.texturesPaths.mask ? TextureManager.Instance.addTextureFromPath(`${relativePath}/${materialDescription.texturesPaths.mask}`, { wrapping: 'repeat' }) : undefined,
-                            reflectivity: materialDescription.texturesPaths.reflectivity ? TextureManager.Instance.addTextureFromPath(`${relativePath}/${materialDescription.texturesPaths.reflectivity}`, { wrapping: 'repeat' }) : undefined
+                async function loadTextureSafe(base64: string | undefined, path: string | undefined, fallbackPath: string | undefined) {
+                    if (base64) {
+                        const isValid = await validateBase64Image(base64);
+                        if (isValid) {
+                            return TextureManager.Instance.addTextureFromBase64(base64, { wrapping: 'repeat', mipMap: false });
+                        } else {
+                            console.warn('Base64 texture data is not a valid image, skipping:', base64.slice(0, 50));
                         }
-                    });
-
-                    output.push({name: mesh.name, geometry, material});
+                    }
+                    if (path && !path.startsWith('*')) {
+                        return TextureManager.Instance.addTextureFromPath(fallbackPath ?? path, { wrapping: 'repeat' });
+                    }
+                    return undefined;
                 }
 
-                const models: {name: string, geometry: Geometry, material: Material}[] = [];
-                for (const m of output) {
-                    models.push({
-                        name: m.name,
-                        geometry: m.geometry,
-                        material: m.material
-                    });
-                }
-
-                resolve(models);        
+                // Replace mesh loop with async/await
+                (async () => {
+                    for (const mesh of meshes) {
+                        const geometry = new Geometry(
+                            mesh.positions as [number, number, number][],
+                            mesh.normals as [number, number, number][],
+                            mesh.uvs as [number, number][],
+                            mesh.tangents as [number, number, number][],
+                            mesh.bitangents as [number, number, number][],
+                            mesh.indices
+                        );
+                        const matIndex = mesh.materialindex;
+                        const materialDescription = materials[matIndex].material;
+                        const textures = {
+                            base: await loadTextureSafe(materialDescription.texturesData.base, materialDescription.texturesPaths.base, `${relativePath}/${materialDescription.texturesPaths.base}`),
+                            specular: await loadTextureSafe(materialDescription.texturesData.specular, materialDescription.texturesPaths.specular, `${relativePath}/${materialDescription.texturesPaths.specular}`),
+                            normal: await loadTextureSafe(materialDescription.texturesData.normal, materialDescription.texturesPaths.normal, `${relativePath}/${materialDescription.texturesPaths.normal}`),
+                            emissive: await loadTextureSafe(materialDescription.texturesData.emissive, materialDescription.texturesPaths.emissive, `${relativePath}/${materialDescription.texturesPaths.emissive}`),
+                            mask: await loadTextureSafe(materialDescription.texturesData.mask, materialDescription.texturesPaths.mask, `${relativePath}/${materialDescription.texturesPaths.mask}`),
+                            reflectivity: await loadTextureSafe(materialDescription.texturesData.reflectivity, materialDescription.texturesPaths.reflectivity, `${relativePath}/${materialDescription.texturesPaths.reflectivity}`)
+                        };
+                        const material = Material.Default({
+                            diffuse: materialDescription.diffuse,
+                            specular: materialDescription.specular,
+                            ambient: materialDescription.ambient,
+                            emissive: materialDescription.emissive,
+                            shininess: materialDescription.shininess,
+                            opacity: materialDescription.opacity,
+                            textures
+                        });
+                        output.push({ name: mesh.name, geometry, material });
+                    }
+                    const models: { name: string, geometry: Geometry, material: Material }[] = [];
+                    for (const m of output) {
+                        models.push({
+                            name: m.name,
+                            geometry: m.geometry,
+                            material: m.material
+                        });
+                    }
+                    resolve(models);
+                })();
             });
         });
 
     }
 
     public static async loadModelsFromFile(files: File[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
+        // Check if this is a GLTF file
+        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
+        if (gltfFile) {
+            const gltfLoader = new GLTFLoader();
+            return await gltfLoader.loadFromFiles(files);
+        }
+
+        // Fall back to Assimp loader for other formats
         return new Promise(async (resolve, reject) => {
             const output: {name: string, geometry: Geometry, material?: Material }[] = [];
     
@@ -129,7 +172,7 @@ export class Loader {
 
             const relativePath = files[0]?.name.split('/').slice(0, -1).join('/');
 
-            Promise.all( res.materials.map(async (mat: any) => { materials.push(await parseMaterial(mat)); } ) )
+            Promise.all( res.materials.map(async (mat: any) => { materials.push(await parseMaterial(mat, res.textures)); } ) )
             .then(() => {
                 const meshes:{
                     name: any;
@@ -193,6 +236,47 @@ export class Loader {
                     const matIndex = mesh.materialindex;
                     const materialDescription = materials[matIndex].material;
 
+                    // Helper function to load texture from embedded data or uploaded files
+                    const loadTextureFromSources = (texturePath: string | undefined, textureData: string | undefined) => {
+                        // First priority: use embedded base64 data if available
+                        if (textureData) {
+                            return TextureManager.Instance.addTextureFromBase64(textureData, { wrapping: 'repeat', mipMap: false });
+                        }
+                        
+                        // Second priority: look for texture file in uploaded files
+                        if (texturePath) {
+                            const textureFileName = texturePath.split(/[\/\\]/).pop();
+                            if (textureFileName) {
+                                const textureFile = files.find(file => 
+                                    file.name.toLowerCase().endsWith(textureFileName.toLowerCase()) ||
+                                    file.name.toLowerCase() === textureFileName.toLowerCase()
+                                );
+                                
+                                if (textureFile) {
+                                    return TextureManager.Instance.addTextureFromFile(textureFile, { wrapping: 'repeat' });
+                                }
+                            }
+                        }
+                        
+                        return undefined;
+                    };
+
+                    const baseColorTexture = loadTextureFromSources(materialDescription.texturesPaths.base, materialDescription.texturesData.base);
+                    const specularTexture = loadTextureFromSources(materialDescription.texturesPaths.specular, materialDescription.texturesData.specular);
+                    const normalTexture = loadTextureFromSources(materialDescription.texturesPaths.normal, materialDescription.texturesData.normal);
+                    const emissiveTexture = loadTextureFromSources(materialDescription.texturesPaths.emissive, materialDescription.texturesData.emissive);
+                    const maskTexture = loadTextureFromSources(materialDescription.texturesPaths.mask, materialDescription.texturesData.mask);
+                    const reflectivityTexture = loadTextureFromSources(materialDescription.texturesPaths.reflectivity, materialDescription.texturesData.reflectivity);
+
+                    const textures = {
+                        base: baseColorTexture,
+                        specular: specularTexture,
+                        normal: normalTexture,
+                        emissive: emissiveTexture,
+                        mask: maskTexture,
+                        reflectivity: reflectivityTexture
+                    };
+
                     const material = Material.Default({
                         diffuse: materialDescription.diffuse,
                         specular: materialDescription.specular,
@@ -200,20 +284,11 @@ export class Loader {
                         emissive: materialDescription.emissive,
                         shininess: materialDescription.shininess,
                         opacity: materialDescription.opacity,
-                        textures: {
-                            base: materialDescription.texturesPaths.base?.split(/[\/\\]/).pop(),
-                            specular: materialDescription.texturesPaths.specular?.split(/[\/\\]/).pop(),
-                            normal: materialDescription.texturesPaths.normal?.split(/[\/\\]/).pop(),
-                            emissive: materialDescription.texturesPaths.emissive?.split(/[\/\\]/).pop(),
-                            mask: materialDescription.texturesPaths.mask?.split(/[\/\\]/).pop(),
-                            reflectivity: materialDescription.texturesPaths.reflectivity?.split(/[\/\\]/).pop()
-                        }
+                        textures
                     });
-
-                    output.push({name: mesh.name, geometry, material});
+                    output.push({ name: mesh.name, geometry, material });
                 }
-
-                const models: {name: string, geometry: Geometry, material: Material}[] = [];
+                const models: { name: string, geometry: Geometry, material: Material }[] = [];
                 for (const m of output) {
                     models.push({
                         name: m.name,
@@ -224,6 +299,7 @@ export class Loader {
                 resolve(models);
             });
         });
+
     }
 
     public static async loadImage(path: string): Promise<HTMLImageElement> {

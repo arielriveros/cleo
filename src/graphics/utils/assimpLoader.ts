@@ -8,7 +8,7 @@ const MASK_TEXTURE = 8;
 
 const assimpjs = require('./assimpjs');
 
-async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: any[], materials: any[] }> {
+async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: any[], materials: any[], textures?: any[] }> {
     try {
         const ajs = await assimpjs();
 
@@ -41,9 +41,10 @@ async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: 
 
         const materials: any[] = resultJson.materials;
         const meshes: any[] = resultJson.meshes;
+        const textures: any[] = resultJson.textures || [];
 
-        let output: { meshes: any[]; materials: any[]; };
-        output = { meshes, materials };
+        let output: { meshes: any[]; materials: any[]; textures?: any[] };
+        output = { meshes, materials, textures };
         return output;
     } 
     catch (error) {
@@ -52,7 +53,7 @@ async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: 
     }
 }
 
-async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[], materials: any[] }> {
+async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[], materials: any[], textures?: any[] }> {
     try {
         const ajs = await assimpjs();
 
@@ -82,9 +83,10 @@ async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[],
 
         const materials: any[] = resultJson.materials;
         const meshes: any[] = resultJson.meshes;
+        const textures: any[] = resultJson.textures || [];
 
-        let output: { meshes: any[]; materials: any[]; };
-        output = { meshes, materials };
+        let output: { meshes: any[]; materials: any[]; textures?: any[] };
+        output = { meshes, materials, textures };
         return output;
     }
     catch (error) {
@@ -116,10 +118,18 @@ export interface OutputMaterial {
         emissive?: string;
         mask?: string;
         reflectivity?: string;
-    }
+    };
+    texturesData: {
+        base?: string;
+        specular?: string;
+        normal?: string;
+        emissive?: string;
+        mask?: string;
+        reflectivity?: string;
+    };
 }
 
-async function parseMaterial(mat: any): Promise<{name: string, material: OutputMaterial}> {
+async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: string, material: OutputMaterial}> {
     return new Promise((resolve, reject) => {
 
         const properties = mat.properties;
@@ -166,6 +176,48 @@ async function parseMaterial(mat: any): Promise<{name: string, material: OutputM
     
             return undefined;
         }
+
+        // Helper function to get embedded texture data
+        const getEmbeddedTextureData = (texturePath: string) => {
+            if (!texturePath || !textures) return undefined;
+            
+            // Check if the texture path refers to an embedded texture (usually starts with "*" followed by index)
+            if (texturePath.startsWith('*')) {
+                const textureIndex = parseInt(texturePath.substring(1));
+                if (textureIndex >= 0 && textureIndex < textures.length) {
+                    const textureData = textures[textureIndex];
+                    console.log(`Processing embedded texture ${textureIndex}:`, {
+                        format: textureData?.achFormatHint,
+                        hasData: !!textureData?.pcData,
+                        dataLength: textureData?.pcData?.length || 0,
+                        mWidth: textureData?.mWidth,
+                        mHeight: textureData?.mHeight,
+                        fullData: textureData
+                    });
+                    
+                    // Return base64 data if available
+                    if (textureData && textureData.achFormatHint && textureData.pcData) {
+                        const formatHint = textureData.achFormatHint.toLowerCase().replace(/\0/g, ''); // Remove null characters
+                        const mimeType = formatHint === 'jpg' ? 'jpeg' : formatHint;
+                        const base64String = `data:image/${mimeType};base64,${textureData.pcData}`;
+                        
+                        console.log(`Generated base64 string (first 100 chars):`, base64String.substring(0, 100));
+                        console.log(`Base64 data length:`, textureData.pcData.length);
+                        
+                        // Try to validate the base64 data
+                        try {
+                            // Test if it's valid base64
+                            atob(textureData.pcData.substring(0, 100));
+                            return base64String;
+                        } catch (e) {
+                            console.error('Invalid base64 data:', e);
+                            return undefined;
+                        }
+                    }
+                }
+            }
+            return undefined;
+        }
         
         const name = getString(properties, '?mat.name');
         const diffuse = getVec3(properties, '$clr.diffuse');
@@ -182,6 +234,15 @@ async function parseMaterial(mat: any): Promise<{name: string, material: OutputM
         const maskMap = getTexture(properties, MASK_TEXTURE);
         const reflectivityMap = getTexture(properties, AMBIENT_TEXTURE);
 
+        console.log(`Material "${name}" texture paths:`, {
+            diffuse: diffuseMap,
+            specular: specularMap,
+            normal: normalMap,
+            emissive: emissiveMap,
+            mask: maskMap,
+            reflectivity: reflectivityMap
+        });
+
         const material: OutputMaterial = {
             name,
             diffuse, specular, ambient,
@@ -193,6 +254,14 @@ async function parseMaterial(mat: any): Promise<{name: string, material: OutputM
                 emissive: emissiveMap,
                 mask: maskMap,
                 reflectivity: reflectivityMap
+            },
+            texturesData: {
+                base: getEmbeddedTextureData(diffuseMap),
+                specular: getEmbeddedTextureData(specularMap),
+                normal: getEmbeddedTextureData(normalMap),
+                emissive: getEmbeddedTextureData(emissiveMap),
+                mask: getEmbeddedTextureData(maskMap),
+                reflectivity: getEmbeddedTextureData(reflectivityMap)
             }
         }
         

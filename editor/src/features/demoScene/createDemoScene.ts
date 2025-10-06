@@ -127,6 +127,30 @@ export async function createDemoScene(params: {
     console.error('Failed to load damaged helmet model:', error);
   }
 
+  // Load Running GLTF Model
+  try {
+    const runningModels = await Model.fromPath({
+      filePaths: ['/assets/running.gltf']
+    });
+
+    if (runningModels.length > 0) {
+      const runningNode = new Node('runningModel');
+      runningNode.setPosition([2, 0, 2]);
+      runningNode.setRotation([0, 0, 0]);
+      runningNode.setScale([1, 1, 1]);
+      
+      for (const model of runningModels) {
+        const modelNode = new ModelNode(model.name, model.model);
+        runningNode.addChild(modelNode);
+      }
+      
+      scene.addNode(runningNode);
+      console.log('Running GLTF model loaded successfully');
+    }
+  } catch (error) {
+    console.error('Failed to load running GLTF model:', error);
+  }
+
   // Directional light with icon sprite (texture is added later by EngineContext)
   const lightNode = new LightNode('light', new DirectionalLight({}));
   const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({ color: [1, 1, 1], texture: '__editor__light_icon' })));

@@ -24,7 +24,7 @@ export class TextureManager {
 
     public addTextureFromPath(path: string, config?: TextureConfig, id?: string): string {
         const texture = new Texture(config);
-        Loader.loadImage(path).then(image => {
+        Loader.loadImage(path).then((image: HTMLImageElement) => {
             texture.create(image, image.width, image.height);
         });
         const identifier = id || uuidv4();
@@ -38,13 +38,105 @@ export class TextureManager {
         return this.addTexture(texture, identifier);
     }
 
-    public addTextureFromBase64(base64: string | undefined, config?: TextureConfig, id?: string): string {
-        const texture = new Texture(config);
-        const image = new Image()
-        image.src = base64;
-        image.onload = () => texture.create(image, image.width, image.height);
+    public addTextureFromBase64(base64: string | undefined, config?: TextureConfig, id?: string): string | undefined {
+        if (!base64) return undefined;
+        
+        console.log('Creating texture from base64 data:', base64.substring(0, 50) + '...');
+        
         const identifier = id || uuidv4();
-        return this.addTexture(texture, identifier);
+        const texture = new Texture(config);
+        
+        // Add the texture to the map immediately but don't create it yet
+        this._textures.set(identifier, texture);
+        
+        const image = new Image();
+        
+        // Set up error handling first
+        image.onerror = (err) => {
+            console.error('Failed to load base64 image:', err);
+            console.error('Base64 data prefix:', base64.substring(0, 100));
+            
+            // Try creating a fallback 1x1 white texture
+            console.log('Creating fallback 1x1 white texture...');
+            this.createFallbackTexture(texture, identifier);
+        };
+        
+        image.onload = () => {
+            console.log(`Base64 image loaded successfully: ${image.width}x${image.height}`);
+            console.log('Image complete:', image.complete);
+            console.log('Image naturalWidth:', image.naturalWidth);
+            console.log('Image naturalHeight:', image.naturalHeight);
+            
+            if (image.width > 0 && image.height > 0 && image.complete) {
+                // Now create the texture with the loaded image
+                texture.create(image, image.width, image.height);
+            } else {
+                console.error('Invalid image dimensions or not complete:', image.width, image.height, image.complete);
+                // Create fallback texture instead of removing
+                this.createFallbackTexture(texture, identifier);
+            }
+        };
+        
+        // Set src after setting up event handlers
+        image.src = base64;
+        
+        return identifier;
+    }
+    
+    private createFallbackTexture(texture: Texture, identifier: string): void {
+        try {
+            // Create a 1x1 white pixel
+            const canvas = document.createElement('canvas');
+            canvas.width = 1;
+            canvas.height = 1;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, 1, 1);
+                
+                const fallbackImage = new Image();
+                fallbackImage.onload = () => {
+                    console.log('Fallback texture created successfully');
+                    texture.create(fallbackImage, 1, 1);
+                };
+                fallbackImage.src = canvas.toDataURL();
+            }
+        } catch (err) {
+            console.error('Failed to create fallback texture:', err);
+            this._textures.delete(identifier);
+        }
+    }
+
+    public addTextureFromFile(file: File, config?: TextureConfig, id?: string): string | undefined {
+        if (!file) return undefined;
+        
+        const identifier = id || uuidv4();
+        const texture = new Texture(config);
+        
+        // Add the texture to the map immediately but don't create it yet
+        this._textures.set(identifier, texture);
+        
+        const objectURL = URL.createObjectURL(file);
+        const image = new Image();
+        
+        image.onerror = () => {
+            URL.revokeObjectURL(objectURL); // Clean up even on error
+            this._textures.delete(identifier); // Remove failed texture
+        };
+        
+        image.onload = () => {
+            if (image.width > 0 && image.height > 0 && image.complete) {
+                texture.create(image, image.width, image.height);
+            } else {
+                console.error('Invalid file image dimensions:', image.width, image.height);
+                this._textures.delete(identifier);
+            }
+            URL.revokeObjectURL(objectURL); // Clean up the object URL
+        };
+        
+        image.src = objectURL;
+        
+        return identifier;
     }
 
     public getTexture(id: string): Texture {

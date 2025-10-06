@@ -412,7 +412,7 @@ export class Geometry {
             const uvs: [number, number][] = [];
             const indices: number[] = [];
 
-            Loader.ImageToArray(heightmapPath).then((image) => {
+            Loader.ImageToArray(heightmapPath).then((image: { data: Uint8Array, width: number, height: number }) => {
                 const width = image.width;
                 const height = image.height;
     
@@ -480,7 +480,7 @@ export class Geometry {
     
                 resolve(new Geometry(positions, normals, uvs, [], [], indices));
             }
-            ).catch((error) => {
+            ).catch((error: unknown) => {
                 reject(error);
             });
         });

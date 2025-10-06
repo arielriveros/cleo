@@ -46,7 +46,7 @@ export class Texture {
 
         this._wrapping = this._getWrappingValue(options?.wrapping) || gl.CLAMP_TO_EDGE;
 
-        this._internalFormat = this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : (this._precision === 'high' ? gl.RGBA16F : gl.RGBA);
+        this._internalFormat = this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : (this._precision === 'high' ? gl.RGBA16F : gl.RGBA8);
 
         this._minFilter = this._mipMap ? 
             (options?.mipMapFilter === 'nearest' ? gl.NEAREST_MIPMAP_NEAREST : gl.LINEAR_MIPMAP_LINEAR) :
@@ -88,9 +88,32 @@ export class Texture {
 
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
 
-        if (this._target === gl.TEXTURE_2D)
-            gl.texImage2D(this._target, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, this._data as HTMLImageElement | null);
-        else {
+        if (this._target === gl.TEXTURE_2D) {
+            if (data) {
+                const img = data as HTMLImageElement;
+                console.log('Creating texture with image:', {
+                    width: img.width,
+                    height: img.height,
+                    complete: img.complete,
+                    naturalWidth: img.naturalWidth,
+                    naturalHeight: img.naturalHeight,
+                    src: img.src?.substring(0, 50) + '...'
+                });
+                
+                // Validate image is properly loaded
+                if (!img.complete || img.naturalWidth === 0) {
+                    console.error('Image not properly loaded before texture creation');
+                    this.unbind();
+                    return;
+                }
+                
+                // When using HTMLImageElement, use the 6-parameter version
+                gl.texImage2D(this._target, 0, this._internalFormat, this._format, this._type, img);
+            } else {
+                // When using null data (for render targets), use the 9-parameter version
+                gl.texImage2D(this._target, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, null);
+            }
+        } else {
             const faces = this._data as CubemapFaces;
             gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, this._internalFormat, this._format, this._type, faces.posX);
             gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, this._internalFormat, this._format, this._type, faces.negX);
@@ -125,10 +148,17 @@ export class Texture {
         }
         this.bind();
         this._data = data;
-        this._width = data.width;
-        this._height = data.height;
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
-        gl.texImage2D(this._target, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, this._data as HTMLImageElement | null);
+        if (data) {
+            this._width = data.width;
+            this._height = data.height;
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
+            // Use the 6-parameter version for HTMLImageElement
+            gl.texImage2D(this._target, 0, this._internalFormat, this._format, this._type, data);
+        } else {
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
+            // Use the 9-parameter version for null data
+            gl.texImage2D(this._target, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, null);
+        }
         if (this._mipMap) {
             gl.generateMipmap(this._target);
         }
@@ -173,7 +203,7 @@ export class Texture {
         this._width = data.width;
         this._height = data.height;
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
-        gl.texImage2D(target, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, data);
+        gl.texImage2D(target, 0, this._internalFormat, this._format, this._type, data);
         if (this._mipMap) {
             gl.generateMipmap(this._target);
         }

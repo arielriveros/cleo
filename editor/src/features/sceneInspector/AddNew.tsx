@@ -225,7 +225,7 @@ export default function AddNew() {
               <label className='add-node-button' htmlFor="file">
                 <img className='add-node-icon' src={ImportIcon} alt='Import' />
               </label>
-              <input type="file" id="file" name="file" multiple accept='.obj, .mtl, .glb' onChange={(e) => {
+              <input type="file" id="file" name="file" multiple accept='.obj, .mtl, .gltf, .glb, .png, .jpg, .jpeg, .bmp, .tga, .tiff' onChange={(e) => {
                 const files = e.target.files;
                 if (files) {
                   const filesArray = Array.from(files);
