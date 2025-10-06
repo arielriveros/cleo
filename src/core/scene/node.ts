@@ -52,6 +52,7 @@ export class Node {
   public onUpdate: (node: Node, delta: number, time: number, global: GlobalState) => void = () => {};
   public onCollision: (node: Node, other: Node, global: GlobalState) => void = () => {};
   public onTrigger: (node: Node, other: Node, global: GlobalState) => void = () => {};
+  public onDespawn: (node: Node, global: GlobalState) => void = () => {};
 
   private _globalStateObject: GlobalState = {
     input: InputManager.instance,
@@ -88,7 +89,7 @@ export class Node {
   public addChild(node: Node): void {
     // if the node already has a parent, remove it from the parent's children
     if (node.parent) {
-      node.parent.removeChild(node);
+      node.parent.removeChild(node, true);
       CleoEngine.eventEmitter.emit('SCENE_CHANGED');
     }
     
@@ -107,7 +108,10 @@ export class Node {
     CleoEngine.eventEmitter.emit('SCENE_CHANGED');
   }
 
-  public removeChild(node: Node): void {
+  public removeChild(node: Node, reparent: boolean = false): void {
+    if (!reparent) {
+      try { node.onDespawn(node, this._globalStateObject); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
+    }
     node.parent = null;
     node.scene = null;
     this._children.splice(this._children.indexOf(node), 1);
@@ -146,6 +150,7 @@ export class Node {
 
   public remove(): void {
     this._markForRemoval = true;
+    try { this.onDespawn(this, this._globalStateObject); } catch (e) { Logger.error(`Error in onDespawn function for node ${this._name}: ${e}`); }
     for (const child of this._children)
       child.remove();
   }
@@ -184,7 +189,8 @@ export class Node {
             // TODO: Only serialize the function body
             onStart: this.onStart.toString(),
             onSpawn: this.onSpawn.toString(),
-            onUpdate: this.onUpdate.toString()
+            onUpdate: this.onUpdate.toString(),
+            onDespawn: this.onDespawn.toString()
           }
         });
       });
@@ -257,7 +263,8 @@ export class Node {
            onSpawn:   pick('onSpawn'),
            onUpdate:  pick('onUpdate'),
            onCollision: pick('onCollision'),
-           onTrigger: pick('onTrigger')
+           onTrigger: pick('onTrigger'),
+           onDespawn: pick('onDespawn')
          };`
       ) as (node: Node, global: GlobalState, Logger: any, InputManager: any) => any;
 
@@ -307,6 +314,7 @@ export class Node {
       node.onUpdate = adaptUpdate(handlers.onUpdate) as (node: Node, delta: number, time: number, global: GlobalState) => void;
       node.onCollision = adaptOther(handlers.onCollision) as (node: Node, other: Node, global: GlobalState) => void;
       node.onTrigger = adaptOther(handlers.onTrigger) as (node: Node, other: Node, global: GlobalState) => void;
+      node.onDespawn = adaptStartLike(handlers.onDespawn) as (node: Node, global: GlobalState) => void;
     } catch (error) {
       Logger.error(`Error parsing script for node ${node.name}: ${error}`);
     }

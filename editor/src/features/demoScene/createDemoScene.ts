@@ -166,10 +166,8 @@ export async function createDemoScene(params: {
   const plane = new Node('plane');
   plane.setPosition([0, -1, 0]).setRotation([-90, 0, 0]).setScale([10, 10, 1]);
 
-  const triggerSphere = new ModelNode('trigger sphere', new Model(Geometry.Sphere(), Material.Default({ diffuse: [0, 0, 1] })));
-  triggerSphere.setPosition([3, 0.5, 0]).setUniformScale(0.5);
 
-  scene.addNodes(lightNode, physicalBox, playable, plane, triggerSphere);
+  scene.addNodes(lightNode, physicalBox, playable, plane);
 
   try {
     const sponzaModels = await Model.fromPath({ filePaths: [
@@ -187,6 +185,32 @@ export async function createDemoScene(params: {
     scene.addNode(sponza);
   } catch (e) {
     console.error('Failed to load sponza model:', e);
+  }
+
+  // --- Simple Game: Collectibles (green cubes) and Hazards (red spheres) ---
+  const collectiblePositions: Array<[number, number, number]> = [
+    [-4, 0, -2], [-2, 0, 3], [0, 0, 4], [2, 0, -3], [4, 0, 1],
+    [-3, 0, 2], [3, 0, -1], [0, 0, -4]
+  ];
+  const collectibles: ModelNode[] = [];
+  for (let i = 0; i < collectiblePositions.length; i++) {
+    const pos = collectiblePositions[i];
+    const cube = new ModelNode(`collectible_${i}`, new Model(Geometry.Cube(), Material.Default({ diffuse: [0, 1, 0], emissive: [0, 1, 0] })));
+    cube.setPosition(pos).setUniformScale(0.5);
+    scene.addNode(cube);
+    collectibles.push(cube);
+  }
+
+  const hazardPositions: Array<[number, number, number]> = [
+    [-3, -0.5, -3], [3, -0.5, 3], [0, -0.5, 0], [-2, -0.5, 4], [4, -0.5, -2]
+  ];
+  const hazards: ModelNode[] = [];
+  for (let i = 0; i < hazardPositions.length; i++) {
+    const pos = hazardPositions[i];
+    const ball = new ModelNode(`hazard_${i}`, new Model(Geometry.Sphere(), Material.Default({ diffuse: [1, 0, 0] })));
+    ball.setPosition(pos).setUniformScale(0.5);
+    scene.addNode(ball);
+    hazards.push(ball);
   }
 
   // Bodies
@@ -235,24 +259,31 @@ export async function createDemoScene(params: {
     shapes: [{ type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }]
   });
 
-  // Triggers
-  triggers.set(triggerSphere.id, { shapes: [{ type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }] });
-  const debugTriggerNode = new Node(`__debug__trigger_${triggerSphere.id}`);
-  debugTriggerNode.onUpdate = (node) => {
-    node.setPosition(triggerSphere.worldPosition);
-    node.setQuaternion(triggerSphere.worldQuaternion);
-  };
-  const debugTriggerModel = new Model(Geometry.Sphere(8), Material.Basic({ color: [0, 1, 0] }, { wireframe: true }));
-  const triggerModelNode = new ModelNode(`__debug__shape_0`, debugTriggerModel);
-  debugTriggerNode?.addChild(triggerModelNode);
-  scene.addNode(debugTriggerNode);
+  // Triggers for collectibles (boxes) and hazards (spheres)
+  for (const cube of collectibles) {
+    triggers.set(cube.id, { shapes: [{ type: 'box', width: 0.5, height: 0.5, depth: 0.5, offset: [0, 0, 0], rotation: [0, 0, 0] }] });
+  }
+  for (const ball of hazards) {
+    triggers.set(ball.id, { shapes: [{ type: 'sphere', radius: 0.5, offset: [0, 0, 0], rotation: [0, 0, 0] }] });
+  }
 
   // Scripts using module-style exports
-  scripts.set(playable.id, "module.exports = {\n  onStart(node, global) {\n    global.logger('Player started');\n    const jump = () => {\n      if (node.body) node.body.impulse([0, 10, 0]);\n      global.logger('Jumping!');\n    };\n    global.input.registerKeyPress('Space', jump);\n  },\n  onUpdate(node, delta, time, global) {\n    if (global.input.isKeyPressed('KeyD')) {\n      node.addX(delta * -2);\n    }\n    if (global.input.isKeyPressed('KeyA')) {\n      node.addX(delta * 2);\n    }\n  }\n};");
+  // Playable controller and game state
+  scripts.set(playable.id, "module.exports = {\n  onStart(node, global) {\n    // Game state stored on the node instance\n    node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n    const jump = () => { if (!node.__game.alive || node.__game.quit) return; if (node.body) node.body.impulse([0, 10, 0]); global.logger('Jump!'); };\n    global.input.registerKeyPress('Space', jump);\n    global.input.registerKeyPress('Escape', () => {\n      node.__game.quit = true;\n      // trigger cleanup and final score logging via onDespawn\n      node.remove();\n    });\n  },\n  onUpdate(node, delta, time, global) {\n    const g = node.__game || (node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 });\n    if (!g.alive || g.quit) return;\n    const speed = 3;\n    if (global.input.isKeyPressed('KeyD')) node.addX(-delta * speed);\n    if (global.input.isKeyPressed('KeyA')) node.addX(delta * speed);\n    if (global.input.isKeyPressed('KeyW')) node.addZ(delta * speed);\n    if (global.input.isKeyPressed('KeyS')) node.addZ(-delta * speed);\n  },\n  onCollision(node, other, global) { /* not used; hazards are triggers */ },\n  onDespawn(node, global) {\n    const g = node.__game || { score: 0 };\n    global.logger('Final score: ' + g.score);\n  }\n};");
 
+  // Camera rotate with mouse (keep existing behavior)
   scripts.set(cameraNode.id, "module.exports = {\n  onUpdate(node, delta, time, global) {\n    const mouseMovement = global.input.mouse.velocity;\n    const deltaFix = -delta * 10;\n    node.rotateY(mouseMovement[0] * deltaFix);\n  }\n};");
 
+  // Log collisions for the physical box (debug)
   scripts.set(physicalBox.id, "module.exports = {\n  onCollision(node, other, global) {\n    global.logger(`${node.name} collided with ${other.name}`);\n  }\n};");
 
-  scripts.set(triggerSphere.id, "module.exports = {\n  onUpdate(node, delta, time) {\n    node.setX(Math.sin(time / 800) * 5);\n  },\n  onTrigger(node, other, global) {\n    global.logger(`${other.name} triggered ${node.name}`);\n    const newColor = [Math.random(), Math.random(), Math.random()];\n    if (node.nodeType === 'model') node.model.material.properties.set('diffuse', newColor);\n  }\n};");
+  // Scripts for collectibles: hide on pickup and increase score
+  for (const cube of collectibles) {
+    scripts.set(cube.id, "module.exports = {\n  onTrigger(node, other, global) {\n    if (other && other.name === 'playable' && node.visible) {\n      // Initialize game state on player if missing\n      other.__game = other.__game || { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n      other.__game.score += 1;\n      node.visible = false;\n      global.logger('Score: ' + other.__game.score);\n    }\n  }\n};");
+  }
+
+  // Scripts for hazards: move and damage player on contact; player dies after 3 hits
+  hazards.forEach((ball, i) => {
+    scripts.set(ball.id, "module.exports = {\n  onStart(node) {\n    node.__origin = [node.position[0], node.position[1], node.position[2]];\n    node.__phase = " + i + ";\n  },\n  onUpdate(node, delta, time) {\n    const o = node.__origin || [0,0,0];\n    const t = time / 700 + (node.__phase || 0);\n    node.setX(o[0] + Math.sin(t) * 2.5);\n    node.setZ(o[2] + Math.cos(t * 0.8) * 2.5);\n  },\n  onTrigger(node, other, global) {\n    if (!other || other.name !== 'playable') return;\n    const now = Date.now();\n    const g = other.__game = other.__game || { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n    if (!g.alive || g.quit) return;\n    if (now < (g.invulnerableUntil || 0)) return; // brief i-frames\n    g.hits = Math.min(3, (g.hits || 0) + 1);\n    g.invulnerableUntil = now + 1000;\n    const livesLeft = 3 - g.hits;\n    if (g.hits >= 3) {\n      g.alive = false;\n      g.quit = true;\n      // despawn player to end game and trigger onDespawn logging\n      other.remove();\n    } else {\n      global.logger('Ouch! Lives left: ' + livesLeft);\n    }\n  }\n};");
+  });
 }
