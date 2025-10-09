@@ -1,4 +1,4 @@
-import { Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite, Texture, Loader, Skybox, SkyboxNode } from 'cleo';
+import { Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, AnimatedModel, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite, Texture, Loader, Skybox, SkyboxNode } from 'cleo';
 import { CameraGeometry, GridGeometry } from '../../utils/EditorModels';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 
@@ -127,11 +127,9 @@ export async function createDemoScene(params: {
     console.error('Failed to load damaged helmet model:', error);
   }
 
-  // Load Running GLTF Model
+  // Load Running GLTF Model with Animation
   try {
-    const runningModels = await Model.fromPath({
-      filePaths: ['/assets/running.gltf']
-    });
+    const runningModels = await Loader.loadAnimatedModelsFromPath('/assets/running.gltf');
 
     if (runningModels.length > 0) {
       const runningNode = new Node('runningModel');
@@ -139,13 +137,26 @@ export async function createDemoScene(params: {
       runningNode.setRotation([0, 0, 0]);
       runningNode.setScale([1, 1, 1]);
       
-      for (const model of runningModels) {
-        const modelNode = new ModelNode(model.name, model.model);
+      for (const modelData of runningModels) {
+        const modelNode = new ModelNode(modelData.name, modelData.model as any);
         runningNode.addChild(modelNode);
       }
       
       scene.addNode(runningNode);
-      console.log('Running GLTF model loaded successfully');
+      
+      // Log animation and skinning info
+      const firstModel = runningModels[0].model;
+      if (firstModel.hasSkin) {
+        console.log('Running GLTF model loaded with skinning data:');
+        console.log('- Joints:', firstModel.skin?.joints.length);
+      }
+      if (firstModel.hasAnimations) {
+        console.log('Running GLTF model loaded with animations:');
+        firstModel.animations.forEach((anim: any, i: number) => {
+          console.log(`- Animation ${i}: ${anim.name}, Channels: ${anim.channels.length}, Samplers: ${anim.samplers.length}`);
+        });
+      }
+      console.log('Running GLTF model loaded successfully as AnimatedModel');
     }
   } catch (error) {
     console.error('Failed to load running GLTF model:', error);

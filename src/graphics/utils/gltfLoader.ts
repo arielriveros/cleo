@@ -1,6 +1,8 @@
 import { Geometry } from "../../core/geometry";
 import { Material } from "../material";
 import { TextureManager } from "../systems/textureManager";
+import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../animatedModel";
+import { mat4 } from "gl-matrix";
 
 // GLTF Types based on the specification
 interface GLTFAsset {
@@ -69,11 +71,40 @@ interface GLTFMesh {
             NORMAL?: number;
             TEXCOORD_0?: number;
             TANGENT?: number;
+            JOINTS_0?: number;
+            WEIGHTS_0?: number;
         };
         indices?: number;
         material?: number;
         mode?: number;
     }[];
+}
+
+interface GLTFSkin {
+    name?: string;
+    inverseBindMatrices?: number;
+    joints: number[];
+    skeleton?: number;
+}
+
+interface GLTFAnimationSampler {
+    input: number;
+    output: number;
+    interpolation?: 'LINEAR' | 'STEP' | 'CUBICSPLINE';
+}
+
+interface GLTFAnimationChannel {
+    sampler: number;
+    target: {
+        node?: number;
+        path: 'translation' | 'rotation' | 'scale' | 'weights';
+    };
+}
+
+interface GLTFAnimation {
+    name?: string;
+    samplers: GLTFAnimationSampler[];
+    channels: GLTFAnimationChannel[];
 }
 
 interface GLTF {
@@ -88,6 +119,8 @@ interface GLTF {
     accessors?: GLTFAccessor[];
     bufferViews?: GLTFBufferView[];
     buffers?: GLTFBuffer[];
+    skins?: GLTFSkin[];
+    animations?: GLTFAnimation[];
 }
 
 // Component type constants
@@ -147,6 +180,45 @@ export class GLTFLoader {
 
         // Parse meshes and materials
         return this.parseMeshes();
+    }
+
+    /**
+     * Load animated models with skinning and animation data from a file path
+     */
+    async loadAnimatedFromPath(filePath: string): Promise<{name: string, model: AnimatedModel}[]> {
+        // Extract base path for relative URI resolution
+        this.basePath = filePath.substring(0, filePath.lastIndexOf('/') + 1);
+        
+        // Load the main GLTF JSON file
+        const response = await fetch(filePath);
+        const gltfJson = await response.json();
+        this.gltf = gltfJson;
+
+        // Load all buffers
+        await this.loadBuffers();
+
+        // Parse meshes with animation data
+        return this.parseAnimatedMeshes();
+    }
+
+    /**
+     * Load animated models with skinning and animation data from uploaded files
+     */
+    async loadAnimatedFromFiles(files: File[]): Promise<{name: string, model: AnimatedModel}[]> {
+        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
+        if (!gltfFile) {
+            throw new Error('No GLTF file found in the uploaded files');
+        }
+
+        // Load GLTF JSON
+        const gltfText = await gltfFile.text();
+        this.gltf = JSON.parse(gltfText);
+
+        // Load buffers from uploaded files
+        await this.loadBuffersFromFiles(files);
+
+        // Parse meshes with animation data
+        return this.parseAnimatedMeshes();
     }
 
     private async loadBuffers(): Promise<void> {
@@ -451,5 +523,162 @@ export class GLTFLoader {
             opacity: pbr?.baseColorFactor ? pbr.baseColorFactor[3] : 1.0,
             textures
         });
+    }
+
+    /**
+     * Parse meshes with animation and skinning data
+     */
+    private async parseAnimatedMeshes(): Promise<{name: string, model: AnimatedModel}[]> {
+        const result: {name: string, model: AnimatedModel}[] = [];
+
+        if (!this.gltf.meshes) return result;
+
+        // Parse all skins first
+        const skins: (Skin | null)[] = [];
+        if (this.gltf.skins) {
+            for (const gltfSkin of this.gltf.skins) {
+                skins.push(this.parseSkin(gltfSkin));
+            }
+        }
+
+        // Parse all animations
+        const animations: Animation[] = [];
+        if (this.gltf.animations) {
+            for (const gltfAnim of this.gltf.animations) {
+                animations.push(this.parseAnimation(gltfAnim));
+            }
+        }
+
+        // Parse meshes
+        for (let meshIndex = 0; meshIndex < this.gltf.meshes.length; meshIndex++) {
+            const mesh = this.gltf.meshes[meshIndex];
+            
+            for (const primitive of mesh.primitives) {
+                const geometry = await this.createGeometry(primitive);
+                const material = await this.createMaterial(primitive.material);
+                
+                // Extract skinning data if present
+                let skin: Skin | undefined = undefined;
+                let jointIndices: Float32Array | undefined = undefined;
+                let jointWeights: Float32Array | undefined = undefined;
+                
+                // Check if this mesh has skinning attributes
+                if (primitive.attributes.JOINTS_0 !== undefined && primitive.attributes.WEIGHTS_0 !== undefined) {
+                    // Load joint indices
+                    const jointData = this.getAccessorData(primitive.attributes.JOINTS_0);
+                    jointIndices = new Float32Array(jointData);
+                    
+                    // Load joint weights
+                    const weightData = this.getAccessorData(primitive.attributes.WEIGHTS_0) as Float32Array;
+                    jointWeights = weightData;
+                    
+                    // Find the skin associated with this mesh
+                    // In GLTF, skins are typically referenced by nodes, not meshes directly
+                    // For now, we'll use the first available skin if any
+                    if (skins.length > 0 && skins[0]) {
+                        skin = skins[0];
+                    }
+                }
+                
+                const animatedModel = new AnimatedModel(
+                    geometry,
+                    material,
+                    skin,
+                    jointIndices,
+                    jointWeights,
+                    animations
+                );
+                
+                result.push({
+                    name: mesh.name || 'AnimatedMesh',
+                    model: animatedModel
+                });
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Parse a GLTF skin into our Skin format
+     */
+    private parseSkin(gltfSkin: GLTFSkin): Skin {
+        const joints: Skin['joints'] = [];
+        
+        // Load inverse bind matrices if present
+        let inverseBindMatrices: mat4[] = [];
+        if (gltfSkin.inverseBindMatrices !== undefined) {
+            const data = this.getAccessorData(gltfSkin.inverseBindMatrices) as Float32Array;
+            
+            // Each matrix is 16 floats (4x4 matrix)
+            for (let i = 0; i < data.length; i += 16) {
+                const matrix = mat4.create();
+                for (let j = 0; j < 16; j++) {
+                    matrix[j] = data[i + j];
+                }
+                inverseBindMatrices.push(matrix);
+            }
+        } else {
+            // If no inverse bind matrices provided, use identity matrices
+            for (let i = 0; i < gltfSkin.joints.length; i++) {
+                inverseBindMatrices.push(mat4.create());
+            }
+        }
+        
+        // Create joint objects
+        for (let i = 0; i < gltfSkin.joints.length; i++) {
+            joints.push({
+                nodeIndex: gltfSkin.joints[i],
+                inverseBindMatrix: inverseBindMatrices[i]
+            });
+        }
+        
+        return {
+            name: gltfSkin.name,
+            joints,
+            skeleton: gltfSkin.skeleton
+        };
+    }
+
+    /**
+     * Parse a GLTF animation into our Animation format
+     */
+    private parseAnimation(gltfAnim: GLTFAnimation): Animation {
+        const samplers: AnimationSampler[] = [];
+        
+        // Parse all samplers
+        for (const gltfSampler of gltfAnim.samplers) {
+            // Load input times
+            const inputData = this.getAccessorData(gltfSampler.input) as Float32Array;
+            const input = Array.from(inputData);
+            
+            // Load output values
+            const outputData = this.getAccessorData(gltfSampler.output) as Float32Array;
+            const output = Array.from(outputData);
+            
+            samplers.push({
+                input,
+                output,
+                interpolation: gltfSampler.interpolation || 'LINEAR'
+            });
+        }
+        
+        // Parse all channels
+        const channels: AnimationChannel[] = [];
+        for (const gltfChannel of gltfAnim.channels) {
+            if (gltfChannel.target.node !== undefined) {
+                channels.push({
+                    samplerIndex: gltfChannel.sampler,
+                    targetNodeIndex: gltfChannel.target.node,
+                    targetPath: gltfChannel.target.path
+                });
+            }
+        }
+        
+        return {
+            name: gltfAnim.name || 'Animation',
+            samplers,
+            channels
+        };
     }
 }

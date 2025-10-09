@@ -14,6 +14,8 @@ export { InputManager } from "./input/inputManager";
 export { TextureManager } from "./graphics/systems/textureManager";
 export { RigidBody as Body, Trigger } from "./physics/body";
 export { Model } from "./graphics/model";
+export { AnimatedModel } from "./graphics/animatedModel";
+export type { Skin, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
 export { Sprite } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";

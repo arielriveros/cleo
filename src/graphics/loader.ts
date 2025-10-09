@@ -2,6 +2,7 @@ import { Geometry } from "../core/geometry";
 import { Material } from "./material";
 import { OutputMaterial, loadAssimpModel, loadAssimpModelFromFiles, parseMaterial } from "./utils/assimpLoader";
 import { GLTFLoader } from "./utils/gltfLoader";
+import { AnimatedModel } from "./animatedModel";
 import { TextureManager } from "./systems/textureManager";
 
 /**
@@ -11,6 +12,10 @@ import { TextureManager } from "./systems/textureManager";
  */
 
 export class Loader {
+    /**
+     * Load models from file paths. Automatically detects GLTF files and uses appropriate loader.
+     * For GLTF files with animations/skinning, use loadAnimatedModelsFromPath instead.
+     */
     public static async loadModelsFromPath(filePaths: string[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
         // Check if this is a GLTF file
         const mainFile = filePaths[0];
@@ -154,6 +159,10 @@ export class Loader {
 
     }
 
+    /**
+     * Load models from uploaded files. Automatically detects GLTF files and uses appropriate loader.
+     * For GLTF files with animations/skinning, use loadAnimatedModelsFromFile instead.
+     */
     public static async loadModelsFromFile(files: File[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
         // Check if this is a GLTF file
         const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
@@ -333,5 +342,36 @@ export class Loader {
             };
             image.onerror = (err) => reject(err);
         });
+    }
+
+    /**
+     * Load animated models with skinning and animation data from file paths.
+     * Only works with GLTF files. For other formats, falls back to loadModelsFromPath.
+     */
+    public static async loadAnimatedModelsFromPath(filePath: string): Promise<{name: string, model: AnimatedModel}[]> {
+        // Check if this is a GLTF file
+        if (filePath.toLowerCase().endsWith('.gltf')) {
+            const gltfLoader = new GLTFLoader();
+            return await gltfLoader.loadAnimatedFromPath(filePath);
+        }
+
+        // For non-GLTF files, throw an error since they don't support skeletal animation
+        throw new Error('Animated models are only supported for GLTF files. Use loadModelsFromPath for static models.');
+    }
+
+    /**
+     * Load animated models with skinning and animation data from uploaded files.
+     * Only works with GLTF files. For other formats, falls back to loadModelsFromFile.
+     */
+    public static async loadAnimatedModelsFromFile(files: File[]): Promise<{name: string, model: AnimatedModel}[]> {
+        // Check if this is a GLTF file
+        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
+        if (gltfFile) {
+            const gltfLoader = new GLTFLoader();
+            return await gltfLoader.loadAnimatedFromFiles(files);
+        }
+
+        // For non-GLTF files, throw an error since they don't support skeletal animation
+        throw new Error('Animated models are only supported for GLTF files. Use loadModelsFromFile for static models.');
     }
 }

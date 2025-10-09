@@ -1,6 +1,7 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../physics/body";
 import { Model } from "../../graphics/model";
+import { AnimatedModel } from "../../graphics/animatedModel";
 import { Sprite } from "../../graphics/sprite";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Skybox } from "../../graphics/skybox";
@@ -703,10 +704,10 @@ export class Node {
 }
 
 export class ModelNode extends Node {
-    private _model: Model;
+    private _model: Model | AnimatedModel;
     private _initialized: boolean;
 
-    constructor(name: string, model: Model, id: string = uuidv4()) {
+    constructor(name: string, model: Model | AnimatedModel, id: string = uuidv4()) {
         super(name, 'model', id);
         this._model = model;
         this._initialized = false;
@@ -771,11 +772,14 @@ export class ModelNode extends Node {
     }
 
     public static parse(parent: Node, json: any) {
-        const node = new ModelNode(json.name, Model.parse(json.model), json.id);
+        // Check if this is an AnimatedModel by looking for animation/skin data
+        const isAnimated = json.model.skin || json.model.animations || json.model.jointIndices;
+        const model = isAnimated ? AnimatedModel.parse(json.model) : Model.parse(json.model);
+        const node = new ModelNode(json.name, model, json.id);
         Node._commonParse(node, parent, json);
     }
 
-    public get model(): Model { return this._model; }
+    public get model(): Model | AnimatedModel { return this._model; }
     public get initialized(): boolean { return this._initialized; }
     public get visible(): boolean { return super.visible; }
     public set visible(value: boolean) {
