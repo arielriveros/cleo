@@ -2,6 +2,7 @@ import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../physics/body";
 import { Model } from "../../graphics/model";
 import { AnimatedModel } from "../../graphics/animatedModel";
+import { Animator } from "../../graphics/animator";
 import { Sprite } from "../../graphics/sprite";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Skybox } from "../../graphics/skybox";
@@ -706,11 +707,19 @@ export class Node {
 export class ModelNode extends Node {
     private _model: Model | AnimatedModel;
     private _initialized: boolean;
+    private _animator: Animator | null;
 
     constructor(name: string, model: Model | AnimatedModel, id: string = uuidv4()) {
         super(name, 'model', id);
         this._model = model;
         this._initialized = false;
+        
+        // Create animator for animated models
+        if (model instanceof AnimatedModel && model.hasSkin) {
+            this._animator = new Animator(model);
+        } else {
+            this._animator = null;
+        }
     }
 
     public initializeModel(): void {
@@ -781,6 +790,7 @@ export class ModelNode extends Node {
 
     public get model(): Model | AnimatedModel { return this._model; }
     public get initialized(): boolean { return this._initialized; }
+    public get animator(): Animator | null { return this._animator; }
     public get visible(): boolean { return super.visible; }
     public set visible(value: boolean) {
       super.visible = value;

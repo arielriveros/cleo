@@ -26,12 +26,15 @@ export interface Animation {
 export interface Joint {
     nodeIndex: number;
     inverseBindMatrix: mat4;
+    parentIndex?: number; // Parent node index for hierarchy traversal
 }
 
 export interface Skin {
     name?: string;
     joints: Joint[];
     skeleton?: number; // Root joint index
+    nodeParents?: Map<number, number>; // Map of node index to parent node index
+    nodeTransforms?: Map<number, mat4>; // Initial transforms for each node from GLTF
 }
 
 // Options for loading animated models
@@ -155,6 +158,26 @@ export class AnimatedModel {
         // Parse skin data
         let skin: Skin | undefined = undefined;
         if (data.skin) {
+            // Parse nodeParents map
+            const nodeParents = new Map<number, number>();
+            if (data.skin.nodeParents) {
+                for (const [key, value] of data.skin.nodeParents) {
+                    nodeParents.set(Number(key), value);
+                }
+            }
+            
+            // Parse nodeTransforms map
+            const nodeTransforms = new Map<number, mat4>();
+            if (data.skin.nodeTransforms) {
+                for (const [key, value] of data.skin.nodeTransforms) {
+                    const matrix = mat4.create();
+                    for (let i = 0; i < 16; i++) {
+                        matrix[i] = value[i];
+                    }
+                    nodeTransforms.set(Number(key), matrix);
+                }
+            }
+            
             skin = {
                 name: data.skin.name,
                 joints: data.skin.joints.map((j: any) => {
@@ -164,10 +187,13 @@ export class AnimatedModel {
                     }
                     return {
                         nodeIndex: j.nodeIndex,
-                        inverseBindMatrix: matrix
+                        inverseBindMatrix: matrix,
+                        parentIndex: j.parentIndex
                     };
                 }),
-                skeleton: data.skin.skeleton
+                skeleton: data.skin.skeleton,
+                nodeParents,
+                nodeTransforms
             };
         }
         
@@ -230,13 +256,32 @@ export class AnimatedModel {
         // Serialize skin data
         let skin: any = null;
         if (this._skin) {
+            // Serialize nodeParents map
+            const nodeParents: [number, number][] = [];
+            if (this._skin.nodeParents) {
+                for (const [key, value] of this._skin.nodeParents.entries()) {
+                    nodeParents.push([key, value]);
+                }
+            }
+            
+            // Serialize nodeTransforms map
+            const nodeTransforms: [number, number[]][] = [];
+            if (this._skin.nodeTransforms) {
+                for (const [key, value] of this._skin.nodeTransforms.entries()) {
+                    nodeTransforms.push([key, Array.from(value)]);
+                }
+            }
+            
             skin = {
                 name: this._skin.name,
                 joints: this._skin.joints.map(j => ({
                     nodeIndex: j.nodeIndex,
-                    inverseBindMatrix: Array.from(j.inverseBindMatrix)
+                    inverseBindMatrix: Array.from(j.inverseBindMatrix),
+                    parentIndex: j.parentIndex
                 })),
-                skeleton: this._skin.skeleton
+                skeleton: this._skin.skeleton,
+                nodeParents,
+                nodeTransforms
             };
         }
         

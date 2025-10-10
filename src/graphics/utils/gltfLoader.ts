@@ -621,6 +621,48 @@ export class GLTFLoader {
     private parseSkin(gltfSkin: GLTFSkin): Skin {
         const joints: Skin['joints'] = [];
         
+        // Build node parent map and extract node transforms from GLTF node hierarchy
+        const nodeParents = new Map<number, number>();
+        const nodeTransforms = new Map<number, mat4>();
+        
+        if (this.gltf.nodes) {
+            for (let nodeIndex = 0; nodeIndex < this.gltf.nodes.length; nodeIndex++) {
+                const node = this.gltf.nodes[nodeIndex];
+                
+                // Build parent map
+                if (node.children) {
+                    for (const childIndex of node.children) {
+                        nodeParents.set(childIndex, nodeIndex);
+                    }
+                }
+                
+                // Extract node's initial transform
+                const transform = mat4.create();
+                
+                if (node.matrix) {
+                    // Node has a direct matrix
+                    for (let i = 0; i < 16; i++) {
+                        transform[i] = node.matrix[i];
+                    }
+                } else {
+                    // Build from TRS (translation, rotation, scale)
+                    const translation = node.translation ? 
+                        [node.translation[0], node.translation[1], node.translation[2]] : 
+                        [0, 0, 0];
+                    const rotation = node.rotation ? 
+                        [node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]] : 
+                        [0, 0, 0, 1];
+                    const scale = node.scale ? 
+                        [node.scale[0], node.scale[1], node.scale[2]] : 
+                        [1, 1, 1];
+                    
+                    mat4.fromRotationTranslationScale(transform, rotation as any, translation as any, scale as any);
+                }
+                
+                nodeTransforms.set(nodeIndex, transform);
+            }
+        }
+        
         // Load inverse bind matrices if present
         let inverseBindMatrices: mat4[] = [];
         if (gltfSkin.inverseBindMatrices !== undefined) {
@@ -641,18 +683,22 @@ export class GLTFLoader {
             }
         }
         
-        // Create joint objects
+        // Create joint objects with parent information
         for (let i = 0; i < gltfSkin.joints.length; i++) {
+            const nodeIndex = gltfSkin.joints[i];
             joints.push({
-                nodeIndex: gltfSkin.joints[i],
-                inverseBindMatrix: inverseBindMatrices[i]
+                nodeIndex,
+                inverseBindMatrix: inverseBindMatrices[i],
+                parentIndex: nodeParents.get(nodeIndex)
             });
         }
         
         return {
             name: gltfSkin.name,
             joints,
-            skeleton: gltfSkin.skeleton
+            skeleton: gltfSkin.skeleton,
+            nodeParents,
+            nodeTransforms
         };
     }
 

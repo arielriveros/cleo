@@ -369,4 +369,5 @@ export class Shader {
 
     public get attributes(): AttributeInfo[] { return this._attributes; }
     public get uniforms(): { [name: string]: {info: UniformInfo, value: any} } { return this._uniforms; }
+    public get program(): WebGLProgram { return this._shaderProgram; }
 }

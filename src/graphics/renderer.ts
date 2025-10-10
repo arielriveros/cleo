@@ -381,21 +381,49 @@ export class Renderer {
         // TODO: Mutliply node transform with model transform for model correction
         this._shaderManager.setUniform('u_model', node.worldTransform);
 
-        // For animated models, set bone matrices (identity matrices for now - no animation yet)
+        // For animated models, set bone matrices
         if (isAnimatedModel) {
             const animatedModel = node.model as AnimatedModel;
-            if (animatedModel.hasSkin) {
-                // Create identity matrices array for all bones
-                const identityMatrices = new Array(100);
-                for (let i = 0; i < 100; i++) {
-                    identityMatrices[i] = [
-                        1, 0, 0, 0,
-                        0, 1, 0, 0,
-                        0, 0, 1, 0,
-                        0, 0, 0, 1
-                    ];
+            if (animatedModel.hasSkin && node.animator) {
+                // Get bone matrices from the animator
+                const boneMatrices = node.animator.getFinalBoneMatrices();
+                
+                // Convert mat4 array to Float32Array for WebGL
+                const flatArray = new Float32Array(100 * 16); // 100 matrices × 16 floats each
+                for (let i = 0; i < Math.min(100, boneMatrices.length); i++) {
+                    for (let j = 0; j < 16; j++) {
+                        flatArray[i * 16 + j] = boneMatrices[i][j];
+                    }
                 }
-                this._shaderManager.setUniform('u_boneMatrices', identityMatrices);
+                
+                // Set the uniform directly with WebGL (bypass shader manager for arrays)
+                const location = gl.getUniformLocation(
+                    this._shaderManager.getShader(shaderType).program, 
+                    'u_boneMatrices'
+                );
+                if (location) {
+                    gl.uniformMatrix4fv(location, false, flatArray);
+                } else {
+                    console.warn('u_boneMatrices uniform location not found');
+                }
+            } else {
+                // Fallback to identity matrices if no animator
+                const identityArray = new Float32Array(100 * 16);
+                for (let i = 0; i < 100; i++) {
+                    // Identity matrix
+                    identityArray[i * 16 + 0] = 1;
+                    identityArray[i * 16 + 5] = 1;
+                    identityArray[i * 16 + 10] = 1;
+                    identityArray[i * 16 + 15] = 1;
+                }
+                
+                const location = gl.getUniformLocation(
+                    this._shaderManager.getShader(shaderType).program, 
+                    'u_boneMatrices'
+                );
+                if (location) {
+                    gl.uniformMatrix4fv(location, false, identityArray);
+                }
             }
         }
 

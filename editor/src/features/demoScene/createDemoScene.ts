@@ -1,4 +1,4 @@
-import { Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, AnimatedModel, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite, Texture, Loader, Skybox, SkyboxNode } from 'cleo';
+import { Scene, Camera, LightNode, DirectionalLight, CameraNode, Model, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite, Texture, Loader, Skybox, SkyboxNode, AnimatedModel } from 'cleo';
 import { CameraGeometry, GridGeometry } from '../../utils/EditorModels';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 
@@ -133,32 +133,19 @@ export async function createDemoScene(params: {
 
     if (runningModels.length > 0) {
       const runningNode = new Node('runningModel');
-      runningNode.setPosition([2, 0, 2]);
+      runningNode.setPosition([-1, 0, 2]);
       runningNode.setRotation([0, 0, 0]);
       runningNode.setScale([1, 1, 1]);
       
       for (const modelData of runningModels) {
-        const modelNode = new ModelNode(modelData.name, modelData.model as any);
+        const modelNode = new ModelNode(modelData.name, modelData.model as AnimatedModel);
         runningNode.addChild(modelNode);
       }
       
       scene.addNode(runningNode);
-      
-      // Log animation and skinning info
-      const firstModel = runningModels[0].model;
-      if (firstModel.hasSkin) {
-        console.log('Running GLTF model loaded with skinning data:');
-        console.log('- Joints:', firstModel.skin?.joints.length);
-      }
-      if (firstModel.hasAnimations) {
-        console.log('Running GLTF model loaded with animations:');
-        firstModel.animations.forEach((anim: any, i: number) => {
-          console.log(`- Animation ${i}: ${anim.name}, Channels: ${anim.channels.length}, Samplers: ${anim.samplers.length}`);
-        });
-      }
-      console.log('Running GLTF model loaded successfully as AnimatedModel');
     }
-  } catch (error) {
+  }
+  catch (error) {
     console.error('Failed to load running GLTF model:', error);
   }
 
