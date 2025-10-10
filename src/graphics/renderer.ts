@@ -8,12 +8,15 @@ import { Mesh } from './mesh';
 import { Shader } from './shader';
 import { Framebuffer } from './framebuffer';
 import { Geometry } from '../core/geometry';
+import { AnimatedModel } from './animatedModel';
 
 // Shaders Sources
 import BasicVertex from './shaders/materials/basic.vs'
 import BasicFragment from './shaders/materials/basic.fs'
+import BasicSkinnedVertex from './shaders/materials/basic_skinned.vs'
 import DefaultVertex from './shaders/materials/default.vs'
 import DefaultFragment from './shaders/materials/default.fs'
+import DefaultSkinnedVertex from './shaders/materials/default_skinned.vs'
 import OutlineVertex from './shaders/materials/outline.vs'
 import OutlineFragment from './shaders/materials/outline.fs'
 
@@ -106,6 +109,8 @@ export class Renderer {
         // Material shaders
         const basicShader = new Shader().create(BasicVertex, BasicFragment);
         const defaultShader = new Shader().create(DefaultVertex, DefaultFragment);
+        const basicSkinnedShader = new Shader().create(BasicSkinnedVertex, BasicFragment);
+        const defaultSkinnedShader = new Shader().create(DefaultSkinnedVertex, DefaultFragment);
         // Environment shaders
         const shadowMapShader = new Shader().create(ShadowMapVertex, ShadowMapFragment);
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
@@ -121,6 +126,8 @@ export class Renderer {
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
         this._shaderManager.addShader('default', defaultShader);
+        this._shaderManager.addShader('basicSkinned', basicSkinnedShader);
+        this._shaderManager.addShader('defaultSkinned', defaultSkinnedShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('screen', screenShader);
@@ -164,14 +171,26 @@ export class Renderer {
         for (const node of scene.lights) {
             if (!node.castShadows) continue;
             this._renderShadowMap(scene.models, node);
+            
+            // Set shadow map uniforms for both default shaders
             this._shaderManager.bind('default');
+            this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
+            this._shaderManager.setUniform('u_shadowMap', 6);
+            this._shadowMapFBO.depth.bind(6);
+            
+            this._shaderManager.bind('defaultSkinned');
             this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
             this._shaderManager.setUniform('u_shadowMap', 6);
             this._shadowMapFBO.depth.bind(6);
         }
 
-        // Set environment map
+        // Set environment map for both default shaders
         this._shaderManager.bind('default');
+        this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+        this._shaderManager.setUniform('u_envMap', 7);
+        scene.environmentMap?.bind(7);
+        
+        this._shaderManager.bind('defaultSkinned');
         this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
         this._shaderManager.setUniform('u_envMap', 7);
         scene.environmentMap?.bind(7);
@@ -232,11 +251,11 @@ export class Renderer {
             this._activeCamera.type = 'perspective';
             this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
             this._activeCamera.type = prevType;
-            this._shaderManager.setUniform('u_skybox', 0);
+            this._shaderManager.setUniform('u_skybox', 8);
             let skyboxNode = scene.skybox as SkyboxNode;
             if (!skyboxNode.initialized)
                 skyboxNode.initializeSkybox();
-            skyboxNode.skybox.texture.bind(0);
+            skyboxNode.skybox.texture.bind(8);
             skyboxNode.skybox.mesh.draw();
             skyboxNode.skybox.texture.unbind();
         }
@@ -334,7 +353,25 @@ export class Renderer {
         if (!node.initialized)
             node.initializeModel();
 
-        this._shaderManager.bind(node.model.material.type);
+        // Check if this is an animated model
+        const isAnimatedModel = node.model instanceof AnimatedModel;
+        
+        // Use appropriate shader based on model type and material
+        let shaderType: string = node.model.material.type;
+        if (isAnimatedModel) {
+            const animatedModel = node.model as AnimatedModel;
+            
+            if (shaderType === 'basic') {
+                shaderType = 'basicSkinned';
+            } else if (shaderType === 'default') {
+                shaderType = 'defaultSkinned';
+            }
+            
+            // Initialize the VAO for the animated model if not already done
+            animatedModel.initializeVAO(this._shaderManager.getShader(shaderType).attributes);
+        }
+
+        this._shaderManager.bind(shaderType);
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
@@ -343,6 +380,24 @@ export class Renderer {
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
         this._shaderManager.setUniform('u_model', node.worldTransform);
+
+        // For animated models, set bone matrices (identity matrices for now - no animation yet)
+        if (isAnimatedModel) {
+            const animatedModel = node.model as AnimatedModel;
+            if (animatedModel.hasSkin) {
+                // Create identity matrices array for all bones
+                const identityMatrices = new Array(100);
+                for (let i = 0; i < 100; i++) {
+                    identityMatrices[i] = [
+                        1, 0, 0, 0,
+                        0, 1, 0, 0,
+                        0, 0, 1, 0,
+                        0, 0, 0, 1
+                    ];
+                }
+                this._shaderManager.setUniform('u_boneMatrices', identityMatrices);
+            }
+        }
 
         // Set Material releted uniforms on the model's shader type
         for (const [name, value] of node.model.material.properties)
@@ -556,7 +611,8 @@ export class Renderer {
     }
 
     private _setLighting(node: LightNode, numPointLights: number, numSpotlights: number): void {
-        const setLights = (node: LightNode) => {
+        const setLights = (shaderName: string, node: LightNode) => {
+            this._shaderManager.bind(shaderName);
             // console.log(node.type)
             switch (node.type) {
                 case 'directional':
@@ -589,11 +645,18 @@ export class Renderer {
             }
         }
 
-        // TODO: Add support for different shaders that support lighting
-        this._shaderManager.bind('default');
-        this._shaderManager.setUniform('u_numPointLights', numPointLights);
-        this._shaderManager.setUniform('u_numSpotlights', numSpotlights);
-        setLights(node);
+        // Set lighting for both default shaders
+        for (const shaderName of ['default', 'defaultSkinned']) {
+            try {
+                this._shaderManager.bind(shaderName);
+                this._shaderManager.setUniform('u_numPointLights', numPointLights);
+                this._shaderManager.setUniform('u_numSpotlights', numSpotlights);
+                setLights(shaderName, node);
+            } catch (error) {
+                // Shader may not have lighting uniforms (e.g., basic shader)
+                console.warn(`Could not set lighting uniforms for shader ${shaderName}:`, error);
+            }
+        }
     }
 
     private _applyPostProcessing(): void {

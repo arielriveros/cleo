@@ -89,7 +89,10 @@ export class Shader {
             return;
 
         const location = gl.getUniformLocation(this._shaderProgram, name);
-        if (!location) throw new Error(`Uniform ${name} of type ${type} not found`);
+        if (!location) {
+            console.warn(`Uniform ${name} of type ${type} not found in current shader program`);
+            return;
+        }
     
         switch (type) {
             case 'float':

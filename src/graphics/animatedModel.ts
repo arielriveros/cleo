@@ -63,6 +63,10 @@ export class AnimatedModel {
     // Animation data
     private readonly _animations: Animation[] = [];
     
+    // Initialization tracking
+    private _vaoInitialized: boolean = false;
+    private _isAnimated: boolean = false;
+    
     constructor(
         geometry: Geometry,
         material: Material,
@@ -90,6 +94,9 @@ export class AnimatedModel {
         if (animations) {
             this._animations = animations;
         }
+        
+        // Initialize the mesh with bone data if available
+        this._initializeMesh();
     }
     
     /**
@@ -250,6 +257,107 @@ export class AnimatedModel {
         };
     }
     
+    /**
+     * Initialize the mesh with bone data if available
+     */
+    private _initializeMesh(): void {
+        const vertexCount = this._geometry.positions.length;
+        
+        if (this.hasSkin && this._jointIndices && this._jointWeights) {
+            // For skinned meshes, we need to create separate buffers for vertex data and bone data
+            // since bone indices must be integers and can't be in the same buffer as floats
+            const vertices = this._geometry.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']);
+            
+            // Create bone indices array (4 per vertex)
+            const boneIndices: number[] = [];
+            const boneWeights: number[] = [];
+            
+            // Debug: log the data structure we're working with
+            console.log(`Vertex count: ${vertexCount}`);
+            console.log(`Joint indices length: ${this._jointIndices.length}`);
+            console.log(`Joint weights length: ${this._jointWeights.length}`);
+            console.log(`Expected bone data length: ${vertexCount * 4}`);
+            
+            for (let i = 0; i < vertexCount; i++) {
+                const baseIndex = i * 4;
+                
+                // Bone indices (4 ints per vertex)
+                if (this._jointIndices && baseIndex + 3 < this._jointIndices.length) {
+                    boneIndices.push(Math.floor(this._jointIndices[baseIndex]));
+                    boneIndices.push(Math.floor(this._jointIndices[baseIndex + 1]));
+                    boneIndices.push(Math.floor(this._jointIndices[baseIndex + 2]));
+                    boneIndices.push(Math.floor(this._jointIndices[baseIndex + 3]));
+                } else {
+                    // Default: use first bone with full weight (assume identity matrix at index 0)
+                    boneIndices.push(0, 0, 0, 0);
+                }
+                
+                // Bone weights (4 floats per vertex)
+                let weights = [0.0, 0.0, 0.0, 0.0];
+                if (this._jointWeights && baseIndex + 3 < this._jointWeights.length) {
+                    weights[0] = this._jointWeights[baseIndex];
+                    weights[1] = this._jointWeights[baseIndex + 1];
+                    weights[2] = this._jointWeights[baseIndex + 2];
+                    weights[3] = this._jointWeights[baseIndex + 3];
+                    
+                    // Normalize weights to ensure they sum to 1.0
+                    const weightSum = weights[0] + weights[1] + weights[2] + weights[3];
+                    if (weightSum > 0.0) {
+                        weights[0] /= weightSum;
+                        weights[1] /= weightSum;
+                        weights[2] /= weightSum;
+                        weights[3] /= weightSum;
+                    } else {
+                        // If all weights are 0, set full weight on first bone
+                        weights[0] = 1.0;
+                    }
+                } else {
+                    // Default: full weight on first bone (assume identity matrix at index 0)
+                    weights[0] = 1.0;
+                }
+                
+                boneWeights.push(weights[0], weights[1], weights[2], weights[3]);
+            }
+            
+            console.log(`Created ${boneIndices.length / 4} vertices worth of bone data`);
+            this._mesh.createAnimated(vertices, vertexCount, boneIndices, boneWeights, this._geometry.indices);
+            this._isAnimated = true;
+        } else {
+            // For regular meshes, create normal mesh
+            const vertices = this._geometry.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']);
+            this._mesh.create(vertices, vertexCount, this._geometry.indices);
+            this._isAnimated = false;
+        }
+    }
+
+    /**
+     * Initialize the animated model's mesh with the appropriate shader
+     */
+    public initializeForSkinning(shaderType: 'basicSkinned' | 'defaultSkinned' = 'defaultSkinned'): void {
+        if (!this.hasSkin) {
+            throw new Error('Cannot initialize for skinning: model has no skin data');
+        }
+        
+        // This method will be called by the renderer when the shader manager is available
+        // For now, we just mark that it needs to be initialized
+        console.log(`AnimatedModel needs to be initialized with shader: ${shaderType}`);
+    }
+
+    /**
+     * Initialize VAO with shader attributes (called by renderer)
+     */
+    public initializeVAO(shaderAttributes: any[]): void {
+        if (this._vaoInitialized) return;
+        
+        if (this.hasSkin && this._mesh.isAnimated) {
+            this._mesh.initializeAnimatedVAO(shaderAttributes);
+        } else {
+            this._mesh.initializeVAO(shaderAttributes);
+        }
+        
+        this._vaoInitialized = true;
+    }
+
     // Getters
     public get geometry(): Geometry { return this._geometry; }
     public get mesh(): Mesh { return this._mesh; }

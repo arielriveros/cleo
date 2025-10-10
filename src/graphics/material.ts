@@ -32,7 +32,9 @@ interface DefaultProperties {
 
 enum MaterialType {
     Basic = 'basic',
-    Default = 'default'
+    Default = 'default',
+    BasicSkinned = 'basicSkinned',
+    DefaultSkinned = 'defaultSkinned'
 }
 
 export class Material {

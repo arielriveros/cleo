@@ -46,7 +46,11 @@ export class Texture {
 
         this._wrapping = this._getWrappingValue(options?.wrapping) || gl.CLAMP_TO_EDGE;
 
-        this._internalFormat = this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : (this._precision === 'high' ? gl.RGBA16F : gl.RGBA8);
+        // Check for floating point texture support before using high precision
+        const hasFloatTextureSupport = gl.getExtension('EXT_color_buffer_float') && gl.getExtension('OES_texture_float_linear');
+        
+        this._internalFormat = this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : 
+                              (this._precision === 'high' && hasFloatTextureSupport ? gl.RGBA16F : gl.RGBA8);
 
         this._minFilter = this._mipMap ? 
             (options?.mipMapFilter === 'nearest' ? gl.NEAREST_MIPMAP_NEAREST : gl.LINEAR_MIPMAP_LINEAR) :
@@ -54,7 +58,7 @@ export class Texture {
 
         this._format = this._usage === 'depth' ? gl.DEPTH_COMPONENT : gl.RGBA;
         this._type = this._usage === 'depth' ? gl.UNSIGNED_INT : 
-                     (this._precision === 'low' ? gl.UNSIGNED_BYTE : gl.FLOAT);
+                     (this._precision === 'low' || !hasFloatTextureSupport ? gl.UNSIGNED_BYTE : gl.FLOAT);
     }
 
     private _getWrappingValue(wrapping?: 'clamp' | 'repeat' | 'mirror'): number {

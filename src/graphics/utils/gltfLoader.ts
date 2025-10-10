@@ -564,9 +564,25 @@ export class GLTFLoader {
                 
                 // Check if this mesh has skinning attributes
                 if (primitive.attributes.JOINTS_0 !== undefined && primitive.attributes.WEIGHTS_0 !== undefined) {
-                    // Load joint indices
+                    // Load joint indices (keep as original integer type, don't convert to Float32Array)
                     const jointData = this.getAccessorData(primitive.attributes.JOINTS_0);
-                    jointIndices = new Float32Array(jointData);
+                    
+                    // Convert to Float32Array only if it's not already a typed array of integers
+                    if (jointData instanceof Float32Array) {
+                        // If it's already float32, convert to integers
+                        jointIndices = new Float32Array(jointData.length);
+                        for (let i = 0; i < jointData.length; i++) {
+                            jointIndices[i] = Math.floor(jointData[i]);
+                        }
+                    } else if (jointData instanceof Uint16Array || jointData instanceof Uint32Array) {
+                        // Convert integer arrays to Float32Array with proper integer values
+                        jointIndices = new Float32Array(jointData.length);
+                        for (let i = 0; i < jointData.length; i++) {
+                            jointIndices[i] = jointData[i];
+                        }
+                    } else {
+                        jointIndices = new Float32Array(jointData);
+                    }
                     
                     // Load joint weights
                     const weightData = this.getAccessorData(primitive.attributes.WEIGHTS_0) as Float32Array;
