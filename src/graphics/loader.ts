@@ -234,78 +234,89 @@ export class Loader {
                                  indices, materialindex: m.materialindex});
                 }
 
-                for (const mesh of meshes) {
-                    const geometry = new Geometry(
-                        mesh.positions as [number, number, number][],
-                        mesh.normals as [number, number, number][],
-                        mesh.uvs as [number, number][],
-                        mesh.tangents as [number, number, number][],
-                        mesh.bitangents as [number, number, number][],
-                        mesh.indices);
-                    const matIndex = mesh.materialindex;
-                    const materialDescription = materials[matIndex].material;
+                // Helper function for validating base64 images
+                const validateBase64Image = async (base64: string): Promise<boolean> => {
+                    return new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => resolve(true);
+                        img.onerror = () => resolve(false);
+                        img.src = base64;
+                    });
+                };
 
-                    // Helper function to load texture from embedded data or uploaded files
-                    const loadTextureFromSources = (texturePath: string | undefined, textureData: string | undefined) => {
-                        // First priority: use embedded base64 data if available
-                        if (textureData) {
+                // Helper function to load texture from embedded data or uploaded files
+                const loadTextureFromSources = async (texturePath: string | undefined, textureData: string | undefined) => {
+                    // First priority: use embedded base64 data if available and valid
+                    if (textureData) {
+                        const isValid = await validateBase64Image(textureData);
+                        if (isValid) {
                             return TextureManager.Instance.addTextureFromBase64(textureData, { wrapping: 'repeat', mipMap: false });
+                        } else {
+                            console.warn('Base64 texture data is not a valid image, skipping:', textureData.slice(0, 50));
                         }
-                        
-                        // Second priority: look for texture file in uploaded files
-                        if (texturePath) {
-                            const textureFileName = texturePath.split(/[\/\\]/).pop();
-                            if (textureFileName) {
-                                const textureFile = files.find(file => 
-                                    file.name.toLowerCase().endsWith(textureFileName.toLowerCase()) ||
-                                    file.name.toLowerCase() === textureFileName.toLowerCase()
-                                );
-                                
-                                if (textureFile) {
-                                    return TextureManager.Instance.addTextureFromFile(textureFile, { wrapping: 'repeat' });
-                                }
+                    }
+                    
+                    // Second priority: look for texture file in uploaded files
+                    if (texturePath) {
+                        const textureFileName = texturePath.split(/[\/\\]/).pop();
+                        if (textureFileName) {
+                            const textureFile = files.find(file => 
+                                file.name.toLowerCase().endsWith(textureFileName.toLowerCase()) ||
+                                file.name.toLowerCase() === textureFileName.toLowerCase()
+                            );
+                            
+                            if (textureFile) {
+                                return TextureManager.Instance.addTextureFromFile(textureFile, { wrapping: 'repeat' });
                             }
                         }
-                        
-                        return undefined;
-                    };
+                    }
+                    
+                    return undefined;
+                };
 
-                    const baseColorTexture = loadTextureFromSources(materialDescription.texturesPaths.base, materialDescription.texturesData.base);
-                    const specularTexture = loadTextureFromSources(materialDescription.texturesPaths.specular, materialDescription.texturesData.specular);
-                    const normalTexture = loadTextureFromSources(materialDescription.texturesPaths.normal, materialDescription.texturesData.normal);
-                    const emissiveTexture = loadTextureFromSources(materialDescription.texturesPaths.emissive, materialDescription.texturesData.emissive);
-                    const maskTexture = loadTextureFromSources(materialDescription.texturesPaths.mask, materialDescription.texturesData.mask);
-                    const reflectivityTexture = loadTextureFromSources(materialDescription.texturesPaths.reflectivity, materialDescription.texturesData.reflectivity);
+                // Process meshes asynchronously like in loadModelsFromPath
+                (async () => {
+                    for (const mesh of meshes) {
+                        const geometry = new Geometry(
+                            mesh.positions as [number, number, number][],
+                            mesh.normals as [number, number, number][],
+                            mesh.uvs as [number, number][],
+                            mesh.tangents as [number, number, number][],
+                            mesh.bitangents as [number, number, number][],
+                            mesh.indices);
+                        const matIndex = mesh.materialindex;
+                        const materialDescription = materials[matIndex].material;
 
-                    const textures = {
-                        base: baseColorTexture,
-                        specular: specularTexture,
-                        normal: normalTexture,
-                        emissive: emissiveTexture,
-                        mask: maskTexture,
-                        reflectivity: reflectivityTexture
-                    };
+                        const textures = {
+                            base: await loadTextureFromSources(materialDescription.texturesPaths.base, materialDescription.texturesData.base),
+                            specular: await loadTextureFromSources(materialDescription.texturesPaths.specular, materialDescription.texturesData.specular),
+                            normal: await loadTextureFromSources(materialDescription.texturesPaths.normal, materialDescription.texturesData.normal),
+                            emissive: await loadTextureFromSources(materialDescription.texturesPaths.emissive, materialDescription.texturesData.emissive),
+                            mask: await loadTextureFromSources(materialDescription.texturesPaths.mask, materialDescription.texturesData.mask),
+                            reflectivity: await loadTextureFromSources(materialDescription.texturesPaths.reflectivity, materialDescription.texturesData.reflectivity)
+                        };
 
-                    const material = Material.Default({
-                        diffuse: materialDescription.diffuse,
-                        specular: materialDescription.specular,
-                        ambient: materialDescription.ambient,
-                        emissive: materialDescription.emissive,
-                        shininess: materialDescription.shininess,
-                        opacity: materialDescription.opacity,
-                        textures
-                    });
-                    output.push({ name: mesh.name, geometry, material });
-                }
-                const models: { name: string, geometry: Geometry, material: Material }[] = [];
-                for (const m of output) {
-                    models.push({
-                        name: m.name,
-                        geometry: m.geometry,
-                        material: m.material
-                    });
-                }
-                resolve(models);
+                        const material = Material.Default({
+                            diffuse: materialDescription.diffuse,
+                            specular: materialDescription.specular,
+                            ambient: materialDescription.ambient,
+                            emissive: materialDescription.emissive,
+                            shininess: materialDescription.shininess,
+                            opacity: materialDescription.opacity,
+                            textures
+                        });
+                        output.push({ name: mesh.name, geometry, material });
+                    }
+                    const models: { name: string, geometry: Geometry, material: Material }[] = [];
+                    for (const m of output) {
+                        models.push({
+                            name: m.name,
+                            geometry: m.geometry,
+                            material: m.material
+                        });
+                    }
+                    resolve(models);
+                })();
             });
         });
 

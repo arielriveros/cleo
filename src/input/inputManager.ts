@@ -46,10 +46,8 @@ export class InputManager {
         InputManager._canvas.onmousemove = InputManager.instance._onMouseMove;
         InputManager._canvas.onmousedown = InputManager.instance._onMouseDown;
         InputManager._canvas.onmouseup = InputManager.instance._onMouseUp;
-        // Capture wheel events for zoom/scroll interactions
+        // Only capture wheel events when mouse is over the canvas
         InputManager._canvas.onwheel = InputManager.instance._onWheel as any;
-        // Also capture wheel globally to avoid overlay issues
-        window.onwheel = InputManager.instance._onWheel as any;
         window.onkeydown = InputManager.instance._onKeyDown;
         window.onkeyup = InputManager.instance._onKeyUp;
     }
@@ -166,6 +164,19 @@ export class InputManager {
 
     public get mouse(): MouseInfo { return InputManager._mouseInfo; }
     public get keys(): KeysInfo { return InputManager._keysInfo; }
+
+    public isMouseOverCanvas(): boolean {
+        if (!InputManager._canvas) return false;
+        
+        const rect = InputManager._canvas.getBoundingClientRect();
+        const mouseX = InputManager._mouseInfo.position[0];
+        const mouseY = InputManager._mouseInfo.position[1];
+        
+        return mouseX >= rect.left && 
+               mouseX <= rect.right && 
+               mouseY >= rect.top && 
+               mouseY <= rect.bottom;
+    }
 
     public isKeyPressed(key: string): boolean {
         if (!InputManager._keysInfo[key]) return false;

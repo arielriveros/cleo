@@ -172,7 +172,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
                 InputManager.instance.isKeyPressed('KeyD') && node.addX(movement * 10);
             }
             // Zoom with mouse wheel by scaling ortho extents
-            if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0) {
+            if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
               const step = -mouse.wheel.deltaY * 0.001; // wheel up -> zoom in
               const factor = Math.max(0.1, 1 + step); // avoid inverting
               const cam = cameraNode.camera;
@@ -221,7 +221,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
           }
           // Zoom with mouse wheel by dollying the camera forward/backward
-          if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0) {
+          if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
             const zoom = -mouse.wheel.deltaY * 0.01; // wheel up -> move forward
             node.addForward(zoom);
           }
@@ -238,10 +238,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (state === 'play') {
         instanceRef.current.isPaused = false;
         setIsPlayMode(true);
+        // Clear selection and outline rendering when entering play mode
+        setSelectedNode(null);
+        if (instanceRef.current && instanceRef.current.renderer) {
+          instanceRef.current.renderer.setSelectedNode(null);
+        }
       }
       else if (state === 'pause') {
         instanceRef.current.isPaused = true;
         setIsPlayMode(true);
+        // Keep selection cleared during pause mode
+        setSelectedNode(null);
+        if (instanceRef.current && instanceRef.current.renderer) {
+          instanceRef.current.renderer.setSelectedNode(null);
+        }
       }
       else if (state === 'stop') {
         instanceRef.current.isPaused = false; // Unpause for editor scene
