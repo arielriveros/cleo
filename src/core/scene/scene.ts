@@ -86,11 +86,6 @@ export class Scene {
                     continue;
                 }
                 
-                // Update animators for animated models
-                if (node instanceof ModelNode && node.animator && !paused) {
-                    node.animator.update(delta);
-                }
-                
                 if (this._hasStarted && !paused)
                     node.update(delta, time);
             }

@@ -852,6 +852,12 @@ export class ModelNode extends Node {
         
         return { min, max };
     }
+
+    public update(delta: number, time: number): void {
+        super.update(delta, time);
+        if (this._animator)
+            this._animator.update(delta);
+    }
 }
 
 export class LightNode extends Node {
