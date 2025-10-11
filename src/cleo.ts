@@ -17,6 +17,7 @@ export { Model } from "./graphics/model";
 export { AnimatedModel } from "./graphics/animatedModel";
 export type { Skin, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
 export { Animator } from "./graphics/animator";
+export type { AnimationMapping } from "./graphics/animator";
 export { Sprite } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";

@@ -127,35 +127,9 @@ export async function createDemoScene(params: {
     console.error('Failed to load damaged helmet model:', error);
   }
 
-  // Load Running GLTF Model with Animation
-  try {
-    const runningModels = await Loader.loadAnimatedModelsFromPath('/assets/running.gltf');
-
-    if (runningModels.length > 0) {
-      const runningNode = new Node('runningModel');
-      runningNode.setPosition([-1, 0, 2]);
-      runningNode.setRotation([0, 0, 0]);
-      runningNode.setScale([1, 1, 1]);
-      
-      for (const modelData of runningModels) {
-        const modelNode = new ModelNode(modelData.name, modelData.model as AnimatedModel);
-        runningNode.addChild(modelNode);
-      }
-      
-      scene.addNode(runningNode);
-    }
-  }
-  catch (error) {
-    console.error('Failed to load running GLTF model:', error);
-  }
-
-  // Directional light with icon sprite (texture is added later by EngineContext)
-  const lightNode = new LightNode('light', new DirectionalLight({}));
-  const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({ color: [1, 1, 1], texture: '__editor__light_icon' })));
-  debugLightIcon.setUniformScale(0.5);
-  lightNode.addChild(debugLightIcon);
-  lightNode.setPosition([0, 1, 0]).setRotation([100, 25, 0]);
-  lightNode.castShadows = true;
+  // Example scene nodes
+  const physicalBox = new ModelNode('physical box', new Model(Geometry.Cube(), Material.Default({ diffuse: [1, 0, 1] })));
+  physicalBox.setPosition([1, 3, 0]).setRotation([45, 0, 45]);
 
   // A controllable camera node with debug mesh
   const cameraNode = new CameraNode('camera', new Camera({}));
@@ -172,24 +146,44 @@ export async function createDemoScene(params: {
   cameraNode.addChild(debugCameraModel);
   cameraNode.setPosition([0, 2, -5]).setRotation([30, 0, 0]);
 
-  // Example scene nodes
-  const physicalBox = new ModelNode('physical box', new Model(Geometry.Cube(), Material.Default({ diffuse: [1, 0, 1] })));
-  physicalBox.setPosition([1, 3, 0]).setRotation([45, 0, 45]);
-
   const playable = new Node('playable');
   playable.setPosition([1, 0, 0]);
+  playable.addChild(cameraNode);
+
+  // Load Running GLTF Model with Animation
+  try {
+    const runningModels = await Loader.loadAnimatedModelsFromPath('/assets/running.gltf');
+
+    if (runningModels.length > 0) {
+
+      for (const modelData of runningModels) {
+        const modelNode = new ModelNode(modelData.name, modelData.model as AnimatedModel);
+        playable.addChild(modelNode);
+      }
+      scene.addNode(playable);
+    }
+  }
+  catch (error) {
+    console.error('Failed to load running GLTF model:', error);
+  }
+
+  // Directional light with icon sprite (texture is added later by EngineContext)
+  const lightNode = new LightNode('light', new DirectionalLight({}));
+  const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({ color: [1, 1, 1], texture: '__editor__light_icon' })));
+  debugLightIcon.setUniformScale(0.5);
+  lightNode.addChild(debugLightIcon);
+  lightNode.setPosition([0, 1, 0]).setRotation([100, 25, 0]);
+  lightNode.castShadows = true;
 
   const spriteNode = new SpriteNode('sprite', new Sprite(Material.Basic({
     texture: 'dinosaur.png'
   })));
-  playable.addChild(spriteNode);
-  playable.addChild(cameraNode);
 
   const plane = new Node('plane');
   plane.setPosition([0, -1, 0]).setRotation([-90, 0, 0]).setScale([10, 10, 1]);
 
 
-  scene.addNodes(lightNode, physicalBox, playable, plane);
+  scene.addNodes(lightNode, physicalBox, spriteNode, plane);
 
   try {
     const sponzaModels = await Model.fromPath({ filePaths: [
@@ -291,7 +285,7 @@ export async function createDemoScene(params: {
 
   // Scripts using module-style exports
   // Playable controller and game state
-  scripts.set(playable.id, "module.exports = {\n  onStart(node, global) {\n    // Game state stored on the node instance\n    node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n    const jump = () => { if (!node.__game.alive || node.__game.quit) return; if (node.body) node.body.impulse([0, 10, 0]); global.logger('Jump!'); };\n    global.input.registerKeyPress('Space', jump);\n    global.input.registerKeyPress('Escape', () => {\n      node.__game.quit = true;\n      // trigger cleanup and final score logging via onDespawn\n      node.remove();\n    });\n  },\n  onUpdate(node, delta, time, global) {\n    const g = node.__game || (node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 });\n    if (!g.alive || g.quit) return;\n    const speed = 3;\n    if (global.input.isKeyPressed('KeyD')) node.addX(-delta * speed);\n    if (global.input.isKeyPressed('KeyA')) node.addX(delta * speed);\n    if (global.input.isKeyPressed('KeyW')) node.addZ(delta * speed);\n    if (global.input.isKeyPressed('KeyS')) node.addZ(-delta * speed);\n  },\n  onCollision(node, other, global) { /* not used; hazards are triggers */ },\n  onDespawn(node, global) {\n    const g = node.__game || { score: 0 };\n    global.logger('Final score: ' + g.score);\n  }\n};");
+  scripts.set(playable.id, "module.exports = {\n  onStart(node, global) {\n    // Game state stored on the node instance\n    node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n    const jump = () => { if (!node.__game.alive || node.__game.quit) return; if (node.body) node.body.impulse([0, 10, 0]); global.logger('Jump!'); };\n    global.input.registerKeyPress('Space', jump);\n    global.input.registerKeyPress('Escape', () => {\n      node.__game.quit = true;\n      // trigger cleanup and final score logging via onDespawn\n      node.remove();\n    });\n  },\n  onUpdate(node, delta, time, global) {\n    const g = node.__game || (node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 });\n    if (!g.alive || g.quit) return;\n    const speed = 3;\n    let moveX = 0;\n    let moveZ = 0;\n    if (global.input.isKeyPressed('KeyD')) { node.addX(-delta * speed); moveX = -1; }\n    if (global.input.isKeyPressed('KeyA')) { node.addX(delta * speed); moveX = 1; }\n    if (global.input.isKeyPressed('KeyW')) { node.addZ(delta * speed); moveZ = 1; }\n    if (global.input.isKeyPressed('KeyS')) { node.addZ(-delta * speed); moveZ = -1; }\n    // Rotate the animated model child to face movement direction\n    if (moveX !== 0 || moveZ !== 0) {\n      const targetAngle = Math.atan2(moveX, moveZ) * (180 / Math.PI);\n      // Find the animated model child and rotate it\n      for (let i = 0; i < node.children.length; i++) {\n        const child = node.children[i];\n        if (child.nodeType === 'model' && child.name !== 'camera') {\n          child.setRotation([0, targetAngle, 0]);\n        }\n      }\n    }\n  },\n  onCollision(node, other, global) { /* not used; hazards are triggers */ },\n  onDespawn(node, global) {\n    const g = node.__game || { score: 0 };\n    global.logger('Final score: ' + g.score);\n  }\n};");
 
   // Camera rotate with mouse (keep existing behavior)
   scripts.set(cameraNode.id, "module.exports = {\n  onUpdate(node, delta, time, global) {\n    const mouseMovement = global.input.mouse.velocity;\n    const deltaFix = -delta * 10;\n    node.rotateY(mouseMovement[0] * deltaFix);\n  }\n};");

@@ -5,12 +5,13 @@ import Tabs, { Tab } from "../../components/Tabs";
 import PropertyEditor from './propertyEditors/PropertyEditor';
 import ScriptEditor from './scriptEditor/ScriptEditor';
 import PhysicsEditor from './physicsEditors/PhysicsEditor';
+import AnimationEditor from './animationEditor/AnimationEditor';
 import './NodeInspector.css'
 
 export default function NodeInspector() {
   const { editorScene, selectedNode } = useCleoEngine()
   const [node, setNode] = useState<Node | null>(null)
-  const [selectedTab, setSelectedTab] = useState<'Properties' | 'Script' | 'Physics'>('Properties')
+  const [selectedTab, setSelectedTab] = useState<'Properties' | 'Script' | 'Physics' | 'Animation'>('Properties')
 
   useEffect(() => {
     if (editorScene && selectedNode) {
@@ -26,11 +27,13 @@ export default function NodeInspector() {
         <Tab title='Properties' onClick={()=>{setSelectedTab('Properties')}} selected={selectedTab === 'Properties'}/>
         <Tab title='Scripts' onClick={()=>{setSelectedTab('Script')}} selected={selectedTab === 'Script'}/>
         <Tab title='Physics' onClick={()=>{setSelectedTab('Physics')}} selected={selectedTab === 'Physics'}/>
+        <Tab title='Animation' onClick={()=>{setSelectedTab('Animation')}} selected={selectedTab === 'Animation'}/>
       </Tabs>
       <div className='nodeInspector'>
         {selectedTab === 'Properties' && node && <PropertyEditor node={node}/>}
         {selectedTab === 'Script'  && <ScriptEditor /> }
         {selectedTab === 'Physics' && node && <PhysicsEditor node={node} />}
+        {selectedTab === 'Animation' && node && <AnimationEditor node={node} />}
       </div>
     </>
   )

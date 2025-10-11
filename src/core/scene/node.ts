@@ -716,7 +716,7 @@ export class ModelNode extends Node {
         
         // Create animator for animated models
         if (model instanceof AnimatedModel && model.hasSkin) {
-            this._animator = new Animator(model);
+            this._animator = new Animator(model, this);
         } else {
             this._animator = null;
         }
@@ -765,6 +765,13 @@ export class ModelNode extends Node {
     public serialize(): Promise<any> {
         return new Promise((resolve, reject) => {
             const model = this._model.serialize()
+            
+            // Serialize animation mappings if animator exists
+            let animationMappings = null;
+            if (this._animator) {
+                animationMappings = this._animator.getAnimationMappings();
+            }
+            
             Promise.all(this._children.map(child => child.serialize())).then(children => {
                 resolve({
                     name: this._name,
@@ -774,7 +781,8 @@ export class ModelNode extends Node {
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
-                    model: model
+                    model: model,
+                    animationMappings: animationMappings
                 });
             });
         });
@@ -785,6 +793,12 @@ export class ModelNode extends Node {
         const isAnimated = json.model.skin || json.model.animations || json.model.jointIndices;
         const model = isAnimated ? AnimatedModel.parse(json.model) : Model.parse(json.model);
         const node = new ModelNode(json.name, model, json.id);
+        
+        // Restore animation mappings if they exist
+        if (json.animationMappings && node.animator) {
+            node.animator.setAnimationMappings(json.animationMappings);
+        }
+        
         Node._commonParse(node, parent, json);
     }
 
@@ -855,8 +869,10 @@ export class ModelNode extends Node {
 
     public update(delta: number, time: number): void {
         super.update(delta, time);
-        if (this._animator)
+        if (this._animator) {
+            this._animator.checkTriggers();
             this._animator.update(delta);
+        }
     }
 }
 

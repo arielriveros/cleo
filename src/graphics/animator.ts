@@ -1,6 +1,19 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { AnimatedModel, Animation, AnimationSampler, AnimationChannel, Skin } from './animatedModel';
 import { Node } from '../core/scene/node';
+import { InputManager } from '../input/inputManager';
+
+/**
+ * Animation mapping interface for trigger-based animation playback
+ */
+export interface AnimationMapping {
+    animationName: string;
+    trigger: string;
+    triggerType: 'key' | 'direction' | 'custom';
+    keyCode?: string;
+    direction?: 'forward' | 'backward' | 'left' | 'right' | 'up' | 'down';
+    customCondition?: string;
+}
 
 /**
  * Represents a single keyframe for position data
@@ -256,9 +269,12 @@ export class Animator {
     private _loop: boolean = true;
     private _speed: number = 1.0;
     private _nodeIndexToJointIndex: Map<number, number> = new Map();
+    private _animationMappings: AnimationMapping[] = [];
+    private _node: Node | null = null;
     
-    constructor(animatedModel: AnimatedModel) {
+    constructor(animatedModel: AnimatedModel, node?: Node) {
         this._animatedModel = animatedModel;
+        this._node = node || null;
         
         // Initialize bone matrices array with identity matrices
         for (let i = 0; i < 100; i++) {
@@ -517,6 +533,121 @@ export class Animator {
         this._currentTime = 0;
     }
     public reset(): void { this._currentTime = 0; }
+    
+    /**
+     * Set animation mappings for trigger-based playback
+     */
+    public setAnimationMappings(mappings: AnimationMapping[]): void {
+        this._animationMappings = mappings;
+    }
+    
+    /**
+     * Get current animation mappings
+     */
+    public getAnimationMappings(): AnimationMapping[] {
+        return this._animationMappings;
+    }
+    
+    /**
+     * Set the node reference for checking triggers
+     */
+    public setNode(node: Node): void {
+        this._node = node;
+    }
+    
+    /**
+     * Check triggers and play appropriate animations
+     * Should be called every frame before update
+     */
+    public checkTriggers(): void {
+        if (!this._animatedModel || this._animationMappings.length === 0) return;
+        
+        const input = InputManager.instance;
+        
+        for (const mapping of this._animationMappings) {
+            let shouldTrigger = false;
+            
+            switch (mapping.triggerType) {
+                case 'key':
+                    if (mapping.keyCode && input.isKeyPressed(mapping.keyCode)) {
+                        shouldTrigger = true;
+                    }
+                    break;
+                    
+                case 'direction':
+                    if (this._node && mapping.direction) {
+                        shouldTrigger = this._checkDirectionTrigger(mapping.direction);
+                    }
+                    break;
+                    
+                case 'custom':
+                    if (mapping.customCondition) {
+                        shouldTrigger = this._evaluateCustomCondition(mapping.customCondition);
+                    }
+                    break;
+            }
+            
+            if (shouldTrigger) {
+                // Check if we're not already playing this animation
+                if (!this._currentAnimation || this._currentAnimation.name !== mapping.animationName) {
+                    this.playAnimationByName(mapping.animationName, true);
+                }
+                break; // Only trigger one animation at a time
+            }
+        }
+    }
+    
+    /**
+     * Check if node is moving in specified direction
+     */
+    private _checkDirectionTrigger(direction: string): boolean {
+        if (!this._node) return false;
+        
+        const input = InputManager.instance;
+        
+        switch (direction) {
+            case 'forward':
+                return input.isKeyPressed('KeyW') || input.isKeyPressed('ArrowUp');
+            case 'backward':
+                return input.isKeyPressed('KeyS') || input.isKeyPressed('ArrowDown');
+            case 'left':
+                return input.isKeyPressed('KeyA') || input.isKeyPressed('ArrowLeft');
+            case 'right':
+                return input.isKeyPressed('KeyD') || input.isKeyPressed('ArrowRight');
+            case 'up':
+                return input.isKeyPressed('Space');
+            case 'down':
+                return input.isKeyPressed('ShiftLeft');
+            default:
+                return false;
+        }
+    }
+    
+    /**
+     * Evaluate custom condition (basic implementation)
+     * For security, only allow safe property access
+     */
+    private _evaluateCustomCondition(condition: string): boolean {
+        if (!this._node) return false;
+        
+        try {
+            // Create a safe evaluation context
+            const context = {
+                node: this._node,
+                position: this._node.position,
+                rotation: this._node.rotation,
+                scale: this._node.scale,
+                // Add any other safe properties here
+            };
+            
+            // Use Function constructor for evaluation (safer than eval)
+            const fn = new Function('context', `with(context) { return ${condition}; }`);
+            return Boolean(fn(context));
+        } catch (error) {
+            console.warn(`Failed to evaluate animation condition: ${condition}`, error);
+            return false;
+        }
+    }
     
     // Getters and setters
     public get isPlaying(): boolean { return this._playing; }
