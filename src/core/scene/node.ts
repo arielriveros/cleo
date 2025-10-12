@@ -2,7 +2,7 @@ import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../physics/body";
 import { Model } from "../../graphics/model";
 import { AnimatedModel } from "../../graphics/animatedModel";
-import { Animator } from "../../graphics/animator";
+import { Animator, AnimationMapping } from "../../graphics/animator";
 import { Sprite } from "../../graphics/sprite";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Skybox } from "../../graphics/skybox";
@@ -769,7 +769,7 @@ export class ModelNode extends Node {
             const model = this._model.serialize()
             
             // Serialize animation mappings if animator exists
-            let animationMappings = null;
+            let animationMappings: AnimationMapping[] | null = null;
             if (this._animator) {
                 animationMappings = this._animator.getAnimationMappings();
             }

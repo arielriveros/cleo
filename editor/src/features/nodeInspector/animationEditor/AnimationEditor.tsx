@@ -35,6 +35,7 @@ export default function AnimationEditor(props: { node: Node }) {
   const [animationNames, setAnimationNames] = useState<string[]>([]);
   const [mappings, setMappings] = useState<AnimationMapping[]>([]);
   const [hasAnimations, setHasAnimations] = useState(false);
+  const [blendTime, setBlendTime] = useState<number>(0.3); // Default blend time
 
   useEffect(() => {
     // Check if node is a ModelNode with an AnimatedModel
@@ -54,6 +55,11 @@ export default function AnimationEditor(props: { node: Node }) {
             const existingMappings = (animator as any).getAnimationMappings();
             if (existingMappings && existingMappings.length > 0) {
               setMappings(existingMappings);
+            }
+            
+            // Load blend time if available
+            if ('blendTime' in animator) {
+              setBlendTime((animator as any).blendTime);
             }
           }
         } else {
@@ -127,6 +133,12 @@ export default function AnimationEditor(props: { node: Node }) {
       if (animator && 'setAnimationMappings' in animator) {
         (animator as any).setAnimationMappings(mappings);
         console.log('Animation mappings applied:', mappings);
+      }
+      
+      // Also set blend time
+      if (animator && 'blendTime' in animator) {
+        (animator as any).blendTime = blendTime;
+        console.log('Blend time set to:', blendTime);
       }
     }
   };
@@ -366,6 +378,25 @@ export default function AnimationEditor(props: { node: Node }) {
             </div>
             </>
           )}
+
+          <div className="blend-time-control" style={{ marginTop: '16px', padding: '12px', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <label style={{ fontWeight: 'bold', minWidth: '100px' }}>Blend Time:</label>
+              <input
+                type="number"
+                value={blendTime}
+                onChange={(e) => setBlendTime(Math.max(0, parseFloat(e.target.value) || 0))}
+                step="0.05"
+                min="0"
+                max="2"
+                style={{ flex: '1', padding: '4px 8px' }}
+              />
+              <span style={{ color: '#888', fontSize: '12px', minWidth: '60px' }}>seconds</span>
+            </div>
+            <p style={{ fontSize: '11px', color: '#888', margin: '8px 0 0 0' }}>
+              Duration for smooth transitions between animations (0 = instant switch)
+            </p>
+          </div>
 
           <button className="apply-btn" onClick={applyMappings}>
             Apply Mappings

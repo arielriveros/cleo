@@ -276,6 +276,14 @@ export class Animator {
     private _lastPosition: vec3 = vec3.create();
     private _currentSpeed: number = 0;
     
+    // Animation blending properties
+    private _previousAnimation: Animation | null = null;
+    private _previousBones: Map<string, Bone> = new Map();
+    private _previousTime: number = 0;
+    private _blendTime: number = 0.3; // Default blend time in seconds
+    private _currentBlendTime: number = 0;
+    private _isBlending: boolean = false;
+    
     constructor(animatedModel: AnimatedModel, node?: Node) {
         this._animatedModel = animatedModel;
         this._node = node || null;
@@ -318,13 +326,28 @@ export class Animator {
     /**
      * Play animation by index
      */
-    public playAnimation(animationIndex: number, loop: boolean = true): void {
+    public playAnimation(animationIndex: number, loop: boolean = true, blend: boolean = true): void {
         if (!this._animatedModel || animationIndex < 0 || animationIndex >= this._animatedModel.animations.length) {
             console.warn(`Animation index ${animationIndex} out of range`);
             return;
         }
         
         const animation = this._animatedModel.animations[animationIndex];
+        
+        // If we're switching to a different animation and blending is enabled
+        if (blend && this._currentAnimation && this._currentAnimation !== animation && this._playing) {
+            // Store current animation state for blending
+            this._previousAnimation = this._currentAnimation;
+            this._previousBones = new Map(this._bones);
+            this._previousTime = this._currentTime;
+            this._isBlending = true;
+            this._currentBlendTime = 0;
+        } else {
+            // No blending - instant switch
+            this._isBlending = false;
+            this._previousAnimation = null;
+        }
+        
         this._currentAnimation = animation;
         this._currentTime = 0;
         this._loop = loop;
@@ -337,7 +360,7 @@ export class Animator {
     /**
      * Play animation by name
      */
-    public playAnimationByName(name: string, loop: boolean = true): void {
+    public playAnimationByName(name: string, loop: boolean = true, blend: boolean = true): void {
         if (!this._animatedModel) return;
         
         const animationIndex = this._animatedModel.animations.findIndex(anim => anim.name === name);
@@ -346,7 +369,7 @@ export class Animator {
             return;
         }
         
-        this.playAnimation(animationIndex, loop);
+        this.playAnimation(animationIndex, loop, blend);
     }
     
     /**
@@ -421,6 +444,17 @@ export class Animator {
         
         this._deltaTime = deltaTime * this._speed;
         
+        // Update blend time if blending
+        if (this._isBlending) {
+            this._currentBlendTime += this._deltaTime;
+            if (this._currentBlendTime >= this._blendTime) {
+                // Blend complete
+                this._isBlending = false;
+                this._previousAnimation = null;
+                this._previousBones.clear();
+            }
+        }
+        
         // Get animation duration (assuming it's the max timestamp in samplers)
         const duration = this._getAnimationDuration();
         
@@ -442,6 +476,21 @@ export class Animator {
             bone.update(this._currentTime);
         }
         
+        // If blending, also update previous animation bones
+        if (this._isBlending && this._previousAnimation) {
+            const previousDuration = this._getPreviousAnimationDuration();
+            let previousTime = this._previousTime + this._deltaTime;
+            
+            // Handle looping for previous animation
+            if (previousTime >= previousDuration) {
+                previousTime = previousTime % previousDuration;
+            }
+            
+            for (const bone of this._previousBones.values()) {
+                bone.update(previousTime);
+            }
+        }
+        
         // Build local transforms map for all joints
         const localTransforms = new Map<number, mat4>();
         for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
@@ -451,8 +500,16 @@ export class Animator {
             const bone = this._bones.get(boneName);
             
             if (bone) {
-                // Use animated transform
-                localTransforms.set(nodeIndex, bone.localTransform);
+                if (this._isBlending && this._previousBones.has(boneName)) {
+                    // Blend between previous and current animation
+                    const previousBone = this._previousBones.get(boneName)!;
+                    const blendFactor = Math.min(this._currentBlendTime / this._blendTime, 1.0);
+                    const blendedTransform = this._blendTransforms(previousBone.localTransform, bone.localTransform, blendFactor);
+                    localTransforms.set(nodeIndex, blendedTransform);
+                } else {
+                    // Use animated transform
+                    localTransforms.set(nodeIndex, bone.localTransform);
+                }
             } else {
                 // Use initial node transform from GLTF, or identity if not available
                 const initialTransform = this._skin.nodeTransforms?.get(nodeIndex);
@@ -511,6 +568,56 @@ export class Animator {
             const globalTransform = calculateGlobalTransform(nodeIndex);
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
         }
+    }
+    
+    /**
+     * Blend between two transformation matrices
+     */
+    private _blendTransforms(from: mat4, to: mat4, factor: number): mat4 {
+        // Decompose both matrices into translation, rotation, and scale
+        const fromTranslation = vec3.create();
+        const fromRotation = quat.create();
+        const fromScale = vec3.create();
+        mat4.getTranslation(fromTranslation, from);
+        mat4.getRotation(fromRotation, from);
+        mat4.getScaling(fromScale, from);
+        
+        const toTranslation = vec3.create();
+        const toRotation = quat.create();
+        const toScale = vec3.create();
+        mat4.getTranslation(toTranslation, to);
+        mat4.getRotation(toRotation, to);
+        mat4.getScaling(toScale, to);
+        
+        // Interpolate each component
+        const blendedTranslation = vec3.create();
+        const blendedRotation = quat.create();
+        const blendedScale = vec3.create();
+        
+        vec3.lerp(blendedTranslation, fromTranslation, toTranslation, factor);
+        quat.slerp(blendedRotation, fromRotation, toRotation, factor);
+        vec3.lerp(blendedScale, fromScale, toScale, factor);
+        
+        // Reconstruct the matrix
+        const result = mat4.create();
+        mat4.fromRotationTranslationScale(result, blendedRotation, blendedTranslation, blendedScale);
+        return result;
+    }
+    
+    /**
+     * Get previous animation duration from samplers
+     */
+    private _getPreviousAnimationDuration(): number {
+        if (!this._previousAnimation) return 0;
+        
+        let maxTime = 0;
+        for (const sampler of this._previousAnimation.samplers) {
+            if (sampler.input.length > 0) {
+                const lastTime = sampler.input[sampler.input.length - 1];
+                maxTime = Math.max(maxTime, lastTime);
+            }
+        }
+        return maxTime;
     }
     
     /**
@@ -810,4 +917,7 @@ export class Animator {
     public set speed(value: number) { this._speed = Math.max(0, value); }
     public get currentAnimation(): Animation | null { return this._currentAnimation; }
     public get currentSpeed(): number { return this._currentSpeed; }
+    public get blendTime(): number { return this._blendTime; }
+    public set blendTime(value: number) { this._blendTime = Math.max(0, value); }
+    public get isBlending(): boolean { return this._isBlending; }
 }
