@@ -1,6 +1,6 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { AnimatedModel, Animation, AnimationSampler, AnimationChannel, Skin } from './animatedModel';
-import { Node } from '../core/scene/node';
+import { Node, ModelNode } from '../core/scene/node';
 import { InputManager } from '../input/inputManager';
 
 /**
@@ -9,9 +9,11 @@ import { InputManager } from '../input/inputManager';
 export interface AnimationMapping {
     animationName: string;
     trigger: string;
-    triggerType: 'key' | 'direction' | 'custom';
+    triggerType: 'key' | 'direction' | 'speed' | 'custom';
     keyCode?: string;
-    direction?: 'forward' | 'backward' | 'left' | 'right' | 'up' | 'down';
+    direction?: [number, number, number]; // 3D vector (x, y, z) ranging from 0 to 1
+    directionThreshold?: number; // Dot product threshold for direction matching (default: 0.8)
+    speedThreshold?: number; // For 'speed' trigger type
     customCondition?: string;
 }
 
@@ -271,10 +273,17 @@ export class Animator {
     private _nodeIndexToJointIndex: Map<number, number> = new Map();
     private _animationMappings: AnimationMapping[] = [];
     private _node: Node | null = null;
+    private _lastPosition: vec3 = vec3.create();
+    private _currentSpeed: number = 0;
     
     constructor(animatedModel: AnimatedModel, node?: Node) {
         this._animatedModel = animatedModel;
         this._node = node || null;
+        
+        // Initialize last position if node is provided
+        if (this._node) {
+            vec3.copy(this._lastPosition, this._node.position);
+        }
         
         // Initialize bone matrices array with identity matrices
         for (let i = 0; i < 100; i++) {
@@ -384,6 +393,13 @@ export class Animator {
                 }
             }
             console.log(`${animatedCount} out of ${this._skin.joints.length} joints have animation data`);
+            
+            // If no joints have animation data, this animation is likely invalid or targets the wrong nodes
+            if (animatedCount === 0) {
+                console.warn(`⚠️ Animation "${animation.name}" has no channels targeting the skin joints. This animation may not work correctly.`);
+                console.warn(`Animation channels target nodes:`, animation.channels.map(c => c.targetNodeIndex));
+                console.warn(`Skin joint nodes:`, this._skin.joints.map(j => j.nodeIndex));
+            }
         }
     }
     
@@ -391,6 +407,14 @@ export class Animator {
      * Update animation state
      */
     public update(deltaTime: number): void {
+        // Calculate speed if node is available
+        if (this._node && deltaTime > 0) {
+            const currentPosition = this._node.position;
+            const distance = vec3.distance(currentPosition, this._lastPosition);
+            this._currentSpeed = distance / deltaTime;
+            vec3.copy(this._lastPosition, currentPosition);
+        }
+        
         if (!this._playing || !this._currentAnimation || !this._skin) {
             return;
         }
@@ -560,10 +584,21 @@ export class Animator {
      * Should be called every frame before update
      */
     public checkTriggers(): void {
-        if (!this._animatedModel || this._animationMappings.length === 0) return;
+        if (!this._animatedModel) return;
+        
+        // If no mappings, set T-pose by stopping animation
+        if (this._animationMappings.length === 0) {
+            if (this._playing) {
+                this._setTPose();
+            }
+            return;
+        }
         
         const input = InputManager.instance;
+        let triggerFound = false;
+        let targetAnimation: string | null = null;
         
+        // Check all mappings in order (priority: first match wins)
         for (const mapping of this._animationMappings) {
             let shouldTrigger = false;
             
@@ -576,7 +611,13 @@ export class Animator {
                     
                 case 'direction':
                     if (this._node && mapping.direction) {
-                        shouldTrigger = this._checkDirectionTrigger(mapping.direction);
+                        shouldTrigger = this._checkDirectionTrigger(mapping.direction, mapping.directionThreshold);
+                    }
+                    break;
+                    
+                case 'speed':
+                    if (mapping.speedThreshold !== undefined) {
+                        shouldTrigger = this._checkSpeedTrigger(mapping.speedThreshold);
                     }
                     break;
                     
@@ -588,39 +629,150 @@ export class Animator {
             }
             
             if (shouldTrigger) {
-                // Check if we're not already playing this animation
-                if (!this._currentAnimation || this._currentAnimation.name !== mapping.animationName) {
-                    this.playAnimationByName(mapping.animationName, true);
-                }
-                break; // Only trigger one animation at a time
+                triggerFound = true;
+                targetAnimation = mapping.animationName;
+                // First matching trigger wins - stop checking others
+                break;
+            }
+        }
+        
+        if (triggerFound && targetAnimation) {
+            // Play the animation if not already playing it
+            if (!this._currentAnimation || this._currentAnimation.name !== targetAnimation || !this._playing) {
+                this.playAnimationByName(targetAnimation, true);
+            }
+        } else {
+            // No trigger active - set T-pose if currently playing
+            if (this._playing) {
+                this._setTPose();
             }
         }
     }
     
     /**
-     * Check if node is moving in specified direction
+     * Set T-pose by resetting bone matrices to bind pose using initial node transforms
      */
-    private _checkDirectionTrigger(direction: string): boolean {
-        if (!this._node) return false;
+    private _setTPose(): void {
+        if (!this._skin) return;
         
-        const input = InputManager.instance;
+        // Stop any playing animation
+        this._playing = false;
         
-        switch (direction) {
-            case 'forward':
-                return input.isKeyPressed('KeyW') || input.isKeyPressed('ArrowUp');
-            case 'backward':
-                return input.isKeyPressed('KeyS') || input.isKeyPressed('ArrowDown');
-            case 'left':
-                return input.isKeyPressed('KeyA') || input.isKeyPressed('ArrowLeft');
-            case 'right':
-                return input.isKeyPressed('KeyD') || input.isKeyPressed('ArrowRight');
-            case 'up':
-                return input.isKeyPressed('Space');
-            case 'down':
-                return input.isKeyPressed('ShiftLeft');
-            default:
-                return false;
+        // Calculate bind pose transforms for all joints
+        const globalTransforms = new Map<number, mat4>();
+        
+        const calculateBindPoseTransform = (nodeIndex: number): mat4 => {
+            // Check if already calculated
+            if (globalTransforms.has(nodeIndex)) {
+                return globalTransforms.get(nodeIndex)!;
+            }
+            
+            // Get initial local transform from GLTF data
+            const localTransform = this._skin!.nodeTransforms?.get(nodeIndex);
+            if (!localTransform) {
+                // Fallback to identity if no transform data
+                const identity = mat4.create();
+                globalTransforms.set(nodeIndex, identity);
+                return identity;
+            }
+            
+            // Find parent
+            const joint = this._skin!.joints.find(j => j.nodeIndex === nodeIndex);
+            const parentIndex = joint?.parentIndex;
+            
+            let globalTransform = mat4.create();
+            
+            if (parentIndex !== undefined) {
+                // Has parent - multiply parent's global transform by local transform
+                const parentGlobal = calculateBindPoseTransform(parentIndex);
+                mat4.multiply(globalTransform, parentGlobal, localTransform);
+            } else {
+                // No parent - local transform IS the global transform
+                mat4.copy(globalTransform, localTransform);
+            }
+            
+            globalTransforms.set(nodeIndex, globalTransform);
+            return globalTransform;
+        };
+        
+        // Calculate final bone matrices for bind pose
+        for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
+            const joint = this._skin.joints[jointIndex];
+            const nodeIndex = joint.nodeIndex;
+            
+            const globalTransform = calculateBindPoseTransform(nodeIndex);
+            mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
         }
+    }
+    
+    /**
+     * Check if movement direction matches the target direction vector in local space
+     * Uses dot product to determine if the input direction is similar enough to the target
+     * The input direction is transformed to the node's local space
+     */
+    private _checkDirectionTrigger(targetDirection: [number, number, number], threshold: number = 0.8): boolean {
+        if (!this._node || !(this._node instanceof ModelNode)) return false;
+        
+        const modelNode = this._node as ModelNode;
+        
+        // Get the movement direction from the ModelNode
+        const worldInputDir = vec3.clone(modelNode.movementDirection);
+        
+        // Check if there's any input
+        const inputLength = vec3.length(worldInputDir);
+        if (inputLength === 0) {
+            // No input - check if target direction is zero (idle state)
+            const targetLength = Math.sqrt(
+                targetDirection[0] * targetDirection[0] + 
+                targetDirection[1] * targetDirection[1] + 
+                targetDirection[2] * targetDirection[2]
+            );
+            return targetLength === 0;
+        }
+        
+        // Normalize world input direction
+        vec3.normalize(worldInputDir, worldInputDir);
+        
+        // Get the node's rotation to convert world space to local space
+        // Extract rotation from world transform and invert it
+        const nodeWorldTransform = this._node.worldTransform;
+        
+        // Extract rotation quaternion from the world transform matrix
+        const worldRotation = quat.create();
+        mat4.getRotation(worldRotation, nodeWorldTransform);
+        
+        // Invert the rotation to go from world space to local space
+        const inverseRotation = quat.create();
+        quat.invert(inverseRotation, worldRotation);
+        
+        // Transform world input direction to local space using only rotation
+        const localInputDir = vec3.create();
+        vec3.transformQuat(localInputDir, worldInputDir, inverseRotation);
+        
+        // Normalize to be safe (should already be normalized, but just in case)
+        vec3.normalize(localInputDir, localInputDir);
+        
+        // Create target direction vector and normalize
+        const targetDir = vec3.fromValues(targetDirection[0], targetDirection[1], targetDirection[2]);
+        const targetLength = vec3.length(targetDir);
+        if (targetLength === 0) {
+            // Target is idle (zero vector), but we have input
+            return false;
+        }
+        vec3.normalize(targetDir, targetDir);
+        
+        // Calculate dot product to measure similarity in local space
+        const dotProduct = vec3.dot(localInputDir, targetDir);
+        
+        // Check if dot product exceeds threshold
+        return dotProduct >= threshold;
+    }
+    
+    /**
+     * Check if speed is above threshold
+     */
+    private _checkSpeedTrigger(threshold: number): boolean {
+        return this._currentSpeed >= threshold;
     }
     
     /**
@@ -657,4 +809,5 @@ export class Animator {
     public get speed(): number { return this._speed; }
     public set speed(value: number) { this._speed = Math.max(0, value); }
     public get currentAnimation(): Animation | null { return this._currentAnimation; }
+    public get currentSpeed(): number { return this._currentSpeed; }
 }

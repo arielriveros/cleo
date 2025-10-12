@@ -152,12 +152,36 @@ export async function createDemoScene(params: {
 
   // Load Running GLTF Model with Animation
   try {
-    const runningModels = await Loader.loadAnimatedModelsFromPath('/assets/running.gltf');
+    const runningModels = await Loader.loadAnimatedModelsFromPath('/assets/mannequin.gltf');
 
     if (runningModels.length > 0) {
 
       for (const modelData of runningModels) {
         const modelNode = new ModelNode(modelData.name, modelData.model as AnimatedModel);
+
+        if (modelNode.animator && modelNode.model) {
+          const animModel = modelNode.model as AnimatedModel;
+          console.log('Available animations:', animModel.animations.map((a: any) => a.name));
+          
+
+          modelNode.animator.setAnimationMappings([
+            {
+              animationName: 'Run', // Running animation (first = higher priority)
+              trigger: 'forward',
+              triggerType: 'direction',
+              direction: [0, 0, 1], // Forward in local space
+              directionThreshold: 0.7
+            },
+            {
+              animationName: 'Idle', // Idle animation (second = lower priority)
+              trigger: 'idle',
+              triggerType: 'direction',
+              direction: [0, 0, 0], // Forward in local space
+              directionThreshold: 0.7
+            }
+          ]);
+        }
+        
         playable.addChild(modelNode);
       }
       scene.addNode(playable);
@@ -185,7 +209,7 @@ export async function createDemoScene(params: {
 
   scene.addNodes(lightNode, physicalBox, spriteNode, plane);
 
-  try {
+  /* try {
     const sponzaModels = await Model.fromPath({ filePaths: [
       '/assets/sponza/sponza.obj',
       '/assets/sponza/sponza.mtl'
@@ -201,7 +225,7 @@ export async function createDemoScene(params: {
     scene.addNode(sponza);
   } catch (e) {
     console.error('Failed to load sponza model:', e);
-  }
+  } */
 
   // --- Simple Game: Collectibles (green cubes) and Hazards (red spheres) ---
   const collectiblePositions: Array<[number, number, number]> = [
@@ -285,7 +309,7 @@ export async function createDemoScene(params: {
 
   // Scripts using module-style exports
   // Playable controller and game state
-  scripts.set(playable.id, "module.exports = {\n  onStart(node, global) {\n    // Game state stored on the node instance\n    node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n    const jump = () => { if (!node.__game.alive || node.__game.quit) return; if (node.body) node.body.impulse([0, 10, 0]); global.logger('Jump!'); };\n    global.input.registerKeyPress('Space', jump);\n    global.input.registerKeyPress('Escape', () => {\n      node.__game.quit = true;\n      // trigger cleanup and final score logging via onDespawn\n      node.remove();\n    });\n  },\n  onUpdate(node, delta, time, global) {\n    const g = node.__game || (node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 });\n    if (!g.alive || g.quit) return;\n    const speed = 3;\n    let moveX = 0;\n    let moveZ = 0;\n    if (global.input.isKeyPressed('KeyD')) { node.addX(-delta * speed); moveX = -1; }\n    if (global.input.isKeyPressed('KeyA')) { node.addX(delta * speed); moveX = 1; }\n    if (global.input.isKeyPressed('KeyW')) { node.addZ(delta * speed); moveZ = 1; }\n    if (global.input.isKeyPressed('KeyS')) { node.addZ(-delta * speed); moveZ = -1; }\n    // Rotate the animated model child to face movement direction\n    if (moveX !== 0 || moveZ !== 0) {\n      const targetAngle = Math.atan2(moveX, moveZ) * (180 / Math.PI);\n      // Find the animated model child and rotate it\n      for (let i = 0; i < node.children.length; i++) {\n        const child = node.children[i];\n        if (child.nodeType === 'model' && child.name !== 'camera') {\n          child.setRotation([0, targetAngle, 0]);\n        }\n      }\n    }\n  },\n  onCollision(node, other, global) { /* not used; hazards are triggers */ },\n  onDespawn(node, global) {\n    const g = node.__game || { score: 0 };\n    global.logger('Final score: ' + g.score);\n  }\n};");
+  scripts.set(playable.id, "module.exports = {\n  onStart(node, global) {\n    // Game state stored on the node instance\n    node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n    const jump = () => { if (!node.__game.alive || node.__game.quit) return; if (node.body) node.body.impulse([0, 10, 0]); global.logger('Jump!'); };\n    global.input.registerKeyPress('Space', jump);\n    global.input.registerKeyPress('Escape', () => {\n      node.__game.quit = true;\n      // trigger cleanup and final score logging via onDespawn\n      node.remove();\n    });\n  },\n  onUpdate(node, delta, time, global) {\n    const g = node.__game || (node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 });\n    if (!g.alive || g.quit) return;\n    const speed = 3;\n    let moveX = 0;\n    let moveZ = 0;\n    if (global.input.isKeyPressed('KeyD')) { node.addX(-delta * speed); moveX = -1; }\n    if (global.input.isKeyPressed('KeyA')) { node.addX(delta * speed); moveX = 1; }\n    if (global.input.isKeyPressed('KeyW')) { node.addZ(delta * speed); moveZ = 1; }\n    if (global.input.isKeyPressed('KeyS')) { node.addZ(-delta * speed); moveZ = -1; }\n    // Rotate the animated model child to face movement direction and set movement direction vector\n    if (moveX !== 0 || moveZ !== 0) {\n      const targetAngle = Math.atan2(moveX, moveZ) * (180 / Math.PI);\n      // Find the animated model child and rotate it\n      for (let i = 0; i < node.children.length; i++) {\n        const child = node.children[i];\n        if (child.nodeType === 'model' && child.name !== 'camera') {\n          child.setRotation([0, targetAngle, 0]);\n          // Set movement direction in world space (normalized)\n          const moveDir = [moveX, 0, moveZ];\n          const length = Math.sqrt(moveX * moveX + moveZ * moveZ);\n          child.movementDirection = [moveDir[0] / length, moveDir[1] / length, moveDir[2] / length];\n        }\n      }\n    } else {\n      // No movement - set direction to zero for idle\n      for (let i = 0; i < node.children.length; i++) {\n        const child = node.children[i];\n        if (child.nodeType === 'model' && child.name !== 'camera') {\n          child.movementDirection = [0, 0, 0];\n        }\n      }\n    }\n  },\n  onCollision(node, other, global) { /* not used; hazards are triggers */ },\n  onDespawn(node, global) {\n    const g = node.__game || { score: 0 };\n    global.logger('Final score: ' + g.score);\n  }\n};");
 
   // Camera rotate with mouse (keep existing behavior)
   scripts.set(cameraNode.id, "module.exports = {\n  onUpdate(node, delta, time, global) {\n    const mouseMovement = global.input.mouse.velocity;\n    const deltaFix = -delta * 10;\n    node.rotateY(mouseMovement[0] * deltaFix);\n  }\n};");

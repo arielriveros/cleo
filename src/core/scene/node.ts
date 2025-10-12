@@ -708,11 +708,13 @@ export class ModelNode extends Node {
     private _model: Model | AnimatedModel;
     private _initialized: boolean;
     private _animator: Animator | null;
+    private _movementDirection: vec3;
 
     constructor(name: string, model: Model | AnimatedModel, id: string = uuidv4()) {
         super(name, 'model', id);
         this._model = model;
         this._initialized = false;
+        this._movementDirection = vec3.create();
         
         // Create animator for animated models
         if (model instanceof AnimatedModel && model.hasSkin) {
@@ -805,6 +807,10 @@ export class ModelNode extends Node {
     public get model(): Model | AnimatedModel { return this._model; }
     public get initialized(): boolean { return this._initialized; }
     public get animator(): Animator | null { return this._animator; }
+    public get movementDirection(): vec3 { return this._movementDirection; }
+    public set movementDirection(direction: vec3) { 
+        vec3.copy(this._movementDirection, direction);
+    }
     public get visible(): boolean { return super.visible; }
     public set visible(value: boolean) {
       super.visible = value;
