@@ -2,7 +2,7 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
-import { LightNode, ModelNode, SkyboxNode, SpriteNode } from '../core/scene/node';
+import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode } from '../core/scene/node';
 import { PointLight, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
@@ -404,6 +404,15 @@ export class Renderer {
 
         this._shaderManager.bind(shaderType);
 
+        // Ensure default UV transform for basic shader when rendering models
+        try {
+            const hasUV = this._shaderManager.getShader(shaderType).hasUniform('u_uvScale');
+            if (hasUV) {
+                this._shaderManager.setUniform('u_uvOffset', [0, 0]);
+                this._shaderManager.setUniform('u_uvScale', [1, 1]);
+            }
+        } catch (_) {}
+
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
@@ -544,6 +553,17 @@ export class Renderer {
 
         this._shaderManager.bind(node.sprite.material.type);
 
+        // If node is an AnimatedSpriteNode, set UV transform uniforms
+        if (node instanceof AnimatedSpriteNode) {
+            const [ox, oy, sx, sy] = node.getUVTransform();
+            // Note: our UVs origin is top-left vs GL bottom-left? Keep as-is; users can invert rows.
+            this._shaderManager.setUniform('u_uvOffset', [ox, oy]);
+            this._shaderManager.setUniform('u_uvScale', [sx, sy]);
+        } else {
+            // Defaults
+            this._shaderManager.setUniform('u_uvOffset', [0, 0]);
+            this._shaderManager.setUniform('u_uvScale', [1, 1]);
+        }
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);

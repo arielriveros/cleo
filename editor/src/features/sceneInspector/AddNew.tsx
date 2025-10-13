@@ -14,7 +14,8 @@ import {
   Vec,
   Spotlight,
   SpriteNode,
-  Sprite
+  Sprite,
+  AnimatedSpriteNode
 } from 'cleo'
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
@@ -33,6 +34,7 @@ import PointLightIcon from '../../icons/point-light.png'
 import DirectionalLightIcon from '../../icons/directional-light.png'
 import SpotlightIcon from '../../icons/spotlight.png'
 import SpriteIcon from '../../icons/static-sprite.png'
+import AnimatedSpriteIcon from '../../icons/animated-sprite.png'
 
 interface AddButtonProps {
   onClick: () => void;
@@ -181,6 +183,12 @@ export default function AddNew() {
     addNode(spriteNode);
   }
 
+  const addAnimatedSprite = () => {
+    const sprite = new Sprite(Material.Basic({}));
+    const node = new AnimatedSpriteNode('animated sprite', sprite, { columns: 4, rows: 4, fps: 12, loop: true, constraints: 'spherical' });
+    addNode(node);
+  }
+
 
   return (
     <Collapsable title='Add'>
@@ -211,6 +219,7 @@ export default function AddNew() {
           Sprites
           <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addSprite()} label='Static' icon={SpriteIcon} />
+            <AddButton onClick={() => addAnimatedSprite()} label='Animated' icon={AnimatedSpriteIcon} />
           </div>
         </div>
         <div className='flex flex-col items-center font-medium mr-[10px]'>

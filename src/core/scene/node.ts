@@ -13,7 +13,7 @@ import { Camera } from "../camera";
 import { CleoEngine, InputManager, Shape } from "../../cleo";
 import { Logger } from "../logger";
 
-type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite';
+type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite';
 
 interface GlobalState {
     input: InputManager;
@@ -393,6 +393,8 @@ export class Node {
           CameraNode.parse(node, child);
         else if (child.type === 'sprite')
           SpriteNode.parse(node, child);
+        else if (child.type === 'animatedSprite')
+          AnimatedSpriteNode.parse(node, child);
         else
           Node.parse(node, child);
       }
@@ -1208,12 +1210,18 @@ export class CameraNode extends Node {
 }
 
 export class SpriteNode extends Node {
-    private _sprite: Sprite;
-    private _initialized: boolean;
-    private _constraints: 'free' | 'spherical' | 'cylindrical';
+    protected _sprite: Sprite;
+    protected _initialized: boolean;
+    protected _constraints: 'free' | 'spherical' | 'cylindrical';
 
-    constructor(name: string, sprite: Sprite, constraints: 'free' | 'spherical' | 'cylindrical' = 'spherical', id: string = uuidv4()) {
-        super(name, 'sprite', id);
+    constructor(
+        name: string,
+        sprite: Sprite,
+        constraints: 'free' | 'spherical' | 'cylindrical' = 'spherical',
+        id: string = uuidv4(),
+        nodeType: 'sprite' | 'animatedSprite' = 'sprite'
+    ) {
+        super(name, nodeType, id);
         this._sprite = sprite;
         this._initialized = false;
         this._constraints = constraints;
@@ -1281,7 +1289,7 @@ export class SpriteNode extends Node {
     }
 
     public static parse(parent: Node, json: any) {
-        const sprite = new SpriteNode(json.name, Sprite.parse(json.sprite.material), json.id);
+        const sprite = new SpriteNode(json.name, Sprite.parse(json.sprite.material), json.sprite.constraints, json.id);
         sprite.constraints = json.sprite.constraints;
         Node._commonParse(sprite, parent, json);
         parent.addChild(sprite);
@@ -1314,5 +1322,162 @@ export class SpriteNode extends Node {
         );
         
         return { min, max };
+    }
+}
+
+export class AnimatedSpriteNode extends SpriteNode {
+    private _columns: number;
+    private _rows: number;
+    private _fps: number;
+    private _loop: boolean;
+    private _startFrame: number;
+    private _endFrame: number;
+    private _currentFrame: number;
+    private _accumulator: number;
+    private _sequence: number[] | null;
+    private _seqIndex: number;
+
+    constructor(
+        name: string,
+        sprite: Sprite,
+        options?: {
+            columns?: number,
+            rows?: number,
+            fps?: number,
+            loop?: boolean,
+            startFrame?: number,
+            endFrame?: number,
+            sequence?: number[] | null,
+            constraints?: 'free' | 'spherical' | 'cylindrical',
+            id?: string
+        }
+    ) {
+        super(name, sprite, options?.constraints || 'spherical', options?.id || uuidv4(), 'animatedSprite');
+        this._columns = Math.max(1, options?.columns ?? 1);
+        this._rows = Math.max(1, options?.rows ?? 1);
+        this._fps = Math.max(0.0001, options?.fps ?? 12);
+        this._loop = options?.loop ?? true;
+        this._startFrame = Math.max(0, options?.startFrame ?? 0);
+        const maxFrames = this._columns * this._rows;
+        this._endFrame = Math.min(maxFrames - 1, options?.endFrame ?? (maxFrames - 1));
+        this._currentFrame = this._startFrame;
+        this._accumulator = 0;
+        this._sequence = options?.sequence ?? null;
+        this._seqIndex = 0;
+    }
+
+    public update(delta: number, time: number): void {
+        super.update(delta, time);
+        const frameTime = 1.0 / this._fps;
+        this._accumulator += delta;
+        while (this._accumulator >= frameTime) {
+            this._accumulator -= frameTime;
+            if (this._sequence && this._sequence.length > 0) {
+                if (this._seqIndex < this._sequence.length - 1) {
+                    this._seqIndex++;
+                } else if (this._loop) {
+                    this._seqIndex = 0;
+                }
+                this._currentFrame = this._sequence[this._seqIndex];
+            } else {
+                if (this._currentFrame < this._endFrame) {
+                    this._currentFrame++;
+                } else if (this._loop) {
+                    this._currentFrame = this._startFrame;
+                } else {
+                    // stop at last frame
+                    this._currentFrame = this._endFrame;
+                }
+            }
+        }
+    }
+
+    public getUVTransform(): [number, number, number, number] {
+        const total = this._columns * this._rows;
+        if (total <= 0) return [0, 0, 1, 1];
+        const scaleX = 1 / this._columns;
+        const scaleY = 1 / this._rows;
+        const idx = Math.max(0, Math.min(this._currentFrame, total - 1));
+        const col = idx % this._columns;
+        const row = Math.floor(idx / this._columns);
+        const offsetX = col * scaleX;
+        const offsetY = row * scaleY;
+        return [offsetX, offsetY, scaleX, scaleY];
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve) => {
+            const sprite = {
+                constraints: this._constraints,
+                material: this._sprite.serialize()
+            };
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    id: this._id,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children,
+                    sprite: sprite,
+                    animation: {
+                        columns: this._columns,
+                        rows: this._rows,
+                        fps: this._fps,
+                        loop: this._loop,
+                        startFrame: this._startFrame,
+                        endFrame: this._endFrame,
+                        sequence: this._sequence
+                    }
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        const spriteNode = new AnimatedSpriteNode(
+            json.name,
+            Sprite.parse(json.sprite.material),
+            {
+                id: json.id,
+                constraints: json.sprite.constraints,
+                columns: json.animation?.columns ?? 1,
+                rows: json.animation?.rows ?? 1,
+                fps: json.animation?.fps ?? 12,
+                loop: json.animation?.loop ?? true,
+                startFrame: json.animation?.startFrame ?? 0,
+                endFrame: json.animation?.endFrame ?? ((json.animation?.columns ?? 1) * (json.animation?.rows ?? 1) - 1),
+                sequence: json.animation?.sequence ?? null
+            }
+        );
+        Node._commonParse(spriteNode, parent, json);
+        parent.addChild(spriteNode);
+    }
+
+    public get columns(): number { return this._columns; }
+    public set columns(v: number) { this._columns = Math.max(1, Math.floor(v)); this._resetFrameBounds(); }
+    public get rows(): number { return this._rows; }
+    public set rows(v: number) { this._rows = Math.max(1, Math.floor(v)); this._resetFrameBounds(); }
+    public get fps(): number { return this._fps; }
+    public set fps(v: number) { this._fps = Math.max(0.0001, v); }
+    public get loop(): boolean { return this._loop; }
+    public set loop(v: boolean) { this._loop = v; }
+    public get startFrame(): number { return this._startFrame; }
+    public set startFrame(v: number) { this._startFrame = Math.max(0, Math.floor(v)); this._currentFrame = this._startFrame; this._seqIndex = 0; }
+    public get endFrame(): number { return this._endFrame; }
+    public set endFrame(v: number) { this._endFrame = Math.max(this._startFrame, Math.floor(v)); }
+    public get currentFrame(): number { return this._currentFrame; }
+    public set currentFrame(v: number) { this._currentFrame = Math.max(this._startFrame, Math.min(Math.floor(v), this._endFrame)); this._accumulator = 0; }
+    public get sequence(): number[] | null { return this._sequence; }
+    public set sequence(seq: number[] | null) { this._sequence = (seq && seq.length > 0) ? seq : null; this._seqIndex = 0; if (this._sequence) this._currentFrame = this._sequence[0]; }
+
+    private _resetFrameBounds(): void {
+        const maxFrames = this._columns * this._rows;
+        this._startFrame = Math.min(this._startFrame, Math.max(0, maxFrames - 1));
+        this._endFrame = Math.min(this._endFrame, Math.max(0, maxFrames - 1));
+        if (this._startFrame > this._endFrame) this._endFrame = this._startFrame;
+        this._currentFrame = this._startFrame;
+        this._seqIndex = 0;
     }
 }

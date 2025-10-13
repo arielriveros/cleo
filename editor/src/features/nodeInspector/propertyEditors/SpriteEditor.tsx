@@ -39,14 +39,14 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
         <h5 className='m-0 mt-2 mb-1 font-bold'>Color</h5>
         <input type='color' className='w-[32px] h-[32px] p-0 border border-[#2d2d77] rounded bg-transparent' value={color} onChange={(e) => {
           sprite.material.properties.set('color', colorToVec3(e.target.value));
-          setColor(e.target.value); }
-        } />
+          setColor(e.target.value);
+        }} />
 
         <h5 className='m-0 mt-2 mb-1 font-bold'>Opacity</h5>
         <input type='range' min='0' max='1' step='0.01' className='w-full' value={opacity} onChange={(e) => {
           sprite.material.properties.set('opacity', Number(e.target.value));
-          setOpacity(e.target.value); }
-        } />
+          setOpacity(e.target.value);
+        }} />
 
         <h5 className='m-0 mt-2 mb-1 font-bold'>Texture</h5>
         <TextureInspector tex='texture' material={material} />

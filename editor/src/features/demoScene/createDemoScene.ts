@@ -1,4 +1,4 @@
-import { Scene, Camera, LightNode, DirectionalLight, CameraNode, Model, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite, Texture, Loader, Skybox, SkyboxNode, AnimatedModel } from 'cleo';
+import { Scene, Camera, LightNode, DirectionalLight, CameraNode, Model, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite, Texture, Loader, Skybox, SkyboxNode, AnimatedModel, TextureManager, PointLight, AnimatedSpriteNode } from 'cleo';
 import { CameraGeometry, GridGeometry } from '../../utils/EditorModels';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 
@@ -211,7 +211,58 @@ export async function createDemoScene(params: {
 
   scene.addNodes(lightNode, physicalBox, spriteNode, plane);
 
-  /* try {
+  // --- Fire posts with point lights and animated sprites ---
+  try {
+    // Lazy-load fire.png texture if not already present
+    const { TextureManager, PointLight, AnimatedSpriteNode } = await import('cleo');
+    if (!TextureManager.Instance.getTexture('fire.png')) {
+      TextureManager.Instance.addTextureFromPath('/assets/fire.png', { mipMap: true }, 'fire.png');
+    }
+
+    const firePositions: Array<[number, number, number]> = [
+      [-4.3, 1.67, -9.76],
+      [2.71, 1.67, -9.76],
+      [2.71, 1.67, 12.37],
+      [-4.43, 1.67, 12.37]
+    ];
+
+    for (let i = 0; i < firePositions.length; i++) {
+      const pos = firePositions[i];
+      const group = new Node(`fire_post_${i+1}`);
+      group.setPosition(pos);
+
+      // Yellow point light
+      const light = new LightNode(`fire_light_${i+1}`, new PointLight({
+        diffuse: [1.0, 0.9, 0.3],
+        specular: [1.0, 0.9, 0.3],
+        ambient: [0.0, 0.0, 0.0],
+        constant: 0.13,
+        linear: 0.51,
+        quadratic: 0.17
+      }));
+      group.addChild(light);
+
+      // Animated fire sprite (8x4, 60 fps, cylindrical, endFrame: 31)
+      const fireSpriteMat = Material.Basic({ color: [1,1,1], texture: 'fire.png', opacity: 1 }, { transparent: true, side: 'double', castShadow: false });
+      const fireSprite = new AnimatedSpriteNode(`fire_sprite_${i+1}`, new Sprite(fireSpriteMat), {
+        columns: 8,
+        rows: 4,
+        fps: 60,
+        loop: true,
+        endFrame: 31,
+        constraints: 'cylindrical'
+      });
+      // Slight scale up for visibility
+      fireSprite.setScale([1.4, 1.65, 1]).setPosition([0, 0.65, 0]);
+      group.addChild(fireSprite);
+
+      scene.addNode(group);
+    }
+  } catch (e) {
+    console.warn('Failed to set up fire posts:', e);
+  }
+
+  try {
     const sponzaModels = await Model.fromPath({ filePaths: [
       '/assets/sponza/sponza.obj',
       '/assets/sponza/sponza.mtl'
@@ -227,7 +278,7 @@ export async function createDemoScene(params: {
     scene.addNode(sponza);
   } catch (e) {
     console.error('Failed to load sponza model:', e);
-  } */
+  }
 
   // --- Simple Game: Collectibles (green cubes) and Hazards (red spheres) ---
   const collectiblePositions: Array<[number, number, number]> = [

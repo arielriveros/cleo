@@ -42,7 +42,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
   return (
     <div
       id={props.nodeId}
-      className={`scene-item flex w-[90%] h-[20px] py-[1px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between ${selected ? 'bg-[#2c2cff] border border-white cursor-default' : 'border border-[#3b3b3b] hover:bg-[#3f3fb4] cursor-pointer'}`}
+      className={`scene-item flex w-[90%] h-[24px] py-[1px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between ${selected ? 'bg-[#2c2cff] border border-white cursor-default' : 'border border-[#3b3b3b] hover:bg-[#3f3fb4] cursor-pointer'}`}
       onClick={() => props.onSelect(props.nodeId)}
       draggable={true}
       onDragStart={handleDragStart} >
@@ -50,6 +50,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
         { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }
+        { props.nodeType === 'animatedSprite' && <img src={SpriteIcon} alt='animated sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeName }
