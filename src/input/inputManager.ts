@@ -11,6 +11,8 @@ interface MouseInfo {
     velocity: vec2;
     // Wheel deltas accumulated each frame
     wheel: { deltaX: number; deltaY: number };
+    // Whether the mouse is captured via Pointer Lock
+    captured: boolean;
 }
 
 interface KeyInfo {
@@ -33,10 +35,13 @@ export class InputManager {
             Middle: false },
         position: vec2.create(), 
         velocity: vec2.create(),
-        wheel: { deltaX: 0, deltaY: 0 }
+        wheel: { deltaX: 0, deltaY: 0 },
+        captured: false
     };
     private static _prevetDefault: boolean = false;
     private static _keysInfo: KeysInfo = {};
+    // Gate to allow requesting pointer lock on user clicks
+    private static _mouseCaptureEnabled: boolean = false;
     private constructor() {}
 
     public static initialize(canvas: HTMLCanvasElement) {
@@ -50,11 +55,36 @@ export class InputManager {
         InputManager._canvas.onwheel = InputManager.instance._onWheel as any;
         window.onkeydown = InputManager.instance._onKeyDown;
         window.onkeyup = InputManager.instance._onKeyUp;
+
+        // Pointer lock state listeners
+        const onPointerLockChange = () => {
+            const locked = (document as any).pointerLockElement === InputManager._canvas;
+            InputManager._mouseInfo.captured = locked;
+        };
+        document.addEventListener('pointerlockchange', onPointerLockChange);
+        document.addEventListener('pointerlockerror', () => {
+            // Simply mark as not captured on error
+            InputManager._mouseInfo.captured = false;
+        });
     }
 
     private _onMouseMove(event: MouseEvent) {
         if (InputManager._prevetDefault) event.preventDefault();
         const mouseInfo = InputManager._mouseInfo;
+
+        // When pointer is locked, use relative movement deltas
+        if (mouseInfo.captured) {
+            const dx = (event as any).movementX || 0;
+            const dy = (event as any).movementY || 0;
+            // Accumulate movement to capture multiple events in a frame
+            mouseInfo.velocity[0] += dx;
+            mouseInfo.velocity[1] += dy;
+            // Maintain a virtual position while locked
+            mouseInfo.position[0] += dx;
+            mouseInfo.position[1] += dy;
+            return;
+        }
+
         const lastPosition = vec2.clone(mouseInfo.position);
     
         mouseInfo.position[0] = event.clientX;
@@ -73,6 +103,10 @@ export class InputManager {
         switch (event.button) {
             case 0:
                 mouseInfo.buttons.Left = true;
+                // If enabled (e.g., in play mode), capture the pointer on left click
+                if (InputManager._mouseCaptureEnabled && InputManager._canvas) {
+                    try { (InputManager._canvas as any).requestPointerLock?.(); } catch {}
+                }
                 break;
             case 1:
                 mouseInfo.buttons.Middle = true;
@@ -197,8 +231,27 @@ export class InputManager {
         InputManager._keysInfo[key].onPress = () => {};
     }
 
+    // Public API to control pointer lock
+    public enableMouseCapture() {
+        InputManager._mouseCaptureEnabled = true;
+    }
+    public disableMouseCapture() {
+        InputManager._mouseCaptureEnabled = false;
+        try { (document as any).exitPointerLock?.(); } catch {}
+        InputManager._mouseInfo.captured = false;
+    }
+    public captureMouse() {
+        try { (InputManager._canvas as any)?.requestPointerLock?.(); } catch {}
+    }
+    public releaseMouse() {
+        try { (document as any).exitPointerLock?.(); } catch {}
+        InputManager._mouseInfo.captured = false;
+    }
+    public get isPointerLocked(): boolean { return InputManager._mouseInfo.captured; }
+
     public clear() {
         InputManager.instance._initKeys();
         InputManager._prevetDefault = false;
+        this.disableMouseCapture();
     }
 }

@@ -238,11 +238,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (state === 'play') {
         instanceRef.current.isPaused = false;
         setIsPlayMode(true);
+        // Enable mouse capture during play so left-click locks pointer
+        InputManager.instance.enableMouseCapture();
         // Clear selection and outline rendering when entering play mode
         setSelectedNode(null);
         if (instanceRef.current && instanceRef.current.renderer) {
           instanceRef.current.renderer.setSelectedNode(null);
         }
+        // Pressing Escape should release pointer lock
+        InputManager.instance.registerKeyPress('Escape', () => InputManager.instance.releaseMouse());
       }
       else if (state === 'pause') {
         instanceRef.current.isPaused = true;
@@ -256,6 +260,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       else if (state === 'stop') {
         instanceRef.current.isPaused = false; // Unpause for editor scene
         setIsPlayMode(false);
+        // Disable mouse capture and release pointer
+        InputManager.instance.disableMouseCapture();
       }
     });
 
