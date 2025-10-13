@@ -3,7 +3,6 @@ import { SpriteNode } from 'cleo';
 import { colorToVec3, vec3ToHex } from '../../../utils/UtilFunctions';
 import Collapsable from '../../../components/Collapsable';
 import TextureInspector from './TextureInspector';
-import './Styles.css';
 import { useCleoEngine } from '../../EngineContext';
 
 export default function SpriteEditor(props: {node: SpriteNode}) {
@@ -25,10 +24,10 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
 
   return (
     <Collapsable title='Sprite'>
-      <div className='materialEditor'>
-        <h5>Constraints</h5>
-        <label htmlFor='constraints'>Constraints</label>
-        <select id='constraints' value={constraints} onChange={(e) => {
+      <div className='w-full p-2'>
+        <h5 className='m-0 mb-1 font-bold'>Constraints</h5>
+        <label className='mr-2' htmlFor='constraints'>Constraints</label>
+        <select className='bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1' id='constraints' value={constraints} onChange={(e) => {
           props.node.constraints = e.target.value as 'free' | 'spherical' | 'cylindrical';
           setConstraints(e.target.value as 'free' | 'spherical' | 'cylindrical');
         }}>
@@ -37,19 +36,19 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
           <option value='cylindrical'>Cylindrical</option>
         </select>
 
-        <h5>Color</h5>
-        <input type='color' className='material-input' value={color} onChange={(e) => {
+        <h5 className='m-0 mt-2 mb-1 font-bold'>Color</h5>
+        <input type='color' className='w-[32px] h-[32px] p-0 border border-[#2d2d77] rounded bg-transparent' value={color} onChange={(e) => {
           sprite.material.properties.set('color', colorToVec3(e.target.value));
           setColor(e.target.value); }
         } />
 
-        <h5>Opacity</h5>
-        <input type='range' min='0' max='1' step='0.01' className='material-input' value={opacity} onChange={(e) => {
+        <h5 className='m-0 mt-2 mb-1 font-bold'>Opacity</h5>
+        <input type='range' min='0' max='1' step='0.01' className='w-full' value={opacity} onChange={(e) => {
           sprite.material.properties.set('opacity', Number(e.target.value));
           setOpacity(e.target.value); }
         } />
 
-        <h5>Texture</h5>
+        <h5 className='m-0 mt-2 mb-1 font-bold'>Texture</h5>
         <TextureInspector tex='texture' material={material} />
 
       </div>

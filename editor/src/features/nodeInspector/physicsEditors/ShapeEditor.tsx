@@ -1,6 +1,5 @@
 import { ShapeDescription } from '../../EngineContext';
 import AxisInput from '../../../components/AxisInput';
-import './Styles.css';
 
 export default function ShapeEditor(props: {
   shape: ShapeDescription;
@@ -8,9 +7,11 @@ export default function ShapeEditor(props: {
   removeShape: () => void;
 }) {
 
+  const number = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-[100px]';
+
   return (
-    <div className='transform-container'>
-        <table className='shape-editor-table'>
+    <div className='w-full p-2'>
+        <table className='w-full border-collapse'>
           <tbody>
             {props.shape.type === 'box' && (
               <>
@@ -25,6 +26,7 @@ export default function ShapeEditor(props: {
                   </td>
                   <td>
                     <input
+                      className={number}
                       type='number'
                       value={props.shape.width}
                       step={0.01}
@@ -43,6 +45,7 @@ export default function ShapeEditor(props: {
                   </td>
                   <td>
                     <input
+                      className={number}
                       type='number'
                       value={props.shape.height}
                       step={0.01}
@@ -61,6 +64,7 @@ export default function ShapeEditor(props: {
                   </td>
                   <td>
                     <input
+                      className={number}
                       type='number'
                       value={props.shape.depth}
                       step={0.01}
@@ -89,6 +93,7 @@ export default function ShapeEditor(props: {
                   </td>
                   <td>
                     <input
+                      className={number}
                       type='number'
                       value={props.shape.radius}
                       step={0.01}
@@ -117,6 +122,7 @@ export default function ShapeEditor(props: {
                   </td>
                   <td>
                     <input
+                      className={number}
                       type='number'
                       value={props.shape.radius}
                       step={0.01}
@@ -135,6 +141,7 @@ export default function ShapeEditor(props: {
                   </td>
                   <td>
                     <input
+                      className={number}
                       type='number'
                       value={props.shape.height}
                       step={0.01}
@@ -153,6 +160,7 @@ export default function ShapeEditor(props: {
                   </td>
                   <td>
                     <input
+                      className={number}
                       type='number'
                       value={props.shape.numSegments}
                       step={1}
@@ -198,7 +206,7 @@ export default function ShapeEditor(props: {
           </tbody>
         </table>
 
-        <button onClick={() => props.removeShape()}>Remove</button>
+        <button className='mt-2 px-3 py-1 bg-[#3b3b3b] border border-[#2d2d77] rounded hover:bg-[#3f3fb4]' onClick={() => props.removeShape()}>Remove</button>
     </div>
   );
 }

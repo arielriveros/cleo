@@ -1,8 +1,7 @@
-import { useState, useEffect, useReducer, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Texture, Skybox, SkyboxNode } from 'cleo'
 import { CubemapFaces } from 'cleo/graphics/texture';
 import Collapsable from '../../../components/Collapsable'
-import './Styles.css'
 
 function FaceEditor(props: { faceName: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ', texture: Texture }) {
     const [img, setImg] = useState<HTMLImageElement | null>(null);
@@ -20,12 +19,12 @@ function FaceEditor(props: { faceName: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ
 
 
     return (
-        <div className='skyboxFace'>
-            {img && <img src={img.src} />}
-            <label htmlFor={`${props.faceName}-upload`} className="textureFileUpload">
+        <div className='flex flex-col items-center gap-2 p-2 border border-[#2d2d77] rounded bg-[#2b2b2b]'>
+            {img && <img className='max-h-28 object-cover rounded' src={img.src} />}
+            <label htmlFor={`${props.faceName}-upload`} className="px-2 py-1 rounded border border-[#2d2d77] bg-[#3b3b3b] hover:bg-[#454545] cursor-pointer">
                 Upload
             </label>
-            <input id={`${props.faceName}-upload`} type='file' onChange={(e) => {
+            <input id={`${props.faceName}-upload`} className='hidden' type='file' onChange={(e) => {
                 const file = e.target.files?.item(0);
                 if (file && file.type.startsWith('image')) {
                     const reader = new FileReader();
@@ -48,9 +47,9 @@ function FaceEditor(props: { faceName: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ
 function CubemapInspector(props: { skybox: Skybox }) {
 
     return (
-        <div> {
+        <div className='overflow-x-auto'> {
             props.skybox.texture && 
-            <table>
+            <table className='mx-auto'>
                 <tbody>
                     <tr>
                         <td></td>
@@ -91,7 +90,9 @@ function CubemapInspector(props: { skybox: Skybox }) {
 export default function SkyboxEditor(props: {node: SkyboxNode}) {
   return (
     <Collapsable title='Skybox'>
-        <CubemapInspector skybox={props.node.skybox} />
+        <div className='p-2'>
+          <CubemapInspector skybox={props.node.skybox} />
+        </div>
     </Collapsable>
   )
 }

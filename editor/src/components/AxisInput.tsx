@@ -41,10 +41,12 @@ export default function AxisInput(props: AxisInputProps) {
     };
   }, []);
 
+  const commonInput = "w-full text-white font-medium ml-[2px] select-none border";
+
   return (
-    <div className="axis-input-container">
+    <div className="flex w-full">
       <input
-        className={'axis-input x'}
+        className={`${commonInput} bg-[rgba(255,0,0,0.2)] border-[1px] border-[rgb(255,125,125)]`}
         type={'number'}
         step={props.step}
         min={props.min}
@@ -58,7 +60,7 @@ export default function AxisInput(props: AxisInputProps) {
         onMouseMove={(e) => handleMouseMove(e, 0)}
       />
       <input
-        className={'axis-input y'}
+        className={`${commonInput} bg-[rgba(0,255,0,0.2)] border-[1px] border-[rgb(125,255,125)]`}
         type={'number'}
         step={props.step}
         min={props.min}
@@ -72,7 +74,7 @@ export default function AxisInput(props: AxisInputProps) {
         onMouseMove={(e) => handleMouseMove(e, 1)}
       />
       <input
-        className={'axis-input z'}
+        className={`${commonInput} bg-[rgba(0,0,255,0.2)] border-[1px] border-[rgb(125,125,255)]`}
         type={'number'}
         step={props.step}
         min={props.min}

@@ -1,5 +1,4 @@
 import { ReactNode } from "react";
-import "./Styles.css";
 
 interface ContentProps {
     children: ReactNode;
@@ -7,7 +6,7 @@ interface ContentProps {
 
 export default function Content(props: ContentProps) {
   return (
-    <div className="content">
+    <div className="fixed top-[30px] left-0 right-0 bottom-0 flex flex-row w-screen">
         {props.children}
     </div>
   )

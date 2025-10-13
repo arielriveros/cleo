@@ -1,7 +1,6 @@
 import { CameraNode } from 'cleo';
 import { useState, useEffect } from 'react';
 import Collapsable from '../../../components/Collapsable';
-import './Styles.css';
 
 export default function CameraEditor(props: { node: CameraNode }) {
   const [cameraState, setCameraState] = useState({
@@ -39,11 +38,14 @@ export default function CameraEditor(props: { node: CameraNode }) {
     props.node.camera.top = cameraState.top;
   }, [cameraState, props.node]);
 
+  const number = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-[120px]';
+  const select = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1';
+
   return (
     <Collapsable title="Camera">
-      <div className="camera-editor">
-        <div className="camera-table">
-          <table>
+      <div className="w-full p-2">
+        <div className="w-full">
+          <table className='w-full border-collapse'>
             <colgroup>
               <col span={1} style={{ width: '50%' }} />
               <col span={1} style={{ width: '50%' }} />
@@ -52,7 +54,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
               <tr>
                 <td>Type</td>
                 <td>
-                  <select
+                  <select className={select}
                     value={cameraState.type}
                     onChange={(e) =>
                       setCameraState((prev) => ({ ...prev, type: e.target.value as 'perspective' | 'orthographic' }))
@@ -68,6 +70,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
                   <td>Field of View</td>
                   <td>
                     <input
+                      className='w-[200px]'
                       type="range"
                       min="1"
                       max="179"
@@ -82,6 +85,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
                 <td>Near</td>
                 <td>
                   <input
+                    className={number}
                     type="number"
                     value={cameraState.near}
                     onChange={(e) => setCameraState((prev) => ({ ...prev, near: parseFloat(e.target.value) }))}
@@ -92,6 +96,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
                 <td>Far</td>
                 <td>
                   <input
+                    className={number}
                     type="number"
                     value={cameraState.far}
                     onChange={(e) => setCameraState((prev) => ({ ...prev, far: parseFloat(e.target.value) }))}
@@ -104,6 +109,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
                     <td>Left</td>
                     <td>
                       <input
+                        className={number}
                         type="number"
                         value={cameraState.left}
                         onChange={(e) => setCameraState((prev) => ({ ...prev, left: parseFloat(e.target.value) }))}
@@ -114,6 +120,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
                     <td>Right</td>
                     <td>
                       <input
+                        className={number}
                         type="number"
                         value={cameraState.right}
                         onChange={(e) => setCameraState((prev) => ({ ...prev, right: parseFloat(e.target.value) }))}
@@ -124,6 +131,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
                     <td>Bottom</td>
                     <td>
                       <input
+                        className={number}
                         type="number"
                         value={cameraState.bottom}
                         onChange={(e) => setCameraState((prev) => ({ ...prev, bottom: parseFloat(e.target.value) }))}
@@ -134,6 +142,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
                     <td>Top</td>
                     <td>
                       <input
+                        className={number}
                         type="number"
                         value={cameraState.top}
                         onChange={(e) => setCameraState((prev) => ({ ...prev, top: parseFloat(e.target.value) }))}

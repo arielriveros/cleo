@@ -10,7 +10,6 @@ import VisibleIcon from '../../icons/visible.png'
 import HiddenIcon from '../../icons/hidden.png'
 import Collapsable from '../../components/Collapsable';
 import AddNew from './AddNew';
-import './Styles.css'
 
 interface NodeDescription {
   id: string;
@@ -34,6 +33,7 @@ interface SceneNodeItemProps {
   
 function SceneNodeItem(props: SceneNodeItemProps) {
   const { selectedNode } = useCleoEngine();
+  const selected = selectedNode === props.nodeId;
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     event.dataTransfer.setData('text/plain', props.nodeId);
@@ -42,24 +42,24 @@ function SceneNodeItem(props: SceneNodeItemProps) {
   return (
     <div
       id={props.nodeId}
-      className={`scene-item ${selectedNode === props.nodeId ? 'selected' : ''}`}
+      className={`scene-item flex w-[90%] h-[20px] py-[1px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between ${selected ? 'bg-[#2c2cff] border border-white cursor-default' : 'border border-[#3b3b3b] hover:bg-[#3f3fb4] cursor-pointer'}`}
       onClick={() => props.onSelect(props.nodeId)}
       draggable={true}
       onDragStart={handleDragStart} >
       <div>
-        { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='scene-item-icon' /> }
-        { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='scene-item-icon' /> }
-        { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='scene-item-icon' /> }
-        { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='scene-item-icon' /> }
-        { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='scene-item-icon' /> }
+        { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='inline-block w-4 h-4 mr-1 align-middle' /> }
+        { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='inline-block w-4 h-4 mr-1 align-middle' /> }
+        { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }
+        { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='inline-block w-4 h-4 mr-1 align-middle' /> }
+        { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeName }
       </div>
-      <div className='scene-item-options-container'>
+      <div className='flex flex-row items-center'>
         <img 
           onClick={ () => props.onSetVisibility(props.nodeId) }
-          src={props.visible ? VisibleIcon : HiddenIcon} alt='visible' className='scene-item-visible-icon' />
+          src={props.visible ? VisibleIcon : HiddenIcon} alt='visible' className='inline-block w-4 h-4 mr-1 align-middle' />
         { props.children && props.children.length > 0 && 
-          <div className='scene-item-expand-button' onClick={() => props.onExpand(props.nodeId)}>
+          <div className='flex items-center justify-center w-[20px] h-[20px] text-white cursor-pointer select-none' onClick={() => props.onExpand(props.nodeId)}>
             { props.expanded ? '>' : '∨' }
           </div>
         }
@@ -78,7 +78,7 @@ function SceneListRecursive(props: SceneListRecursiveProps) {
 
   return (
     props.node.name.includes('__debug__') ? null : 
-    <div style={{ paddingLeft: 10 }}>
+    <div className="pl-[10px]">
       <SceneNodeItem
         key={props.node.id}
         nodeId={props.node.id}
@@ -173,7 +173,7 @@ export default function SceneInspector() {
   }
 
   return (
-    <div className='sceneInspector' onDragOver={handleDragOver} onDrop={handleDrop}>
+    <div className='flex flex-col text-white bg-[#202020] w-full h-full' onDragOver={handleDragOver} onDrop={handleDrop}>
       <AddNew />
       <Collapsable title='Scene'>
         { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode} handleSetVisibility={handleSetVisibility} /> }

@@ -3,7 +3,7 @@ import { EngineProvider } from './features/EngineContext'
 
 export default function App() {
   return (
-    <div>
+    <div className="h-screen w-screen overflow-hidden">
         <EngineProvider>
             <Editor />
         </EngineProvider>

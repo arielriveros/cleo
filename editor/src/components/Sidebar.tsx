@@ -1,5 +1,4 @@
-import { ReactNode, DragEvent, useState, useEffect } from 'react';
-import './Styles.css';
+import { ReactNode, useState, useEffect } from 'react';
 
 interface SidebarProps {
   width?: string;
@@ -9,7 +8,7 @@ interface SidebarProps {
 
 export default function Sidebar(props: SidebarProps) {
   return (
-    <div className="sidebar" style={{ width: props.width ?? '20vw', minWidth: props.minWidth ?? '20vw' }} >
+    <div className="flex flex-col overflow-x-hidden overflow-y-auto select-none" style={{ width: props.width ?? '20vw', minWidth: props.minWidth ?? '20vw' }} >
       {props.children}
     </div>
   );
@@ -44,7 +43,7 @@ export function SidebarResizer(props: SidebarResizerProps) {
 
   return (
     <div
-      className="sidebar-resizer"
+      className="flex flex-col items-center justify-center w-[2px] h-full cursor-ew-resize bg-[#2d2d77] hover:w-[5px] hover:bg-[#3f3fb4]"
       onMouseDown={() => setDragging(true)}
     />
   );

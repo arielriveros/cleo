@@ -3,7 +3,6 @@ import { Geometry, Material, Model, ModelNode, Node, Vec } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
 import ShapeEditor from './ShapeEditor';
-import './Styles.css'
 
 export default function PhysicsEditor(props: {node: Node}) {
   const { bodies, triggers, eventEmitter: eventEmitter } = useCleoEngine();
@@ -180,6 +179,13 @@ export default function PhysicsEditor(props: {node: Node}) {
     })
   }, [triggerProperties?.shapes] )
 
+  const section = 'w-full p-2';
+  const row = 'flex items-center gap-2 my-1';
+  const label = 'w-[160px]';
+  const number = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-[120px]';
+
+  const addBtn = 'ml-2 px-2 py-1 bg-[#3b3b3b] border border-[#2d2d77] rounded hover:bg-[#3f3fb4]';
+
   const addShape = (type: string, target: 'body' | 'trigger') => {
     switch (type) {
       case 'box':
@@ -254,7 +260,7 @@ export default function PhysicsEditor(props: {node: Node}) {
 
   return ( <>
     <Collapsable title='Rigid Body'>
-    <div className='body-editor'>
+    <div className={section}>
         { !bodyProperties ? 
         <> {
           props.node.name === 'root' ?
@@ -263,7 +269,7 @@ export default function PhysicsEditor(props: {node: Node}) {
             props.node.parent?.name !== 'root' ? <p> Can only add rigid bodies to nodes at root level. </p> :
           <>
             <p>Node does not have a rigid body.</p> 
-            <button onClick={() => setBodyProperties({
+            <button className={addBtn} onClick={() => setBodyProperties({
               mass: 0,
               linearDamping: 0,
               angularDamping: 0,
@@ -273,30 +279,30 @@ export default function PhysicsEditor(props: {node: Node}) {
           </>
         } </>
         : <>
-            <div className='body-editor-row'>
-              <label>Mass</label>
+            <div className={row}>
+              <label className={label}>Mass</label>
               <div>
-                <input type='number' value={bodyProperties.mass} onChange={(e) => setBodyProperties({...bodyProperties, mass: parseFloat(e.target.value)})} />
-                {bodyProperties.mass === 0 && <p>Mass of 0 will make the object static</p> }
+                <input className={number} type='number' value={bodyProperties.mass} onChange={(e) => setBodyProperties({...bodyProperties, mass: parseFloat(e.target.value)})} />
+                {bodyProperties.mass === 0 && <p className='text-xs text-gray-300'>Mass of 0 will make the object static</p> }
               </div>
             </div>
-            <div className='body-editor-row'>
-              <label>Damping</label>
+            <div className={row}>
+              <label className={label}>Damping</label>
               <div>
-                <input type='range' value={bodyProperties.linearDamping} step={0.01} min={0} max={1} onChange={(e) => setBodyProperties({...bodyProperties, linearDamping: parseFloat(e.target.value)})} />
+                <input className='w-[200px]' type='range' value={bodyProperties.linearDamping} step={0.01} min={0} max={1} onChange={(e) => setBodyProperties({...bodyProperties, linearDamping: parseFloat(e.target.value)})} />
                 { bodyProperties.linearDamping }
               </div>
             </div>
-            <div className='body-editor-row'>
-              <label>Angular Damping</label>
+            <div className={row}>
+              <label className={label}>Angular Damping</label>
               <div>
-                <input type='range' value={bodyProperties.angularDamping} step={0.01} min={0} max={1} onChange={(e) => setBodyProperties({...bodyProperties, angularDamping: parseFloat(e.target.value)})} />
+                <input className='w-[200px]' type='range' value={bodyProperties.angularDamping} step={0.01} min={0} max={1} onChange={(e) => setBodyProperties({...bodyProperties, angularDamping: parseFloat(e.target.value)})} />
                 { bodyProperties.angularDamping }
               </div>
             </div>
-            <div className='body-editor-row'>
-              <label>Linear Constraints</label>
-              <div>
+            <div className={row}>
+              <label className={label}>Linear Constraints</label>
+              <div className='flex items-center gap-2'>
                 <label>X</label>
                 <input type='checkbox' checked={bodyProperties.linearConstraints[0] === 1} onChange={(e) => setBodyProperties({...bodyProperties, linearConstraints: [e.target.checked ? 1 : 0, bodyProperties.linearConstraints[1], bodyProperties.linearConstraints[2]]})} />
                 <label>Y</label>
@@ -305,9 +311,9 @@ export default function PhysicsEditor(props: {node: Node}) {
                 <input type='checkbox' checked={bodyProperties.linearConstraints[2] === 1} onChange={(e) => setBodyProperties({...bodyProperties, linearConstraints: [bodyProperties.linearConstraints[0], bodyProperties.linearConstraints[1], e.target.checked ? 1 : 0]})} />
               </div>
             </div>
-            <div className='body-editor-row'>
-              <label>Angular Constraints</label>
-              <div>
+            <div className={row}>
+              <label className={label}>Angular Constraints</label>
+              <div className='flex items-center gap-2'>
                 <label>X</label>
                 <input type='checkbox' checked={bodyProperties.angularConstraints[0] === 1} onChange={(e) => setBodyProperties({...bodyProperties, angularConstraints: [e.target.checked ? 1 : 0, bodyProperties.angularConstraints[1], bodyProperties.angularConstraints[2]]})} />
                 <label>Y</label>
@@ -316,19 +322,19 @@ export default function PhysicsEditor(props: {node: Node}) {
                 <input type='checkbox' checked={bodyProperties.angularConstraints[2] === 1} onChange={(e) => setBodyProperties({...bodyProperties, angularConstraints: [bodyProperties.angularConstraints[0], bodyProperties.angularConstraints[1], e.target.checked ? 1 : 0]})} />
               </div>
             </div>
-            <button onClick={() => removeBody()}>Remove Rigid Body</button>
+            <button className={addBtn} onClick={() => removeBody()}>Remove Rigid Body</button>
         </>
         }
       </div>
     { bodyProperties &&
-      <div className='body-editor'>
+      <div className={section}>
         <p>Shapes</p>
-        <div className='body-editor-row'>
+        <div className={row}>
           Add Shape:
-          <button onClick={() => addShape('box', 'body')}>Box</button>
-          <button onClick={() => addShape('sphere', 'body')}>Sphere</button>
-          <button onClick={() => addShape('cylinder', 'body')}>Cylinder</button>
-          <button onClick={() => addShape('plane', 'body')}>Plane</button>
+          <button className={addBtn} onClick={() => addShape('box', 'body')}>Box</button>
+          <button className={addBtn} onClick={() => addShape('sphere', 'body')}>Sphere</button>
+          <button className={addBtn} onClick={() => addShape('cylinder', 'body')}>Cylinder</button>
+          <button className={addBtn} onClick={() => addShape('plane', 'body')}>Plane</button>
         </div>
         { bodyProperties.shapes.map((shape, i) => 
           <ShapeEditor key={i} shape={shape} setShape={(newShape: any) => {
@@ -344,25 +350,25 @@ export default function PhysicsEditor(props: {node: Node}) {
       </div>}
     </Collapsable>
     <Collapsable title='Trigger'>
-      <div className='body-editor'>
+      <div className={section}>
         {
           !triggerProperties ? 
           <>
             <p>Node does not have a trigger.</p>
-            <button onClick={() => setTriggerProperties({ shapes: [] })}> Add Trigger </button>
+            <button className={addBtn} onClick={() => setTriggerProperties({ shapes: [] })}> Add Trigger </button>
           </>
           :
           <>
-          <button onClick={() => removeTrigger()}>Remove Trigger</button>
+          <button className={addBtn} onClick={() => removeTrigger()}>Remove Trigger</button>
           { triggerProperties &&
-            <div className='body-editor'>
+            <div className={section}>
               <p>Shapes</p>
-              <div className='body-editor-row'>
+              <div className={row}>
                 Add Shape:
-                <button onClick={() => addShape('box', 'trigger')}>Box</button>
-                <button onClick={() => addShape('sphere', 'trigger')}>Sphere</button>
-                <button onClick={() => addShape('cylinder', 'trigger')}>Cylinder</button>
-                <button onClick={() => addShape('plane', 'trigger')}>Plane</button>
+                <button className={addBtn} onClick={() => addShape('box', 'trigger')}>Box</button>
+                <button className={addBtn} onClick={() => addShape('sphere', 'trigger')}>Sphere</button>
+                <button className={addBtn} onClick={() => addShape('cylinder', 'trigger')}>Cylinder</button>
+                <button className={addBtn} onClick={() => addShape('plane', 'trigger')}>Plane</button>
               </div>
               { triggerProperties.shapes.map((shape, i) => 
                 <ShapeEditor key={i} shape={shape} setShape={(newShape: any) => {

@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react'
 import { Texture, TextureManager } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import Collapsable from '../../components/Collapsable'
-import './Styles.css'
 
 function TextureItem({ textureName }: { textureName: string }) {
   return (
-    <div className='texture-item'> {textureName} </div>
+    <div className='flex w-[90%] h-[20px] py-[1px] px-[5px] mb-[1px] border border-[#3b3b3b] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between'> {textureName} </div>
   )
 }
 
@@ -52,12 +51,12 @@ export default function TextureExplorer() {
 
   return (
     <Collapsable title='Textures'>
-      <div className='texture-explorer'>
+      <div className='flex flex-col w-full h-full pl-[10px]'>
         <div>
           <b>Upload Textures</b>
           <br/>
-          <label htmlFor='file-upload' className='custom-file-upload'> Upload Files </label>
-          <input id='file-upload' type='file' multiple accept='.png, .jpg, .jpeg, .tga, .bmp' onChange={handleFileUpload} />
+          <label htmlFor='file-upload' className='bg-[#3b3b3b] text-white border border-black m-[1px] px-2 py-1 rounded cursor-pointer'> Upload Files </label>
+          <input id='file-upload' className='hidden' type='file' multiple accept='.png, .jpg, .jpeg, .tga, .bmp' onChange={handleFileUpload} />
         </div>
         {
           texturesList.map((textureName, index) => {

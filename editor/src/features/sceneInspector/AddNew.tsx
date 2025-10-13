@@ -33,7 +33,6 @@ import PointLightIcon from '../../icons/point-light.png'
 import DirectionalLightIcon from '../../icons/directional-light.png'
 import SpotlightIcon from '../../icons/spotlight.png'
 import SpriteIcon from '../../icons/static-sprite.png'
-import './Styles.css'
 
 interface AddButtonProps {
   onClick: () => void;
@@ -42,9 +41,9 @@ interface AddButtonProps {
 }
 function AddButton(props: AddButtonProps) {
   return(
-    <div className='add-container'>
-      <button className='add-node-button' onClick={() => props.onClick()}>
-        <img className='add-node-icon' src={props.icon} alt={props.label} />
+    <div className='flex flex-col items-center font-thin text-sm px-[1px]'>
+      <button className='flex items-center justify-center w-[40px] h-[40px] border border-[#3b3b3b] rounded-[2px] bg-[#3b3b3b] text-white cursor-pointer' onClick={() => props.onClick()}>
+        <img className='flex items-center justify-center w-[35px] h-[35px]' src={props.icon} alt={props.label} />
       </button>
       {props.label}
     </div>
@@ -185,47 +184,47 @@ export default function AddNew() {
 
   return (
     <Collapsable title='Add'>
-      <div className='add-new-container'>
-        <div className='node-category'>
+      <div className='flex flex-row font-thin px-[2px] flex-wrap w-full'>
+        <div className='flex flex-col items-center font-medium mr-[10px]'>
           Common
-          <div className='node-button-container'>
+          <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addNode(new Node('node')) } label='Empty' icon={EmptyIcon} />
             <AddButton onClick={() => addTrigger()} label='Trigger' icon={TriggerIcon} />
           </div>
         </div>
-        <div className='node-category'>
+        <div className='flex flex-col items-center font-medium mr-[10px]'>
           Cameras
-          <div className='node-button-container'>
+          <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addCamera('perspective')} label='Perspective' icon={CameraIcon} />
             <AddButton onClick={() => addCamera('orthographic')} label='Orthographic' icon={CameraIcon} />
           </div>
         </div>
-        <div className='node-category'>
+        <div className='flex flex-col items-center font-medium mr-[10px]'>
           Lights
-          <div className='node-button-container'>
+          <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addDirectionalLight() } label='Directional' icon={DirectionalLightIcon} />
             <AddButton onClick={() => addPointLight()} label='Point' icon={PointLightIcon} />
             <AddButton onClick={() => addSpotlight()} label='Spotlight' icon={SpotlightIcon} />
           </div>
         </div>
-        <div className='node-category'>
+        <div className='flex flex-col items-center font-medium mr-[10px]'>
           Sprites
-          <div className='node-button-container'>
+          <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addSprite()} label='Static' icon={SpriteIcon} />
           </div>
         </div>
-        <div className='node-category'>
+        <div className='flex flex-col items-center font-medium mr-[10px]'>
           Meshes
-          <div className='node-button-container'>
+          <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addCube()} label='Cube' icon={CubeIcon} />
             <AddButton onClick={() => addSphere()} label='Sphere' icon={SphereIcon} />
             <AddButton onClick={() => addCylinder()} label='Cylinder' icon={CylinderIcon} />
             <AddButton onClick={() => addPlane()} label='Plane' icon={PlaneIcon} />
-            <div className='add-container'>
-              <label className='add-node-button' htmlFor="file">
-                <img className='add-node-icon' src={ImportIcon} alt='Import' />
+            <div className='flex flex-col items-center font-thin text-sm px-[1px]'>
+              <label className='flex items-center justify-center w-[40px] h-[40px] border border-[#3b3b3b] rounded-[2px] bg-[#3b3b3b] text-white cursor-pointer' htmlFor="file">
+                <img className='flex items-center justify-center w-[35px] h-[35px]' src={ImportIcon} alt='Import' />
               </label>
-              <input type="file" id="file" name="file" multiple accept='.obj, .mtl, .gltf, .glb, .png, .jpg, .jpeg, .bmp, .tga, .tiff' onChange={(e) => {
+              <input className='hidden' type="file" id="file" name="file" multiple accept='.obj, .mtl, .gltf, .glb, .png, .jpg, .jpeg, .bmp, .tga, .tiff' onChange={(e) => {
                 const files = e.target.files;
                 if (files) {
                   const filesArray = Array.from(files);
@@ -244,9 +243,9 @@ export default function AddNew() {
             </div>
           </div>
         </div>
-        <div className='node-category'>
+        <div className='flex flex-col items-center font-medium mr-[10px]'>
           Environment
-          <div className='node-button-container'>
+          <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addSkybox()} label='Skybox' icon={SkyboxIcon} />
           </div>
         </div>

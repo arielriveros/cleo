@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { useCleoEngine } from '../EngineContext';
-import './Styles.css';
 
 export default function Logger() {
   const { eventEmitter: eventEmitter } = useCleoEngine();
@@ -27,23 +26,22 @@ export default function Logger() {
     };
   }, [eventEmitter]);
 
+  const btn = 'text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[98px] inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded disabled:bg-[#2c2cff] disabled:border-white disabled:cursor-default';
+
   return (
-    <div className='logger'>
-      <div className='filters'>
-        <button className={`filter-button${ 
-          !filter.log ? ' disabled' : ''}`} onClick={() => setFilter({...filter, log: !filter.log})} >Log</button>
-        <button className={`filter-button${
-          !filter.info ? ' disabled' : ''}`} onClick={() => setFilter({...filter, info: !filter.info}) }>Info</button>
-        <button className={`filter-button${
-          !filter.warning ? ' disabled' : ''}`} onClick={() => setFilter({...filter, warning: !filter.warning})}>Warning</button>
-        <button className={`filter-button${
-          !filter.error ? ' disabled' : ''}`} onClick={() => setFilter({...filter, error: !filter.error})}>Error</button>
+    <div className='flex flex-col w-full h-full text-white bg-[#202020]'>
+      <div className='flex flex-row items-center border-b border-[#2d2d77] p-1'>
+        <button className={btn + (!filter.log ? ' opacity-50' : '')} onClick={() => setFilter({...filter, log: !filter.log})} >Log</button>
+        <button className={btn + (!filter.info ? ' opacity-50' : '')} onClick={() => setFilter({...filter, info: !filter.info}) }>Info</button>
+        <button className={btn + (!filter.warning ? ' opacity-50' : '')} onClick={() => setFilter({...filter, warning: !filter.warning})}>Warning</button>
+        <button className={btn + (!filter.error ? ' opacity-50' : '')} onClick={() => setFilter({...filter, error: !filter.error})}>Error</button>
       </div>
-      <div className='logs-container'>
+      <div className='flex flex-col w-full h-full overflow-y-auto p-2 gap-1'>
         {logs.map((log, index) => {
-          if (!filter[log.type]) return null;
+          if (!filter[log.type]) return null as any;
+          const color = log.type === 'error' ? 'text-red-400' : log.type === 'warning' ? 'text-yellow-300' : log.type === 'info' ? 'text-blue-300' : 'text-white';
           return (
-            <span key={index} className={`log log-${log.type}`}>
+            <span key={index} className={`text-sm ${color}`}>
               [{log.scope}] {log.timeStamp} {log.message}
             </span>
           );

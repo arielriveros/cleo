@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 html, body {
     font-family: Consolas, monaco, monospace;
     height: 100%;
@@ -6,31 +10,66 @@ html, body {
     margin: 0;
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-}
-  
-/* Track */
-::-webkit-scrollbar-track {
-  background: #b4b4b4; 
-}
-  
-/* Handle */
-::-webkit-scrollbar-thumb {
-  background: #3b3b3b; 
-  border-radius: 5px;
+/* Design tokens */
+:root {
+  --bg: #0f1117;
+  --panel: #1b1e27;
+  --panel-accent: #2d2d77;
+  --muted: #9aa4b2;
+  --text: #e5e7eb;
+  --primary: #326acc;
+  --primary-600: #2a59a9;
+  --primary-700: #244b8e;
+  --danger: #ef4444;
 }
 
-/* Handle on hover */
-::-webkit-scrollbar-thumb:hover {
-  background: #2c2cff; 
+@layer base {
+  html, body { @apply h-full w-full antialiased; }
+  body { background-color: var(--bg); color: var(--text); }
+  a { @apply text-blue-400 hover:text-blue-300; }
+  ::selection { background: rgba(50,106,204,0.35); color: #fff; }
+  [role='button'], button { @apply select-none; }
 }
 
-input[type="file"] {
-  display: none;
+@layer components {
+  .panel { @apply rounded-md border bg-[#2b2b2b] border-[#2d2d77] shadow-md; }
+  .panel-header { @apply px-2 py-1 text-xs uppercase tracking-wide text-slate-300 bg-gradient-to-b from-[#2d2d77]/20 to-transparent; }
+
+  .input { @apply bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1; }
+  .select { @apply bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1; }
+
+  .btn { @apply px-3 py-1 rounded border border-[#2d2d77] bg-[#3b3b3b] hover:bg-[#454545] text-white; }
+  .btn-primary { @apply px-3 py-1 rounded text-white border border-[#274b8f] bg-[#326acc] hover:bg-[#2a59a9]; }
+  .btn-danger { @apply px-3 py-1 rounded text-white border border-red-700 bg-red-600 hover:bg-red-700; }
+  .btn-ghost { @apply px-2 py-1 rounded border border-[#2d2d77] hover:bg-[#3b3b3b]; }
+  .icon-button { @apply inline-flex items-center justify-center rounded border border-[#2d2d77] bg-[#3b3b3b] hover:bg-[#454545]; width: 28px; height: 28px; }
+
+  .resizer-x { @apply w-1 cursor-col-resize bg-[#1f1f3f] hover:w-1.5 hover:bg-[#2d2d77] transition-all; }
+  .resizer-y { @apply h-1 cursor-row-resize bg-[#1f1f3f] hover:h-1.5 hover:bg-[#2d2d77] transition-all; }
+
+  .tab { @apply px-2 py-1 rounded border border-transparent text-slate-300 hover:text-white hover:border-[#2d2d77]; }
+  .tab-active { @apply bg-[#1f1f3f] text-white border border-[#2d2d77]; }
+
+  .toolbar { @apply h-10 flex items-center gap-2 px-2 bg-[#12131a] border-b border-[#2d2d77] shadow; }
+  .status-bar { @apply h-6 flex items-center gap-2 px-2 bg-[#12131a] border-t border-[#2d2d77] text-xs text-slate-400; }
 }
 
-input[type="range"]::-webkit-slider-runnable-track {
-  background: #053a5f;
-  height: 1rem;
-}
+/* Modern dark scrollbars (overrides) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #16181d; }
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #3b3b3b 0%, #2d2d77 100%); border-radius: 6px; border: 1px solid #1b1e27; }
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #4a4a4a 0%, #3737a3 100%); }
+/* Firefox */
+* { scrollbar-color: #3b3b3b #16181d; scrollbar-width: thin; }
+
+input[type="file"] { display: none; }
+
+/* Modern slider styling */
+input[type="range"] { -webkit-appearance: none; appearance: none; height: 1rem; background: transparent; }
+input[type="range"]::-webkit-slider-runnable-track { background: linear-gradient(90deg, #2d2d77, #326acc); height: 6px; border-radius: 9999px; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 9999px; background: #e5e7eb; border: 2px solid #1b1e27; margin-top: -4px; }
+input[type="range"]::-moz-range-track { background: linear-gradient(90deg, #2d2d77, #326acc); height: 6px; border-radius: 9999px; }
+input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 9999px; background: #e5e7eb; }
+
+/* Focus styles */
+:focus-visible { outline: 2px solid #326acc; outline-offset: 2px; }

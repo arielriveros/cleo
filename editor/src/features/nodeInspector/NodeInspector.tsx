@@ -6,7 +6,6 @@ import PropertyEditor from './propertyEditors/PropertyEditor';
 import ScriptEditor from './scriptEditor/ScriptEditor';
 import PhysicsEditor from './physicsEditors/PhysicsEditor';
 import AnimationEditor from './animationEditor/AnimationEditor';
-import './NodeInspector.css'
 
 export default function NodeInspector() {
   const { editorScene, selectedNode } = useCleoEngine()
@@ -29,7 +28,7 @@ export default function NodeInspector() {
         <Tab title='Physics' onClick={()=>{setSelectedTab('Physics')}} selected={selectedTab === 'Physics'}/>
         <Tab title='Animation' onClick={()=>{setSelectedTab('Animation')}} selected={selectedTab === 'Animation'}/>
       </Tabs>
-      <div className='nodeInspector'>
+      <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
         {selectedTab === 'Properties' && node && <PropertyEditor node={node}/>}
         {selectedTab === 'Script'  && <ScriptEditor /> }
         {selectedTab === 'Physics' && node && <PhysicsEditor node={node} />}

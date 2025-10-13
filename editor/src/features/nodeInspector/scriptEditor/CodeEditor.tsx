@@ -4,7 +4,6 @@ import { javascript, javascriptLanguage, scopeCompletionSource } from '@codemirr
 import { EditorState } from "@codemirror/state"
 import { useCleoEngine } from '../../EngineContext'
 import { InputManager, Logger, ModelNode, Node } from 'cleo'
-import './Styles.css'
 
 const description = `/*
 // You can write full JavaScript here. Define helpers and export handlers.
@@ -114,12 +113,26 @@ export default function CodeEditor() {
   }
 
   return (
-    <>
-      {!hasScript && <button onClick={handleAddScript}>Add Script</button>}
-      <div style={{display: hasScript ?  'block' : 'none'}}>
-        <div ref={editorRef} style={{width: '100%', backgroundColor: 'white', color: 'black'}} />
+    <div className='p-2'>
+      {!hasScript && (
+        <button
+          className='px-3 py-1 rounded bg-[#326acc] hover:bg-[#2a59a9] text-white border border-[#274b8f]'
+          onClick={handleAddScript}
+        >
+          Add Script
+        </button>
+      )}
+      <div style={{display: hasScript ?  'block' : 'none'}} className='mt-2 border border-[#2d2d77] rounded overflow-hidden'>
+        <div ref={editorRef} className='w-full bg-white text-black min-h-[240px]' />
       </div>
-      {hasScript && <button onClick={handleDeleteScript}>Delete Script</button>}
-    </>
+      {hasScript && (
+        <button
+          className='mt-2 px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white border border-red-700'
+          onClick={handleDeleteScript}
+        >
+          Delete Script
+        </button>
+      )}
+    </div>
   )
 }

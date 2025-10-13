@@ -154,25 +154,25 @@ export default function MenuBar() {
 
   return (
     <Topbar>
-      <div className='file-controls'>
-        <div className='option-button' onClick={() => onSave()}>Save</div>
-        <label htmlFor='load-scene-file' className='option-button'>Load</label>
-        <input type='file' id='load-scene-file' name='file' onChange={(e) => onLoad(e.target.files)} />
+      <div className='flex items-center h-full'>
+        <div className='text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[98px] inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded' onClick={() => onSave()}>Save</div>
+        <label htmlFor='load-scene-file' className='text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[98px] inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded'>Load</label>
+        <input className="hidden" type='file' id='load-scene-file' name='file' onChange={(e) => onLoad(e.target.files)} />
       </div>
-      <div className='media-controls'>
-        <button className='media-button' disabled={playState==='playing'} onClick={() => onPlay()}>
-          <img src={PlayIcon} alt='Play' className='media-icon' />
+      <div className='flex items-center h-full'>
+        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='playing'} onClick={() => onPlay()}>
+          <img src={PlayIcon} alt='Play' className='inline-block h-full w-full align-middle' />
         </button>
-        <button className='media-button' disabled={playState==='paused' || playState==='stopped'} onClick={() => onPause()}>
-          <img src={PauseIcon} alt='Pause' className='media-icon' />
+        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='paused' || playState==='stopped'} onClick={() => onPause()}>
+          <img src={PauseIcon} alt='Pause' className='inline-block h-full w-full align-middle' />
         </button>
-        <button className='media-button' disabled={playState==='stopped'} onClick={() => onStop()}>
-          <img src={StopIcon} alt='Stop' className='media-icon' />
+        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='stopped'} onClick={() => onStop()}>
+          <img src={StopIcon} alt='Stop' className='inline-block h-full w-full align-middle' />
         </button>
       </div>
-      <div className='dimension-controls'>
-        <p>Mode</p>
-        <select disabled={ playState==='playing' || playState==='paused' } onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', (e.target.value as '2D' | '3D'))}>
+      <div className='flex items-center justify-between h-full w-[100px] text-white'>
+        <p className='m-0'>Mode</p>
+        <select className='bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 disabled:opacity-50' disabled={ playState==='playing' || playState==='paused' } onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', (e.target.value as '2D' | '3D'))}>
           <option value='3D'>3D</option>
           <option value='2D'>2D</option>
         </select>

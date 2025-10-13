@@ -1,5 +1,4 @@
 import { ReactNode } from 'react'
-import './Styles.css';
 
 interface CenterProps {
     width: string;
@@ -7,7 +6,7 @@ interface CenterProps {
 }
 export default function Center(props: CenterProps) {
   return (
-    <div className='center' style={{width: props.width}}>
+    <div className="flex flex-col w-full" style={{width: props.width}}>
         {props.children}
     </div>
   )

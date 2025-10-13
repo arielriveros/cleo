@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { LightNode, ModelNode, PointLight, Spotlight, SpriteNode } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import Collapsable from '../../../components/Collapsable'
-import './Styles.css'
 
 
 interface ColorInputProps {
@@ -16,10 +15,14 @@ export function ColorInput(props: ColorInputProps) {
   };
 
   return (
-    <input type='color' className='materialInput' value={props.color} onChange={(e) => {
-      let color = colorToVec3(e.target.value);
-      props.onChange([color[0], color[1], color[2]]);
-    }} 
+    <input
+      type='color'
+      className='h-8 w-10 p-0 border border-[#2d2d77] rounded bg-[#3b3b3b]'
+      value={props.color}
+      onChange={(e) => {
+        let color = colorToVec3(e.target.value);
+        props.onChange([color[0], color[1], color[2]]);
+      }}
     />
   )
 };
@@ -89,10 +92,12 @@ export default function LightEditor(props: {node: LightNode}) {
       (editorSprite[0] as SpriteNode).sprite.material.properties.set('color', light.diffuse);
   }, [props.node, diffuse])
 
+  const slider = 'w-[220px] align-middle ml-2';
+
   return (
     <Collapsable title='Light'>
-    <div className='material-editor'>
-      <table>
+    <div className='w-full p-2'>
+      <table className='w-full border-collapse'>
         <colgroup>
           <col span={1} style={{width: '16%'}} />
           <col span={1} style={{width: '28%'}} />
@@ -101,29 +106,29 @@ export default function LightEditor(props: {node: LightNode}) {
         </colgroup>
         <thead>
           <tr>
-            <th></th>
-            <th>Diffuse</th>
-            <th>Specular</th>
-            <th>Ambient</th>
+            <th className='text-left px-2 py-1'></th>
+            <th className='text-left px-2 py-1'>Diffuse</th>
+            <th className='text-left px-2 py-1'>Specular</th>
+            <th className='text-left px-2 py-1'>Ambient</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td> Colors </td>
-            <td>
+            <td className='px-2 py-1'> Colors </td>
+            <td className='px-2 py-1'>
               <ColorInput color={diffuse} onChange={(color) => { 
                 light.diffuse = color;
                 setDiffuse(vec3ToHex(color));
               }} />
             </td>
             
-            <td>
+            <td className='px-2 py-1'>
               <ColorInput color={specular} onChange={(color) => { 
                 light.specular = color;
                 setSpecular(vec3ToHex(color));
               }} />
             </td>
-            <td>
+            <td className='px-2 py-1'>
               <ColorInput color={ambient} onChange={(color) => { 
                 light.ambient = color;
                 setAmbient(vec3ToHex(color));
@@ -134,55 +139,55 @@ export default function LightEditor(props: {node: LightNode}) {
       </table>
 
       { props.node.light instanceof PointLight &&
-        <div>
-          <h3>Point Light</h3>
-          <div>
+        <div className='mt-3'>
+          <h3 className='font-semibold mb-2'>Point Light</h3>
+          <div className='flex flex-col gap-2'>
             {/* TODO, light properties should be managed as a state, not directly */}
             <label>Constant: {properties.constant}</label>
-            <input type='range' className='materialInput' value={properties.constant} min='0' max='1' step='0.01' onChange={(e) => {
+            <input type='range' className={slider} value={properties.constant} min='0' max='1' step='0.01' onChange={(e) => {
               setProperties({...properties, constant: parseFloat(e.target.value)});
             }} />
             
 
             <label>Linear: {properties.linear}</label>
-            <input type='range' className='materialInput' value={properties.linear} min='0' max='1' step='0.01' onChange={(e) => {
+            <input type='range' className={slider} value={properties.linear} min='0' max='1' step='0.01' onChange={(e) => {
               setProperties({...properties, linear: parseFloat(e.target.value)});
             }} />
 
             <label>Quadratic: {properties.quadratic}</label>
-            <input type='range' className='materialInput' value={properties.quadratic} min='0' max='1' step='0.01' onChange={(e) => {
+            <input type='range' className={slider} value={properties.quadratic} min='0' max='1' step='0.01' onChange={(e) => {
               setProperties({...properties, quadratic: parseFloat(e.target.value)});
             }} />
           </div>
         </div>
       }
       { props.node.light instanceof Spotlight &&
-        <div>
-          <h3>Spot Light</h3>
-          <div>
+        <div className='mt-3'>
+          <h3 className='font-semibold mb-2'>Spot Light</h3>
+          <div className='flex flex-col gap-2'>
             {/* TODO, light properties should be managed as a state, not directly */}
             <label>Constant: {properties.constant}</label>
-            <input type='range' className='materialInput' value={properties.constant} min='0' max='1' step='0.1' onChange={(e) => {
+            <input type='range' className={slider} value={properties.constant} min='0' max='1' step='0.1' onChange={(e) => {
               setProperties({...properties, constant: parseFloat(e.target.value)});
             }} />
 
             <label>Linear: {properties.linear}</label>
-            <input type='range' className='materialInput' value={properties.linear} min='0' max='1' step='0.01' onChange={(e) => {
+            <input type='range' className={slider} value={properties.linear} min='0' max='1' step='0.01' onChange={(e) => {
               setProperties({...properties, linear: parseFloat(e.target.value)});
             }} />
 
             <label>Quadratic: {properties.quadratic}</label>
-            <input type='range' className='materialInput' value={properties.quadratic} min='0' max='1' step='0.001' onChange={(e) => {
+            <input type='range' className={slider} value={properties.quadratic} min='0' max='1' step='0.001' onChange={(e) => {
               setProperties({...properties, quadratic: parseFloat(e.target.value)});
             }} />
 
             <label>Cut Off: {properties.cutOff?.toFixed(2)}</label>
-            <input type='range' className='materialInput' value={properties.cutOff} min='0' max='60' step='0.01' onChange={(e) => {
+            <input type='range' className={slider} value={properties.cutOff} min='0' max='60' step='0.01' onChange={(e) => {
               setProperties({...properties, cutOff: parseFloat(e.target.value)});
             }} />
 
             <label>Outer Cut Off: {properties.outerCutOff?.toFixed(2)}</label>
-            <input type='range' className='materialInput' value={properties.outerCutOff} min='0' max='60' step='0.01' onChange={(e) => {
+            <input type='range' className={slider} value={properties.outerCutOff} min='0' max='60' step='0.01' onChange={(e) => {
               setProperties({...properties, outerCutOff: parseFloat(e.target.value)});
             }} />
           </div>

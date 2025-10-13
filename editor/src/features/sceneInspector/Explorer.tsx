@@ -21,7 +21,7 @@ export default function Explorer() {
         <Tab title='Scene' onClick={()=>{setSelectedTab('Scene')}} selected={selectedTab === 'Scene'}/>
         <Tab title='Assets' onClick={()=>{setSelectedTab('Assets')}} selected={selectedTab === 'Assets'}/>
       </Tabs>
-      <div className='explorer'>
+      <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
         {selectedTab === 'Scene' && <SceneInspector />}
         {selectedTab === 'Assets' && <div>
           <TextureExplorer />

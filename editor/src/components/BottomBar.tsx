@@ -1,5 +1,4 @@
 import { ReactNode, useState, useEffect } from 'react';
-import './Styles.css';
 
 interface BottomBarProps {
   height?: string;
@@ -9,7 +8,7 @@ interface BottomBarProps {
 
 export default function BottomBar(props: BottomBarProps) {
   return (
-    <div className="bottom-bar" style={{
+    <div className="flex flex-col w-full select-none" style={{
       display: props.height === '0vw' ? 'none': 'flex',
       height: props.height ?? '20vw',
       minHeight: props.minHeight ?? '20vw'
@@ -49,7 +48,7 @@ export function BottomBarResizer(props: BottomBarResizerProps) {
 
   return (
     <div
-      className="bottom-bar-resizer"
+      className="flex flex-row items-center justify-center w-full h-[2px] cursor-ns-resize bg-[#2d2d77] hover:h-[5px] hover:bg-[#3f3fb4]"
       onMouseDown={() => setDragging(true)}
     />
   );

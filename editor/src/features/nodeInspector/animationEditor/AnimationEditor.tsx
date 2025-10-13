@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ModelNode, Node } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
-import './AnimationEditor.css';
 
 interface AnimationMapping {
   animationName: string;
@@ -146,7 +145,7 @@ export default function AnimationEditor(props: { node: Node }) {
   if (!hasAnimations) {
     return (
       <Collapsable title="Animation Editor">
-        <div className="animation-editor-empty">
+        <div className="p-4 text-sm text-gray-400 border border-[#2d2d77] rounded bg-[#2b2b2b]">
           <p>This node does not have any animations.</p>
           <p>Only ModelNodes with AnimatedModel can use the animation editor.</p>
         </div>
@@ -154,51 +153,54 @@ export default function AnimationEditor(props: { node: Node }) {
     );
   }
 
+  const inputCls = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1';
+  const btn = 'px-3 py-1 rounded bg-[#326acc] hover:bg-[#2a59a9] text-white border border-[#274b8f] disabled:opacity-50 disabled:cursor-not-allowed';
+  const btnGhost = 'px-2 py-1 rounded border border-[#2d2d77] hover:bg-[#3b3b3b]';
+  const btnDanger = 'px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white border border-red-700';
+
   return (
     <Collapsable title="Animation Editor">
-      <div className="animation-editor">
-        <div className="animation-info">
+      <div className="p-2 flex flex-col gap-4">
+        <div className="border border-[#2d2d77] rounded p-2">
           <p>Available Animations: {animationNames.length}</p>
-          <ul className="animation-list">
+          <ul className="list-disc pl-5 text-sm mt-1">
             {animationNames.map((name, idx) => (
               <li key={idx}>{name}</li>
             ))}
           </ul>
         </div>
 
-        <div className="animation-mappings">
-          <div className="mappings-header">
-            <h3>Animation Triggers</h3>
-            <button className="add-mapping-btn" onClick={addMapping}>
-              + Add Mapping
-            </button>
+        <div className="border border-[#2d2d77] rounded p-2">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold">Animation Triggers</h3>
+            <button className={btn} onClick={addMapping}>+ Add Mapping</button>
           </div>
 
           {mappings.length === 0 ? (
-            <p className="no-mappings">No animation mappings configured. Click "Add Mapping" to create one.</p>
+            <p className="text-sm text-gray-400">No animation mappings configured. Click "Add Mapping" to create one.</p>
           ) : (
             <>
-              <p style={{ fontSize: '12px', color: '#888', margin: '8px 0' }}>
+              <p className="text-xs text-gray-400 my-2">
                 ⚠️ Priority: First matching trigger plays. Order more specific animations first, idle/fallback animations last.
               </p>
-              <div className="mappings-list">
+              <div className="flex flex-col gap-3">
                 {mappings.map((mapping, index) => (
-                  <div key={index} className="mapping-item">
-                    <div className="mapping-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <strong style={{ color: '#4a9eff' }}>Trigger #{index + 1} (Priority: {index + 1})</strong>
-                      <div style={{ display: 'flex', gap: '4px' }}>
+                  <div key={index} className="border border-[#2d2d77] rounded p-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <strong className="text-[#4a9eff]">Trigger #{index + 1} (Priority: {index + 1})</strong>
+                      <div className="flex gap-1">
                         <button
+                          className={btnGhost}
                           onClick={() => moveMapping(index, 'up')}
                           disabled={index === 0}
-                          style={{ padding: '2px 8px', fontSize: '12px' }}
                           title="Move up (higher priority)"
                         >
                           ▲
                         </button>
                         <button
+                          className={btnGhost}
                           onClick={() => moveMapping(index, 'down')}
                           disabled={index === mappings.length - 1}
-                          style={{ padding: '2px 8px', fontSize: '12px' }}
                           title="Move down (lower priority)"
                         >
                           ▼
@@ -206,199 +208,199 @@ export default function AnimationEditor(props: { node: Node }) {
                       </div>
                     </div>
                     
-                    <div className="mapping-row">
-                    <label>Animation:</label>
-                    <select
-                      value={mapping.animationName}
-                      onChange={(e) => updateMapping(index, 'animationName', e.target.value)}
-                    >
-                      {animationNames.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="mapping-row">
-                    <label>Trigger Type:</label>
-                    <select
-                      value={mapping.triggerType}
-                      onChange={(e) => updateMapping(index, 'triggerType', e.target.value)}
-                    >
-                      <option value="key">Key Press</option>
-                      <option value="direction">Movement Direction</option>
-                      <option value="speed">Speed Threshold</option>
-                      <option value="custom">Custom Condition</option>
-                    </select>
-                  </div>
-
-                  {mapping.triggerType === 'key' && (
-                    <div className="mapping-row">
-                      <label>Key:</label>
+                    <div className="flex items-center gap-2 mb-2">
+                      <label className="min-w-[100px]">Animation:</label>
                       <select
-                        value={mapping.keyCode || 'Space'}
-                        onChange={(e) => updateMapping(index, 'keyCode', e.target.value)}
+                        className={inputCls}
+                        value={mapping.animationName}
+                        onChange={(e) => updateMapping(index, 'animationName', e.target.value)}
                       >
-                        {AVAILABLE_KEYS.map((key) => (
-                          <option key={key} value={key}>
-                            {key}
+                        {animationNames.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
                           </option>
                         ))}
                       </select>
                     </div>
-                  )}
 
-                  {mapping.triggerType === 'direction' && (
-                    <>
-                      <div className="mapping-row">
-                        <label>Preset Direction (Local Space):</label>
+                    <div className="flex items-center gap-2 mb-2">
+                      <label className="min-w-[100px]">Trigger Type:</label>
+                      <select
+                        className={inputCls}
+                        value={mapping.triggerType}
+                        onChange={(e) => updateMapping(index, 'triggerType', e.target.value)}
+                      >
+                        <option value="key">Key Press</option>
+                        <option value="direction">Movement Direction</option>
+                        <option value="speed">Speed Threshold</option>
+                        <option value="custom">Custom Condition</option>
+                      </select>
+                    </div>
+
+                    {mapping.triggerType === 'key' && (
+                      <div className="flex items-center gap-2 mb-2">
+                        <label className="min-w-[100px]">Key:</label>
                         <select
-                          value={JSON.stringify(mapping.direction || [0, 0, 1])}
-                          onChange={(e) => {
-                            const vector = JSON.parse(e.target.value);
-                            updateMapping(index, 'direction', vector);
-                          }}
+                          className={inputCls}
+                          value={mapping.keyCode || 'Space'}
+                          onChange={(e) => updateMapping(index, 'keyCode', e.target.value)}
                         >
-                          {COMMON_DIRECTIONS.map((dir) => (
-                            <option key={dir.name} value={JSON.stringify(dir.vector)}>
-                              {dir.name}
+                          {AVAILABLE_KEYS.map((key) => (
+                            <option key={key} value={key}>
+                              {key}
                             </option>
                           ))}
-                          <option value="custom">Custom...</option>
                         </select>
                       </div>
-                      
-                      <div className="mapping-row">
-                        <label>Direction Vector (X, Y, Z):</label>
-                        <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                          <input
-                            type="number"
-                            value={mapping.direction?.[0] ?? 0}
+                    )}
+
+                    {mapping.triggerType === 'direction' && (
+                      <>
+                        <div className="flex items-center gap-2 mb-2">
+                          <label className="min-w-[100px]">Preset Direction (Local Space):</label>
+                          <select
+                            className={inputCls}
+                            value={JSON.stringify(mapping.direction || [0, 0, 1])}
                             onChange={(e) => {
-                              const newDir: [number, number, number] = [
-                                parseFloat(e.target.value) || 0,
-                                mapping.direction?.[1] ?? 0,
-                                mapping.direction?.[2] ?? 1
-                              ];
-                              updateMapping(index, 'direction', newDir);
+                              const vector = JSON.parse(e.target.value);
+                              updateMapping(index, 'direction', vector);
                             }}
-                            step="0.1"
-                            placeholder="X"
-                            style={{ width: '60px' }}
-                          />
-                          <input
-                            type="number"
-                            value={mapping.direction?.[1] ?? 0}
-                            onChange={(e) => {
-                              const newDir: [number, number, number] = [
-                                mapping.direction?.[0] ?? 0,
-                                parseFloat(e.target.value) || 0,
-                                mapping.direction?.[2] ?? 1
-                              ];
-                              updateMapping(index, 'direction', newDir);
-                            }}
-                            step="0.1"
-                            placeholder="Y"
-                            style={{ width: '60px' }}
-                          />
-                          <input
-                            type="number"
-                            value={mapping.direction?.[2] ?? 1}
-                            onChange={(e) => {
-                              const newDir: [number, number, number] = [
-                                mapping.direction?.[0] ?? 0,
-                                mapping.direction?.[1] ?? 0,
-                                parseFloat(e.target.value) || 0
-                              ];
-                              updateMapping(index, 'direction', newDir);
-                            }}
-                            step="0.1"
-                            placeholder="Z"
-                            style={{ width: '60px' }}
-                          />
-                          <small style={{ color: '#888', fontSize: '11px' }}>
-                            (Local to node)
-                          </small>
+                          >
+                            {COMMON_DIRECTIONS.map((dir) => (
+                              <option key={dir.name} value={JSON.stringify(dir.vector)}>
+                                {dir.name}
+                              </option>
+                            ))}
+                            <option value="custom">Custom...</option>
+                          </select>
                         </div>
-                      </div>
-                      
-                      <div className="mapping-row">
-                        <label>Direction Threshold:</label>
+                        
+                        <div className="flex items-center gap-2 mb-2">
+                          <label className="min-w-[100px]">Direction Vector (X, Y, Z):</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              className={inputCls + ' w-[80px]'}
+                              type="number"
+                              value={mapping.direction?.[0] ?? 0}
+                              onChange={(e) => {
+                                const newDir: [number, number, number] = [
+                                  parseFloat(e.target.value) || 0,
+                                  mapping.direction?.[1] ?? 0,
+                                  mapping.direction?.[2] ?? 1
+                                ];
+                                updateMapping(index, 'direction', newDir);
+                              }}
+                              step="0.1"
+                              placeholder="X"
+                            />
+                            <input
+                              className={inputCls + ' w-[80px]'}
+                              type="number"
+                              value={mapping.direction?.[1] ?? 0}
+                              onChange={(e) => {
+                                const newDir: [number, number, number] = [
+                                  mapping.direction?.[0] ?? 0,
+                                  parseFloat(e.target.value) || 0,
+                                  mapping.direction?.[2] ?? 1
+                                ];
+                                updateMapping(index, 'direction', newDir);
+                              }}
+                              step="0.1"
+                              placeholder="Y"
+                            />
+                            <input
+                              className={inputCls + ' w-[80px]'}
+                              type="number"
+                              value={mapping.direction?.[2] ?? 1}
+                              onChange={(e) => {
+                                const newDir: [number, number, number] = [
+                                  mapping.direction?.[0] ?? 0,
+                                  mapping.direction?.[1] ?? 0,
+                                  parseFloat(e.target.value) || 0
+                                ];
+                                updateMapping(index, 'direction', newDir);
+                              }}
+                              step="0.1"
+                              placeholder="Z"
+                            />
+                            <small className="text-xs text-gray-400">(Local to node)</small>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2 mb-2">
+                          <label className="min-w-[100px]">Direction Threshold:</label>
+                          <input
+                            className={inputCls + ' w-[120px]'}
+                            type="number"
+                            value={mapping.directionThreshold ?? 0.8}
+                            onChange={(e) => updateMapping(index, 'directionThreshold', parseFloat(e.target.value))}
+                            step="0.05"
+                            min="0"
+                            max="1"
+                            placeholder="0.8"
+                          />
+                          <small className="text-xs text-gray-400">(0-1, higher = more precise)</small>
+                        </div>
+                      </>
+                    )}
+
+                    {mapping.triggerType === 'speed' && (
+                      <div className="flex items-center gap-2 mb-2">
+                        <label className="min-w-[100px]">Speed Threshold:</label>
                         <input
+                          className={inputCls + ' w-[120px]'}
                           type="number"
-                          value={mapping.directionThreshold ?? 0.8}
-                          onChange={(e) => updateMapping(index, 'directionThreshold', parseFloat(e.target.value))}
-                          step="0.05"
+                          value={mapping.speedThreshold || 1.0}
+                          onChange={(e) => updateMapping(index, 'speedThreshold', parseFloat(e.target.value))}
+                          step="0.1"
                           min="0"
-                          max="1"
-                          placeholder="0.8"
+                          placeholder="e.g., 1.0"
                         />
-                        <small style={{ marginLeft: '8px', color: '#888' }}>
-                          (0-1, higher = more precise)
-                        </small>
                       </div>
-                    </>
-                  )}
+                    )}
 
-                  {mapping.triggerType === 'speed' && (
-                    <div className="mapping-row">
-                      <label>Speed Threshold:</label>
-                      <input
-                        type="number"
-                        value={mapping.speedThreshold || 1.0}
-                        onChange={(e) => updateMapping(index, 'speedThreshold', parseFloat(e.target.value))}
-                        step="0.1"
-                        min="0"
-                        placeholder="e.g., 1.0"
-                      />
-                    </div>
-                  )}
+                    {mapping.triggerType === 'custom' && (
+                      <div className="flex items-center gap-2 mb-2">
+                        <label className="min-w-[100px]">Condition:</label>
+                        <input
+                          className={inputCls + ' flex-1'}
+                          type="text"
+                          value={mapping.customCondition || ''}
+                          onChange={(e) => updateMapping(index, 'customCondition', e.target.value)}
+                          placeholder="e.g., node.speed > 5"
+                        />
+                      </div>
+                    )}
 
-                  {mapping.triggerType === 'custom' && (
-                    <div className="mapping-row">
-                      <label>Condition:</label>
-                      <input
-                        type="text"
-                        value={mapping.customCondition || ''}
-                        onChange={(e) => updateMapping(index, 'customCondition', e.target.value)}
-                        placeholder="e.g., node.speed > 5"
-                      />
-                    </div>
-                  )}
-
-                  <button
-                    className="remove-mapping-btn"
-                    onClick={() => removeMapping(index)}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
+                    <button className={btnDanger} onClick={() => removeMapping(index)}>
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
             </>
           )}
 
-          <div className="blend-time-control" style={{ marginTop: '16px', padding: '12px', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <label style={{ fontWeight: 'bold', minWidth: '100px' }}>Blend Time:</label>
+          <div className="mt-4 p-3 rounded bg-[#2a2a2a]">
+            <div className="flex items-center gap-3">
+              <label className="font-semibold min-w-[100px]">Blend Time:</label>
               <input
+                className={inputCls + ' flex-1'}
                 type="number"
                 value={blendTime}
                 onChange={(e) => setBlendTime(Math.max(0, parseFloat(e.target.value) || 0))}
                 step="0.05"
                 min="0"
                 max="2"
-                style={{ flex: '1', padding: '4px 8px' }}
               />
-              <span style={{ color: '#888', fontSize: '12px', minWidth: '60px' }}>seconds</span>
+              <span className="text-xs text-gray-400 min-w-[60px]">seconds</span>
             </div>
-            <p style={{ fontSize: '11px', color: '#888', margin: '8px 0 0 0' }}>
+            <p className="text-xs text-gray-400 mt-2">
               Duration for smooth transitions between animations (0 = instant switch)
             </p>
           </div>
 
-          <button className="apply-btn" onClick={applyMappings}>
+          <button className={btn + ' mt-3'} onClick={applyMappings}>
             Apply Mappings
           </button>
         </div>

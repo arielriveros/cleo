@@ -9,7 +9,6 @@ import MenuBar from "./MenuBar";
 import Explorer from "./sceneInspector/Explorer";
 import BottomBar, { BottomBarResizer } from "../components/BottomBar";
 import Logger from "./logger/Logger";
-import './Editor.css'
 
 export default function Editor() {
   const { instance, eventEmitter } = useCleoEngine();
@@ -57,15 +56,17 @@ export default function Editor() {
           }}
         />
         <Center width={`${100 - barsDimensions.left - barsDimensions.right}vw`}>
-          <div style={{height: `${100 - barsDimensions.height}vh`}}>
-            <EngineViewport />
+          <div className="flex flex-col h-full">
+            <div className="flex-1 min-h-0">
+              <EngineViewport />
+            </div>
+            <BottomBarResizer onDrag={ e => {
+              setBarsDimensions({...barsDimensions, height: 100 - (100 * e.clientY) / window.innerHeight});
+            }} />
+            <BottomBar height={`${barsDimensions.height}vh`} minHeight={`${barsDimensions.minHeight}vh`}>
+              <Logger />
+            </BottomBar>
           </div>
-          <BottomBarResizer onDrag={ e => {
-            setBarsDimensions({...barsDimensions, height: 100 - (100 * e.clientY) / window.innerHeight});
-          }} />
-          <BottomBar height={`${barsDimensions.height}vh`} minHeight={`${barsDimensions.minHeight}vh`}>
-            <Logger />
-          </BottomBar>
         </Center>
         <SidebarResizer
           onDrag={ e => {
