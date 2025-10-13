@@ -30,11 +30,27 @@ interface DefaultProperties {
     }
 }
 
+interface PBRProperties {
+    baseColor?: number[];
+    metallic?: number;
+    roughness?: number;
+    opacity?: number;
+    emissiveFactor?: number[];
+    textures?: {
+        baseColorTexture?: string;
+        metallicRoughnessTexture?: string; // b=metallic, g=roughness
+        normalMap?: string;
+        occlusionMap?: string;
+        emissiveMap?: string;
+    }
+}
+
 enum MaterialType {
     Basic = 'basic',
     Default = 'default',
     BasicSkinned = 'basicSkinned',
-    DefaultSkinned = 'defaultSkinned'
+    DefaultSkinned = 'defaultSkinned',
+    PBR = 'pbr'
 }
 
 export class Material {
@@ -122,6 +138,35 @@ export class Material {
             const tex = properties.textures.reflectivity;
             material.textures.set('reflectivityMap', tex);
         }
+
+        return material;
+    }
+
+    public static PBR(properties: PBRProperties = {}, config?: MaterialConfig): Material {
+        const material = new Material(config);
+        material.type = MaterialType.PBR;
+        material.properties.set('baseColor', properties.baseColor || [1.0, 1.0, 1.0]);
+        material.properties.set('metallic', properties.metallic === undefined ? 0.0 : properties.metallic);
+        material.properties.set('roughness', properties.roughness === undefined ? 1.0 : properties.roughness);
+        material.properties.set('opacity', properties.opacity === undefined ? 1.0 : properties.opacity);
+        material.properties.set('emissiveFactor', properties.emissiveFactor || [0.0, 0.0, 0.0]);
+
+        // Textures flags
+        const tex = properties.textures || {};
+        material.properties.set('hasBaseColorTexture', tex.baseColorTexture ? true : false);
+        if (tex.baseColorTexture) material.textures.set('baseColorTexture', tex.baseColorTexture);
+
+        material.properties.set('hasMetallicRoughnessTexture', tex.metallicRoughnessTexture ? true : false);
+        if (tex.metallicRoughnessTexture) material.textures.set('metallicRoughnessTexture', tex.metallicRoughnessTexture);
+
+        material.properties.set('hasNormalMap', tex.normalMap ? true : false);
+        if (tex.normalMap) material.textures.set('normalMap', tex.normalMap);
+
+        material.properties.set('hasOcclusionMap', tex.occlusionMap ? true : false);
+        if (tex.occlusionMap) material.textures.set('occlusionMap', tex.occlusionMap);
+
+        material.properties.set('hasEmissiveMap', tex.emissiveMap ? true : false);
+        if (tex.emissiveMap) material.textures.set('emissiveMap', tex.emissiveMap);
 
         return material;
     }

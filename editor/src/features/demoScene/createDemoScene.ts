@@ -211,7 +211,7 @@ export async function createDemoScene(params: {
 
   scene.addNodes(lightNode, physicalBox, spriteNode, plane);
 
-  try {
+  /* try {
     const sponzaModels = await Model.fromPath({ filePaths: [
       '/assets/sponza/sponza.obj',
       '/assets/sponza/sponza.mtl'
@@ -227,7 +227,7 @@ export async function createDemoScene(params: {
     scene.addNode(sponza);
   } catch (e) {
     console.error('Failed to load sponza model:', e);
-  }
+  } */
 
   // --- Simple Game: Collectibles (green cubes) and Hazards (red spheres) ---
   const collectiblePositions: Array<[number, number, number]> = [

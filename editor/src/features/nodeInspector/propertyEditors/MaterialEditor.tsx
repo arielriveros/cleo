@@ -15,8 +15,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const material = model.material;
 
   // Shader selection (basic | default)
-  const [shaderType, setShaderType] = useState<'basic' | 'default'>(
-    (material.type as string).includes('default') ? 'default' : 'basic'
+  const [shaderType, setShaderType] = useState<'basic' | 'default' | 'pbr'>(
+    (material.type as string).includes('default') ? 'default' : (material.type as string).includes('pbr') ? 'pbr' : 'basic'
   );
 
   // Default shader state
@@ -25,6 +25,15 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const [ambient, setAmbient] = useState(vec3ToHex(material.properties.get('ambient')));
   const [shininess, setShininess] = useState(material.properties.get('shininess') || 32);
   const [emission, setEmission] = useState(vec3ToHex(material.properties.get('emissive')));
+
+  // PBR shader state
+  const [baseColor, setBaseColor] = useState<string>(vec3ToHex(material.properties.get('baseColor') || [1,1,1]));
+  const [metallic, setMetallic] = useState<number>(material.properties.get('metallic') ?? 0);
+  const [roughness, setRoughness] = useState<number>(material.properties.get('roughness') ?? 1);
+  const [emissiveFactor, setEmissiveFactor] = useState<string>(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
+  const [pbrOpacity, setPbrOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
+  // Add default shader opacity state
+  const [defaultOpacity, setDefaultOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
 
   // Basic shader state
   const [basicColor, setBasicColor] = useState(
@@ -45,13 +54,21 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   useEffect(() => {
     // Sync shader type and values from material when node changes
-    setShaderType((material.type as string).includes('default') ? 'default' : 'basic');
+    setShaderType((material.type as string).includes('default') ? 'default' : (material.type as string).includes('pbr') ? 'pbr' : 'basic');
 
     setDiffuse(vec3ToHex(material.properties.get('diffuse')));
     setSpecular(vec3ToHex(material.properties.get('specular')));
     setAmbient(vec3ToHex(material.properties.get('ambient')));
     setShininess(material.properties.get('shininess') || 32);
     setEmission(vec3ToHex(material.properties.get('emissive')));
+
+    setBaseColor(vec3ToHex(material.properties.get('baseColor') || [1,1,1]));
+    setMetallic(material.properties.get('metallic') ?? 0);
+    setRoughness(material.properties.get('roughness') ?? 1);
+    setEmissiveFactor(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
+    setPbrOpacity(material.properties.get('opacity') ?? 1);
+    // Sync default opacity
+    setDefaultOpacity(material.properties.get('opacity') ?? 1);
 
     setBasicColor(vec3ToHex(material.properties.get('color') ?? [1,1,1]));
     setBasicOpacity(material.properties.get('opacity') ?? 1);
@@ -76,7 +93,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
       // Flag for single texture in basic
       if (material.properties.get('hasTexture') === undefined) material.properties.set('hasTexture', false);
-    } else {
+    } else if (shaderType === 'default') {
       // Default shader required props
       if (!material.properties.get('diffuse')) material.properties.set('diffuse', [1,1,1]);
       if (!material.properties.get('specular')) material.properties.set('specular', [1,1,1]);
@@ -85,6 +102,17 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       if (material.properties.get('shininess') === undefined) material.properties.set('shininess', 32.0);
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
       if (material.properties.get('reflectivity') === undefined) material.properties.set('reflectivity', 0.0);
+    } else if (shaderType === 'pbr') {
+      if (!material.properties.get('baseColor')) material.properties.set('baseColor', [1,1,1]);
+      if (material.properties.get('metallic') === undefined) material.properties.set('metallic', 0.0);
+      if (material.properties.get('roughness') === undefined) material.properties.set('roughness', 1.0);
+      if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
+      if (!material.properties.get('emissiveFactor')) material.properties.set('emissiveFactor', [0,0,0]);
+      if (material.properties.get('hasBaseColorTexture') === undefined) material.properties.set('hasBaseColorTexture', false);
+      if (material.properties.get('hasMetallicRoughnessTexture') === undefined) material.properties.set('hasMetallicRoughnessTexture', false);
+      if (material.properties.get('hasNormalMap') === undefined) material.properties.set('hasNormalMap', false);
+      if (material.properties.get('hasOcclusionMap') === undefined) material.properties.set('hasOcclusionMap', false);
+      if (material.properties.get('hasEmissiveMap') === undefined) material.properties.set('hasEmissiveMap', false);
     }
   }, [shaderType, material]);
 
@@ -110,9 +138,10 @@ export default function MaterialEditor(props: {node: ModelNode}) {
         {/* Shader selector */}
         <div className='mb-2 flex items-center gap-2'>
           <span className='text-xs text-slate-300'>Shader</span>
-          <select className={selectInput} value={shaderType} onChange={(e) => setShaderType(e.target.value as 'basic' | 'default')}>
+          <select className={selectInput} value={shaderType} onChange={(e) => setShaderType(e.target.value as 'basic' | 'default' | 'pbr')}>
             <option value='basic'>Basic</option>
             <option value='default'>Default</option>
+            <option value='pbr'>PBR</option>
           </select>
         </div>
 
@@ -163,6 +192,24 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 </tr>
               </tbody>
             </table>
+
+            {/* Opacity slider for Default material */}
+            <div className='mt-2'>
+              <span className='text-xs text-slate-300 mr-2'>Opacity</span>
+              <input
+                type='range'
+                min={0}
+                max={1}
+                step={0.01}
+                value={defaultOpacity}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setDefaultOpacity(v);
+                  model.material.properties.set('opacity', v);
+                }}
+              />
+              <span className='text-xs ml-2'>{defaultOpacity.toFixed(2)}</span>
+            </div>
 
             <h5 className='m-0 mt-2 mb-1 font-bold'>Textures</h5>
             <table className='w-full text-left border-collapse'>
@@ -254,6 +301,123 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                   <td>
                     <TextureInspector tex={'texture'} material={model.material} />
                   </td>
+                </tr>
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {shaderType === 'pbr' && (
+          <>
+            <h5 className='m-0 mb-1 font-bold'>Properties</h5>
+            <table className='w-full text-left border-collapse'>
+              <tbody>
+                <tr>
+                  <td>Base Color</td>
+                  <td>Metallic / Roughness</td>
+                  <td>Opacity</td>
+                  <td>Emissive</td>
+                </tr>
+                <tr>
+                  <td>
+                    <input type='color' className={colorInput} value={baseColor} onChange={(e) => {
+                      model.material.properties.set('baseColor', colorToVec3(e.target.value));
+                      setBaseColor(e.target.value);
+                    }} />
+                  </td>
+                  <td>
+                    <div className='flex flex-col gap-1'>
+                      <label className='text-xs text-slate-300'>Metallic</label>
+                      <div>
+                        <input
+                          type='range'
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={metallic}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            setMetallic(v);
+                            model.material.properties.set('metallic', v);
+                          }}
+                        />
+                        <span className='text-xs ml-2'>{metallic.toFixed(2)}</span>
+                      </div>
+                      <label className='text-xs text-slate-300 mt-1'>Roughness</label>
+                      <div>
+                        <input
+                          type='range'
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={roughness}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            setRoughness(v);
+                            model.material.properties.set('roughness', v);
+                          }}
+                        />
+                        <span className='text-xs ml-2'>{roughness.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <input
+                      type='range'
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={pbrOpacity}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        setPbrOpacity(v);
+                        model.material.properties.set('opacity', v);
+                      }}
+                    />
+                    <span className='text-xs ml-2'>{pbrOpacity.toFixed(2)}</span>
+                  </td>
+                  <td>
+                    <input type='color' className={colorInput} value={emissiveFactor} onChange={(e) => {
+                      model.material.properties.set('emissiveFactor', colorToVec3(e.target.value));
+                      setEmissiveFactor(e.target.value);
+                    }} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h5 className='m-0 mt-2 mb-1 font-bold'>Textures</h5>
+            <table className='w-full text-left border-collapse'>
+              <tbody>
+                <tr>
+                  <td>Base Color</td>
+                  <td>Metallic+Roughness</td>
+                  <td>Normal</td>
+                </tr>
+                <tr>
+                  <td>
+                    <TextureInspector tex={'baseColorTexture'} material={model.material} />
+                  </td>
+                  <td>
+                    <TextureInspector tex={'metallicRoughnessTexture'} material={model.material} />
+                  </td>
+                  <td>
+                    <TextureInspector tex={'normalMap'} material={model.material} />
+                  </td>
+                </tr>
+                <tr>
+                  <td>Occlusion</td>
+                  <td>Emissive</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <TextureInspector tex={'occlusionMap'} material={model.material} />
+                  </td>
+                  <td>
+                    <TextureInspector tex={'emissiveMap'} material={model.material} />
+                  </td>
+                  <td></td>
                 </tr>
               </tbody>
             </table>

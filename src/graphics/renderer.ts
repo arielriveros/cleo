@@ -31,6 +31,9 @@ import Bloom from './shaders/screen/bloom.fs'
 import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
+import PBRVertex from './shaders/materials/pbr.vs'
+import PBRFragment from './shaders/materials/pbr.fs'
+import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 
@@ -111,6 +114,8 @@ export class Renderer {
         const defaultShader = new Shader().create(DefaultVertex, DefaultFragment);
         const basicSkinnedShader = new Shader().create(BasicSkinnedVertex, BasicFragment);
         const defaultSkinnedShader = new Shader().create(DefaultSkinnedVertex, DefaultFragment);
+        const pbrShader = new Shader().create(PBRVertex, PBRFragment);
+        const pbrSkinnedShader = new Shader().create(PBRSkinnedVertex, PBRFragment);
         // Environment shaders
         const shadowMapShader = new Shader().create(ShadowMapVertex, ShadowMapFragment);
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
@@ -128,6 +133,8 @@ export class Renderer {
         this._shaderManager.addShader('default', defaultShader);
         this._shaderManager.addShader('basicSkinned', basicSkinnedShader);
         this._shaderManager.addShader('defaultSkinned', defaultSkinnedShader);
+        this._shaderManager.addShader('pbr', pbrShader);
+        this._shaderManager.addShader('pbrSkinned', pbrSkinnedShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('screen', screenShader);
@@ -182,6 +189,17 @@ export class Renderer {
             this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
             this._shaderManager.setUniform('u_shadowMap', 6);
             this._shadowMapFBO.depth.bind(6);
+
+            // Also for PBR shaders
+            this._shaderManager.bind('pbr');
+            this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
+            this._shaderManager.setUniform('u_shadowMap', 6);
+            this._shadowMapFBO.depth.bind(6);
+
+            this._shaderManager.bind('pbrSkinned');
+            this._shaderManager.setUniform('u_lightSpace', node.lightSpace);
+            this._shaderManager.setUniform('u_shadowMap', 6);
+            this._shadowMapFBO.depth.bind(6);
         }
 
         // Set environment map for both default shaders
@@ -191,6 +209,17 @@ export class Renderer {
         scene.environmentMap?.bind(7);
         
         this._shaderManager.bind('defaultSkinned');
+        this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+        this._shaderManager.setUniform('u_envMap', 7);
+        scene.environmentMap?.bind(7);
+
+        // And for PBR shaders
+        this._shaderManager.bind('pbr');
+        this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+        this._shaderManager.setUniform('u_envMap', 7);
+        scene.environmentMap?.bind(7);
+
+        this._shaderManager.bind('pbrSkinned');
         this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
         this._shaderManager.setUniform('u_envMap', 7);
         scene.environmentMap?.bind(7);
@@ -365,6 +394,8 @@ export class Renderer {
                 shaderType = 'basicSkinned';
             } else if (shaderType === 'default') {
                 shaderType = 'defaultSkinned';
+            } else if (shaderType === 'pbr') {
+                shaderType = 'pbrSkinned';
             }
             
             // Initialize the VAO for the animated model if not already done
@@ -436,9 +467,11 @@ export class Renderer {
             switch(name) {
                 case 'texture':
                 case 'baseTexture':
+                case 'baseColorTexture':
                     slot = 0;
                     break;
                 case 'specularMap':
+                case 'metallicRoughnessTexture':
                     slot = 1;
                     break;
                 case 'emissiveMap':
@@ -448,6 +481,7 @@ export class Renderer {
                     slot = 3;
                     break;
                 case 'maskMap':
+                case 'occlusionMap':
                     slot = 4;
                     break;
                 case 'reflectivityMap':
@@ -461,6 +495,12 @@ export class Renderer {
         }
 
         const materialConfig = node.model.material.config;
+
+        // Inform shaders about transparency state (only used by PBR shaders)
+        this._shaderManager.setUniform('u_isTransparent', materialConfig.transparent);
+
+        // Control blending per material
+        if (materialConfig.transparent) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
 
         switch(materialConfig.side) {
             case 'front':
@@ -553,9 +593,11 @@ export class Renderer {
             switch(name) {
                 case 'texture':
                 case 'baseTexture':
+                case 'baseColorTexture':
                     slot = 0;
                     break;
                 case 'specularMap':
+                case 'metallicRoughnessTexture':
                     slot = 1;
                     break;
                 case 'emissiveMap':
@@ -565,6 +607,7 @@ export class Renderer {
                     slot = 3;
                     break;
                 case 'maskMap':
+                case 'occlusionMap':
                     slot = 4;
                     break;
                 case 'reflectivityMap':
@@ -578,6 +621,12 @@ export class Renderer {
         }
 
         const materialConfig = node.sprite.material.config;
+
+        // Sprites are always transparent
+        this._shaderManager.setUniform('u_isTransparent', true);
+        gl.enable(gl.BLEND);
+        // Don't write to depth for blended sprites to avoid occluding later sprites
+        gl.depthMask(false);
 
         switch(materialConfig.side) {
             case 'front':
@@ -604,6 +653,9 @@ export class Renderer {
                 break;
         }
         node.sprite.mesh.draw(mode);
+
+        // Restore depth writes after drawing sprite
+        gl.depthMask(true);
 
         gl.disable(gl.CULL_FACE);
 
@@ -674,7 +726,7 @@ export class Renderer {
         }
 
         // Set lighting for both default shaders
-        for (const shaderName of ['default', 'defaultSkinned']) {
+        for (const shaderName of ['default', 'defaultSkinned', 'pbr', 'pbrSkinned']) {
             try {
                 this._shaderManager.bind(shaderName);
                 this._shaderManager.setUniform('u_numPointLights', numPointLights);

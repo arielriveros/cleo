@@ -67,36 +67,56 @@ export class Model {
             data.geometry.indices
         );
 
-        let texData = data.material.textures;
-        let baseTexture = texData.base;
-        let specularMap = texData.specular;
-        let normalMap = texData.normal;
-        let emissiveMap = texData.emissive;
-        let maskMap = texData.mask;
-        let reflectivityMap = texData.reflectivity;
-        
-        let material = Material.Default({
-            diffuse: data.material.diffuse,
-            specular: data.material.specular,
-            ambient: data.material.ambient,
-            emissive: data.material.emissive,
-            shininess: data.material.shininess,
-            opacity: data.material.opacity,
-            textures: {
-                base: baseTexture,
-                specular: specularMap,
-                normal: normalMap,
-                emissive: emissiveMap,
-                mask: maskMap,
-                reflectivity: reflectivityMap
-            }},
-            {
-                side: data.material.config?.side,
-                wireframe: data.material.config?.wireframe,
-                transparent: data.material.config?.transparent,
-                castShadow: data.material.config?.castShadow
-            }
-            );
+        const m = data.material || {};
+        const config = {
+            side: m.config?.side,
+            wireframe: m.config?.wireframe,
+            transparent: m.config?.transparent,
+            castShadow: m.config?.castShadow
+        };
+
+        let material: Material;
+        const type: string = m.type || 'default'; // backward compat defaults to default
+        if (type === 'basic') {
+            material = Material.Basic({
+                color: m.color || [1,1,1],
+                opacity: m.opacity ?? 1.0,
+                texture: m.textures?.texture
+            }, config);
+        } else if (type === 'pbr') {
+            material = Material.PBR({
+                baseColor: m.baseColor || [1,1,1],
+                metallic: m.metallic ?? 0.0,
+                roughness: m.roughness ?? 1.0,
+                opacity: m.opacity ?? 1.0,
+                emissiveFactor: m.emissiveFactor || [0,0,0],
+                textures: {
+                    baseColorTexture: m.textures?.baseColorTexture,
+                    metallicRoughnessTexture: m.textures?.metallicRoughnessTexture,
+                    normalMap: m.textures?.normalMap,
+                    occlusionMap: m.textures?.occlusionMap,
+                    emissiveMap: m.textures?.emissiveMap
+                }
+            }, config);
+        } else { // 'default' or legacy
+            const texData = m.textures || {};
+            material = Material.Default({
+                diffuse: m.diffuse,
+                specular: m.specular,
+                ambient: m.ambient,
+                emissive: m.emissive,
+                shininess: m.shininess,
+                opacity: m.opacity,
+                textures: {
+                    base: texData.base,
+                    specular: texData.specular,
+                    normal: texData.normal,
+                    emissive: texData.emissive,
+                    mask: texData.mask,
+                    reflectivity: texData.reflectivity
+                }
+            }, config);
+        }
 
         return new Model(geometry, material);
     }
@@ -111,29 +131,65 @@ export class Model {
             indices: this._geometry.indices
         };
 
-        /* TODO: serialize for different types of materials */
-        let material = {
-            diffuse: this._material.properties.get('diffuse'),
-            specular: this._material.properties.get('specular'),
-            ambient: this._material.properties.get('ambient'),
-            emissive: this._material.properties.get('emissive'),
-            shininess: this._material.properties.get('shininess'),
-            opacity: this._material.properties.get('opacity'),
-            textures: {
-                base: this._material.textures.get('baseTexture'),
-                specular:  this._material.textures.get('specularMap'),
-                normal: this._material.textures.get('normalMap'),
-                emissive: this._material.textures.get('emissiveMap'),
-                mask: this._material.textures.get('maskMap'),
-                reflectivity: this._material.textures.get('reflectivityMap')
-            },
-            config: {
-                side: this._material.config.side,
-                wireframe: this._material.config.wireframe,
-                transparent: this._material.config.transparent,
-                castShadow: this._material.config.castShadow,
-            }
+        // Material serialization depending on shader type
+        const cfg = {
+            side: this._material.config.side,
+            wireframe: this._material.config.wireframe,
+            transparent: this._material.config.transparent,
+            castShadow: this._material.config.castShadow,
         };
+
+        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'defaultSkinned' ? 'default' : t);
+        const type = normalizeType(this._material.type as any);
+
+        let material: any;
+        if (type === 'basic') {
+            material = {
+                type,
+                color: this._material.properties.get('color'),
+                opacity: this._material.properties.get('opacity'),
+                textures: {
+                    texture: this._material.textures.get('texture')
+                },
+                config: cfg
+            };
+        } else if (type === 'pbr') {
+            material = {
+                type,
+                baseColor: this._material.properties.get('baseColor'),
+                metallic: this._material.properties.get('metallic'),
+                roughness: this._material.properties.get('roughness'),
+                opacity: this._material.properties.get('opacity'),
+                emissiveFactor: this._material.properties.get('emissiveFactor'),
+                textures: {
+                    baseColorTexture: this._material.textures.get('baseColorTexture'),
+                    metallicRoughnessTexture: this._material.textures.get('metallicRoughnessTexture'),
+                    normalMap: this._material.textures.get('normalMap'),
+                    occlusionMap: this._material.textures.get('occlusionMap'),
+                    emissiveMap: this._material.textures.get('emissiveMap')
+                },
+                config: cfg
+            };
+        } else { // default
+            material = {
+                type: 'default',
+                diffuse: this._material.properties.get('diffuse'),
+                specular: this._material.properties.get('specular'),
+                ambient: this._material.properties.get('ambient'),
+                emissive: this._material.properties.get('emissive'),
+                shininess: this._material.properties.get('shininess'),
+                opacity: this._material.properties.get('opacity'),
+                textures: {
+                    base: this._material.textures.get('baseTexture'),
+                    specular:  this._material.textures.get('specularMap'),
+                    normal: this._material.textures.get('normalMap'),
+                    emissive: this._material.textures.get('emissiveMap'),
+                    mask: this._material.textures.get('maskMap'),
+                    reflectivity: this._material.textures.get('reflectivityMap')
+                },
+                config: cfg
+            };
+        }
 
         return { geometry, material };        
     }
