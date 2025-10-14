@@ -9,12 +9,15 @@ import MenuBar from "./MenuBar";
 import Explorer from "./sceneInspector/Explorer";
 import BottomBar, { BottomBarResizer } from "../components/BottomBar";
 import Logger from "./logger/Logger";
+import Tabs, { Tab } from "../components/Tabs";
+import AssetExplorer from "./assets/AssetExplorer";
 
 export default function Editor() {
   const { instance, eventEmitter } = useCleoEngine();
   const [barsDimensions, setBarsDimensions] = useState({
     left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15
   });
+  const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets'>('Logger');
 
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
@@ -64,7 +67,14 @@ export default function Editor() {
               setBarsDimensions({...barsDimensions, height: 100 - (100 * e.clientY) / window.innerHeight});
             }} />
             <BottomBar height={`${barsDimensions.height}vh`} minHeight={`${barsDimensions.minHeight}vh`}>
-              <Logger />
+              <Tabs>
+                <Tab title='Logger' onClick={() => setBottomTab('Logger')} selected={bottomTab === 'Logger'} />
+                <Tab title='Assets' onClick={() => setBottomTab('Assets')} selected={bottomTab === 'Assets'} />
+              </Tabs>
+              <div className="flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto">
+                {bottomTab === 'Logger' && <Logger />}
+                {bottomTab === 'Assets' && <AssetExplorer />}
+              </div>
             </BottomBar>
           </div>
         </Center>

@@ -12,6 +12,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
   const [textureMissing, setTextureMissing] = useState(false);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -110,19 +111,71 @@ export default function TextureInspector(props: { tex: string, material: Materia
     props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, true)
     setTexture(textureId);
     setOpen(false);
+    // notify others
+    eventEmitter.emit("TEXTURES_CHANGED");
   }
+
+  const allowDrop = (e: React.DragEvent) => {
+    const types = Array.from(e.dataTransfer.types || []);
+    if (types.includes('text/cleo-asset') || types.includes('text/plain')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      return true;
+    }
+    return false;
+  };
+
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (allowDrop(e)) setIsDragOver(true);
+  };
+
+  const onDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    setIsDragOver(false);
+  };
+
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const custom = e.dataTransfer.getData('text/cleo-asset');
+    const plain = e.dataTransfer.getData('text/plain');
+    let data: any = null;
+    if (custom) {
+      try { data = JSON.parse(custom); } catch { data = null; }
+    }
+    if (!data && plain) {
+      data = { type: 'texture', id: plain };
+    }
+    if (data?.type === 'texture' && typeof data.id === 'string' && data.id.length > 0) {
+      if (TextureManager.Instance.getTexture(data.id)) {
+        onTextureSelect(data.id);
+      }
+    }
+  };
 
   const filtered = texturesIds.filter(id => id.toLowerCase().includes(query.toLowerCase()));
 
   return (
-    <div ref={containerRef} className='relative panel flex flex-col items-center gap-1'>
+    <div
+      ref={containerRef}
+      className='relative panel flex flex-col items-center gap-1'
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {/* Preview with hover controls */}
-      <div className='relative group h-24 w-24'>
+      <div
+        className={`relative group h-24 w-24 ${isDragOver ? 'ring-2 ring-[#3f3fb4]' : ''}`}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        title='Drop a texture from Assets here'
+      >
         {img ? (
-          <img className='h-full w-full object-cover rounded' src={img.src} />
+          <img className='h-full w-full object-cover rounded pointer-events-none' src={img.src} />
         ) : (
-          <div className='h-full w-full rounded border border-dashed border-[#2d2d77] grid place-items-center text-xs text-slate-400'>
-            No texture
+          <div className={`h-full w-full rounded border border-dashed ${isDragOver ? 'border-[#3f3fb4]' : 'border-[#2d2d77]'} grid place-items-center text-xs text-slate-400`}>
+            {isDragOver ? 'Release to assign' : 'No texture'}
           </div>
         )}
 
