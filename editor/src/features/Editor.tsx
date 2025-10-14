@@ -34,6 +34,12 @@ export default function Editor() {
   }, [eventEmitter]);
 
   useEffect(() => {
+    if (bottomTab === 'Assets') {
+      eventEmitter.emit('TEXTURES_CHANGED');
+    }
+  }, [bottomTab]);
+
+  useEffect(() => {
     if (!instance) return;
 
     if (barsDimensions.left < barsDimensions.minLeft)
@@ -71,9 +77,13 @@ export default function Editor() {
                 <Tab title='Logger' onClick={() => setBottomTab('Logger')} selected={bottomTab === 'Logger'} />
                 <Tab title='Assets' onClick={() => setBottomTab('Assets')} selected={bottomTab === 'Assets'} />
               </Tabs>
-              <div className="flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto">
-                {bottomTab === 'Logger' && <Logger />}
-                {bottomTab === 'Assets' && <AssetExplorer />}
+              <div className="flex flex-col text-white bg-[#202020] w-full h-full overflow-hidden">
+                <div className={`${bottomTab === 'Logger' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
+                  <Logger />
+                </div>
+                <div className={`${bottomTab === 'Assets' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
+                  <AssetExplorer />
+                </div>
               </div>
             </BottomBar>
           </div>

@@ -1,18 +1,66 @@
-import { useEffect, useMemo, useState } from 'react';
-import Collapsable from '../../components/Collapsable';
+import { useEffect, useMemo, useRef, useState } from 'react';
+// import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
 import { Texture, TextureManager } from 'cleo';
 
 // Simple card for a texture asset. Later we can extend for models, sounds, etc.
 function TextureCard({ id }: { id: string }) {
+  const { eventEmitter } = useCleoEngine();
   const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const currentImgElRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
-    const tex = TextureManager.Instance.getTexture(id);
-    if (!tex) return;
-    const data = tex.data as HTMLImageElement | null;
-    if (data) setImg(data);
-  }, [id]);
+    const attach = () => {
+      const tex = TextureManager.Instance.getTexture(id);
+      if (!tex) {
+        setImg(null);
+        setIsLoading(false);
+        return;
+      }
+      const data = tex.data as HTMLImageElement | null;
+      if (!data) {
+        setImg(null);
+        setIsLoading(false);
+        return;
+      }
+
+      const imgEl = data as HTMLImageElement;
+      currentImgElRef.current = imgEl;
+
+      const onLoad = () => {
+        setImg(imgEl);
+        setIsLoading(false);
+      };
+      const onError = () => {
+        setImg(null);
+        setIsLoading(false);
+      };
+
+      if (imgEl.complete && imgEl.naturalWidth > 0) {
+        setImg(imgEl);
+        setIsLoading(false);
+      } else {
+        setIsLoading(true);
+        imgEl.addEventListener('load', onLoad, { once: true });
+        imgEl.addEventListener('error', onError, { once: true });
+      }
+
+      return () => {
+        imgEl.removeEventListener('load', onLoad as any);
+        imgEl.removeEventListener('error', onError as any);
+      };
+    };
+
+    const cleanup = attach();
+    const handleChanged = () => attach();
+    eventEmitter.on('TEXTURES_CHANGED', handleChanged);
+
+    return () => {
+      eventEmitter.off('TEXTURES_CHANGED', handleChanged);
+      if (cleanup) cleanup();
+    };
+  }, [id, eventEmitter]);
 
   const onDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     // Mark this as a cleo texture asset drag
@@ -33,7 +81,7 @@ function TextureCard({ id }: { id: string }) {
         {img ? (
           <img src={(img as HTMLImageElement).src} alt={id} className="object-contain max-w-[96px] max-h-[96px] pointer-events-none" />
         ) : (
-          <div className="text-xs text-gray-400">No preview</div>
+          <div className="text-xs text-gray-400">{isLoading ? 'Loading...' : 'No preview'}</div>
         )}
       </div>
       <div title={id} className="mt-2 w-full text-xs text-ellipsis overflow-hidden whitespace-nowrap text-center">{id}</div>
@@ -60,6 +108,13 @@ export default function AssetExplorer() {
     };
   }, [eventEmitter]);
 
+  const handleRefresh = () => {
+    // re-emit change in case some publishers didn't fire it
+    eventEmitter.emit('TEXTURES_CHANGED');
+    // also force local refresh
+    refreshTextures();
+  };
+
   const onUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
@@ -79,9 +134,10 @@ export default function AssetExplorer() {
 
   return (
     <div className="flex flex-col w-full h-full p-2">
-      <div className="flex items-center mb-2">
+      <div className="flex items-center gap-2 mb-2">
         <label htmlFor="asset-upload" className="bg-[#3b3b3b] text-white border border-black px-2 py-1 rounded cursor-pointer">Upload Textures</label>
         <input id="asset-upload" type="file" className="hidden" multiple accept=".png,.jpg,.jpeg,.tga,.bmp" onChange={onUpload} />
+        <button onClick={handleRefresh} className="px-2 py-1 rounded bg-[#3b3b3b] hover:bg-[#4b4b4b] text-white border border-black">Refresh</button>
       </div>
       <div className="flex-1 min-h-0 bg-[#202020] border border-[#2c2c2c] rounded p-2 overflow-auto">
         <div className="flex flex-row flex-wrap">
