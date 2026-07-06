@@ -202,13 +202,13 @@ void main() {
     vec3 kD = 1.0 - kS;
     kD *= 1.0 - metallic;
 
-    vec3 ambient = vec3(0.03) * albedo; // simple ambient term
+    vec3 ambient = vec3(0.1) * albedo; // simple ambient term
     if (u_useEnvMap) {
         vec3 R = reflect(normalize(fragPos - u_viewPos), N);
         vec3 env = texture(u_envMap, R).rgb;
-        // Approximate prefiltered env by attenuating specular with roughness so that
-        // at metallic=0 and roughness=1 the env map contribution vanishes.
-        float specAtten = pow(1.0 - roughness, 2.0);
+        // Strong roughness falloff so only smooth surfaces reflect the env map; kS keeps it
+        // metallic-aware. Matches deferredLighting.fs for forward/deferred parity.
+        float specAtten = pow(1.0 - roughness, 4.0);
         ambient += env * kS * specAtten;
     }
 

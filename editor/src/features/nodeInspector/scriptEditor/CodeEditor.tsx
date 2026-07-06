@@ -15,6 +15,11 @@ const description = `/*
 //  - global.input: InputManager singleton
 //  - global.logger(text): log to the engine console
 //  - console.log/warn/error: forwarded to engine logs
+//  - scene: the current Scene; findNode(name): first node with that name
+//  - getData(node): read a node's custom Variables (returns { name: value, ... })
+//  - setData(node, name, value): write a variable (works on ANY node)
+//      const hp = getData(other).HealthPoints;
+//      setData(other, 'HealthPoints', hp - 1);
 
 function helperJump() {
   node.body && node.body.impulse([0, 8, 0]);
@@ -26,6 +31,8 @@ function onStart(node, global) {
 
 function onUpdate(node, delta, time, global) {
   if (global.input.isKeyPressed('Space')) helperJump();
+  // Example: read/write a custom variable defined in the inspector
+  // if (getData(node).HealthPoints <= 0) console.log('dead');
 }
 
 // Alternatively, using module.exports:
@@ -81,7 +88,11 @@ export default function CodeEditor() {
                 input: InputManager.prototype,
                 logger: (text: string) => Logger.log(text)
               },
-              node: editorScene.getNodeById(selectedNode!)?.nodeType === 'model' ? ModelNode.prototype : Node.prototype
+              node: editorScene.getNodeById(selectedNode!)?.nodeType === 'model' ? ModelNode.prototype : Node.prototype,
+              getData: (_node: Node) => ({}),
+              setData: (_node: Node, _name: string, ..._params: any[]) => {},
+              findNode: (_name: string) => Node.prototype,
+              scene: editorScene
             }),
           }),
           EditorView.updateListener.of((update) => {

@@ -6,6 +6,10 @@ import DinosaurImage from '../images/dinosaur.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
 import { createDemoScene } from './demoScene/createDemoScene';
+import { createDemoUI } from './demoScene/createDemoUI';
+import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
+import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
+import { Template } from "../utils/templates";
 
 type BoxShapeDescription = {
   type: 'box';
@@ -62,6 +66,20 @@ const EngineContext = createContext<{
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[]; }>;
+  // UI overlay state (outside 3D scene)
+  ui: UIState;
+  setUI: (next: UIState) => void;
+  addUIElement: (el: UIElement, parentId?: string) => void;
+  updateUIElement: (el: UIElement) => void;
+  removeUIElement: (id: string) => void;
+  // Play lifecycle
+  startPlay: () => void;
+  stopPlay: () => void;
+  pausePlay: () => void;
+  // Node templates
+  templates: Template[];
+  addTemplate: (t: Template) => void;
+  removeTemplate: (id: string) => void;
   }>({
     instance: null,
     editorScene: new Scene(),
@@ -71,7 +89,18 @@ const EngineContext = createContext<{
     isPlayMode: false,
     scripts: new Map(),
     bodies: new Map(),
-    triggers: new Map()
+    triggers: new Map(),
+    ui: { version: 1, elements: [] },
+    setUI: () => {},
+    addUIElement: () => {},
+    updateUIElement: () => {},
+    removeUIElement: () => {},
+    startPlay: () => {},
+    stopPlay: () => {},
+    pausePlay: () => {},
+    templates: [],
+    addTemplate: () => {},
+    removeTemplate: () => {},
   });
   
   // Create a custom hook to access the engine and scene from anywhere
@@ -90,6 +119,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const scriptsRef = useRef(new Map<string, string>());
   const bodiesRef = useRef(new Map<string, BodyDescription>());
   const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
+  const [uiState, setUiState] = useState<UIState>({ version: 1, elements: [] });
+  const uiStateRef = useRef(uiState);
+  const startedRef = useRef(false);
+  useEffect(() => { uiStateRef.current = uiState; }, [uiState]);
+
+  // Reusable node templates, persisted to localStorage
+  const [templates, setTemplates] = useState<Template[]>(() => {
+    try { const raw = localStorage.getItem('cleo_templates'); return raw ? JSON.parse(raw) : []; }
+    catch { return []; }
+  });
+  const persistTemplates = (list: Template[]) => {
+    try { localStorage.setItem('cleo_templates', JSON.stringify(list)); }
+    catch (e) { console.warn('Failed to persist templates (quota?):', e); }
+  };
+  const addTemplate = (t: Template) => setTemplates(prev => { const next = [...prev, t]; persistTemplates(next); return next; });
+  const removeTemplate = (id: string) => setTemplates(prev => { const next = prev.filter(x => x.id !== id); persistTemplates(next); return next; });
 
   const setupInitialScene = async () => {
     await createDemoScene({
@@ -115,6 +160,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           CleoEngine.eventEmitter.on('SCENE_CHANGED', () => { eventEmitter.current.emit('SCENE_CHANGED') });
           
           await setupInitialScene();
+
+          // Seed the demo HUD + Game Over overlay
+          setUiState(createDemoUI());
 
           TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
           TextureManager.Instance.addTextureFromBase64(DinosaurImage, {}, 'dinosaur.png');
@@ -302,6 +350,144 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   }, [eventEmitter]);
 
+  // UI element tree helpers
+  const addUIElement = (el: UIElement, parentId?: string) => {
+    setUiState(prev => {
+      const withId: UIElement = { ...(el as any), id: (el as any).id ?? cryptoRandomId() };
+      const clone = (arr: UIElement[]): UIElement[] => arr.map(e => ({ ...(e as any), children: (e as any).children ? clone((e as any).children) : undefined }) as any);
+      let elements = clone(prev.elements);
+      if (!parentId) {
+        elements.push(withId);
+      } else {
+        const attach = (arr: UIElement[]): boolean => {
+          for (let i = 0; i < arr.length; i++) {
+            const item = arr[i] as any;
+            if (item.id === parentId && item.type === 'container') {
+              item.children = [...(item.children || []), withId];
+              return true;
+            }
+            if (item.children && attach(item.children)) return true;
+          }
+          return false;
+        };
+        if (!attach(elements)) elements.push(withId);
+      }
+      eventEmitter.current.emit('UI_CHANGED');
+      return { ...prev, elements };
+    });
+  };
+
+  const updateUIElement = (el: UIElement) => {
+    setUiState(prev => {
+      const replace = (arr: UIElement[]): UIElement[] => arr.map(item => {
+        if (item.id === el.id) return { ...item, ...el } as UIElement;
+        const anyItem = item as any;
+        if (anyItem.children) return { ...anyItem, children: replace(anyItem.children) } as UIElement;
+        return item;
+      });
+      const elements = replace(prev.elements);
+      eventEmitter.current.emit('UI_CHANGED');
+      return { ...prev, elements };
+    });
+  };
+
+  const removeUIElement = (id: string) => {
+    setUiState(prev => {
+      const prune = (arr: UIElement[]): UIElement[] => arr
+        .filter(item => item.id !== id)
+        .map(item => {
+          const anyItem = item as any;
+          if (anyItem.children) return { ...anyItem, children: prune(anyItem.children) } as UIElement;
+          return item;
+        });
+      const elements = prune(prev.elements);
+      eventEmitter.current.emit('UI_CHANGED');
+      return { ...prev, elements };
+    });
+  };
+
+  // --- Play lifecycle (builds the play scene, drives the UI runtime) ---------------------------
+  const clearDebuggingNodes = (scene: any) => {
+    const iterate = (children: any[]): any[] => children.filter((child: any) => {
+      if (child.name.includes('__debug__') || child.name.includes('__editor__')) return false;
+      child.children = iterate(child.children);
+      return true;
+    });
+    scene.children = iterate(scene.children);
+  };
+  const injectScripts = (scene: any) => {
+    const root = scriptsRef.current.get(scene.id);
+    if (root) scene.script = root;
+    const iterate = (children: any[]) => children.forEach((c: any) => {
+      const s = scriptsRef.current.get(c.id); if (s) c.script = s;
+      iterate(c.children);
+    });
+    iterate(scene.children);
+  };
+  const injectBodies = (scene: any) => {
+    const iterate = (children: any[]) => children.forEach((c: any) => {
+      const b = bodiesRef.current.get(c.id); if (b) c.body = b;
+      const t = triggersRef.current.get(c.id); if (t) c.trigger = t;
+      iterate(c.children);
+    });
+    iterate(scene.children);
+  };
+  const buildPlayScene = async (): Promise<Scene> => {
+    const json = await editorSceneRef.current.serialize(true);
+    clearDebuggingNodes(json.scene);
+    injectScripts(json.scene);
+    injectBodies(json.scene);
+    json.ui = { version: uiStateRef.current.version, elements: uiStateRef.current.elements };
+    const newScene = new Scene();
+    newScene.parse(json, true);
+    return newScene;
+  };
+  const startUIRuntime = () => {
+    UIRuntime.start(uiStateRef.current.elements, {
+      emit: (n) => eventEmitter.current.emit(n),
+      getScene: () => instanceRef.current?.scene,
+      game,
+    });
+  };
+  const startPlay = async () => {
+    const instance = instanceRef.current;
+    if (!instance) return;
+    instance.input.preventDefault();
+    if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', 'play'); return; }
+    const newScene = await buildPlayScene();
+    instance.setScene(newScene);
+    instance.isPaused = false;
+    setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 100);
+    eventEmitter.current.emit('SET_PLAY_STATE', 'play');
+    startedRef.current = true;
+  };
+  const stopPlay = () => {
+    startedRef.current = false;
+    const instance = instanceRef.current;
+    UIRuntime.stop();
+    if (!instance) return;
+    instance.setScene(editorSceneRef.current);
+    instance.input.clear();
+    instance.physics.clear();
+    eventEmitter.current.emit('SET_PLAY_STATE', 'stop');
+  };
+  const pausePlay = () => eventEmitter.current.emit('SET_PLAY_STATE', 'pause');
+  const resetPlay = async () => {
+    const instance = instanceRef.current;
+    if (!instance) return;
+    UIRuntime.stop();
+    // Clear input/physics so key bindings and bodies from the previous run don't stack.
+    instance.input.clear();
+    instance.physics.clear();
+    const newScene = await buildPlayScene();
+    instance.setScene(newScene);
+    instance.isPaused = false;
+    setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 50);
+    startedRef.current = true;
+    eventEmitter.current.emit('SET_PLAY_STATE', 'play');
+  };
+  const game: GameActions = { reset: () => { resetPlay(); }, exit: () => { stopPlay(); }, pause: () => { pausePlay(); } };
+
   return (
   <EngineContext.Provider value={{
       instance: instanceRef.current,
@@ -312,7 +498,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       isPlayMode,
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,
-      triggers: triggersRef.current
+      triggers: triggersRef.current,
+      ui: uiState,
+      setUI: setUiState,
+      addUIElement,
+      updateUIElement,
+      removeUIElement,
+      startPlay,
+      stopPlay,
+      pausePlay,
+      templates,
+      addTemplate,
+      removeTemplate,
     }}>
     {props.children}
   </EngineContext.Provider>

@@ -1,4 +1,5 @@
 import { gl } from './renderer';
+import { GLState } from './systems/glState';
 
 export class Mesh {
     private _vertexArray: WebGLVertexArrayObject;
@@ -22,7 +23,7 @@ export class Mesh {
     }
 
     public create(vertices: number[], vertex_count: number, indices: number[] | null = null): Mesh {
-        gl.bindVertexArray(this._vertexArray);
+        GLState.bindVAO(this._vertexArray);
         
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
@@ -35,7 +36,7 @@ export class Mesh {
             this._indexCount = indices.length;
         }
 
-        gl.bindVertexArray(null);
+        GLState.bindVAO(null);
 
         return this;
     }
@@ -47,7 +48,7 @@ export class Mesh {
         boneWeights: number[], 
         indices: number[] | null = null
     ): Mesh {
-        gl.bindVertexArray(this._vertexArray);
+        GLState.bindVAO(this._vertexArray);
         
         // Create and bind main vertex buffer (positions, normals, uvs, tangents, bitangents)
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
@@ -72,23 +73,29 @@ export class Mesh {
         }
 
         this._isAnimated = true;
-        gl.bindVertexArray(null);
+        GLState.bindVAO(null);
 
         return this;
     }
 
     public draw(mode: number = gl.TRIANGLES): void {
-        gl.bindVertexArray(this._vertexArray);
+        GLState.bindVAO(this._vertexArray);
         if (this._indexBuffer && this._indexCount > 0)
             gl.drawElements(mode, this._indexCount, gl.UNSIGNED_SHORT, 0);
         else
             gl.drawArrays(mode, 0, this._vertexCount);
+    }
 
-        gl.bindVertexArray(null);
+    public drawInstanced(instanceCount: number, mode: number = gl.TRIANGLES): void {
+        GLState.bindVAO(this._vertexArray);
+        if (this._indexBuffer && this._indexCount > 0)
+            gl.drawElementsInstanced(mode, this._indexCount, gl.UNSIGNED_SHORT, 0, instanceCount);
+        else
+            gl.drawArraysInstanced(mode, 0, this._vertexCount, instanceCount);
     }
 
     public initializeVAO(attributes: any): void {
-        gl.bindVertexArray(this._vertexArray);
+        GLState.bindVAO(this._vertexArray);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
 
@@ -97,7 +104,7 @@ export class Mesh {
             gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
         }
 
-        gl.bindVertexArray(null);
+        GLState.bindVAO(null);
     }
 
     public initializeAnimatedVAO(attributes: any): void {
@@ -105,7 +112,7 @@ export class Mesh {
             throw new Error('Mesh is not animated or bone buffers are not initialized');
         }
 
-        gl.bindVertexArray(this._vertexArray);
+        GLState.bindVAO(this._vertexArray);
 
         // Our interleaved main vertex buffer layout (floats):
         // position(3), normal(3), uv(2), tangent(3), bitangent(3) => 14 floats per-vertex
@@ -158,7 +165,24 @@ export class Mesh {
             gl.vertexAttribPointer(weightsLocation, 4, gl.FLOAT, false, 0, 0);
         }
 
-        gl.bindVertexArray(null);
+        GLState.bindVAO(null);
+    }
+
+    /**
+     * Configure this mesh's VAO to read a per-instance model matrix (mat4) from the given buffer
+     * at attribute locations baseLocation..baseLocation+3, advancing once per instance. The caller
+     * is responsible for uploading matrices to `buffer` before drawing with `drawInstanced`.
+     */
+    public setupInstanceMatrixBuffer(buffer: WebGLBuffer, baseLocation: number = 5): void {
+        GLState.bindVAO(this._vertexArray);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const stride = 16 * 4; // mat4 = 16 floats
+        for (let i = 0; i < 4; i++) {
+            const loc = baseLocation + i;
+            gl.enableVertexAttribArray(loc);
+            gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, stride, i * 4 * 4);
+            gl.vertexAttribDivisor(loc, 1);
+        }
     }
 
     public get vertexArray(): WebGLVertexArrayObject { return this._vertexArray; }

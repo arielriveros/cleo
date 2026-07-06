@@ -10,6 +10,12 @@ interface CleoConfig {
     clearColor?: number[];
     shadowMapSize?: number;
     bloom?: boolean;
+    /** Use deferred shading for opaque geometry (default true). Set false for the legacy forward path. */
+    deferred?: boolean;
+    /** Max distance covered by the directional cascaded shadow maps (default 100). */
+    shadowDistance?: number;
+    /** Frustum-cull opaque meshes against the active camera (default true). */
+    frustumCulling?: boolean;
   },
   physics?: {
     gravity?: number[];
@@ -39,7 +45,10 @@ export class CleoEngine {
   constructor(config?: CleoConfig) {
     this._renderer = new Renderer({ clearColor: config?.graphics?.clearColor,
                                     shadowMapResolution: config?.graphics?.shadowMapSize,
-                                    bloom: config?.graphics?.bloom });
+                                    bloom: config?.graphics?.bloom,
+                                    deferred: config?.graphics?.deferred,
+                                    shadowDistance: config?.graphics?.shadowDistance,
+                                    frustumCulling: config?.graphics?.frustumCulling });
     this._physicsSystem = new PhysicsSystem({
       gravity: config?.physics?.gravity || [0, -9.81, 0],
       killZHeight: config?.physics?.killZHeight || -100

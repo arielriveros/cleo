@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
 import { Raycaster } from "cleo";
 import PositionGizmo from "./PositionGizmo";
+import { instantiateTemplate } from "../utils/templates";
 
 export default function EngineViewport() {
-    const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode } = useCleoEngine();
+    const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode,
+            templates, scripts, bodies, triggers } = useCleoEngine();
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -163,15 +165,35 @@ export default function EngineViewport() {
 
     const handlePositionChange = (nodeId: string, newPosition: [number, number, number]) => {
         if (!editorScene) return;
-        
+
         const node = editorScene.getNodeById(nodeId);
         if (node) {
             node.setPosition(newPosition);
         }
     };
 
+    // Drop a template from the Templates panel to instantiate an independent copy.
+    const onViewportDragOver = (e: React.DragEvent) => {
+        if (Array.from(e.dataTransfer.types).includes('text/cleo-template')) e.preventDefault();
+    };
+    const onViewportDrop = (e: React.DragEvent) => {
+        const templateId = e.dataTransfer.getData('text/cleo-template');
+        if (!templateId || !editorScene) return;
+        e.preventDefault();
+        const template = templates.find(t => t.id === templateId);
+        if (!template) return;
+        try {
+            const newId = instantiateTemplate(template, editorScene.root, { scripts, bodies, triggers });
+            eventEmitter.emit('TEXTURES_CHANGED');
+            eventEmitter.emit('SCENE_CHANGED');
+            eventEmitter.emit('SELECT_NODE', newId);
+        } catch (err) {
+            console.error('Failed to instantiate template:', err);
+        }
+    };
+
     return (
-        <div ref={viewportRef}>
+        <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}>
             <PositionGizmo 
                 selectedNodeId={selectedNode} 
                 onPositionChange={handlePositionChange}

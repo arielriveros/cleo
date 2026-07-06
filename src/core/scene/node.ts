@@ -15,6 +15,38 @@ import { Logger } from "../logger";
 
 type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite';
 
+export type NodeVariableType = 'number' | 'string' | 'boolean' | 'vec3';
+export interface NodeVariable {
+    type: NodeVariableType;
+    value: any;
+}
+
+/**
+ * Returns a plain snapshot of a node's custom variables (name -> value). Read-only: assigning to
+ * the returned object does NOT change the node — use `setData(node, name, value)` to write.
+ *
+ *   const data = getData(player);
+ *   if (data.HealthPoints <= 0) { ... }
+ *   console.log(data);                 // { HealthPoints: 3, ... }
+ */
+export function getData(node: Node): Record<string, any> {
+    const out: Record<string, any> = {};
+    if (node && node.variables) for (const [name, v] of node.variables) out[name] = v.value;
+    return out;
+}
+
+/**
+ * Sets a custom variable on a node (including a different node than the one running the script).
+ * Pass a single value, or multiple components for a vec3 (setData(node, 'pos', x, y, z)).
+ *
+ *   setData(other, 'HealthPoints', getData(other).HealthPoints - 1);
+ */
+export function setData(node: Node, name: string, ...params: any[]): void {
+    if (!node || typeof node.setVariable !== 'function') return;
+    const value = params.length <= 1 ? params[0] : params;
+    node.setVariable(name, value);
+}
+
 interface GlobalState {
     input: InputManager;
     logger: (text: string) => void;
@@ -30,6 +62,14 @@ export class Node {
 
   protected readonly  _localTransform: mat4;
   protected _worldTransform: mat4
+
+  // Cached world-space values derived from _worldTransform, recomputed lazily only after the
+  // transform actually changes (flagged in updateTransforms) instead of allocating on every read.
+  protected _worldPosition: vec3 = vec3.create();
+  protected _worldQuaternion: quat = quat.create();
+  protected _worldScale: vec3 = vec3.create();
+  protected _worldForward: vec3 = vec3.create();
+  protected _worldCacheDirty: boolean = true;
 
   protected readonly _position: vec3;
   protected readonly _translationMatrix: mat4;
@@ -48,6 +88,10 @@ export class Node {
   protected _trigger: Trigger | null;
 
   protected _visible: boolean;
+
+  // Custom user-defined variables editable in the inspector, serialized with the node, and
+  // readable from scripts via getData(node) and writable via setData(node, name, value).
+  protected _variables: Map<string, NodeVariable> = new Map();
 
   public onStart: (node: Node, global: GlobalState) => void = () => {};
   public onSpawn: (node: Node, global: GlobalState) => void = () => {};
@@ -145,10 +189,22 @@ export class Node {
     else
       mat4.copy(this._worldTransform, this._localTransform);
 
+    // World transform changed: invalidate the derived world-space cache.
+    this._worldCacheDirty = true;
+
     for (const child of this._children) {
       child.updateTransforms(this._worldTransform);
     }
-  }  
+  }
+
+  private _updateWorldCache(): void {
+    vec3.set(this._worldPosition, this._worldTransform[12], this._worldTransform[13], this._worldTransform[14]);
+    mat4.getRotation(this._worldQuaternion, this._worldTransform);
+    mat4.getScaling(this._worldScale, this._worldTransform);
+    vec3.transformQuat(this._worldForward, vec3.set(this._worldForward, 0, 0, 1), this._worldQuaternion);
+    vec3.normalize(this._worldForward, this._worldForward);
+    this._worldCacheDirty = false;
+  }
 
   public remove(): void {
     this._markForRemoval = true;
@@ -187,6 +243,7 @@ export class Node {
           rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
           scale: [this._scale[0], this._scale[1], this._scale[2]],
           children: children,
+          variables: this._serializeVariables(),
           scripts: {
             // TODO: Only serialize the function body
             onStart: this.onStart.toString(),
@@ -236,6 +293,10 @@ export class Node {
         'global',
         'Logger',
         'InputManager',
+        'getData',
+        'setData',
+        'scene',
+        'findNode',
         `"use strict";
          const console = {
            log: (...args) => global.logger(args.map(a => String(a)).join(' ')),
@@ -244,33 +305,26 @@ export class Node {
          };
          let exports = {};
          let module = { exports };
-         try { ${script} } catch (__e) {
-           Logger.error('Error evaluating script for node ' + node.name + ': ' + __e);
-         }
-         const exported = (module && module.exports && typeof module.exports === 'object') ? module.exports : null;
-         const pick = (name) => {
-           const fromExports = exported && typeof exported[name] === 'function' ? exported[name] : null;
-           if (fromExports) return fromExports;
-           try {
-             // eslint-disable-next-line no-undef
-             if (typeof eval(name) === 'function') {
-               // eslint-disable-next-line no-undef
-               return eval(name);
-             }
-           } catch(_) {}
-           return null;
-         };
+         // Source runs at the function top level so top-level \`function\` declarations hoist to
+         // the function scope; module.exports handlers are also supported.
+         ${script}
+         const ex = (module && typeof module.exports === 'object' && module.exports) ? module.exports : {};
+         const pick = (fn, name) => (typeof fn === 'function' ? fn : (typeof ex[name] === 'function' ? ex[name] : null));
          return {
-           onStart:   pick('onStart'),
-           onSpawn:   pick('onSpawn'),
-           onUpdate:  pick('onUpdate'),
-           onCollision: pick('onCollision'),
-           onTrigger: pick('onTrigger'),
-           onDespawn: pick('onDespawn')
+           onStart:     pick(typeof onStart === 'function' ? onStart : null, 'onStart'),
+           onSpawn:     pick(typeof onSpawn === 'function' ? onSpawn : null, 'onSpawn'),
+           onUpdate:    pick(typeof onUpdate === 'function' ? onUpdate : null, 'onUpdate'),
+           onCollision: pick(typeof onCollision === 'function' ? onCollision : null, 'onCollision'),
+           onTrigger:   pick(typeof onTrigger === 'function' ? onTrigger : null, 'onTrigger'),
+           onDespawn:   pick(typeof onDespawn === 'function' ? onDespawn : null, 'onDespawn')
          };`
-      ) as (node: Node, global: GlobalState, Logger: any, InputManager: any) => any;
+      ) as (...args: any[]) => any;
 
-      const handlers = factory(node, node._globalStateObject, Logger, InputManager) || {};
+      const findNode = (name: string) => node.scene?.getNodesByName(name)[0];
+      const handlers = factory(
+        node, node._globalStateObject, Logger, InputManager,
+        getData, setData, node.scene, findNode
+      ) || {};
 
       const adaptStartLike = (fn: any) => {
         if (typeof fn !== 'function') return () => {};
@@ -324,6 +378,9 @@ export class Node {
 
   protected static _commonParse(node: Node, parent: Node, json: any) {
     node.updateTransforms(parent.worldTransform);
+
+    // Restore custom variables before scripts so onStart can read them.
+    Node._parseVariables(node, json.variables);
 
     if (json.script)
       Node._parseScript(node, json.script);
@@ -416,6 +473,42 @@ export class Node {
   public set parent(node: Node | null) { this._parent = node; }
   public get parent(): Node | null { return this._parent; }
   public get children(): Node[] { return this._children; }
+  // --- Custom variables -------------------------------------------------------------------------
+  public get variables(): Map<string, NodeVariable> { return this._variables; }
+  public getVariable(name: string): any {
+    const v = this._variables.get(name);
+    return v ? v.value : undefined;
+  }
+  public setVariable(name: string, value: any, type?: NodeVariableType): void {
+    const existing = this._variables.get(name);
+    const resolvedType: NodeVariableType = type
+      ?? existing?.type
+      ?? (typeof value === 'number' ? 'number'
+        : typeof value === 'boolean' ? 'boolean'
+        : Array.isArray(value) ? 'vec3' : 'string');
+    this._variables.set(name, { type: resolvedType, value });
+  }
+  public removeVariable(name: string): void { this._variables.delete(name); }
+
+  /** Serialize custom variables into a plain `{ name: { type, value } }` object. */
+  protected _serializeVariables(): Record<string, NodeVariable> {
+    const out: Record<string, NodeVariable> = {};
+    for (const [name, v] of this._variables) out[name] = { type: v.type, value: v.value };
+    return out;
+  }
+
+  /** Populate a node's variables from serialized JSON (`{ name: { type, value } }`). */
+  protected static _parseVariables(node: Node, json: any): void {
+    if (!json || typeof json !== 'object') return;
+    for (const name of Object.keys(json)) {
+      const entry = json[name];
+      if (entry && typeof entry === 'object' && 'value' in entry)
+        node.setVariable(name, entry.value, entry.type);
+      else
+        node.setVariable(name, entry);
+    }
+  }
+
   public get scene(): Scene | null { return this._scene; }
   public set scene(scene: Scene | null) {
     this._scene = scene;
@@ -436,31 +529,23 @@ export class Node {
   }
 
   public get worldPosition(): vec3 {
-    return vec3.transformMat4(vec3.create(), vec3.create(), this.worldTransform);
+    if (this._worldCacheDirty) this._updateWorldCache();
+    return this._worldPosition;
   }
 
   public get worldQuaternion(): quat {
-    let worldRotation = quat.create();
-    mat4.getRotation(worldRotation, this._worldTransform);
-    return worldRotation;
+    if (this._worldCacheDirty) this._updateWorldCache();
+    return this._worldQuaternion;
   }
 
   public get worldScale(): vec3 {
-    let worldScale = vec3.create();
-    mat4.getScaling(worldScale, this._worldTransform);
-    return worldScale;
+    if (this._worldCacheDirty) this._updateWorldCache();
+    return this._worldScale;
   }
 
   public get worldForward(): vec3 {
-    // get the forward vector of the node in world space
-    let forward = vec3.fromValues(0, 0, 1);
-    //vec3.transformMat4(forward, forward, this._rotationMatrix);
-    // get world rotation
-    let worldRotation = this.worldQuaternion;
-    vec3.transformQuat(forward, forward, worldRotation);
-    // normalize
-    vec3.normalize(forward, forward);
-    return forward;
+    if (this._worldCacheDirty) this._updateWorldCache();
+    return this._worldForward;
   }
 
   public setX(value: number): Node {
@@ -785,6 +870,7 @@ export class ModelNode extends Node {
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
+                    variables: this._serializeVariables(),
                     model: model,
                     animationMappings: animationMappings
                 });
@@ -890,6 +976,10 @@ export class LightNode extends Node {
     private _index: number;
     private _lightSpace: mat4;
     private _castShadows: boolean;
+    // Reused scratch to avoid per-frame allocations in the lightSpace getter.
+    private readonly _lightView: mat4 = mat4.create();
+    private readonly _lightProjection: mat4 = mat4.create();
+    private readonly _lightPos: vec3 = vec3.create();
 
     constructor(name: string, light: Light, castShadows: boolean = false, id: string = uuidv4()) {
         super(name, 'light', id);
@@ -954,6 +1044,7 @@ export class LightNode extends Node {
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
+                    variables: this._serializeVariables(),
                     lightType: this._type,
                     light: lightData
                 });
@@ -1007,15 +1098,13 @@ export class LightNode extends Node {
     public get index(): number { return this._index; }
     public set index(value: number) { this._index = value; }
     public get lightSpace(): mat4 {
-        const lightView = mat4.create();
-        const lightProjection = mat4.create();
-        const lightPos = vec3.scale(vec3.create(), this.worldForward, -50);
+        const lightPos = vec3.scale(this._lightPos, this.worldForward, -50);
         if (this._type === 'directional') {
             // TODO: Change look at position to be the center of where the camera is looking
-            mat4.lookAt(lightView, lightPos, [0, 0, 0], [0, 1, 0]);
-            mat4.ortho(lightProjection, -20, 20, -20, 20, 0.1, 100);
+            mat4.lookAt(this._lightView, lightPos, [0, 0, 0], [0, 1, 0]);
+            mat4.ortho(this._lightProjection, -20, 20, -20, 20, 0.1, 100);
         }
-        return mat4.multiply(this._lightSpace, lightProjection, lightView);
+        return mat4.multiply(this._lightSpace, this._lightProjection, this._lightView);
     }
     public get castShadows(): boolean { return this._castShadows; }
     public set castShadows(value: boolean) { this._castShadows = value; }
@@ -1089,6 +1178,7 @@ export class SkyboxNode extends Node {
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
+                    variables: this._serializeVariables(),
                     skybox: skybox
                 });
             });
@@ -1164,6 +1254,7 @@ export class CameraNode extends Node {
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
+                    variables: this._serializeVariables(),
                     camera: {
                         type: this._camera.type,
                         fov: this._camera.fov,
@@ -1282,6 +1373,7 @@ export class SpriteNode extends Node {
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
+                    variables: this._serializeVariables(),
                     sprite: sprite
                 });
             });
@@ -1420,6 +1512,7 @@ export class AnimatedSpriteNode extends SpriteNode {
                     rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
+                    variables: this._serializeVariables(),
                     sprite: sprite,
                     animation: {
                         columns: this._columns,

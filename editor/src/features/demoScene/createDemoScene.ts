@@ -153,6 +153,8 @@ export async function createDemoScene(params: {
 
   const playable = new Node('playable');
   playable.setPosition([1, 0, 0]);
+  // Custom variable driving the health HUD (read via getData / write via setData)
+  playable.setVariable('HealthPoints', 3, 'number');
   // Parent camera under pivot, and pivot under playable
   cameraPivot.addChild(cameraNode);
   playable.addChild(cameraPivot);
@@ -384,6 +386,6 @@ export async function createDemoScene(params: {
 
   // Scripts for hazards: move and damage player on contact; player dies after 3 hits
   hazards.forEach((ball, i) => {
-    scripts.set(ball.id, "module.exports = {\n  onStart(node) {\n    node.__origin = [node.position[0], node.position[1], node.position[2]];\n    node.__phase = " + i + ";\n  },\n  onUpdate(node, delta, time) {\n    const o = node.__origin || [0,0,0];\n    const t = time / 700 + (node.__phase || 0);\n    node.setX(o[0] + Math.sin(t) * 2.5);\n    node.setZ(o[2] + Math.cos(t * 0.8) * 2.5);\n  },\n  onTrigger(node, other, global) {\n    if (!other || other.name !== 'playable') return;\n    const now = Date.now();\n    const g = other.__game = other.__game || { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n    if (!g.alive || g.quit) return;\n    if (now < (g.invulnerableUntil || 0)) return; // brief i-frames\n    g.hits = Math.min(3, (g.hits || 0) + 1);\n    g.invulnerableUntil = now + 1000;\n    const livesLeft = 3 - g.hits;\n    if (g.hits >= 3) {\n      g.alive = false;\n      g.quit = true;\n      // despawn player to end game and trigger onDespawn logging\n      other.remove();\n    } else {\n      global.logger('Ouch! Lives left: ' + livesLeft);\n    }\n  }\n};");
+    scripts.set(ball.id, "module.exports = {\n  onStart(node) {\n    node.__origin = [node.position[0], node.position[1], node.position[2]];\n    node.__phase = " + i + ";\n  },\n  onUpdate(node, delta, time) {\n    const o = node.__origin || [0,0,0];\n    const t = time / 700 + (node.__phase || 0);\n    node.setX(o[0] + Math.sin(t) * 2.5);\n    node.setZ(o[2] + Math.cos(t * 0.8) * 2.5);\n  },\n  onTrigger(node, other, global) {\n    if (!other || other.name !== 'playable') return;\n    const now = Date.now();\n    other.__iframe = other.__iframe || 0;\n    if (now < other.__iframe) return; // brief i-frames\n    other.__iframe = now + 1000;\n    const hp = getData(other).HealthPoints;\n    if (hp > 0) {\n      setData(other, 'HealthPoints', hp - 1);\n      global.logger('Ouch! Health: ' + (hp - 1));\n    }\n  }\n};");
   });
 }

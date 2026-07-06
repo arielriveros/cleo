@@ -32,6 +32,13 @@ export class Framebuffer {
         this._width = width;
         this._height = height;
 
+        // Release any textures from a previous create()/resize() so we don't leak GPU memory
+        // (and grow the _colors array) every time the viewport is resized.
+        for (const color of this._colors) color.delete();
+        this._colors = [];
+        this._depth.delete();
+        this._depth = new Texture({ usage: 'depth', mipMap: false });
+
         gl.bindFramebuffer(gl.FRAMEBUFFER, this._id);
 
         const numColorAttachments = this._options.colorAttachments as number;
@@ -92,6 +99,7 @@ export class Framebuffer {
         this.recreate();
     }
 
+    public get framebuffer(): WebGLFramebuffer { return this._id as unknown as WebGLFramebuffer; }
     public get colors(): Texture[] { return this._colors; }
     public get depth(): Texture { return this._depth; }
     public get width(): number { return this._width; }

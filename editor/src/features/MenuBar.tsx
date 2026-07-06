@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Scene, Logger } from "cleo";
+import { Logger } from "cleo";
 import { useCleoEngine } from "./EngineContext";
 import Topbar from "../components/Topbar";
 import PlayIcon from '../icons/play.png'
@@ -7,8 +7,7 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, triggers, eventEmitter: eventEmitter } = useCleoEngine();
-  const [started, setStarted] = useState(false);
+  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, eventEmitter: eventEmitter } = useCleoEngine();
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
 
   useEffect(() => {
@@ -81,6 +80,12 @@ export default function MenuBar() {
         const data = e.target?.result;
         if (data) {
           const json = JSON.parse(data as string);
+          // Load UI if present
+          if (json.ui) {
+            setUI({ version: json.ui.version ?? 1, elements: json.ui.elements ?? [] });
+          } else if (json.scene?.ui) {
+            setUI({ version: json.scene.ui.version ?? 1, elements: json.scene.ui.elements ?? [] });
+          }
           editorScene?.parse(json);
         }
       };
@@ -97,6 +102,8 @@ export default function MenuBar() {
         setScripts(json);
         // Assign the bodies to the new scene
         setBodies(json);
+        // Attach UI overlay data
+        json.ui = { version: ui.version, elements: ui.elements };
         const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -107,50 +114,11 @@ export default function MenuBar() {
     });
   };
 
-  const onPlay = () => {
-    if (!instance) return;
+  const onPlay = () => startPlay();
 
-    instance.input.preventDefault();
+  const onStop = () => stopPlay();
 
-    if (started) {
-      eventEmitter.emit('SET_PLAY_STATE', 'play');
-      return;
-    }
-
-    const newScene = new Scene();
-    editorScene?.serialize(true).then(json => {
-      // Clear debugging nodes from the editor scene
-      clearDebuggingNodes(json.scene)
-      // Assign the scripts to the new scene
-      setScripts(json);
-      // Assign the bodies to the new scene
-      setBodies(json);
-      // Parse the scene from the editor
-      newScene.parse(json, true);
-      // Set the new scene to the engine then start it
-      instance.setScene(newScene);
-      instance.isPaused = false;
-
-      // add a little delay to make sure the scene is set before starting it
-      setTimeout(() => { instance.scene.start(); } , 100);
-
-      eventEmitter.emit('SET_PLAY_STATE', 'play');
-      setStarted(true);
-    });
-  }
-
-  const onStop = () => {
-    setStarted(false);
-    if (!instance) return;
-    instance.setScene(editorScene as Scene);
-    instance.input.clear(); // Clear any registered input that might be left from the game
-    instance.physics.clear(); // Clear any physics bodies that might be left from the game
-    eventEmitter.emit('SET_PLAY_STATE', 'stop');
-  }
-
-  const onPause = () => {
-    eventEmitter.emit('SET_PLAY_STATE', 'pause');
-  }
+  const onPause = () => pausePlay();
 
   return (
     <Topbar>

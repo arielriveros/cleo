@@ -1,6 +1,7 @@
 import { mat4, vec2, vec3, vec4 } from 'gl-matrix';
 import { gl } from './renderer';
 import { Loader } from './loader';
+import { GLState } from './systems/glState';
 
 
 type AttributeLayout = {
@@ -48,7 +49,6 @@ export class Shader {
     public create(vertexSource: string, fragmentSource: string): Shader {
         gl.shaderSource(this._vertexShader, vertexSource);
         gl.compileShader(this._vertexShader);
-        gl.compileShader(this._vertexShader);
         if (!gl.getShaderParameter(this._vertexShader, gl.COMPILE_STATUS))
             throw new Error(gl.getShaderInfoLog(this._vertexShader) || 'Unknown error creating vertex shader');
 
@@ -72,28 +72,18 @@ export class Shader {
     }
 
     public use(): void {
-        // Use the program only if it is not already in use
-        if (gl.getParameter(gl.CURRENT_PROGRAM) !== this._shaderProgram)
-            gl.useProgram(this._shaderProgram);
+        // Use the program only if it is not already in use (deduped by the GL state cache)
+        GLState.useProgram(this._shaderProgram);
     }
 
     public setUniform(name: string, value: any) {
-        if (!this._uniforms[name]) return;
-        this._uniforms[name].value = value;
-        this._setUniform(name, this._uniforms[name].info.type, value);
+        const uniform = this._uniforms[name];
+        if (!uniform) return;
+        uniform.value = value;
+        this._setUniform(uniform.info.location, uniform.info.type, value);
     }
 
-    private _setUniform(name: string, type: string, value: any) {
-        // check if location is from current shader program
-        if (gl.getParameter(gl.CURRENT_PROGRAM) !== this._shaderProgram)
-            return;
-
-        const location = gl.getUniformLocation(this._shaderProgram, name);
-        if (!location) {
-            console.warn(`Uniform ${name} of type ${type} not found in current shader program`);
-            return;
-        }
-    
+    private _setUniform(location: WebGLUniformLocation, type: string, value: any) {
         switch (type) {
             case 'float':
                 gl.uniform1f(location, value);
@@ -169,7 +159,7 @@ export class Shader {
     }
 
     public hasUniform(name: string) {
-        return gl.getUniformLocation(this._shaderProgram, name) !== null;        
+        return name in this._uniforms;
     }
 
     private storeAttributes(): void {

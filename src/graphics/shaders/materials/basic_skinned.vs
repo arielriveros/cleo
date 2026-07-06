@@ -1,9 +1,9 @@
 #version 300 es
 
-in vec3 a_position;
-in vec2 a_texCoord;
-in ivec4 a_boneIds;    // Joint indices (up to 4 bones per vertex)
-in vec4 a_weights;     // Joint weights (up to 4 weights per vertex)
+layout (location = 0) in vec3 a_position;
+layout (location = 1) in vec2 a_texCoord;
+layout (location = 2) in ivec4 a_boneIds;    // Joint indices (up to 4 bones per vertex)
+layout (location = 3) in vec4 a_weights;     // Joint weights (up to 4 weights per vertex)
 
 out vec2 fragTexCoord;
 

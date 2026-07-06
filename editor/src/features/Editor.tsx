@@ -11,13 +11,15 @@ import BottomBar, { BottomBarResizer } from "../components/BottomBar";
 import Logger from "./logger/Logger";
 import Tabs, { Tab } from "../components/Tabs";
 import AssetExplorer from "./assets/AssetExplorer";
+import TemplateExplorer from "./sceneInspector/TemplateExplorer";
+import UIOverlay from "./uiInspector/UIOverlay";
 
 export default function Editor() {
   const { instance, eventEmitter } = useCleoEngine();
   const [barsDimensions, setBarsDimensions] = useState({
     left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15
   });
-  const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets'>('Logger');
+  const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets' | 'Templates'>('Logger');
 
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
@@ -66,8 +68,10 @@ export default function Editor() {
         />
         <Center width={`${100 - barsDimensions.left - barsDimensions.right}vw`}>
           <div className="flex flex-col h-full">
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative">
               <EngineViewport />
+              {/* UI overlay sits on top of the WebGL canvas */}
+              <UIOverlay />
             </div>
             <BottomBarResizer onDrag={ e => {
               setBarsDimensions({...barsDimensions, height: 100 - (100 * e.clientY) / window.innerHeight});
@@ -76,6 +80,7 @@ export default function Editor() {
               <Tabs>
                 <Tab title='Logger' onClick={() => setBottomTab('Logger')} selected={bottomTab === 'Logger'} />
                 <Tab title='Assets' onClick={() => setBottomTab('Assets')} selected={bottomTab === 'Assets'} />
+                <Tab title='Templates' onClick={() => setBottomTab('Templates')} selected={bottomTab === 'Templates'} />
               </Tabs>
               <div className="flex flex-col text-white bg-[#202020] w-full h-full overflow-hidden">
                 <div className={`${bottomTab === 'Logger' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
@@ -83,6 +88,9 @@ export default function Editor() {
                 </div>
                 <div className={`${bottomTab === 'Assets' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
                   <AssetExplorer />
+                </div>
+                <div className={`${bottomTab === 'Templates' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
+                  <TemplateExplorer />
                 </div>
               </div>
             </BottomBar>
