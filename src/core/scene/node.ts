@@ -12,8 +12,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
 import { CleoEngine, InputManager, Shape } from "../../cleo";
 import { Logger } from "../logger";
+import { Terrain } from "../../terrain/terrain";
 
-type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite';
+type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape';
 
 export type NodeVariableType = 'number' | 'string' | 'boolean' | 'vec3';
 export interface NodeVariable {
@@ -452,6 +453,8 @@ export class Node {
           SpriteNode.parse(node, child);
         else if (child.type === 'animatedSprite')
           AnimatedSpriteNode.parse(node, child);
+        else if (child.type === 'landscape')
+          LandscapeNode.parse(node, child);
         else
           Node.parse(node, child);
       }
@@ -967,6 +970,93 @@ export class ModelNode extends Node {
             this._animator.checkTriggers();
             this._animator.update(delta);
         }
+    }
+}
+
+const TERRAIN_ATTRIBUTES = ['position', 'normal', 'uv', 'tangent', 'bitangent'];
+
+/**
+ * Scene node for a sculptable heightfield terrain. Owns a `Terrain` (heights + physics) and wraps each
+ * of its render chunks in a child ModelNode. The chunk children are NOT serialized (they are rebuilt from
+ * the compact terrain blob on load), so save/play stay small. Deforming the terrain (sculpt/import) flags
+ * chunks dirty; `update()` re-uploads the affected chunk meshes to the GPU once they are initialized.
+ */
+export class LandscapeNode extends Node {
+    private _terrain: Terrain;
+    private _chunkNodes: ModelNode[] = [];
+
+    constructor(name: string, terrain: Terrain, id: string = uuidv4()) {
+        super(name, 'landscape', id);
+        this._terrain = terrain;
+        this._buildChunkNodes();
+    }
+
+    private _buildChunkNodes(): void {
+        this._chunkNodes = [];
+        for (let i = 0; i < this._terrain.chunks.length; i++) {
+            const node = new ModelNode(`__terrain_chunk__${i}`, this._terrain.chunks[i].model);
+            this._chunkNodes.push(node);
+            this.addChild(node);
+        }
+    }
+
+    public get terrain(): Terrain { return this._terrain; }
+
+    public update(delta: number, time: number): void {
+        super.update(delta, time);
+        // Keep the terrain's origin in sync with the node so sculpting/collision follow the node.
+        this._terrain.setOrigin(this.worldPosition);
+        const chunks = this._terrain.chunks;
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const node = this._chunkNodes[i];
+            if (chunk.dirty && node && node.initialized) {
+                chunk.model.mesh.updateVertexData(chunk.model.geometry.getData(TERRAIN_ATTRIBUTES));
+                chunk.dirty = false;
+            }
+        }
+    }
+
+    public getBoundingBox(): { min: vec3, max: vec3 } {
+        const p = this.worldPosition;
+        const half = this._terrain.size / 2;
+        const heights = this._terrain.heights;
+        let minY = Infinity, maxY = -Infinity;
+        for (let i = 0; i < heights.length; i++) {
+            if (heights[i] < minY) minY = heights[i];
+            if (heights[i] > maxY) maxY = heights[i];
+        }
+        if (!isFinite(minY)) { minY = 0; maxY = 0; }
+        return {
+            min: vec3.fromValues(p[0] - half, p[1] + minY - 0.1, p[2] - half),
+            max: vec3.fromValues(p[0] + half, p[1] + maxY + 0.1, p[2] + half),
+        };
+    }
+
+    public serialize(): Promise<any> {
+        // Exclude the internal chunk children; they are rebuilt from the terrain blob on parse.
+        const externalChildren = this._children.filter(c => !this._chunkNodes.includes(c as ModelNode));
+        return new Promise((resolve) => {
+            Promise.all(externalChildren.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    id: this._id,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children,
+                    variables: this._serializeVariables(),
+                    terrain: this._terrain.serialize(),
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        const terrain = Terrain.deserialize(json.terrain);
+        const node = new LandscapeNode(json.name, terrain, json.id);
+        Node._commonParse(node, parent, json);
     }
 }
 

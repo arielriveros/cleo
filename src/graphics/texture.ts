@@ -145,6 +145,33 @@ export class Texture {
         this.unbind();
     }
 
+    /**
+     * Create the texture from a raw RGBA byte array (e.g. an editable splat map). No mipmaps/flip so the
+     * data maps 1:1 to UVs, and it can be partially updated later with `updateRegion`.
+     */
+    public createFromData(data: Uint8Array, width: number, height: number): void {
+        this.bind();
+        this._data = null;
+        this._width = width;
+        this._height = height;
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texImage2D(this._target, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        gl.texParameteri(this._target, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(this._target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(this._target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(this._target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        this.checkForErrors();
+        this.unbind();
+    }
+
+    /** Upload a sub-rectangle of RGBA bytes (row-major, tightly packed) into an existing data texture. */
+    public updateRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
+        this.bind();
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texSubImage2D(this._target, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        this.unbind();
+    }
+
     public updateImg(data: HTMLImageElement | null): void {
         if (this._target !== gl.TEXTURE_2D) {
             console.error('Cannot update 2D texture with cubemap face');

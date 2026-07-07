@@ -72,6 +72,43 @@ export class Geometry {
 
         return interleaved;
     }
+
+    /**
+     * Recompute smooth per-vertex normals in place from the current positions and indices
+     * (area-weighted face-normal accumulation). Used after deforming positions at runtime
+     * (e.g. terrain sculpting). No-op if the geometry is not indexed.
+     */
+    public computeNormals(): void {
+        if (this._indices.length === 0) return;
+
+        for (let i = 0; i < this._positions.length; i++)
+            this._normals[i] = [0, 0, 0];
+
+        const pA = vec3.create(), pB = vec3.create(), pC = vec3.create();
+        const edge1 = vec3.create(), edge2 = vec3.create(), faceNormal = vec3.create();
+
+        for (let f = 0; f < this._indices.length; f += 3) {
+            const a = this._indices[f], b = this._indices[f + 1], c = this._indices[f + 2];
+            vec3.set(pA, this._positions[a][0], this._positions[a][1], this._positions[a][2]);
+            vec3.set(pB, this._positions[b][0], this._positions[b][1], this._positions[b][2]);
+            vec3.set(pC, this._positions[c][0], this._positions[c][1], this._positions[c][2]);
+            vec3.subtract(edge1, pB, pA);
+            vec3.subtract(edge2, pC, pA);
+            // Non-normalized cross => magnitude proportional to face area (area weighting)
+            vec3.cross(faceNormal, edge1, edge2);
+            this._normals[a][0] += faceNormal[0]; this._normals[a][1] += faceNormal[1]; this._normals[a][2] += faceNormal[2];
+            this._normals[b][0] += faceNormal[0]; this._normals[b][1] += faceNormal[1]; this._normals[b][2] += faceNormal[2];
+            this._normals[c][0] += faceNormal[0]; this._normals[c][1] += faceNormal[1]; this._normals[c][2] += faceNormal[2];
+        }
+
+        const n = vec3.create();
+        for (let i = 0; i < this._normals.length; i++) {
+            vec3.set(n, this._normals[i][0], this._normals[i][1], this._normals[i][2]);
+            vec3.normalize(n, n);
+            this._normals[i] = [n[0], n[1], n[2]];
+        }
+    }
+
     private _calculateTangents(): void {
         const faces: number[][] = []
         for (let i = 0; i < this._indices.length; i+=3)
@@ -401,6 +438,50 @@ export class Geometry {
             indices.push(positions.length - i - 2);
         }
 
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Flat horizontal grid on the XZ plane (Y up), centred on the origin. `cols`/`rows` are the number of
+     * quads along X/Z, producing (cols+1)*(rows+1) vertices. Intended as the base mesh for terrain that is
+     * then sculpted by mutating the Y of each vertex. UVs span 0..1 across the whole plane.
+     */
+    public static Plane(width: number = 1, depth: number = 1, cols: number = 1, rows: number = 1): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        cols = Math.max(1, Math.floor(cols));
+        rows = Math.max(1, Math.floor(rows));
+        const halfW = width / 2;
+        const halfD = depth / 2;
+
+        for (let r = 0; r <= rows; r++) {
+            const v = r / rows;
+            const z = -halfD + v * depth;
+            for (let c = 0; c <= cols; c++) {
+                const u = c / cols;
+                const x = -halfW + u * width;
+                positions.push([x, 0.0, z]);
+                normals.push([0.0, 1.0, 0.0]);
+                uvs.push([u, v]);
+            }
+        }
+
+        const stride = cols + 1;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const tl = r * stride + c;
+                const tr = tl + 1;
+                const bl = (r + 1) * stride + c;
+                const br = bl + 1;
+                // CCW winding, front face up
+                indices.push(tl, bl, tr);
+                indices.push(tr, bl, br);
+            }
+        }
 
         return new Geometry(positions, normals, uvs, [], [], indices);
     }

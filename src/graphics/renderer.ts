@@ -38,6 +38,8 @@ import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
 // Deferred pipeline shaders
 import GeometryPBRFragment from './shaders/deferred/geometryPBR.fs'
 import GeometryDefaultFragment from './shaders/deferred/geometryDefault.fs'
+import GeometryTerrainFragment from './shaders/deferred/geometryTerrain.fs'
+import GeometryFoliageBillboardFragment from './shaders/deferred/geometryFoliageBillboard.fs'
 import GeometryBasicFragment from './shaders/deferred/geometryBasic.fs'
 import GeometryInstancedVertex from './shaders/deferred/geometry_instanced.vs'
 import DeferredLightingFragment from './shaders/deferred/deferredLighting.fs'
@@ -190,6 +192,10 @@ export class Renderer {
         // Instanced geometry variants (pbr/default share the 14-float vertex layout)
         const pbrGeometryInstancedShader = new Shader().create(GeometryInstancedVertex, GeometryPBRFragment);
         const defaultGeometryInstancedShader = new Shader().create(GeometryInstancedVertex, GeometryDefaultFragment);
+        // Terrain splat geometry shader (reuses the default 14-float vertex layout).
+        const terrainGeometryShader = new Shader().create(DefaultVertex, GeometryTerrainFragment);
+        // Instanced billboard foliage (grass) geometry shader.
+        const foliageBillboardShader = new Shader().create(GeometryInstancedVertex, GeometryFoliageBillboardFragment);
         // Deferred lighting (fullscreen) shader
         const deferredLightingShader = new Shader().create(ScreenVertex, DeferredLightingFragment);
         // Environment shaders
@@ -219,6 +225,10 @@ export class Renderer {
         this._shaderManager.addShader('basicGeometrySkinned', basicGeometrySkinnedShader);
         this._shaderManager.addShader('pbrGeometryInstanced', pbrGeometryInstancedShader);
         this._shaderManager.addShader('defaultGeometryInstanced', defaultGeometryInstancedShader);
+        // 'terrain' is used by ModelNode.initializeModel (attribute reflection); 'terrainGeometry' by the deferred pass.
+        this._shaderManager.addShader('terrain', terrainGeometryShader);
+        this._shaderManager.addShader('terrainGeometry', terrainGeometryShader);
+        this._shaderManager.addShader('foliageBillboardInstanced', foliageBillboardShader);
         this._shaderManager.addShader('deferredLighting', deferredLightingShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
         this._shaderManager.addShader('skybox', skybox);
@@ -373,6 +383,53 @@ export class Renderer {
             if (group.length >= 2) this._drawInstancedGroup(group);
             else this._drawGeometryNode(group[0]);
         }
+
+        // Instanced foliage owned by landscapes (grass billboards + scattered mesh props).
+        this._foliagePass(scene);
+    }
+
+    private _foliagePass(scene: Scene): void {
+        const defaultAttrs = this._shaderManager.getShader('defaultGeometry').attributes;
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                if (layer.count === 0) continue;
+
+                // Lazily upload the (static) mesh + set up its per-vertex VAO (locations 0-4).
+                if (!layer.initialized) {
+                    const g = layer.model.geometry;
+                    layer.model.mesh.create(g.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']), g.vertexCount, g.indices);
+                    layer.model.mesh.initializeVAO(defaultAttrs);
+                    layer.initialized = true;
+                }
+
+                // Re-upload the per-instance matrix buffer only when the scatter changed.
+                if (!layer.glBuffer) layer.glBuffer = gl.createBuffer();
+                if (layer.uploadedVersion !== layer.version) {
+                    gl.bindBuffer(gl.ARRAY_BUFFER, layer.glBuffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, layer.matrices.subarray(0, layer.count * 16), gl.STATIC_DRAW);
+                    layer.uploadedVersion = layer.version;
+                }
+
+                const shaderType = layer.kind === 'billboard' ? 'foliageBillboardInstanced'
+                    : (layer.model.material.type === 'pbr' ? 'pbrGeometryInstanced' : 'defaultGeometryInstanced');
+                this._shaderManager.bind(shaderType);
+                this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+                this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+
+                if (layer.kind === 'billboard') {
+                    const tex = layer.textureId ? TextureManager.Instance.getTexture(layer.textureId) : null;
+                    if (tex) { tex.bind(0); this._shaderManager.setUniform('u_texture', 0); }
+                    GLState.disable(gl.CULL_FACE);
+                } else {
+                    this._applyMaterial(layer.model.material);
+                    this._applyCull(layer.model.material.config.side);
+                }
+
+                layer.model.mesh.setupInstanceMatrixBuffer(layer.glBuffer as WebGLBuffer, 5);
+                layer.model.mesh.drawInstanced(layer.count);
+            }
+        }
     }
 
     private _geometryShaderFor(node: ModelNode): string {
@@ -382,6 +439,7 @@ export class Renderer {
             case 'pbr': return animated ? 'pbrGeometrySkinned' : 'pbrGeometry';
             case 'default': return animated ? 'defaultGeometrySkinned' : 'defaultGeometry';
             case 'basic': return animated ? 'basicGeometrySkinned' : 'basicGeometry';
+            case 'terrain': return 'terrainGeometry';
             default: return animated ? 'pbrGeometrySkinned' : 'pbrGeometry';
         }
     }
@@ -399,7 +457,8 @@ export class Renderer {
 
         if (animated) this._uploadBoneMatrices(shaderType, node);
 
-        this._applyMaterial(node.model.material);
+        if (node.model.material.type === 'terrain') this._applyTerrainMaterial(node.model.material);
+        else this._applyMaterial(node.model.material);
         this._applyCull(node.model.material.config.side);
         const mode = node.model.material.config.wireframe ? gl.LINES : gl.TRIANGLES;
         node.model.mesh.draw(mode);
@@ -649,6 +708,21 @@ export class Renderer {
             const texture = TextureManager.Instance.getTexture(tex);
             if (texture) texture.bind(slot);
         }
+    }
+
+    private _applyTerrainMaterial(material: Material): void {
+        // Bind the splat + layer textures to sequential units, then push the blend/tiling/auto uniforms.
+        // Uniform names in the material already match the terrain shader (u_splat, u_layer0, u_tiling0, ...).
+        let slot = 0;
+        for (const [name, texId] of material.textures) {
+            const texture = TextureManager.Instance.getTexture(texId);
+            if (!texture) continue;
+            texture.bind(slot);
+            this._shaderManager.setUniform(name, slot);
+            slot++;
+        }
+        for (const [name, value] of material.properties)
+            this._shaderManager.setUniform(name, value);
     }
 
     private _applyCull(side: 'front' | 'back' | 'double' | undefined): void {

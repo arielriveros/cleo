@@ -41,6 +41,16 @@ export class Mesh {
         return this;
     }
 
+    /**
+     * Re-upload interleaved vertex data into the existing vertex buffer at runtime.
+     * Expects the same layout and vertex count used in `create()` (position/normal/uv/tangent/bitangent),
+     * so the buffer size is unchanged. Used for dynamically deforming meshes (e.g. terrain sculpting).
+     */
+    public updateVertexData(vertices: number[]): void {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(vertices));
+    }
+
     public createAnimated(
         vertices: number[], 
         vertex_count: number, 

@@ -1,5 +1,5 @@
-import { Shape as CannonShape, 
-    Box, Sphere, Cylinder, Plane, Trimesh,
+import { Shape as CannonShape,
+    Box, Sphere, Cylinder, Plane, Trimesh, Heightfield,
     Vec3 } from "cannon-es";
 import { vec3 } from "gl-matrix";
 import { Geometry } from "../core/geometry";
@@ -50,6 +50,17 @@ export class Shape {
         const trimesh = new Trimesh(numVertices, indices);
         trimesh.setScale(new Vec3( scale[0], scale[1], scale[2]));
         return new Shape(trimesh);
+    }
+
+    /**
+     * Heightfield collider for terrain. `data` is a row-major 2D array of heights (data[i][j], i along the
+     * local X axis, j along the local Y axis; height is along local Z). cannon-es collides Heightfield with
+     * Sphere/Box/Convex/Cylinder bodies, so any mesh using those shapes is walkable. `elementSize` is the
+     * world spacing between adjacent samples. The owning body should be rotated -90° about X so the field
+     * lies in the world XZ plane with height along world Y (handled by the Terrain subsystem).
+     */
+    public static Heightfield(data: number[][], elementSize: number): Shape {
+        return new Shape(new Heightfield(data, { elementSize }));
     }
 
     public get cShape(): CannonShape { return this._shape; }

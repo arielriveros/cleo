@@ -7,7 +7,7 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, eventEmitter: eventEmitter } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, setEditorMode, eventEmitter: eventEmitter } = useCleoEngine();
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
 
   useEffect(() => {
@@ -144,6 +144,15 @@ export default function MenuBar() {
           <option value='3D'>3D</option>
           <option value='2D'>2D</option>
         </select>
+      </div>
+      <div className='flex items-center h-full'>
+        <div
+          className={`text-white h-[25px] border text-center inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded ${editorMode === 'landscape' ? 'bg-[#2c7a2c] border-[#8fe08f]' : 'bg-[#3b3b3b] border-[#ccc]'} ${(playState==='playing' || playState==='paused') ? 'opacity-50 pointer-events-none' : ''}`}
+          title='Toggle landscape sculpting mode'
+          onClick={() => setEditorMode(editorMode === 'landscape' ? 'default' : 'landscape')}
+        >
+          Landscape
+        </div>
       </div>
       <div />
     </Topbar>

@@ -57,6 +57,25 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
+export type EditorMode = 'default' | 'landscape';
+export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
+export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
+export type TerrainBrushState = {
+  mode: TerrainBrushMode;
+  tool: TerrainTool;
+  radius: number;
+  strength: number;
+  falloff: number;
+  /** Active splat layer (0..3) for the paint tool. */
+  paintLayer: number;
+  /** Active foliage layer index for the foliage tool. */
+  foliageLayer: number;
+  /** When true the foliage tool erases instead of scatters. */
+  foliageErase: boolean;
+  /** Id of the landscape node currently being edited (set by the inspector). */
+  activeLandscapeId: string | null;
+};
+
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
   instance: CleoEngine | null;
@@ -66,6 +85,9 @@ const EngineContext = createContext<{
   isGizmoDragging: boolean;
   isPlayMode: boolean;
   isSceneReady: boolean;
+  editorMode: EditorMode;
+  setEditorMode: (mode: EditorMode) => void;
+  terrainBrush: React.MutableRefObject<TerrainBrushState>;
   loadingProgress: LoadingProgress;
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
@@ -92,6 +114,9 @@ const EngineContext = createContext<{
     isGizmoDragging: false,
     isPlayMode: false,
     isSceneReady: false,
+    editorMode: 'default',
+    setEditorMode: () => {},
+    terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null } },
     loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
     bodies: new Map(),
@@ -122,6 +147,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
   const [isPlayMode, setIsPlayMode] = useState(false);
   const [isSceneReady, setIsSceneReady] = useState(false);
+  const [editorMode, setEditorMode] = useState<EditorMode>('default');
+  const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null });
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
   const scriptsRef = useRef(new Map<string, string>());
@@ -514,6 +541,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       isGizmoDragging,
       isPlayMode,
       isSceneReady,
+      editorMode,
+      setEditorMode,
+      terrainBrush,
       loadingProgress,
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,

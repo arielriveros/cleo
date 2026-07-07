@@ -50,7 +50,8 @@ enum MaterialType {
     Default = 'default',
     BasicSkinned = 'basicSkinned',
     DefaultSkinned = 'defaultSkinned',
-    PBR = 'pbr'
+    PBR = 'pbr',
+    Terrain = 'terrain'
 }
 
 export class Material {
@@ -168,6 +169,27 @@ export class Material {
         material.properties.set('hasEmissiveMap', tex.emissiveMap ? true : false);
         if (tex.emissiveMap) material.textures.set('emissiveMap', tex.emissiveMap);
 
+        return material;
+    }
+
+    /**
+     * Terrain splat material: up to 4 tiled layers blended by an RGBA splat map, with optional
+     * per-layer automatic height/slope masking. Uniform names match shaders/deferred/geometryTerrain.fs.
+     * The `Terrain` subsystem owns/updates the splat + layer textures and the per-layer properties;
+     * this factory just seeds the defaults.
+     */
+    public static Terrain(properties: { baseColor?: number[] } = {}, config?: MaterialConfig): Material {
+        const material = new Material(config);
+        material.type = MaterialType.Terrain;
+        material.properties.set('u_baseColor', properties.baseColor || [0.38, 0.5, 0.28]);
+        material.properties.set('u_layerCount', 0);
+        material.properties.set('u_useAuto', 0);
+        for (let i = 0; i < 4; i++) {
+            material.properties.set(`u_tiling${i}`, 20);
+            material.properties.set(`u_auto${i}`, 0);
+            material.properties.set(`u_hRange${i}`, [0, 100]);
+            material.properties.set(`u_sRange${i}`, [0, 1]);
+        }
         return material;
     }
 }

@@ -148,7 +148,10 @@ export class TextureManager {
     public serializeTexture(id: string): string {
         const texture = this._textures.get(id);
         if (!texture) return undefined;
-        
+        // Data-backed textures (e.g. editable terrain splat maps) have no HTMLImageElement to draw;
+        // skip them here — such subsystems serialize their own pixel data separately.
+        if (!(texture.data instanceof HTMLImageElement)) return undefined;
+
         const canvas = document.createElement('canvas');
         canvas.width = texture.width;
         canvas.height = texture.height;
@@ -161,9 +164,9 @@ export class TextureManager {
     public serializeTextureData(): any {
         const textures: {id: string, data: string, config: any}[] = []; // Define index signature for textures object
         this._textures.forEach((texture, id) => {
-            textures.push({
-                id, data: this.serializeTexture(id), config: texture.config
-            });
+            const data = this.serializeTexture(id);
+            if (!data) return; // skip data-backed textures (no image to embed)
+            textures.push({ id, data, config: texture.config });
         });
         return textures;
     }

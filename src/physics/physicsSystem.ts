@@ -67,6 +67,13 @@ export class PhysicsSystem {
           node.trigger.quaternion.set(quat[0], quat[1], quat[2], quat[3]);
         }
       }
+
+      // Terrain: register/refresh the static heightfield collider(s) so any mesh walks over the landscape.
+      for (const landscape of this._scene.landscapes) {
+        if (landscape.markForRemoval) { landscape.terrain.dispose(this._world); continue; }
+        landscape.terrain.setOrigin(landscape.worldPosition);
+        landscape.terrain.ensureRegistered(this._world);
+      }
     } catch (e) {
       Logger.error(e.toString());
     }

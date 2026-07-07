@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
 import { Raycaster } from "cleo";
 import PositionGizmo from "./PositionGizmo";
+import LandscapeBrush from "./landscape/LandscapeBrush";
+import LandscapeInspector from "./landscape/LandscapeInspector";
 import { instantiateTemplate } from "../utils/templates";
 
 export default function EngineViewport() {
-    const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode,
+    const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
             templates, scripts, bodies, triggers } = useCleoEngine();
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
@@ -62,6 +64,8 @@ export default function EngineViewport() {
         const handleClick = (event: MouseEvent) => {
             // Don't allow selection during play mode
             if (isPlayMode) return;
+            // In landscape mode the viewport is a sculpting surface, not a selection surface.
+            if (editorMode === 'landscape') return;
             
             // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
@@ -137,7 +141,7 @@ export default function EngineViewport() {
             viewport.removeEventListener('mouseup', handleMouseUp);
             viewport.removeEventListener('click', handleClick);
         };
-    }, [instance, editorScene, eventEmitter, isDragging, isGizmoDragging, dragStartPos, isPlayMode]);
+    }, [instance, editorScene, eventEmitter, isDragging, isGizmoDragging, dragStartPos, isPlayMode, editorMode]);
 
     // Listen for gizmo drag events
     useEffect(() => {
@@ -194,11 +198,15 @@ export default function EngineViewport() {
 
     return (
         <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}>
-            <PositionGizmo 
-                selectedNodeId={selectedNode} 
+            {editorMode !== 'landscape' && <PositionGizmo
+                selectedNodeId={selectedNode}
                 onPositionChange={handlePositionChange}
                 viewportRef={viewportRef}
-            />
+            />}
+            {editorMode === 'landscape' && <>
+                <LandscapeBrush viewportRef={viewportRef} />
+                <LandscapeInspector />
+            </>}
         </div>
     );
 }
