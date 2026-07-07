@@ -43,7 +43,6 @@ import GeometryInstancedVertex from './shaders/deferred/geometry_instanced.vs'
 import DeferredLightingFragment from './shaders/deferred/deferredLighting.fs'
 
 import { GLState } from './systems/glState';
-import { Frustum } from '../core/frustum';
 import { Material } from './material';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
@@ -59,8 +58,6 @@ interface RendererConfig {
     deferred?: boolean;
     /** Max distance covered by the directional cascaded shadow maps (default 100). */
     shadowDistance?: number;
-    /** Frustum-cull opaque meshes against the active camera (default true). */
-    frustumCulling?: boolean;
 }
 
 export class Renderer {
@@ -93,7 +90,6 @@ export class Renderer {
     private _cascadeSplitLoc: WebGLUniformLocation | null | undefined = undefined;
     private _cascadeSamplerLoc: WebGLUniformLocation | null | undefined = undefined;
     private _shadowDistance: number;
-    private _frustumCulling: boolean;
 
     // Post processing
     private _compose_FBOs: Framebuffer[];
@@ -106,7 +102,6 @@ export class Renderer {
 
     // Deferred pipeline state
     private _deferred: boolean;
-    private _frustum: Frustum = new Frustum();
     private _viewProj: mat4 = mat4.create();
     private _invViewProj: mat4 = mat4.create();
 
@@ -120,16 +115,11 @@ export class Renderer {
     // Object -> stable id (for grouping identical mesh+material into instanced draws)
     private _objIds: WeakMap<object, number> = new WeakMap();
     private _objIdCounter: number = 0;
-    // Cached local-space AABBs keyed by geometry, plus scratch for frustum culling
-    private _localAABBCache: WeakMap<object, { min: number[], max: number[] }> = new WeakMap();
-    private _aabbMin: vec3 = vec3.create();
-    private _aabbMax: vec3 = vec3.create();
 
     constructor(config: RendererConfig) {
         this._config = config;
         this._deferred = config.deferred !== false; // default: deferred on
         this._shadowDistance = config.shadowDistance ?? 100;
-        this._frustumCulling = config.frustumCulling !== false; // default: on
         // Create canvas
         this._canvas = document.createElement('canvas');
 
@@ -277,7 +267,6 @@ export class Renderer {
         const proj = this._activeCamera.projectionMatrix;
         mat4.multiply(this._viewProj, proj, view);
         mat4.invert(this._invViewProj, this._viewProj);
-        this._frustum.update(this._viewProj);
 
         // Shadow map depth pass (shared by both pipelines). Keep the last shadow-casting light.
         let shadowLight: LightNode | null = null;
@@ -352,7 +341,7 @@ export class Renderer {
         GLState.disable(gl.BLEND);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-        // Collect visible, opaque, non-gizmo models (frustum-culled).
+        // Collect visible, opaque, non-gizmo models.
         const singles: ModelNode[] = [];
         const instanceGroups = new Map<string, ModelNode[]>();
 
@@ -361,7 +350,6 @@ export class Renderer {
             if ((node as any).isGizmo) continue;
             if (node.model.material.config.transparent) continue;
             if (!node.initialized) node.initializeModel();
-            if (this._frustumCulling && !this._isNodeVisible(node)) continue;
 
             const mat = node.model.material;
             const animated = node.model instanceof AnimatedModel;
@@ -694,49 +682,6 @@ export class Renderer {
         } else {
             gl.uniformMatrix4fv(location, false, this._boneIdentityScratch);
         }
-    }
-
-    /** Cheap frustum cull using a cached per-geometry local AABB transformed by the node's world matrix. */
-    private _isNodeVisible(node: ModelNode): boolean {
-        // Skinned meshes are posed by bone matrices at draw time; their bind-pose positions don't
-        // reflect where the mesh actually renders, so a bind-pose AABB would wrongly cull them.
-        if (node.model instanceof AnimatedModel) return true;
-
-        const geometry: any = (node.model as any).geometry;
-        if (!geometry || !geometry.positions || geometry.positions.length === 0) return true;
-
-        let local = this._localAABBCache.get(geometry);
-        if (!local) {
-            let mnx = Infinity, mny = Infinity, mnz = Infinity;
-            let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
-            for (const v of geometry.positions) {
-                if (v[0] < mnx) mnx = v[0]; if (v[1] < mny) mny = v[1]; if (v[2] < mnz) mnz = v[2];
-                if (v[0] > mxx) mxx = v[0]; if (v[1] > mxy) mxy = v[1]; if (v[2] > mxz) mxz = v[2];
-            }
-            local = { min: [mnx, mny, mnz], max: [mxx, mxy, mxz] };
-            this._localAABBCache.set(geometry, local);
-        }
-
-        // Transform the 8 corners of the local AABB by the world matrix to get a world AABB.
-        const t = node.worldTransform;
-        const lo = local.min, hi = local.max;
-        let wmnx = Infinity, wmny = Infinity, wmnz = Infinity;
-        let wmxx = -Infinity, wmxy = -Infinity, wmxz = -Infinity;
-        for (let c = 0; c < 8; c++) {
-            const x = (c & 1) ? hi[0] : lo[0];
-            const y = (c & 2) ? hi[1] : lo[1];
-            const z = (c & 4) ? hi[2] : lo[2];
-            const cx = t[0] * x + t[4] * y + t[8] * z + t[12];
-            const cy = t[1] * x + t[5] * y + t[9] * z + t[13];
-            const cz = t[2] * x + t[6] * y + t[10] * z + t[14];
-            if (cx < wmnx) wmnx = cx; if (cy < wmny) wmny = cy; if (cz < wmnz) wmnz = cz;
-            if (cx > wmxx) wmxx = cx; if (cy > wmxy) wmxy = cy; if (cz > wmxz) wmxz = cz;
-        }
-        // Conservative margin (5% of each extent) so meshes near the frustum edge aren't clipped.
-        const mx = (wmxx - wmnx) * 0.05, my = (wmxy - wmny) * 0.05, mz = (wmxz - wmnz) * 0.05;
-        vec3.set(this._aabbMin, wmnx - mx, wmny - my, wmnz - mz);
-        vec3.set(this._aabbMax, wmxx + mx, wmxy + my, wmxz + mz);
-        return this._frustum.intersectsAABB(this._aabbMin, this._aabbMax);
     }
 
     public resize(): void {

@@ -13,9 +13,10 @@ import Tabs, { Tab } from "../components/Tabs";
 import AssetExplorer from "./assets/AssetExplorer";
 import TemplateExplorer from "./sceneInspector/TemplateExplorer";
 import UIOverlay from "./uiInspector/UIOverlay";
+import LoadingScreen from "../components/LoadingScreen";
 
 export default function Editor() {
-  const { instance, eventEmitter } = useCleoEngine();
+  const { instance, eventEmitter, isSceneReady, loadingProgress } = useCleoEngine();
   const [barsDimensions, setBarsDimensions] = useState({
     left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15
   });
@@ -72,6 +73,8 @@ export default function Editor() {
               <EngineViewport />
               {/* UI overlay sits on top of the WebGL canvas */}
               <UIOverlay />
+              {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
+              {!isSceneReady && <LoadingScreen progress={loadingProgress} />}
             </div>
             <BottomBarResizer onDrag={ e => {
               setBarsDimensions({...barsDimensions, height: 100 - (100 * e.clientY) / window.innerHeight});

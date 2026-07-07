@@ -7,8 +7,18 @@ export async function createDemoScene(params: {
   scripts: Map<string, string>,
   bodies: Map<string, BodyDescription>,
   triggers: Map<string, { shapes: ShapeDescription[] }>,
+  onProgress?: (loaded: number, total: number, label: string) => void,
 }): Promise<void> {
-  const { scene, scripts, bodies, triggers } = params;
+  const { scene, scripts, bodies, triggers, onProgress } = params;
+
+  // Report startup asset-loading progress. Each awaited asset group below is one
+  // step; `step` is called immediately before a group starts loading, so the bar
+  // reflects completed groups and the label names the group currently loading.
+  // Calls are unconditional (placed before each try), so a failed asset still
+  // advances the bar instead of stalling it.
+  const LOAD_STEPS = 6;
+  let loadedSteps = 0;
+  const step = (label: string) => onProgress?.(loadedSteps++, LOAD_STEPS, label);
 
   // Editor Camera
   const editorCameraNode = new CameraNode('__editor__Camera', new Camera({ far: 10000 }));
@@ -43,6 +53,7 @@ export async function createDemoScene(params: {
   scene.addNodes(editorCameraNode, editorGridNode, xAxis, yAxis, zAxis);
 
   // Environment map (cubemap) just like in the example app
+  step('Loading environment map…');
   try {
     const envmap = new Texture({ target: 'cubemap', flipY: true });
     const images = await Promise.all([
@@ -69,6 +80,7 @@ export async function createDemoScene(params: {
   }
 
   // Skybox just like in the example app
+  step('Loading skybox…');
   try {
     const skybox = await Skybox.fromFiles({
       posX: '/assets/cubemaps/skybox/right.jpg',
@@ -84,6 +96,7 @@ export async function createDemoScene(params: {
   }
 
   // Load Damaged Helmet
+  step('Loading damaged helmet…');
   try {
     const helmetModels = await Model.fromPath({
       filePaths: [
@@ -160,6 +173,7 @@ export async function createDemoScene(params: {
   playable.addChild(cameraPivot);
 
   // Load Running GLTF Model with Animation
+  step('Loading character model…');
   try {
     const runningModels = await Loader.loadAnimatedModelsFromPath('/assets/mannequin.gltf');
 
@@ -221,6 +235,7 @@ export async function createDemoScene(params: {
   scene.addNodes(lightNode, physicalBox, spriteNode, plane);
 
   // --- Fire posts with point lights and animated sprites ---
+  step('Loading fire effects…');
   try {
     // Lazy-load fire.png texture if not already present
     const { TextureManager, PointLight, AnimatedSpriteNode } = await import('cleo');
@@ -271,6 +286,7 @@ export async function createDemoScene(params: {
     console.warn('Failed to set up fire posts:', e);
   }
 
+  step('Loading Sponza scene…');
   try {
     const sponzaModels = await Model.fromPath({ filePaths: [
       '/assets/sponza/sponza.obj',

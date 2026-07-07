@@ -55,6 +55,8 @@ export type BodyDescription = {
 }
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | PlaneShapeDescription;
 
+export type LoadingProgress = { loaded: number; total: number; label: string };
+
 // Create a context to hold the engine and scene
 const EngineContext = createContext<{
   instance: CleoEngine | null;
@@ -63,6 +65,8 @@ const EngineContext = createContext<{
   selectedNode: string | null;
   isGizmoDragging: boolean;
   isPlayMode: boolean;
+  isSceneReady: boolean;
+  loadingProgress: LoadingProgress;
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[]; }>;
@@ -87,6 +91,8 @@ const EngineContext = createContext<{
     selectedNode: null,
     isGizmoDragging: false,
     isPlayMode: false,
+    isSceneReady: false,
+    loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
     bodies: new Map(),
     triggers: new Map(),
@@ -115,6 +121,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
   const [isPlayMode, setIsPlayMode] = useState(false);
+  const [isSceneReady, setIsSceneReady] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
   const scriptsRef = useRef(new Map<string, string>());
   const bodiesRef = useRef(new Map<string, BodyDescription>());
@@ -142,11 +150,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
+      onProgress: (loaded, total, label) => setLoadingProgress({ loaded, total, label }),
     });
   };
 
   useEffect(() => {
       const initializeEngine = async () => {
+        try {
           const engine = new CleoEngine({
               graphics: {
                   clearColor: [0.65, 0.65, 0.71, 1.0],
@@ -178,6 +188,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           setSelectedNode(editorSceneRef.current.root.id);
           
           engine.run();
+
+          setLoadingProgress({ loaded: 6, total: 6, label: 'Ready' });
+        } finally {
+          // Always dismiss the splash, even if an asset failed to load,
+          // so the editor never gets stuck behind the loading screen.
+          setIsSceneReady(true);
+        }
       };
 
       initializeEngine();
@@ -496,6 +513,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       selectedNode,
       isGizmoDragging,
       isPlayMode,
+      isSceneReady,
+      loadingProgress,
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
