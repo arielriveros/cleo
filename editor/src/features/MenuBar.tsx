@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Logger } from "cleo";
 import { useCleoEngine } from "./EngineContext";
+import { buildGameData } from "./publish/buildGameData";
+import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import Topbar from "../components/Topbar";
 import PlayIcon from '../icons/play.png'
 import PauseIcon from '../icons/pause.png'
@@ -9,6 +11,11 @@ import StopIcon from '../icons/stop.png'
 export default function MenuBar() {
   const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, setEditorMode, eventEmitter: eventEmitter } = useCleoEngine();
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
+  const [showPublish, setShowPublish] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [embedAssets, setEmbedAssets] = useState(true);
+  const publishRef = useRef<HTMLDivElement>(null);
+  const desktop = isDesktop();
 
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
@@ -20,58 +27,6 @@ export default function MenuBar() {
     return () => { eventEmitter.off('SET_PLAY_STATE', handlePlayState) };
   }, [eventEmitter]);
   
-  const clearDebuggingNodes = (json: any) => {
-    const iterateChildren = (children: any[]) => {
-      return children.filter((child: any) => {
-        if (child.name.includes('__debug__')) {
-          Logger.info(`Removing debugging node ${child.name}`, 'Editor');
-          return false;
-        }
-        if (child.name.includes('__editor__')) {
-          Logger.info(`Removing editor node ${child.name}`, 'Editor');
-          return false;
-        }
-        child.children = iterateChildren(child.children);
-        return true;
-      });
-    }
-
-    json.children = iterateChildren(json.children);
-  }
-
-  const setScripts = (json: any) => {
-    const scene = json.scene;
-    const rootScript = scripts.get(scene.id);
-
-    if(rootScript) scene.script = rootScript;
-
-    const iterateChildren = (children: any[]) => {
-      children.forEach((child: any) => {
-        const nodeScript = scripts.get(child.id);
-        if(nodeScript) child.script = nodeScript;
-        iterateChildren(child.children);
-      });
-    }
-    iterateChildren(scene.children);
-  }
-
-  const setBodies = (json: any) => {
-    const scene = json.scene;
-
-    const iterateChildren = (children: any[]) => {
-      children.forEach((child: any) => {
-        const body = bodies.get(child.id);
-        if(body) child.body = body;
-
-        const trigger = triggers.get(child.id);
-        if(trigger) child.trigger = trigger;
-        iterateChildren(child.children);
-      });
-    }
-    iterateChildren(scene.children);
-
-  }
-
   const onLoad = (filelist: FileList | null) => {
     if (filelist) {
       const reader = new FileReader();
@@ -92,27 +47,52 @@ export default function MenuBar() {
     }
   };
 
-  const onSave = () => {
-    /* TODO: Remove __editor__ and __debug__ textures */
-    editorScene?.serialize().then((json) => {
-      if (json) {
-        // Clear debugging nodes from the editor scene
-        clearDebuggingNodes(json.scene)
-        // Assign the scripts to the new scene
-        setScripts(json);
-        // Assign the bodies to the new scene
-        setBodies(json);
-        // Attach UI overlay data
-        json.ui = { version: ui.version, elements: ui.elements };
-        const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'scene.json';
-        a.click();
-      }
-    });
+  const onSave = async () => {
+    if (!editorScene) return;
+    const json = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui });
+    const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'scene.json';
+    a.click();
   };
+
+  // Close the Publish dropdown when clicking outside it.
+  useEffect(() => {
+    if (!showPublish) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (publishRef.current && !publishRef.current.contains(e.target as Node)) setShowPublish(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showPublish]);
+
+  // Publish targets embed all assets: buildGameData with useCache=false so textures serialize to base64.
+  const runPublish = async (action: () => Promise<string>) => {
+    setShowPublish(false);
+    setPublishing(true);
+    try {
+      const message = await action();
+      Logger.info(message, 'Publish');
+    } catch (e: any) {
+      Logger.error(`Publish failed: ${e?.message || e}`, 'Publish');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const onPublishWeb = () => runPublish(async () => {
+    if (!editorScene) throw new Error('No scene to publish');
+    const data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui });
+    return publishWeb(data, { embedAssets });
+  });
+
+  const onPublishDesktop = (installer: boolean) => runPublish(async () => {
+    if (!editorScene) throw new Error('No scene to publish');
+    const data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui });
+    return publishDesktop(data, { installer, embedAssets });
+  });
 
   const onPlay = () => startPlay();
 
@@ -126,6 +106,43 @@ export default function MenuBar() {
         <div className='text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[98px] inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded' onClick={() => onSave()}>Save</div>
         <label htmlFor='load-scene-file' className='text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[98px] inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded'>Load</label>
         <input className="hidden" type='file' id='load-scene-file' name='file' onChange={(e) => onLoad(e.target.files)} />
+        <div className='relative inline-block' ref={publishRef}>
+          <div
+            className={`text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center w-[98px] inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded ${publishing ? 'opacity-50 pointer-events-none' : ''}`}
+            title='Publish an optimized build of your game'
+            onClick={() => setShowPublish(v => !v)}
+          >
+            {publishing ? 'Publishing…' : 'Publish ▾'}
+          </div>
+          {showPublish && (
+            <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-[#2b2b2b] border border-[#555] rounded shadow-lg py-1 text-white text-sm'>
+              <label className='flex items-start gap-2 px-3 py-2 border-b border-[#444] cursor-pointer select-none' onClick={(e) => e.stopPropagation()}>
+                <input type='checkbox' className='mt-[3px]' checked={embedAssets} onChange={(e) => setEmbedAssets(e.target.checked)} />
+                <span>
+                  <span className='font-semibold'>Embed assets in data</span>
+                  <span className='block text-[11px] text-[#aaa]'>{embedAssets ? 'One self-contained game.json (larger)' : 'Loose assets/ files + small game.json'}</span>
+                </span>
+              </label>
+              <div className='px-3 py-2 hover:bg-[#3b3b3b] cursor-pointer' onClick={onPublishWeb}>
+                <div className='font-semibold'>Web (HTML)</div>
+                <div className='text-[11px] text-[#aaa]'>{desktop ? 'Write index.html + game.js + game.json to a folder' : 'Download a .zip of the game'}</div>
+              </div>
+              <div
+                className={`px-3 py-2 ${desktop ? 'hover:bg-[#3b3b3b] cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
+                onClick={() => desktop && onPublishDesktop(false)}
+              >
+                <div className='font-semibold'>Desktop (Electron)</div>
+                <div className='text-[11px] text-[#aaa]'>{desktop ? 'Runnable Electron game folder' : 'Only available in the desktop app'}</div>
+              </div>
+              {desktop && (
+                <div className='px-3 py-2 hover:bg-[#3b3b3b] cursor-pointer' onClick={() => onPublishDesktop(true)}>
+                  <div className='font-semibold'>Desktop installer</div>
+                  <div className='text-[11px] text-[#aaa]'>Package a native installer (electron-builder)</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <div className='flex items-center h-full'>
         <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='playing'} onClick={() => onPlay()}>

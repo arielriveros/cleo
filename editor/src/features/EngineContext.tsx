@@ -10,6 +10,7 @@ import { createDemoUI } from './demoScene/createDemoUI';
 import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
 import { Template } from "../utils/templates";
+import { buildGameData } from "./publish/buildGameData";
 
 type BoxShapeDescription = {
   type: 'box';
@@ -451,37 +452,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // --- Play lifecycle (builds the play scene, drives the UI runtime) ---------------------------
-  const clearDebuggingNodes = (scene: any) => {
-    const iterate = (children: any[]): any[] => children.filter((child: any) => {
-      if (child.name.includes('__debug__') || child.name.includes('__editor__')) return false;
-      child.children = iterate(child.children);
-      return true;
-    });
-    scene.children = iterate(scene.children);
-  };
-  const injectScripts = (scene: any) => {
-    const root = scriptsRef.current.get(scene.id);
-    if (root) scene.script = root;
-    const iterate = (children: any[]) => children.forEach((c: any) => {
-      const s = scriptsRef.current.get(c.id); if (s) c.script = s;
-      iterate(c.children);
-    });
-    iterate(scene.children);
-  };
-  const injectBodies = (scene: any) => {
-    const iterate = (children: any[]) => children.forEach((c: any) => {
-      const b = bodiesRef.current.get(c.id); if (b) c.body = b;
-      const t = triggersRef.current.get(c.id); if (t) c.trigger = t;
-      iterate(c.children);
-    });
-    iterate(scene.children);
-  };
   const buildPlayScene = async (): Promise<Scene> => {
-    const json = await editorSceneRef.current.serialize(true);
-    clearDebuggingNodes(json.scene);
-    injectScripts(json.scene);
-    injectBodies(json.scene);
-    json.ui = { version: uiStateRef.current.version, elements: uiStateRef.current.elements };
+    // useCache: true — textures already live in TextureManager for in-editor play, so skip re-embedding.
+    const json = await buildGameData({
+      scene: editorSceneRef.current,
+      scripts: scriptsRef.current,
+      bodies: bodiesRef.current,
+      triggers: triggersRef.current,
+      ui: uiStateRef.current,
+      useCache: true,
+    });
     const newScene = new Scene();
     newScene.parse(json, true);
     return newScene;

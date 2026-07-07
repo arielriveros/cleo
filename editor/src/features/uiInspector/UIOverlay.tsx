@@ -1,17 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useCleoEngine } from '../EngineContext';
 import { UIElement } from '../../utils/UIModel';
-import { UIRuntime, RuntimeElement } from './uiRuntime';
-
-function styleToReact(style: any): React.CSSProperties {
-  const css: any = { position: 'absolute', ...style };
-  // translate numeric sizes to px
-  const pxProps = ['left','top','width','height','padding','margin','fontSize','borderRadius','gap'];
-  pxProps.forEach(k => {
-    if (typeof css[k] === 'number') css[k] = `${css[k]}px`;
-  });
-  return css as React.CSSProperties;
-}
+import { UIRuntime } from './uiRuntime';
+import { PlayElement, styleToReact } from './PlayElement';
 
 // Edit mode: click selects the element in the inspector.
 function EditElement({ el, onSelect }: { el: UIElement, onSelect: (id: string) => void }) {
@@ -26,23 +17,6 @@ function EditElement({ el, onSelect }: { el: UIElement, onSelect: (id: string) =
     return <img style={styleToReact(el.style)} onClick={click} src={el.src} alt={el.alt || ''} data-ui-id={el.id} />;
   if (el.type === 'button')
     return <button style={styleToReact(el.style)} onClick={click} data-ui-id={el.id}>{el.label}</button>;
-  return null;
-}
-
-// Play mode: render runtime tree; hidden elements are skipped; buttons run their onClick handler.
-function PlayElement({ el }: { el: RuntimeElement }) {
-  if (el.visible === false) return null;
-  if (el.type === 'container')
-    return <div style={styleToReact(el.style)} data-ui-id={el.id}>
-      {(el.children || []).map(child => <PlayElement key={child.id} el={child} />)}
-    </div>;
-  if (el.type === 'text')
-    return <div style={styleToReact(el.style)} data-ui-id={el.id}>{(el as any).content}</div>;
-  if (el.type === 'image')
-    return <img style={styleToReact(el.style)} src={(el as any).src} alt={(el as any).alt || ''} data-ui-id={el.id} />;
-  if (el.type === 'button')
-    return <button style={{ ...styleToReact(el.style), pointerEvents: 'auto' }} data-ui-id={el.id}
-      onClick={(e) => { e.stopPropagation(); UIRuntime.handleClick(el.id); }}>{(el as any).label}</button>;
   return null;
 }
 
