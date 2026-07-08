@@ -25,10 +25,6 @@ export async function createDemoScene(params: {
   editorCameraNode.active = true;
   editorCameraNode.setPosition([4, 4, 4]).setRotation([30, -135, 0]);
 
-  // Grid + Axes.
-  // The ground grid and its X/Z axes are drawn by the renderer's infinite-grid shader
-  // (enabled by the editor via renderer.setGridVisible). Only the vertical Y axis remains
-  // a mesh, since it lies out of the ground plane and isn't covered by the grid shader.
   const yAxis = new ModelNode('__editor__Yaxis', new Model(
     new Geometry([[0, -200, 0], [0, 200, 0]], undefined, undefined, undefined, undefined, [0, 1], false),
     Material.Basic({ color: [0, 1, 0] }, { wireframe: true })

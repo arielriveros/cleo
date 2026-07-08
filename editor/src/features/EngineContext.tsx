@@ -339,6 +339,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         setSelectedNode(null);
         if (instanceRef.current && instanceRef.current.renderer) {
           instanceRef.current.renderer.setSelectedNode(null);
+          // Hide the editor grid while in game mode
+          instanceRef.current.renderer.setGridVisible(false);
         }
         // Pressing Escape should release pointer lock
         InputManager.instance.registerKeyPress('Escape', () => InputManager.instance.releaseMouse());
@@ -355,6 +357,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       else if (state === 'stop') {
         instanceRef.current.isPaused = false; // Unpause for editor scene
         setIsPlayMode(false);
+        // Restore the editor grid when returning to the editor scene
+        if (instanceRef.current.renderer) {
+          instanceRef.current.renderer.setGridVisible(true);
+        }
         // Disable mouse capture and release pointer
         InputManager.instance.disableMouseCapture();
       }

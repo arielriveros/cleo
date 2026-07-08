@@ -189,6 +189,23 @@ export default function AddNew() {
     addNode(node);
   }
 
+  // Shared import handler for both the single-file and whole-folder inputs.
+  // A folder pick (webkitdirectory) is what lets a .gltf with an external textures/ folder work:
+  // the browser hands us every file (each carrying webkitRelativePath), so the loader can resolve them.
+  const importModelFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const filesArray = Array.from(files);
+    Model.fromFile({ files: filesArray }).then((models) => {
+      const node = new Node('model');
+      for (const model of models) {
+        const modelNode = new ModelNode(model.name, model.model);
+        node.addChild(modelNode);
+      }
+      addNode(node);
+    })
+    .catch(err => console.error(err));
+  }
+
 
   return (
     <Collapsable title='Add'>
@@ -233,22 +250,17 @@ export default function AddNew() {
               <label className='flex items-center justify-center w-[40px] h-[40px] border border-[#3b3b3b] rounded-[2px] bg-[#3b3b3b] text-white cursor-pointer' htmlFor="file">
                 <img className='flex items-center justify-center w-[35px] h-[35px]' src={ImportIcon} alt='Import' />
               </label>
-              <input className='hidden' type="file" id="file" name="file" multiple accept='.obj, .mtl, .gltf, .glb, .png, .jpg, .jpeg, .bmp, .tga, .tiff' onChange={(e) => {
-                const files = e.target.files;
-                if (files) {
-                  const filesArray = Array.from(files);
-                  Model.fromFile({ files: filesArray }).then((models) => {
-                    const node = new Node('model');
-                    for (const model of models) {
-                      const modelNode = new ModelNode(model.name, model.model);
-                      node.addChild(modelNode);
-                    }
-                    addNode(node);
-                  })
-                  .catch( err => console.error(err) );
-                }
-              }} />
+              <input className='hidden' type="file" id="file" name="file" multiple accept='.obj, .mtl, .gltf, .glb, .png, .jpg, .jpeg, .bmp, .tga, .tiff'
+                onChange={(e) => { importModelFiles(e.target.files); e.target.value = ''; }} />
               Import
+            </div>
+            <div className='flex flex-col items-center font-thin text-sm px-[1px]'>
+              <label className='flex items-center justify-center w-[40px] h-[40px] border border-[#3b3b3b] rounded-[2px] bg-[#3b3b3b] text-white cursor-pointer' htmlFor="folder">
+                <img className='flex items-center justify-center w-[35px] h-[35px]' src={ImportIcon} alt='Import Folder' />
+              </label>
+              <input className='hidden' type="file" id="folder" name="folder" {...({ webkitdirectory: '', directory: '' } as any)}
+                onChange={(e) => { importModelFiles(e.target.files); e.target.value = ''; }} />
+              Folder
             </div>
           </div>
         </div>

@@ -148,6 +148,7 @@ export class GLTFLoader {
     private gltf: GLTF;
     private buffers: ArrayBuffer[] = [];
     private basePath: string = '';
+    private files: File[] = [];
 
     async loadFromPath(filePath: string): Promise<{name: string, geometry: Geometry, material: Material}[]> {
         // Extract base path for relative URI resolution
@@ -171,12 +172,15 @@ export class GLTFLoader {
             throw new Error('No GLTF file found in the uploaded files');
         }
 
+        // Keep the uploaded files so external texture URIs can be resolved against them
+        this.files = files;
+
         // Load GLTF JSON
         const gltfText = await gltfFile.text();
         this.gltf = JSON.parse(gltfText);
 
         // Load buffers from uploaded files
-        await this.loadBuffersFromFiles(files);
+        await this.loadBuffersFromFiles();
 
         // Parse meshes and materials
         return this.parseMeshes();
@@ -210,12 +214,15 @@ export class GLTFLoader {
             throw new Error('No GLTF file found in the uploaded files');
         }
 
+        // Keep the uploaded files so external texture URIs can be resolved against them
+        this.files = files;
+
         // Load GLTF JSON
         const gltfText = await gltfFile.text();
         this.gltf = JSON.parse(gltfText);
 
         // Load buffers from uploaded files
-        await this.loadBuffersFromFiles(files);
+        await this.loadBuffersFromFiles();
 
         // Parse meshes with animation data
         return this.parseAnimatedMeshes();
@@ -247,13 +254,13 @@ export class GLTFLoader {
         }
     }
 
-    private async loadBuffersFromFiles(files: File[]): Promise<void> {
+    private async loadBuffersFromFiles(): Promise<void> {
         if (!this.gltf.buffers) return;
 
         for (const buffer of this.gltf.buffers) {
             if (buffer.uri && !buffer.uri.startsWith('data:')) {
-                // Find the buffer file in uploaded files
-                const bufferFile = files.find(f => f.name === buffer.uri || f.name.endsWith(buffer.uri!));
+                // Find the buffer file among the provided files (folder import or multi-select)
+                const bufferFile = this.findFile(buffer.uri);
                 if (bufferFile) {
                     const arrayBuffer = await bufferFile.arrayBuffer();
                     this.buffers.push(arrayBuffer);
@@ -339,37 +346,86 @@ export class GLTFLoader {
         return result;
     }
 
-    private async loadImageFromBufferView(image: GLTFImage): Promise<string> {
-        if (image.bufferView !== undefined) {
-            const bufferView = this.gltf.bufferViews![image.bufferView];
-            const buffer = this.buffers[bufferView.buffer];
-            const byteOffset = bufferView.byteOffset || 0;
-            const byteLength = bufferView.byteLength;
-            
-            const imageData = buffer.slice(byteOffset, byteOffset + byteLength);
-            const uint8Array = new Uint8Array(imageData);
-            
-            // Convert to base64
-            let binary = '';
-            for (let i = 0; i < uint8Array.length; i++) {
-                binary += String.fromCharCode(uint8Array[i]);
-            }
-            const base64 = btoa(binary);
-            
-            const mimeType = image.mimeType || 'image/jpeg';
-            return `data:${mimeType};base64,${base64}`;
+    /**
+     * Match a GLTF-relative URI (e.g. "textures/foo.png") against the provided files.
+     * Robust to folder imports (webkitRelativePath) and plain multi-select (basename only).
+     */
+    private findFile(uri: string): File | undefined {
+        const target = decodeURIComponent(uri).replace(/\\/g, '/').replace(/^\.?\//, '').toLowerCase();
+        const base = target.split('/').pop()!;
+        // Prefer a relative-path suffix match (disambiguates same-named files in different folders)
+        const file = this.files.find(f => {
+            const rel = ((f as any).webkitRelativePath || f.name).replace(/\\/g, '/').toLowerCase();
+            return rel === target || rel.endsWith('/' + target);
+        });
+        // Fall back to basename (a plain multi-select <input> preserves only basenames)
+        return file ?? this.files.find(f => f.name.toLowerCase() === base);
+    }
+
+    /**
+     * Encode an image stored in a bufferView (embedded / .glb) as a base64 data URI.
+     */
+    private encodeBufferViewImage(image: GLTFImage): string {
+        const bufferView = this.gltf.bufferViews![image.bufferView!];
+        const buffer = this.buffers[bufferView.buffer];
+        const byteOffset = bufferView.byteOffset || 0;
+        const byteLength = bufferView.byteLength;
+
+        const imageData = buffer.slice(byteOffset, byteOffset + byteLength);
+        const uint8Array = new Uint8Array(imageData);
+
+        // Convert to base64
+        let binary = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
         }
-        
-        if (image.uri) {
-            if (image.uri.startsWith('data:')) {
-                return image.uri;
-            } else {
-                // External image file
-                return this.basePath + image.uri;
+        const base64 = btoa(binary);
+
+        const mimeType = image.mimeType || 'image/jpeg';
+        return `data:${mimeType};base64,${base64}`;
+    }
+
+    /**
+     * Resolve a GLTF texture reference into a TextureManager texture id.
+     * Handles embedded bufferView images, data URIs, uploaded external files
+     * (file-import flow), and external paths (path-load flow).
+     */
+    private loadTexture(textureIndex: number): string | undefined {
+        if (!this.gltf.textures || !this.gltf.images) return undefined;
+
+        const texture = this.gltf.textures[textureIndex];
+        if (!texture || texture.source === undefined) return undefined;
+
+        const image = this.gltf.images[texture.source];
+        const cfg = { wrapping: 'repeat' as const };
+
+        try {
+            // 1. Embedded image (bufferView) -> base64
+            if (image.bufferView !== undefined) {
+                const base64 = this.encodeBufferViewImage(image);
+                return TextureManager.Instance.addTextureFromBase64(base64, { ...cfg, mipMap: false });
             }
+
+            // 2. Inline data URI
+            if (image.uri && image.uri.startsWith('data:')) {
+                return TextureManager.Instance.addTextureFromBase64(image.uri, { ...cfg, mipMap: false });
+            }
+
+            // 3. External URI
+            if (image.uri) {
+                // 3a. File-import flow: resolve against the provided files (folder or multi-select)
+                if (this.files.length) {
+                    const file = this.findFile(image.uri);
+                    if (file) return TextureManager.Instance.addTextureFromFile(file, cfg);
+                }
+                // 3b. Path-load flow: resolve relative to the GLTF's base path
+                return TextureManager.Instance.addTextureFromPath(this.basePath + image.uri, cfg);
+            }
+        } catch (error) {
+            console.warn('Failed to load texture:', error);
         }
-        
-        throw new Error('Image has no valid data source');
+
+        return undefined;
     }
 
     private async parseMeshes(): Promise<{name: string, geometry: Geometry, material: Material}[]> {
@@ -460,59 +516,9 @@ export class GLTFLoader {
         // Load textures
         const textures: any = {};
 
-        if (pbr?.baseColorTexture && this.gltf.textures && this.gltf.images) {
-            const textureIndex = pbr.baseColorTexture.index;
-            const texture = this.gltf.textures[textureIndex];
-            if (texture.source !== undefined) {
-                const image = this.gltf.images[texture.source];
-                try {
-                    const imageData = await this.loadImageFromBufferView(image);
-                    if (imageData.startsWith('data:')) {
-                        textures.base = TextureManager.Instance.addTextureFromBase64(imageData, { wrapping: 'repeat', mipMap: false });
-                    } else {
-                        textures.base = TextureManager.Instance.addTextureFromPath(imageData, { wrapping: 'repeat' });
-                    }
-                } catch (error) {
-                    console.warn('Failed to load base color texture:', error);
-                }
-            }
-        }
-
-        if (gltfMaterial.normalTexture && this.gltf.textures && this.gltf.images) {
-            const textureIndex = gltfMaterial.normalTexture.index;
-            const texture = this.gltf.textures[textureIndex];
-            if (texture.source !== undefined) {
-                const image = this.gltf.images[texture.source];
-                try {
-                    const imageData = await this.loadImageFromBufferView(image);
-                    if (imageData.startsWith('data:')) {
-                        textures.normal = TextureManager.Instance.addTextureFromBase64(imageData, { wrapping: 'repeat', mipMap: false });
-                    } else {
-                        textures.normal = TextureManager.Instance.addTextureFromPath(imageData, { wrapping: 'repeat' });
-                    }
-                } catch (error) {
-                    console.warn('Failed to load normal texture:', error);
-                }
-            }
-        }
-
-        if (gltfMaterial.emissiveTexture && this.gltf.textures && this.gltf.images) {
-            const textureIndex = gltfMaterial.emissiveTexture.index;
-            const texture = this.gltf.textures[textureIndex];
-            if (texture.source !== undefined) {
-                const image = this.gltf.images[texture.source];
-                try {
-                    const imageData = await this.loadImageFromBufferView(image);
-                    if (imageData.startsWith('data:')) {
-                        textures.emissive = TextureManager.Instance.addTextureFromBase64(imageData, { wrapping: 'repeat', mipMap: false });
-                    } else {
-                        textures.emissive = TextureManager.Instance.addTextureFromPath(imageData, { wrapping: 'repeat' });
-                    }
-                } catch (error) {
-                    console.warn('Failed to load emissive texture:', error);
-                }
-            }
-        }
+        if (pbr?.baseColorTexture) textures.base = this.loadTexture(pbr.baseColorTexture.index);
+        if (gltfMaterial.normalTexture) textures.normal = this.loadTexture(gltfMaterial.normalTexture.index);
+        if (gltfMaterial.emissiveTexture) textures.emissive = this.loadTexture(gltfMaterial.emissiveTexture.index);
 
         return Material.Default({
             diffuse,

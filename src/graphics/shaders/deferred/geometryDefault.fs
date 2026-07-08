@@ -51,7 +51,7 @@ void main() {
 
     vec3 albedo = u_material.diffuse;
     if (u_material.hasBaseTexture)
-        albedo *= texture(u_material.baseTexture, fragTexCoord).rgb;
+        albedo *= pow(texture(u_material.baseTexture, fragTexCoord).rgb, vec3(2.2)); // sRGB -> linear
 
     // Blinn-Phong shininess -> perceptual roughness. Biased rougher (matte) so typical default
     // materials aren't glossy and don't pick up env reflection (shininess 32 -> ~0.49).
@@ -69,7 +69,7 @@ void main() {
     // Match the old forward path's emissive boost of 1.25.
     vec3 emissive = u_material.emissive * 1.25;
     if (u_material.hasEmissiveMap)
-        emissive = texture(u_material.emissiveMap, fragTexCoord).rgb * u_material.emissive * 1.25;
+        emissive = pow(texture(u_material.emissiveMap, fragTexCoord).rgb, vec3(2.2)) * u_material.emissive * 1.25; // sRGB -> linear
 
     gAlbedoMetallic  = vec4(albedo, metallic);
     gNormalRoughness = vec4(normalize(N), roughness);

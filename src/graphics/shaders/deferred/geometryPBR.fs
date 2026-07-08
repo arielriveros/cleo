@@ -50,7 +50,7 @@ vec3 getNormal() {
 void main() {
     vec3 albedo = u_material.baseColor;
     if (u_material.hasBaseColorTexture)
-        albedo *= texture(u_material.baseColorTexture, fragTexCoord).rgb;
+        albedo *= pow(texture(u_material.baseColorTexture, fragTexCoord).rgb, vec3(2.2)); // sRGB -> linear
 
     float metallic = u_material.metallic;
     float roughness = u_material.roughness;
@@ -66,7 +66,7 @@ void main() {
 
     vec3 emissive = u_material.emissiveFactor;
     if (u_material.hasEmissiveMap)
-        emissive = texture(u_material.emissiveMap, fragTexCoord).rgb * u_material.emissiveFactor;
+        emissive = pow(texture(u_material.emissiveMap, fragTexCoord).rgb, vec3(2.2)) * u_material.emissiveFactor; // sRGB -> linear
 
     vec3 N = normalize(getNormal());
 

@@ -29,6 +29,14 @@ float gridLine(vec2 coord, float scale) {
     return 1.0 - clamp(min(l.x, l.y), 0.0, 1.0);
 }
 
+// Anti-aliased coverage for a single center axis at c == 0. Measures distance from the
+// axis in *pixels* using c's own screen-space derivative, so the line keeps a constant
+// ~1px width instead of smearing into a wide band at grazing/horizon angles.
+float axisLine(float c) {
+    float d = fwidth(c);
+    return 1.0 - clamp(abs(c) / max(d, 1e-8) - 1.0, 0.0, 1.0);
+}
+
 void main() {
     // 1. Reconstruct the world-space ray through this pixel (near -> far).
     vec2 ndc = fragTexCoord * 2.0 - 1.0;
@@ -69,13 +77,17 @@ void main() {
     a = max(a, coarse);
     vec3 col = vec3(0.55);
 
-    // 5. Colored center axes baked into the grid (the two in-plane axes).
-    float axisW = 1.5 * px;
-    if (abs(coord.x) < axisW) { col = vec3(0.90, 0.25, 0.25); a = 1.0; } // X = red
-    if (abs(coord.y) < axisW) {
+    // 5. Colored center axes baked into the grid (the two in-plane axes). AA, constant
+    //    pixel width (see axisLine) so they stay thin and don't band out at the horizon.
+    // coord.y == 0 is the X axis in both planes (points with z=0 or y=0) -> red.
+    // coord.x == 0 is the in-plane depth/vertical axis -> Z (ground, blue) or Y (front, green).
+    float xAxis = axisLine(coord.x);
+    float yAxis = axisLine(coord.y);
+    if (yAxis > 0.0) { col = vec3(0.90, 0.25, 0.25); a = max(a, yAxis); } // X = red
+    if (xAxis > 0.0) {
         col = (u_plane == 0) ? vec3(0.25, 0.45, 0.95)  // Z = blue (3D ground)
                              : vec3(0.30, 0.85, 0.35); // Y = green (2D front)
-        a = 1.0;
+        a = max(a, xAxis);
     }
 
     // 6. Distance fade => infinite illusion and no far-field shimmer.
