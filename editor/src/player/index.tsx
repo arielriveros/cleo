@@ -4,6 +4,8 @@ import EventEmitter from 'events';
 import { CleoEngine, Scene } from 'cleo';
 import { UIRuntime } from '../features/uiInspector/uiRuntime';
 import PlayerUI from './PlayerUI';
+import { reinflate } from './reinflate';
+import { attachScripts } from './attachScripts';
 
 // Standalone, data-driven runtime for a published Cleo game. It loads a serialized game JSON
 // (built by the editor via buildGameData) and runs it outside the editor, mirroring the editor's
@@ -42,7 +44,9 @@ async function loadGameData(): Promise<any> {
 }
 
 async function boot(): Promise<void> {
-  const data = await loadGameData();
+  const raw = await loadGameData();
+  // Expand the compact publish format (assets table -> inline) back into what Scene.parse expects.
+  const data = reinflate(raw);
 
   const engine = new CleoEngine({
     graphics: data?.config?.graphics ?? { clearColor: [0, 0, 0, 1] },
@@ -54,9 +58,18 @@ async function boot(): Promise<void> {
   engine.setViewport(viewport);
   engine.input.preventDefault();
 
-  // Rebuild the scene from the serialized data (useCache=false -> textures rebuilt from base64).
+  // Rebuild the scene from the serialized data (useCache=false -> textures rebuilt from base64/paths).
   const scene = new Scene();
   scene.parse(data, false);
+  // Attach published scripts (real functions from game.scripts.js) before the scene starts.
+  const attached = attachScripts(scene);
+
+  // Startup summary — helps diagnose a published game (open the console to see it).
+  const scriptCount = Object.keys((window as any).CLEO_GAME_SCRIPTS || {}).length;
+  const texCount = data?.assets?.textures?.length ?? data?.textures?.length ?? 0;
+  const geoCount = Object.keys(data?.assets?.geometries || {}).length;
+  console.info(`[Cleo] nodes=${[...scene.nodes].length} scriptsInFile=${scriptCount} scriptsAttached=${attached} textures=${texCount} geometries=${geoCount}`);
+
   engine.setScene(scene);
   engine.isPaused = false;
   engine.run();

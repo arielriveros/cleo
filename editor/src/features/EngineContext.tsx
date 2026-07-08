@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager, SpriteNode, Sprite } from "cleo";
-import { CameraGeometry, GridGeometry } from "../utils/EditorModels";
+import { CameraGeometry } from "../utils/EditorModels";
 import NullImage from '../images/null.png';
 import DinosaurImage from '../images/dinosaur.png';
 import LightIcon from '../icons/light.png';
@@ -217,6 +217,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           
           engine.run();
 
+          // Enable the editor infinite-grid overlay (ground/XZ plane by default).
+          engine.renderer.setGridVisible(true);
+          engine.renderer.setGridPlane('xz');
+
           setLoadingProgress({ loaded: 6, total: 6, label: 'Ready' });
         } finally {
           // Always dismiss the splash, even if an asset failed to load,
@@ -294,9 +298,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             }
         };
 
-        // Rotate Grid
-        const grid = editorSceneRef.current.getNodesByName('__editor__Grid')[0];
-        grid.setRotation([90, 0, 0]);
+        // Orient the infinite grid onto the front (XY) plane for 2D.
+        instanceRef.current.renderer.setGridPlane('xy');
       }
       else {
         cameraNode.camera.type = 'perspective';
@@ -320,9 +323,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           }
         };
 
-        // Rotate Grid
-        const grid = editorSceneRef.current.getNodesByName('__editor__Grid')[0];
-        grid.setRotation([0, 0, 0]);
+        // Orient the infinite grid onto the ground (XZ) plane for 3D.
+        instanceRef.current.renderer.setGridPlane('xz');
       }
     });
 

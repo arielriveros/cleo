@@ -1,12 +1,15 @@
 import JSZip from 'jszip';
 import { externalizeAssets, ExternalAsset } from './externalizeAssets';
+import { packAssets } from './packAssets';
+import { extractScripts, generateScriptsJs } from './extractScripts';
 
 // The files that make up a published game.
 export interface PublishFiles {
   indexHtml: string;
-  gameJs: string;   // the player+engine bundle
-  gameJson: string; // serialized game data (assets embedded as base64, or referencing ./assets/*)
-  assets?: ExternalAsset[]; // loose asset files (only when publishing with embedAssets=false)
+  gameJs: string;   // the player+engine bundle (static)
+  gameJson: string; // serialized game data (scene + `assets` table; no scripts)
+  scriptsJs: string; // per-game scripts as real functions (game.scripts.js)
+  assets?: ExternalAsset[]; // loose image files (only when publishing with embedAssets=false)
 }
 
 export interface PublishOptions {
@@ -48,16 +51,24 @@ async function loadPlayerTemplates(): Promise<{ indexHtml: string; gameJs: strin
   return { indexHtml: await htmlRes.text(), gameJs: await jsRes.text() };
 }
 
-// Build the file set. When embedAssets is false, pull images out to loose assets/ files first.
+// Build the file set. Transform order: optional image externalization -> geometry/asset packing ->
+// script extraction. game.json ends up with an `assets` table and no script strings; scripts ship as
+// real functions in game.scripts.js.
 export async function assemblePublishFiles(data: any, options?: PublishOptions): Promise<PublishFiles> {
   const { indexHtml, gameJs } = await loadPlayerTemplates();
+
   let assets: ExternalAsset[] | undefined;
   if (options && options.embedAssets === false) {
     const result = externalizeAssets(data);
     data = result.data;
     assets = result.assets;
   }
-  return { indexHtml, gameJs, gameJson: JSON.stringify(data), assets };
+
+  packAssets(data); // dedupe geometry into data.assets.geometries + move textures under data.assets
+  const { scripts } = extractScripts(data); // strip node scripts out of data
+  const scriptsJs = await generateScriptsJs(scripts); // real functions, heavily obfuscated
+
+  return { indexHtml, gameJs, gameJson: JSON.stringify(data), scriptsJs, assets };
 }
 
 function addAssetsToZip(zip: JSZip, assets?: ExternalAsset[]): void {
@@ -80,6 +91,7 @@ export async function publishWeb(data: any, options?: PublishOptions, name = 'cl
   const zip = new JSZip();
   zip.file('index.html', files.indexHtml);
   zip.file('game.js', files.gameJs);
+  zip.file('game.scripts.js', files.scriptsJs);
   zip.file('game.json', files.gameJson);
   addAssetsToZip(zip, files.assets);
   const blob = await zip.generateAsync({ type: 'blob' });

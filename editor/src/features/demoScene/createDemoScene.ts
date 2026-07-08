@@ -1,5 +1,5 @@
 import { Scene, Camera, LightNode, DirectionalLight, CameraNode, Model, Geometry, Material, Node, ModelNode, Vec, SpriteNode, Sprite, Texture, Loader, Skybox, SkyboxNode, AnimatedModel, TextureManager, PointLight, AnimatedSpriteNode } from 'cleo';
-import { CameraGeometry, GridGeometry } from '../../utils/EditorModels';
+import { CameraGeometry } from '../../utils/EditorModels';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 
 export async function createDemoScene(params: {
@@ -25,32 +25,17 @@ export async function createDemoScene(params: {
   editorCameraNode.active = true;
   editorCameraNode.setPosition([4, 4, 4]).setRotation([30, -135, 0]);
 
-  // Grid + Axes
-  const grid = GridGeometry(200);
-  const editorGridNode = new ModelNode('__editor__Grid', new Model(
-    new Geometry(grid.positions, undefined, grid.texCoords, undefined, undefined, grid.indices, false),
-    Material.Basic({ color: [0.75, 0.75, 0.75] }, { wireframe: true })
-  ));
-
-  const xAxis = new ModelNode('__editor__Xaxis', new Model(
-    new Geometry([[-200, 0, 0], [200, 0, 0]], undefined, undefined, undefined, undefined, [0, 1], false),
-    Material.Basic({ color: [1, 0, 0] }, { wireframe: true })
-  ));
-  xAxis.setPosition([100, 0.001, 0]);
-
+  // Grid + Axes.
+  // The ground grid and its X/Z axes are drawn by the renderer's infinite-grid shader
+  // (enabled by the editor via renderer.setGridVisible). Only the vertical Y axis remains
+  // a mesh, since it lies out of the ground plane and isn't covered by the grid shader.
   const yAxis = new ModelNode('__editor__Yaxis', new Model(
     new Geometry([[0, -200, 0], [0, 200, 0]], undefined, undefined, undefined, undefined, [0, 1], false),
     Material.Basic({ color: [0, 1, 0] }, { wireframe: true })
   ));
   yAxis.setPosition([0, 100, 0.001]);
 
-  const zAxis = new ModelNode('__editor__Zaxis', new Model(
-    new Geometry([[0, 0, -200], [0, 0, 200]], undefined, undefined, undefined, undefined, [0, 1], false),
-    Material.Basic({ color: [0, 0, 1] }, { wireframe: true })
-  ));
-  zAxis.setPosition([0, 0.001, 100]);
-
-  scene.addNodes(editorCameraNode, editorGridNode, xAxis, yAxis, zAxis);
+  scene.addNodes(editorCameraNode, yAxis);
 
   // Environment map (cubemap) just like in the example app
   step('Loading environment map…');

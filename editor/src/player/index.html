@@ -11,6 +11,9 @@
         #ui-root { position: absolute; inset: 0; pointer-events: none; }
         #cleo-error { position: absolute; inset: 0; margin: 0; color: #ff6b6b; background: #111; font-family: monospace; font-size: 13px; padding: 16px; white-space: pre-wrap; overflow: auto; z-index: 9999; }
     </style>
+    <!-- Per-game scripts (real functions, populated at publish). Deferred so it runs before game.js
+         but after the DOM parses; both are `defer` so document order is preserved. -->
+    <script defer src="game.scripts.js"></script>
 </head>
 <body>
     <div id="game-viewport"></div>

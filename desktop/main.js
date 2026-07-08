@@ -89,6 +89,7 @@ async function writeWebFiles(dir, files) {
   await fsp.mkdir(dir, { recursive: true });
   await fsp.writeFile(path.join(dir, 'index.html'), files.indexHtml, 'utf-8');
   await fsp.writeFile(path.join(dir, 'game.js'), files.gameJs, 'utf-8');
+  await fsp.writeFile(path.join(dir, 'game.scripts.js'), files.scriptsJs || 'window.CLEO_GAME_SCRIPTS = {};\n', 'utf-8');
   await fsp.writeFile(path.join(dir, 'game.json'), files.gameJson, 'utf-8');
   await writeAssets(dir, files.assets);
 }

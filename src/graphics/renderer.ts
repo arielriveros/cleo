@@ -31,6 +31,7 @@ import Bloom from './shaders/screen/bloom.fs'
 import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
+import GridFragment from './shaders/screen/grid.fs'
 import PBRVertex from './shaders/materials/pbr.vs'
 import PBRFragment from './shaders/materials/pbr.fs'
 import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
@@ -106,6 +107,10 @@ export class Renderer {
     private _deferred: boolean;
     private _viewProj: mat4 = mat4.create();
     private _invViewProj: mat4 = mat4.create();
+
+    // Editor infinite grid overlay (off in published builds; toggled by the editor)
+    private _gridEnabled: boolean = false;
+    private _gridPlane: 0 | 1 = 0; // 0 = XZ ground (3D), 1 = XY front (2D)
 
     // Reused scratch to avoid per-frame allocations
     private _boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
@@ -207,6 +212,8 @@ export class Renderer {
         const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
         const chromaticAbShader = new Shader().create(ScreenVertex, ChromaticAberration);
         const composerShader = new Shader().create(ScreenVertex, Composer);
+        // Editor infinite grid (fullscreen world-plane pass)
+        const gridShader = new Shader().create(ScreenVertex, GridFragment);
         // Outline shader
         const outlineShader = new Shader().create(OutlineVertex, OutlineFragment);
 
@@ -237,6 +244,7 @@ export class Renderer {
         this._shaderManager.addShader('blur', blurShader);
         this._shaderManager.addShader('chromaticAberration', chromaticAbShader);
         this._shaderManager.addShader('composer', composerShader);
+        this._shaderManager.addShader('grid', gridShader);
         this._shaderManager.addShader('outline', outlineShader);
 
         // Create framebuffers
@@ -624,6 +632,9 @@ export class Renderer {
             skyboxNode.skybox.mesh.draw();
         }
 
+        // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
+        this._renderGrid();
+
         // Collect transparent models, selected models (for outlines), gizmos, and sprites.
         const transparentQueue: ModelNode[] = [];
         const selectedNodes: ModelNode[] = [];
@@ -660,6 +671,47 @@ export class Renderer {
 
         // Sprites (always transparent, forward).
         this._renderSpritesPass(scene);
+    }
+
+    /**
+     * Editor-only infinite reference grid. Renders a single fullscreen quad; the fragment
+     * shader reconstructs a world ray per pixel, intersects the origin plane, and draws
+     * adaptive anti-aliased lines. Depth-tested (via gl_FragDepth) so scene geometry
+     * occludes it, but depth-write is disabled so it stays a pure overlay. No-op unless
+     * the editor has enabled it, so published games never draw it.
+     */
+    private _renderGrid(): void {
+        if (!this._gridEnabled) return;
+
+        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthMask(false);       // overlay: test against scene depth, don't write
+        GLState.enable(gl.BLEND);
+        GLState.disable(gl.CULL_FACE);
+
+        this._shaderManager.bind('grid');
+        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_viewProj', this._viewProj);
+        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_plane', this._gridPlane);
+
+        // Fade radius scales with zoom so the grid always reads as infinite. In perspective
+        // that tracks the camera's distance to the plane; in ortho it tracks the frustum extent.
+        let fadeFar: number;
+        if (this._activeCamera.type === 'orthographic') {
+            const width = Math.abs(this._activeCamera.right - this._activeCamera.left);
+            const height = Math.abs(this._activeCamera.top - this._activeCamera.bottom);
+            fadeFar = Math.max(40, Math.max(width, height) * 2.0);
+        } else {
+            const h = Math.abs(this._gridPlane === 0
+                ? this._activeCamera.position[1]
+                : this._activeCamera.position[2]);
+            fadeFar = Math.max(40, h * 25.0);
+        }
+        this._shaderManager.setUniform('u_fadeFar', fadeFar);
+
+        this._screenQuad.draw();
+
+        GLState.depthMask(true);
     }
 
     private _renderSpritesPass(scene: Scene): void {
@@ -786,6 +838,16 @@ export class Renderer {
 
     public setSelectedNode(nodeId: string | null): void {
         this._selectedNodeId = nodeId;
+    }
+
+    /** Show/hide the editor infinite grid overlay. Off by default (published builds never draw it). */
+    public setGridVisible(visible: boolean): void {
+        this._gridEnabled = visible;
+    }
+
+    /** Orient the grid: 'xz' = ground plane (3D perspective), 'xy' = front plane (2D orthographic). */
+    public setGridPlane(plane: 'xz' | 'xy'): void {
+        this._gridPlane = plane === 'xy' ? 1 : 0;
     }
 
     private _collectAllChildren(node: any, allNodes: any[]): void {

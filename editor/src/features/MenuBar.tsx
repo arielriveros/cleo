@@ -41,6 +41,19 @@ export default function MenuBar() {
           } else if (json.scene?.ui) {
             setUI({ version: json.scene.ui.version ?? 1, elements: json.scene.ui.elements ?? [] });
           }
+          // Move scripts/bodies/triggers from the saved scene into the editor's maps (the source of
+          // truth for Play and Publish), then strip them from the tree so they don't run in edit mode.
+          // Without this, a loaded scene has scripts compiled onto its nodes (running in edit mode) but
+          // empty editor maps, so publishing/playing loses all scripts.
+          const importNodeState = (node: any) => {
+            if (!node || typeof node !== 'object') return;
+            if (typeof node.script === 'string' && node.script.trim()) scripts.set(node.id, node.script);
+            if (node.body) bodies.set(node.id, node.body);
+            if (node.trigger) triggers.set(node.id, node.trigger);
+            delete node.script; delete node.scripts; delete node.body; delete node.trigger;
+            (node.children ?? []).forEach(importNodeState);
+          };
+          if (json.scene) importNodeState(json.scene);
           editorScene?.parse(json);
         }
       };
