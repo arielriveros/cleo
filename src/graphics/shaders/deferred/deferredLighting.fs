@@ -68,11 +68,22 @@ struct SpotLight {
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 uniform SpotLight  u_spotlights[MAX_SPOTLIGHTS];
 
-// IBL
+// IBL (split-sum image-based lighting from the active light probe)
+uniform bool u_useIBL;
+uniform float u_iblIntensity;
+uniform samplerCube u_irradiance;   // diffuse irradiance
+uniform samplerCube u_prefiltered;  // prefiltered specular (mip = roughness)
+uniform sampler2D u_brdfLUT;        // BRDF integration LUT
+// Fallback crude environment reflection (used when no probe is active)
 uniform bool u_useEnvMap;
 uniform samplerCube u_envMap;
 
+// Screen-space ambient occlusion
+uniform bool u_ssaoEnabled;
+uniform sampler2D u_ssao;
+
 const float PI = 3.14159265359;
+const float MAX_REFLECTION_LOD = 4.0;
 
 float pcf(sampler2D shadowMap, vec4 fragPosLS) {
     vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
@@ -185,18 +196,36 @@ void main() {
     vec3 worldPos = reconstructWorldPos(depth);
     vec3 V = normalize(u_viewPos - worldPos);
 
-    // Ambient (IBL approximation), matching materials/pbr.fs
+    // Indirect lighting. When a light probe / environment is available, use full split-sum IBL
+    // (diffuse irradiance + prefiltered specular + BRDF LUT); otherwise fall back to flat ambient.
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    vec3 kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+    float ssao = 1.0;
+    if (u_ssaoEnabled) ssao = texture(u_ssao, fragTexCoord).r;
 
-    vec3 ambient = vec3(0.1) * albedo;
-    if (u_useEnvMap) {
+    vec3 ambient;
+    if (u_useIBL) {
+        vec3 F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+        vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+
+        vec3 irradiance = texture(u_irradiance, N).rgb;
+        vec3 diffuseIBL = irradiance * albedo;
+
         vec3 R = reflect(-V, N);
-        vec3 env = texture(u_envMap, R).rgb;
-        // Strong roughness falloff so only smooth surfaces reflect the env map; kS keeps it
-        // metallic-aware (metals reflect strongly, dielectrics stay subtle, matte surfaces ~none).
-        float specAtten = pow(1.0 - roughness, 4.0);
-        ambient += env * kS * specAtten;
+        vec3 prefiltered = textureLod(u_prefiltered, R, roughness * MAX_REFLECTION_LOD).rgb;
+        vec2 brdf = texture(u_brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+        vec3 specularIBL = prefiltered * (F * brdf.x + brdf.y);
+
+        ambient = (kD * diffuseIBL + specularIBL) * u_iblIntensity;
+    } else {
+        // No probe: original crude ambient + optional environment reflection.
+        ambient = vec3(0.1) * albedo;
+        if (u_useEnvMap) {
+            vec3 kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+            vec3 R = reflect(-V, N);
+            vec3 env = texture(u_envMap, R).rgb;
+            float specAtten = pow(1.0 - roughness, 4.0);
+            ambient += env * kS * specAtten;
+        }
     }
 
     vec3 Lo = vec3(0.0);
@@ -226,7 +255,7 @@ void main() {
         accumulateLight(N, V, albedo, metallic, roughness, L, u_spotlights[i].diffuse * att * intensity, Lo);
     }
 
-    vec3 color = ambient * ao + Lo + emissive;
+    vec3 color = ambient * ao * ssao + Lo + emissive;
     // Lit surfaces get the filmic tonemap + sRGB encode. Unlit "basic" materials write zero albedo
     // and pass their authored color through the emissive channel (see geometryBasic.fs) — display
     // those as-is so flat/debug colors keep their exact brightness and don't bloom.

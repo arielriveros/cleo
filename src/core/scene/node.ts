@@ -3,9 +3,11 @@ import { RigidBody, Trigger } from "../../physics/body";
 import { Model } from "../../graphics/model";
 import { AnimatedModel } from "../../graphics/animatedModel";
 import { Animator, AnimationMapping } from "../../graphics/animator";
+import type { RagdollOptions } from "../../physics/ragdoll";
 import { Sprite } from "../../graphics/sprite";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Skybox } from "../../graphics/skybox";
+import { Texture } from "../../graphics/texture";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
 import { v4 as uuidv4 } from 'uuid';
@@ -14,7 +16,7 @@ import { CleoEngine, InputManager, Shape } from "../../cleo";
 import { Logger } from "../logger";
 import { Terrain } from "../../terrain/terrain";
 
-type NodeType = 'node' | 'model' | 'light' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape';
+type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape';
 
 export type NodeVariableType = 'number' | 'string' | 'boolean' | 'vec3';
 export interface NodeVariable {
@@ -445,6 +447,8 @@ export class Node {
           ModelNode.parse(node, child);
         else if (child.type === 'light')
           LightNode.parse(node, child);
+        else if (child.type === 'lightProbe')
+          LightProbeNode.parse(node, child);
         else if (child.type === 'skybox')
           SkyboxNode.parse(node, child);
         else if (child.type === 'camera')
@@ -799,6 +803,8 @@ export class ModelNode extends Node {
     private _initialized: boolean;
     private _animator: Animator | null;
     private _movementDirection: vec3;
+    /** Optional per-node ragdoll simulation config (skinned meshes). Persisted with the scene; read by Ragdoll. */
+    private _ragdollConfig: RagdollOptions | null = null;
 
     constructor(name: string, model: Model | AnimatedModel, id: string = uuidv4()) {
         super(name, 'model', id);
@@ -875,7 +881,8 @@ export class ModelNode extends Node {
                     children: children,
                     variables: this._serializeVariables(),
                     model: model,
-                    animationMappings: animationMappings
+                    animationMappings: animationMappings,
+                    ragdoll: this._ragdollConfig
                 });
             });
         });
@@ -891,13 +898,18 @@ export class ModelNode extends Node {
         if (json.animationMappings && node.animator) {
             node.animator.setAnimationMappings(json.animationMappings);
         }
-        
+
+        // Restore ragdoll config if present
+        if (json.ragdoll) node.ragdollConfig = json.ragdoll;
+
         Node._commonParse(node, parent, json);
     }
 
     public get model(): Model | AnimatedModel { return this._model; }
     public get initialized(): boolean { return this._initialized; }
     public get animator(): Animator | null { return this._animator; }
+    public get ragdollConfig(): RagdollOptions | null { return this._ragdollConfig; }
+    public set ragdollConfig(config: RagdollOptions | null) { this._ragdollConfig = config; }
     public get movementDirection(): vec3 { return this._movementDirection; }
     public set movementDirection(direction: vec3) { 
         vec3.copy(this._movementDirection, direction);
@@ -1222,6 +1234,107 @@ export class LightNode extends Node {
         );
         
         return { min, max };
+    }
+}
+
+/**
+ * A light probe captures the surrounding scene into a cubemap and provides image-based lighting
+ * (diffuse irradiance + prefiltered specular) for PBR. The actual capture/convolution is done by the
+ * renderer (`Renderer.captureProbe`), which fills this node's baked maps. Two modes:
+ *  - 'baked'    : captured once (on add, on load, or via the editor "Bake" button).
+ *  - 'realtime' : re-captured every `updateFrequency` seconds for dynamic reflections.
+ * The baked GPU cubemaps are not serialized (they'd lose HDR); instead the probe re-bakes on load.
+ */
+export class LightProbeNode extends Node {
+    private _resolution: number;
+    private _mode: 'baked' | 'realtime';
+    private _updateFrequency: number; // seconds (realtime mode)
+    private _intensity: number;
+    private _needsBake: boolean = true;
+    private _lastBakeTime: number = 0;
+    private _sourceCube: Texture | null = null;
+    private _irradiance: Texture | null = null;
+    private _prefiltered: Texture | null = null;
+
+    constructor(
+        name: string,
+        options: { resolution?: number, mode?: 'baked' | 'realtime', updateFrequency?: number, intensity?: number } = {},
+        id: string = uuidv4()
+    ) {
+        super(name, 'lightProbe', id);
+        this._resolution = options.resolution ?? 256;
+        this._mode = options.mode ?? 'baked';
+        this._updateFrequency = options.updateFrequency ?? 1;
+        this._intensity = options.intensity ?? 1;
+    }
+
+    // --- Editor-facing properties (setting the ones that affect the capture flags a re-bake) ---
+    public get resolution(): number { return this._resolution; }
+    public set resolution(v: number) { const n = Math.max(16, Math.floor(v)); if (n !== this._resolution) { this._resolution = n; this._needsBake = true; } }
+    public get mode(): 'baked' | 'realtime' { return this._mode; }
+    public set mode(v: 'baked' | 'realtime') { this._mode = v; if (v === 'realtime') this._needsBake = true; }
+    public get updateFrequency(): number { return this._updateFrequency; }
+    public set updateFrequency(v: number) { this._updateFrequency = Math.max(0, v); }
+    public get intensity(): number { return this._intensity; }
+    public set intensity(v: number) { this._intensity = Math.max(0, v); }
+
+    // --- Renderer-facing baking state ---
+    public get needsBake(): boolean { return this._needsBake; }
+    public get lastBakeTime(): number { return this._lastBakeTime; }
+    public get hasBakedMaps(): boolean { return this._irradiance !== null && this._prefiltered !== null; }
+    public get irradiance(): Texture | null { return this._irradiance; }
+    public get prefiltered(): Texture | null { return this._prefiltered; }
+    /** Request a (re)capture on the next frame — used by the editor "Bake" button. */
+    public bake(): void { this._needsBake = true; }
+    public markBaked(time: number): void { this._needsBake = false; this._lastBakeTime = time; }
+    public setBakedMaps(source: Texture, irradiance: Texture, prefiltered: Texture): void {
+        this._sourceCube?.delete();
+        this._irradiance?.delete();
+        this._prefiltered?.delete();
+        this._sourceCube = source;
+        this._irradiance = irradiance;
+        this._prefiltered = prefiltered;
+    }
+
+    public getBoundingBox(): { min: vec3, max: vec3 } {
+        const position = this.worldPosition;
+        const scale = this.worldScale;
+        const radius = Math.max(scale[0], scale[1], scale[2]) * 0.5;
+        const min = vec3.fromValues(position[0] - radius, position[1] - radius, position[2] - radius);
+        const max = vec3.fromValues(position[0] + radius, position[1] + radius, position[2] + radius);
+        return { min, max };
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve) => {
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    id: this._id,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children,
+                    variables: this._serializeVariables(),
+                    resolution: this._resolution,
+                    mode: this._mode,
+                    updateFrequency: this._updateFrequency,
+                    intensity: this._intensity
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        const node = new LightProbeNode(json.name, {
+            resolution: json.resolution,
+            mode: json.mode,
+            updateFrequency: json.updateFrequency,
+            intensity: json.intensity
+        }, json.id);
+        Node._commonParse(node, parent, json);
+        parent.addChild(node);
     }
 }
 

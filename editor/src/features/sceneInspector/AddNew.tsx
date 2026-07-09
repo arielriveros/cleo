@@ -5,6 +5,7 @@ import {
   Node,
   ModelNode,
   LightNode,
+  LightProbeNode,
   DirectionalLight,
   PointLight,
   SkyboxNode,
@@ -177,6 +178,16 @@ export default function AddNew() {
     addNode(spotlightNode);
   }
 
+  const addLightProbe = () => {
+    const probeNode = new LightProbeNode('light probe');
+    // Wireframe sphere helper so the probe is visible/selectable in the viewport (stripped at publish).
+    const debugModel = new Model(Geometry.Sphere(16), Material.Basic({ color: [0.4, 0.8, 1] }, { wireframe: true, castShadow: false }));
+    const debugNode = new ModelNode('__editor__ProbeHelper', debugModel);
+    debugNode.setUniformScale(0.3);
+    probeNode.addChild(debugNode);
+    addNode(probeNode);
+  }
+
   const addSprite = () => {
     const sprite = new Sprite(Material.Basic({}));
     const spriteNode = new SpriteNode('sprite', sprite, 'spherical');
@@ -268,6 +279,7 @@ export default function AddNew() {
           Environment
           <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addSkybox()} label='Skybox' icon={SkyboxIcon} />
+            <AddButton onClick={() => addLightProbe()} label='Light Probe' icon={SphereIcon} />
           </div>
         </div>
       </div>

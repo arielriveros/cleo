@@ -4,6 +4,15 @@ import { Node, ModelNode } from '../core/scene/node';
 import { InputManager } from '../input/inputManager';
 
 /**
+ * Minimal structural view of a physics body used to drive ragdoll bones.
+ * Matches cannon-es Body (position/quaternion) without importing the physics layer.
+ */
+export interface RagdollBodyRef {
+    position: { x: number; y: number; z: number };
+    quaternion: { x: number; y: number; z: number; w: number };
+}
+
+/**
  * Animation mapping interface for trigger-based animation playback
  */
 export interface AnimationMapping {
@@ -283,7 +292,15 @@ export class Animator {
     private _blendTime: number = 0.3; // Default blend time in seconds
     private _currentBlendTime: number = 0;
     private _isBlending: boolean = false;
-    
+
+    // Ragdoll: when active, bone matrices are driven by physics bodies instead of animation.
+    // Every joint is driven by the nearest ancestor bone that owns a body, so bones without their own
+    // body (e.g. pruned fingers) ride rigidly on their limb. finalBoneMatrix = inv(nodeWorld) * bodyWorld * offset;
+    // the constant offset captures the bone's full start pose incl. any embedded rig scale, so bones
+    // follow only the body's RIGID motion (no scale reconstruction) and scaled rigs don't blow up.
+    private _ragdollActive: boolean = false;
+    private _ragdollDrive: Map<number, { body: RagdollBodyRef, offset: mat4 }> | null = null;
+
     constructor(animatedModel: AnimatedModel, node?: Node) {
         this._animatedModel = animatedModel;
         this._node = node || null;
@@ -430,6 +447,12 @@ export class Animator {
      * Update animation state
      */
     public update(deltaTime: number): void {
+        // Ragdoll takes over: drive bones from physics bodies, skip all animation.
+        if (this._ragdollActive) {
+            this._updateRagdollMatrices();
+            return;
+        }
+
         // Calculate speed if node is available
         if (this._node && deltaTime > 0) {
             const currentPosition = this._node.position;
@@ -664,7 +687,90 @@ export class Animator {
         this._currentTime = 0;
     }
     public reset(): void { this._currentTime = 0; }
-    
+
+    // ---- Ragdoll drive mode ----
+
+    /** True while bones are driven by physics bodies instead of animation. */
+    public get ragdollActive(): boolean { return this._ragdollActive; }
+
+    /**
+     * Hand the skeleton over to physics: bone matrices are computed from the given
+     * per-joint bodies (keyed by GLTF node index) every frame instead of from animation.
+     */
+    public enableRagdoll(bodies: Map<number, RagdollBodyRef>): void {
+        this._ragdollActive = true;
+        this._playing = false;
+        this._ragdollDrive = new Map();
+        if (!this._skin || !this._node) return;
+
+        // Walk up the skeleton to the nearest ancestor (inclusive) that owns a body.
+        const parentOf = new Map<number, number | undefined>();
+        for (const j of this._skin.joints) parentOf.set(j.nodeIndex, j.parentIndex);
+        const drivingIndex = (nodeIndex: number): number | null => {
+            let n: number | undefined = nodeIndex;
+            while (n !== undefined) {
+                if (bodies.has(n)) return n;
+                n = parentOf.get(n);
+            }
+            return null;
+        };
+
+        // Snapshot each bone's fixed offset from its driving body at hand-off:
+        //   offset = inverse(bodyWorld0) * nodeWorld0 * finalBoneMatrix0
+        // bodyWorld0 is built rigidly (pos+quat) from the body's spawn pose, so all scale lives in
+        // finalBoneMatrix0 and is carried through unchanged. At t=0 this reproduces the exact pose.
+        const nodeWorld0 = this._node.worldTransform;
+        const bodyWorld0 = mat4.create();
+        const bodyInv0 = mat4.create();
+        for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
+            const joint = this._skin.joints[jointIndex];
+            const bi = drivingIndex(joint.nodeIndex);
+            if (bi === null) continue; // no bodied ancestor: keep this bone's last matrix
+            const body = bodies.get(bi)!;
+            const q = body.quaternion, p = body.position;
+            mat4.fromRotationTranslation(bodyWorld0, [q.x, q.y, q.z, q.w], [p.x, p.y, p.z]);
+            mat4.invert(bodyInv0, bodyWorld0);
+            const offset = mat4.create();
+            mat4.multiply(offset, nodeWorld0, this._finalBoneMatrices[jointIndex]); // nodeWorld0 * FBM0
+            mat4.multiply(offset, bodyInv0, offset);                                // inverse(bodyWorld0) * ...
+            this._ragdollDrive.set(joint.nodeIndex, { body, offset });
+        }
+    }
+
+    /** Return control of the skeleton to the animation system. */
+    public disableRagdoll(): void {
+        this._ragdollActive = false;
+        this._ragdollDrive = null;
+    }
+
+    /**
+     * Compute final bone matrices from ragdoll bodies. Each body carries a bone's
+     * world transform; convert it to model space via the owning node's inverse world
+     * transform, then apply the inverse bind matrix (matching the animation path).
+     * Runs after the physics step, so bodies hold this frame's settled pose.
+     */
+    private _updateRagdollMatrices(): void {
+        if (!this._skin || !this._ragdollDrive || !this._node) return;
+
+        const nodeInv = mat4.create();
+        mat4.invert(nodeInv, this._node.worldTransform);
+
+        const bodyWorld = mat4.create();
+        const tmp = mat4.create();
+
+        for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
+            const joint = this._skin.joints[jointIndex];
+            const drive = this._ragdollDrive.get(joint.nodeIndex);
+            if (!drive) continue; // no bodied ancestor: keep its last matrix
+
+            // finalBoneMatrix = inverse(nodeWorld) * bodyWorld * offset  (bodyWorld built rigidly)
+            const q = drive.body.quaternion, p = drive.body.position;
+            mat4.fromRotationTranslation(bodyWorld, [q.x, q.y, q.z, q.w], [p.x, p.y, p.z]);
+            mat4.multiply(tmp, nodeInv, bodyWorld);
+            mat4.multiply(this._finalBoneMatrices[jointIndex], tmp, drive.offset);
+        }
+    }
+
     /**
      * Set animation mappings for trigger-based playback
      */
@@ -691,6 +797,8 @@ export class Animator {
      * Should be called every frame before update
      */
     public checkTriggers(): void {
+        // While ragdolling, ignore animation triggers (and don't fall back to T-pose).
+        if (this._ragdollActive) return;
         if (!this._animatedModel) return;
         
         // If no mappings, set T-pose by stopping animation

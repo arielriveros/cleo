@@ -1,6 +1,8 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, LandscapeNode, LightNode, ModelNode, Node, SkyboxNode, SpriteNode } from "./node";
+import { CameraNode, LandscapeNode, LightNode, LightProbeNode, ModelNode, Node, SkyboxNode, SpriteNode } from "./node";
+import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
+import type { PhysicsSystem } from "../../physics/physicsSystem";
 
 export class Scene {
     private _root: Node = new Node('root');
@@ -10,10 +12,15 @@ export class Scene {
     private _models: Set<ModelNode>;
     private _sprites: Set<SpriteNode>;
     private _landscapes: Set<LandscapeNode>;
+    private _lightProbes: Set<LightProbeNode>;
     private _skybox: SkyboxNode | null;
     private _environmentMap: Texture | null = null;
     private _dirty: boolean = true;
     private _hasStarted: boolean = false;
+
+    /** Back-reference to the physics system driving this scene (set by PhysicsSystem.set scene).
+     *  Exposes physics to node scripts via the injected `scene` identifier (e.g. scene.physics.startRagdoll). */
+    public physics!: PhysicsSystem;
 
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
@@ -26,6 +33,7 @@ export class Scene {
         this._models = new Set();
         this._sprites = new Set();
         this._landscapes = new Set();
+        this._lightProbes = new Set();
         this._skybox = null;
 
         // TODO: Move this to a LightManager class
@@ -127,6 +135,7 @@ export class Scene {
         this._models = new Set();
         this._sprites = new Set();
         this._landscapes = new Set();
+        this._lightProbes = new Set();
         this._skybox = null;
         for (const node of this._nodes) {
             if (node instanceof LightNode)
@@ -137,6 +146,8 @@ export class Scene {
                 this._sprites.add(node);
             if (node instanceof LandscapeNode)
                 this._landscapes.add(node);
+            if (node instanceof LightProbeNode)
+                this._lightProbes.add(node);
             if (node instanceof SkyboxNode)
                 this._skybox = node;
             if (node instanceof CameraNode)
@@ -292,6 +303,24 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._skybox;
+    }
+
+    public get lightProbes(): Set<LightProbeNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._lightProbes;
+    }
+
+    /** The light probe nearest the given world position that has baked maps, or null. */
+    public activeProbe(position: vec3): LightProbeNode | null {
+        let nearest: LightProbeNode | null = null;
+        let nearestDist = Infinity;
+        for (const probe of this.lightProbes) {
+            if (!probe.hasBakedMaps) continue;
+            const d = vec3.squaredDistance(position, probe.worldPosition);
+            if (d < nearestDist) { nearestDist = d; nearest = probe; }
+        }
+        return nearest;
     }
 
     public get environmentMap(): Texture | null { return this._environmentMap; }

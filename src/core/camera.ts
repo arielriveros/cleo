@@ -17,6 +17,7 @@ export class Camera {
     private _type: 'perspective' | 'orthographic';
     private _position: vec3 = vec3.create();
     private _eye: vec3 = vec3.create();
+    private _up: vec3 = vec3.clone(UP);
     private _fov: number;
     private _near: number;
     private _far: number;
@@ -60,6 +61,10 @@ export class Camera {
     public set position(value: vec3) { vec3.copy(this._position, value); this._viewDirty = true; }
     public get eye(): vec3 { return this._eye; }
     public set eye(value: vec3) { vec3.copy(this._eye, value); this._viewDirty = true; }
+    // Up vector for the view matrix. Defaults to world up; set explicitly for cube-map capture,
+    // where the +Y / -Y faces need a non-default up.
+    public get up(): vec3 { return this._up; }
+    public set up(value: vec3) { vec3.copy(this._up, value); this._viewDirty = true; }
     public get fov(): number { return this._fov; }
     public set fov(value: number) { if (value !== this._fov) { this._fov = value; this._projDirty = true; } }
     public get near(): number { return this._near; }
@@ -77,7 +82,7 @@ export class Camera {
 
     public get viewMatrix(): mat4 {
         if (this._viewDirty) {
-            mat4.lookAt(this._view, this._position, this._eye, UP);
+            mat4.lookAt(this._view, this._position, this._eye, this._up);
             this._viewDirty = false;
         }
         return this._view;

@@ -111,7 +111,27 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
         });
     };
 
-    // Update gizmo position to follow selected node
+    // Screen-space size factor: keep the gizmo a constant apparent size regardless of the camera
+    // distance. For a perspective camera the world size needed to cover a fixed fraction of the
+    // viewport grows linearly with distance and with tan(fov/2). For an orthographic camera the
+    // apparent size is distance-independent, so we derive it from the vertical ortho extent.
+    const GIZMO_SCREEN_SIZE = 0.15;
+    const computeGizmoScale = (worldPos: ArrayLike<number>): number => {
+        const cam = instance?.scene?.activeCamera?.camera;
+        if (!cam) return 1;
+        if (cam.type === 'orthographic') {
+            return Math.max((cam.top - cam.bottom) * GIZMO_SCREEN_SIZE, 1e-3);
+        }
+        const camPos = cam.position;
+        const dx = camPos[0] - worldPos[0];
+        const dy = camPos[1] - worldPos[1];
+        const dz = camPos[2] - worldPos[2];
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const halfFov = (cam.fov * Math.PI / 180) / 2;
+        return Math.max(dist * Math.tan(halfFov) * GIZMO_SCREEN_SIZE, 1e-3);
+    };
+
+    // Update gizmo position (and constant-size scale) to follow selected node
     const updateGizmoPosition = () => {
         if (!selectedNodeId || !editorScene) return;
 
@@ -119,12 +139,19 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
         if (!selectedNode) return;
 
         const worldPos = selectedNode.worldPosition;
-        
-        // Update gizmo position to match selected node
-        if (gizmoNodes.xAxis) gizmoNodes.xAxis.setPosition([worldPos[0] + 0.5, worldPos[1], worldPos[2]]);
-        if (gizmoNodes.yAxis) gizmoNodes.yAxis.setPosition([worldPos[0], worldPos[1] + 0.5, worldPos[2]]);
-        if (gizmoNodes.zAxis) gizmoNodes.zAxis.setPosition([worldPos[0], worldPos[1], worldPos[2] + 0.5]);
-        
+        const s = computeGizmoScale(worldPos);
+
+        // Scale both the node transform and the positional offsets by the same factor so the
+        // arrowheads stay attached to the ends of the shafts as the gizmo grows/shrinks.
+        const scaleNode = (node: ModelNode | null) => { if (node) node.setScale([s, s, s]); };
+        scaleNode(gizmoNodes.xAxis); scaleNode(gizmoNodes.yAxis); scaleNode(gizmoNodes.zAxis);
+        scaleNode(gizmoNodes.xLine); scaleNode(gizmoNodes.yLine); scaleNode(gizmoNodes.zLine);
+
+        // Update gizmo position to match selected node (arrow offset scaled by s)
+        if (gizmoNodes.xAxis) gizmoNodes.xAxis.setPosition([worldPos[0] + 0.5 * s, worldPos[1], worldPos[2]]);
+        if (gizmoNodes.yAxis) gizmoNodes.yAxis.setPosition([worldPos[0], worldPos[1] + 0.5 * s, worldPos[2]]);
+        if (gizmoNodes.zAxis) gizmoNodes.zAxis.setPosition([worldPos[0], worldPos[1], worldPos[2] + 0.5 * s]);
+
         if (gizmoNodes.xLine) gizmoNodes.xLine.setPosition([worldPos[0], worldPos[1], worldPos[2]]);
         if (gizmoNodes.yLine) gizmoNodes.yLine.setPosition([worldPos[0], worldPos[1], worldPos[2]]);
         if (gizmoNodes.zLine) gizmoNodes.zLine.setPosition([worldPos[0], worldPos[1], worldPos[2]]);
@@ -309,6 +336,23 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
             updateGizmoPosition();
         }
     }, [isDragging, selectedNodeId]);
+
+    // Keep the gizmo at a constant screen size every frame. The camera can orbit/zoom without a
+    // selection change (which the selection-driven effects wouldn't catch), so recompute the
+    // distance-based scale each animation frame while a node is selected and not in play mode.
+    useEffect(() => {
+        if (!gizmoNodes.xAxis) return;
+        const isRootNode = selectedNodeId === 'root' || selectedNodeId === editorScene?.root?.id;
+        if (!selectedNodeId || isPlayMode || isRootNode) return;
+
+        let raf = 0;
+        const tick = () => {
+            updateGizmoPosition();
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [selectedNodeId, gizmoNodes, isPlayMode, editorScene]);
 
 
     // Set up mouse event listeners

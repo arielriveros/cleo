@@ -1,8 +1,9 @@
-import { Node, ModelNode, SkyboxNode, LightNode, CameraNode, SpriteNode } from 'cleo'
+import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, SpriteNode } from 'cleo'
 import MaterialEditor from './MaterialEditor'
 import SkyboxEditor from './SkyboxEditor'
 import TransformEditor from './TransformEditor'
 import LightEditor from './LightEditor'
+import LightProbeEditor from './LightProbeEditor'
 import NodeInfo from './NodeInfo'
 import CameraEditor from './CameraEditor'
 import SpriteEditor from './SpriteEditor'
@@ -22,6 +23,7 @@ export default function PropertyEditor(props: {node: Node}) {
         { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
         { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
         { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }
+        { props.node.nodeType === 'lightProbe' && <LightProbeEditor node={props.node as LightProbeNode} /> }
         { props.node.nodeType === 'skybox' && <SkyboxEditor node={props.node as SkyboxNode} /> }
         { props.node.nodeType === 'camera' && <CameraEditor node={props.node as CameraNode} /> }
 

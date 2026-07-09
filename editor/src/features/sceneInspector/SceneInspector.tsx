@@ -52,6 +52,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
         { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'animatedSprite' && <img src={SpriteIcon} alt='animated sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='inline-block w-4 h-4 mr-1 align-middle' /> }
+        { props.nodeType === 'lightProbe' && <img src={SkyboxIcon} alt='light probe' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeName }
       </div>

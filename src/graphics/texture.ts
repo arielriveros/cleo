@@ -149,17 +149,18 @@ export class Texture {
      * Create the texture from a raw RGBA byte array (e.g. an editable splat map). No mipmaps/flip so the
      * data maps 1:1 to UVs, and it can be partially updated later with `updateRegion`.
      */
-    public createFromData(data: Uint8Array, width: number, height: number): void {
+    public createFromData(data: Uint8Array, width: number, height: number, wrapping: 'clamp' | 'repeat' | 'mirror' = 'clamp'): void {
         this.bind();
         this._data = null;
         this._width = width;
         this._height = height;
+        const wrap = this._getWrappingValue(wrapping);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         gl.texImage2D(this._target, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
         gl.texParameteri(this._target, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(this._target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(this._target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(this._target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(this._target, gl.TEXTURE_WRAP_S, wrap);
+        gl.texParameteri(this._target, gl.TEXTURE_WRAP_T, wrap);
         this.checkForErrors();
         this.unbind();
     }
@@ -240,6 +241,34 @@ export class Texture {
         }
         this.checkForErrors();
         this.unbind();        
+    }
+
+    /**
+     * Allocate an empty renderable cubemap (all 6 faces) with immutable storage, sized `size` per
+     * face and `levels` mip levels. Used as an IBL render target (captured environment, irradiance,
+     * prefiltered specular) — render into a face/level with a framebuffer, then sample as a cubemap.
+     */
+    public createCubemapTarget(size: number, levels: number = 1): void {
+        this.bind();
+        this._width = size;
+        this._height = size;
+        this._mipMap = levels > 1;
+        gl.texStorage2D(gl.TEXTURE_CUBE_MAP, levels, this._internalFormat, size, size);
+
+        const minFilter = levels > 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR;
+        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, minFilter);
+        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+        this.unbind();
+    }
+
+    /** (Re)generate the mip chain for this texture — e.g. after rendering a captured cubemap. */
+    public generateMipmaps(): void {
+        this.bind();
+        gl.generateMipmap(this._target);
+        this.unbind();
     }
 
     private checkForErrors(): void {

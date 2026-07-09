@@ -2,7 +2,7 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
-import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode } from '../core/scene/node';
+import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode, LightProbeNode } from '../core/scene/node';
 import { PointLight, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
@@ -44,8 +44,18 @@ import GeometryFoliageBillboardFragment from './shaders/deferred/geometryFoliage
 import GeometryBasicFragment from './shaders/deferred/geometryBasic.fs'
 import GeometryInstancedVertex from './shaders/deferred/geometry_instanced.vs'
 import DeferredLightingFragment from './shaders/deferred/deferredLighting.fs'
+import SSAOFragment from './shaders/deferred/ssao.fs'
+import SSAOBlurFragment from './shaders/deferred/ssaoBlur.fs'
+
+// IBL (image-based lighting) precompute shaders
+import CubeVertex from './shaders/ibl/cube.vs'
+import IrradianceFragment from './shaders/ibl/irradiance.fs'
+import PrefilterFragment from './shaders/ibl/prefilter.fs'
+import BRDFFragment from './shaders/ibl/brdf.fs'
 
 import { GLState } from './systems/glState';
+import { Texture } from './texture';
+import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material } from './material';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
@@ -61,6 +71,8 @@ interface RendererConfig {
     deferred?: boolean;
     /** Max distance covered by the directional cascaded shadow maps (default 100). */
     shadowDistance?: number;
+    /** Screen-space ambient occlusion (deferred path only, default true). */
+    ssao?: boolean;
 }
 
 export class Renderer {
@@ -99,6 +111,40 @@ export class Renderer {
     private _blur_FBOs: Framebuffer[];
     private _bloomFBO: Framebuffer;
 
+    // SSAO (deferred path). Raw pass -> blur pass, consumed in the deferred lighting pass.
+    private _ssaoFBO: Framebuffer;
+    private _ssaoBlurFBO: Framebuffer;
+    private _ssaoEnabled: boolean;
+    private _ssaoKernel: Float32Array = new Float32Array(64 * 3);
+    private _ssaoNoise!: Texture;
+    private _ssaoRadius: number = 0.5;
+    private _ssaoBias: number = 0.025;
+    private _ssaoPower: number = 1.5;
+    private _ssaoKernelLoc: WebGLUniformLocation | null | undefined = undefined;
+
+    // IBL (image-based lighting). Shared BRDF LUT + a cube framebuffer/mesh/camera for baking, plus a
+    // scene-wide IBL cache built from scene.environmentMap when no light probe is active.
+    private _brdfFBO: Framebuffer;
+    private _cubeFBO!: CubeFramebuffer;
+    private _iblCubeMesh!: Mesh;
+    private _captureCamera!: Camera;
+    private _captureProj: mat4 = mat4.create();
+    private _iblFaceViews: mat4[] = [];
+    private _capturing: boolean = false;
+    // Standard cube-map capture directions (dir, up) in the OpenGL convention.
+    private static readonly _CUBE_FACES: { dir: [number, number, number], up: [number, number, number] }[] = [
+        { dir: [ 1,  0,  0], up: [0, -1,  0] }, // +X
+        { dir: [-1,  0,  0], up: [0, -1,  0] }, // -X
+        { dir: [ 0,  1,  0], up: [0,  0,  1] }, // +Y
+        { dir: [ 0, -1,  0], up: [0,  0, -1] }, // -Y
+        { dir: [ 0,  0,  1], up: [0, -1,  0] }, // +Z
+        { dir: [ 0,  0, -1], up: [0, -1,  0] }, // -Z
+    ];
+    private static readonly IRRADIANCE_SIZE = 32;
+    private static readonly PREFILTER_SIZE = 128;
+    private static readonly PREFILTER_MIPS = 5;
+    private static readonly BRDF_LUT_SIZE = 512;
+
     private _screenQuad: Mesh;
 
     private _shaderManager: ShaderManager;
@@ -127,6 +173,7 @@ export class Renderer {
         this._config = config;
         this._deferred = config.deferred !== false; // default: deferred on
         this._shadowDistance = config.shadowDistance ?? 100;
+        this._ssaoEnabled = config.ssao !== false; // default: SSAO on
         // Create canvas
         this._canvas = document.createElement('canvas');
 
@@ -163,6 +210,11 @@ export class Renderer {
         this._bloomFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false } });
         this._blur_FBOs = [new Framebuffer(), new Framebuffer()];
         this._compose_FBOs = [new Framebuffer({ colorTextureOptions: {precision: 'high'}}), new Framebuffer({ colorTextureOptions: {precision: 'high'}})];
+        // SSAO is a low-precision single-channel-ish (grayscale) occlusion buffer.
+        this._ssaoFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
+        this._ssaoBlurFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
+        // BRDF integration LUT (computed once) — high precision, no mipmaps.
+        this._brdfFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
     }
 
     public preInitialize(): void {
@@ -203,6 +255,13 @@ export class Renderer {
         const foliageBillboardShader = new Shader().create(GeometryInstancedVertex, GeometryFoliageBillboardFragment);
         // Deferred lighting (fullscreen) shader
         const deferredLightingShader = new Shader().create(ScreenVertex, DeferredLightingFragment);
+        // SSAO (fullscreen) shaders
+        const ssaoShader = new Shader().create(ScreenVertex, SSAOFragment);
+        const ssaoBlurShader = new Shader().create(ScreenVertex, SSAOBlurFragment);
+        // IBL precompute shaders
+        const irradianceShader = new Shader().create(CubeVertex, IrradianceFragment);
+        const prefilterShader = new Shader().create(CubeVertex, PrefilterFragment);
+        const brdfShader = new Shader().create(ScreenVertex, BRDFFragment);
         // Environment shaders
         const shadowMapShader = new Shader().create(ShadowMapVertex, ShadowMapFragment);
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
@@ -237,6 +296,11 @@ export class Renderer {
         this._shaderManager.addShader('terrainGeometry', terrainGeometryShader);
         this._shaderManager.addShader('foliageBillboardInstanced', foliageBillboardShader);
         this._shaderManager.addShader('deferredLighting', deferredLightingShader);
+        this._shaderManager.addShader('ssao', ssaoShader);
+        this._shaderManager.addShader('ssaoBlur', ssaoBlurShader);
+        this._shaderManager.addShader('irradiance', irradianceShader);
+        this._shaderManager.addShader('prefilter', prefilterShader);
+        this._shaderManager.addShader('brdf', brdfShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('screen', screenShader);
@@ -250,6 +314,9 @@ export class Renderer {
         // Create framebuffers
         this._sceneFBO.create(this._canvas.width, this._canvas.height);
         this._gBufferFBO.create(this._canvas.width, this._canvas.height);
+        this._ssaoFBO.create(this._canvas.width, this._canvas.height);
+        this._ssaoBlurFBO.create(this._canvas.width, this._canvas.height);
+        this._generateSSAOKernelAndNoise();
 
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
         this._instanceBuffer = gl.createBuffer();
@@ -269,6 +336,9 @@ export class Renderer {
         this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
         this._screenQuad.create([-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1 ], 12, [0, 1, 2, 0, 2, 3]);
 
+        // IBL setup (BRDF LUT is rendered on the screen quad, so this must run after it exists).
+        this._initializeIBL();
+
         this.resize();
 
         Logger.info('Renderer ready')
@@ -285,6 +355,9 @@ export class Renderer {
         const proj = this._activeCamera.projectionMatrix;
         mat4.multiply(this._viewProj, proj, view);
         mat4.invert(this._invViewProj, this._viewProj);
+
+        // Bake/refresh IBL (light probes + scene environment) before the main passes.
+        this._updateIBL(scene);
 
         // Shadow map depth pass (shared by both pipelines). Keep the last shadow-casting light.
         let shadowLight: LightNode | null = null;
@@ -346,6 +419,8 @@ export class Renderer {
     private _renderDeferred(scene: Scene, shadowLight: LightNode | null): void {
         // 1. Rasterize all opaque lit geometry into the G-buffer.
         this._geometryPass(scene);
+        // 1b. Screen-space ambient occlusion from the G-buffer depth+normals.
+        if (this._ssaoEnabled) this._ssaoPass();
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
         this._deferredLightingPass(scene, shadowLight);
         // 3. Forward passes (skybox, transparent, sprites, outlines, gizmos) into the scene FBO.
@@ -561,10 +636,34 @@ export class Renderer {
             this._shaderManager.setUniform('u_lightSpace', shadowLight.lightSpace);
         }
 
-        // Environment map (IBL)
-        this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+        // Image-based lighting from the nearest baked light probe (split-sum: irradiance on unit 5,
+        // prefiltered specular on unit 7, shared BRDF LUT on unit 12). With no probe, fall back to the
+        // original crude environment reflection (env cubemap on unit 7) so existing scenes are unchanged.
+        // The sampler units are assigned every frame (even when unused) so the cube samplers never
+        // alias the 2D G-buffer samplers on unit 0 (which would be a draw-time type-collision error).
+        this._shaderManager.setUniform('u_irradiance', 5);
+        this._shaderManager.setUniform('u_prefiltered', 7);
         this._shaderManager.setUniform('u_envMap', 7);
-        scene.environmentMap?.bind(7);
+        this._shaderManager.setUniform('u_brdfLUT', 12);
+        const ibl = this._activeIBL(scene);
+        if (ibl) {
+            this._shaderManager.setUniform('u_useIBL', true);
+            this._shaderManager.setUniform('u_useEnvMap', false);
+            this._shaderManager.setUniform('u_iblIntensity', ibl.intensity);
+            ibl.irradiance.bind(5);
+            ibl.prefiltered.bind(7);
+            this._brdfFBO.colors[0].bind(12);
+        } else {
+            this._shaderManager.setUniform('u_useIBL', false);
+            this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+            scene.environmentMap?.bind(7);
+        }
+
+        // SSAO (unit 4). Always bind a complete texture so the sampler is valid; the shader only
+        // reads it when u_ssaoEnabled is true.
+        this._shaderManager.setUniform('u_ssaoEnabled', this._ssaoEnabled);
+        this._shaderManager.setUniform('u_ssao', 4);
+        this._ssaoBlurFBO.colors[0].bind(4);
 
         this._screenQuad.draw();
 
@@ -607,6 +706,269 @@ export class Renderer {
                     break;
             }
         }
+    }
+
+    // Build the hemisphere sample kernel (biased toward the origin) and a small tiled rotation-noise
+    // texture. Done once; the kernel is uploaded to the SSAO shader each frame.
+    private _generateSSAOKernelAndNoise(): void {
+        for (let i = 0; i < 64; i++) {
+            let x = Math.random() * 2 - 1;
+            let y = Math.random() * 2 - 1;
+            let z = Math.random(); // hemisphere: z >= 0
+            const len = Math.hypot(x, y, z) || 1;
+            x /= len; y /= len; z /= len;
+            const r = Math.random();
+            x *= r; y *= r; z *= r;
+            // Accelerating interpolation so more samples sit close to the origin.
+            let scale = i / 64;
+            scale = 0.1 + 0.9 * scale * scale;
+            this._ssaoKernel[i * 3 + 0] = x * scale;
+            this._ssaoKernel[i * 3 + 1] = y * scale;
+            this._ssaoKernel[i * 3 + 2] = z * scale;
+        }
+
+        const noiseData = new Uint8Array(4 * 4 * 4);
+        for (let i = 0; i < 16; i++) {
+            noiseData[i * 4 + 0] = Math.floor(Math.random() * 256);
+            noiseData[i * 4 + 1] = Math.floor(Math.random() * 256);
+            noiseData[i * 4 + 2] = 128; // z ~ 0 after remap
+            noiseData[i * 4 + 3] = 255;
+        }
+        this._ssaoNoise = new Texture({ mipMap: false });
+        this._ssaoNoise.createFromData(noiseData, 4, 4, 'repeat');
+    }
+
+    // Screen-space ambient occlusion: raw pass from the G-buffer into _ssaoFBO, then a box blur into
+    // _ssaoBlurFBO. Consumed by the deferred lighting pass (unit 4).
+    private _ssaoPass(): void {
+        this._ssaoFBO.bind();
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthMask(false);
+        GLState.disable(gl.BLEND);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        this._shaderManager.bind('ssao');
+        this._shaderManager.setUniform('u_gNormalRoughness', 0);
+        this._shaderManager.setUniform('u_gDepth', 1);
+        this._shaderManager.setUniform('u_noise', 2);
+        this._gBufferFBO.colors[1].bind(0);
+        this._gBufferFBO.depth.bind(1);
+        this._ssaoNoise.bind(2);
+
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_noiseScale', [this._canvas.width / 4, this._canvas.height / 4]);
+        this._shaderManager.setUniform('u_radius', this._ssaoRadius);
+        this._shaderManager.setUniform('u_bias', this._ssaoBias);
+        this._shaderManager.setUniform('u_power', this._ssaoPower);
+
+        // vec3 arrays are only reachable via their [0] location (see the cascade uniforms).
+        const program = this._shaderManager.getShader('ssao').program;
+        if (this._ssaoKernelLoc === undefined)
+            this._ssaoKernelLoc = gl.getUniformLocation(program, 'u_samples[0]');
+        if (this._ssaoKernelLoc) gl.uniform3fv(this._ssaoKernelLoc, this._ssaoKernel);
+
+        this._screenQuad.draw();
+
+        // Blur to remove the tiled-noise pattern.
+        this._ssaoBlurFBO.bind();
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        this._shaderManager.bind('ssaoBlur');
+        this._shaderManager.setUniform('u_ssao', 0);
+        this._ssaoFBO.colors[0].bind(0);
+        this._screenQuad.draw();
+
+        GLState.depthMask(true);
+        GLState.enable(gl.DEPTH_TEST);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Image-based lighting (IBL)
+    // ---------------------------------------------------------------------------------------------
+
+    // One-time IBL setup: cube capture camera/mesh/framebuffer, per-face view matrices, and the
+    // shared BRDF integration LUT.
+    private _initializeIBL(): void {
+        // 90-degree perspective for cube-face rendering (camera sits inside the unit cube).
+        mat4.perspective(this._captureProj, Math.PI / 2, 1, 0.1, 10);
+        for (const f of Renderer._CUBE_FACES) {
+            const view = mat4.create();
+            mat4.lookAt(view, [0, 0, 0], f.dir, f.up);
+            this._iblFaceViews.push(view);
+        }
+
+        const cubeGeo = Geometry.Cube();
+        this._iblCubeMesh = new Mesh();
+        this._iblCubeMesh.initializeVAO(this._shaderManager.getShader('irradiance').attributes);
+        this._iblCubeMesh.create(cubeGeo.getData(['position']), cubeGeo.indices.length, cubeGeo.indices);
+
+        this._cubeFBO = new CubeFramebuffer();
+        this._captureCamera = new Camera({ type: 'perspective', fov: 90, near: 0.05, far: 2000 });
+
+        this._brdfFBO.create(Renderer.BRDF_LUT_SIZE, Renderer.BRDF_LUT_SIZE);
+        this._renderBRDFLUT();
+    }
+
+    private _renderBRDFLUT(): void {
+        this._brdfFBO.bind();
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthMask(false);
+        GLState.disable(gl.BLEND);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        this._shaderManager.bind('brdf');
+        this._screenQuad.draw();
+        this._brdfFBO.unbind();
+        GLState.depthMask(true);
+        GLState.enable(gl.DEPTH_TEST);
+    }
+
+    // Render a convolution shader (irradiance/prefilter) into all 6 faces of `target` at a mip level.
+    private _convolveCubeFaces(shaderName: string, sourceCube: Texture, target: Texture, mip: number, size: number, perFace?: () => void): void {
+        this._shaderManager.bind(shaderName);
+        this._shaderManager.setUniform('u_projection', this._captureProj);
+        this._shaderManager.setUniform('u_envMap', 0);
+        sourceCube.bind(0);
+        if (perFace) perFace();
+        gl.viewport(0, 0, size, size);
+        for (let face = 0; face < 6; face++) {
+            this._cubeFBO.bindFace(target, face, mip, false);
+            this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._iblCubeMesh.draw();
+        }
+    }
+
+    /** Convolve a source environment cubemap into diffuse-irradiance and prefiltered-specular cubemaps. */
+    public bakeIBL(sourceCube: Texture, sourceRes: number): { irradiance: Texture, prefiltered: Texture } {
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthMask(false);
+        GLState.disable(gl.BLEND);
+        GLState.disable(gl.CULL_FACE);
+
+        // Diffuse irradiance (small, no mips).
+        const irradiance = new Texture({ target: 'cubemap', precision: 'high', mipMap: false });
+        irradiance.createCubemapTarget(Renderer.IRRADIANCE_SIZE, 1);
+        this._convolveCubeFaces('irradiance', sourceCube, irradiance, 0, Renderer.IRRADIANCE_SIZE);
+
+        // Prefiltered specular (mip level encodes roughness).
+        const prefiltered = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
+        prefiltered.createCubemapTarget(Renderer.PREFILTER_SIZE, Renderer.PREFILTER_MIPS);
+        for (let mip = 0; mip < Renderer.PREFILTER_MIPS; mip++) {
+            const mipSize = Math.max(1, Math.floor(Renderer.PREFILTER_SIZE * Math.pow(0.5, mip)));
+            const roughness = Renderer.PREFILTER_MIPS > 1 ? mip / (Renderer.PREFILTER_MIPS - 1) : 0;
+            this._convolveCubeFaces('prefilter', sourceCube, prefiltered, mip, mipSize, () => {
+                this._shaderManager.setUniform('u_roughness', roughness);
+                this._shaderManager.setUniform('u_resolution', sourceRes);
+            });
+        }
+
+        this._cubeFBO.unbind();
+        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        GLState.depthMask(true);
+        GLState.enable(gl.DEPTH_TEST);
+        return { irradiance, prefiltered };
+    }
+
+    /**
+     * Capture the full scene (skybox + opaque geometry) into a cubemap from a probe's position, then
+     * bake its irradiance + prefiltered specular maps. Guarded so probe capture never re-enters itself.
+     */
+    public captureProbe(scene: Scene, probe: LightProbeNode): void {
+        if (this._capturing) return;
+        this._capturing = true;
+
+        const res = probe.resolution;
+        const levels = Math.floor(Math.log2(res)) + 1;
+        const sourceCube = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
+        sourceCube.createCubemapTarget(res, levels);
+
+        const cam = this._captureCamera;
+        cam.fov = 90;
+        cam.resize(res, res); // aspect 1
+        const prevCamera = this._activeCamera;
+        this._activeCamera = cam;
+
+        // Forward lighting for the capture (no probe IBL bound -> avoids feedback).
+        for (const light of scene.lights) this._setLighting(light, scene.numPointLights, scene.numSpotlights);
+        this._bindEnvToForwardShaders(scene);
+
+        const probePos = probe.worldPosition;
+        const eye = vec3.create();
+        const clear = this._config.clearColor || [0, 0, 0, 1];
+        for (let face = 0; face < 6; face++) {
+            const f = Renderer._CUBE_FACES[face];
+            const dir = vec3.fromValues(f.dir[0], f.dir[1], f.dir[2]);
+            const up = vec3.fromValues(f.up[0], f.up[1], f.up[2]);
+            cam.position = probePos;
+            vec3.add(eye, probePos, dir);
+            cam.eye = eye;
+            cam.up = up;
+
+            this._cubeFBO.bindFace(sourceCube, face, 0, true, res);
+            gl.viewport(0, 0, res, res);
+            GLState.enable(gl.DEPTH_TEST);
+            GLState.depthMask(true);
+            GLState.disable(gl.BLEND);
+            gl.clearColor(clear[0], clear[1], clear[2], clear[3]);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // Skybox background first, then opaque geometry over it.
+            if (scene.skybox) {
+                GLState.disable(gl.CULL_FACE);
+                this._shaderManager.bind('skybox');
+                this._shaderManager.setUniform('u_view', cam.viewMatrix);
+                this._shaderManager.setUniform('u_projection', cam.projectionMatrix);
+                this._shaderManager.setUniform('u_skybox', 8);
+                const skyboxNode = scene.skybox as SkyboxNode;
+                if (!skyboxNode.initialized) skyboxNode.initializeSkybox();
+                skyboxNode.skybox.texture.bind(8);
+                skyboxNode.skybox.mesh.draw();
+            }
+
+            for (const node of scene.models) {
+                if (!node.visible) continue;
+                if ((node as any).isGizmo) continue;
+                // Exclude editor-only helpers (probe sphere, light icons, camera model, etc.) so they
+                // don't pollute the captured environment.
+                if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) continue;
+                if (node.model.material.config.transparent) continue;
+                this._renderModel(node);
+            }
+        }
+
+        this._activeCamera = prevCamera;
+        this._cubeFBO.unbind();
+        sourceCube.generateMipmaps();
+
+        const { irradiance, prefiltered } = this.bakeIBL(sourceCube, res);
+        probe.setBakedMaps(sourceCube, irradiance, prefiltered);
+
+        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        this._capturing = false;
+    }
+
+    // Bake any light probes flagged for baking or due for a realtime refresh. IBL is applied only
+    // where the user has placed a probe; scenes without one keep their previous (flat + crude env) look.
+    private _updateIBL(scene: Scene): void {
+        if (this._capturing) return;
+
+        const now = performance.now();
+        for (const probe of scene.lightProbes) {
+            const due = probe.mode === 'realtime' && (now - probe.lastBakeTime) >= probe.updateFrequency * 1000;
+            if (probe.needsBake || due) {
+                this.captureProbe(scene, probe);
+                probe.markBaked(now);
+            }
+        }
+    }
+
+    // Pick the IBL source for this frame: the nearest baked light probe, or null (no probe -> no IBL).
+    private _activeIBL(scene: Scene): { irradiance: Texture, prefiltered: Texture, intensity: number } | null {
+        const probe = scene.activeProbe(this._activeCamera.position);
+        if (probe && probe.hasBakedMaps)
+            return { irradiance: probe.irradiance!, prefiltered: probe.prefiltered!, intensity: probe.intensity };
+        return null;
     }
 
     /** Forward passes drawn on top of the deferred-lit scene: skybox, transparent models, sprites, editor overlays. */
@@ -820,6 +1182,8 @@ export class Renderer {
 
         this._sceneFBO.resize(this._canvas.width, this._canvas.height);
         this._gBufferFBO.resize(this._canvas.width, this._canvas.height);
+        this._ssaoFBO.resize(this._canvas.width, this._canvas.height);
+        this._ssaoBlurFBO.resize(this._canvas.width, this._canvas.height);
         this._blur_FBOs[0].resize(this._canvas.width / 2, this._canvas.height / 2);
         this._blur_FBOs[1].resize(this._canvas.width / 2, this._canvas.height / 2);
         this._compose_FBOs[0].resize(this._canvas.width, this._canvas.height);
@@ -1375,6 +1739,13 @@ export class Renderer {
 
     public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
     public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
+
+    public get ssaoEnabled(): boolean { return this._ssaoEnabled; }
+    public set ssaoEnabled(enabled: boolean) { this._ssaoEnabled = enabled; }
+    public get ssaoRadius(): number { return this._ssaoRadius; }
+    public set ssaoRadius(radius: number) { this._ssaoRadius = Math.max(0, radius); }
+    public get ssaoPower(): number { return this._ssaoPower; }
+    public set ssaoPower(power: number) { this._ssaoPower = Math.max(0, power); }
 
     private _renderOutlines(selectedNodes: ModelNode[]): void {
         // Collect all nodes including children
