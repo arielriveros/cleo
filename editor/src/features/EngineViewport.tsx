@@ -4,6 +4,7 @@ import { Raycaster } from "cleo";
 import PositionGizmo from "./PositionGizmo";
 import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
+import RendererOptions from "./renderer/RendererOptions";
 import { instantiateTemplate } from "../utils/templates";
 
 export default function EngineViewport() {
@@ -64,8 +65,8 @@ export default function EngineViewport() {
         const handleClick = (event: MouseEvent) => {
             // Don't allow selection during play mode
             if (isPlayMode) return;
-            // In landscape mode the viewport is a sculpting surface, not a selection surface.
-            if (editorMode === 'landscape') return;
+            // In landscape/renderer modes the viewport is not a selection surface.
+            if (editorMode === 'landscape' || editorMode === 'renderer') return;
             
             // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
@@ -197,8 +198,9 @@ export default function EngineViewport() {
     };
 
     return (
-        <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}>
-            {editorMode !== 'landscape' && <PositionGizmo
+        <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}
+             onContextMenu={(e) => e.preventDefault()}>
+            {editorMode !== 'landscape' && editorMode !== 'renderer' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onPositionChange={handlePositionChange}
                 viewportRef={viewportRef}
@@ -207,6 +209,7 @@ export default function EngineViewport() {
                 <LandscapeBrush viewportRef={viewportRef} />
                 <LandscapeInspector />
             </>}
+            {editorMode === 'renderer' && <RendererOptions />}
             {editorMode === 'template' && (
                 <div data-cleo-overlay className="absolute top-2 left-1/2 -translate-x-1/2 z-20 bg-[#252525]/95 border border-[#8f8fe0] rounded-md px-3 py-1 text-white text-xs shadow-lg select-none pointer-events-none">
                     Editing template: <b>{editingTemplateName ?? 'New Template'}</b> — switch to <b>Scene</b> to save

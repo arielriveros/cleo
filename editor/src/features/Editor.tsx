@@ -35,8 +35,10 @@ export default function Editor() {
   const [barsDimensions, setBarsDimensions] = useState(() => readLayout().barsDimensions);
   const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets' | 'Templates'>(() => readLayout().bottomTab);
 
-  // Landscape mode hides both side inspectors and gives the viewport full width.
-  const hideSides = editorMode === 'landscape';
+  // Landscape mode hides both side inspectors; renderer mode additionally hides the bottom bar,
+  // leaving only the viewport + the floating Renderer Options window.
+  const hideSides = editorMode === 'landscape' || editorMode === 'renderer';
+  const hideBottom = editorMode === 'renderer';
   const effLeft = hideSides ? 0 : barsDimensions.left;
   const effRight = hideSides ? 0 : barsDimensions.right;
 
@@ -112,6 +114,7 @@ export default function Editor() {
               {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
               {!isSceneReady && <LoadingScreen progress={loadingProgress} />}
             </div>
+            {!hideBottom && <>
             <BottomBarResizer onDrag={ e => {
               setBarsDimensions({...barsDimensions, height: 100 - (100 * e.clientY) / window.innerHeight});
             }} />
@@ -133,6 +136,7 @@ export default function Editor() {
                 </div>
               </div>
             </BottomBar>
+            </>}
           </div>
         </Center>
         {!hideSides && <SidebarResizer

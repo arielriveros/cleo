@@ -59,7 +59,7 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
-export type EditorMode = 'scene' | 'landscape' | 'template';
+export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
@@ -500,8 +500,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         cameraNode.onUpdate = (node, delta, time) => {
             const mouse = InputManager.instance.mouse;
             const movement = delta;
-            // Pan with left button when not dragging gizmo
-            if (mouse.buttons.Left && !isGizmoDraggingRef.current) {
+            // Pan with left OR right button when not dragging gizmo
+            if ((mouse.buttons.Left || mouse.buttons.Right) && !isGizmoDraggingRef.current) {
                 node.addX(-mouse.velocity[0] * movement);
                 node.addY(mouse.velocity[1] * movement);
 
@@ -558,6 +558,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
             InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
           }
+          // Pan with right button (translate along the view's right/up axes)
+          if (mouse.buttons.Right && !isGizmoDraggingRef.current) {
+            node.addRight(-mouse.velocity[0] * movement);
+            node.addUp(mouse.velocity[1] * movement);
+          }
           // Zoom with mouse wheel by dollying the camera forward/backward
           if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
             const zoom = -mouse.wheel.deltaY * 0.01; // wheel up -> move forward
@@ -583,6 +588,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           instanceRef.current.renderer.setSelectedNode(null);
           // Hide the editor grid while in game mode
           instanceRef.current.renderer.setGridVisible(false);
+          // Never render a debug channel in the running game (in case Play is pressed in Renderer mode).
+          instanceRef.current.renderer.debugView = 'final';
         }
         // Pressing Escape should release pointer lock
         InputManager.instance.registerKeyPress('Escape', () => InputManager.instance.releaseMouse());

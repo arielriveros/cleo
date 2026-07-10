@@ -21,6 +21,13 @@ const TemplateIcon = () => (
     <path d="M12 12v9" />
   </svg>
 );
+const RendererIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="4" y1="7" x2="20" y2="7" /><circle cx="9" cy="7" r="2" fill="currentColor" stroke="none" />
+    <line x1="4" y1="12" x2="20" y2="12" /><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" />
+    <line x1="4" y1="17" x2="20" y2="17" /><circle cx="8" cy="17" r="2" fill="currentColor" stroke="none" />
+  </svg>
+);
 
 interface SegmentProps {
   active: boolean;
@@ -64,6 +71,9 @@ export default function ModeSelector() {
         </Segment>
         <Segment active={editorMode === 'template'} disabled={isPlayMode} title='Template editor — pick or create a template in the Templates panel' onClick={() => eventEmitter.emit('FOCUS_BOTTOM_TAB', 'Templates')}>
           <TemplateIcon /> Template
+        </Segment>
+        <Segment active={editorMode === 'renderer'} disabled={isPlayMode} title='Renderer options & debug channels' onClick={() => select('renderer')}>
+          <RendererIcon /> Renderer
         </Segment>
       </div>
     </div>

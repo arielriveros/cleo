@@ -27,6 +27,7 @@ import SkyboxFragment from './shaders/environment/skybox.fs'
 
 import ScreenVertex from './shaders/screen/screen.vs'
 import ScreenFragment from './shaders/screen/screen.fs'
+import DebugViewFragment from './shaders/screen/debugView.fs'
 import Bloom from './shaders/screen/bloom.fs'
 import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
@@ -63,6 +64,11 @@ import { Logger } from '../core/logger';
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
 
+/** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
+export type DebugView =
+    'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom';
+
 interface RendererConfig {
     clearColor?: number[];
     shadowMapResolution?: number;
@@ -85,6 +91,8 @@ export class Renderer {
     private _exposure: number = 1.5;
     private _chromaticAberrationStrength: number = 0.0;
     private _selectedNodeId: string | null = null;
+    // Editor "Renderer" debug view: which buffer to blit to the screen ('final' = normal image).
+    private _debugView: DebugView = 'final';
 
     private _sceneFBO: Framebuffer;
     private _shadowMapFBO: Framebuffer;
@@ -267,6 +275,7 @@ export class Renderer {
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
         // Screen shaders
         const screenShader = new Shader().create(ScreenVertex, ScreenFragment);
+        const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
         const bloomShader = new Shader().create(ScreenVertex, Bloom);
         const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
         const chromaticAbShader = new Shader().create(ScreenVertex, ChromaticAberration);
@@ -304,6 +313,7 @@ export class Renderer {
         this._shaderManager.addShader('shadowMap', shadowMapShader);
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('screen', screenShader);
+        this._shaderManager.addShader('debugView', debugViewShader);
         this._shaderManager.addShader('bloom', bloomShader);
         this._shaderManager.addShader('blur', blurShader);
         this._shaderManager.addShader('chromaticAberration', chromaticAbShader);
@@ -1670,10 +1680,42 @@ export class Renderer {
         // Render to screen using default framebuffer
         this._sceneFBO.unbind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        this._shaderManager.bind('screen');
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        if (this._debugView === 'final') {
+            this._shaderManager.bind('screen');
+            this._shaderManager.setUniform('u_exposure', this._exposure);
+            this._shaderManager.setUniform('u_screenTexture', 0);
+            this._compose_FBOs[1].colors[0].bind();
+            this._screenQuad.draw();
+        } else {
+            // Editor Renderer-mode: blit one internal buffer instead of the composited image.
+            this._blitDebugView();
+        }
+    }
+
+    // Draw a single intermediate buffer to the screen for the editor's Renderer debug channels.
+    // All passes above still ran, so every buffer (G-buffer, SSAO, bloom, …) is populated.
+    private _blitDebugView(): void {
+        // mode: 0 passthrough RGB · 1 normal remap · 2 alpha->grayscale · 3 depth · 4 red->grayscale
+        let tex: Texture;
+        let mode = 0;
+        switch (this._debugView) {
+            case 'scene':     tex = this._sceneFBO.colors[0];      mode = 0; break;
+            case 'albedo':    tex = this._gBufferFBO.colors[0];    mode = 0; break;
+            case 'metallic':  tex = this._gBufferFBO.colors[0];    mode = 2; break;
+            case 'normal':    tex = this._gBufferFBO.colors[1];    mode = 1; break;
+            case 'roughness': tex = this._gBufferFBO.colors[1];    mode = 2; break;
+            case 'emissive':  tex = this._gBufferFBO.colors[2];    mode = 0; break;
+            case 'ao':        tex = this._gBufferFBO.colors[2];    mode = 2; break;
+            case 'depth':     tex = this._gBufferFBO.depth;        mode = 3; break;
+            case 'ssao':      tex = this._ssaoBlurFBO.colors[0];   mode = 4; break;
+            case 'shadow':    tex = this._shadowMapFBO.depth;      mode = 3; break;
+            case 'bloom':     tex = this._bloomFBO.colors[1];      mode = 0; break;
+            default:          tex = this._sceneFBO.colors[0];      mode = 0; break;
+        }
+        this._shaderManager.bind('debugView');
         this._shaderManager.setUniform('u_screenTexture', 0);
-        this._compose_FBOs[1].colors[0].bind();
+        this._shaderManager.setUniform('u_mode', mode);
+        tex.bind();
         this._screenQuad.draw();
     }
 
@@ -1746,6 +1788,16 @@ export class Renderer {
     public set ssaoRadius(radius: number) { this._ssaoRadius = Math.max(0, radius); }
     public get ssaoPower(): number { return this._ssaoPower; }
     public set ssaoPower(power: number) { this._ssaoPower = Math.max(0, power); }
+    public get ssaoBias(): number { return this._ssaoBias; }
+    public set ssaoBias(bias: number) { this._ssaoBias = Math.max(0, bias); }
+
+    // Editor "Renderer" debug channel currently blitted to screen ('final' = normal image).
+    public get debugView(): DebugView { return this._debugView; }
+    public set debugView(view: DebugView) { this._debugView = view; }
+
+    // Read-only mirrors of the grid state (set via setGridVisible / setGridPlane) for editor UIs.
+    public get gridVisible(): boolean { return this._gridEnabled; }
+    public get gridPlane(): 'xz' | 'xy' { return this._gridPlane === 1 ? 'xy' : 'xz'; }
 
     private _renderOutlines(selectedNodes: ModelNode[]): void {
         // Collect all nodes including children
