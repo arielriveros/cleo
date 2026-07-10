@@ -5,9 +5,11 @@ import DinosaurImage from '../images/dinosaur.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
+import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
 import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
+import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback } from "../utils/materials";
 import { buildGameData } from "./publish/buildGameData";
 import { loadProject, applyGameData, saveProject, ProjectPrefs } from "../utils/projectStorage";
 import { idbGet, idbSet } from "../utils/idb";
@@ -59,18 +61,19 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
-export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer';
+export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Browser-style editor tabs. The 'main' tab hosts the real game scene and its scene/landscape/
-// renderer sub-mode; template tabs each own a live template edit session. Extensible to future
-// kinds (e.g. 'material'). `editorMode` is derived from the active tab (see EngineProvider).
-export type TabKind = 'main' | 'template';
+// renderer sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
+// tabRuntimeRef). `editorMode` is derived from the active tab (see EngineProvider).
+export type TabKind = 'main' | 'template' | 'material';
 export interface EditorTab {
   id: string;
   kind: TabKind;
   title: string;
   templateId?: string | null; // template tabs: source template id, null = unsaved new template
+  materialId?: string | null; // material tabs: source material asset id, null = unsaved new material
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
@@ -110,10 +113,16 @@ const EngineContext = createContext<{
   closeTab: (id: string) => void;
   reorderTabs: (fromId: string, toId: string) => void;
   saveActiveTemplate: () => void;
+  saveActiveMaterial: () => void;
   // Template editor
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
   templateRootId: string | null;
+  // Material editor
+  enterMaterialEditor: (materialId?: string) => void;
+  createMaterialForNode: (node: Node) => void;
+  editingMaterialName: string | null;
+  setActiveMaterialName: (name: string) => void;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   loadingProgress: LoadingProgress;
   scripts: Map<string, string>;
@@ -134,6 +143,11 @@ const EngineContext = createContext<{
   addTemplate: (t: Template) => void;
   removeTemplate: (id: string) => void;
   updateTemplate: (id: string, t: Template) => void;
+  // Material assets
+  materials: MaterialAsset[];
+  addMaterial: (m: MaterialAsset) => void;
+  removeMaterial: (id: string) => void;
+  updateMaterial: (id: string, m: MaterialAsset) => void;
   // Project persistence
   saveProject: () => void;
   savingState: SavingState;
@@ -155,9 +169,14 @@ const EngineContext = createContext<{
     closeTab: () => {},
     reorderTabs: () => {},
     saveActiveTemplate: () => {},
+    saveActiveMaterial: () => {},
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
+    enterMaterialEditor: () => {},
+    createMaterialForNode: () => {},
+    editingMaterialName: null,
+    setActiveMaterialName: () => {},
     terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null } },
     loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
@@ -175,6 +194,10 @@ const EngineContext = createContext<{
     addTemplate: () => {},
     removeTemplate: () => {},
     updateTemplate: () => {},
+    materials: [],
+    addMaterial: () => {},
+    removeMaterial: () => {},
+    updateMaterial: () => {},
     saveProject: () => {},
     savingState: 'idle',
   });
@@ -259,16 +282,38 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const updateTemplate = (id: string, t: Template) => setTemplates(prev => prev.map(x => x.id === id ? t : x));
 
+  // Reusable material assets (global library, like templates): persisted to IndexedDB because they embed
+  // base64 textures + a thumbnail. A node references one via the MATERIAL_ID_VAR node variable.
+  const [materials, setMaterials] = useState<MaterialAsset[]>([]);
+  const materialsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<MaterialAsset[]>('cleo_materials');
+        if (list && list.length) setMaterials(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load materials:', e); }
+      finally { materialsLoadedRef.current = true; }
+    })();
+  }, []);
+  useEffect(() => {
+    if (!materialsLoadedRef.current) return;
+    idbSet('cleo_materials', materials).catch(e => console.warn('Failed to persist materials:', e));
+  }, [materials]);
+
+  const addMaterial = (m: MaterialAsset) => setMaterials(prev => [...prev, m]);
+  const updateMaterial = (id: string, m: MaterialAsset) => setMaterials(prev => prev.map(x => x.id === id ? m : x));
+
   // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
-  const activeRuntime = activeTab.kind === 'template' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
-  // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template scene.
+  const activeRuntime = (activeTab.kind === 'template' || activeTab.kind === 'material') ? tabRuntimeRef.current.get(activeTab.id) : undefined;
+  // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material scene.
   const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
-  // Legacy single mode value, now derived: 'template' whenever a template tab is active, else the Main
-  // tab's sub-mode. Keeps every existing `editorMode === ...` consumer working unchanged.
-  const editorMode: EditorMode = activeTab.kind === 'main' ? mainMode : 'template';
-  const templateRootId = activeRuntime ? activeRuntime.rootId : null;
+  // Legacy single mode value, now derived from the active tab kind. Keeps every existing
+  // `editorMode === ...` consumer working unchanged.
+  const editorMode: EditorMode = activeTab.kind === 'main' ? mainMode : activeTab.kind === 'material' ? 'material' : 'template';
+  const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
+  const editingMaterialName = activeTab.kind === 'material' ? activeTab.title : null;
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
@@ -381,12 +426,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Close a template tab (Main is unclosable). Discards unsaved edits after a confirm — saving is the
   // explicit "Save Template" action, so closing does not auto-save.
-  const closeTab = (id: string) => {
+  // Low-level tab removal (no confirm). Shared by closeTab and removeMaterial (force-closing a deleted
+  // material's tab). Main is unclosable.
+  const removeTabById = (id: string) => {
     if (id === 'main') return;
-    const tab = tabs.find(t => t.id === id);
-    if (!tab) return;
-    if (dirtyTabs[id] && !window.confirm(`Discard unsaved changes to "${tab.title}"?`)) return;
     const idx = tabs.findIndex(t => t.id === id);
+    if (idx < 0) return;
     const remaining = tabs.filter(t => t.id !== id);
     tabRuntimeRef.current.delete(id);
     setDirtyTabs(prev => { const next = { ...prev }; delete next[id]; return next; });
@@ -395,6 +440,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const fallback = remaining[Math.max(0, idx - 1)] ?? remaining[0];
       setActiveTabId(fallback ? fallback.id : 'main');
     }
+  };
+
+  const closeTab = (id: string) => {
+    if (id === 'main') return;
+    const tab = tabs.find(t => t.id === id);
+    if (!tab) return;
+    if (dirtyTabs[id] && !window.confirm(`Discard unsaved changes to "${tab.title}"?`)) return;
+    removeTabById(id);
   };
 
   // Reorder: move `fromId` to `toId`'s position (Main included — it is movable).
@@ -411,6 +464,114 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     });
   };
 
+  // Re-apply a saved/edited material to every node in the game scene that references it (keeps the link).
+  const syncMaterialInstances = (materialId: string, asset: MaterialAsset) => {
+    const scene = editorSceneRef.current;
+    const instances = Array.from(scene.nodes).filter(n => getMaterialIdOf(n) === materialId);
+    for (const inst of instances) applyMaterialAsset(inst, asset);
+    if (instances.length) {
+      eventEmitter.current.emit('TEXTURES_CHANGED');
+      eventEmitter.current.emit('SCENE_CHANGED');
+    }
+  };
+
+  // Delete a material asset: fall every referencing node back to a Basic + Null-texture material, drop
+  // the link, and force-close any open editor tab for it.
+  const removeMaterial = (id: string) => {
+    const scene = editorSceneRef.current;
+    let changed = false;
+    for (const n of Array.from(scene.nodes)) {
+      if (getMaterialIdOf(n) === id) { unlinkToFallback(n); changed = true; }
+    }
+    if (changed) { eventEmitter.current.emit('TEXTURES_CHANGED'); eventEmitter.current.emit('SCENE_CHANGED'); }
+    const openTab = tabs.find(t => t.kind === 'material' && t.materialId === id);
+    if (openTab) removeTabById(openTab.id);
+    setMaterials(prev => prev.filter(x => x.id !== id));
+  };
+
+  // Build a material editor tab: a throwaway preview scene whose sphere carries the material to edit
+  // (from `asset`, else a fresh PBR material for a brand-new one). Taking the asset object directly (not
+  // an id) lets callers open a just-created asset without waiting for the `materials` state to commit.
+  const openMaterialTab = (asset: MaterialAsset | null) => {
+    const scene = new Scene();
+    createMaterialPreviewScene(scene);
+
+    if (asset) {
+      for (const t of asset.textures || []) {
+        if (t?.id && !TextureManager.Instance.getTexture(t.id)) TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id);
+      }
+    }
+    const material: Material = asset ? Material.parse(asset.material) : Material.PBR({});
+    const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), material));
+    scene.addNode(sphere);
+    scene.start();
+
+    const tabId = cryptoRandomId();
+    tabRuntimeRef.current.set(tabId, { scene, rootId: sphere.id });
+    setTabs(prev => [...prev, { id: tabId, kind: 'material', title: asset?.name ?? 'New Material', materialId: asset?.id ?? null }]);
+    setActiveTabId(tabId); // the activate effect swaps the engine scene + selects the sphere
+  };
+
+  // Open (or focus) the editor for a library material, or a brand-new one when called with no id.
+  const enterMaterialEditor = (materialId?: string) => {
+    if (!instanceRef.current) return;
+    if (materialId) {
+      const existing = tabs.find(t => t.kind === 'material' && t.materialId === materialId);
+      if (existing) { setActiveTabId(existing.id); return; }
+      const asset = materials.find(m => m.id === materialId);
+      if (!asset) { Logger.error('Material not found', 'Editor'); return; }
+      openMaterialTab(asset);
+    } else {
+      openMaterialTab(null);
+    }
+  };
+
+  // Create a material asset from a node's current material, link the node to it, and open its editor.
+  const createMaterialForNode = (node: Node) => {
+    if (!instanceRef.current) return;
+    const material = getNodeMaterial(node);
+    if (!material) return;
+    const asset = buildMaterialAsset(material, `${node.name} Material`, '');
+    addMaterial(asset);
+    applyMaterialAsset(node, asset); // stamp __materialId so the node now references the asset
+    eventEmitter.current.emit('TEXTURES_CHANGED');
+    eventEmitter.current.emit('SCENE_CHANGED');
+    openMaterialTab(asset); // seed directly: `asset` isn't in the `materials` state this render yet
+  };
+
+  // Save the active material tab to the library (capturing a sphere thumbnail) and propagate to references.
+  const saveActiveMaterial = () => {
+    const instance = instanceRef.current;
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!instance || !tab || tab.kind !== 'material') return;
+    const runtime = tabRuntimeRef.current.get(tab.id);
+    if (!runtime) return;
+    const sphere = runtime.scene.getNodeById(runtime.rootId) as ModelNode | null;
+    if (!sphere || !sphere.model) return;
+    try {
+      const thumbnail = instance.renderer.screenshot(runtime.scene, 256);
+      if (tab.materialId) {
+        const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail, tab.materialId);
+        updateMaterial(tab.materialId, asset);
+        syncMaterialInstances(tab.materialId, asset); // push edits to placed references
+      } else {
+        const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail);
+        addMaterial(asset); // asset carries a fresh id
+        setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, materialId: asset.id } : x));
+      }
+      setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+      Logger.info(`Material "${tab.title}" saved`, 'Editor');
+    } catch (e) {
+      Logger.error('Failed to save material: ' + e, 'Editor');
+    }
+  };
+
+  // Rename the active material tab (bound to the name field in the material-mode inspector).
+  const setActiveMaterialName = (name: string) => {
+    setTabs(prev => prev.map(t => (t.id === activeTabId && t.kind === 'material') ? { ...t, title: name } : t));
+    setDirtyTabs(prev => ({ ...prev, [activeTabId]: true }));
+  };
+
   // Keep non-reactive mirrors of the active tab (read by the once-registered SCENE_CHANGED/dimension listeners).
   useEffect(() => { activeTabIdRef.current = activeTabId; activeTabKindRef.current = activeTab.kind; }, [activeTabId, activeTab.kind]);
 
@@ -420,14 +581,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!instance) return;
     const tab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
     activeTabKindRef.current = tab.kind;
-    const runtime = tab.kind === 'template' ? tabRuntimeRef.current.get(tab.id) : undefined;
+    const runtime = (tab.kind === 'template' || tab.kind === 'material') ? tabRuntimeRef.current.get(tab.id) : undefined;
     instance.setScene(runtime ? runtime.scene : editorSceneRef.current);
+    // Hide the editor ground grid in material tabs so the preview sphere + its thumbnail stay clean.
+    instance.renderer.setGridVisible(tab.kind !== 'material');
     // Arm dirty-tracking only after the editor-helper reconciler's initial pass settles (it emits
     // SCENE_CHANGED as it adds light/gizmo helpers to the freshly-shown template scene).
     dirtyArmedRef.current = false;
-    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template'); }));
-    // Template scenes are authored in 3D; the Main tab restores its own remembered dimension.
-    eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'template' ? '3D' : dimensionRef.current);
+    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material'); }));
+    // Template/material scenes are authored in 3D; the Main tab restores its own remembered dimension.
+    eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'main' ? dimensionRef.current : '3D');
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     eventEmitter.current.emit('SELECT_NODE', runtime ? runtime.rootId : null);
@@ -436,7 +599,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Mark the active template tab dirty on scene edits (after the open-settle window).
   useEffect(() => {
     const mark = () => {
-      if (!dirtyArmedRef.current || activeTabKindRef.current !== 'template') return;
+      if (!dirtyArmedRef.current || (activeTabKindRef.current !== 'template' && activeTabKindRef.current !== 'material')) return;
       const id = activeTabIdRef.current;
       setDirtyTabs(prev => prev[id] ? prev : { ...prev, [id]: true });
     };
@@ -546,7 +709,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     const runReconcile = () => {
       reconcileScheduledRef.current = false;
-      if (isPlayMode || !activeScene) return;
+      // Material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
+      if (isPlayMode || !activeScene || editorMode === 'material') return;
       suppressReconcileRef.current = true;
       try { reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current); }
       finally { suppressReconcileRef.current = false; }
@@ -889,9 +1053,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       closeTab,
       reorderTabs,
       saveActiveTemplate,
+      saveActiveMaterial,
       enterTemplateEditor,
       editingTemplateName,
       templateRootId,
+      enterMaterialEditor,
+      createMaterialForNode,
+      editingMaterialName,
+      setActiveMaterialName,
       terrainBrush,
       loadingProgress,
       scripts: scriptsRef.current,
@@ -909,6 +1078,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addTemplate,
       removeTemplate,
       updateTemplate,
+      materials,
+      addMaterial,
+      removeMaterial,
+      updateMaterial,
       saveProject: saveProjectToStorage,
       savingState,
     }}>

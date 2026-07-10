@@ -215,7 +215,7 @@ export default function EngineViewport() {
         <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}
              onContextMenu={(e) => e.preventDefault()}>
             {/* Minimal floating 2D/3D switch, top-right of the viewport (Main tab only, not during play). */}
-            {editorMode !== 'template' && !isPlayMode && (
+            {editorMode !== 'template' && editorMode !== 'material' && !isPlayMode && (
                 <select
                     data-cleo-overlay
                     value={dimension}
@@ -227,7 +227,7 @@ export default function EngineViewport() {
                     <option value='2D'>2D</option>
                 </select>
             )}
-            {editorMode !== 'landscape' && editorMode !== 'renderer' && <PositionGizmo
+            {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onPositionChange={handlePositionChange}
                 viewportRef={viewportRef}

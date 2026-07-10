@@ -11,8 +11,11 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 
 export default function MenuBar() {
-  const { editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, savingState, eventEmitter: eventEmitter } = useCleoEngine();
+  const { editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, savingState, eventEmitter: eventEmitter } = useCleoEngine();
   const templateMode = editorMode === 'template';
+  const materialMode = editorMode === 'material';
+  // Template and material tabs both hide the project/scene-level actions (they edit a library asset).
+  const libEdit = templateMode || materialMode;
   const saving = savingState === 'saving';
   const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved ✓' : savingState === 'error' ? 'Save failed' : 'Save';
   const saveBorder = savingState === 'error' ? 'border-red-400' : savingState === 'saved' ? 'border-green-400' : 'border-[#ccc]';
@@ -116,13 +119,16 @@ export default function MenuBar() {
         {templateMode && (
           <div className='text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-[#3f3fb4]' title='Save this template and update its placed instances' onClick={() => saveActiveTemplate()}>Save Template</div>
         )}
-        <div className={`text-white h-[25px] border ${saveBorder} bg-[#3b3b3b] text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(templateMode || saving) ? 'opacity-50 pointer-events-none' : ''}`} title='Save the project to local storage' onClick={() => onSave()}>{saveLabel}</div>
-        <label htmlFor='load-scene-file' className={`text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${templateMode ? 'opacity-50 pointer-events-none' : ''}`} title='Import a .json scene file'>Import</label>
+        {materialMode && (
+          <div className='text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-[#3f3fb4]' title='Save this material (captures a thumbnail) and update nodes that use it' onClick={() => saveActiveMaterial()}>Save Material</div>
+        )}
+        <div className={`text-white h-[25px] border ${saveBorder} bg-[#3b3b3b] text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(libEdit || saving) ? 'opacity-50 pointer-events-none' : ''}`} title='Save the project to local storage' onClick={() => onSave()}>{saveLabel}</div>
+        <label htmlFor='load-scene-file' className={`text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Import a .json scene file'>Import</label>
         <input className="hidden" type='file' accept='.json' id='load-scene-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
-        <div className={`text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${templateMode ? 'opacity-50 pointer-events-none' : ''}`} title='Export the scene to a .json file' onClick={() => onExport()}>Export</div>
+        <div className={`text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Export the scene to a .json file' onClick={() => onExport()}>Export</div>
         <div className='relative inline-block' ref={publishRef}>
           <div
-            className={`text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(publishing || templateMode) ? 'opacity-50 pointer-events-none' : ''}`}
+            className={`text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(publishing || libEdit) ? 'opacity-50 pointer-events-none' : ''}`}
             title='Publish an optimized build of your game'
             onClick={() => setShowPublish(v => !v)}
           >
@@ -159,13 +165,13 @@ export default function MenuBar() {
         </div>
       </div>
       <div className='flex items-center h-full'>
-        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='playing' || templateMode} onClick={() => onPlay()}>
+        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='playing' || libEdit} onClick={() => onPlay()}>
           <img src={PlayIcon} alt='Play' className='inline-block h-full w-full align-middle' />
         </button>
-        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='paused' || playState==='stopped' || templateMode} onClick={() => onPause()}>
+        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='paused' || playState==='stopped' || libEdit} onClick={() => onPause()}>
           <img src={PauseIcon} alt='Pause' className='inline-block h-full w-full align-middle' />
         </button>
-        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='stopped' || templateMode} onClick={() => onStop()}>
+        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='stopped' || libEdit} onClick={() => onStop()}>
           <img src={StopIcon} alt='Stop' className='inline-block h-full w-full align-middle' />
         </button>
       </div>

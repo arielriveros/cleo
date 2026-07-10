@@ -421,6 +421,39 @@ export class Renderer {
         this._applyPostProcessing();
     }
 
+    /**
+     * Render `scene` and capture the result as a base64 PNG data URL, center-cropped to a `size`x`size`
+     * square. Synchronous so it works even though the context has no preserveDrawingBuffer: it draws,
+     * then reads the default framebuffer in the same tick. Used by the editor for asset thumbnails.
+     */
+    public screenshot(scene: Scene, size: number = 256): string {
+        this.render(scene);
+        const w = this._canvas.width, h = this._canvas.height;
+        if (w === 0 || h === 0) return '';
+
+        const pixels = new Uint8Array(w * h * 4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        // Blit into a full-size 2D canvas, flipping Y (WebGL's origin is bottom-left).
+        const full = document.createElement('canvas');
+        full.width = w; full.height = h;
+        const fctx = full.getContext('2d')!;
+        const img = fctx.createImageData(w, h);
+        for (let y = 0; y < h; y++) {
+            const src = (h - 1 - y) * w * 4;
+            img.data.set(pixels.subarray(src, src + w * 4), y * w * 4);
+        }
+        fctx.putImageData(img, 0, 0);
+
+        // Center-crop the largest square and downscale into the requested thumbnail size.
+        const side = Math.min(w, h);
+        const out = document.createElement('canvas');
+        out.width = size; out.height = size;
+        out.getContext('2d')!.drawImage(full, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
+        return out.toDataURL('image/png');
+    }
+
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
     private _renderForward(scene: Scene, shadowLight: LightNode | null): void {
         for (const light of scene.lights)
