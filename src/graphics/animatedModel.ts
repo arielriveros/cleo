@@ -140,7 +140,7 @@ export class AnimatedModel {
         };
         
         let material: Material;
-        const type: string = m.type || 'default';
+        const type: string = m.type || 'blinn_phong';
         if (type === 'basic') {
             material = Material.Basic({
                 color: m.color || [1,1,1],
@@ -263,7 +263,7 @@ export class AnimatedModel {
             transparent: this._material.config.transparent,
             castShadow: this._material.config.castShadow,
         };
-        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'defaultSkinned' ? 'default' : t);
+        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'blinn_phongSkinned' ? 'blinn_phong' : t);
         const type = normalizeType(this._material.type as any);
         
         let material: any;
@@ -296,7 +296,7 @@ export class AnimatedModel {
             };
         } else {
             material = {
-                type: 'default',
+                type: 'blinn_phong',
                 diffuse: this._material.properties.get('diffuse'),
                 specular: this._material.properties.get('specular'),
                 ambient: this._material.properties.get('ambient'),
@@ -440,7 +440,7 @@ export class AnimatedModel {
     /**
      * Initialize the animated model's mesh with the appropriate shader
      */
-    public initializeForSkinning(shaderType: 'basicSkinned' | 'defaultSkinned' = 'defaultSkinned'): void {
+    public initializeForSkinning(shaderType: 'basicSkinned' | 'blinn_phongSkinned' = 'blinn_phongSkinned'): void {
         if (!this.hasSkin) {
             throw new Error('Cannot initialize for skinning: model has no skin data');
         }

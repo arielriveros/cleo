@@ -47,9 +47,9 @@ interface PBRProperties {
 
 enum MaterialType {
     Basic = 'basic',
-    Default = 'default',
+    Default = 'blinn_phong',
     BasicSkinned = 'basicSkinned',
-    DefaultSkinned = 'defaultSkinned',
+    DefaultSkinned = 'blinn_phongSkinned',
     PBR = 'pbr',
     Terrain = 'terrain'
 }
@@ -191,5 +191,120 @@ export class Material {
             material.properties.set(`u_sRange${i}`, [0, 1]);
         }
         return material;
+    }
+
+    /**
+     * Flatten this material to a plain JSON object keyed by shader type. Geometry-independent, so it
+     * can snapshot a standalone material (e.g. a material asset) as well as back Model.serialize().
+     * Skinned types normalize to their base type; terrain and anything unrecognized fall through to
+     * the Blinn-Phong shape (matching the historical Model.serialize behavior).
+     */
+    public serialize(): any {
+        const cfg = {
+            side: this.config.side,
+            wireframe: this.config.wireframe,
+            transparent: this.config.transparent,
+            castShadow: this.config.castShadow,
+        };
+        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'blinn_phongSkinned' ? 'blinn_phong' : t);
+        const type = normalizeType(this.type as any);
+
+        if (type === 'basic') {
+            return {
+                type,
+                color: this.properties.get('color'),
+                opacity: this.properties.get('opacity'),
+                textures: { texture: this.textures.get('texture') },
+                config: cfg
+            };
+        } else if (type === 'pbr') {
+            return {
+                type,
+                baseColor: this.properties.get('baseColor'),
+                metallic: this.properties.get('metallic'),
+                roughness: this.properties.get('roughness'),
+                opacity: this.properties.get('opacity'),
+                emissiveFactor: this.properties.get('emissiveFactor'),
+                textures: {
+                    baseColorTexture: this.textures.get('baseColorTexture'),
+                    metallicRoughnessTexture: this.textures.get('metallicRoughnessTexture'),
+                    normalMap: this.textures.get('normalMap'),
+                    occlusionMap: this.textures.get('occlusionMap'),
+                    emissiveMap: this.textures.get('emissiveMap')
+                },
+                config: cfg
+            };
+        } else { // blinn_phong (and legacy/terrain fall-through)
+            return {
+                type: 'blinn_phong',
+                diffuse: this.properties.get('diffuse'),
+                specular: this.properties.get('specular'),
+                ambient: this.properties.get('ambient'),
+                emissive: this.properties.get('emissive'),
+                shininess: this.properties.get('shininess'),
+                opacity: this.properties.get('opacity'),
+                textures: {
+                    base: this.textures.get('baseTexture'),
+                    specular: this.textures.get('specularMap'),
+                    normal: this.textures.get('normalMap'),
+                    emissive: this.textures.get('emissiveMap'),
+                    mask: this.textures.get('maskMap'),
+                    reflectivity: this.textures.get('reflectivityMap')
+                },
+                config: cfg
+            };
+        }
+    }
+
+    /** Rebuild a Material from the JSON produced by serialize(). Missing/legacy 'default' type -> Blinn-Phong. */
+    public static parse(m: any): Material {
+        m = m || {};
+        const config = {
+            side: m.config?.side,
+            wireframe: m.config?.wireframe,
+            transparent: m.config?.transparent,
+            castShadow: m.config?.castShadow
+        };
+        const type: string = m.type || 'blinn_phong';
+        if (type === 'basic') {
+            return Material.Basic({
+                color: m.color || [1, 1, 1],
+                opacity: m.opacity ?? 1.0,
+                texture: m.textures?.texture
+            }, config);
+        } else if (type === 'pbr') {
+            return Material.PBR({
+                baseColor: m.baseColor || [1, 1, 1],
+                metallic: m.metallic ?? 0.0,
+                roughness: m.roughness ?? 1.0,
+                opacity: m.opacity ?? 1.0,
+                emissiveFactor: m.emissiveFactor || [0, 0, 0],
+                textures: {
+                    baseColorTexture: m.textures?.baseColorTexture,
+                    metallicRoughnessTexture: m.textures?.metallicRoughnessTexture,
+                    normalMap: m.textures?.normalMap,
+                    occlusionMap: m.textures?.occlusionMap,
+                    emissiveMap: m.textures?.emissiveMap
+                }
+            }, config);
+        } else { // 'blinn_phong' (or legacy 'default')
+            const texData = m.textures || {};
+            return Material.Default({
+                diffuse: m.diffuse,
+                specular: m.specular,
+                ambient: m.ambient,
+                emissive: m.emissive,
+                shininess: m.shininess,
+                opacity: m.opacity,
+                textures: {
+                    base: texData.base,
+                    specular: texData.specular,
+                    normal: texData.normal,
+                    emissive: texData.emissive,
+                    mask: texData.mask,
+                    reflectivity: texData.reflectivity
+                }
+            }, config);
+        }
     }
 }

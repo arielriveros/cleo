@@ -15,9 +15,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const material = model.material;
 
   // Shader selection (basic | default)
-  const [shaderType, setShaderType] = useState<'basic' | 'default' | 'pbr'>(
-    (material.type as string).includes('default') ? 'default' : (material.type as string).includes('pbr') ? 'pbr' : 'basic'
-  );
+  const detectShaderType = (t: string): 'basic' | 'blinn_phong' | 'pbr' =>
+    (t.includes('blinn_phong') || t.includes('default')) ? 'blinn_phong' : t.includes('pbr') ? 'pbr' : 'basic';
+  const [shaderType, setShaderType] = useState<'basic' | 'blinn_phong' | 'pbr'>(detectShaderType(material.type as string));
 
   // Default shader state
   const [diffuse, setDiffuse] = useState(vec3ToHex(material.properties.get('diffuse')));
@@ -54,7 +54,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   useEffect(() => {
     // Sync shader type and values from material when node changes
-    setShaderType((material.type as string).includes('default') ? 'default' : (material.type as string).includes('pbr') ? 'pbr' : 'basic');
+    setShaderType(detectShaderType(material.type as string));
 
     setDiffuse(vec3ToHex(material.properties.get('diffuse')));
     setSpecular(vec3ToHex(material.properties.get('specular')));
@@ -89,25 +89,30 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
     // Ensure required properties exist for selected shader
     if (shaderType === 'basic') {
-      if (!material.properties.get('color')) material.properties.set('color', [1,1,1]);
+      const carried = material.properties.get('color') || material.properties.get('baseColor') || material.properties.get('diffuse') || [1,1,1];
+      material.properties.set('color', carried);
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
       // Flag for single texture in basic
       if (material.properties.get('hasTexture') === undefined) material.properties.set('hasTexture', false);
-    } else if (shaderType === 'default') {
-      // Default shader required props
-      if (!material.properties.get('diffuse')) material.properties.set('diffuse', [1,1,1]);
+    } else if (shaderType === 'blinn_phong') {
+      // Blinn-Phong shader required props — carry the main color/emissive over from PBR/basic so the
+      // object keeps its look after a type switch instead of resetting to white.
+      const carried = material.properties.get('diffuse') || material.properties.get('baseColor') || material.properties.get('color') || [1,1,1];
+      material.properties.set('diffuse', carried);
       if (!material.properties.get('specular')) material.properties.set('specular', [1,1,1]);
-      if (!material.properties.get('ambient')) material.properties.set('ambient', material.properties.get('diffuse') || [1,1,1]);
-      if (!material.properties.get('emissive')) material.properties.set('emissive', [0,0,0]);
+      if (!material.properties.get('ambient')) material.properties.set('ambient', carried);
+      if (!material.properties.get('emissive')) material.properties.set('emissive', material.properties.get('emissiveFactor') || [0,0,0]);
       if (material.properties.get('shininess') === undefined) material.properties.set('shininess', 32.0);
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
       if (material.properties.get('reflectivity') === undefined) material.properties.set('reflectivity', 0.0);
     } else if (shaderType === 'pbr') {
-      if (!material.properties.get('baseColor')) material.properties.set('baseColor', [1,1,1]);
+      // Carry the main color/emissive over from default/basic so the object keeps its look.
+      const carried = material.properties.get('baseColor') || material.properties.get('diffuse') || material.properties.get('color') || [1,1,1];
+      material.properties.set('baseColor', carried);
       if (material.properties.get('metallic') === undefined) material.properties.set('metallic', 0.0);
       if (material.properties.get('roughness') === undefined) material.properties.set('roughness', 1.0);
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
-      if (!material.properties.get('emissiveFactor')) material.properties.set('emissiveFactor', [0,0,0]);
+      if (!material.properties.get('emissiveFactor')) material.properties.set('emissiveFactor', material.properties.get('emissive') || [0,0,0]);
       if (material.properties.get('hasBaseColorTexture') === undefined) material.properties.set('hasBaseColorTexture', false);
       if (material.properties.get('hasMetallicRoughnessTexture') === undefined) material.properties.set('hasMetallicRoughnessTexture', false);
       if (material.properties.get('hasNormalMap') === undefined) material.properties.set('hasNormalMap', false);
@@ -138,14 +143,14 @@ export default function MaterialEditor(props: {node: ModelNode}) {
         {/* Shader selector */}
         <div className='mb-2 flex items-center gap-2'>
           <span className='text-xs text-slate-300'>Shader</span>
-          <select className={selectInput} value={shaderType} onChange={(e) => setShaderType(e.target.value as 'basic' | 'default' | 'pbr')}>
+          <select className={selectInput} value={shaderType} onChange={(e) => setShaderType(e.target.value as 'basic' | 'blinn_phong' | 'pbr')}>
             <option value='basic'>Basic</option>
-            <option value='default'>Default</option>
+            <option value='blinn_phong'>Blinn-Phong</option>
             <option value='pbr'>PBR</option>
           </select>
         </div>
 
-        {shaderType === 'default' && (
+        {shaderType === 'blinn_phong' && (
           <>
             <h5 className='m-0 mb-1 font-bold'>Colors</h5>
             <table className='w-full text-left border-collapse'>

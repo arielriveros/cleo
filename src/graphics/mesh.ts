@@ -104,12 +104,48 @@ export class Mesh {
             gl.drawArraysInstanced(mode, 0, this._vertexCount, instanceCount);
     }
 
+    // Canonical interleaved vertex layout, matching the fixed order Geometry.getData() emits:
+    // position, normal, uv, tangent, bitangent. Keyed by both the `a_`-prefixed shader name and
+    // the bare name. This is the single source of truth for attribute order/size — NOT the shader's
+    // reflected attribute enumeration (gl.getActiveAttrib), whose order is driver/program dependent
+    // and would otherwise scramble the VAO for some material programs (e.g. 'default' vs 'pbr').
+    private static readonly _CANON_ATTR: Record<string, { order: number; size: number }> = {
+        a_position:  { order: 0, size: 3 }, position:  { order: 0, size: 3 },
+        a_normal:    { order: 1, size: 3 }, normal:    { order: 1, size: 3 },
+        a_texCoord:  { order: 2, size: 2 }, texCoord:  { order: 2, size: 2 },
+        a_uv:        { order: 2, size: 2 }, uv:        { order: 2, size: 2 },
+        a_tangent:   { order: 3, size: 3 }, tangent:   { order: 3, size: 3 },
+        a_bitangent: { order: 4, size: 3 }, bitangent: { order: 4, size: 3 },
+    };
+
     public initializeVAO(attributes: any): void {
         GLState.bindVAO(this._vertexArray);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
 
-        for (let attr of attributes) {
+        // Split the shader's attributes into the canonical standard set and any unknown extras.
+        const known: { location: number; size: number; order: number }[] = [];
+        const unknown: any[] = [];
+        for (const attr of attributes) {
+            const canon = Mesh._CANON_ATTR[attr.name as string];
+            if (canon) known.push({ location: attr.location, size: canon.size, order: canon.order });
+            else unknown.push(attr);
+        }
+
+        // Assign packed offsets in canonical order (position, normal, uv, tangent, bitangent),
+        // over only the attributes present — exactly how Geometry.getData() interleaves them.
+        known.sort((a, b) => a.order - b.order);
+        const floatSize = 4;
+        const stride = known.reduce((s, a) => s + a.size, 0) * floatSize;
+        let offset = 0;
+        for (const attr of known) {
+            gl.enableVertexAttribArray(attr.location);
+            gl.vertexAttribPointer(attr.location, attr.size, gl.FLOAT, false, stride, offset);
+            offset += attr.size * floatSize;
+        }
+
+        // Fallback for any non-standard attribute: trust the reflected layout.
+        for (const attr of unknown) {
             gl.enableVertexAttribArray(attr.location);
             gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
         }
@@ -192,6 +228,20 @@ export class Mesh {
             gl.enableVertexAttribArray(loc);
             gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, stride, i * 4 * 4);
             gl.vertexAttribDivisor(loc, 1);
+        }
+    }
+
+    /**
+     * Undo {@link setupInstanceMatrixBuffer}: disable the per-instance matrix attributes and reset
+     * their divisor back to 0. Leaving locations 5-8 enabled with divisor 1 on a shared mesh VAO
+     * would corrupt a later non-instanced draw of the same mesh, so call this after instanced draws.
+     */
+    public teardownInstanceMatrixBuffer(baseLocation: number = 5): void {
+        GLState.bindVAO(this._vertexArray);
+        for (let i = 0; i < 4; i++) {
+            const loc = baseLocation + i;
+            gl.vertexAttribDivisor(loc, 0);
+            gl.disableVertexAttribArray(loc);
         }
     }
 

@@ -15,6 +15,8 @@ export class Sprite {
 
   public get mesh(): Mesh { return this._mesh; }
   public get material(): Material { return this._material; }
+  // Sprites render only Basic materials; a non-Basic material set here contributes its base color/texture.
+  public set material(material: Material) { this._material = material; }
   public get geometry(): Geometry { return this._geometry; }
 
   public static parse(data: any): Sprite {

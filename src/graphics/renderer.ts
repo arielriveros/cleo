@@ -33,6 +33,7 @@ import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
 import GridFragment from './shaders/screen/grid.fs'
+import OutlinePostFragment from './shaders/screen/outline.fs'
 import PBRVertex from './shaders/materials/pbr.vs'
 import PBRFragment from './shaders/materials/pbr.fs'
 import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
@@ -67,7 +68,7 @@ export let gl: WebGL2RenderingContext;
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom';
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom' | 'mask';
 
 interface RendererConfig {
     clearColor?: number[];
@@ -91,6 +92,14 @@ export class Renderer {
     private _exposure: number = 1.5;
     private _chromaticAberrationStrength: number = 0.0;
     private _selectedNodeId: string | null = null;
+
+    // Selection outline: silhouette mask FBO + a screen-space edge pass. `_outlineActive` is set
+    // per-frame when something selected was drawn into the mask, so the outline pass is skipped
+    // (and the plain scene blitted) when there's no selection.
+    private _outlineMaskFBO!: Framebuffer;
+    private _outlineActive: boolean = false;
+    private _outlineColor: [number, number, number] = [1.0, 0.55, 0.1];
+    private _outlineWidth: number = 5.0;
     // Editor "Renderer" debug view: which buffer to blit to the screen ('final' = normal image).
     private _debugView: DebugView = 'final';
 
@@ -223,6 +232,8 @@ export class Renderer {
         this._ssaoBlurFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
         // BRDF integration LUT (computed once) — high precision, no mipmaps.
         this._brdfFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        // Selection outline silhouette mask (low precision, no mipmaps).
+        this._outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
     }
 
     public preInitialize(): void {
@@ -282,24 +293,26 @@ export class Renderer {
         const composerShader = new Shader().create(ScreenVertex, Composer);
         // Editor infinite grid (fullscreen world-plane pass)
         const gridShader = new Shader().create(ScreenVertex, GridFragment);
-        // Outline shader
+        // Outline: material shader stamps the selection silhouette into the mask; the screen shader
+        // turns that mask into a border in a post pass.
         const outlineShader = new Shader().create(OutlineVertex, OutlineFragment);
+        const outlinePostShader = new Shader().create(ScreenVertex, OutlinePostFragment);
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
-        this._shaderManager.addShader('default', defaultShader);
+        this._shaderManager.addShader('blinn_phong', defaultShader);
         this._shaderManager.addShader('basicSkinned', basicSkinnedShader);
-        this._shaderManager.addShader('defaultSkinned', defaultSkinnedShader);
+        this._shaderManager.addShader('blinn_phongSkinned', defaultSkinnedShader);
         this._shaderManager.addShader('pbr', pbrShader);
         this._shaderManager.addShader('pbrSkinned', pbrSkinnedShader);
         this._shaderManager.addShader('pbrGeometry', pbrGeometryShader);
         this._shaderManager.addShader('pbrGeometrySkinned', pbrGeometrySkinnedShader);
-        this._shaderManager.addShader('defaultGeometry', defaultGeometryShader);
-        this._shaderManager.addShader('defaultGeometrySkinned', defaultGeometrySkinnedShader);
+        this._shaderManager.addShader('blinn_phongGeometry', defaultGeometryShader);
+        this._shaderManager.addShader('blinn_phongGeometrySkinned', defaultGeometrySkinnedShader);
         this._shaderManager.addShader('basicGeometry', basicGeometryShader);
         this._shaderManager.addShader('basicGeometrySkinned', basicGeometrySkinnedShader);
         this._shaderManager.addShader('pbrGeometryInstanced', pbrGeometryInstancedShader);
-        this._shaderManager.addShader('defaultGeometryInstanced', defaultGeometryInstancedShader);
+        this._shaderManager.addShader('blinn_phongGeometryInstanced', defaultGeometryInstancedShader);
         // 'terrain' is used by ModelNode.initializeModel (attribute reflection); 'terrainGeometry' by the deferred pass.
         this._shaderManager.addShader('terrain', terrainGeometryShader);
         this._shaderManager.addShader('terrainGeometry', terrainGeometryShader);
@@ -320,12 +333,14 @@ export class Renderer {
         this._shaderManager.addShader('composer', composerShader);
         this._shaderManager.addShader('grid', gridShader);
         this._shaderManager.addShader('outline', outlineShader);
+        this._shaderManager.addShader('outlinePost', outlinePostShader);
 
         // Create framebuffers
         this._sceneFBO.create(this._canvas.width, this._canvas.height);
         this._gBufferFBO.create(this._canvas.width, this._canvas.height);
         this._ssaoFBO.create(this._canvas.width, this._canvas.height);
         this._ssaoBlurFBO.create(this._canvas.width, this._canvas.height);
+        this._outlineMaskFBO.create(this._canvas.width, this._canvas.height);
         this._generateSSAOKernelAndNoise();
 
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
@@ -381,6 +396,17 @@ export class Renderer {
             if (this._deferred && shadowLight.type === 'directional') {
                 this._renderCascades(scene.models, shadowLight);
                 this._useCSM = true;
+                // Forward-rendered objects (opaque Blinn-Phong + transparent) sample the single shadow
+                // map, not the cascades — render it too so they receive directional light/shadows
+                // (otherwise they read a stale map, come out fully shadowed, and lose directional light).
+                // Skipped when the scene has no forward objects (pure PBR) to avoid an extra pass.
+                let hasForward = false;
+                for (const n of scene.models) {
+                    if (!n.visible) continue;
+                    const m = n.model.material;
+                    if (m.config.transparent || m.type === 'blinn_phong' || m.type === 'blinn_phongSkinned') { hasForward = true; break; }
+                }
+                if (hasForward) this._renderShadowMap(scene.models, shadowLight);
             } else {
                 this._renderShadowMap(scene.models, shadowLight);
             }
@@ -395,6 +421,39 @@ export class Renderer {
         this._applyPostProcessing();
     }
 
+    /**
+     * Render `scene` and capture the result as a base64 PNG data URL, center-cropped to a `size`x`size`
+     * square. Synchronous so it works even though the context has no preserveDrawingBuffer: it draws,
+     * then reads the default framebuffer in the same tick. Used by the editor for asset thumbnails.
+     */
+    public screenshot(scene: Scene, size: number = 256): string {
+        this.render(scene);
+        const w = this._canvas.width, h = this._canvas.height;
+        if (w === 0 || h === 0) return '';
+
+        const pixels = new Uint8Array(w * h * 4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        // Blit into a full-size 2D canvas, flipping Y (WebGL's origin is bottom-left).
+        const full = document.createElement('canvas');
+        full.width = w; full.height = h;
+        const fctx = full.getContext('2d')!;
+        const img = fctx.createImageData(w, h);
+        for (let y = 0; y < h; y++) {
+            const src = (h - 1 - y) * w * 4;
+            img.data.set(pixels.subarray(src, src + w * 4), y * w * 4);
+        }
+        fctx.putImageData(img, 0, 0);
+
+        // Center-crop the largest square and downscale into the requested thumbnail size.
+        const side = Math.min(w, h);
+        const out = document.createElement('canvas');
+        out.width = size; out.height = size;
+        out.getContext('2d')!.drawImage(full, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
+        return out.toDataURL('image/png');
+    }
+
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
     private _renderForward(scene: Scene, shadowLight: LightNode | null): void {
         for (const light of scene.lights)
@@ -405,7 +464,7 @@ export class Renderer {
     }
 
     private _bindShadowToForwardShaders(light: LightNode): void {
-        for (const shaderName of ['default', 'defaultSkinned', 'pbr', 'pbrSkinned']) {
+        for (const shaderName of ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned']) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_lightSpace', light.lightSpace);
             this._shaderManager.setUniform('u_shadowMap', 6);
@@ -414,7 +473,7 @@ export class Renderer {
     }
 
     private _bindEnvToForwardShaders(scene: Scene): void {
-        for (const shaderName of ['default', 'defaultSkinned', 'pbr', 'pbrSkinned']) {
+        for (const shaderName of ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned']) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
             this._shaderManager.setUniform('u_envMap', 7);
@@ -444,6 +503,13 @@ export class Renderer {
         GLState.disable(gl.BLEND);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+        // Prevent a framebuffer feedback loop: the previous frame's deferred lighting pass leaves the
+        // G-buffer's own textures bound to units 0-3 (the same units the material shaders' samplers
+        // reference). A textureless material never rebinds those units, so drawing into the G-buffer
+        // with them still bound is an INVALID_OPERATION and the draw is dropped (the object vanishes).
+        // Clear the material sampler units so no G-buffer texture is bound while we write to it.
+        for (let u = 0; u < 8; u++) { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, null); }
+
         // Collect visible, opaque, non-gizmo models.
         const singles: ModelNode[] = [];
         const instanceGroups = new Map<string, ModelNode[]>();
@@ -452,12 +518,17 @@ export class Renderer {
             if (!node.visible) continue;
             if ((node as any).isGizmo) continue;
             if (node.model.material.config.transparent) continue;
+            // Default (Blinn-Phong) materials are forward-rendered in the overlay so their full feature
+            // set (specular/ambient/reflectivity + maps) works; they never enter the deferred G-buffer.
+            const dtype = node.model.material.type;
+            if (dtype === 'blinn_phong' || dtype === 'blinn_phongSkinned') continue;
             if (!node.initialized) node.initializeModel();
 
             const mat = node.model.material;
             const animated = node.model instanceof AnimatedModel;
-            // Only non-animated pbr/default materials (14-float layout) can be instanced.
-            if (!animated && (mat.type === 'pbr' || mat.type === 'default')) {
+            // Only non-animated pbr/blinn_phong materials (14-float layout) can be instanced. Note:
+            // opaque blinn_phong is forward-rendered above, so in practice only pbr reaches here.
+            if (!animated && (mat.type === 'pbr' || mat.type === 'blinn_phong')) {
                 const key = `${this._objectId(node.model.mesh)}|${this._objectId(mat)}`;
                 let group = instanceGroups.get(key);
                 if (!group) { group = []; instanceGroups.set(key, group); }
@@ -482,7 +553,7 @@ export class Renderer {
     }
 
     private _foliagePass(scene: Scene): void {
-        const defaultAttrs = this._shaderManager.getShader('defaultGeometry').attributes;
+        const defaultAttrs = this._shaderManager.getShader('blinn_phongGeometry').attributes;
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             for (const layer of landscape.terrain.foliage) {
@@ -505,7 +576,7 @@ export class Renderer {
                 }
 
                 const shaderType = layer.kind === 'billboard' ? 'foliageBillboardInstanced'
-                    : (layer.model.material.type === 'pbr' ? 'pbrGeometryInstanced' : 'defaultGeometryInstanced');
+                    : (layer.model.material.type === 'pbr' ? 'pbrGeometryInstanced' : 'blinn_phongGeometryInstanced');
                 this._shaderManager.bind(shaderType);
                 this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
                 this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
@@ -521,6 +592,7 @@ export class Renderer {
 
                 layer.model.mesh.setupInstanceMatrixBuffer(layer.glBuffer as WebGLBuffer, 5);
                 layer.model.mesh.drawInstanced(layer.count);
+                layer.model.mesh.teardownInstanceMatrixBuffer(5);
             }
         }
     }
@@ -530,7 +602,7 @@ export class Renderer {
         const animated = node.model instanceof AnimatedModel;
         switch (type) {
             case 'pbr': return animated ? 'pbrGeometrySkinned' : 'pbrGeometry';
-            case 'default': return animated ? 'defaultGeometrySkinned' : 'defaultGeometry';
+            case 'blinn_phong': return animated ? 'blinn_phongGeometrySkinned' : 'blinn_phongGeometry';
             case 'basic': return animated ? 'basicGeometrySkinned' : 'basicGeometry';
             case 'terrain': return 'terrainGeometry';
             default: return animated ? 'pbrGeometrySkinned' : 'pbrGeometry';
@@ -560,7 +632,7 @@ export class Renderer {
     private _drawInstancedGroup(group: ModelNode[]): void {
         const first = group[0];
         const type = first.model.material.type;
-        const shaderType = type === 'default' ? 'defaultGeometryInstanced' : 'pbrGeometryInstanced';
+        const shaderType = type === 'blinn_phong' ? 'blinn_phongGeometryInstanced' : 'pbrGeometryInstanced';
 
         // Pack per-instance model matrices into the shared instance buffer.
         const count = group.length;
@@ -583,6 +655,9 @@ export class Renderer {
         mesh.setupInstanceMatrixBuffer(this._instanceBuffer as WebGLBuffer, 5);
         const mode = first.model.material.config.wireframe ? gl.LINES : gl.TRIANGLES;
         mesh.drawInstanced(count, mode);
+        // Reset the per-instance divisor so a later non-instanced draw of this (possibly shared) mesh
+        // isn't left reading the instance buffer.
+        mesh.teardownInstanceMatrixBuffer(5);
     }
 
     private _deferredLightingPass(scene: Scene, shadowLight: LightNode | null): void {
@@ -987,6 +1062,31 @@ export class Renderer {
         GLState.enable(gl.DEPTH_TEST);
         GLState.depthMask(true);
 
+        // Collect the forward-rendered models: transparent (any material), opaque Default (Blinn-Phong,
+        // rendered forward so their full material — specular/ambient/reflectivity + maps — works),
+        // plus the selected models (for the outline mask) and gizmos.
+        const transparentQueue: ModelNode[] = [];
+        const opaqueForwardQueue: ModelNode[] = [];
+        const selectedNodes: ModelNode[] = [];
+        const gizmoNodes: ModelNode[] = [];
+        for (const node of scene.models) {
+            if (!node.visible) continue;
+            if ((node as any).isGizmo) { gizmoNodes.push(node); continue; }
+            if (this._selectedNodeId && node.id === this._selectedNodeId) selectedNodes.push(node);
+            const mat = node.model.material;
+            if (mat.config.transparent) transparentQueue.push(node);
+            else if (mat.type === 'blinn_phong' || mat.type === 'blinn_phongSkinned') opaqueForwardQueue.push(node);
+        }
+
+        // Forward lighting is only needed if something is drawn through the material shaders.
+        const needForward = transparentQueue.length > 0 || opaqueForwardQueue.length > 0 || scene.sprites.size > 0 || gizmoNodes.length > 0;
+        if (needForward) {
+            for (const light of scene.lights)
+                this._setLighting(light, scene.numPointLights, scene.numSpotlights);
+            if (shadowLight) this._bindShadowToForwardShaders(shadowLight);
+            this._bindEnvToForwardShaders(scene);
+        }
+
         // Skybox fills the background (fragments the geometry pass left at far depth).
         if (scene.skybox) {
             // The skybox cube is viewed from the inside, so back-face culling would discard it.
@@ -1004,31 +1104,14 @@ export class Renderer {
             skyboxNode.skybox.mesh.draw();
         }
 
+        // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
+        // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
+        GLState.depthMask(true);
+        GLState.disable(gl.BLEND);
+        for (const node of opaqueForwardQueue) this._renderModel(node);
+
         // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
         this._renderGrid();
-
-        // Collect transparent models, selected models (for outlines), gizmos, and sprites.
-        const transparentQueue: ModelNode[] = [];
-        const selectedNodes: ModelNode[] = [];
-        const gizmoNodes: ModelNode[] = [];
-        for (const node of scene.models) {
-            if (!node.visible) continue;
-            if ((node as any).isGizmo) { gizmoNodes.push(node); continue; }
-            if (this._selectedNodeId && node.id === this._selectedNodeId) selectedNodes.push(node);
-            if (node.model.material.config.transparent) transparentQueue.push(node);
-        }
-
-        // Forward lighting is only needed if something is drawn through the material shaders.
-        const needForward = transparentQueue.length > 0 || scene.sprites.size > 0 || gizmoNodes.length > 0;
-        if (needForward) {
-            for (const light of scene.lights)
-                this._setLighting(light, scene.numPointLights, scene.numSpotlights);
-            if (shadowLight) this._bindShadowToForwardShaders(shadowLight);
-            this._bindEnvToForwardShaders(scene);
-        }
-
-        // Outlines for selected opaque nodes (already shaded via the G-buffer; just draw the outline).
-        if (selectedNodes.length > 0) this._renderOutlines(selectedNodes);
 
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes.
         transparentQueue.sort((a, b) =>
@@ -1043,6 +1126,13 @@ export class Renderer {
 
         // Sprites (always transparent, forward).
         this._renderSpritesPass(scene);
+
+        // Selection silhouette mask (consumed by the post-process outline pass).
+        const selectedSprites: SpriteNode[] = [];
+        if (this._selectedNodeId)
+            for (const node of scene.sprites)
+                if (node.visible && node.id === this._selectedNodeId) selectedSprites.push(node);
+        this._renderSelectionMask(selectedNodes, selectedSprites);
     }
 
     /**
@@ -1087,20 +1177,14 @@ export class Renderer {
     }
 
     private _renderSpritesPass(scene: Scene): void {
-        const spriteNodes = Array.from(scene.sprites);
-        const selectedSprites: SpriteNode[] = [];
-        const nonSelectedSprites: SpriteNode[] = [];
-        for (const node of spriteNodes) {
-            if (!node.visible) continue;
-            if (this._selectedNodeId && node.id === this._selectedNodeId) selectedSprites.push(node);
-            else nonSelectedSprites.push(node);
-        }
-        nonSelectedSprites.sort((a, b) =>
+        // Back-to-front so blended sprites composite correctly. Selection outlines are handled
+        // separately by the mask pass, so no special-casing of the selected sprite here.
+        const spriteNodes: SpriteNode[] = [];
+        for (const node of scene.sprites) if (node.visible) spriteNodes.push(node);
+        spriteNodes.sort((a, b) =>
             vec3.distance(this._activeCamera.position, b.worldPosition) -
             vec3.distance(this._activeCamera.position, a.worldPosition));
-        for (const node of nonSelectedSprites) this._renderSprite(node);
-        if (selectedSprites.length > 0) this._renderSpriteOutlines(selectedSprites);
-        for (const node of selectedSprites) this._renderSprite(node);
+        for (const node of spriteNodes) this._renderSprite(node);
     }
 
     // --- Shared helpers ---------------------------------------------------------------------------
@@ -1199,6 +1283,7 @@ export class Renderer {
         this._compose_FBOs[0].resize(this._canvas.width, this._canvas.height);
         this._compose_FBOs[1].resize(this._canvas.width, this._canvas.height);
         this._bloomFBO.resize(this._canvas.width, this._canvas.height);
+        this._outlineMaskFBO.resize(this._canvas.width, this._canvas.height);
 
         Logger.info(`Resized to ${this._canvas.width}x${this._canvas.height}`)
     }
@@ -1279,12 +1364,7 @@ export class Renderer {
             }
         }
 
-        // Render outlines for selected nodes FIRST (before the selected objects)
-        if (selectedNodes.length > 0) {
-            this._renderOutlines(selectedNodes);
-        }
-
-        // Now render the selected objects normally
+        // Render the selected objects normally (the outline is drawn by the mask pass below).
         for (const node of selectedNodes) {
             if (!node.visible) continue;
             this._renderModel(node);
@@ -1328,20 +1408,12 @@ export class Renderer {
             return bDist - aDist;
         });
 
-        // Render non-selected sprites first
-        for (const node of nonSelectedSprites) {
-            this._renderSprite(node);
-        }
+        // Render non-selected sprites first, then the selected ones on top.
+        for (const node of nonSelectedSprites) this._renderSprite(node);
+        for (const node of selectedSprites) this._renderSprite(node);
 
-        // Render outlines for selected sprites
-        if (selectedSprites.length > 0) {
-            this._renderSpriteOutlines(selectedSprites);
-        }
-
-        // Render selected sprites normally
-        for (const node of selectedSprites) {
-            this._renderSprite(node);
-        }
+        // Selection silhouette mask (consumed by the post-process outline pass).
+        this._renderSelectionMask(selectedNodes, selectedSprites);
     }
 
     private _renderModel(node: ModelNode): void {
@@ -1358,8 +1430,8 @@ export class Renderer {
             
             if (shaderType === 'basic') {
                 shaderType = 'basicSkinned';
-            } else if (shaderType === 'default') {
-                shaderType = 'defaultSkinned';
+            } else if (shaderType === 'blinn_phong') {
+                shaderType = 'blinn_phongSkinned';
             } else if (shaderType === 'pbr') {
                 shaderType = 'pbrSkinned';
             }
@@ -1645,7 +1717,7 @@ export class Renderer {
         }
 
         // Set lighting for both default shaders
-        for (const shaderName of ['default', 'defaultSkinned', 'pbr', 'pbrSkinned']) {
+        for (const shaderName of ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned']) {
             try {
                 this._shaderManager.bind(shaderName);
                 this._shaderManager.setUniform('u_numPointLights', numPointLights);
@@ -1681,15 +1753,34 @@ export class Renderer {
         this._sceneFBO.unbind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         if (this._debugView === 'final') {
-            this._shaderManager.bind('screen');
-            this._shaderManager.setUniform('u_exposure', this._exposure);
-            this._shaderManager.setUniform('u_screenTexture', 0);
-            this._compose_FBOs[1].colors[0].bind();
-            this._screenQuad.draw();
+            if (this._outlineActive) {
+                // Composite the selection outline over the final image on the way to the screen.
+                this._outlinePass();
+            } else {
+                this._shaderManager.bind('screen');
+                this._shaderManager.setUniform('u_exposure', this._exposure);
+                this._shaderManager.setUniform('u_screenTexture', 0);
+                this._compose_FBOs[1].colors[0].bind();
+                this._screenQuad.draw();
+            }
         } else {
             // Editor Renderer-mode: blit one internal buffer instead of the composited image.
             this._blitDebugView();
         }
+    }
+
+    // Screen-space selection outline: draws a border just outside the silhouette mask over the
+    // final composited image. Renders to whatever framebuffer is currently bound (the screen).
+    private _outlinePass(): void {
+        this._shaderManager.bind('outlinePost');
+        this._shaderManager.setUniform('u_screenTexture', 0);
+        this._shaderManager.setUniform('u_maskTexture', 1);
+        this._shaderManager.setUniform('u_texelSize', [1 / this._canvas.width, 1 / this._canvas.height]);
+        this._shaderManager.setUniform('u_outlineColor', this._outlineColor);
+        this._shaderManager.setUniform('u_outlineWidth', this._outlineWidth);
+        this._compose_FBOs[1].colors[0].bind(0);
+        this._outlineMaskFBO.colors[0].bind(1);
+        this._screenQuad.draw();
     }
 
     // Draw a single intermediate buffer to the screen for the editor's Renderer debug channels.
@@ -1710,6 +1801,7 @@ export class Renderer {
             case 'ssao':      tex = this._ssaoBlurFBO.colors[0];   mode = 4; break;
             case 'shadow':    tex = this._shadowMapFBO.depth;      mode = 3; break;
             case 'bloom':     tex = this._bloomFBO.colors[1];      mode = 0; break;
+            case 'mask':      tex = this._outlineMaskFBO.colors[0]; mode = 0; break;
             default:          tex = this._sceneFBO.colors[0];      mode = 0; break;
         }
         this._shaderManager.bind('debugView');
@@ -1782,6 +1874,12 @@ export class Renderer {
     public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
     public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
 
+    // Selection outline appearance (used by the post-process outline pass).
+    public get outlineColor(): [number, number, number] { return this._outlineColor; }
+    public set outlineColor(color: [number, number, number]) { this._outlineColor = color; }
+    public get outlineWidth(): number { return this._outlineWidth; }
+    public set outlineWidth(width: number) { this._outlineWidth = Math.max(0, width); }
+
     public get ssaoEnabled(): boolean { return this._ssaoEnabled; }
     public set ssaoEnabled(enabled: boolean) { this._ssaoEnabled = enabled; }
     public get ssaoRadius(): number { return this._ssaoRadius; }
@@ -1799,182 +1897,75 @@ export class Renderer {
     public get gridVisible(): boolean { return this._gridEnabled; }
     public get gridPlane(): 'xz' | 'xy' { return this._gridPlane === 1 ? 'xy' : 'xz'; }
 
-    private _renderOutlines(selectedNodes: ModelNode[]): void {
-        // Collect all nodes including children
-        const allNodesToOutline: any[] = [];
-        for (const node of selectedNodes) {
-            this._collectAllChildren(node, allNodesToOutline);
+    /**
+     * Draws the currently selected nodes' silhouettes as solid white into the outline mask FBO.
+     * A later post pass (`_outlinePass`) turns that mask into a screen-space border. Rendered with
+     * no depth test/write so the whole silhouette is always outlined (selection stays visible even
+     * when occluded). Sets `_outlineActive` so the outline pass runs only when something is selected.
+     */
+    private _renderSelectionMask(models: ModelNode[], sprites: SpriteNode[]): void {
+        this._outlineMaskFBO.bind();
+        // Clear the mask to transparent black without disturbing the configured scene clear color.
+        const cc = this._config.clearColor || [0.0, 0.0, 0.0, 1.0];
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.clearColor(cc[0], cc[1], cc[2], cc[3]);
+
+        this._outlineActive = models.length > 0 || sprites.length > 0;
+        if (this._outlineActive) {
+            GLState.disable(gl.DEPTH_TEST);
+            GLState.depthMask(false);
+            GLState.disable(gl.BLEND);
+            gl.colorMask(true, true, true, true);
+
+            this._shaderManager.bind('outline');
+            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            this._shaderManager.setUniform('u_outlineColor', [1.0, 1.0, 1.0]); // white silhouette
+
+            // Selected models and their children.
+            const modelNodes: any[] = [];
+            for (const node of models) this._collectAllChildren(node, modelNodes);
+            for (const node of modelNodes) {
+                if (!node.initialized || !node.model) continue;
+                this._shaderManager.setUniform('u_model', node.worldTransform);
+                node.model.mesh.draw(gl.TRIANGLES);
+            }
+
+            // Selected sprites and their children (preserving billboard constraints).
+            const spriteNodes: any[] = [];
+            for (const node of sprites) this._collectAllChildren(node, spriteNodes);
+            for (const node of spriteNodes) {
+                if (!node.initialized || !node.sprite) continue;
+                this._shaderManager.setUniform('u_model', this._spriteBillboardMatrix(node));
+                node.sprite.mesh.draw(gl.TRIANGLES);
+            }
+
+            GLState.depthMask(true);
+            GLState.enable(gl.DEPTH_TEST);
         }
 
-        // Enable stencil testing for outline rendering
-        GLState.enable(gl.STENCIL_TEST);
-        
-        // First pass: write to stencil buffer for selected objects and their children
-        gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
-        gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
-        gl.stencilMask(0xFF);
-        
-        // Render selected objects to stencil buffer (invisible)
-        gl.colorMask(false, false, false, false);
-        GLState.disable(gl.DEPTH_TEST);
-        
-        this._shaderManager.bind('outline');
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
-        this._shaderManager.setUniform('u_outlineColor', [1.0, 0.0, 1.0]);
-        this._shaderManager.setUniform('u_outlineWidth', 0.02);
-
-        for (const node of allNodesToOutline) {
-            if (!node.initialized || !node.model) continue;
-            this._shaderManager.setUniform('u_model', node.worldTransform);
-            node.model.mesh.draw(gl.TRIANGLES);
-        }
-
-        // Second pass: render outline where stencil is NOT 1
-        gl.colorMask(true, true, true, true);
-        gl.stencilFunc(gl.NOTEQUAL, 1, 0xFF);
-        gl.stencilMask(0x00);
-        GLState.disable(gl.DEPTH_TEST);
-
-        // Render slightly larger outline
-        for (const node of allNodesToOutline) {
-            if (!node.initialized || !node.model) continue;
-
-            // Create a scaled transform matrix for the outline
-            const outlineTransform = mat4.create();
-            mat4.copy(outlineTransform, node.worldTransform);
-            
-            // Scale the transform matrix by 1.05 to make the outline slightly larger
-            mat4.scale(outlineTransform, outlineTransform, [1.05, 1.05, 1.05]);
-
-            this._shaderManager.setUniform('u_model', outlineTransform);
-            node.model.mesh.draw(gl.TRIANGLES);
-        }
-
-        // Restore settings
-        gl.stencilMask(0xFF);
-        gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
-        GLState.enable(gl.DEPTH_TEST);
-        GLState.disable(gl.STENCIL_TEST);
+        // Restore the scene framebuffer for any subsequent draws.
+        this._sceneFBO.bind();
     }
 
-    private _renderSpriteOutlines(selectedSprites: SpriteNode[]): void {
-        // Collect all nodes including children
-        const allNodesToOutline: any[] = [];
-        for (const node of selectedSprites) {
-            this._collectAllChildren(node, allNodesToOutline);
+    /** Builds a sprite's world matrix with its camera-facing billboard constraint applied. */
+    private _spriteBillboardMatrix(node: SpriteNode): mat4 {
+        const m = mat4.clone(node.worldTransform);
+        const view = this._activeCamera.viewMatrix;
+        const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
+        if (constraints === 'spherical') {
+            m[0] = view[0]; m[1] = view[4]; m[2] = view[8];
+            m[4] = view[1]; m[5] = view[5]; m[6] = view[9];
+            m[8] = view[2]; m[9] = view[6]; m[10] = view[10];
+            mat4.scale(m, m, node.worldScale);
+        } else if (constraints === 'cylindrical') {
+            m[0] = view[0]; m[1] = view[4]; m[2] = view[8];
+            m[4] = 0; m[5] = 1; m[6] = 0;
+            m[8] = view[2]; m[9] = view[6]; m[10] = view[10];
+            mat4.scale(m, m, node.worldScale);
         }
-
-        // Enable stencil testing for outline rendering
-        GLState.enable(gl.STENCIL_TEST);
-        
-        // First pass: write to stencil buffer for selected sprites and their children
-        gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
-        gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
-        gl.stencilMask(0xFF);
-        
-        // Render selected sprites to stencil buffer (invisible)
-        gl.colorMask(false, false, false, false);
-        GLState.disable(gl.DEPTH_TEST);
-        
-        this._shaderManager.bind('outline');
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
-        this._shaderManager.setUniform('u_outlineColor', [1.0, 0.0, 1.0]);
-        this._shaderManager.setUniform('u_outlineWidth', 0.02);
-
-        for (const node of allNodesToOutline) {
-            if (!node.initialized || !node.sprite) continue;
-            
-            // Apply the same transform logic as _renderSprite
-            const spriteMatrix = mat4.clone(node.worldTransform);
-            const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
-
-            if (constraints === 'spherical') {
-                spriteMatrix[0] = this._activeCamera.viewMatrix[0];
-                spriteMatrix[1] = this._activeCamera.viewMatrix[4];
-                spriteMatrix[2] = this._activeCamera.viewMatrix[8];
-                spriteMatrix[4] = this._activeCamera.viewMatrix[1];
-                spriteMatrix[5] = this._activeCamera.viewMatrix[5];
-                spriteMatrix[6] = this._activeCamera.viewMatrix[9];
-                spriteMatrix[8] = this._activeCamera.viewMatrix[2];
-                spriteMatrix[9] = this._activeCamera.viewMatrix[6];
-                spriteMatrix[10] = this._activeCamera.viewMatrix[10];
-                // reapply scaling
-                mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
-            }
-            else if (constraints === 'cylindrical') {
-                spriteMatrix[0] = this._activeCamera.viewMatrix[0];
-                spriteMatrix[1] = this._activeCamera.viewMatrix[4];
-                spriteMatrix[2] = this._activeCamera.viewMatrix[8];
-                spriteMatrix[4] = 0;
-                spriteMatrix[5] = 1;
-                spriteMatrix[6] = 0;
-                spriteMatrix[8] = this._activeCamera.viewMatrix[2];
-                spriteMatrix[9] = this._activeCamera.viewMatrix[6];
-                spriteMatrix[10] = this._activeCamera.viewMatrix[10];
-                // reapply scaling
-                mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
-            }
-
-            this._shaderManager.setUniform('u_model', spriteMatrix);
-            node.sprite.mesh.draw(gl.TRIANGLES);
-        }
-
-        // Second pass: render outline where stencil is NOT 1
-        gl.colorMask(true, true, true, true);
-        gl.stencilFunc(gl.NOTEQUAL, 1, 0xFF);
-        gl.stencilMask(0x00);
-        GLState.disable(gl.DEPTH_TEST);
-
-        // Render slightly larger outline
-        for (const node of allNodesToOutline) {
-            if (!node.initialized || !node.sprite) continue;
-
-            // Create a scaled transform matrix for the outline with same constraints
-            const outlineTransform = mat4.create();
-            mat4.copy(outlineTransform, node.worldTransform);
-            const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
-
-            if (constraints === 'spherical') {
-                outlineTransform[0] = this._activeCamera.viewMatrix[0];
-                outlineTransform[1] = this._activeCamera.viewMatrix[4];
-                outlineTransform[2] = this._activeCamera.viewMatrix[8];
-                outlineTransform[4] = this._activeCamera.viewMatrix[1];
-                outlineTransform[5] = this._activeCamera.viewMatrix[5];
-                outlineTransform[6] = this._activeCamera.viewMatrix[9];
-                outlineTransform[8] = this._activeCamera.viewMatrix[2];
-                outlineTransform[9] = this._activeCamera.viewMatrix[6];
-                outlineTransform[10] = this._activeCamera.viewMatrix[10];
-                // reapply scaling with outline scale
-                mat4.scale(outlineTransform, outlineTransform, [node.worldScale[0] * 1.05, node.worldScale[1] * 1.05, node.worldScale[2] * 1.05]);
-            }
-            else if (constraints === 'cylindrical') {
-                outlineTransform[0] = this._activeCamera.viewMatrix[0];
-                outlineTransform[1] = this._activeCamera.viewMatrix[4];
-                outlineTransform[2] = this._activeCamera.viewMatrix[8];
-                outlineTransform[4] = 0;
-                outlineTransform[5] = 1;
-                outlineTransform[6] = 0;
-                outlineTransform[8] = this._activeCamera.viewMatrix[2];
-                outlineTransform[9] = this._activeCamera.viewMatrix[6];
-                outlineTransform[10] = this._activeCamera.viewMatrix[10];
-                // reapply scaling with outline scale
-                mat4.scale(outlineTransform, outlineTransform, [node.worldScale[0] * 1.05, node.worldScale[1] * 1.05, node.worldScale[2] * 1.05]);
-            } else {
-                // For 'free' constraint, just scale the transform matrix
-                mat4.scale(outlineTransform, outlineTransform, [1.05, 1.05, 1.05]);
-            }
-
-            this._shaderManager.setUniform('u_model', outlineTransform);
-            node.sprite.mesh.draw(gl.TRIANGLES);
-        }
-
-        // Restore settings
-        gl.stencilMask(0xFF);
-        gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
-        GLState.enable(gl.DEPTH_TEST);
-        GLState.disable(gl.STENCIL_TEST);
+        return m;
     }
 
     private _renderGizmos(gizmoNodes: ModelNode[]): void {

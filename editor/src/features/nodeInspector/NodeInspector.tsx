@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Node } from 'cleo'
+import { Node, ModelNode } from 'cleo'
 import Tabs, { Tab } from "../../components/Tabs";
 import PropertyEditor from './propertyEditors/PropertyEditor';
+import MaterialEditor from './propertyEditors/MaterialEditor';
 import ScriptEditor from './scriptEditor/ScriptEditor';
 import PhysicsEditor from './physicsEditors/PhysicsEditor';
 import AnimationEditor from './animationEditor/AnimationEditor';
 import { isWithinTemplateInstance } from '../../utils/templates';
 
 export default function NodeInspector() {
-  const { editorScene, selectedNode, editorMode } = useCleoEngine()
+  const { editorScene, selectedNode, editorMode, eventEmitter, editingMaterialName, setActiveMaterialName } = useCleoEngine()
   const [node, setNode] = useState<Node | null>(null)
   const [selectedTab, setSelectedTab] = useState<'Properties' | 'Script' | 'Physics' | 'Animation'>('Properties')
 
@@ -20,6 +21,26 @@ export default function NodeInspector() {
     }
 
   }, [selectedNode])
+
+  // Material editor mode: the inspector focuses on the preview sphere's material only (name + controls).
+  if (editorMode === 'material') {
+    return (
+      <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
+        <div className='p-2 border-b border-[#2d2d77]'>
+          <label className='text-xs text-slate-300 block mb-1'>Material name</label>
+          <input
+            className='bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-full text-sm'
+            value={editingMaterialName ?? ''}
+            onChange={(e) => setActiveMaterialName(e.target.value)} />
+        </div>
+        {/* Any edit inside the material controls marks the tab dirty (drives the unsaved dot / close guard). */}
+        {node && node.nodeType === 'model' &&
+          <div onChange={() => eventEmitter.emit('SCENE_CHANGED')}>
+            <MaterialEditor node={node as ModelNode} />
+          </div>}
+      </div>
+    )
+  }
 
   // A placed template instance (and its children) is read-only in Scene mode, except its Transform.
   // Template mode itself stays fully editable (that's where the template is authored).
