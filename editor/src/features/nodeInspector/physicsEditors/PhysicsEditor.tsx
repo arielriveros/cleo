@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Geometry, Material, Model, ModelNode, AnimatedModel, Node, Vec, RAGDOLL_DEFAULTS } from 'cleo'
+import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS } from 'cleo'
 import type { RagdollOptions } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
@@ -48,8 +48,9 @@ export default function PhysicsEditor(props: {node: Node}) {
 
   }, [props.node, bodies])
 
+  // Persist body edits to the shared map; the editor-helper reconciler rebuilds the debug wireframe.
   useEffect(() => {
-    if (bodyProperties ) {
+    if (bodyProperties) {
       bodies.set(props.node.id, {
         mass: bodyProperties.mass,
         linearDamping: bodyProperties.linearDamping,
@@ -58,66 +59,9 @@ export default function PhysicsEditor(props: {node: Node}) {
         angularConstraints: bodyProperties.angularConstraints,
         shapes: bodyProperties.shapes
       });
-      // Check if scene contains a debug node for this body, if not, create one
-      if (!props.node.scene?.getNodesByName(`__debug__body_${props.node.id}`)[0]) {
-        const node = new Node(`__debug__body_${props.node.id}`)
-        node.onUpdate = () => {
-          node.setPosition(props.node.position);
-          node.setRotation(props.node.rotation);
-        }
-        props.node.scene?.addNode(node);
-      }
+      eventEmitter.emit('PHYSICS_CHANGED');
     }
   }, [bodyProperties])
-
-  useEffect(() => {
-    if (!bodyProperties) return;
-    const node = props.node.scene?.getNodesByName(`__debug__body_${props.node.id}`)[0];
-    // Setup debug shapes for each shape in the body
-    bodyProperties.shapes.forEach((shape, i) => {
-      // First check if the debug node contains a model for this shape, if not, create one
-      if (!node?.getChildByName(`__debug__shape_${i}`)[0]) {
-        let model: Model | null;
-        switch (shape.type) {
-          case 'box':
-            model = new Model(Geometry.Cube(shape.width, shape.height, shape.depth, true), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
-            break;
-          case 'sphere':
-            model = new Model(Geometry.Sphere(8, shape.radius), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
-            break;
-          case 'cylinder':
-            model = new Model(Geometry.Cylinder(12, shape.radius, shape.height), Material.Basic({color: [1, 0, 0]}, {wireframe: true}));
-            break;
-          case 'plane':
-            model = null;
-            break;
-          default:
-            model = null;
-        }
-        if (model) {
-          const modelNode = new ModelNode(`__debug__shape_${i}`, model)
-          node?.addChild(modelNode);
-        }
-      }
-      // Update position and rotation of the model
-      const modelNode = node?.getChildByName(`__debug__shape_${i}`)[0];
-      if (modelNode) {
-        modelNode.setPosition(Vec.vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]))
-                  .setRotation(Vec.vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2]));
-      }
-      
-      // Update shape properties
-      if (modelNode && shape.type === 'box') {
-        modelNode.setScale(Vec.vec3.fromValues(shape.width, shape.height, shape.depth));
-      }
-      if (modelNode && shape.type === 'sphere') {
-        modelNode.setUniformScale(shape.radius);
-      }
-      if (modelNode && shape.type === 'cylinder') {
-        modelNode.setScale(Vec.vec3.fromValues(shape.radius, shape.height, shape.radius));
-      }
-    })
-  }, [bodyProperties?.shapes] )
 
   useEffect(() => {
     const trigger = triggers.get(props.node.id);
@@ -126,69 +70,13 @@ export default function PhysicsEditor(props: {node: Node}) {
     else setTriggerProperties(null)
   }, [props.node, triggers])
 
+  // Persist trigger edits to the shared map; the editor-helper reconciler rebuilds the debug wireframe.
   useEffect(() => {
-    if (triggerProperties ) {
+    if (triggerProperties) {
       triggers.set(props.node.id, { shapes: triggerProperties.shapes });
-      // Check if scene contains a debug node for this body, if not, create one
-      if (!props.node.scene?.getNodesByName(`__debug__trigger_${props.node.id}`)[0]) {
-        const node = new Node(`__debug__trigger_${props.node.id}`)
-        node.onUpdate = () => {
-          node.setPosition(props.node.worldPosition);
-          node.setQuaternion(props.node.worldQuaternion);
-        }
-        props.node.scene?.addNode(node);
-      }
+      eventEmitter.emit('PHYSICS_CHANGED');
     }
   }, [triggerProperties])
-
-  useEffect(() => {
-    if (!triggerProperties) return;
-    const node = props.node.scene?.getNodesByName(`__debug__trigger_${props.node.id}`)[0];
-    // Setup debug shapes for each shape in the trigger
-    triggerProperties.shapes.forEach((shape, i) => {
-      // First check if the debug node contains a model for this shape, if not, create one
-      if (!node?.getChildByName(`__debug__shape_${i}`)[0]) {
-        let model: Model | null;
-        switch (shape.type) {
-          case 'box':
-            model = new Model(Geometry.Cube(shape.width, shape.height, shape.depth, true), Material.Basic({color: [0, 1, 0]}, {wireframe: true}));
-            break;
-          case 'sphere':
-            model = new Model(Geometry.Sphere(8, shape.radius), Material.Basic({color: [0, 1, 0]}, {wireframe: true}));
-            break;
-          case 'cylinder':
-            model = new Model(Geometry.Cylinder(12, shape.radius, shape.height), Material.Basic({color: [0, 1, 0]}, {wireframe: true}));
-            break;
-          case 'plane':
-            model = null;
-            break;
-          default:
-            model = null;
-        }
-        if (model) {
-          const modelNode = new ModelNode(`__debug__shape_${i}`, model)
-          node?.addChild(modelNode);
-        }
-      }
-      // Update position and rotation of the model
-      const modelNode = node?.getChildByName(`__debug__shape_${i}`)[0];
-      if (modelNode) {
-        modelNode.setPosition(Vec.vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]))
-                  .setRotation(Vec.vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2]));
-      }
-      
-      // Update shape properties
-      if (modelNode && shape.type === 'box') {
-        modelNode.setScale(Vec.vec3.fromValues(shape.width, shape.height, shape.depth));
-      }
-      if (modelNode && shape.type === 'sphere') {
-        modelNode.setUniformScale(shape.radius);
-      }
-      if (modelNode && shape.type === 'cylinder') {
-        modelNode.setScale(Vec.vec3.fromValues(shape.radius, shape.height, shape.radius));
-      }
-    })
-  }, [triggerProperties?.shapes] )
 
   // Load ragdoll config from the node (merged over shared defaults) when a skinned mesh is selected.
   useEffect(() => {
@@ -239,47 +127,32 @@ export default function PhysicsEditor(props: {node: Node}) {
     }
   }
 
+  // Shape/body/trigger removal just updates the data; the reconciler rebuilds or removes the debug
+  // wireframes (setBodyProperties/setTriggerProperties re-run the persist effects above, which emit
+  // PHYSICS_CHANGED; the explicit emits below cover the null case where those effects short-circuit).
   const removeShape = (shapeIndex: number, target: 'body' | 'trigger') => {
     if (target === 'body' && bodyProperties) {
       const newShapes = [...bodyProperties.shapes];
       newShapes.splice(shapeIndex, 1);
       setBodyProperties({...bodyProperties, shapes: newShapes})
-      // Remove debug model
-      const node = props.node.scene?.getNodesByName(`__debug__body_${props.node.id}`)[0];
-      const modelNode = node?.getChildByName(`__debug__shape_${shapeIndex}`)[0];
-      if (modelNode) node?.removeChild(modelNode);
-      // Update the names of the models
-      node?.children.forEach((child, i) => {
-        child.name = `__debug__shape_${i}`;
-      })
     }
     if (target === 'trigger' && triggerProperties) {
       const newShapes = [...triggerProperties.shapes];
       newShapes.splice(shapeIndex, 1);
       setTriggerProperties({...triggerProperties, shapes: newShapes})
-      // Remove debug model
-      const node = props.node.scene?.getNodesByName(`__debug__trigger_${props.node.id}`)[0];
-      const modelNode = node?.getChildByName(`__debug__shape_${shapeIndex}`)[0];
-      if (modelNode) node?.removeChild(modelNode);
-      // Update the names of the models
-      node?.children.forEach((child, i) => {
-        child.name = `__debug__shape_${i}`;
-      })
     }
   };
 
   const removeBody = () => {
     bodies.delete(props.node.id);
-    const nodeToRemove = props.node.scene?.getNodesByName(`__debug__body_${props.node.id}`)[0];
-    if (nodeToRemove) props.node.scene?.removeNode(nodeToRemove);
     setBodyProperties(null);
+    eventEmitter.emit('PHYSICS_CHANGED');
   }
 
   const removeTrigger = () => {
     triggers.delete(props.node.id);
-    const nodeToRemove = props.node.scene?.getNodesByName(`__debug__trigger_${props.node.id}`)[0];
-    if (nodeToRemove) props.node.scene?.removeNode(nodeToRemove);
     setTriggerProperties(null);
+    eventEmitter.emit('PHYSICS_CHANGED');
   }
 
   return ( <>

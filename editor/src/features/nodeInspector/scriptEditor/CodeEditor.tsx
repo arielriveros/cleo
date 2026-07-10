@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react'
 import { EditorView, basicSetup } from "codemirror"
 import { javascript, javascriptLanguage, scopeCompletionSource } from '@codemirror/lang-javascript'
-import { EditorState } from "@codemirror/state"
+import { EditorState, Compartment } from "@codemirror/state"
 import { useCleoEngine } from '../../EngineContext'
 import { InputManager, Logger, ModelNode, Node } from 'cleo'
 
@@ -42,20 +42,28 @@ function onUpdate(node, delta, time, global) {
 // };
 */`;
 
-export default function CodeEditor() {
+export default function CodeEditor(props: { readOnly?: boolean }) {
   const {selectedNode, scripts, editorScene} = useCleoEngine()
   const editorRef = React.useRef<HTMLDivElement>(null)
   const editorViewRef = React.useRef<EditorView | null>(null)
+  const readOnlyComp = React.useRef(new Compartment())
   const [editorText, setEditorText] = React.useState('')
   const [scriptText, setScriptText] = React.useState<string | null>(null)
   const [hasScript, setHasScript] = React.useState(false)
-  
+
+  const roExtension = (ro: boolean) => [EditorState.readOnly.of(ro), EditorView.editable.of(!ro)]
 
   useEffect(() => {
     if (!selectedNode || !scriptText) return
+    if (props.readOnly) return // never write scripts for a read-only (template instance) node
     scripts.set(selectedNode, scriptText)
 
   }, [scriptText])
+
+  // Toggle CodeMirror read-only reactively (a <fieldset disabled> does not stop contentEditable).
+  useEffect(() => {
+    editorViewRef.current?.dispatch({ effects: readOnlyComp.current.reconfigure(roExtension(!!props.readOnly)) })
+  }, [props.readOnly])
 
   useEffect(() => {
     if (editorViewRef.current) {
@@ -100,8 +108,9 @@ export default function CodeEditor() {
               setScriptText(update.state.doc.toString())
             }
           }),
+          readOnlyComp.current.of(roExtension(!!props.readOnly)),
         ],
-      }),      
+      }),
       parent: editorRef.current
     });
 
@@ -127,7 +136,8 @@ export default function CodeEditor() {
     <div className='p-2'>
       {!hasScript && (
         <button
-          className='px-3 py-1 rounded bg-[#326acc] hover:bg-[#2a59a9] text-white border border-[#274b8f]'
+          disabled={props.readOnly}
+          className='px-3 py-1 rounded bg-[#326acc] hover:bg-[#2a59a9] text-white border border-[#274b8f] disabled:opacity-50 disabled:cursor-not-allowed'
           onClick={handleAddScript}
         >
           Add Script
@@ -138,7 +148,8 @@ export default function CodeEditor() {
       </div>
       {hasScript && (
         <button
-          className='mt-2 px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white border border-red-700'
+          disabled={props.readOnly}
+          className='mt-2 px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white border border-red-700 disabled:opacity-50 disabled:cursor-not-allowed'
           onClick={handleDeleteScript}
         >
           Delete Script

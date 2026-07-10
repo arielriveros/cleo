@@ -14,13 +14,31 @@ import AssetExplorer from "./assets/AssetExplorer";
 import TemplateExplorer from "./sceneInspector/TemplateExplorer";
 import UIOverlay from "./uiInspector/UIOverlay";
 import LoadingScreen from "../components/LoadingScreen";
+import { LAYOUT_KEY } from "../utils/projectStorage";
+
+const DEFAULT_BARS = { left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15 };
+
+// Restore persisted panel layout (falls back to defaults).
+function readLayout(): { barsDimensions: typeof DEFAULT_BARS; bottomTab: 'Logger' | 'Assets' | 'Templates' } {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (raw) {
+      const l = JSON.parse(raw);
+      return { barsDimensions: { ...DEFAULT_BARS, ...(l.barsDimensions ?? {}) }, bottomTab: l.bottomTab ?? 'Logger' };
+    }
+  } catch { /* ignore */ }
+  return { barsDimensions: DEFAULT_BARS, bottomTab: 'Logger' };
+}
 
 export default function Editor() {
-  const { instance, eventEmitter, isSceneReady, loadingProgress } = useCleoEngine();
-  const [barsDimensions, setBarsDimensions] = useState({
-    left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15
-  });
-  const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets' | 'Templates'>('Logger');
+  const { instance, eventEmitter, isSceneReady, loadingProgress, editorMode, isPlayMode } = useCleoEngine();
+  const [barsDimensions, setBarsDimensions] = useState(() => readLayout().barsDimensions);
+  const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets' | 'Templates'>(() => readLayout().bottomTab);
+
+  // Landscape mode hides both side inspectors and gives the viewport full width.
+  const hideSides = editorMode === 'landscape';
+  const effLeft = hideSides ? 0 : barsDimensions.left;
+  const effRight = hideSides ? 0 : barsDimensions.right;
 
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
@@ -42,6 +60,24 @@ export default function Editor() {
     }
   }, [bottomTab]);
 
+  // The Template mode segment focuses the Templates bottom panel.
+  useEffect(() => {
+    const onFocus = (tab: 'Logger' | 'Assets' | 'Templates') => setBottomTab(tab);
+    eventEmitter.on('FOCUS_BOTTOM_TAB', onFocus);
+    return () => { eventEmitter.off('FOCUS_BOTTOM_TAB', onFocus); };
+  }, [eventEmitter]);
+
+  // Persist panel layout (but not the collapsed play-mode dimensions).
+  useEffect(() => {
+    if (isPlayMode) return;
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ barsDimensions, bottomTab })); } catch { /* ignore */ }
+  }, [barsDimensions, bottomTab, isPlayMode]);
+
+  // Resize the renderer when sidebars appear/disappear on mode change.
+  useEffect(() => {
+    if (instance) instance.renderer.resize();
+  }, [editorMode, instance]);
+
   useEffect(() => {
     if (!instance) return;
 
@@ -59,15 +95,15 @@ export default function Editor() {
     <>
       <MenuBar />
       <Content>
-        <Sidebar width={`${barsDimensions.left}vw`} minWidth={`${barsDimensions.minLeft}vw`}>
+        <Sidebar width={`${effLeft}vw`} minWidth={`${hideSides ? 0 : barsDimensions.minLeft}vw`}>
           <Explorer />
         </Sidebar>
-        <SidebarResizer 
+        {!hideSides && <SidebarResizer
           onDrag={ e => {
             setBarsDimensions({...barsDimensions, left: 100 * e.clientX / window.innerWidth, right: barsDimensions.right});
           }}
-        />
-        <Center width={`${100 - barsDimensions.left - barsDimensions.right}vw`}>
+        />}
+        <Center width={`${100 - effLeft - effRight}vw`}>
           <div className="flex flex-col h-full">
             <div className="flex-1 min-h-0 relative">
               <EngineViewport />
@@ -99,12 +135,12 @@ export default function Editor() {
             </BottomBar>
           </div>
         </Center>
-        <SidebarResizer
+        {!hideSides && <SidebarResizer
           onDrag={ e => {
             setBarsDimensions({...barsDimensions, left: barsDimensions.left, right: 100 - (100 * e.clientX) / window.innerWidth});
           }}
-        />
-        <Sidebar width={`${barsDimensions.right}vw`} minWidth={`${barsDimensions.minRight}vw`}>
+        />}
+        <Sidebar width={`${effRight}vw`} minWidth={`${hideSides ? 0 : barsDimensions.minRight}vw`}>
           <NodeInspector />
         </Sidebar>
       </Content>

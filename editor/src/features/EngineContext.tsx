@@ -1,16 +1,17 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager, SpriteNode, Sprite } from "cleo";
-import { CameraGeometry } from "../utils/EditorModels";
+import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager, SpriteNode, Sprite, Logger } from "cleo";
 import NullImage from '../images/null.png';
 import DinosaurImage from '../images/dinosaur.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
-import { createDemoScene } from './demoScene/createDemoScene';
-import { createDemoUI } from './demoScene/createDemoUI';
+import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
-import { Template } from "../utils/templates";
+import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
 import { buildGameData } from "./publish/buildGameData";
+import { loadProject, applyGameData, saveProject, ProjectPrefs } from "../utils/projectStorage";
+import { idbGet, idbSet } from "../utils/idb";
+import { reconcileEditorHelpers } from "../utils/editorHelpers";
 
 type BoxShapeDescription = {
   type: 'box';
@@ -58,7 +59,8 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
-export type EditorMode = 'default' | 'landscape';
+export type EditorMode = 'scene' | 'landscape' | 'template';
+export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
 export type TerrainBrushState = {
@@ -88,6 +90,10 @@ const EngineContext = createContext<{
   isSceneReady: boolean;
   editorMode: EditorMode;
   setEditorMode: (mode: EditorMode) => void;
+  // Template editor
+  enterTemplateEditor: (templateId?: string) => void;
+  editingTemplateName: string | null;
+  templateRootId: string | null;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   loadingProgress: LoadingProgress;
   scripts: Map<string, string>;
@@ -107,6 +113,10 @@ const EngineContext = createContext<{
   templates: Template[];
   addTemplate: (t: Template) => void;
   removeTemplate: (id: string) => void;
+  updateTemplate: (id: string, t: Template) => void;
+  // Project persistence
+  saveProject: () => void;
+  savingState: SavingState;
   }>({
     instance: null,
     editorScene: new Scene(),
@@ -115,8 +125,11 @@ const EngineContext = createContext<{
     isGizmoDragging: false,
     isPlayMode: false,
     isSceneReady: false,
-    editorMode: 'default',
+    editorMode: 'scene',
     setEditorMode: () => {},
+    enterTemplateEditor: () => {},
+    editingTemplateName: null,
+    templateRootId: null,
     terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null } },
     loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
@@ -133,6 +146,9 @@ const EngineContext = createContext<{
     templates: [],
     addTemplate: () => {},
     removeTemplate: () => {},
+    updateTemplate: () => {},
+    saveProject: () => {},
+    savingState: 'idle',
   });
   
   // Create a custom hook to access the engine and scene from anywhere
@@ -148,7 +164,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
   const [isPlayMode, setIsPlayMode] = useState(false);
   const [isSceneReady, setIsSceneReady] = useState(false);
-  const [editorMode, setEditorMode] = useState<EditorMode>('default');
+  const [editorMode, setEditorModeState] = useState<EditorMode>('scene');
+  // Template editor: a throwaway scene the inspectors/gizmo point at while authoring a template.
+  const templateSceneRef = useRef<Scene | null>(null);
+  const templateRootIdRef = useRef<string | null>(null);
+  const editingTemplateIdRef = useRef<string | null>(null); // null = a brand-new template
+  const [editingTemplateName, setEditingTemplateName] = useState<string | null>(null);
+  const [templateRootId, setTemplateRootId] = useState<string | null>(null); // template node id (inspector root in template mode)
+  const [savingState, setSavingState] = useState<SavingState>('idle');
+  const dimensionRef = useRef<'2D' | '3D'>('3D');
+  const templatePrevDimensionRef = useRef<'2D' | '3D'>('3D'); // game dimension to restore after template editing
+  const pendingPrefsRef = useRef<ProjectPrefs | null>(null);
   const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null });
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
@@ -160,26 +186,208 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const startedRef = useRef(false);
   useEffect(() => { uiStateRef.current = uiState; }, [uiState]);
 
-  // Reusable node templates, persisted to localStorage
-  const [templates, setTemplates] = useState<Template[]>(() => {
-    try { const raw = localStorage.getItem('cleo_templates'); return raw ? JSON.parse(raw) : []; }
-    catch { return []; }
-  });
-  const persistTemplates = (list: Template[]) => {
-    try { localStorage.setItem('cleo_templates', JSON.stringify(list)); }
-    catch (e) { console.warn('Failed to persist templates (quota?):', e); }
-  };
-  const addTemplate = (t: Template) => setTemplates(prev => { const next = [...prev, t]; persistTemplates(next); return next; });
-  const removeTemplate = (id: string) => setTemplates(prev => { const next = prev.filter(x => x.id !== id); persistTemplates(next); return next; });
+  // Reusable node templates, persisted to IndexedDB (they embed base64 textures and would blow the
+  // ~5MB localStorage quota). Loaded asynchronously on mount, migrating any legacy localStorage copy once.
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const templatesLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        let list = await idbGet<Template[]>('cleo_templates');
+        if (!list) {
+          const raw = localStorage.getItem('cleo_templates');
+          if (raw) {
+            list = JSON.parse(raw) as Template[];
+            try { await idbSet('cleo_templates', list); localStorage.removeItem('cleo_templates'); } catch { /* keep legacy copy if migration write fails */ }
+          }
+        }
+        // Don't clobber templates the user may have added before the async load resolved.
+        if (list && list.length) setTemplates(prev => prev.length ? prev : list!);
+      } catch (e) { console.warn('Failed to load templates:', e); }
+      finally { templatesLoadedRef.current = true; }
+    })();
+  }, []);
+  useEffect(() => {
+    if (!templatesLoadedRef.current) return;
+    idbSet('cleo_templates', templates).catch(e => console.warn('Failed to persist templates:', e));
+  }, [templates]);
 
+  const addTemplate = (t: Template) => setTemplates(prev => [...prev, t]);
+  const removeTemplate = (id: string) => {
+    // Unlink any placed instances so they become normal, fully-editable nodes (instead of staying
+    // locked forever with no template to edit). Removing the marker re-renders the provider, so the
+    // node inspector's read-only gate re-evaluates to editable.
+    const scene = editorSceneRef.current;
+    let changed = false;
+    for (const n of Array.from(scene.nodes)) {
+      if (n.getVariable(TEMPLATE_ID_VAR) === id) { n.removeVariable(TEMPLATE_ID_VAR); changed = true; }
+    }
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+    setTemplates(prev => prev.filter(x => x.id !== id));
+  };
+  const updateTemplate = (id: string, t: Template) => setTemplates(prev => prev.map(x => x.id === id ? t : x));
+
+  // The scene the inspectors/gizmo/AddNew currently edit: the game scene, or the template scene in
+  // template mode. Recomputed on every render (provider re-renders on editorMode change).
+  const activeScene = (editorMode === 'template' && templateSceneRef.current) ? templateSceneRef.current : editorSceneRef.current;
+
+  const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
+
+  // Open a dedicated empty scene to author a template node (new, or an existing template's subtree).
+  const enterTemplateEditor = (templateId?: string) => {
+    const instance = instanceRef.current;
+    if (!instance) return;
+    const scene = new Scene();
+    createEmptyScene(scene); // editor camera + a light so the template content is lit
+
+    let rootId: string;
+    let name: string;
+    if (templateId) {
+      const t = templates.find(x => x.id === templateId);
+      if (!t) { Logger.error('Template not found', 'Editor'); return; }
+      rootId = instantiateTemplate(t, scene.root, engineMaps());
+      name = t.name;
+      editingTemplateIdRef.current = templateId;
+    } else {
+      const node = new Node('New Template');
+      scene.addNode(node);
+      rootId = node.id;
+      name = 'New Template';
+      editingTemplateIdRef.current = null;
+    }
+
+    templateRootIdRef.current = rootId;
+    templateSceneRef.current = scene;
+    templatePrevDimensionRef.current = dimensionRef.current; // remember game dimension to restore on exit
+    setTemplateRootId(rootId);
+    setEditingTemplateName(name);
+    scene.start();
+    instance.setScene(scene);
+    setEditorModeState('template');
+    eventEmitter.current.emit('CHANGE_DIMENSION', '3D');
+    eventEmitter.current.emit('TEXTURES_CHANGED');
+    eventEmitter.current.emit('SCENE_CHANGED');
+    eventEmitter.current.emit('SELECT_NODE', rootId);
+  };
+
+  const collectSubtreeIds = (node: Node, out: string[] = []): string[] => {
+    out.push(node.id);
+    node.children.forEach((c: Node) => collectSubtreeIds(c, out));
+    return out;
+  };
+
+  // Rebuild every placed instance of a template after it was edited, preserving each instance's own
+  // transform. Runs on the game scene (editorSceneRef.current), never the template scene.
+  const syncTemplateInstances = (templateId: string, template: Template) => {
+    const scene = editorSceneRef.current;
+    const maps = engineMaps();
+    const instances = Array.from(scene.nodes).filter(n => n.getVariable(TEMPLATE_ID_VAR) === templateId);
+    let reselectId: string | null = null;
+    for (const inst of instances) {
+      const parent = inst.parent;
+      if (!parent) continue;
+      const pos = Array.from(inst.position) as [number, number, number];
+      const rot = Array.from(inst.rotation) as [number, number, number];
+      const scl = Array.from(inst.scale) as [number, number, number];
+      const wasSelected = inst.id === selectedNode;
+      // Drop the old subtree's out-of-band data so map entries don't leak.
+      for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
+      // Detach synchronously: Node.remove() only marks for removal, and the deferred sweep calls
+      // root.removeChild on each marked descendant, which mis-splices and deletes unrelated root
+      // children (including the node we're about to re-instantiate). removeChild cleanly drops the subtree.
+      parent.removeChild(inst);
+      const newId = instantiateTemplate(template, parent, maps); // re-tags __templateId
+      const newNode = scene.getNodeById(newId);
+      if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
+      if (wasSelected) reselectId = newId;
+    }
+    if (instances.length) {
+      eventEmitter.current.emit('TEXTURES_CHANGED');
+      eventEmitter.current.emit('SCENE_CHANGED');
+      if (reselectId) eventEmitter.current.emit('SELECT_NODE', reselectId);
+    }
+  };
+
+  // Serialize the authored template and return to the game scene. Called on any exit from template mode.
+  const exitTemplateEditor = async () => {
+    const instance = instanceRef.current;
+    const scene = templateSceneRef.current;
+    const rootId = templateRootIdRef.current;
+    if (scene && rootId) {
+      const rootNode = scene.getNodeById(rootId);
+      if (rootNode) {
+        try {
+          const t = await buildTemplateFromNode(rootNode, engineMaps());
+          if (editingTemplateIdRef.current) {
+            const id = editingTemplateIdRef.current;
+            const updated = { ...t, id };
+            updateTemplate(id, updated);
+            syncTemplateInstances(id, updated); // propagate the edit to placed instances
+          } else {
+            addTemplate(t);
+          }
+          Logger.info(`Template "${t.name}" saved`, 'Editor');
+        } catch (e) {
+          Logger.error('Failed to save template: ' + e, 'Editor');
+        }
+      }
+    }
+    templateSceneRef.current = null;
+    templateRootIdRef.current = null;
+    editingTemplateIdRef.current = null;
+    setTemplateRootId(null);
+    setEditingTemplateName(null);
+    if (instance) {
+      instance.setScene(editorSceneRef.current);
+      eventEmitter.current.emit('CHANGE_DIMENSION', templatePrevDimensionRef.current);
+      eventEmitter.current.emit('SELECT_NODE', null);
+    }
+  };
+
+  // Public mode switch. Leaving template mode auto-saves the template first (never lands on 'template'
+  // here — the Template segment focuses the panel; editing is entered via enterTemplateEditor).
+  const changeEditorMode = async (mode: EditorMode) => {
+    if (mode === 'template') return;
+    if (editorMode === 'template') await exitTemplateEditor();
+    setEditorModeState(mode);
+  };
+
+  const saveProjectToStorage = async () => {
+    setSavingState('saving');
+    try {
+      // Race against a timeout as a defensive backstop so the UI never gets stuck "saving".
+      const ok = await Promise.race<boolean>([
+        saveProject({
+          scene: editorSceneRef.current,
+          scripts: scriptsRef.current,
+          bodies: bodiesRef.current,
+          triggers: triggersRef.current,
+          ui: uiStateRef.current,
+          prefs: { dimension: dimensionRef.current, selectedNode },
+        }),
+        new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('Save timed out')), 15000)),
+      ]);
+      if (ok) { Logger.info('Project saved', 'Editor'); setSavingState('saved'); }
+      else { setSavingState('error'); }
+    } catch (e: any) {
+      Logger.error('Save failed: ' + (e?.message || e), 'Editor');
+      setSavingState('error');
+    } finally {
+      setTimeout(() => setSavingState('idle'), 2000);
+    }
+  };
+
+  // Startup: restore the saved project if present, otherwise open a blank scene.
   const setupInitialScene = async () => {
-    await createDemoScene({
-      scene: editorSceneRef.current,
-      scripts: scriptsRef.current,
-      bodies: bodiesRef.current,
-      triggers: triggersRef.current,
-      onProgress: (loaded, total, label) => setLoadingProgress({ loaded, total, label }),
-    });
+    const project = await loadProject();
+    if (project) {
+      applyGameData(project, { ...engineMaps(), scene: editorSceneRef.current, setUI: setUiState });
+      ensureEditorCamera(editorSceneRef.current);
+      pendingPrefsRef.current = project.prefs ?? null;
+    } else {
+      createEmptyScene(editorSceneRef.current);
+      pendingPrefsRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -199,9 +407,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           
           await setupInitialScene();
 
-          // Seed the demo HUD + Game Over overlay
-          setUiState(createDemoUI());
-
           TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
           TextureManager.Instance.addTextureFromBase64(DinosaurImage, {}, 'dinosaur.png');
           TextureManager.Instance.addTextureFromBase64(LightIcon, {
@@ -213,13 +418,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           engine.setScene(editorSceneRef.current);
           editorSceneRef.current.start();
 
-          setSelectedNode(editorSceneRef.current.root.id);
-          
+          // Restore selection/dimension from saved prefs (falls back to the scene root / 3D).
+          const prefs = pendingPrefsRef.current;
+          setSelectedNode(prefs?.selectedNode ?? editorSceneRef.current.root.id);
+
           engine.run();
 
           // Enable the editor infinite-grid overlay (ground/XZ plane by default).
           engine.renderer.setGridVisible(true);
           engine.renderer.setGridPlane('xz');
+
+          eventEmitter.current.emit('TEXTURES_CHANGED');
+          eventEmitter.current.emit('SCENE_CHANGED');
+          // Drive the initial camera dimension now that the scene is live (restored pref, else 3D).
+          eventEmitter.current.emit('CHANGE_DIMENSION', prefs?.dimension ?? '3D');
 
           setLoadingProgress({ loaded: 6, total: 6, label: 'Ready' });
         } finally {
@@ -232,10 +444,40 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       initializeEngine();
   }, []);
 
+  // Keep editor helper nodes (light/camera/probe icons + physics debug wireframes) derived from the
+  // scene's contents. Helpers are __editor__/__debug__ prefixed so they never leak into play/save/
+  // publish; we only maintain them on the active editor scene while editing. Reconciling is coalesced
+  // to one rAF, and a suppress flag ignores the SCENE_CHANGED the reconciler's own edits emit.
+  const reconcileScheduledRef = useRef(false);
+  const suppressReconcileRef = useRef(false);
+  useEffect(() => {
+    const runReconcile = () => {
+      reconcileScheduledRef.current = false;
+      if (isPlayMode || !activeScene) return;
+      suppressReconcileRef.current = true;
+      try { reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current); }
+      finally { suppressReconcileRef.current = false; }
+    };
+    const schedule = () => {
+      if (suppressReconcileRef.current || reconcileScheduledRef.current) return;
+      reconcileScheduledRef.current = true;
+      requestAnimationFrame(runReconcile);
+    };
+    const emitter = eventEmitter.current;
+    emitter.on('SCENE_CHANGED', schedule);
+    emitter.on('PHYSICS_CHANGED', schedule);
+    schedule(); // initial reconcile for the current scene / mode
+    return () => {
+      emitter.off('SCENE_CHANGED', schedule);
+      emitter.off('PHYSICS_CHANGED', schedule);
+    };
+  }, [activeScene, isPlayMode, editorMode]);
+
   // Event handling
   useEffect(() => {
     eventEmitter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
       if (!instanceRef.current) return;
+      dimensionRef.current = dimension;
 
       // Wait for scene to be ready
       if (!instanceRef.current.scene) {
@@ -393,8 +635,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     isGizmoDraggingRef.current = false;
     setIsGizmoDragging(false);
 
-    // Default values
-    eventEmitter.current.emit('CHANGE_DIMENSION', '3D');
+    // Default values (the initial CHANGE_DIMENSION is emitted from initializeEngine once the scene is live).
     eventEmitter.current.emit('SET_PLAY_STATE', 'stop');
     eventEmitter.current.emit('SELECT_SCRIPT', null);
 
@@ -520,17 +761,28 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const game: GameActions = { reset: () => { resetPlay(); }, exit: () => { stopPlay(); }, pause: () => { pausePlay(); } };
 
+  // Warn before closing/reloading the page while a project save is in flight.
+  useEffect(() => {
+    if (savingState !== 'saving') return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [savingState]);
+
   return (
   <EngineContext.Provider value={{
       instance: instanceRef.current,
-      editorScene: editorSceneRef.current,
+      editorScene: activeScene,
       eventEmitter: eventEmitter.current,
       selectedNode,
       isGizmoDragging,
       isPlayMode,
       isSceneReady,
       editorMode,
-      setEditorMode,
+      setEditorMode: changeEditorMode,
+      enterTemplateEditor,
+      editingTemplateName,
+      templateRootId,
       terrainBrush,
       loadingProgress,
       scripts: scriptsRef.current,
@@ -547,6 +799,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       templates,
       addTemplate,
       removeTemplate,
+      updateTemplate,
+      saveProject: saveProjectToStorage,
+      savingState,
     }}>
     {props.children}
   </EngineContext.Provider>

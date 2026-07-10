@@ -12,7 +12,6 @@ import {
   Skybox,
   CameraNode,
   Camera,
-  Vec,
   Spotlight,
   SpriteNode,
   Sprite,
@@ -21,7 +20,6 @@ import {
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
 import { useEffect, useState } from 'react';
-import { CameraGeometry } from '../../utils/EditorModels';
 import CameraIcon from '../../icons/camera.png'
 import SkyboxIcon from '../../icons/skybox.png'
 import CubeIcon from '../../icons/cube.png'
@@ -70,47 +68,17 @@ export default function AddNew() {
   }
 
   const addTrigger = () => {
-    // Just an empty node with a trigger
+    // Just an empty node with a trigger; the editor-helper reconciler draws its debug wireframe.
     const triggerNode = new Node('trigger');
-    triggers.set(triggerNode.id, { shapes: [] });
-    
     triggers.set(triggerNode.id, { shapes: [ { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } ] });
-    // add debug shape for the trigger
-    const debugTriggerNode = new Node(`__debug__trigger_${triggerNode.id}`);
-    debugTriggerNode.onUpdate = (node) => {
-      node.setPosition(triggerNode.worldPosition);
-      node.setQuaternion(triggerNode.worldQuaternion);
-    };
-
-    const debugTriggerModel = new Model(Geometry.Sphere(8), Material.Basic({color: [0, 1, 0]}, {wireframe: true}));
-    const triggerModelNode = new ModelNode(`__debug__shape_0`, debugTriggerModel);
-    debugTriggerNode?.addChild(triggerModelNode);
-    editorScene.addNode(debugTriggerNode);
-
+    eventEmitter.emit('PHYSICS_CHANGED');
     addNode(triggerNode);
   }
 
-  const addCamera = (type: 'perspective' | 'orthographic') => { 
+  const addCamera = (type: 'perspective' | 'orthographic') => {
+    // The reconciler adds the frustum gizmo (__debug__CameraModel) from the CameraNode itself.
     const cameraNode = new CameraNode('camera', new Camera({type}));
     cameraNode.active = true;
-    const cameraModel = new Model(
-      new Geometry( CameraGeometry.positions, undefined, CameraGeometry.texCoords, undefined, undefined, CameraGeometry.indices, false),
-      Material.Basic({color: [0.2, 0.2, 0.75]}, { castShadow: false })
-    );
-    const debugCameraModel = new ModelNode('__debug__CameraModel', cameraModel);
-    debugCameraModel.onUpdate = (node) => {
-      // Get the scale from the world matrix of the parent node
-      if (!node.parent) return;
-      const compensationScale = Vec.mat4.getScaling(Vec.vec3.create(), node.parent.worldTransform);
-
-      // Inverse scale to get the compensation scale
-      Vec.vec3.inverse(compensationScale, compensationScale);
-  
-      // Set the scale of the camera model with the compensation
-      node.setScale(compensationScale);
-    };
-    cameraNode.addChild(debugCameraModel);
-    
     addNode(cameraNode);
   }
 
@@ -154,38 +122,22 @@ export default function AddNew() {
     })
   }
 
+  // Lights/probes get their editor icon (__editor__LightSprite / __editor__ProbeHelper) added
+  // automatically by the reconciler, keyed off the node type.
   const addDirectionalLight = () => {
-    const directionalLightNode = new LightNode('directional light', new DirectionalLight({}), true);
-    const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
-    debugLightIcon.setUniformScale(0.5);
-    /* TODO: Add arrow model for direction debugging */
-    directionalLightNode.addChild(debugLightIcon);
+    addNode(new LightNode('directional light', new DirectionalLight({}), true));
   }
 
   const addPointLight = () => {
-    const pointLightNode = new LightNode('point light', new PointLight({}));
-    const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
-    debugLightIcon.setUniformScale(0.5);
-    pointLightNode.addChild(debugLightIcon);
-    addNode(pointLightNode);
+    addNode(new LightNode('point light', new PointLight({})));
   }
 
   const addSpotlight = () => {
-    const spotlightNode = new LightNode('spot light', new Spotlight({}));
-    const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({color: [1, 1, 1], texture: '__editor__light_icon'})));
-    debugLightIcon.setUniformScale(0.5);
-    spotlightNode.addChild(debugLightIcon);
-    addNode(spotlightNode);
+    addNode(new LightNode('spot light', new Spotlight({})));
   }
 
   const addLightProbe = () => {
-    const probeNode = new LightProbeNode('light probe');
-    // Wireframe sphere helper so the probe is visible/selectable in the viewport (stripped at publish).
-    const debugModel = new Model(Geometry.Sphere(16), Material.Basic({ color: [0.4, 0.8, 1] }, { wireframe: true, castShadow: false }));
-    const debugNode = new ModelNode('__editor__ProbeHelper', debugModel);
-    debugNode.setUniformScale(0.3);
-    probeNode.addChild(debugNode);
-    addNode(probeNode);
+    addNode(new LightProbeNode('light probe'));
   }
 
   const addSprite = () => {

@@ -99,8 +99,13 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             showCursor(h.point);
         };
 
+        // The brush listens in the capture phase on the viewport (the panel's ancestor), so a click on a
+        // floating panel control would otherwise start a stroke and never reach the control. Bail on those.
+        const inOverlay = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-cleo-overlay]');
+
         const onDown = (e: MouseEvent) => {
             if (editorMode !== 'landscape' || e.button !== 0) return;
+            if (inOverlay(e.target)) return;
             const h = hit(e.clientX, e.clientY);
             if (!h) return;
             paintingRef.current = true;
@@ -114,6 +119,8 @@ export default function LandscapeBrush({ viewportRef }: Props) {
 
         const onMove = (e: MouseEvent) => {
             if (editorMode !== 'landscape') return;
+            // While hovering a floating panel (and not mid-stroke), don't preview/apply the brush.
+            if (!paintingRef.current && inOverlay(e.target)) { hideCursor(); return; }
             const now = performance.now();
             const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);
             lastTimeRef.current = now;

@@ -4,7 +4,7 @@ import { useCleoEngine } from '../EngineContext'
 import { buildTemplateFromNode, Template } from '../../utils/templates'
 
 export default function TemplateExplorer() {
-  const { editorScene, templates, addTemplate, removeTemplate, scripts, bodies, triggers } = useCleoEngine()
+  const { editorScene, templates, addTemplate, removeTemplate, scripts, bodies, triggers, enterTemplateEditor } = useCleoEngine()
   const [dragOver, setDragOver] = useState(false)
 
   // Drop a scene node here (from the Scene tree, which sets text/plain = node id) to save a template.
@@ -33,13 +33,20 @@ export default function TemplateExplorer() {
 
   return (
     <div className='w-full h-full p-2 text-white text-sm'>
+      <button
+        className='w-full mb-3 bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-2 text-xs font-semibold'
+        onClick={() => enterTemplateEditor()}
+        title='Author a new template in a dedicated empty scene'>
+        + New Template
+      </button>
+
       <div
         className={`border-2 border-dashed rounded p-3 mb-3 text-center ${dragOver ? 'border-[#2c2cff] bg-[#2d2d77]/30' : 'border-[#2d2d77]'}`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
       >
-        Drag a node from the <b>Scene</b> tree here to create a template.
+        Or drag a node from the <b>Scene</b> tree here to create a template.
       </div>
 
       {templates.length === 0 && <p className='text-xs text-gray-500'>No templates yet.</p>}
@@ -51,7 +58,8 @@ export default function TemplateExplorer() {
             draggable
             onDragStart={(e) => onTemplateDragStart(e, t)}
             title='Drag into the viewport to instantiate'>
-            <span className='truncate'>📦 {t.name}</span>
+            <span className='truncate flex-1'>📦 {t.name}</span>
+            <button className='text-blue-300 ml-2' onClick={() => enterTemplateEditor(t.id)} title='Edit this template'>Edit</button>
             <button className='text-red-300 ml-2' onClick={() => removeTemplate(t.id)}>Delete</button>
           </div>
         ))}

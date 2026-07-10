@@ -68,7 +68,10 @@ export class Scene {
     }
 
     public removeNode(node: Node): void {
-        this._root.removeChild(node);
+        // Remove from the node's actual parent. Using _root unconditionally mis-splices nested nodes:
+        // removeChild does _children.splice(indexOf(node), 1), and indexOf === -1 for a non-child makes
+        // splice(-1, 1) delete an unrelated last child (corrupting the tree during the removal sweep).
+        (node.parent ?? this._root).removeChild(node);
     }
 
     public removeNodesByName(name: string): void {
@@ -190,11 +193,20 @@ export class Scene {
                         Logger.error('Failed to serialize environment map');
                     }
                 }
-                // Serialize 2D textures unless using cache
-                if (!useCache)
-                    output.textures = TextureManager.Instance.serializeTextureData();
+                // Serialize 2D textures unless using cache. Guarded: toDataURL can throw (e.g. a
+                // cross-origin/tainted canvas), and without this the promise would never settle and
+                // any save/publish awaiting it would hang forever.
+                if (!useCache) {
+                    try {
+                        output.textures = TextureManager.Instance.serializeTextureData();
+                    } catch (e) {
+                        Logger.error('Failed to serialize textures');
+                        output.textures = [];
+                    }
+                }
                 resolve(output);
-            });
+            // Surface a rejected node serialize instead of hanging the whole chain.
+            }).catch(reject);
         });
     }
 

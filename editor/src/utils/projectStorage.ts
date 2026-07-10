@@ -1,0 +1,111 @@
+import type { Scene } from 'cleo';
+import { Logger } from 'cleo';
+import { buildGameData } from '../features/publish/buildGameData';
+import { idbGet, idbSet, idbDelete } from './idb';
+import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
+import type { UIState } from './UIModel';
+
+// Storage keys. The project blob lives in IndexedDB (scenes embed base64 textures and exceed the
+// ~5MB localStorage quota); the tiny panel layout stays in localStorage.
+export const PROJECT_KEY = 'cleo_project';
+export const LAYOUT_KEY = 'cleo_project_layout';
+
+// Small editor-level settings persisted alongside the scene.
+export interface ProjectPrefs {
+  dimension?: '2D' | '3D';
+  selectedNode?: string | null;
+}
+
+// The stored blob = the runtime game data ({ scene, textures?, ui }) plus editor prefs.
+export interface SavedProject {
+  scene: any;
+  textures?: any;
+  ui?: { version: number; elements: any[] };
+  prefs?: ProjectPrefs;
+  savedAt?: number;
+}
+
+type EngineMaps = {
+  scene: Scene;
+  scripts: Map<string, string>;
+  bodies: Map<string, BodyDescription>;
+  triggers: Map<string, { shapes: ShapeDescription[] }>;
+};
+
+/**
+ * Persist the whole project (scene + scripts/bodies/triggers + UI + editor prefs) to IndexedDB.
+ * Uses the same buildGameData path as Export so textures are embedded (useCache=false).
+ * Returns true on success; warns (and returns false) on failure.
+ */
+export async function saveProject(params: {
+  scene: Scene;
+  scripts: Map<string, string>;
+  bodies: Map<string, BodyDescription>;
+  triggers: Map<string, { shapes: ShapeDescription[] }>;
+  ui: { version: number; elements: any[] };
+  prefs?: ProjectPrefs;
+}): Promise<boolean> {
+  try {
+    const gameData = await buildGameData({
+      scene: params.scene,
+      scripts: params.scripts,
+      bodies: params.bodies,
+      triggers: params.triggers,
+      ui: params.ui,
+    });
+    const payload: SavedProject = { ...gameData, prefs: params.prefs, savedAt: Date.now() };
+    await idbSet(PROJECT_KEY, payload);
+    return true;
+  } catch (e: any) {
+    Logger.error(`Failed to save project: ${e?.message || e}`, 'Editor');
+    return false;
+  }
+}
+
+/** Read the saved project from IndexedDB (migrating a legacy localStorage save once), or null. */
+export async function loadProject(): Promise<SavedProject | null> {
+  try {
+    const existing = await idbGet<SavedProject>(PROJECT_KEY);
+    if (existing) return existing;
+    // One-time migration of an older, smaller localStorage save into IndexedDB.
+    const raw = localStorage.getItem(PROJECT_KEY);
+    if (raw) {
+      const migrated = JSON.parse(raw) as SavedProject;
+      try { await idbSet(PROJECT_KEY, migrated); localStorage.removeItem(PROJECT_KEY); } catch { /* keep localStorage copy if migration write fails */ }
+      return migrated;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remove the saved project. */
+export async function clearProject(): Promise<void> {
+  try { await idbDelete(PROJECT_KEY); } catch { /* ignore */ }
+  try { localStorage.removeItem(PROJECT_KEY); } catch { /* ignore */ }
+}
+
+/**
+ * Apply a saved/imported game-data JSON into an existing scene: restore the UI, move each node's
+ * script/body/trigger into the editor maps (the source of truth for Play/Publish) and strip them
+ * from the tree so they don't run in edit mode, then parse the tree into the scene.
+ * Shared by the Import button and startup restore.
+ */
+export function applyGameData(json: any, deps: EngineMaps & { setUI: (s: UIState) => void }): void {
+  if (!json) return;
+  // UI (top-level `ui`, or legacy `scene.ui`).
+  if (json.ui) deps.setUI({ version: json.ui.version ?? 1, elements: json.ui.elements ?? [] });
+  else if (json.scene?.ui) deps.setUI({ version: json.scene.ui.version ?? 1, elements: json.scene.ui.elements ?? [] });
+
+  const importNodeState = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.script === 'string' && node.script.trim()) deps.scripts.set(node.id, node.script);
+    if (node.body) deps.bodies.set(node.id, node.body);
+    if (node.trigger) deps.triggers.set(node.id, node.trigger);
+    delete node.script; delete node.scripts; delete node.body; delete node.trigger;
+    (node.children ?? []).forEach(importNodeState);
+  };
+  if (json.scene) importNodeState(json.scene);
+  deps.scene.parse(json);
+}

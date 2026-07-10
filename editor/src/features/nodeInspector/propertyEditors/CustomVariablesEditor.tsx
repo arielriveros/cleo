@@ -23,7 +23,9 @@ export default function CustomVariablesEditor(props: { node: Node }) {
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<VarType>('number')
 
+  // Hide internal/reserved variables (e.g. the __templateId instance marker) from the UI.
   const sync = () => setVars(Array.from(props.node.variables.entries())
+    .filter(([name]) => !name.startsWith('__'))
     .map(([name, v]) => ({ name, type: v.type as VarType, value: v.value })))
 
   useEffect(() => { sync() }, [props.node])

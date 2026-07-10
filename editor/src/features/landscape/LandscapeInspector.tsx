@@ -133,7 +133,7 @@ export default function LandscapeInspector() {
         <button className={`flex-1 rounded px-2 py-1 text-xs ${mode === m ? 'bg-[#2c2cff]' : 'bg-[#3b3b3b] hover:bg-[#4a4a4a]'}`} onClick={() => setMode(m)}>{text}</button>;
 
     return (
-        <div className="absolute top-2 left-2 z-20 w-64 max-h-[85%] overflow-y-auto bg-[#252525]/95 border border-[#3b3b3b] rounded-md p-3 text-white shadow-lg select-none">
+        <div data-cleo-overlay className="absolute top-2 left-2 z-20 w-64 max-h-[85%] overflow-y-auto bg-[#252525]/95 border border-[#3b3b3b] rounded-md p-3 text-white shadow-lg select-none">
             <div className="font-semibold text-sm mb-2">Landscape</div>
 
             <div className="mb-3 border-b border-[#3b3b3b] pb-3">

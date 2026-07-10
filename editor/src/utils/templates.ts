@@ -32,6 +32,19 @@ type EngineMaps = {
   triggers: Map<string, any>
 }
 
+// Node variable name used to link a placed instance back to its source template.
+export const TEMPLATE_ID_VAR = '__templateId'
+
+/** True if `node` or any ancestor is a placed template instance (carries the __templateId marker). */
+export function isWithinTemplateInstance(node: Node | null | undefined): boolean {
+  let n: Node | null | undefined = node
+  while (n) {
+    if (n.getVariable(TEMPLATE_ID_VAR)) return true
+    n = n.parent
+  }
+  return false
+}
+
 // Remove editor/debug helper children so templates only contain user content.
 function stripDebug(nodeJson: any): void {
   if (Array.isArray(nodeJson.children)) {
@@ -75,6 +88,9 @@ function regenerateIds(nodeJson: any, map: Map<string, string>): void {
 export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promise<Template> {
   const nodeJson = await node.serialize()
   stripDebug(nodeJson)
+  // A template definition must never carry an instance back-link (the editing scene instantiates the
+  // template, which stamps __templateId onto the root); strip it so it isn't baked into the definition.
+  if (nodeJson.variables) delete nodeJson.variables[TEMPLATE_ID_VAR]
 
   const ids = collectIds(nodeJson)
   const scripts: Record<string, string> = {}
@@ -99,6 +115,10 @@ export function instantiateTemplate(template: Template, parent: Node, maps: Engi
   const clone = JSON.parse(JSON.stringify(template.nodeJson))
   const idMap = new Map<string, string>()
   regenerateIds(clone, idMap)
+
+  // Tag the instance root so it can be recognized as a template instance (read-only in Scene mode)
+  // and re-synced when the template is edited. Persists via the node's serialized `variables`.
+  clone.variables = { ...(clone.variables || {}), [TEMPLATE_ID_VAR]: { type: 'string', value: template.id } }
 
   // Restore any textures not already present.
   for (const t of template.textures || []) {

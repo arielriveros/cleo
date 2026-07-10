@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
 
-export default function NodeInfo(props: {node: Node}) {
+export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
   const { eventEmitter: eventEmitter } = useCleoEngine();
   const [nodeName, setNodeName] = useState(props.node.name);
 
@@ -50,7 +50,7 @@ export default function NodeInfo(props: {node: Node}) {
           <tbody>
             <tr className='border-b border-[#2d2d77]'>
               <td className='py-1 pr-2'> Name </td>
-              <td className='py-1'> { props.node.name !== 'root' ? <input className='bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1' value={nodeName} onChange={(e) => setNodeName(e.target.value)} onBlur={handleNodeNameChange} /> : props.node.name } </td>
+              <td className='py-1'> { props.node.name !== 'root' ? <input disabled={props.readOnly} className={`bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 ${props.readOnly ? 'opacity-60' : ''}`} value={nodeName} onChange={(e) => setNodeName(e.target.value)} onBlur={handleNodeNameChange} /> : props.node.name } </td>
             </tr>
             <tr className='border-b border-[#2d2d77]'>
               <td className='py-1 pr-2'> ID </td>

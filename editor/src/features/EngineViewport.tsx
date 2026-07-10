@@ -8,7 +8,7 @@ import { instantiateTemplate } from "../utils/templates";
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            templates, scripts, bodies, triggers } = useCleoEngine();
+            editingTemplateName, templates, scripts, bodies, triggers } = useCleoEngine();
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -207,6 +207,11 @@ export default function EngineViewport() {
                 <LandscapeBrush viewportRef={viewportRef} />
                 <LandscapeInspector />
             </>}
+            {editorMode === 'template' && (
+                <div data-cleo-overlay className="absolute top-2 left-1/2 -translate-x-1/2 z-20 bg-[#252525]/95 border border-[#8f8fe0] rounded-md px-3 py-1 text-white text-xs shadow-lg select-none pointer-events-none">
+                    Editing template: <b>{editingTemplateName ?? 'New Template'}</b> — switch to <b>Scene</b> to save
+                </div>
+            )}
         </div>
     );
 }
