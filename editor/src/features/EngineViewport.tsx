@@ -9,13 +9,20 @@ import { instantiateTemplate } from "../utils/templates";
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            editingTemplateName, templates, scripts, bodies, triggers } = useCleoEngine();
+            templates, scripts, bodies, triggers } = useCleoEngine();
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
     const wasDraggingRef = useRef(false);
     const isGizmoDraggingRef = useRef(false);
     const justFinishedGizmoDragRef = useRef(false);
+    // Mirror the viewport dimension so the floating 2D/3D control reflects the current state.
+    const [dimension, setDimension] = useState<'2D' | '3D'>('3D');
+    useEffect(() => {
+        const onDim = (d: '2D' | '3D') => setDimension(d);
+        eventEmitter.on('CHANGE_DIMENSION', onDim);
+        return () => { eventEmitter.off('CHANGE_DIMENSION', onDim); };
+    }, [eventEmitter]);
  
     useEffect(() => {
         if (viewportRef.current && instance) {
@@ -29,7 +36,12 @@ export default function EngineViewport() {
     useEffect(() => {
         if (!viewportRef.current || !instance) return;
 
+        // Clicks on floating viewport overlays (e.g. the 2D/3D control) bubble to these div-level
+        // listeners; ignore them so they don't deselect nodes or start a drag.
+        const inOverlay = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-cleo-overlay]');
+
         const handleMouseDown = (event: MouseEvent) => {
+            if (inOverlay(event.target)) return;
             if (event.button === 0) { // Left mouse button
                 const rect = viewportRef.current!.getBoundingClientRect();
                 const x = event.clientX - rect.left;
@@ -63,6 +75,8 @@ export default function EngineViewport() {
         };
 
         const handleClick = (event: MouseEvent) => {
+            // Ignore clicks that land on a floating overlay (2D/3D control, etc.).
+            if (inOverlay(event.target)) return;
             // Don't allow selection during play mode
             if (isPlayMode) return;
             // In landscape/renderer modes the viewport is not a selection surface.
@@ -200,6 +214,19 @@ export default function EngineViewport() {
     return (
         <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}
              onContextMenu={(e) => e.preventDefault()}>
+            {/* Minimal floating 2D/3D switch, top-right of the viewport (Main tab only, not during play). */}
+            {editorMode !== 'template' && !isPlayMode && (
+                <select
+                    data-cleo-overlay
+                    value={dimension}
+                    onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', e.target.value as '2D' | '3D')}
+                    title='Viewport dimension'
+                    className='absolute top-2 right-2 z-20 bg-[#252525]/80 hover:bg-[#252525] text-white text-xs rounded px-1.5 py-1 border border-white/10 cursor-pointer focus:outline-none'
+                >
+                    <option value='3D'>3D</option>
+                    <option value='2D'>2D</option>
+                </select>
+            )}
             {editorMode !== 'landscape' && editorMode !== 'renderer' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onPositionChange={handlePositionChange}
@@ -210,11 +237,6 @@ export default function EngineViewport() {
                 <LandscapeInspector />
             </>}
             {editorMode === 'renderer' && <RendererOptions />}
-            {editorMode === 'template' && (
-                <div data-cleo-overlay className="absolute top-2 left-1/2 -translate-x-1/2 z-20 bg-[#252525]/95 border border-[#8f8fe0] rounded-md px-3 py-1 text-white text-xs shadow-lg select-none pointer-events-none">
-                    Editing template: <b>{editingTemplateName ?? 'New Template'}</b> — switch to <b>Scene</b> to save
-                </div>
-            )}
         </div>
     );
 }

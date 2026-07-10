@@ -6,6 +6,7 @@ import Content from "../components/Content";
 import NodeInspector from "./nodeInspector/NodeInspector";
 import Sidebar, { SidebarResizer } from "../components/Sidebar";
 import MenuBar from "./MenuBar";
+import TabBar from "./TabBar";
 import Explorer from "./sceneInspector/Explorer";
 import BottomBar, { BottomBarResizer } from "../components/BottomBar";
 import Logger from "./logger/Logger";
@@ -107,6 +108,7 @@ export default function Editor() {
         />}
         <Center width={`${100 - effLeft - effRight}vw`}>
           <div className="flex flex-col h-full">
+            <TabBar />
             <div className="flex-1 min-h-0 relative">
               <EngineViewport />
               {/* UI overlay sits on top of the WebGL canvas */}

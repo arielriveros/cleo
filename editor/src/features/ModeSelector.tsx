@@ -14,13 +14,6 @@ const LandscapeIcon = () => (
     <circle cx="17" cy="6" r="2" />
   </svg>
 );
-const TemplateIcon = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 3 21 7.5v9L12 21 3 16.5v-9L12 3Z" />
-    <path d="M3 7.5 12 12l9-4.5" />
-    <path d="M12 12v9" />
-  </svg>
-);
 const RendererIcon = () => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <line x1="4" y1="7" x2="20" y2="7" /><circle cx="9" cy="7" r="2" fill="currentColor" stroke="none" />
@@ -56,9 +49,12 @@ function Segment({ active, disabled, title, onClick, children }: SegmentProps) {
  * template to edit; it only highlights while a template is actually being edited.
  */
 export default function ModeSelector() {
-  const { editorMode, setEditorMode, isPlayMode, eventEmitter } = useCleoEngine();
+  const { editorMode, setEditorMode, isPlayMode, activeTab } = useCleoEngine();
 
   const select = (mode: EditorMode) => { if (mode !== editorMode) setEditorMode(mode); };
+
+  // The scene/landscape/renderer switch belongs to the Main tab; template (and future) tabs hide it.
+  if (activeTab.kind !== 'main') return null;
 
   return (
     <div className='flex items-center h-full mx-[5px]'>
@@ -68,9 +64,6 @@ export default function ModeSelector() {
         </Segment>
         <Segment active={editorMode === 'landscape'} disabled={isPlayMode} title='Landscape sculpting' onClick={() => select('landscape')}>
           <LandscapeIcon /> Landscape
-        </Segment>
-        <Segment active={editorMode === 'template'} disabled={isPlayMode} title='Template editor — pick or create a template in the Templates panel' onClick={() => eventEmitter.emit('FOCUS_BOTTOM_TAB', 'Templates')}>
-          <TemplateIcon /> Template
         </Segment>
         <Segment active={editorMode === 'renderer'} disabled={isPlayMode} title='Renderer options & debug channels' onClick={() => select('renderer')}>
           <RendererIcon /> Renderer

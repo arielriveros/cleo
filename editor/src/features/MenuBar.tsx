@@ -11,7 +11,7 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 
 export default function MenuBar() {
-  const { editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, savingState, eventEmitter: eventEmitter } = useCleoEngine();
+  const { editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, savingState, eventEmitter: eventEmitter } = useCleoEngine();
   const templateMode = editorMode === 'template';
   const saving = savingState === 'saving';
   const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved ✓' : savingState === 'error' ? 'Save failed' : 'Save';
@@ -113,6 +113,9 @@ export default function MenuBar() {
   return (
     <Topbar>
       <div className='flex items-center h-full'>
+        {templateMode && (
+          <div className='text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-[#3f3fb4]' title='Save this template and update its placed instances' onClick={() => saveActiveTemplate()}>Save Template</div>
+        )}
         <div className={`text-white h-[25px] border ${saveBorder} bg-[#3b3b3b] text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(templateMode || saving) ? 'opacity-50 pointer-events-none' : ''}`} title='Save the project to local storage' onClick={() => onSave()}>{saveLabel}</div>
         <label htmlFor='load-scene-file' className={`text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${templateMode ? 'opacity-50 pointer-events-none' : ''}`} title='Import a .json scene file'>Import</label>
         <input className="hidden" type='file' accept='.json' id='load-scene-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
@@ -165,13 +168,6 @@ export default function MenuBar() {
         <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='stopped' || templateMode} onClick={() => onStop()}>
           <img src={StopIcon} alt='Stop' className='inline-block h-full w-full align-middle' />
         </button>
-      </div>
-      <div className='flex items-center justify-between h-full w-[90px] text-white'>
-        <p className='m-0'>View</p>
-        <select className='bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 disabled:opacity-50' disabled={ playState==='playing' || playState==='paused' || templateMode } onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', (e.target.value as '2D' | '3D'))}>
-          <option value='3D'>3D</option>
-          <option value='2D'>2D</option>
-        </select>
       </div>
       <ModeSelector />
       <div />

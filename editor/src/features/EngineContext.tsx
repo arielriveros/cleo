@@ -61,6 +61,17 @@ export type LoadingProgress = { loaded: number; total: number; label: string };
 
 export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
+
+// Browser-style editor tabs. The 'main' tab hosts the real game scene and its scene/landscape/
+// renderer sub-mode; template tabs each own a live template edit session. Extensible to future
+// kinds (e.g. 'material'). `editorMode` is derived from the active tab (see EngineProvider).
+export type TabKind = 'main' | 'template';
+export interface EditorTab {
+  id: string;
+  kind: TabKind;
+  title: string;
+  templateId?: string | null; // template tabs: source template id, null = unsaved new template
+}
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
 export type TerrainBrushState = {
@@ -90,6 +101,15 @@ const EngineContext = createContext<{
   isSceneReady: boolean;
   editorMode: EditorMode;
   setEditorMode: (mode: EditorMode) => void;
+  // Editor tabs (Main + template tabs)
+  tabs: EditorTab[];
+  activeTabId: string;
+  activeTab: EditorTab;
+  dirtyTabs: Record<string, boolean>;
+  setActiveTab: (id: string) => void;
+  closeTab: (id: string) => void;
+  reorderTabs: (fromId: string, toId: string) => void;
+  saveActiveTemplate: () => void;
   // Template editor
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
@@ -127,6 +147,14 @@ const EngineContext = createContext<{
     isSceneReady: false,
     editorMode: 'scene',
     setEditorMode: () => {},
+    tabs: [{ id: 'main', kind: 'main', title: 'Main' }],
+    activeTabId: 'main',
+    activeTab: { id: 'main', kind: 'main', title: 'Main' },
+    dirtyTabs: {},
+    setActiveTab: () => {},
+    closeTab: () => {},
+    reorderTabs: () => {},
+    saveActiveTemplate: () => {},
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -164,16 +192,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
   const [isPlayMode, setIsPlayMode] = useState(false);
   const [isSceneReady, setIsSceneReady] = useState(false);
-  const [editorMode, setEditorModeState] = useState<EditorMode>('scene');
-  // Template editor: a throwaway scene the inspectors/gizmo point at while authoring a template.
-  const templateSceneRef = useRef<Scene | null>(null);
-  const templateRootIdRef = useRef<string | null>(null);
-  const editingTemplateIdRef = useRef<string | null>(null); // null = a brand-new template
-  const [editingTemplateName, setEditingTemplateName] = useState<string | null>(null);
-  const [templateRootId, setTemplateRootId] = useState<string | null>(null); // template node id (inspector root in template mode)
+  // The Main tab's sub-mode (scene/landscape/renderer). `editorMode` exposed to consumers is derived
+  // from the active tab — 'template' when a template tab is active, else this.
+  const [mainMode, setMainMode] = useState<'scene' | 'landscape' | 'renderer'>('scene');
+  // Editor tabs: the Main tab (real game scene) plus any open template tabs. Each template tab's live
+  // scene + root live in tabRuntimeRef (not React state — Scene objects shouldn't be serialized).
+  const [tabs, setTabs] = useState<EditorTab[]>([{ id: 'main', kind: 'main', title: 'Main' }]);
+  const [activeTabId, setActiveTabId] = useState<string>('main');
+  const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({}); // tab id -> has unsaved edits
+  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string }>>(new Map());
+  const activeTabIdRef = useRef<string>('main');
+  const activeTabKindRef = useRef<TabKind>('main');
+  const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
   const [savingState, setSavingState] = useState<SavingState>('idle');
-  const dimensionRef = useRef<'2D' | '3D'>('3D');
-  const templatePrevDimensionRef = useRef<'2D' | '3D'>('3D'); // game dimension to restore after template editing
+  const dimensionRef = useRef<'2D' | '3D'>('3D'); // the Main tab's dimension (template tabs are always 3D)
   const pendingPrefsRef = useRef<ProjectPrefs | null>(null);
   const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null });
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
@@ -227,16 +259,30 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const updateTemplate = (id: string, t: Template) => setTemplates(prev => prev.map(x => x.id === id ? t : x));
 
-  // The scene the inspectors/gizmo/AddNew currently edit: the game scene, or the template scene in
-  // template mode. Recomputed on every render (provider re-renders on editorMode change).
-  const activeScene = (editorMode === 'template' && templateSceneRef.current) ? templateSceneRef.current : editorSceneRef.current;
+  // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
+  const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
+  const activeRuntime = activeTab.kind === 'template' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
+  // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template scene.
+  const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
+  // Legacy single mode value, now derived: 'template' whenever a template tab is active, else the Main
+  // tab's sub-mode. Keeps every existing `editorMode === ...` consumer working unchanged.
+  const editorMode: EditorMode = activeTab.kind === 'main' ? mainMode : 'template';
+  const templateRootId = activeRuntime ? activeRuntime.rootId : null;
+  const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
-  // Open a dedicated empty scene to author a template node (new, or an existing template's subtree).
+  // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
   const enterTemplateEditor = (templateId?: string) => {
     const instance = instanceRef.current;
     if (!instance) return;
+
+    // Focus an already-open tab for this template instead of duplicating it.
+    if (templateId) {
+      const existing = tabs.find(t => t.kind === 'template' && t.templateId === templateId);
+      if (existing) { setActiveTabId(existing.id); return; }
+    }
+
     const scene = new Scene();
     createEmptyScene(scene); // editor camera + a light so the template content is lit
 
@@ -247,27 +293,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!t) { Logger.error('Template not found', 'Editor'); return; }
       rootId = instantiateTemplate(t, scene.root, engineMaps());
       name = t.name;
-      editingTemplateIdRef.current = templateId;
     } else {
       const node = new Node('New Template');
       scene.addNode(node);
       rootId = node.id;
       name = 'New Template';
-      editingTemplateIdRef.current = null;
     }
-
-    templateRootIdRef.current = rootId;
-    templateSceneRef.current = scene;
-    templatePrevDimensionRef.current = dimensionRef.current; // remember game dimension to restore on exit
-    setTemplateRootId(rootId);
-    setEditingTemplateName(name);
     scene.start();
-    instance.setScene(scene);
-    setEditorModeState('template');
-    eventEmitter.current.emit('CHANGE_DIMENSION', '3D');
-    eventEmitter.current.emit('TEXTURES_CHANGED');
-    eventEmitter.current.emit('SCENE_CHANGED');
-    eventEmitter.current.emit('SELECT_NODE', rootId);
+
+    const tabId = cryptoRandomId();
+    tabRuntimeRef.current.set(tabId, { scene, rootId });
+    setTabs(prev => [...prev, { id: tabId, kind: 'template', title: name, templateId: templateId ?? null }]);
+    setActiveTabId(tabId); // the activate effect swaps the engine scene + dimension + selection
   };
 
   const collectSubtreeIds = (node: Node, out: string[] = []): string[] => {
@@ -308,49 +345,105 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
 
-  // Serialize the authored template and return to the game scene. Called on any exit from template mode.
-  const exitTemplateEditor = async () => {
-    const instance = instanceRef.current;
-    const scene = templateSceneRef.current;
-    const rootId = templateRootIdRef.current;
-    if (scene && rootId) {
-      const rootNode = scene.getNodeById(rootId);
-      if (rootNode) {
-        try {
-          const t = await buildTemplateFromNode(rootNode, engineMaps());
-          if (editingTemplateIdRef.current) {
-            const id = editingTemplateIdRef.current;
-            const updated = { ...t, id };
-            updateTemplate(id, updated);
-            syncTemplateInstances(id, updated); // propagate the edit to placed instances
-          } else {
-            addTemplate(t);
-          }
-          Logger.info(`Template "${t.name}" saved`, 'Editor');
-        } catch (e) {
-          Logger.error('Failed to save template: ' + e, 'Editor');
-        }
+  // Public mode switch — only the Main tab's sub-mode (scene/landscape/renderer). Template editing is
+  // a tab now (opened via enterTemplateEditor), not a mode, so 'template' is not accepted here.
+  const setEditorMode = (mode: EditorMode) => {
+    if (mode === 'scene' || mode === 'landscape' || mode === 'renderer') setMainMode(mode);
+  };
+
+  const setActiveTab = (id: string) => setActiveTabId(id);
+
+  // Save the active template tab back to the library and propagate the change to placed instances.
+  const saveActiveTemplate = async () => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'template') return;
+    const runtime = tabRuntimeRef.current.get(tab.id);
+    if (!runtime) return;
+    const rootNode = runtime.scene.getNodeById(runtime.rootId);
+    if (!rootNode) return;
+    try {
+      const t = await buildTemplateFromNode(rootNode, engineMaps());
+      if (tab.templateId) {
+        const updated = { ...t, id: tab.templateId };
+        updateTemplate(tab.templateId, updated);
+        syncTemplateInstances(tab.templateId, updated); // propagate to placed instances
+      } else {
+        addTemplate(t); // t carries a fresh id
       }
-    }
-    templateSceneRef.current = null;
-    templateRootIdRef.current = null;
-    editingTemplateIdRef.current = null;
-    setTemplateRootId(null);
-    setEditingTemplateName(null);
-    if (instance) {
-      instance.setScene(editorSceneRef.current);
-      eventEmitter.current.emit('CHANGE_DIMENSION', templatePrevDimensionRef.current);
-      eventEmitter.current.emit('SELECT_NODE', null);
+      // Adopt the saved name/id so later saves update (not re-add) and the tab label stays in sync.
+      setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, title: t.name, templateId: tab.templateId ?? t.id } : x));
+      setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+      Logger.info(`Template "${t.name}" saved`, 'Editor');
+    } catch (e) {
+      Logger.error('Failed to save template: ' + e, 'Editor');
     }
   };
 
-  // Public mode switch. Leaving template mode auto-saves the template first (never lands on 'template'
-  // here — the Template segment focuses the panel; editing is entered via enterTemplateEditor).
-  const changeEditorMode = async (mode: EditorMode) => {
-    if (mode === 'template') return;
-    if (editorMode === 'template') await exitTemplateEditor();
-    setEditorModeState(mode);
+  // Close a template tab (Main is unclosable). Discards unsaved edits after a confirm — saving is the
+  // explicit "Save Template" action, so closing does not auto-save.
+  const closeTab = (id: string) => {
+    if (id === 'main') return;
+    const tab = tabs.find(t => t.id === id);
+    if (!tab) return;
+    if (dirtyTabs[id] && !window.confirm(`Discard unsaved changes to "${tab.title}"?`)) return;
+    const idx = tabs.findIndex(t => t.id === id);
+    const remaining = tabs.filter(t => t.id !== id);
+    tabRuntimeRef.current.delete(id);
+    setDirtyTabs(prev => { const next = { ...prev }; delete next[id]; return next; });
+    setTabs(remaining);
+    if (id === activeTabId) {
+      const fallback = remaining[Math.max(0, idx - 1)] ?? remaining[0];
+      setActiveTabId(fallback ? fallback.id : 'main');
+    }
   };
+
+  // Reorder: move `fromId` to `toId`'s position (Main included — it is movable).
+  const reorderTabs = (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    setTabs(prev => {
+      const from = prev.findIndex(t => t.id === fromId);
+      const to = prev.findIndex(t => t.id === toId);
+      if (from < 0 || to < 0) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  // Keep non-reactive mirrors of the active tab (read by the once-registered SCENE_CHANGED/dimension listeners).
+  useEffect(() => { activeTabIdRef.current = activeTabId; activeTabKindRef.current = activeTab.kind; }, [activeTabId, activeTab.kind]);
+
+  // Switch the engine to the active tab's scene whenever the active tab changes.
+  useEffect(() => {
+    const instance = instanceRef.current;
+    if (!instance) return;
+    const tab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
+    activeTabKindRef.current = tab.kind;
+    const runtime = tab.kind === 'template' ? tabRuntimeRef.current.get(tab.id) : undefined;
+    instance.setScene(runtime ? runtime.scene : editorSceneRef.current);
+    // Arm dirty-tracking only after the editor-helper reconciler's initial pass settles (it emits
+    // SCENE_CHANGED as it adds light/gizmo helpers to the freshly-shown template scene).
+    dirtyArmedRef.current = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template'); }));
+    // Template scenes are authored in 3D; the Main tab restores its own remembered dimension.
+    eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'template' ? '3D' : dimensionRef.current);
+    eventEmitter.current.emit('TEXTURES_CHANGED');
+    eventEmitter.current.emit('SCENE_CHANGED');
+    eventEmitter.current.emit('SELECT_NODE', runtime ? runtime.rootId : null);
+  }, [activeTabId]);
+
+  // Mark the active template tab dirty on scene edits (after the open-settle window).
+  useEffect(() => {
+    const mark = () => {
+      if (!dirtyArmedRef.current || activeTabKindRef.current !== 'template') return;
+      const id = activeTabIdRef.current;
+      setDirtyTabs(prev => prev[id] ? prev : { ...prev, [id]: true });
+    };
+    const emitter = eventEmitter.current;
+    emitter.on('SCENE_CHANGED', mark);
+    return () => { emitter.off('SCENE_CHANGED', mark); };
+  }, []);
 
   const saveProjectToStorage = async () => {
     setSavingState('saving');
@@ -477,7 +570,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     eventEmitter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
       if (!instanceRef.current) return;
-      dimensionRef.current = dimension;
+      // Only the Main tab's dimension is persisted; template tabs render transiently in 3D.
+      if (activeTabKindRef.current === 'main') dimensionRef.current = dimension;
 
       // Wait for scene to be ready
       if (!instanceRef.current.scene) {
@@ -786,7 +880,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       isPlayMode,
       isSceneReady,
       editorMode,
-      setEditorMode: changeEditorMode,
+      setEditorMode,
+      tabs,
+      activeTabId,
+      activeTab,
+      dirtyTabs,
+      setActiveTab,
+      closeTab,
+      reorderTabs,
+      saveActiveTemplate,
       enterTemplateEditor,
       editingTemplateName,
       templateRootId,
