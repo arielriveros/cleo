@@ -15,6 +15,7 @@ import { Camera } from "../camera";
 import { CleoEngine, InputManager, Shape } from "../../cleo";
 import { Logger } from "../logger";
 import { Terrain } from "../../terrain/terrain";
+import type { BVH } from "../bvh";
 
 type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape';
 
@@ -793,14 +794,27 @@ export class Node {
     const max = vec3.create();
     vec3.subtract(min, position, halfSize);
     vec3.add(max, position, halfSize);
-    
+
     return { min, max };
+  }
+
+  /**
+   * Object-space Bounding Volume Hierarchy for exact ray/triangle picking, or `null` when the node
+   * has no static triangle geometry (the raycaster then falls back to the AABB from
+   * {@link getBoundingBox}). Overridden by {@link ModelNode} for static meshes.
+   */
+  public getBVH(): BVH | null {
+    return null;
   }
 }
 
 export class ModelNode extends Node {
     private _model: Model | AnimatedModel;
     private _initialized: boolean;
+    // Material type the mesh VAO/vertex-data were last built for. If the material type changes
+    // (e.g. the editor switches basic <-> default/pbr, which use different vertex attribute
+    // layouts), the mesh must be rebuilt — see the `initialized` getter.
+    private _initializedType: string | null = null;
     private _animator: Animator | null;
     private _movementDirection: vec3;
     /** Optional per-node ragdoll simulation config (skinned meshes). Persisted with the scene; read by Ragdoll. */
@@ -858,6 +872,7 @@ export class ModelNode extends Node {
 
         this._model.mesh.create(this._model.geometry.getData(attributes), this._model.geometry.vertexCount, this._model.geometry.indices);
         this._initialized = true;
+        this._initializedType = this._model.material.type;
     }
 
     public serialize(): Promise<any> {
@@ -906,7 +921,12 @@ export class ModelNode extends Node {
     }
 
     public get model(): Model | AnimatedModel { return this._model; }
-    public get initialized(): boolean { return this._initialized; }
+    // Reports uninitialized when the material type changed since the mesh was built, so the
+    // renderer's `if (!node.initialized) node.initializeModel()` guards rebuild the VAO/vertex
+    // data for the new material's attribute layout (basic uses a different layout than default/pbr).
+    public get initialized(): boolean {
+        return this._initialized && this._initializedType === this._model.material.type;
+    }
     public get animator(): Animator | null { return this._animator; }
     public get ragdollConfig(): RagdollOptions | null { return this._ragdollConfig; }
     public set ragdollConfig(config: RagdollOptions | null) { this._ragdollConfig = config; }
@@ -972,8 +992,20 @@ export class ModelNode extends Node {
         
         const min = vec3.fromValues(minX, minY, minZ);
         const max = vec3.fromValues(maxX, maxY, maxZ);
-        
+
         return { min, max };
+    }
+
+    /**
+     * Static meshes expose their geometry's cached BVH for exact picking. Skinned/animated meshes
+     * deform on the GPU, so an object-space BVH would not match the current pose — those return
+     * `null` and fall back to AABB picking.
+     */
+    public getBVH(): BVH | null {
+        if (this._model instanceof AnimatedModel) return null;
+        const bvh = this._model.geometry.bvh;
+        // Geometry with no triangles → fall back to AABB picking.
+        return bvh.triangleCount > 0 ? bvh : null;
     }
 
     public update(delta: number, time: number): void {

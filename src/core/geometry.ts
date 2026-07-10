@@ -1,5 +1,6 @@
 import { vec2, vec3 } from "gl-matrix";
 import { Loader } from "../cleo";
+import { BVH } from "./bvh";
 
 export class Geometry {
     private readonly _positions: [number, number, number][];
@@ -8,6 +9,7 @@ export class Geometry {
     private _tangents!: [number, number, number][];
     private _bitangents!: [number, number, number][];
     private readonly _indices: number[];
+    private _bvh?: BVH;
 
     constructor(
         positions: [number, number, number][] = [],
@@ -36,6 +38,15 @@ export class Geometry {
     public get tangents(): number[][] { return this._tangents; }
     public get bitangents(): number[][] { return this._bitangents; }
     public get vertexCount(): number { return this._positions.length * 3; }
+    /**
+     * Bounding Volume Hierarchy over this geometry's triangles, built lazily in object space and
+     * memoized. Used for exact ray/triangle picking (see `Raycaster`); shared across every node
+     * that references this geometry.
+     */
+    public get bvh(): BVH {
+        if (!this._bvh) this._bvh = BVH.fromGeometry(this._positions, this._indices);
+        return this._bvh;
+    }
     public getData(attributes: string[] = []): number[] {
         const interleaved: number[] = [];
 

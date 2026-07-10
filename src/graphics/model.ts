@@ -76,7 +76,8 @@ export class Model {
         };
 
         let material: Material;
-        const type: string = m.type || 'default'; // backward compat defaults to default
+        // Legacy 'default'/'defaultSkinned' (and missing type) fall through to the Blinn-Phong branch below.
+        const type: string = m.type || 'blinn_phong';
         if (type === 'basic') {
             material = Material.Basic({
                 color: m.color || [1,1,1],
@@ -98,7 +99,7 @@ export class Model {
                     emissiveMap: m.textures?.emissiveMap
                 }
             }, config);
-        } else { // 'default' or legacy
+        } else { // 'blinn_phong' (or legacy 'default')
             const texData = m.textures || {};
             material = Material.Default({
                 diffuse: m.diffuse,
@@ -139,7 +140,7 @@ export class Model {
             castShadow: this._material.config.castShadow,
         };
 
-        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'defaultSkinned' ? 'default' : t);
+        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'blinn_phongSkinned' ? 'blinn_phong' : t);
         const type = normalizeType(this._material.type as any);
 
         let material: any;
@@ -170,9 +171,9 @@ export class Model {
                 },
                 config: cfg
             };
-        } else { // default
+        } else { // blinn_phong
             material = {
-                type: 'default',
+                type: 'blinn_phong',
                 diffuse: this._material.properties.get('diffuse'),
                 specular: this._material.properties.get('specular'),
                 ambient: this._material.properties.get('ambient'),

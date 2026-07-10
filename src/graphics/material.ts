@@ -47,9 +47,9 @@ interface PBRProperties {
 
 enum MaterialType {
     Basic = 'basic',
-    Default = 'default',
+    Default = 'blinn_phong',
     BasicSkinned = 'basicSkinned',
-    DefaultSkinned = 'defaultSkinned',
+    DefaultSkinned = 'blinn_phongSkinned',
     PBR = 'pbr',
     Terrain = 'terrain'
 }

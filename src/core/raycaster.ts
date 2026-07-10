@@ -1,6 +1,7 @@
 import { vec3, mat4 } from "gl-matrix";
 import { Node } from "./scene/node";
 import { Camera } from "./camera";
+import { BVH } from "./bvh";
 
 export interface Ray {
     origin: vec3;
@@ -164,68 +165,86 @@ export class Raycaster {
     }
     
     /**
-     * Performs raycast against all nodes in the scene
+     * Performs a raycast against a set of nodes.
+     *
+     * Broad phase: ray-vs-AABB per node (`node.getBoundingBox()`). Narrow phase: when a node exposes
+     * a Bounding Volume Hierarchy (`node.getBVH()`, e.g. static meshes) the ray is refined against
+     * the actual triangles, so clicks inside a loose bounding box but off the geometry miss. Nodes
+     * without a BVH (sprites, lights, skinned meshes) keep AABB-granularity hits.
+     *
+     * @param precise set to false to force AABB-only picking (skip the BVH narrow phase).
      */
     public static raycast(
-        ray: Ray, 
-        nodes: Node[], 
-        maxDistance: number = Infinity
+        ray: Ray,
+        nodes: Node[],
+        maxDistance: number = Infinity,
+        precise: boolean = true
     ): RaycastHit[] {
         const hits: RaycastHit[] = [];
-        
-        console.log('Raycasting against', nodes.length, 'nodes');
-        
+
         for (const node of nodes) {
-            if (!node.visible) {
-                console.log(`Skipping invisible node: ${node.name}`);
+            if (!node.visible) continue;
+
+            // Skip editor/debug helper nodes (but keep gizmos raycastable) and terrain: terrain is
+            // never a selectable object — it has its own analytic picker (Terrain.raycast).
+            if ((node.name.startsWith('__editor__') && !node.name.includes('gizmo')) ||
+                node.name.startsWith('__debug__') ||
+                node.name.startsWith('__terrain_chunk__') ||
+                node.nodeType === 'landscape') {
                 continue;
             }
-            
-            // Skip editor debug nodes, debug shape nodes, editor grid, and editor camera
-            // But allow gizmo nodes to be raycastable
-            if ((node.name.startsWith('__editor__') && !node.name.includes('gizmo')) || 
-                node.name.startsWith('__debug__') || 
-                node.name.startsWith('__debug__shape_')) {
-                console.log(`Skipping editor/debug node: ${node.name}`);
-                continue;
-            }
-            
-            console.log(`Testing node: ${node.name} (${node.nodeType})`);
+
             const boundingBox = this.getBoundingBox(node);
-            console.log(`Bounding box for ${node.name}:`, boundingBox);
-            
             const distance = this.rayBoxIntersection(ray, boundingBox.min, boundingBox.max);
-            console.log(`Distance for ${node.name}:`, distance);
-            
-            // Debug logging for spheres
-            if (node.name.toLowerCase().includes('sphere')) {
-                console.log(`Testing sphere ${node.name}:`, {
-                    position: node.worldPosition,
-                    scale: node.worldScale,
-                    boundingBox,
-                    distance,
-                    ray: { origin: ray.origin, direction: ray.direction }
-                });
-            }
-            
-            if (distance !== null && distance > 0 && distance < maxDistance) {
+            if (distance === null || distance <= 0 || distance >= maxDistance) continue;
+
+            // Narrow phase against the node's BVH, if it has one.
+            const bvh = precise ? node.getBVH() : null;
+            if (bvh) {
+                const preciseDistance = this.raycastBVH(ray, node, bvh);
+                // BVH miss → the AABB hit was a false positive; reject the node.
+                if (preciseDistance === null || preciseDistance >= maxDistance) continue;
+                const hitPoint = vec3.create();
+                vec3.scaleAndAdd(hitPoint, ray.origin, ray.direction, preciseDistance);
+                hits.push({ node, distance: preciseDistance, point: hitPoint });
+            } else {
                 const hitPoint = vec3.create();
                 vec3.scaleAndAdd(hitPoint, ray.origin, ray.direction, distance);
-                
-                hits.push({
-                    node,
-                    distance,
-                    point: hitPoint
-                });
-                
-                if (node.name.toLowerCase().includes('sphere')) {
-                    console.log(`Hit sphere ${node.name} at distance ${distance}`);
-                }
+                hits.push({ node, distance, point: hitPoint });
             }
         }
-        
+
         // Sort by distance (closest first)
         hits.sort((a, b) => a.distance - b.distance);
         return hits;
+    }
+
+    /**
+     * Refines a hit against a node's object-space BVH. Transforms the world-space ray into the
+     * node's local space via the inverse world transform and returns the world-space distance of
+     * the nearest triangle hit, or null when the ray misses the geometry.
+     */
+    private static raycastBVH(ray: Ray, node: Node, bvh: BVH): number | null {
+        const inv = mat4.create();
+        // Singular transform (e.g. zero scale) → can't invert; fall back to the AABB distance.
+        if (!mat4.invert(inv, node.worldTransform)) {
+            const box = node.getBoundingBox();
+            return this.rayBoxIntersection(ray, box.min, box.max);
+        }
+
+        // Origin transforms as a point; direction as a vector (strip translation, keep scale so the
+        // returned t stays consistent with the normalized world ray — see note below).
+        const localOrigin = vec3.transformMat4(vec3.create(), ray.origin, inv);
+        const rotOnly = mat4.clone(inv);
+        rotOnly[12] = 0; rotOnly[13] = 0; rotOnly[14] = 0;
+        const localDir = vec3.transformMat4(vec3.create(), ray.direction, rotOnly);
+
+        const hit = bvh.raycast(localOrigin, localDir);
+        if (!hit) return null;
+
+        // localDir was NOT renormalized, so `hit.t` is already the distance along the normalized
+        // world-space ray direction (worldRot * localDir == ray.direction). It maps directly to a
+        // world-space distance.
+        return hit.t;
     }
 }
