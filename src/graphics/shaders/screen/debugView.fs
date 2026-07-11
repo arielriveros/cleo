@@ -27,6 +27,9 @@ void main() {
     } else if (u_mode == 4) {
         // Single-channel value in .r (SSAO occlusion factor).
         outColor = vec4(vec3(t.r), 1.0);
+    } else if (u_mode == 5) {
+        // Motion-blur velocity (screen-space, small UV units in .rg). Amplify + bias so it's visible.
+        outColor = vec4(t.rg * 15.0 + 0.5, 0.5, 1.0);
     } else {
         // Passthrough RGB (albedo, emissive, lit scene, bloom).
         outColor = vec4(t.rgb, 1.0);

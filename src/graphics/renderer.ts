@@ -14,6 +14,7 @@ import { AnimatedModel } from './animatedModel';
 // Shaders Sources
 import BasicVertex from './shaders/materials/basic.vs'
 import BasicFragment from './shaders/materials/basic.fs'
+import BasicInstancedVertex from './shaders/materials/basicInstanced.vs'
 import BasicSkinnedVertex from './shaders/materials/basic_skinned.vs'
 import DefaultVertex from './shaders/materials/default.vs'
 import DefaultFragment from './shaders/materials/default.fs'
@@ -23,6 +24,7 @@ import OutlineFragment from './shaders/materials/outline.fs'
 
 import ShadowMapVertex from './shaders/environment/shadowMap.vs'
 import ShadowMapFragment from './shaders/environment/shadowMap.fs'
+import ShadowMapSkinnedVertex from './shaders/environment/shadowMapSkinned.vs'
 import SkyboxVertex from './shaders/environment/skybox.vs'
 import SkyboxFragment from './shaders/environment/skybox.fs'
 
@@ -35,6 +37,10 @@ import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
 import GridFragment from './shaders/screen/grid.fs'
 import OutlinePostFragment from './shaders/screen/outline.fs'
+import MotionBlurVelocity from './shaders/screen/motionBlurVelocity.fs'
+import MotionBlurTileMax from './shaders/screen/motionBlurTileMax.fs'
+import MotionBlurNeighborMax from './shaders/screen/motionBlurNeighborMax.fs'
+import MotionBlurGather from './shaders/screen/motionBlur.fs'
 import PBRVertex from './shaders/materials/pbr.vs'
 import PBRFragment from './shaders/materials/pbr.fs'
 import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
@@ -70,7 +76,7 @@ export let gl: WebGL2RenderingContext;
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom' | 'mask';
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom' | 'mask' | 'velocity';
 
 interface RendererConfig {
     clearColor?: number[];
@@ -84,6 +90,22 @@ interface RendererConfig {
     ssao?: boolean;
 }
 
+/**
+ * Editor-only skeleton overlay: joint spheres + bone connectors drawn instanced and always-on-top
+ * (depth test off) in the gizmo pass. The caller packs world-space model matrices (16 floats each)
+ * into `jointMatrices`/`boneMatrices` and refreshes them every frame via Renderer.setSkeletonOverlay.
+ */
+export interface SkeletonOverlay {
+    jointMatrices: Float32Array;   // 16 * jointCount
+    jointCount: number;
+    jointColor: [number, number, number];
+    boneMatrices: Float32Array;    // 16 * boneCount
+    boneCount: number;
+    boneColor: [number, number, number];
+    highlightMatrix?: Float32Array | null; // 16, the selected joint (drawn over the rest)
+    highlightColor?: [number, number, number];
+}
+
 export class Renderer {
     private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
@@ -94,6 +116,12 @@ export class Renderer {
     private _exposure: number = 1.5;
     private _chromaticAberrationStrength: number = 0.0;
     private _selectedNodeId: string | null = null;
+
+    // Camera-reprojection motion blur (UE5-style tile reconstruction). Off by default.
+    private _motionBlurEnabled: boolean = true;
+    private _motionBlurIntensity: number = 1.0;
+    private _motionBlurSamples: number = 12;
+    private static readonly MOTION_BLUR_TILE = 20; // tile edge (px); also caps the blur length
 
     // Selection outline: silhouette mask FBO + a screen-space edge pass. `_outlineActive` is set
     // per-frame when something selected was drawn into the mask, so the outline pass is skipped
@@ -129,6 +157,11 @@ export class Renderer {
     private _compose_FBOs: Framebuffer[];
     private _blur_FBOs: Framebuffer[];
     private _bloomFBO: Framebuffer;
+
+    // Motion blur: full-res per-pixel velocity + TileMax/NeighborMax (both tile-res).
+    private _velocityFBO!: Framebuffer;
+    private _velocityTileFBO!: Framebuffer;
+    private _velocityNeighborFBO!: Framebuffer;
 
     // SSAO (deferred path). Raw pass -> blur pass, consumed in the deferred lighting pass.
     private _ssaoFBO: Framebuffer;
@@ -172,6 +205,9 @@ export class Renderer {
     private _deferred: boolean;
     private _viewProj: mat4 = mat4.create();
     private _invViewProj: mat4 = mat4.create();
+    // Previous frame's view-projection, used by the camera-reprojection motion blur pass.
+    private _prevViewProj: mat4 = mat4.create();
+    private _hasPrevViewProj: boolean = false;
 
     // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _viewProj.
     private _frustum: Frustum = new Frustum();
@@ -191,6 +227,12 @@ export class Renderer {
     private _boneLocations: Map<WebGLProgram, WebGLUniformLocation | null> = new Map();
     private _instanceBuffer: WebGLBuffer | null = null;
     private _instanceScratch: Float32Array = new Float32Array(16 * 64);
+
+    // Editor skeleton overlay: drawn instanced + always-on-top in the gizmo pass (set by the editor).
+    private _skeletonOverlay: SkeletonOverlay | null = null;
+    private _overlaySphereMesh: Mesh | null = null;
+    private _overlayBoneMesh: Mesh | null = null;
+    private _overlayInstanceBuffer: WebGLBuffer | null = null;
 
     // Object -> stable id (for grouping identical mesh+material into instanced draws)
     private _objIds: WeakMap<object, number> = new WeakMap();
@@ -237,6 +279,10 @@ export class Renderer {
         this._bloomFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false } });
         this._blur_FBOs = [new Framebuffer(), new Framebuffer()];
         this._compose_FBOs = [new Framebuffer({ colorTextureOptions: {precision: 'high'}}), new Framebuffer({ colorTextureOptions: {precision: 'high'}})];
+        // Motion blur velocity buffers (signed velocity -> float precision).
+        this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._velocityTileFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._velocityNeighborFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // SSAO is a low-precision single-channel-ish (grayscale) occlusion buffer.
         this._ssaoFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
         this._ssaoBlurFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
@@ -263,6 +309,8 @@ export class Renderer {
 
         // Material shaders
         const basicShader = new Shader().create(BasicVertex, BasicFragment);
+        // Forward unlit instanced shader for the editor skeleton overlay (many spheres/bones in one draw).
+        const basicInstancedShader = new Shader().create(BasicInstancedVertex, BasicFragment);
         const defaultShader = new Shader().create(DefaultVertex, DefaultFragment);
         const basicSkinnedShader = new Shader().create(BasicSkinnedVertex, BasicFragment);
         const defaultSkinnedShader = new Shader().create(DefaultSkinnedVertex, DefaultFragment);
@@ -293,6 +341,8 @@ export class Renderer {
         const brdfShader = new Shader().create(ScreenVertex, BRDFFragment);
         // Environment shaders
         const shadowMapShader = new Shader().create(ShadowMapVertex, ShadowMapFragment);
+        // Skinned depth shader so animated meshes cast their animated-pose shadow (not the bind pose).
+        const shadowMapSkinnedShader = new Shader().create(ShadowMapSkinnedVertex, ShadowMapFragment);
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
         // Screen shaders
         const screenShader = new Shader().create(ScreenVertex, ScreenFragment);
@@ -307,9 +357,15 @@ export class Renderer {
         // turns that mask into a border in a post pass.
         const outlineShader = new Shader().create(OutlineVertex, OutlineFragment);
         const outlinePostShader = new Shader().create(ScreenVertex, OutlinePostFragment);
+        // Motion blur (camera reprojection): velocity -> tile max -> neighbor max -> gather.
+        const motionBlurVelocityShader = new Shader().create(ScreenVertex, MotionBlurVelocity);
+        const motionBlurTileMaxShader = new Shader().create(ScreenVertex, MotionBlurTileMax);
+        const motionBlurNeighborMaxShader = new Shader().create(ScreenVertex, MotionBlurNeighborMax);
+        const motionBlurShader = new Shader().create(ScreenVertex, MotionBlurGather);
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
+        this._shaderManager.addShader('basicInstanced', basicInstancedShader);
         this._shaderManager.addShader('blinn_phong', defaultShader);
         this._shaderManager.addShader('basicSkinned', basicSkinnedShader);
         this._shaderManager.addShader('blinn_phongSkinned', defaultSkinnedShader);
@@ -334,6 +390,7 @@ export class Renderer {
         this._shaderManager.addShader('prefilter', prefilterShader);
         this._shaderManager.addShader('brdf', brdfShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
+        this._shaderManager.addShader('shadowMapSkinned', shadowMapSkinnedShader);
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('screen', screenShader);
         this._shaderManager.addShader('debugView', debugViewShader);
@@ -344,6 +401,10 @@ export class Renderer {
         this._shaderManager.addShader('grid', gridShader);
         this._shaderManager.addShader('outline', outlineShader);
         this._shaderManager.addShader('outlinePost', outlinePostShader);
+        this._shaderManager.addShader('motionBlurVelocity', motionBlurVelocityShader);
+        this._shaderManager.addShader('motionBlurTileMax', motionBlurTileMaxShader);
+        this._shaderManager.addShader('motionBlurNeighborMax', motionBlurNeighborMaxShader);
+        this._shaderManager.addShader('motionBlur', motionBlurShader);
 
         // Create framebuffers
         this._sceneFBO.create(this._canvas.width, this._canvas.height);
@@ -366,6 +427,11 @@ export class Renderer {
         this._compose_FBOs[0].create(this._canvas.width, this._canvas.height);
         this._compose_FBOs[1].create(this._canvas.width, this._canvas.height);
         this._bloomFBO.create(this._canvas.width, this._canvas.height);
+
+        const mbK = Renderer.MOTION_BLUR_TILE;
+        this._velocityFBO.create(this._canvas.width, this._canvas.height);
+        this._velocityTileFBO.create(Math.ceil(this._canvas.width / mbK), Math.ceil(this._canvas.height / mbK));
+        this._velocityNeighborFBO.create(Math.ceil(this._canvas.width / mbK), Math.ceil(this._canvas.height / mbK));
         
         // Create screen quad to render framebuffer to
         this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
@@ -434,6 +500,10 @@ export class Renderer {
 
         // Apply post processing
         this._applyPostProcessing();
+
+        // Remember this frame's camera transform so next frame's motion blur can reproject against it.
+        mat4.copy(this._prevViewProj, this._viewProj);
+        this._hasPrevViewProj = true;
 
         frameStats.frameMs = performance.now() - _statsT0;
     }
@@ -1188,8 +1258,8 @@ export class Renderer {
         for (const node of transparentQueue) this._renderModel(node);
         GLState.depthMask(true);
 
-        // Gizmos on top.
-        if (gizmoNodes.length > 0) this._renderGizmos(gizmoNodes);
+        // Gizmos on top (also draws the editor skeleton overlay when set).
+        if (gizmoNodes.length > 0 || this._skeletonOverlay) this._renderGizmos(gizmoNodes);
 
         // Sprites (always transparent, forward).
         this._renderSpritesPass(scene);
@@ -1351,6 +1421,12 @@ export class Renderer {
         this._compose_FBOs[1].resize(this._canvas.width, this._canvas.height);
         this._bloomFBO.resize(this._canvas.width, this._canvas.height);
         this._outlineMaskFBO.resize(this._canvas.width, this._canvas.height);
+        const mbK = Renderer.MOTION_BLUR_TILE;
+        this._velocityFBO.resize(this._canvas.width, this._canvas.height);
+        this._velocityTileFBO.resize(Math.ceil(this._canvas.width / mbK), Math.ceil(this._canvas.height / mbK));
+        this._velocityNeighborFBO.resize(Math.ceil(this._canvas.width / mbK), Math.ceil(this._canvas.height / mbK));
+        // A resize invalidates the previous-frame camera transform; skip blur for one frame.
+        this._hasPrevViewProj = false;
 
         Logger.info(`Resized to ${this._canvas.width}x${this._canvas.height}`)
     }
@@ -1448,8 +1524,8 @@ export class Renderer {
         for (const node of transparentDrawQueue)
             this._renderModel(node);
 
-        // Render gizmo nodes last (on top of everything)
-        if (gizmoNodes.length > 0) {
+        // Render gizmo nodes last (on top of everything); also the editor skeleton overlay when set.
+        if (gizmoNodes.length > 0 || this._skeletonOverlay) {
             this._renderGizmos(gizmoNodes);
         }
 
@@ -1628,24 +1704,52 @@ export class Renderer {
         this._shadowMapFBO.bind();
         gl.clear(gl.DEPTH_BUFFER_BIT);
 
-        // Set shader
-        this._shaderManager.bind('shadowMap');
-        this._shaderManager.setUniform('u_lightSpace', light.lightSpace); // sm shader
-
         // Render scene (front-face culling reduces peter-panning)
         GLState.enable(gl.DEPTH_TEST);
         GLState.depthMask(true);
         GLState.enable(gl.CULL_FACE);
         GLState.cullFace(gl.FRONT);
+
+        this._renderShadowCasters(models, light.lightSpace);
+
+        GLState.cullFace(gl.BACK);
+    }
+
+    /**
+     * Draw every shadow-casting model into the currently bound depth target for one light-space
+     * matrix. Skinned meshes use the skinned depth shader (with their bone matrices) so the shadow
+     * follows the animated pose; everything else uses the plain depth shader. Shared by the single
+     * shadow map and each cascade.
+     */
+    private _renderShadowCasters(models: Set<ModelNode>, lightSpace: mat4): void {
+        let bound: 'shadowMap' | 'shadowMapSkinned' | null = null;
         for (const node of models) {
             if (!node.model.material.config.castShadow || node.model.material.config.wireframe) continue;
-            // Skip gizmo nodes from shadow casting
+            // Skip gizmo/overlay nodes from shadow casting
             if ((node as any).isGizmo) continue;
-            this._shaderManager.setUniform('u_isInstanced', false);
+
+            const skinned = node.model instanceof AnimatedModel && (node.model as AnimatedModel).hasSkin && !!node.animator;
+            const shaderType = skinned ? 'shadowMapSkinned' : 'shadowMap';
+
+            // Uniforms live per-program, so (re)set u_lightSpace whenever the bound program changes.
+            if (shaderType !== bound) {
+                this._shaderManager.bind(shaderType);
+                this._shaderManager.setUniform('u_lightSpace', lightSpace);
+                if (shaderType === 'shadowMap') this._shaderManager.setUniform('u_isInstanced', false);
+                bound = shaderType;
+            }
+
             this._shaderManager.setUniform('u_model', node.worldTransform);
+
+            if (skinned) {
+                // Ensure the full-attribute animated VAO exists (idempotent) so bone attributes are
+                // bound even if the shadow pass runs before the geometry pass on the first frame.
+                (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(this._geometryShaderFor(node)).attributes);
+                this._uploadBoneMatrices('shadowMapSkinned', node);
+            }
+
             node.model.mesh.draw(gl.TRIANGLES);
         }
-        GLState.cullFace(gl.BACK);
     }
 
     /** Render the directional light's cascaded shadow maps (one depth map per view-frustum slice). */
@@ -1660,7 +1764,6 @@ export class Renderer {
         GLState.depthMask(true);
         GLState.enable(gl.CULL_FACE);
         GLState.cullFace(gl.FRONT);
-        this._shaderManager.bind('shadowMap');
 
         for (let i = 0; i < this._cascadeCount; i++) {
             const nearD = i === 0 ? cam.near : splits[i - 1];
@@ -1670,16 +1773,8 @@ export class Renderer {
 
             this._shadowCascades[i].bind();
             gl.clear(gl.DEPTH_BUFFER_BIT);
-            this._shaderManager.bind('shadowMap');
-            this._shaderManager.setUniform('u_lightSpace', this._cascadeMatrices[i]);
 
-            for (const node of models) {
-                if (!node.model.material.config.castShadow || node.model.material.config.wireframe) continue;
-                if ((node as any).isGizmo) continue;
-                this._shaderManager.setUniform('u_isInstanced', false);
-                this._shaderManager.setUniform('u_model', node.worldTransform);
-                node.model.mesh.draw(gl.TRIANGLES);
-            }
+            this._renderShadowCasters(models, this._cascadeMatrices[i]);
         }
         GLState.cullFace(gl.BACK);
     }
@@ -1804,13 +1899,22 @@ export class Renderer {
         GLState.disable(gl.BLEND);
         GLState.disable(gl.DEPTH_TEST);
         GLState.depthMask(true);
-        // First, render the scene framebuffer to the screen framebuffer
-        this._compose_FBOs[0].bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); 
-        this._shaderManager.bind('screen');
-        this._shaderManager.setUniform('u_screenTexture', 0);
-        this._sceneFBO.colors[0].bind();
-        this._screenQuad.draw();
+
+        // First, bring the lit scene into _compose_FBOs[0]. Motion blur (when on) reconstructs the
+        // image while doing so; otherwise it's a plain copy.
+        const motionBlurOn = this._motionBlurEnabled && this._hasPrevViewProj && this._motionBlurIntensity > 0.0;
+        if (motionBlurOn) {
+            this._motionBlurPass();
+        } else {
+            // Populate the velocity buffer anyway when the editor is inspecting the 'velocity' channel.
+            if (this._debugView === 'velocity' && this._hasPrevViewProj) this._velocityPass();
+            this._compose_FBOs[0].bind();
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            this._shaderManager.bind('screen');
+            this._shaderManager.setUniform('u_screenTexture', 0);
+            this._sceneFBO.colors[0].bind();
+            this._screenQuad.draw();
+        }
 
         // Then, render the screen framebuffer to the bloom framebuffer
         this._bloomPass(10);
@@ -1871,6 +1975,7 @@ export class Renderer {
             case 'shadow':    tex = this._shadowMapFBO.depth;      mode = 3; break;
             case 'bloom':     tex = this._bloomFBO.colors[1];      mode = 0; break;
             case 'mask':      tex = this._outlineMaskFBO.colors[0]; mode = 0; break;
+            case 'velocity':  tex = this._velocityFBO.colors[0];   mode = 5; break;
             default:          tex = this._sceneFBO.colors[0];      mode = 0; break;
         }
         this._shaderManager.bind('debugView');
@@ -1927,12 +2032,79 @@ export class Renderer {
 
     private _chromaticAberrationPass(): void {
         this._compose_FBOs[1].bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); 
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         this._shaderManager.bind('chromaticAberration');
         this._shaderManager.setUniform('u_screenTexture', 0);
         this._compose_FBOs[0].colors[0].bind();
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
-        this._screenQuad.draw();   
+        this._screenQuad.draw();
+    }
+
+    // Camera-reprojection velocity: reconstruct each pixel's world position from the G-buffer depth,
+    // project it with the previous frame's view-projection, and store the screen-space delta (UV
+    // units, clamped to one tile) in _velocityFBO. Also used standalone by the 'velocity' debug view.
+    private _velocityPass(): void {
+        const w = this._canvas.width, h = this._canvas.height;
+        this._velocityFBO.bind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._shaderManager.bind('motionBlurVelocity');
+        this._shaderManager.setUniform('u_gDepth', 0);
+        this._gBufferFBO.depth.bind(0);
+        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_prevViewProj', this._prevViewProj);
+        this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
+        this._shaderManager.setUniform('u_screenSize', [w, h]);
+        this._shaderManager.setUniform('u_maxVelocityPx', Renderer.MOTION_BLUR_TILE);
+        this._screenQuad.draw();
+    }
+
+    // UE5-style tile reconstruction motion blur: velocity -> TileMax -> NeighborMax -> jittered
+    // gather. Reads the lit scene (_sceneFBO) and writes the blurred result into _compose_FBOs[0],
+    // replacing the plain scene->compose copy so the rest of the post chain is unchanged.
+    private _motionBlurPass(): void {
+        const w = this._canvas.width, h = this._canvas.height;
+        const K = Renderer.MOTION_BLUR_TILE;
+
+        // 1) Per-pixel velocity.
+        this._velocityPass();
+
+        // 2) TileMax: dominant velocity per KxK tile.
+        this._velocityTileFBO.bind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._shaderManager.bind('motionBlurTileMax');
+        this._shaderManager.setUniform('u_velocity', 0);
+        this._velocityFBO.colors[0].bind(0);
+        this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
+        this._shaderManager.setUniform('u_tileSize', K);
+        this._screenQuad.draw();
+
+        // 3) NeighborMax: 3x3 dilation of the tile velocities.
+        this._velocityNeighborFBO.bind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._shaderManager.bind('motionBlurNeighborMax');
+        this._shaderManager.setUniform('u_tileMax', 0);
+        this._velocityTileFBO.colors[0].bind(0);
+        this._shaderManager.setUniform('u_tileTexelSize', [1 / this._velocityTileFBO.width, 1 / this._velocityTileFBO.height]);
+        this._screenQuad.draw();
+
+        // 4) Gather: reconstruct the blurred image into _compose_FBOs[0].
+        this._compose_FBOs[0].bind();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._shaderManager.bind('motionBlur');
+        this._shaderManager.setUniform('u_screenTexture', 0);
+        this._sceneFBO.colors[0].bind(0);
+        this._shaderManager.setUniform('u_velocity', 1);
+        this._velocityFBO.colors[0].bind(1);
+        this._shaderManager.setUniform('u_neighborMax', 2);
+        this._velocityNeighborFBO.colors[0].bind(2);
+        this._shaderManager.setUniform('u_gDepth', 3);
+        this._gBufferFBO.depth.bind(3);
+        this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
+        this._shaderManager.setUniform('u_screenSize', [w, h]);
+        this._shaderManager.setUniform('u_samples', this._motionBlurSamples);
+        this._shaderManager.setUniform('u_near', this._activeCamera.near);
+        this._shaderManager.setUniform('u_far', this._activeCamera.far);
+        this._screenQuad.draw();
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
@@ -1967,6 +2139,7 @@ export class Renderer {
         addFbo(this._sceneFBO); addFbo(this._gBufferFBO); addFbo(this._shadowMapFBO);
         addFbo(this._bloomFBO); addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
         addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO);
+        addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
         for (const f of this._shadowCascades) addFbo(f);
         for (const f of this._blur_FBOs) addFbo(f);
         for (const f of this._compose_FBOs) addFbo(f);
@@ -1979,6 +2152,13 @@ export class Renderer {
 
     public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
     public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
+
+    public get motionBlurEnabled(): boolean { return this._motionBlurEnabled; }
+    public set motionBlurEnabled(enabled: boolean) { this._motionBlurEnabled = enabled; }
+    public get motionBlurIntensity(): number { return this._motionBlurIntensity; }
+    public set motionBlurIntensity(intensity: number) { this._motionBlurIntensity = Math.max(0, intensity); }
+    public get motionBlurSamples(): number { return this._motionBlurSamples; }
+    public set motionBlurSamples(samples: number) { this._motionBlurSamples = Math.min(32, Math.max(4, Math.round(samples))); }
 
     // Selection outline appearance (used by the post-process outline pass).
     public get outlineColor(): [number, number, number] { return this._outlineColor; }
@@ -2142,8 +2322,61 @@ export class Renderer {
             // Draw the mesh
             node.model.mesh.draw();
         }
-        
+
+        // Editor skeleton overlay (instanced), also always-on-top.
+        this._drawSkeletonOverlay();
+
         // Re-enable depth testing
         GLState.enable(gl.DEPTH_TEST);
+    }
+
+    /** Editor: set (or clear) the instanced skeleton overlay drawn in the gizmo pass. */
+    public setSkeletonOverlay(overlay: SkeletonOverlay | null): void {
+        this._skeletonOverlay = overlay;
+    }
+
+    private _ensureOverlayMeshes(): void {
+        if (this._overlaySphereMesh && this._overlayBoneMesh && this._overlayInstanceBuffer) return;
+        // Init the base VAO with a standard non-instanced 5-attribute shader; instance matrices are
+        // wired separately via setupInstanceMatrixBuffer (mirrors _foliagePass).
+        const attrs = this._shaderManager.getShader('blinn_phongGeometry').attributes;
+        const build = (g: Geometry): Mesh => {
+            const m = new Mesh();
+            m.create(g.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']), g.vertexCount, g.indices);
+            m.initializeVAO(attrs);
+            return m;
+        };
+        if (!this._overlaySphereMesh) this._overlaySphereMesh = build(Geometry.Sphere(8, 1));
+        if (!this._overlayBoneMesh) this._overlayBoneMesh = build(Geometry.Cube(1, 1, 1));
+        if (!this._overlayInstanceBuffer) this._overlayInstanceBuffer = gl.createBuffer();
+    }
+
+    private _drawSkeletonOverlay(): void {
+        const o = this._skeletonOverlay;
+        if (!o) return;
+        this._ensureOverlayMeshes();
+        const buf = this._overlayInstanceBuffer, sphere = this._overlaySphereMesh, bone = this._overlayBoneMesh;
+        if (!buf || !sphere || !bone) return;
+
+        this._shaderManager.bind('basicInstanced');
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+
+        const drawSet = (mesh: Mesh, matrices: Float32Array, count: number, color: [number, number, number]) => {
+            if (count <= 0) return;
+            this._shaderManager.setUniform('u_material.color', color);
+            this._shaderManager.setUniform('u_material.hasTexture', false);
+            this._shaderManager.setUniform('u_material.opacity', 1.0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, matrices.subarray(0, count * 16), gl.DYNAMIC_DRAW);
+            mesh.setupInstanceMatrixBuffer(buf, 5);
+            mesh.drawInstanced(count, gl.TRIANGLES);
+            mesh.teardownInstanceMatrixBuffer(5);
+        };
+
+        // Bones first, joints over them, highlight on top (depth test is off in the gizmo pass).
+        drawSet(bone, o.boneMatrices, o.boneCount, o.boneColor);
+        drawSet(sphere, o.jointMatrices, o.jointCount, o.jointColor);
+        if (o.highlightMatrix && o.highlightColor) drawSet(sphere, o.highlightMatrix, 1, o.highlightColor);
     }
 }

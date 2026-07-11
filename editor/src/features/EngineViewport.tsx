@@ -6,6 +6,8 @@ import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
 import RendererOptions from "./renderer/RendererOptions";
 import RendererStats from "./renderer/RendererStats";
+import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
+import AnimationPlayer from "./animation/AnimationPlayer";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
 import { instantiateMeshAsset } from "../utils/meshes";
 import { GizmoMode } from "./EngineContext";
@@ -116,7 +118,8 @@ export default function EngineViewport() {
             if (isPlayMode) return;
             // In landscape/renderer modes the viewport is not a selection surface. In material mode the
             // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
-            if (editorMode === 'landscape' || editorMode === 'renderer' || editorMode === 'material') return;
+            // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
+            if (editorMode === 'landscape' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'animation') return;
             
             // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
@@ -302,7 +305,7 @@ export default function EngineViewport() {
                     </select>
                 )}
             </div>
-            {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && <PositionGizmo
+            {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'animation' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}
@@ -313,6 +316,10 @@ export default function EngineViewport() {
             </>}
             {editorMode === 'renderer' && <RendererOptions />}
             {editorMode === 'renderer' && <RendererStats />}
+            {editorMode === 'animation' && <>
+                <AnimationSkeletonTool viewportRef={viewportRef} />
+                <AnimationPlayer />
+            </>}
         </div>
     );
 }

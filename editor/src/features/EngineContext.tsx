@@ -1,17 +1,19 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, Node, ModelNode, TextureManager, Logger } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, Node, ModelNode, AnimatedModel, TextureManager, Logger } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
+import { createAnimationEditorScene } from './demoScene/createAnimationEditorScene';
+import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback } from "../utils/materials";
 import { MeshAsset, buildMeshAsset } from "../utils/meshes";
 import { groupImportFiles } from "../utils/importGrouping";
-import { renderMeshThumbnail, renderMaterialThumbnail, normalizeRootScale, meshBoundsRadius, awaitSubtreeTexturesReady } from "../utils/meshThumbnails";
+import { renderMeshThumbnail, renderMaterialThumbnail, normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady } from "../utils/meshThumbnails";
 import { parseBundleToRoot } from "../utils/meshImport";
 import { detectMissingTextures } from "../utils/textureRefs";
 
@@ -80,20 +82,21 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
-export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material';
+export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'animation';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Browser-style editor tabs. The 'main' tab hosts the real game scene and its scene/landscape/
 // renderer sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef). `editorMode` is derived from the active tab (see EngineProvider).
-export type TabKind = 'main' | 'template' | 'material';
+export type TabKind = 'main' | 'template' | 'material' | 'animation';
 export interface EditorTab {
   id: string;
   kind: TabKind;
   title: string;
   templateId?: string | null; // template tabs: source template id, null = unsaved new template
   materialId?: string | null; // material tabs: source material asset id, null = unsaved new material
+  animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
@@ -147,6 +150,11 @@ const EngineContext = createContext<{
   createMaterialForNode: (node: Node) => void;
   editingMaterialName: string | null;
   setActiveMaterialName: (name: string) => void;
+  // Animation editor
+  enterAnimationEditor: (nodeId: string) => void;
+  animationTargetId: string | null; // cloned skinned model in the active animation tab's scene
+  animationSourceId: string | null; // original node in the main scene (state-machine write-back target)
+  commitAnimationStateMachine: (sm: any) => void;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   loadingProgress: LoadingProgress;
   scripts: Map<string, string>;
@@ -211,6 +219,10 @@ const EngineContext = createContext<{
     createMaterialForNode: () => {},
     editingMaterialName: null,
     setActiveMaterialName: () => {},
+    enterAnimationEditor: () => {},
+    animationTargetId: null,
+    animationSourceId: null,
+    commitAnimationStateMachine: () => {},
     terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null } },
     loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
@@ -264,7 +276,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [tabs, setTabs] = useState<EditorTab[]>([{ id: 'main', kind: 'main', title: 'Main' }]);
   const [activeTabId, setActiveTabId] = useState<string>('main');
   const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({}); // tab id -> has unsaved edits
-  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string }>>(new Map());
+  // Per-tab runtime scene + root. Animation tabs also record where the SOURCE node lives (its scene may
+  // be the main scene OR a template tab's scene) so authored state machines are written back correctly.
+  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string }>>(new Map());
   const activeTabIdRef = useRef<string>('main');
   const activeTabKindRef = useRef<TabKind>('main');
   const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
@@ -379,15 +393,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
-  const activeRuntime = (activeTab.kind === 'template' || activeTab.kind === 'material') ? tabRuntimeRef.current.get(activeTab.id) : undefined;
-  // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material scene.
+  const activeRuntime = (activeTab.kind === 'template' || activeTab.kind === 'material' || activeTab.kind === 'animation') ? tabRuntimeRef.current.get(activeTab.id) : undefined;
+  // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material/animation scene.
   const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
   // Legacy single mode value, now derived from the active tab kind. Keeps every existing
   // `editorMode === ...` consumer working unchanged.
-  const editorMode: EditorMode = activeTab.kind === 'main' ? mainMode : activeTab.kind === 'material' ? 'material' : 'template';
+  const editorMode: EditorMode = activeTab.kind === 'main' ? mainMode
+    : activeTab.kind === 'material' ? 'material'
+    : activeTab.kind === 'animation' ? 'animation'
+    : 'template';
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
   const editingMaterialName = activeTab.kind === 'material' ? activeTab.title : null;
+  // Animation editor: the cloned skinned model in the tab's scene (target to preview/edit) and the
+  // original node in the main scene (where authored state machines are written back).
+  const animationTargetId = activeTab.kind === 'animation' && activeRuntime ? activeRuntime.rootId : null;
+  const animationSourceId = activeTab.kind === 'animation' ? (activeTab.animationSourceId ?? null) : null;
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
@@ -464,10 +485,78 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
 
-  // Public mode switch — only the Main tab's sub-mode (scene/landscape/renderer). Template editing is
-  // a tab now (opened via enterTemplateEditor), not a mode, so 'template' is not accepted here.
+  // Public mode switch — only the Main tab's sub-mode (scene/landscape/renderer). Template/material/
+  // animation editing are tabs now (opened via enter*Editor), not modes, so they aren't accepted here.
   const setEditorMode = (mode: EditorMode) => {
     if (mode === 'scene' || mode === 'landscape' || mode === 'renderer') setMainMode(mode);
+  };
+
+  // Force skinned models to their bind (T) pose. Used to keep the editor showing the default pose
+  // (animators don't tick while the scene is paused, but a model posed by a previous Play run would
+  // otherwise stay frozen). Also fixes the mesh/shadow both reading the bind pose consistently.
+  const showBindPoseForSkinnedModels = (scene: Scene) => {
+    for (const node of scene.nodes) {
+      if (node instanceof ModelNode && node.model instanceof AnimatedModel && node.animator) {
+        node.animator.showBindPose();
+      }
+    }
+  };
+
+  // Open (or focus) the Animation Editor for a specific skinned ModelNode. Like the template/material
+  // editors it opens a tab with its own throwaway scene: a CLONE of the source model (framed camera +
+  // shadow light + ground). Authored state machines are written back to the original node on Apply.
+  const enterAnimationEditor = async (nodeId: string) => {
+    const instance = instanceRef.current;
+    if (!instance) return;
+
+    // Focus an already-open animation tab for this node instead of duplicating it.
+    const existing = tabs.find(t => t.kind === 'animation' && t.animationSourceId === nodeId);
+    if (existing) { setActiveTabId(existing.id); return; }
+
+    // The source lives in whatever scene is currently active (main scene OR a template tab's scene).
+    const sourceScene = activeScene;
+    const sourceTabId = activeTabId;
+    const source = sourceScene.getNodeById(nodeId);
+    if (!(source instanceof ModelNode) || !(source.model instanceof AnimatedModel) || !source.model.hasSkin || !source.animator) {
+      Logger.error('Animation Editor requires a skinned model', 'Editor');
+      return;
+    }
+
+    // Clone the source node (with its skin, animations, mappings and state machine) into a fresh scene.
+    const scene = new Scene();
+    const json = await source.serialize();
+    stripDebug(json);
+    regenerateIds(json, new Map()); // distinct ids so the clone never collides with the original
+    parseByType(scene.root, json);
+    const cloneRootId = json.id;
+    const clone = scene.getNodeById(cloneRootId) as ModelNode | null;
+    if (!clone) { Logger.error('Failed to clone model for the Animation Editor', 'Editor'); return; }
+
+    // Frame the camera + build the shadow-catching ground around the clone's bounds.
+    scene.root.updateTransforms();
+    const bounds = combineBounds(clone);
+    createAnimationEditorScene(scene, bounds.center, bounds.radius);
+    scene.start();
+    clone.animator?.showBindPose(); // start from the rest pose
+
+    const tabId = cryptoRandomId();
+    tabRuntimeRef.current.set(tabId, { scene, rootId: cloneRootId, sourceScene, sourceNodeId: nodeId, sourceTabId });
+    setTabs(prev => [...prev, { id: tabId, kind: 'animation', title: `${source.name} (Anim)`, animationSourceId: nodeId }]);
+    setActiveTabId(tabId); // the activate effect swaps the engine scene + camera
+  };
+
+  // Persist an authored state machine from the animation tab's clone back to the ORIGINAL node in its
+  // own scene (main or a template tab). For template sources, mark the template tab dirty so the user
+  // saves it (Save Template serializes the node's stateMachine and propagates it to instances).
+  const commitAnimationStateMachine = (sm: any) => {
+    const rt = tabRuntimeRef.current.get(activeTabId);
+    if (!rt?.sourceScene || !rt.sourceNodeId) return;
+    const src = rt.sourceScene.getNodeById(rt.sourceNodeId);
+    if (src instanceof ModelNode && src.animator) {
+      src.animator.setStateMachine(sm);
+      src.animator.showBindPose(); // its scene is paused; keep the source at its rest pose
+    }
+    if (rt.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
   };
 
   const setActiveTab = (id: string) => setActiveTabId(id);
@@ -737,7 +826,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!instance) return;
     const tab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
     activeTabKindRef.current = tab.kind;
-    const runtime = (tab.kind === 'template' || tab.kind === 'material') ? tabRuntimeRef.current.get(tab.id) : undefined;
+    const runtime = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'animation') ? tabRuntimeRef.current.get(tab.id) : undefined;
     instance.setScene(runtime ? runtime.scene : editorSceneRef.current);
     // Hide the editor ground grid in material tabs so the preview sphere + its thumbnail stay clean.
     instance.renderer.setGridVisible(tab.kind !== 'material');
@@ -752,7 +841,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'main' ? dimensionRef.current : '3D');
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
-    eventEmitter.current.emit('SELECT_NODE', runtime ? runtime.rootId : null);
+    // Animation tabs select via the skeleton tree (SELECT_JOINT), not the mesh, so start with none.
+    eventEmitter.current.emit('SELECT_NODE', (runtime && tab.kind !== 'animation') ? runtime.rootId : null);
   }, [activeTabId]);
 
   // Mark the active template tab dirty on scene edits (after the open-settle window).
@@ -831,6 +921,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // Setting the editor scene and camera
           engine.setScene(editorSceneRef.current);
           editorSceneRef.current.start();
+          // Editor is paused (animators don't tick), so pin skinned models to their bind/T pose.
+          showBindPoseForSkinnedModels(editorSceneRef.current);
 
           // Restore selection/dimension from saved prefs (falls back to the scene root / 3D).
           const prefs = pendingPrefsRef.current;
@@ -1167,6 +1259,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.setScene(editorSceneRef.current);
     instance.input.clear();
     instance.physics.clear();
+    showBindPoseForSkinnedModels(editorSceneRef.current); // back to the default pose in the editor
     eventEmitter.current.emit('SET_PLAY_STATE', 'stop');
   };
   const pausePlay = () => eventEmitter.current.emit('SET_PLAY_STATE', 'pause');
@@ -1224,6 +1317,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       createMaterialForNode,
       editingMaterialName,
       setActiveMaterialName,
+      enterAnimationEditor,
+      animationTargetId,
+      animationSourceId,
+      commitAnimationStateMachine,
       terrainBrush,
       loadingProgress,
       scripts: scriptsRef.current,

@@ -6,13 +6,13 @@ import PropertyEditor from './propertyEditors/PropertyEditor';
 import MaterialEditor from './propertyEditors/MaterialEditor';
 import ScriptEditor from './scriptEditor/ScriptEditor';
 import PhysicsEditor from './physicsEditors/PhysicsEditor';
-import AnimationEditor from './animationEditor/AnimationEditor';
+import StateMachineEditor from '../animation/StateMachineEditor';
 import { isWithinTemplateInstance } from '../../utils/templates';
 
 export default function NodeInspector() {
   const { editorScene, selectedNode, editorMode, eventEmitter, editingMaterialName, setActiveMaterialName } = useCleoEngine()
   const [node, setNode] = useState<Node | null>(null)
-  const [selectedTab, setSelectedTab] = useState<'Properties' | 'Script' | 'Physics' | 'Animation'>('Properties')
+  const [selectedTab, setSelectedTab] = useState<'Properties' | 'Script' | 'Physics'>('Properties')
 
   useEffect(() => {
     if (editorScene && selectedNode) {
@@ -21,6 +21,11 @@ export default function NodeInspector() {
     }
 
   }, [selectedNode])
+
+  // Animation editor mode: the right sidebar becomes the animation state machine / events authoring.
+  if (editorMode === 'animation') {
+    return <StateMachineEditor />
+  }
 
   // Material editor mode: the inspector focuses on the preview sphere's material only (name + controls).
   if (editorMode === 'material') {
@@ -53,14 +58,12 @@ export default function NodeInspector() {
         <Tab title='Properties' onClick={()=>{setSelectedTab('Properties')}} selected={selectedTab === 'Properties'}/>
         <Tab title='Scripts' onClick={()=>{setSelectedTab('Script')}} selected={selectedTab === 'Script'}/>
         <Tab title='Physics' onClick={()=>{setSelectedTab('Physics')}} selected={selectedTab === 'Physics'}/>
-        <Tab title='Animation' onClick={()=>{setSelectedTab('Animation')}} selected={selectedTab === 'Animation'}/>
       </Tabs>
       {readOnly && <div className='text-[11px] text-[#ffd27a] bg-[#3a2f12] px-2 py-1'>Template instance — edit the template to change its content (Transform is per-instance).</div>}
       <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
         {selectedTab === 'Properties' && node && <PropertyEditor node={node} readOnly={readOnly}/>}
         {selectedTab === 'Script'  && <ScriptEditor readOnly={readOnly} /> }
         {selectedTab === 'Physics' && node && <fieldset disabled={readOnly} className={gate}><PhysicsEditor node={node} /></fieldset>}
-        {selectedTab === 'Animation' && node && <fieldset disabled={readOnly} className={gate}><AnimationEditor node={node} /></fieldset>}
       </div>
     </>
   )

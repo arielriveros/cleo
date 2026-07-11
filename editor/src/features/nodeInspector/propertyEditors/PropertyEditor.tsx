@@ -1,5 +1,6 @@
 import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, SpriteNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
+import AnimationSlot from './AnimationSlot'
 import SkyboxEditor from './SkyboxEditor'
 import TransformEditor from './TransformEditor'
 import LightEditor from './LightEditor'
@@ -24,6 +25,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
         {/* Everything else is disabled in one shot for a template instance. */}
         <fieldset disabled={ro} className={`${ro ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
           { props.node.nodeType === 'model' && <MaterialSlot node={props.node as ModelNode} /> }
+          { props.node.nodeType === 'model' && <AnimationSlot node={props.node as ModelNode} /> }
           { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
           { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }

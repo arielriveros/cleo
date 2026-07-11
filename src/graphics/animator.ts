@@ -26,6 +26,69 @@ export interface AnimationMapping {
     customCondition?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Animation State Machine + Events
+//
+// The modern authoring model (replaces the flat AnimationMapping list going forward):
+// named States each bound to a clip, Transitions with Conditions that compare typed
+// Parameters scripts set at runtime, plus per-clip timeline Event markers that fire named
+// events. The whole machine is a plain serializable object stored on the Animator/ModelNode.
+// ---------------------------------------------------------------------------
+
+export type AnimationParameterType = 'bool' | 'float' | 'trigger';
+
+export interface AnimationParameter {
+    name: string;
+    type: AnimationParameterType;
+    /** Default value: number for 'float', boolean for 'bool'/'trigger'. */
+    default: number | boolean;
+}
+
+export interface AnimationState {
+    name: string;
+    /** Name of the animation clip this state plays (empty = hold bind pose). */
+    clipName: string;
+    loop: boolean;
+    speed: number;
+    /** The state the machine starts in. Exactly one state should be the entry. */
+    isEntry?: boolean;
+}
+
+/** Comparison operator for a transition condition (interpreted per parameter type). */
+export type AnimationConditionOp = 'gt' | 'lt' | 'eq' | 'neq' | 'true' | 'false' | 'trigger';
+
+export interface AnimationCondition {
+    param: string;
+    op: AnimationConditionOp;
+    /** Threshold for float comparisons ('gt' | 'lt' | 'eq' | 'neq'). */
+    value?: number;
+}
+
+export interface AnimationTransition {
+    /** Source state name, or '*' to match any state. */
+    from: string;
+    to: string;
+    conditions: AnimationCondition[];
+    /** When true, the transition only fires once the clip reaches exitTime. */
+    hasExitTime?: boolean;
+    /** Normalized clip time (0..1) the transition waits for when hasExitTime is set. */
+    exitTime?: number;
+}
+
+export interface AnimationEventMarker {
+    clipName: string;
+    /** Time in seconds within the clip. */
+    time: number;
+    eventName: string;
+}
+
+export interface AnimationStateMachine {
+    parameters: AnimationParameter[];
+    states: AnimationState[];
+    transitions: AnimationTransition[];
+    events: AnimationEventMarker[];
+}
+
 /**
  * Represents a single keyframe for position data
  */
@@ -301,6 +364,15 @@ export class Animator {
     private _ragdollActive: boolean = false;
     private _ragdollDrive: Map<number, { body: RagdollBodyRef, offset: mat4 }> | null = null;
 
+    // Animation state machine (the modern action/event-driven model). When set, it drives
+    // playback each frame instead of the AnimationMapping list. Parameter values are live
+    // (set by scripts); triggers are consumed when a transition using them fires.
+    private _stateMachine: AnimationStateMachine | null = null;
+    private _paramValues: Map<string, number | boolean> = new Map();
+    private _currentStateName: string | null = null;
+    private _eventCallbacks: ((eventName: string, clipName: string) => void)[] = [];
+    private _prevEventTime: number = 0;
+
     constructor(animatedModel: AnimatedModel, node?: Node) {
         this._animatedModel = animatedModel;
         this._node = node || null;
@@ -480,19 +552,25 @@ export class Animator {
         
         // Get animation duration (assuming it's the max timestamp in samplers)
         const duration = this._getAnimationDuration();
-        
-        // Update current time
+
+        // Update current time (remember the pre-advance time for event-marker crossing)
+        const prevTime = this._currentTime;
+        let looped = false;
         this._currentTime += this._deltaTime;
-        
+
         // Handle looping or stopping
         if (this._currentTime >= duration) {
             if (this._loop) {
                 this._currentTime = this._currentTime % duration;
+                looped = true;
             } else {
                 this._currentTime = duration;
                 this._playing = false;
             }
         }
+
+        // Fire any animation-event markers crossed this frame.
+        this._fireDueEvents(prevTime, this._currentTime, duration, looped);
         
         // Update all bones with current animation time
         for (const bone of this._bones.values()) {
@@ -503,17 +581,29 @@ export class Animator {
         if (this._isBlending && this._previousAnimation) {
             const previousDuration = this._getPreviousAnimationDuration();
             let previousTime = this._previousTime + this._deltaTime;
-            
+
             // Handle looping for previous animation
             if (previousTime >= previousDuration) {
                 previousTime = previousTime % previousDuration;
             }
-            
+
             for (const bone of this._previousBones.values()) {
                 bone.update(previousTime);
             }
         }
-        
+
+        // Turn the current bone local transforms into final skinning matrices.
+        this._recomputePose();
+    }
+
+    /**
+     * Recompute _finalBoneMatrices from the bones' current local transforms.
+     * Split out of update() so seek() can pose the skeleton at an arbitrary time
+     * without advancing time or running trigger logic.
+     */
+    private _recomputePose(): void {
+        if (!this._skin) return;
+
         // Build local transforms map for all joints
         const localTransforms = new Map<number, mat4>();
         for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
@@ -521,7 +611,7 @@ export class Animator {
             const nodeIndex = joint.nodeIndex;
             const boneName = `bone_${nodeIndex}`;
             const bone = this._bones.get(boneName);
-            
+
             if (bone) {
                 if (this._isBlending && this._previousBones.has(boneName)) {
                     // Blend between previous and current animation
@@ -539,16 +629,16 @@ export class Animator {
                 localTransforms.set(nodeIndex, initialTransform ? initialTransform : mat4.create());
             }
         }
-        
+
         // Calculate global transforms by accumulating through parent hierarchy
         const globalTransforms = new Map<number, mat4>();
-        
+
         const calculateGlobalTransform = (nodeIndex: number): mat4 => {
             // Check if already calculated
             if (globalTransforms.has(nodeIndex)) {
                 return globalTransforms.get(nodeIndex)!;
             }
-            
+
             // Get local transform
             const localTransform = localTransforms.get(nodeIndex);
             if (!localTransform) {
@@ -563,13 +653,13 @@ export class Animator {
                 globalTransforms.set(nodeIndex, identity);
                 return identity;
             }
-            
+
             // Find parent
             const joint = this._skin!.joints.find(j => j.nodeIndex === nodeIndex);
             const parentIndex = joint?.parentIndex;
-            
+
             let globalTransform = mat4.create();
-            
+
             if (parentIndex !== undefined) {
                 // Has parent - multiply parent's global transform by local transform
                 const parentGlobal = calculateGlobalTransform(parentIndex);
@@ -578,21 +668,36 @@ export class Animator {
                 // No parent - local transform IS the global transform
                 mat4.copy(globalTransform, localTransform);
             }
-            
+
             globalTransforms.set(nodeIndex, globalTransform);
             return globalTransform;
         };
-        
+
         // Calculate final bone matrices: finalMatrix = globalTransform × inverseBindMatrix
         for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
             const joint = this._skin.joints[jointIndex];
             const nodeIndex = joint.nodeIndex;
-            
+
             const globalTransform = calculateGlobalTransform(nodeIndex);
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
         }
     }
-    
+
+    /**
+     * Pose the skeleton at an explicit time on the current animation (for editor scrubbing).
+     * Does not change play/pause state and does not advance time on its own.
+     */
+    public seek(time: number): void {
+        if (this._ragdollActive || !this._currentAnimation || !this._skin) return;
+        const duration = this._getAnimationDuration();
+        this._currentTime = Math.max(0, Math.min(time, duration));
+        this._isBlending = false;
+        for (const bone of this._bones.values()) {
+            bone.update(this._currentTime);
+        }
+        this._recomputePose();
+    }
+
     /**
      * Blend between two transformation matrices
      */
@@ -687,6 +792,143 @@ export class Animator {
         this._currentTime = 0;
     }
     public reset(): void { this._currentTime = 0; }
+
+    /**
+     * Force the skeleton to its bind (default / T) pose and stop playback.
+     * Public wrapper of the internal T-pose reset — used by the editor to preview the
+     * rest pose and to guarantee a T-pose whenever nothing is playing.
+     */
+    public showBindPose(): void { this._setTPose(); }
+
+    // ---- Animation state machine (action/event-driven playback) ----
+
+    /** The current state machine, or null if none is assigned. */
+    public getStateMachine(): AnimationStateMachine | null { return this._stateMachine; }
+    public get hasStateMachine(): boolean { return this._stateMachine !== null; }
+    /** Name of the state currently active in the machine (null when no machine / no entry). */
+    public get currentStateName(): string | null { return this._currentStateName; }
+
+    /**
+     * Assign (or clear) the state machine. Resets live parameter values to their defaults and
+     * enters the entry state. Pass null to remove the machine (falls back to mappings/T-pose).
+     */
+    public setStateMachine(sm: AnimationStateMachine | null): void {
+        this._stateMachine = sm;
+        this._paramValues.clear();
+        this._currentStateName = null;
+        if (!sm) return;
+        for (const p of sm.parameters) this._paramValues.set(p.name, p.default);
+        this.resetStateMachine();
+    }
+
+    /** Re-enter the entry state and reset triggers to their defaults. */
+    public resetStateMachine(): void {
+        if (!this._stateMachine) return;
+        // Reset triggers (bool/float keep their last set value; triggers are momentary).
+        for (const p of this._stateMachine.parameters) {
+            if (p.type === 'trigger') this._paramValues.set(p.name, false);
+        }
+        const entry = this._stateMachine.states.find(s => s.isEntry) ?? this._stateMachine.states[0];
+        if (entry) this._enterState(entry.name);
+        else { this._currentStateName = null; this._setTPose(); }
+    }
+
+    // Parameter setters/getters used by scripts to drive the machine.
+    public setFloat(name: string, value: number): void { this._paramValues.set(name, value); }
+    public setBool(name: string, value: boolean): void { this._paramValues.set(name, value); }
+    /** Fire a momentary trigger; it is consumed when a transition that uses it fires. */
+    public setTrigger(name: string): void { this._paramValues.set(name, true); }
+    public resetTrigger(name: string): void { this._paramValues.set(name, false); }
+    public getParam(name: string): number | boolean | undefined { return this._paramValues.get(name); }
+
+    /** Subscribe to animation events fired by clip event markers. Returns an unsubscribe fn. */
+    public onAnimationEvent(cb: (eventName: string, clipName: string) => void): () => void {
+        this._eventCallbacks.push(cb);
+        return () => { this._eventCallbacks = this._eventCallbacks.filter(c => c !== cb); };
+    }
+
+    /** Enter a state by name: make it current and play its bound clip. */
+    private _enterState(name: string): void {
+        if (!this._stateMachine) return;
+        const state = this._stateMachine.states.find(s => s.name === name);
+        this._currentStateName = name;
+        this._prevEventTime = 0;
+        if (!state || !state.clipName) {
+            // No clip bound: hold bind pose.
+            this._setTPose();
+            return;
+        }
+        this.playAnimationByName(state.clipName, state.loop, true);
+        this._speed = state.speed ?? 1.0;
+    }
+
+    /** Evaluate the active state's outgoing transitions and switch state when one fires. */
+    private _evaluateStateMachine(): void {
+        const sm = this._stateMachine;
+        if (!sm) return;
+        if (!this._currentStateName) { this.resetStateMachine(); return; }
+
+        const duration = this._getAnimationDuration();
+        for (const t of sm.transitions) {
+            if (t.from !== '*' && t.from !== this._currentStateName) continue;
+            if (t.to === this._currentStateName) continue;
+
+            // Exit-time gate: wait until the clip reaches the normalized exit time.
+            if (t.hasExitTime) {
+                const exit = (t.exitTime ?? 1.0) * duration;
+                if (this._currentTime < exit) continue;
+            }
+
+            if (!t.conditions.every(c => this._conditionMet(c))) continue;
+
+            // Consume any triggers this transition used, then switch.
+            for (const c of t.conditions) {
+                if (c.op === 'trigger') this._paramValues.set(c.param, false);
+            }
+            this._enterState(t.to);
+            return;
+        }
+    }
+
+    private _conditionMet(c: AnimationCondition): boolean {
+        const v = this._paramValues.get(c.param);
+        switch (c.op) {
+            case 'trigger': return v === true;
+            case 'true':    return v === true;
+            case 'false':   return v === false;
+            case 'gt':      return typeof v === 'number' && v > (c.value ?? 0);
+            case 'lt':      return typeof v === 'number' && v < (c.value ?? 0);
+            case 'eq':      return typeof v === 'number' && v === (c.value ?? 0);
+            case 'neq':     return typeof v === 'number' && v !== (c.value ?? 0);
+            default:        return false;
+        }
+    }
+
+    /** Fire event markers on the current clip whose time was crossed in (prev, cur]. */
+    private _fireDueEvents(prevTime: number, curTime: number, duration: number, looped: boolean): void {
+        const sm = this._stateMachine;
+        if (!sm || sm.events.length === 0 || !this._currentAnimation || this._eventCallbacks.length === 0) {
+            this._prevEventTime = curTime;
+            return;
+        }
+        const clip = this._currentAnimation.name;
+        const fire = (from: number, to: number) => {
+            for (const ev of sm.events) {
+                if (ev.clipName !== clip) continue;
+                if (ev.time > from && ev.time <= to) {
+                    for (const cb of this._eventCallbacks) cb(ev.eventName, clip);
+                }
+            }
+        };
+        if (looped) {
+            // Wrapped past the end: fire (prev, duration] then (0, cur].
+            fire(prevTime, duration);
+            fire(-1, curTime);
+        } else {
+            fire(prevTime, curTime);
+        }
+        this._prevEventTime = curTime;
+    }
 
     // ---- Ragdoll drive mode ----
 
@@ -800,7 +1042,13 @@ export class Animator {
         // While ragdolling, ignore animation triggers (and don't fall back to T-pose).
         if (this._ragdollActive) return;
         if (!this._animatedModel) return;
-        
+
+        // The state machine, when present, is the source of truth for what plays.
+        if (this._stateMachine) {
+            this._evaluateStateMachine();
+            return;
+        }
+
         // If no mappings, set T-pose by stopping animation
         if (this._animationMappings.length === 0) {
             if (this._playing) {
@@ -1019,6 +1267,8 @@ export class Animator {
     // Getters and setters
     public get isPlaying(): boolean { return this._playing; }
     public get currentTime(): number { return this._currentTime; }
+    /** Duration (seconds) of the current animation, or 0 if none. */
+    public get duration(): number { return this._getAnimationDuration(); }
     public get loop(): boolean { return this._loop; }
     public set loop(value: boolean) { this._loop = value; }
     public get speed(): number { return this._speed; }

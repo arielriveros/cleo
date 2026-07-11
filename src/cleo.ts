@@ -8,6 +8,7 @@ export { Logger } from "./core/logger";
 export { Mesh } from "./graphics/mesh";
 export { Material } from "./graphics/material";
 export { Renderer } from "./graphics/renderer";
+export type { SkeletonOverlay } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";
 export { Texture } from "./graphics/texture";
 export { Loader } from "./graphics/loader";
@@ -20,7 +21,17 @@ export { Model } from "./graphics/model";
 export { AnimatedModel } from "./graphics/animatedModel";
 export type { Skin, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
 export { Animator } from "./graphics/animator";
-export type { AnimationMapping } from "./graphics/animator";
+export type {
+    AnimationMapping,
+    AnimationStateMachine,
+    AnimationState,
+    AnimationTransition,
+    AnimationCondition,
+    AnimationConditionOp,
+    AnimationParameter,
+    AnimationParameterType,
+    AnimationEventMarker,
+} from "./graphics/animator";
 export { Sprite } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";

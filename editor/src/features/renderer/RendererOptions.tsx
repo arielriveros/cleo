@@ -16,6 +16,14 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'ssao',      label: 'SSAO' },
   { key: 'shadow',    label: 'Shadow' },
   { key: 'bloom',     label: 'Bloom' },
+  { key: 'velocity',  label: 'Velocity' },
+];
+
+// Motion-blur quality presets: sample taps per pixel (higher = smoother, costlier).
+const MB_QUALITY: { label: string; samples: number }[] = [
+  { label: 'Low',  samples: 8 },
+  { label: 'Med',  samples: 16 },
+  { label: 'High', samples: 24 },
 ];
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -68,6 +76,9 @@ export default function RendererOptions() {
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
   const [foliageCullDistance, setFoliageCullDistance] = useState<number>(() => renderer?.foliageCullDistance ?? 65);
   const [foliageCellSize, setFoliageCellSize] = useState<number>(() => renderer?.foliageCellSize ?? 13);
+  const [motionBlur, setMotionBlur] = useState<boolean>(() => renderer?.motionBlurEnabled ?? true);
+  const [motionBlurIntensity, setMotionBlurIntensity] = useState<number>(() => renderer?.motionBlurIntensity ?? 1.0);
+  const [motionBlurSamples, setMotionBlurSamples] = useState<number>(() => renderer?.motionBlurSamples ?? 12);
 
   // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => { if (renderer) renderer.debugView = 'final'; }, [renderer]);
@@ -81,6 +92,9 @@ export default function RendererOptions() {
     setFrustumCulling(renderer.frustumCulling);
     setFoliageCullDistance(renderer.foliageCullDistance);
     setFoliageCellSize(renderer.foliageCellSize);
+    setMotionBlur(renderer.motionBlurEnabled);
+    setMotionBlurIntensity(renderer.motionBlurIntensity);
+    setMotionBlurSamples(renderer.motionBlurSamples);
   }, [isPlayMode, renderer]);
 
   if (!renderer) {
@@ -130,6 +144,27 @@ export default function RendererOptions() {
           onChange={(v) => { renderer.exposure = v; setExposure(v); }} />
         <Slider label='Chromatic' value={chromatic} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.chromaticAberrationStrength = v; setChromatic(v); }} />
+      </Section>
+
+      <Section title='Motion Blur'>
+        <label className='flex items-center gap-2 my-1 text-xs'>
+          <input type='checkbox' checked={motionBlur}
+            onChange={(e) => { renderer.motionBlurEnabled = e.target.checked; setMotionBlur(e.target.checked); }} />
+          Enabled
+        </label>
+        <Slider label='Amount' value={motionBlurIntensity} min={0} max={4} step={0.05}
+          onChange={(v) => { renderer.motionBlurIntensity = v; setMotionBlurIntensity(v); }} />
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>Quality</span>
+          {MB_QUALITY.map((q) => (
+            <button key={q.label} onClick={() => { renderer.motionBlurSamples = q.samples; setMotionBlurSamples(q.samples); }}
+              className={`px-2 py-1 rounded border ${
+                motionBlurSamples === q.samples ? 'bg-[#2c2cff] border-white' : 'bg-[#3b3b3b] border-[#3b3b3b] hover:bg-[#4a4a4a]'}`}>
+              {q.label}
+            </button>
+          ))}
+        </div>
+        <div className='text-[10px] text-[#8a8aa0] mt-0.5'>Camera-reprojection motion blur (UE5-style). Amount scales the shutter length.</div>
       </Section>
 
       <Section title='SSAO'>

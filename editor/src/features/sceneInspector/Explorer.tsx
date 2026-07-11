@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Tabs, { Tab } from '../../components/Tabs'
 import SceneInspector from './SceneInspector'
 import UIInspector from '../uiInspector/UIInspector'
+import SkeletonTree from '../animation/SkeletonTree'
 import { useCleoEngine } from '../EngineContext'
 
 export default function Explorer() {
@@ -22,6 +23,10 @@ export default function Explorer() {
     if (selectedTab === 'UI')
       eventEmitter.emit('UI_CHANGED')
   }, [selectedTab])
+
+  // The Animation Editor replaces the scene tree with the skeleton tree.
+  if (editorMode === 'animation') return <SkeletonTree />
+
   return (
     <>
       <Tabs>

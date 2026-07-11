@@ -2,7 +2,7 @@ import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../physics/body";
 import { Model } from "../../graphics/model";
 import { AnimatedModel } from "../../graphics/animatedModel";
-import { Animator, AnimationMapping } from "../../graphics/animator";
+import { Animator, AnimationMapping, AnimationStateMachine } from "../../graphics/animator";
 import type { RagdollOptions } from "../../physics/ragdoll";
 import { Sprite } from "../../graphics/sprite";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
@@ -899,12 +899,14 @@ export class ModelNode extends Node {
         return new Promise((resolve, reject) => {
             const model = this._model.serialize()
             
-            // Serialize animation mappings if animator exists
+            // Serialize animation mappings + state machine if animator exists
             let animationMappings: AnimationMapping[] | null = null;
+            let stateMachine: AnimationStateMachine | null = null;
             if (this._animator) {
                 animationMappings = this._animator.getAnimationMappings();
+                stateMachine = this._animator.getStateMachine();
             }
-            
+
             Promise.all(this._children.map(child => child.serialize())).then(children => {
                 resolve({
                     name: this._name,
@@ -917,6 +919,7 @@ export class ModelNode extends Node {
                     variables: this._serializeVariables(),
                     model: model,
                     animationMappings: animationMappings,
+                    stateMachine: stateMachine,
                     ragdoll: this._ragdollConfig
                 });
             });
@@ -932,6 +935,11 @@ export class ModelNode extends Node {
         // Restore animation mappings if they exist
         if (json.animationMappings && node.animator) {
             node.animator.setAnimationMappings(json.animationMappings);
+        }
+
+        // Restore the animation state machine if present (takes precedence over mappings).
+        if (json.stateMachine && node.animator) {
+            node.animator.setStateMachine(json.stateMachine);
         }
 
         // Restore ragdoll config if present
