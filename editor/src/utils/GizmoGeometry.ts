@@ -2,6 +2,56 @@ import { Geometry } from "cleo";
 
 export class GizmoGeometry {
     /**
+     * Torus (ring) lying in the plane perpendicular to `axis`, used as the rotation-gizmo handle for
+     * that axis. `radius` is the ring's major radius (matches the arrow length); `tube` is the tube
+     * thickness. Kept thin so it reads as a ring but still has a pickable bounding box.
+     */
+    private static torus(axis: 'x' | 'y' | 'z', radius: number, tube: number, majorSeg = 32, minorSeg = 6): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        for (let i = 0; i <= majorSeg; i++) {
+            const u = (i / majorSeg) * Math.PI * 2;
+            const cu = Math.cos(u), su = Math.sin(u);
+            for (let j = 0; j <= minorSeg; j++) {
+                const v = (j / minorSeg) * Math.PI * 2;
+                const cv = Math.cos(v), sv = Math.sin(v);
+                const rr = radius + tube * cv;
+                let p: [number, number, number];
+                let n: [number, number, number];
+                if (axis === 'z') { p = [rr * cu, rr * su, tube * sv]; n = [cv * cu, cv * su, sv]; }
+                else if (axis === 'y') { p = [rr * cu, tube * sv, rr * su]; n = [cv * cu, sv, cv * su]; }
+                else { p = [tube * sv, rr * cu, rr * su]; n = [sv, cv * cu, cv * su]; }
+                positions.push(p);
+                normals.push(n);
+                uvs.push([i / majorSeg, j / minorSeg]);
+            }
+        }
+
+        const stride = minorSeg + 1;
+        for (let i = 0; i < majorSeg; i++) {
+            for (let j = 0; j < minorSeg; j++) {
+                const a = i * stride + j;
+                const b = (i + 1) * stride + j;
+                const c = (i + 1) * stride + (j + 1);
+                const d = i * stride + (j + 1);
+                indices.push(a, b, d);
+                indices.push(b, c, d);
+            }
+        }
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /** Rotation ring in the YZ plane (rotates about the X axis). */
+    public static RingX(radius: number = 1, tube: number = 0.04): Geometry { return this.torus('x', radius, tube); }
+    /** Rotation ring in the XZ plane (rotates about the Y axis). */
+    public static RingY(radius: number = 1, tube: number = 0.04): Geometry { return this.torus('y', radius, tube); }
+    /** Rotation ring in the XY plane (rotates about the Z axis). */
+    public static RingZ(radius: number = 1, tube: number = 0.04): Geometry { return this.torus('z', radius, tube); }
+
+    /**
      * Creates geometry for a 3D arrow pointing along the X axis
      */
     public static ArrowX(length: number = 1, headSize: number = 0.2): Geometry {

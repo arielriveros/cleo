@@ -6,12 +6,45 @@ import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
 import RendererOptions from "./renderer/RendererOptions";
 import RendererStats from "./renderer/RendererStats";
-import { instantiateTemplate } from "../utils/templates";
+import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
 import { instantiateMeshAsset } from "../utils/meshes";
+import { GizmoMode } from "./EngineContext";
+
+// One segment of the Move/Rotate/Scale toggle, styled to match the top-toolbar ModeSelector.
+function GizmoSeg({ active, title, onClick, children }: { active: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
+    return (
+        <button
+            data-cleo-overlay
+            className={`flex items-center justify-center w-[26px] h-[25px] border-r border-[#555] last:border-r-0 transition-colors cursor-pointer
+                ${active ? 'bg-[#2c2cff] text-white' : 'bg-[#3b3b3b] text-[#ccc] hover:bg-[#4a4a4a]'}`}
+            title={title}
+            onClick={onClick}
+        >
+            {children}
+        </button>
+    );
+}
+
+// Compact glyphs (stroke currentColor) for the gizmo-mode toggle.
+const MoveIcon = () => (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3v18M3 12h18M12 3 9 6M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" />
+    </svg>
+);
+const RotateIcon = () => (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 12a8 8 0 1 1-2.3-5.6" /><path d="M20 4v4h-4" />
+    </svg>
+);
+const ScaleIcon = () => (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="4" width="10" height="10" rx="1" /><path d="M14 14l6 6M20 15v5h-5" />
+    </svg>
+);
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            templates, meshes, scripts, bodies, triggers } = useCleoEngine();
+            gizmoMode, setGizmoMode, templateRootId, templates, meshes, scripts, bodies, triggers } = useCleoEngine();
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -81,8 +114,9 @@ export default function EngineViewport() {
             if (inOverlay(event.target)) return;
             // Don't allow selection during play mode
             if (isPlayMode) return;
-            // In landscape/renderer modes the viewport is not a selection surface.
-            if (editorMode === 'landscape' || editorMode === 'renderer') return;
+            // In landscape/renderer modes the viewport is not a selection surface. In material mode the
+            // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
+            if (editorMode === 'landscape' || editorMode === 'renderer' || editorMode === 'material') return;
             
             // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
@@ -117,20 +151,23 @@ export default function EngineViewport() {
 
                 console.log('Ray created:', { origin: ray.origin, direction: ray.direction });
 
-                // Get all nodes from the scene
-                const allNodes = Array.from(editorScene.nodes);
+                // Get all selectable nodes from the scene. Exclude gizmo nodes so a stray ray can never
+                // select the transform gizmo itself (the gizmo has its own grab raycast in PositionGizmo).
+                const allNodes = Array.from(editorScene.nodes).filter(n => !(n as any).isGizmo);
                 console.log('Total nodes in scene:', allNodes.length);
                 console.log('Nodes:', allNodes.map(n => ({ id: n.id, name: n.name, type: n.nodeType, visible: n.visible })));
-                
+
                 // Perform raycast
                 const hits = Raycaster.raycast(ray, allNodes);
                 console.log('Raycast hits:', hits.length);
-                
+
                 if (hits.length > 0) {
-                    // Select the closest hit
-                    const selectedNode = hits[0].node;
-                    console.log('Selected node:', { id: selectedNode.id, name: selectedNode.name, type: selectedNode.nodeType });
-                    eventEmitter.emit('SELECT_NODE', selectedNode.id);
+                    // Select the closest hit. In scene mode, a placed template instance behaves as one
+                    // object: redirect a hit on any instance child up to the instance root.
+                    const hit = hits[0].node;
+                    const target = editorMode === 'scene' ? (templateInstanceRootOf(hit) ?? hit) : hit;
+                    console.log('Selected node:', { id: target.id, name: target.name, type: target.nodeType });
+                    eventEmitter.emit('SELECT_NODE', target.id);
                 } else {
                     // Deselect if clicking on empty space
                     console.log('No hits, deselecting');
@@ -184,13 +221,14 @@ export default function EngineViewport() {
         };
     }, [eventEmitter]);
 
-    const handlePositionChange = (nodeId: string, newPosition: [number, number, number]) => {
+    const handleTransformChange = (nodeId: string, mode: GizmoMode, value: [number, number, number]) => {
         if (!editorScene) return;
 
         const node = editorScene.getNodeById(nodeId);
-        if (node) {
-            node.setPosition(newPosition);
-        }
+        if (!node) return;
+        if (mode === 'rotation') node.setRotation(value);
+        else if (mode === 'scale') node.setScale(value);
+        else node.setPosition(value);
     };
 
     // Drop a template (Templates panel) or a mesh (Meshes panel) into the viewport to instantiate a copy.
@@ -201,13 +239,19 @@ export default function EngineViewport() {
     const onViewportDrop = (e: React.DragEvent) => {
         if (!editorScene) return;
 
+        // In a template tab the editable subtree is rooted at the template root (a child of the scene
+        // root); drops must parent there so they show in the hierarchy and save with the template.
+        const dropParent = (editorMode === 'template' && templateRootId)
+            ? (editorScene.getNodeById(templateRootId) ?? editorScene.root)
+            : editorScene.root;
+
         const meshId = e.dataTransfer.getData('text/cleo-mesh');
         if (meshId) {
             e.preventDefault();
             const mesh = meshes.find(m => m.id === meshId);
             if (!mesh) return;
             try {
-                const newId = instantiateMeshAsset(mesh, editorScene.root);
+                const newId = instantiateMeshAsset(mesh, dropParent);
                 eventEmitter.emit('TEXTURES_CHANGED');
                 eventEmitter.emit('SCENE_CHANGED');
                 eventEmitter.emit('SELECT_NODE', newId);
@@ -223,7 +267,7 @@ export default function EngineViewport() {
         const template = templates.find(t => t.id === templateId);
         if (!template) return;
         try {
-            const newId = instantiateTemplate(template, editorScene.root, { scripts, bodies, triggers });
+            const newId = instantiateTemplate(template, dropParent, { scripts, bodies, triggers });
             eventEmitter.emit('TEXTURES_CHANGED');
             eventEmitter.emit('SCENE_CHANGED');
             eventEmitter.emit('SELECT_NODE', newId);
@@ -235,23 +279,32 @@ export default function EngineViewport() {
     return (
         <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}
              onContextMenu={(e) => e.preventDefault()}>
-            {/* Minimal floating 2D/3D switch, top-right of the viewport (Main tab only, not during play).
-                Hidden in renderer mode where the top-right holds the perf HUD (and 2D makes no sense). */}
-            {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'renderer' && !isPlayMode && (
-                <select
-                    data-cleo-overlay
-                    value={dimension}
-                    onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', e.target.value as '2D' | '3D')}
-                    title='Viewport dimension'
-                    className='absolute top-2 right-2 z-20 bg-[#252525]/80 hover:bg-[#252525] text-white text-xs rounded px-1.5 py-1 border border-white/10 cursor-pointer focus:outline-none'
-                >
-                    <option value='3D'>3D</option>
-                    <option value='2D'>2D</option>
-                </select>
-            )}
+            {/* Floating top-right overlays: the gizmo-mode toggle (where the gizmo is active) sits to the
+                left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead. */}
+            <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
+                {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && !isPlayMode && (
+                    <div className='flex items-center rounded overflow-hidden border border-[#555]'>
+                        <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
+                        <GizmoSeg active={gizmoMode === 'rotation'} title='Rotate' onClick={() => setGizmoMode('rotation')}><RotateIcon /></GizmoSeg>
+                        <GizmoSeg active={gizmoMode === 'scale'} title='Scale' onClick={() => setGizmoMode('scale')}><ScaleIcon /></GizmoSeg>
+                    </div>
+                )}
+                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'renderer' && !isPlayMode && (
+                    <select
+                        data-cleo-overlay
+                        value={dimension}
+                        onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', e.target.value as '2D' | '3D')}
+                        title='Viewport dimension'
+                        className='bg-[#252525]/80 hover:bg-[#252525] text-white text-xs rounded px-1.5 py-1 border border-white/10 cursor-pointer focus:outline-none'
+                    >
+                        <option value='3D'>3D</option>
+                        <option value='2D'>2D</option>
+                    </select>
+                )}
+            </div>
             {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && <PositionGizmo
                 selectedNodeId={selectedNode}
-                onPositionChange={handlePositionChange}
+                onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}
             />}
             {editorMode === 'landscape' && <>

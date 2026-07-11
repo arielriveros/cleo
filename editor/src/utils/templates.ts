@@ -22,14 +22,19 @@ type EngineMaps = {
 // Node variable name used to link a placed instance back to its source template.
 export const TEMPLATE_ID_VAR = '__templateId'
 
-/** True if `node` or any ancestor is a placed template instance (carries the __templateId marker). */
-export function isWithinTemplateInstance(node: Node | null | undefined): boolean {
+/** Walk up to the placed-instance root (nearest ancestor, or self, carrying __templateId), or null. */
+export function templateInstanceRootOf(node: Node | null | undefined): Node | null {
   let n: Node | null | undefined = node
   while (n) {
-    if (n.getVariable(TEMPLATE_ID_VAR)) return true
+    if (n.getVariable(TEMPLATE_ID_VAR)) return n
     n = n.parent
   }
-  return false
+  return null
+}
+
+/** True if `node` or any ancestor is a placed template instance (carries the __templateId marker). */
+export function isWithinTemplateInstance(node: Node | null | undefined): boolean {
+  return !!templateInstanceRootOf(node)
 }
 
 /** Build a Template capturing a node's subtree + its assets and out-of-band script/body/trigger data. */

@@ -66,6 +66,7 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
 export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material';
+export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Browser-style editor tabs. The 'main' tab hosts the real game scene and its scene/landscape/
@@ -108,6 +109,9 @@ const EngineContext = createContext<{
   isSceneReady: boolean;
   editorMode: EditorMode;
   setEditorMode: (mode: EditorMode) => void;
+  // Transform gizmo mode (move/rotate/scale)
+  gizmoMode: GizmoMode;
+  setGizmoMode: (mode: GizmoMode) => void;
   // Editor tabs (Main + template tabs)
   tabs: EditorTab[];
   activeTabId: string;
@@ -169,6 +173,8 @@ const EngineContext = createContext<{
     isSceneReady: false,
     editorMode: 'scene',
     setEditorMode: () => {},
+    gizmoMode: 'position',
+    setGizmoMode: () => {},
     tabs: [{ id: 'main', kind: 'main', title: 'Main' }],
     activeTabId: 'main',
     activeTab: { id: 'main', kind: 'main', title: 'Main' },
@@ -229,6 +235,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // The Main tab's sub-mode (scene/landscape/renderer). `editorMode` exposed to consumers is derived
   // from the active tab — 'template' when a template tab is active, else this.
   const [mainMode, setMainMode] = useState<'scene' | 'landscape' | 'renderer'>('scene');
+  // Active transform-gizmo mode (move/rotate/scale), driven by the viewport toggle.
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>('position');
   // Editor tabs: the Main tab (real game scene) plus any open template tabs. Each template tab's live
   // scene + root live in tabRuntimeRef (not React state — Scene objects shouldn't be serialized).
   const [tabs, setTabs] = useState<EditorTab[]>([{ id: 'main', kind: 'main', title: 'Main' }]);
@@ -979,11 +987,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.on('SELECT_NODE', (node: string | null) => {
       console.log('SELECT_NODE event received:', node);
       setSelectedNode(node);
-      
-      // Use stencil-based outlining instead of creating outline nodes
+
+      // Use stencil-based outlining instead of creating outline nodes. In a material tab the preview
+      // sphere is the (logical) selection so the inspector targets it, but it must not show the outline.
       if (instanceRef.current && instanceRef.current.renderer) {
-        instanceRef.current.renderer.setSelectedNode(node);
-        console.log('Selection updated in renderer:', node);
+        const outlineTarget = activeTabKindRef.current === 'material' ? null : node;
+        instanceRef.current.renderer.setSelectedNode(outlineTarget);
+        console.log('Selection updated in renderer:', outlineTarget);
       }
     });
 
@@ -1148,6 +1158,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       isSceneReady,
       editorMode,
       setEditorMode,
+      gizmoMode,
+      setGizmoMode,
       tabs,
       activeTabId,
       activeTab,

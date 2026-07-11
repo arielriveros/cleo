@@ -39,10 +39,12 @@ export default function Editor() {
   const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets' | 'Templates' | 'Materials' | 'Meshes'>(() => readLayout().bottomTab);
 
   // Landscape mode hides both side inspectors; renderer mode additionally hides the bottom bar,
-  // leaving only the viewport + the floating Renderer Options window.
+  // leaving only the viewport + the floating Renderer Options window. Material mode hides only the
+  // left (scene/UI) sidebar — the right sidebar keeps the material inspector.
   const hideSides = editorMode === 'landscape' || editorMode === 'renderer';
+  const hideLeft = hideSides || editorMode === 'material';
   const hideBottom = editorMode === 'renderer';
-  const effLeft = hideSides ? 0 : barsDimensions.left;
+  const effLeft = hideLeft ? 0 : barsDimensions.left;
   const effRight = hideSides ? 0 : barsDimensions.right;
 
   useEffect(() => {
@@ -100,10 +102,10 @@ export default function Editor() {
     <>
       <MenuBar />
       <Content>
-        <Sidebar width={`${effLeft}vw`} minWidth={`${hideSides ? 0 : barsDimensions.minLeft}vw`}>
+        <Sidebar width={`${effLeft}vw`} minWidth={`${hideLeft ? 0 : barsDimensions.minLeft}vw`}>
           <Explorer />
         </Sidebar>
-        {!hideSides && <SidebarResizer
+        {!hideLeft && <SidebarResizer
           onDrag={ e => {
             setBarsDimensions({...barsDimensions, left: 100 * e.clientX / window.innerWidth, right: barsDimensions.right});
           }}

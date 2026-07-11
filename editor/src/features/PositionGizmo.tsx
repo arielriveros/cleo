@@ -1,19 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-import { useCleoEngine } from "./EngineContext";
+import { useEffect, useState } from "react";
+import { useCleoEngine, GizmoMode } from "./EngineContext";
 import { Model, ModelNode, Material, Geometry } from "cleo";
 import { GizmoGeometry } from "../utils/GizmoGeometry";
 import { Raycaster } from "cleo";
 
-interface PositionGizmoProps {
+interface TransformGizmoProps {
     selectedNodeId: string | null;
-    onPositionChange: (nodeId: string, newPosition: [number, number, number]) => void;
+    onTransformChange: (nodeId: string, mode: GizmoMode, value: [number, number, number]) => void;
     viewportRef: React.RefObject<HTMLDivElement>;
 }
 
 type GizmoAxis = 'x' | 'y' | 'z' | null;
+type Transform = { pos: [number, number, number]; rot: [number, number, number]; scale: [number, number, number] };
 
-export default function PositionGizmo({ selectedNodeId, onPositionChange, viewportRef }: PositionGizmoProps) {
-    const { instance, editorScene, eventEmitter } = useCleoEngine();
+export default function PositionGizmo({ selectedNodeId, onTransformChange, viewportRef }: TransformGizmoProps) {
+    const { instance, editorScene, eventEmitter, gizmoMode } = useCleoEngine();
     const [isDragging, setIsDragging] = useState(false);
     const [draggedAxis, setDraggedAxis] = useState<GizmoAxis>(null);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -33,82 +34,55 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
         zLine: null
     });
     const [initialMousePos, setInitialMousePos] = useState<{ x: number; y: number } | null>(null);
-    const [initialNodePos, setInitialNodePos] = useState<[number, number, number] | null>(null);
+    const [initialTransform, setInitialTransform] = useState<Transform | null>(null);
     const [isPlayMode, setIsPlayMode] = useState(false);
 
-    // Create gizmo geometry and materials
-    const createGizmoNodes = () => {
-        if (!instance || !editorScene) return;
+    // Create the gizmo node set for the given mode. Position uses arrows + shaft lines, scale uses cube
+    // tips + shaft lines, rotation uses a ring per axis (no shafts). Returns every created node so the
+    // caller can remove them on cleanup / mode change. All nodes are tagged `isGizmo` so the renderer
+    // draws them on top (depth test disabled) and the selection raycast can filter them out.
+    const createGizmoNodes = (mode: GizmoMode): ModelNode[] => {
+        if (!instance || !editorScene) return [];
 
-        // Create materials for each axis with front rendering
-        const xMaterial = Material.Basic({ color: [1, 0, 0] }, { 
-            wireframe: false,
-            transparent: false,
-            castShadow: false
-        });
-        const yMaterial = Material.Basic({ color: [0, 1, 0] }, { 
-            wireframe: false,
-            transparent: false,
-            castShadow: false
-        });
-        const zMaterial = Material.Basic({ color: [0, 0, 1] }, { 
-            wireframe: false,
-            transparent: false,
-            castShadow: false
-        });
+        const basic = (color: [number, number, number]) =>
+            Material.Basic({ color }, { wireframe: false, transparent: false, castShadow: false });
+        const xMaterial = basic([1, 0, 0]);
+        const yMaterial = basic([0, 1, 0]);
+        const zMaterial = basic([0, 0, 1]);
 
-        // Create arrow geometries
-        const xArrowGeometry = GizmoGeometry.ArrowX(1, 0.2);
-        const yArrowGeometry = GizmoGeometry.ArrowY(1, 0.2);
-        const zArrowGeometry = GizmoGeometry.ArrowZ(1, 0.2);
+        let xGeo: Geometry, yGeo: Geometry, zGeo: Geometry;
+        let hasLines = true;
+        if (mode === 'rotation') {
+            xGeo = GizmoGeometry.RingX(); yGeo = GizmoGeometry.RingY(); zGeo = GizmoGeometry.RingZ();
+            hasLines = false;
+        } else if (mode === 'scale') {
+            xGeo = Geometry.Cube(0.15, 0.15, 0.15); yGeo = Geometry.Cube(0.15, 0.15, 0.15); zGeo = Geometry.Cube(0.15, 0.15, 0.15);
+        } else {
+            xGeo = GizmoGeometry.ArrowX(1, 0.2); yGeo = GizmoGeometry.ArrowY(1, 0.2); zGeo = GizmoGeometry.ArrowZ(1, 0.2);
+        }
 
-        // Create line geometries using thin cubes
-        const xLineGeometry = Geometry.Cube(0.8, 0.02, 0.02);
-        const yLineGeometry = Geometry.Cube(0.02, 0.8, 0.02);
-        const zLineGeometry = Geometry.Cube(0.02, 0.02, 0.8);
-
-        // Create models
-        const xArrowModel = new Model(xArrowGeometry, xMaterial);
-        const yArrowModel = new Model(yArrowGeometry, yMaterial);
-        const zArrowModel = new Model(zArrowGeometry, zMaterial);
-
-        const xLineModel = new Model(xLineGeometry, xMaterial);
-        const yLineModel = new Model(yLineGeometry, yMaterial);
-        const zLineModel = new Model(zLineGeometry, zMaterial);
-
-        // Create nodes
-        const xAxisNode = new ModelNode('__editor__gizmo__x_axis', xArrowModel);
-        const yAxisNode = new ModelNode('__editor__gizmo__y_axis', yArrowModel);
-        const zAxisNode = new ModelNode('__editor__gizmo__z_axis', zArrowModel);
-
-        const xLineNode = new ModelNode('__editor__gizmo__x_line', xLineModel);
-        const yLineNode = new ModelNode('__editor__gizmo__y_line', yLineModel);
-        const zLineNode = new ModelNode('__editor__gizmo__z_line', zLineModel);
-
-        // Mark gizmo nodes for front rendering
+        const xAxisNode = new ModelNode('__editor__gizmo__x_axis', new Model(xGeo, xMaterial));
+        const yAxisNode = new ModelNode('__editor__gizmo__y_axis', new Model(yGeo, yMaterial));
+        const zAxisNode = new ModelNode('__editor__gizmo__z_axis', new Model(zGeo, zMaterial));
         (xAxisNode as any).isGizmo = true;
         (yAxisNode as any).isGizmo = true;
         (zAxisNode as any).isGizmo = true;
-        (xLineNode as any).isGizmo = true;
-        (yLineNode as any).isGizmo = true;
-        (zLineNode as any).isGizmo = true;
 
-        // Set up arrow positions
-        xAxisNode.setPosition([0.5, 0, 0]);
-        yAxisNode.setPosition([0, 0.5, 0]);
-        zAxisNode.setPosition([0, 0, 0.5]);
+        const created: ModelNode[] = [xAxisNode, yAxisNode, zAxisNode];
+        let xLineNode: ModelNode | null = null, yLineNode: ModelNode | null = null, zLineNode: ModelNode | null = null;
+        if (hasLines) {
+            xLineNode = new ModelNode('__editor__gizmo__x_line', new Model(Geometry.Cube(0.8, 0.02, 0.02), xMaterial));
+            yLineNode = new ModelNode('__editor__gizmo__y_line', new Model(Geometry.Cube(0.02, 0.8, 0.02), yMaterial));
+            zLineNode = new ModelNode('__editor__gizmo__z_line', new Model(Geometry.Cube(0.02, 0.02, 0.8), zMaterial));
+            (xLineNode as any).isGizmo = true;
+            (yLineNode as any).isGizmo = true;
+            (zLineNode as any).isGizmo = true;
+            created.push(xLineNode, yLineNode, zLineNode);
+        }
 
-        // Add to scene
-        editorScene.addNodes(xAxisNode, yAxisNode, zAxisNode, xLineNode, yLineNode, zLineNode);
-
-        setGizmoNodes({
-            xAxis: xAxisNode,
-            yAxis: yAxisNode,
-            zAxis: zAxisNode,
-            xLine: xLineNode,
-            yLine: yLineNode,
-            zLine: zLineNode
-        });
+        editorScene.addNodes(...created);
+        setGizmoNodes({ xAxis: xAxisNode, yAxis: yAxisNode, zAxis: zAxisNode, xLine: xLineNode, yLine: yLineNode, zLine: zLineNode });
+        return created;
     };
 
     // Screen-space size factor: keep the gizmo a constant apparent size regardless of the camera
@@ -140,21 +114,24 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
 
         const worldPos = selectedNode.worldPosition;
         const s = computeGizmoScale(worldPos);
+        // Rings sit centered on the node; arrows/scale-handles sit half a unit out along their axis.
+        const off = gizmoMode === 'rotation' ? 0 : 0.5;
 
-        // Scale both the node transform and the positional offsets by the same factor so the
-        // arrowheads stay attached to the ends of the shafts as the gizmo grows/shrinks.
-        const scaleNode = (node: ModelNode | null) => { if (node) node.setScale([s, s, s]); };
-        scaleNode(gizmoNodes.xAxis); scaleNode(gizmoNodes.yAxis); scaleNode(gizmoNodes.zAxis);
-        scaleNode(gizmoNodes.xLine); scaleNode(gizmoNodes.yLine); scaleNode(gizmoNodes.zLine);
+        const place = (node: ModelNode | null, dir: [number, number, number]) => {
+            if (!node) return;
+            node.setScale([s, s, s]);
+            node.setPosition([worldPos[0] + dir[0] * off * s, worldPos[1] + dir[1] * off * s, worldPos[2] + dir[2] * off * s]);
+        };
+        place(gizmoNodes.xAxis, [1, 0, 0]);
+        place(gizmoNodes.yAxis, [0, 1, 0]);
+        place(gizmoNodes.zAxis, [0, 0, 1]);
 
-        // Update gizmo position to match selected node (arrow offset scaled by s)
-        if (gizmoNodes.xAxis) gizmoNodes.xAxis.setPosition([worldPos[0] + 0.5 * s, worldPos[1], worldPos[2]]);
-        if (gizmoNodes.yAxis) gizmoNodes.yAxis.setPosition([worldPos[0], worldPos[1] + 0.5 * s, worldPos[2]]);
-        if (gizmoNodes.zAxis) gizmoNodes.zAxis.setPosition([worldPos[0], worldPos[1], worldPos[2] + 0.5 * s]);
-
-        if (gizmoNodes.xLine) gizmoNodes.xLine.setPosition([worldPos[0], worldPos[1], worldPos[2]]);
-        if (gizmoNodes.yLine) gizmoNodes.yLine.setPosition([worldPos[0], worldPos[1], worldPos[2]]);
-        if (gizmoNodes.zLine) gizmoNodes.zLine.setPosition([worldPos[0], worldPos[1], worldPos[2]]);
+        const placeLine = (node: ModelNode | null) => {
+            if (!node) return;
+            node.setScale([s, s, s]);
+            node.setPosition([worldPos[0], worldPos[1], worldPos[2]]);
+        };
+        placeLine(gizmoNodes.xLine); placeLine(gizmoNodes.yLine); placeLine(gizmoNodes.zLine);
     };
 
     // Handle mouse interactions
@@ -170,26 +147,28 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
 
         // Create ray from mouse position
         const ray = Raycaster.screenToRay(
-            x, 
-            y, 
-            rect.width, 
-            rect.height, 
+            x,
+            y,
+            rect.width,
+            rect.height,
             instance.scene.activeCamera.camera
         );
 
-        // Check for gizmo axis hits
-        const gizmoNodesList = [gizmoNodes.xAxis, gizmoNodes.yAxis, gizmoNodes.zAxis].filter(
-            (node): node is ModelNode => node !== null
-        );
-        const hits = Raycaster.raycast(ray, gizmoNodesList);
+        // Check for gizmo handle hits. Include the shaft lines and use AABB-only picking (precise=false)
+        // so the whole axis is an easy, occlusion-independent grab target — the gizmo always wins.
+        const gizmoNodesList = [
+            gizmoNodes.xAxis, gizmoNodes.yAxis, gizmoNodes.zAxis,
+            gizmoNodes.xLine, gizmoNodes.yLine, gizmoNodes.zLine,
+        ].filter((node): node is ModelNode => node !== null);
+        const hits = Raycaster.raycast(ray, gizmoNodesList, Infinity, false);
 
         if (hits.length > 0) {
             const hitNode = hits[0].node;
             let axis: GizmoAxis = null;
 
-            if (hitNode === gizmoNodes.xAxis) axis = 'x';
-            else if (hitNode === gizmoNodes.yAxis) axis = 'y';
-            else if (hitNode === gizmoNodes.zAxis) axis = 'z';
+            if (hitNode === gizmoNodes.xAxis || hitNode === gizmoNodes.xLine) axis = 'x';
+            else if (hitNode === gizmoNodes.yAxis || hitNode === gizmoNodes.yLine) axis = 'y';
+            else if (hitNode === gizmoNodes.zAxis || hitNode === gizmoNodes.zLine) axis = 'z';
 
             if (axis) {
                 event.preventDefault(); // Prevent default mouse behavior
@@ -198,20 +177,24 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
                 setDraggedAxis(axis);
                 setInitialMousePos({ x, y });
                 setDragStartPos({ x, y });
-                
+
                 // Emit event to disable camera controls
                 eventEmitter.emit('GIZMO_DRAG_START', { axis, nodeId: selectedNodeId });
-                
+
                 const selectedNode = editorScene.getNodeById(selectedNodeId);
                 if (selectedNode) {
-                    setInitialNodePos([selectedNode.position[0], selectedNode.position[1], selectedNode.position[2]]);
+                    setInitialTransform({
+                        pos: Array.from(selectedNode.position) as [number, number, number],
+                        rot: Array.from(selectedNode.rotation) as [number, number, number],
+                        scale: Array.from(selectedNode.scale) as [number, number, number],
+                    });
                 }
             }
         }
     };
 
     const handleMouseMove = (event: MouseEvent) => {
-        if (!isDragging || !draggedAxis || !selectedNodeId || !editorScene || !viewportRef.current || !initialMousePos || !initialNodePos || !dragStartPos) return;
+        if (!isDragging || !draggedAxis || !selectedNodeId || !editorScene || !viewportRef.current || !initialMousePos || !initialTransform || !dragStartPos) return;
 
         event.preventDefault(); // Prevent default mouse behavior
 
@@ -223,7 +206,7 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
         const deltaX = x - dragStartPos.x;
         const deltaY = y - dragStartPos.y;
         const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-        
+
         // Only start actual dragging if moved more than 5 pixels
         if (distance < 5) {
             return;
@@ -236,48 +219,40 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
         const camera = instance?.scene.activeCamera;
         if (!camera) return;
 
-        const sensitivity = 0.01;
-        let deltaPosition: [number, number, number] = [0, 0, 0];
-
         // Get camera's right and up vectors in world space
         const viewMatrix = camera.camera.viewMatrix;
         const cameraRight = [viewMatrix[0], viewMatrix[4], viewMatrix[8]];
         const cameraUp = [viewMatrix[1], viewMatrix[5], viewMatrix[9]];
+        const axisIndex = draggedAxis === 'x' ? 0 : draggedAxis === 'y' ? 1 : 2;
 
-        // Define the gizmo axis directions in world space
-        const axisX = [1, 0, 0]; // World X axis
-        const axisY = [0, 1, 0]; // World Y axis  
-        const axisZ = [0, 0, 1]; // World Z axis
+        // Signed amount the mouse dragged along the given world axis (screen right/up projected onto it).
+        const projectOntoAxis = (component: number): number => {
+            const sensitivity = 0.01;
+            switch (draggedAxis) {
+                case 'x': return cameraRight[0] * moveDeltaX * sensitivity + cameraUp[0] * (-moveDeltaY) * sensitivity;
+                case 'y': return -moveDeltaY * sensitivity; // Y reads cleanly off vertical mouse motion
+                case 'z': return cameraRight[2] * moveDeltaX * sensitivity + cameraUp[2] * (-moveDeltaY) * sensitivity;
+            }
+            return component;
+        };
 
-        switch (draggedAxis) {
-            case 'x':
-                // Project both mouse X and Y movement onto X axis relative to camera
-                // Use camera's right vector for X movement and camera's up vector for Y movement
-                const xProjectionX = cameraRight[0] * moveDeltaX * sensitivity;
-                const xProjectionY = cameraUp[0] * (-moveDeltaY) * sensitivity;
-                deltaPosition = [xProjectionX + xProjectionY, 0, 0];
-                break;
-            case 'y':
-                // Y axis works correctly as is
-                deltaPosition = [0, -moveDeltaY * sensitivity, 0];
-                break;
-            case 'z':
-                // Project both mouse X and Y movement onto Z axis relative to camera
-                // Use camera's right vector for X movement and camera's up vector for Y movement
-                const zProjectionX = cameraRight[2] * moveDeltaX * sensitivity;
-                const zProjectionY = cameraUp[2] * (-moveDeltaY) * sensitivity;
-                deltaPosition = [0, 0, zProjectionX + zProjectionY];
-                break;
+        if (gizmoMode === 'rotation') {
+            const ROT_SENSITIVITY = 0.5; // degrees per pixel (euler is in degrees)
+            const newRotation: [number, number, number] = [...initialTransform.rot];
+            newRotation[axisIndex] = initialTransform.rot[axisIndex] + moveDeltaX * ROT_SENSITIVITY;
+            onTransformChange(selectedNodeId, 'rotation', newRotation);
+        } else if (gizmoMode === 'scale') {
+            const delta = projectOntoAxis(0);
+            const newScale: [number, number, number] = [...initialTransform.scale];
+            newScale[axisIndex] = Math.max(0.01, initialTransform.scale[axisIndex] + delta);
+            onTransformChange(selectedNodeId, 'scale', newScale);
+        } else {
+            const delta = projectOntoAxis(0);
+            const newPosition: [number, number, number] = [...initialTransform.pos];
+            newPosition[axisIndex] = initialTransform.pos[axisIndex] + delta;
+            onTransformChange(selectedNodeId, 'position', newPosition);
         }
 
-        const newPosition: [number, number, number] = [
-            initialNodePos[0] + deltaPosition[0],
-            initialNodePos[1] + deltaPosition[1],
-            initialNodePos[2] + deltaPosition[2]
-        ];
-
-        onPositionChange(selectedNodeId, newPosition);
-        
         // Update gizmo position to follow the object
         updateGizmoPosition();
     };
@@ -287,20 +262,23 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
             // Emit event to re-enable camera controls
             eventEmitter.emit('GIZMO_DRAG_END', { axis: draggedAxis, nodeId: selectedNodeId });
         }
-        
+
         setIsDragging(false);
         setDraggedAxis(null);
         setInitialMousePos(null);
-        setInitialNodePos(null);
+        setInitialTransform(null);
         setDragStartPos(null);
     };
 
-    // Initialize gizmo
+    // Build (and rebuild on mode change) the gizmo node set; remove the previous set on cleanup.
     useEffect(() => {
-        if (instance && editorScene) {
-            createGizmoNodes();
-        }
-    }, [instance, editorScene]);
+        if (!instance || !editorScene) return;
+        const created = createGizmoNodes(gizmoMode);
+        return () => {
+            for (const n of created) editorScene.removeNode(n);
+            setGizmoNodes({ xAxis: null, yAxis: null, zAxis: null, xLine: null, yLine: null, zLine: null });
+        };
+    }, [instance, editorScene, gizmoMode]);
 
     // Update gizmo visibility and position
     useEffect(() => {
@@ -308,26 +286,13 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
 
         // Check if selected node is root node
         const isRootNode = selectedNodeId === 'root' || selectedNodeId === editorScene?.root?.id;
+        const show = !!selectedNodeId && !isPlayMode && !isRootNode;
 
-        if (selectedNodeId && !isPlayMode && !isRootNode) {
-            // Show gizmo only when not in play mode and not root node
-            gizmoNodes.xAxis.visible = true;
-            gizmoNodes.yAxis.visible = true;
-            gizmoNodes.zAxis.visible = true;
-            if (gizmoNodes.xLine) gizmoNodes.xLine.visible = true;
-            if (gizmoNodes.yLine) gizmoNodes.yLine.visible = true;
-            if (gizmoNodes.zLine) gizmoNodes.zLine.visible = true;
-            
-            updateGizmoPosition();
-        } else {
-            // Hide gizmo when no selection, in play mode, or root node selected
-            gizmoNodes.xAxis.visible = false;
-            gizmoNodes.yAxis.visible = false;
-            gizmoNodes.zAxis.visible = false;
-            if (gizmoNodes.xLine) gizmoNodes.xLine.visible = false;
-            if (gizmoNodes.yLine) gizmoNodes.yLine.visible = false;
-            if (gizmoNodes.zLine) gizmoNodes.zLine.visible = false;
-        }
+        const setVisible = (node: ModelNode | null) => { if (node) node.visible = show; };
+        setVisible(gizmoNodes.xAxis); setVisible(gizmoNodes.yAxis); setVisible(gizmoNodes.zAxis);
+        setVisible(gizmoNodes.xLine); setVisible(gizmoNodes.yLine); setVisible(gizmoNodes.zLine);
+
+        if (show) updateGizmoPosition();
     }, [selectedNodeId, gizmoNodes, isPlayMode, editorScene]);
 
     // Update gizmo position continuously when dragging
@@ -352,7 +317,7 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
         };
         raf = requestAnimationFrame(tick);
         return () => cancelAnimationFrame(raf);
-    }, [selectedNodeId, gizmoNodes, isPlayMode, editorScene]);
+    }, [selectedNodeId, gizmoNodes, isPlayMode, editorScene, gizmoMode]);
 
 
     // Set up mouse event listeners
@@ -369,7 +334,7 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
             viewport.removeEventListener('mousemove', handleMouseMove);
             viewport.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [selectedNodeId, isDragging, draggedAxis, initialMousePos, initialNodePos, gizmoNodes]);
+    }, [selectedNodeId, isDragging, draggedAxis, initialMousePos, initialTransform, gizmoNodes, gizmoMode]);
 
     // Listen for play state changes
     useEffect(() => {
@@ -378,25 +343,11 @@ export default function PositionGizmo({ selectedNodeId, onPositionChange, viewpo
         };
 
         eventEmitter.on('SET_PLAY_STATE', handlePlayState);
-        
+
         return () => {
             eventEmitter.off('SET_PLAY_STATE', handlePlayState);
         };
     }, [eventEmitter]);
-
-    // Clean up gizmo nodes when component unmounts
-    useEffect(() => {
-        return () => {
-            if (editorScene && gizmoNodes.xAxis) {
-                editorScene.removeNode(gizmoNodes.xAxis);
-                editorScene.removeNode(gizmoNodes.yAxis!);
-                editorScene.removeNode(gizmoNodes.zAxis!);
-                editorScene.removeNode(gizmoNodes.xLine!);
-                editorScene.removeNode(gizmoNodes.yLine!);
-                editorScene.removeNode(gizmoNodes.zLine!);
-            }
-        };
-    }, []);
 
     return null; // This component doesn't render anything visible
 }

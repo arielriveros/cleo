@@ -19,6 +19,7 @@ import {
 } from 'cleo'
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
+import { isWithinTemplateInstance } from '../../utils/templates';
 import { useEffect, useState } from 'react';
 import CameraIcon from '../../icons/camera.png'
 import SkyboxIcon from '../../icons/skybox.png'
@@ -53,7 +54,7 @@ function AddButton(props: AddButtonProps) {
 
 export default function AddNew() {
   const [node, setNode] = useState<Node | null>(null)
-  const { editorScene, selectedNode, eventEmitter: eventEmitter, triggers, importMeshFiles } = useCleoEngine();
+  const { editorScene, selectedNode, editorMode, eventEmitter: eventEmitter, triggers, importMeshFiles } = useCleoEngine();
 
   useEffect(() => {
     if (editorScene && selectedNode) {
@@ -61,6 +62,11 @@ export default function AddNew() {
         if (node) setNode(node)
     }
   }, [selectedNode])
+
+  // A placed template instance (and its children) is read-only in Scene mode; adding nodes would parent
+  // them into the locked subtree, so disable the whole group. Computed fresh from the current selection.
+  const selectedNodeObj = editorScene && selectedNode ? editorScene.getNodeById(selectedNode) : null;
+  const locked = editorMode === 'scene' && isWithinTemplateInstance(selectedNodeObj);
 
   const addNode = (newNode: Node) => {
     node?.addChild(newNode);
@@ -165,6 +171,8 @@ export default function AddNew() {
 
   return (
     <Collapsable title='Add'>
+      {locked && <div className='text-[11px] text-[#ffd27a] bg-[#3a2f12] px-2 py-1'>Template instance — edit the template to add nodes.</div>}
+      <fieldset disabled={locked} className={`border-0 m-0 p-0 min-w-0 ${locked ? 'opacity-50' : ''}`}>
       <div className='flex flex-row font-thin px-[2px] flex-wrap w-full'>
         <div className='flex flex-col items-center font-medium mr-[10px]'>
           Common
@@ -228,6 +236,7 @@ export default function AddNew() {
           </div>
         </div>
       </div>
+      </fieldset>
     </Collapsable>
   )
 }
