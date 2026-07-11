@@ -178,6 +178,8 @@ export class Renderer {
     private _frustumCulling: boolean = true;
     // Foliage cells beyond this camera distance are skipped (world units; 0 = disabled).
     private _foliageCullDistance: number = 0;
+    // Foliage spatial-grid cell size (world units); smaller = tighter culling, more draw calls.
+    private _foliageCellSize: number = 32;
 
     // Editor infinite grid overlay (off in published builds; toggled by the editor)
     private _gridEnabled: boolean = false;
@@ -599,7 +601,10 @@ export class Renderer {
                     layer.initialized = true;
                 }
 
-                // Free GPU buffers orphaned by a previous cell-layout rebuild (e.g. after painting).
+                // Keep the layer's grid at the current global cell size (re-buckets only on change).
+                if (layer.cellSize !== this._foliageCellSize) layer.setCellSize(this._foliageCellSize);
+
+                // Free GPU buffers orphaned by a previous cell-layout rebuild (e.g. after painting or a resize).
                 for (const buf of layer.collectStaleBuffers()) gl.deleteBuffer(buf);
 
                 // Bind shader/material once per layer; only the instance buffer + draw vary per cell.
@@ -1997,6 +2002,10 @@ export class Renderer {
     /** Distance (world units) beyond which foliage cells are culled; 0 disables distance culling. */
     public get foliageCullDistance(): number { return this._foliageCullDistance; }
     public set foliageCullDistance(d: number) { this._foliageCullDistance = Math.max(0, d); }
+
+    /** Foliage spatial-grid cell size (world units); layers re-bucket to match on the next frame. */
+    public get foliageCellSize(): number { return this._foliageCellSize; }
+    public set foliageCellSize(s: number) { this._foliageCellSize = Math.max(1, s); }
 
     // Editor "Renderer" debug channel currently blitted to screen ('final' = normal image).
     public get debugView(): DebugView { return this._debugView; }

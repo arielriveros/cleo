@@ -67,6 +67,7 @@ export default function RendererOptions() {
   const [gridPlane, setGridPlane] = useState<string>(() => renderer?.gridPlane ?? 'xz');
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
   const [foliageCullDistance, setFoliageCullDistance] = useState<number>(() => renderer?.foliageCullDistance ?? 0);
+  const [foliageCellSize, setFoliageCellSize] = useState<number>(() => renderer?.foliageCellSize ?? 32);
 
   // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => { if (renderer) renderer.debugView = 'final'; }, [renderer]);
@@ -79,6 +80,7 @@ export default function RendererOptions() {
     setGridPlane(renderer.gridPlane);
     setFrustumCulling(renderer.frustumCulling);
     setFoliageCullDistance(renderer.foliageCullDistance);
+    setFoliageCellSize(renderer.foliageCellSize);
   }, [isPlayMode, renderer]);
 
   if (!renderer) {
@@ -118,7 +120,9 @@ export default function RendererOptions() {
         </label>
         <NumberField label='Foliage Dist' value={foliageCullDistance} min={0} step={5}
           onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); }} />
-        <div className='text-[10px] text-[#8a8aa0] mt-0.5'>Foliage cull distance in world units (0 = off).</div>
+        <NumberField label='Cell Size' value={foliageCellSize} min={1} step={4}
+          onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); }} />
+        <div className='text-[10px] text-[#8a8aa0] mt-0.5'>Foliage cull distance &amp; grid cell size in world units (distance 0 = off).</div>
       </Section>
 
       <Section title='Tone / Post'>
