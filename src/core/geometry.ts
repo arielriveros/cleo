@@ -10,6 +10,7 @@ export class Geometry {
     private _bitangents!: [number, number, number][];
     private readonly _indices: number[];
     private _bvh?: BVH;
+    private _boundingSphere?: { center: vec3; radius: number };
 
     constructor(
         positions: [number, number, number][] = [],
@@ -46,6 +47,39 @@ export class Geometry {
     public get bvh(): BVH {
         if (!this._bvh) this._bvh = BVH.fromGeometry(this._positions, this._indices);
         return this._bvh;
+    }
+    /**
+     * Object-space bounding sphere (center + radius), computed lazily and cached. Derived from the
+     * BVH's root AABB when the geometry has triangles (reusing bounds already computed by the BVH
+     * build), otherwise from a single pass over the positions. Purely local-space, so it never
+     * invalidates — used for cheap per-object frustum culling (see `Node.getBoundingSphere`).
+     */
+    public get boundingSphere(): { center: vec3; radius: number } {
+        if (this._boundingSphere) return this._boundingSphere;
+
+        let min: [number, number, number];
+        let max: [number, number, number];
+        const bvh = this.bvh;
+        if (bvh.triangleCount > 0) {
+            const b = bvh.bounds;
+            min = b.min; max = b.max;
+        } else if (this._positions.length > 0) {
+            min = [Infinity, Infinity, Infinity];
+            max = [-Infinity, -Infinity, -Infinity];
+            for (const p of this._positions)
+                for (let a = 0; a < 3; a++) {
+                    if (p[a] < min[a]) min[a] = p[a];
+                    if (p[a] > max[a]) max[a] = p[a];
+                }
+        } else {
+            min = [0, 0, 0]; max = [0, 0, 0];
+        }
+
+        const center = vec3.fromValues((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+        const dx = max[0] - min[0], dy = max[1] - min[1], dz = max[2] - min[2];
+        const radius = 0.5 * Math.sqrt(dx * dx + dy * dy + dz * dz);
+        this._boundingSphere = { center, radius };
+        return this._boundingSphere;
     }
     public getData(attributes: string[] = []): number[] {
         const interleaved: number[] = [];

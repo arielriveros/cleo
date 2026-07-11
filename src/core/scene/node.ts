@@ -75,6 +75,11 @@ export class Node {
   protected _worldForward: vec3 = vec3.create();
   protected _worldCacheDirty: boolean = true;
 
+  // Cached world-space bounding sphere for frustum culling, recomputed lazily only after the
+  // transform changes (flagged in updateTransforms) — see getBoundingSphere().
+  protected _worldSphere: { center: vec3; radius: number } = { center: vec3.create(), radius: 0 };
+  protected _worldSphereDirty: boolean = true;
+
   protected readonly _position: vec3;
   protected readonly _translationMatrix: mat4;
 
@@ -195,6 +200,7 @@ export class Node {
 
     // World transform changed: invalidate the derived world-space cache.
     this._worldCacheDirty = true;
+    this._worldSphereDirty = true;
 
     for (const child of this._children) {
       child.updateTransforms(this._worldTransform);
@@ -806,6 +812,20 @@ export class Node {
   public getBVH(): BVH | null {
     return null;
   }
+
+  /**
+   * World-space bounding sphere used for fast frustum culling. The default matches the unit-cube
+   * {@link getBoundingBox}: centered at the world position with a radius covering the scaled cube's
+   * corner. {@link ModelNode} overrides this with the geometry's actual (cached) bounds.
+   */
+  public getBoundingSphere(): { center: vec3; radius: number } {
+    const scale = this.worldScale;
+    const maxScale = Math.max(Math.abs(scale[0]), Math.abs(scale[1]), Math.abs(scale[2]));
+    vec3.copy(this._worldSphere.center, this.worldPosition);
+    // Half-diagonal of the scaled unit cube: 0.5 * sqrt(3) per axis, times the largest world scale.
+    this._worldSphere.radius = 0.5 * Math.sqrt(3) * maxScale;
+    return this._worldSphere;
+  }
 }
 
 export class ModelNode extends Node {
@@ -1006,6 +1026,28 @@ export class ModelNode extends Node {
         const bvh = this._model.geometry.bvh;
         // Geometry with no triangles → fall back to AABB picking.
         return bvh.triangleCount > 0 ? bvh : null;
+    }
+
+    /**
+     * World-space bounding sphere for frustum culling: the geometry's cached local sphere transformed
+     * by the world matrix, radius scaled by the largest world-axis scale. Cached and invalidated with
+     * the transform (`_worldSphereDirty`). Skinned/animated meshes deform on the GPU, so their bind-pose
+     * bound understates the animated extent — inflate the radius to avoid popping.
+     */
+    public getBoundingSphere(): { center: vec3; radius: number } {
+        if (!this._worldSphereDirty) return this._worldSphere;
+
+        const local = this._model.geometry.boundingSphere;
+        vec3.transformMat4(this._worldSphere.center, local.center, this.worldTransform);
+
+        const scale = this.worldScale;
+        const maxScale = Math.max(Math.abs(scale[0]), Math.abs(scale[1]), Math.abs(scale[2]));
+        let radius = local.radius * maxScale;
+        if (this._model instanceof AnimatedModel) radius *= 1.75;
+
+        this._worldSphere.radius = radius;
+        this._worldSphereDirty = false;
+        return this._worldSphere;
     }
 
     public update(delta: number, time: number): void {

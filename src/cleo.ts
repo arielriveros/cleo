@@ -32,4 +32,5 @@ export { Raycaster } from "./core/raycaster";
 export type { Ray, RaycastHit } from "./core/raycaster";
 export { BVH, rayTriangleIntersection } from "./core/bvh";
 export type { BVHHit } from "./core/bvh";
+export { Frustum } from "./core/frustum";
 export * as Vec from "gl-matrix";

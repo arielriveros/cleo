@@ -115,6 +115,18 @@ export class BVH {
 
     public get triangleCount(): number { return this._triCount; }
 
+    /**
+     * Object-space AABB of the whole geometry — the root node's bounds, computed for free during the
+     * build. A cheap, cached tight box that avoids re-scanning every vertex (used to derive a geometry
+     * bounding sphere for frustum culling). Empty geometry → a zero box at the origin.
+     */
+    public get bounds(): { min: [number, number, number]; max: [number, number, number] } {
+        if (this._nodes.length === 0)
+            return { min: [0, 0, 0], max: [0, 0, 0] };
+        const n = this._nodes[0];
+        return { min: [n.min[0], n.min[1], n.min[2]], max: [n.max[0], n.max[1], n.max[2]] };
+    }
+
     private _build(): void {
         // Precompute triangle centroids used for the median split.
         for (let t = 0; t < this._triCount; t++) {

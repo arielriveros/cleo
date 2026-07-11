@@ -9,6 +9,8 @@ export interface RenderStats {
     instancedDrawCalls: number;
     /** Scene meshes drawn in the color pass (post-`visible`; excludes shadow/IBL re-draws and foliage blades). */
     objects: number;
+    /** Scene meshes skipped this frame by camera frustum culling (color pass only). */
+    culled: number;
     /** Total instances submitted across all instanced draws (PBR batches + foliage). */
     instances: number;
     /** Triangles submitted to the GPU this frame (× instanceCount for instanced draws). */
@@ -25,6 +27,7 @@ export const frameStats: RenderStats = {
     drawCalls: 0,
     instancedDrawCalls: 0,
     objects: 0,
+    culled: 0,
     instances: 0,
     triangles: 0,
     vertices: 0,
@@ -37,6 +40,7 @@ export function resetFrameStats(): void {
     frameStats.drawCalls = 0;
     frameStats.instancedDrawCalls = 0;
     frameStats.objects = 0;
+    frameStats.culled = 0;
     frameStats.instances = 0;
     frameStats.triangles = 0;
     frameStats.vertices = 0;

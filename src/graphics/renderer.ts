@@ -8,6 +8,7 @@ import { Mesh } from './mesh';
 import { Shader } from './shader';
 import { Framebuffer } from './framebuffer';
 import { Geometry } from '../core/geometry';
+import { Frustum } from '../core/frustum';
 import { AnimatedModel } from './animatedModel';
 
 // Shaders Sources
@@ -171,6 +172,10 @@ export class Renderer {
     private _deferred: boolean;
     private _viewProj: mat4 = mat4.create();
     private _invViewProj: mat4 = mat4.create();
+
+    // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _viewProj.
+    private _frustum: Frustum = new Frustum();
+    private _frustumCulling: boolean = true;
 
     // Editor infinite grid overlay (off in published builds; toggled by the editor)
     private _gridEnabled: boolean = false;
@@ -381,6 +386,7 @@ export class Renderer {
         const proj = this._activeCamera.projectionMatrix;
         mat4.multiply(this._viewProj, proj, view);
         mat4.invert(this._invViewProj, this._viewProj);
+        this._frustum.setFromViewProjection(this._viewProj);
 
         // Bake/refresh IBL (light probes + scene environment) before the main passes.
         this._updateIBL(scene);
@@ -503,6 +509,19 @@ export class Renderer {
         this._renderForwardOverlay(scene, shadowLight);
     }
 
+    /**
+     * True when `node` is fully outside the camera frustum and can be skipped this frame. Tests the
+     * node's cached world-space bounding sphere against the 6 frustum planes (~6 dot products).
+     * Increments the `culled` stat so the editor HUD can report savings.
+     */
+    private _culled(node: ModelNode): boolean {
+        if (!this._frustumCulling) return false;
+        const s = node.getBoundingSphere();
+        const inside = this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius);
+        if (!inside) frameStats.culled++;
+        return !inside;
+    }
+
     private _geometryPass(scene: Scene): void {
         this._gBufferFBO.bind();
         GLState.enable(gl.DEPTH_TEST);
@@ -525,6 +544,7 @@ export class Renderer {
             if (!node.visible) continue;
             if ((node as any).isGizmo) continue;
             if (node.model.material.config.transparent) continue;
+            if (this._culled(node)) continue;
             // Default (Blinn-Phong) materials are forward-rendered in the overlay so their full feature
             // set (specular/ambient/reflectivity + maps) works; they never enter the deferred G-buffer.
             const dtype = node.model.material.type;
@@ -1364,7 +1384,7 @@ export class Renderer {
             // Check if this node is selected
             else if (this._selectedNodeId && node.id === this._selectedNodeId) {
                 selectedNodes.push(node);
-            } else {
+            } else if (!this._culled(node)) {
                 // Add to transparent draw queue if transparent so that it is drawn last
                 if (node.model.material.config.transparent === true)
                     transparentDrawQueue.push(node);
@@ -1885,6 +1905,7 @@ export class Renderer {
             drawCalls: frameStats.drawCalls,
             instancedDrawCalls: frameStats.instancedDrawCalls,
             objects: frameStats.objects,
+            culled: frameStats.culled,
             instances: frameStats.instances,
             triangles: frameStats.triangles,
             vertices: frameStats.vertices,
@@ -1935,6 +1956,10 @@ export class Renderer {
     public set ssaoPower(power: number) { this._ssaoPower = Math.max(0, power); }
     public get ssaoBias(): number { return this._ssaoBias; }
     public set ssaoBias(bias: number) { this._ssaoBias = Math.max(0, bias); }
+
+    /** Per-object camera frustum culling for the main color passes (on by default). */
+    public get frustumCulling(): boolean { return this._frustumCulling; }
+    public set frustumCulling(enabled: boolean) { this._frustumCulling = enabled; }
 
     // Editor "Renderer" debug channel currently blitted to screen ('final' = normal image).
     public get debugView(): DebugView { return this._debugView; }
