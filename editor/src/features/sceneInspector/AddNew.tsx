@@ -16,7 +16,8 @@ import {
   SpriteNode,
   Sprite,
   AnimatedSpriteNode,
-  VolumetricCloudsNode
+  VolumetricCloudsNode,
+  SkyAtmosphereNode
 } from 'cleo'
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
@@ -37,6 +38,7 @@ import SpotlightIcon from '../../icons/spotlight.png'
 import SpriteIcon from '../../icons/static-sprite.png'
 import AnimatedSpriteIcon from '../../icons/animated-sprite.png'
 import CloudsIcon from '../../icons/clouds.png'
+import SkyAtmosphereIcon from '../../icons/sky-atmosphere.png'
 
 interface AddButtonProps {
   onClick: () => void;
@@ -112,7 +114,19 @@ export default function AddNew() {
     addNode(planeNode);
   }
 
+  // Only one sky at a time: adding a Skybox removes any existing Sky Atmosphere, and vice-versa.
+  // Use the synchronous removeNode (not the deferred Node.remove) per the EngineContext caveat.
+  const removeExistingSky = (kind: 'skybox' | 'skyAtmosphere') => {
+    if (!editorScene) return;
+    const other = kind === 'skybox' ? editorScene.skyAtmosphere : editorScene.skybox;
+    if (other) {
+      editorScene.removeNode(other);
+      eventEmitter.emit('SCENE_CHANGED');
+    }
+  }
+
   const addSkybox = () => {
+    removeExistingSky('skybox');
     import ('../../images/null.png').then( (imgSrc) => {
       const img = new Image();
       img.src = imgSrc.default;
@@ -150,6 +164,11 @@ export default function AddNew() {
 
   const addVolumetricClouds = () => {
     addNode(new VolumetricCloudsNode('volumetric clouds'));
+  }
+
+  const addSkyAtmosphere = () => {
+    removeExistingSky('skyAtmosphere');
+    addNode(new SkyAtmosphereNode('sky atmosphere'));
   }
 
   const addSprite = () => {
@@ -238,6 +257,7 @@ export default function AddNew() {
           Environment
           <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addSkybox()} label='Skybox' icon={SkyboxIcon} />
+            <AddButton onClick={() => addSkyAtmosphere()} label='Sky Atmosphere' icon={SkyAtmosphereIcon} />
             <AddButton onClick={() => addLightProbe()} label='Light Probe' icon={SphereIcon} />
             <AddButton onClick={() => addVolumetricClouds()} label='Clouds' icon={CloudsIcon} />
           </div>

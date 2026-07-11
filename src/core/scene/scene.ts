@@ -1,5 +1,5 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, LandscapeNode, LightNode, LightProbeNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode } from "./node";
+import { CameraNode, LandscapeNode, LightNode, LightProbeNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode } from "./node";
 import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
@@ -15,6 +15,7 @@ export class Scene {
     private _lightProbes: Set<LightProbeNode>;
     private _skybox: SkyboxNode | null;
     private _volumetricClouds: VolumetricCloudsNode | null = null;
+    private _skyAtmosphere: SkyAtmosphereNode | null = null;
     private _environmentMap: Texture | null = null;
     private _dirty: boolean = true;
     private _hasStarted: boolean = false;
@@ -41,6 +42,7 @@ export class Scene {
         this._lightProbes = new Set();
         this._skybox = null;
         this._volumetricClouds = null;
+        this._skyAtmosphere = null;
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
@@ -151,6 +153,7 @@ export class Scene {
         this._lightProbes = new Set();
         this._skybox = null;
         this._volumetricClouds = null;
+        this._skyAtmosphere = null;
         for (const node of this._nodes) {
             if (node instanceof LightNode)
                 this._lights.add(node);
@@ -166,6 +169,8 @@ export class Scene {
                 this._skybox = node;
             if (node instanceof VolumetricCloudsNode)
                 this._volumetricClouds = node;
+            if (node instanceof SkyAtmosphereNode)
+                this._skyAtmosphere = node;
             if (node instanceof CameraNode)
                 this._cameras.add(node);
         }
@@ -334,6 +339,12 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._volumetricClouds;
+    }
+
+    public get skyAtmosphere(): SkyAtmosphereNode | null {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._skyAtmosphere;
     }
 
     public get lightProbes(): Set<LightProbeNode> {

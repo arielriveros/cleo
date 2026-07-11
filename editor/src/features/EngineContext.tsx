@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, Node, ModelNode, AnimatedModel, TextureManager, Logger } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, Node, ModelNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
+import type { AnimationCompatibility } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
@@ -31,6 +32,14 @@ export type MeshImportDecision = {
   normalize: boolean;
   targetSize: number;     // desired bounding diameter in world units
 };
+// Animation clips parsed from a file, each with a compatibility report vs the target skeleton,
+// awaiting user review in the animation-import modal.
+export type PendingAnimationImportView = {
+  fileName: string;
+  clips: { name: string; report: AnimationCompatibility }[];
+};
+// The user's decision from the animation-import modal: which clips to add (by index).
+export type AnimationImportDecision = { include: boolean[] };
 import { buildGameData } from "./publish/buildGameData";
 import { loadProject, applyGameData, saveProject, ProjectPrefs } from "../utils/projectStorage";
 import { idbGet, idbSet } from "../utils/idb";
@@ -188,6 +197,10 @@ const EngineContext = createContext<{
   // Mesh import review modal
   pendingMeshImport: PendingMeshImportView | null;
   resolveMeshImport: (decision: MeshImportDecision | null) => void;
+  // Animation import (into the Animation Editor's model)
+  importAnimationFiles: (files: File[]) => Promise<void>;
+  pendingAnimationImport: PendingAnimationImportView | null;
+  resolveAnimationImport: (decision: AnimationImportDecision | null) => void;
   // Project persistence
   saveProject: () => void;
   savingState: SavingState;
@@ -251,6 +264,9 @@ const EngineContext = createContext<{
     importMeshFiles: async () => {},
     pendingMeshImport: null,
     resolveMeshImport: () => {},
+    importAnimationFiles: async () => {},
+    pendingAnimationImport: null,
+    resolveAnimationImport: () => {},
     saveProject: () => {},
     savingState: 'idle',
   });
@@ -390,6 +406,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const r = pendingResolverRef.current;
     pendingResolverRef.current = null;
     setPendingMeshImport(null);
+    if (r) r(decision);
+  };
+
+  // Animation import review modal — same "park then resolve a promise" pattern as the mesh import.
+  const [pendingAnimationImport, setPendingAnimationImport] = useState<PendingAnimationImportView | null>(null);
+  const pendingAnimResolverRef = useRef<((d: AnimationImportDecision | null) => void) | null>(null);
+  const resolveAnimationImport = (decision: AnimationImportDecision | null) => {
+    const r = pendingAnimResolverRef.current;
+    pendingAnimResolverRef.current = null;
+    setPendingAnimationImport(null);
     if (r) r(decision);
   };
 
@@ -564,6 +590,50 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       src.animator.showBindPose(); // its scene is paused; keep the source at its rest pose
     }
     if (rt.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+  };
+
+  // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation
+  // Editor. Parses the file, remaps each clip onto the target skeleton by bone name + computes a
+  // compatibility report, shows the review modal, then adds the accepted clips to BOTH the preview
+  // clone (so the transport/state-machine see them) and the source node (so they persist on save).
+  const importAnimationFiles = async (files: File[]) => {
+    const rt = tabRuntimeRef.current.get(activeTabId);
+    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    if (!(cloneNode instanceof ModelNode) || !(cloneNode.model instanceof AnimatedModel) || !cloneNode.model.skin) {
+      Logger.error('Open the Animation Editor for a skinned model before importing animations', 'Editor');
+      return;
+    }
+    const cloneModel = cloneNode.model; // narrowed to AnimatedModel
+    const targetSkin = cloneModel.skin!;
+
+    let parsed: { animations: any[]; skin: any };
+    try { parsed = await Loader.loadAnimationsFromFile(files); }
+    catch (e) { Logger.error('Failed to parse animation file: ' + e, 'Editor'); return; }
+    if (!parsed.animations.length) { Logger.warn('No animation clips found in the file', 'Editor'); return; }
+    if (!parsed.skin) { Logger.warn('The imported file has no skeleton to match against', 'Editor'); return; }
+
+    const results = parsed.animations.map(clip => remapAnimationToSkin(clip, parsed.skin, targetSkin));
+    const fileName = files.find(f => /\.(gltf|glb|fbx)$/i.test(f.name))?.name ?? files[0]?.name ?? 'animation';
+
+    const decision = await new Promise<AnimationImportDecision | null>(resolve => {
+      pendingAnimResolverRef.current = resolve;
+      setPendingAnimationImport({ fileName, clips: results.map(r => ({ name: r.report.clipName, report: r.report })) });
+    });
+    if (!decision) { Logger.info('Animation import cancelled', 'Editor'); return; }
+
+    const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
+    let added = 0;
+    results.forEach((r, i) => {
+      if (!decision.include[i]) return;
+      cloneModel.addAnimation(r.remapped);                                        // preview clone
+      if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.addAnimation(r.remapped); // persist
+      added++;
+    });
+    if (added > 0) {
+      if (rt?.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+      eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+      Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName}`, 'Editor');
+    }
   };
 
   const setActiveTab = (id: string) => setActiveTabId(id);
@@ -1358,6 +1428,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       importMeshFiles,
       pendingMeshImport,
       resolveMeshImport,
+      importAnimationFiles,
+      pendingAnimationImport,
+      resolveAnimationImport,
       saveProject: saveProjectToStorage,
       savingState,
     }}>

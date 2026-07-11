@@ -229,6 +229,61 @@ export class GLTFLoader {
         return this.parseAnimatedMeshes();
     }
 
+    /**
+     * Parse ONLY animation clips + the source skeleton (bone names/parents) from uploaded files,
+     * for animation IMPORT/retargeting. Unlike loadAnimatedFromFiles this does NOT require a mesh or
+     * skin — animation-only files (e.g. a Mixamo export with "skin" unchecked) are supported: the
+     * skeleton is reconstructed from the glTF node hierarchy + the nodes the animation targets.
+     */
+    async loadAnimationsFromFiles(files: File[]): Promise<{ animations: Animation[]; skin: Skin }> {
+        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
+        if (!gltfFile) throw new Error('No GLTF file found in the uploaded files');
+        this.files = files;
+        this.gltf = JSON.parse(await gltfFile.text());
+        await this.loadBuffersFromFiles();
+        return this.parseAnimationsAndSkeleton();
+    }
+
+    /** Build clips + a source Skin (with nodeNames/nodeParents) from the loaded glTF, mesh or not. */
+    private parseAnimationsAndSkeleton(): { animations: Animation[]; skin: Skin } {
+        const animations: Animation[] = [];
+        if (this.gltf.animations) {
+            for (const a of this.gltf.animations) animations.push(this.parseAnimation(a));
+        }
+
+        // Node name/parent/transform maps over ALL nodes (mirrors the parseSkin node loop).
+        const nodeParents = new Map<number, number>();
+        const nodeNames = new Map<number, string>();
+        const nodeTransforms = new Map<number, mat4>();
+        if (this.gltf.nodes) {
+            for (let i = 0; i < this.gltf.nodes.length; i++) {
+                const node = this.gltf.nodes[i];
+                if (typeof node.name === 'string' && node.name.length > 0) nodeNames.set(i, node.name);
+                if (node.children) for (const ci of node.children) nodeParents.set(ci, i);
+                const t = mat4.create();
+                if (node.matrix) { for (let k = 0; k < 16; k++) t[k] = node.matrix[k]; }
+                else {
+                    mat4.fromRotationTranslationScale(t,
+                        (node.rotation ?? [0, 0, 0, 1]) as any,
+                        (node.translation ?? [0, 0, 0]) as any,
+                        (node.scale ?? [1, 1, 1]) as any);
+                }
+                nodeTransforms.set(i, t);
+            }
+        }
+
+        // Prefer a real skin (has inverse-bind matrices); else synthesize joints from animated nodes.
+        if (this.gltf.skins && this.gltf.skins.length > 0) {
+            return { animations, skin: this.parseSkin(this.gltf.skins[0]) };
+        }
+        const animatedNodes = new Set<number>();
+        for (const a of animations) for (const ch of a.channels) animatedNodes.add(ch.targetNodeIndex);
+        const joints = [...animatedNodes].sort((x, y) => x - y).map(ni => ({
+            nodeIndex: ni, inverseBindMatrix: mat4.create(), parentIndex: nodeParents.get(ni),
+        }));
+        return { animations, skin: { joints, nodeParents, nodeTransforms, nodeNames } };
+    }
+
     private async loadBuffers(): Promise<void> {
         if (!this.gltf.buffers) return;
 
@@ -634,11 +689,17 @@ export class GLTFLoader {
         // Build node parent map and extract node transforms from GLTF node hierarchy
         const nodeParents = new Map<number, number>();
         const nodeTransforms = new Map<number, mat4>();
-        
+        const nodeNames = new Map<number, string>();
+
         if (this.gltf.nodes) {
             for (let nodeIndex = 0; nodeIndex < this.gltf.nodes.length; nodeIndex++) {
                 const node = this.gltf.nodes[nodeIndex];
-                
+
+                // Capture the node/bone name (used to retarget imported clips across files by name)
+                if (typeof node.name === 'string' && node.name.length > 0) {
+                    nodeNames.set(nodeIndex, node.name);
+                }
+
                 // Build parent map
                 if (node.children) {
                     for (const childIndex of node.children) {
@@ -708,7 +769,8 @@ export class GLTFLoader {
             joints,
             skeleton: gltfSkin.skeleton,
             nodeParents,
-            nodeTransforms
+            nodeTransforms,
+            nodeNames
         };
     }
 

@@ -2,8 +2,8 @@ export { CleoEngine } from "./core/engine";
 export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";
 export { Scene } from "./core/scene/scene";
-export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, VolumetricCloudsNode, getData, setData, bindDataAccessors, canAccessVariable } from "./core/scene/node";
-export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions } from "./core/scene/node";
+export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable } from "./core/scene/node";
+export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export { Mesh } from "./graphics/mesh";
 export { Material } from "./graphics/material";
@@ -19,7 +19,9 @@ export { Ragdoll, RAGDOLL_DEFAULTS } from "./physics/ragdoll";
 export type { RagdollOptions } from "./physics/ragdoll";
 export { Model } from "./graphics/model";
 export { AnimatedModel } from "./graphics/animatedModel";
-export type { Skin, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
+export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
+export { remapAnimationToSkin } from "./graphics/animationRetarget";
+export type { AnimationCompatibility, HierarchyMismatch } from "./graphics/animationRetarget";
 export { Animator } from "./graphics/animator";
 export type {
     AnimationMapping,

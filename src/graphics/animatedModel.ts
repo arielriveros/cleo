@@ -35,6 +35,7 @@ export interface Skin {
     skeleton?: number; // Root joint index
     nodeParents?: Map<number, number>; // Map of node index to parent node index
     nodeTransforms?: Map<number, mat4>; // Initial transforms for each node from GLTF
+    nodeNames?: Map<number, string>; // Map of node index to bone/node name (for cross-file retargeting)
 }
 
 // Options for loading animated models
@@ -204,7 +205,15 @@ export class AnimatedModel {
                     nodeTransforms.set(Number(key), matrix);
                 }
             }
-            
+
+            // Parse nodeNames map
+            const nodeNames = new Map<number, string>();
+            if (data.skin.nodeNames) {
+                for (const [key, value] of data.skin.nodeNames) {
+                    nodeNames.set(Number(key), value);
+                }
+            }
+
             skin = {
                 name: data.skin.name,
                 joints: data.skin.joints.map((j: any) => {
@@ -220,7 +229,8 @@ export class AnimatedModel {
                 }),
                 skeleton: data.skin.skeleton,
                 nodeParents,
-                nodeTransforms
+                nodeTransforms,
+                nodeNames
             };
         }
         
@@ -333,7 +343,15 @@ export class AnimatedModel {
                     nodeTransforms.push([key, Array.from(value)]);
                 }
             }
-            
+
+            // Serialize nodeNames map (bone names for cross-file retargeting)
+            const nodeNames: [number, string][] = [];
+            if (this._skin.nodeNames) {
+                for (const [key, value] of this._skin.nodeNames.entries()) {
+                    nodeNames.push([key, value]);
+                }
+            }
+
             skin = {
                 name: this._skin.name,
                 joints: this._skin.joints.map(j => ({
@@ -343,7 +361,8 @@ export class AnimatedModel {
                 })),
                 skeleton: this._skin.skeleton,
                 nodeParents,
-                nodeTransforms
+                nodeTransforms,
+                nodeNames
             };
         }
         
@@ -475,6 +494,24 @@ export class AnimatedModel {
     public get jointIndices(): Float32Array | null { return this._jointIndices; }
     public get jointWeights(): Float32Array | null { return this._jointWeights; }
     public get animations(): Animation[] { return this._animations; }
+
+    /**
+     * Add an animation clip at runtime (e.g. an imported/retargeted clip). De-dups the name so it can
+     * be selected/played by name. The clip is immediately playable — Animator.playAnimationByName
+     * re-reads this array and rebuilds its bone map per play.
+     */
+    public addAnimation(clip: Animation): Animation {
+        const taken = new Set(this._animations.map(a => a.name));
+        let name = clip.name || 'clip';
+        if (taken.has(name)) {
+            let n = 2;
+            while (taken.has(`${name} (${n})`)) n++;
+            name = `${name} (${n})`;
+        }
+        const stored: Animation = { ...clip, name };
+        this._animations.push(stored);
+        return stored;
+    }
     
     public get hasSkin(): boolean { return this._skin !== null; }
     public get hasAnimations(): boolean { return this._animations.length > 0; }

@@ -33,7 +33,7 @@ const ghost = 'px-1.5 py-0.5 rounded border border-[#555] hover:bg-[#3b3b3b] tex
 const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
 
 export default function StateMachineEditor() {
-  const { editorScene, animationTargetId, animationSourceScene, animationSourceId, commitAnimationStateMachine, closeTab, activeTabId, eventEmitter } = useCleoEngine()
+  const { editorScene, animationTargetId, animationSourceScene, animationSourceId, commitAnimationStateMachine, importAnimationFiles, closeTab, activeTabId, eventEmitter } = useCleoEngine()
   const target = getAnimationTarget(editorScene, animationTargetId)
 
   const [sm, setSm] = useState<AnimationStateMachine>(EMPTY)
@@ -53,6 +53,13 @@ export default function StateMachineEditor() {
     setSm(existing ? clone(existing) : clone(EMPTY))
     setSelectedState(existing?.states.find(s => s.isEntry)?.name ?? existing?.states[0]?.name ?? null)
   }, [animationTargetId])
+
+  // Re-render when clips are imported so the new clips appear in the state/event clip pickers.
+  useEffect(() => {
+    const onClips = () => force(x => x + 1)
+    eventEmitter.on('ANIM_CLIPS_CHANGED', onClips)
+    return () => { eventEmitter.off('ANIM_CLIPS_CHANGED', onClips) }
+  }, [eventEmitter])
 
   const update = (next: AnimationStateMachine) => setSm({ ...next })
   const apply = () => {
@@ -164,11 +171,16 @@ export default function StateMachineEditor() {
         <button className={ghost} title='Close the Animation Editor tab' onClick={() => closeTab(activeTabId)}>Close</button>
       </div>
 
-      <div className='p-2'>
+      <div className='p-2 flex flex-col gap-1'>
         <button className={btn + ' w-full'} onClick={apply} title='Save the machine onto the original model (used at runtime and by Simulate)'>
           Apply to Model
         </button>
-        <p className='text-[10px] text-gray-500 mt-1'>Writes back to the source node. Scripts drive it with <code>animator.setFloat/setBool/setTrigger()</code>.</p>
+        <label className={ghost + ' w-full text-center cursor-pointer'} title='Import animation clips (glTF / GLB / FBX) onto this skeleton'>
+          Import Animation…
+          <input type='file' multiple className='hidden' accept='.gltf,.glb,.fbx,.bin'
+            onChange={e => { const fs = e.target.files ? Array.from(e.target.files) : []; e.target.value = ''; if (fs.length) importAnimationFiles(fs) }} />
+        </label>
+        <p className='text-[10px] text-gray-500 mt-0.5'>Writes back to the source node. Scripts drive it with <code>animator.setFloat/setBool/setTrigger()</code>.</p>
       </div>
 
       {/* Parameters */}

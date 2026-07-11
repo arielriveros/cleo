@@ -31,11 +31,13 @@ export default function AnimationPlayer() {
   useEffect(() => { playingRef.current = playing }, [playing])
   useEffect(() => { simulateRef.current = simulate }, [simulate])
 
-  // Reflect a state machine applied in the right sidebar (so the Simulate toggle appears/updates).
+  // Reflect a state machine applied in the right sidebar (Simulate toggle) and imported clips (so the
+  // transport's clip dropdown refreshes).
   useEffect(() => {
     const onChanged = () => force(x => x + 1)
     eventEmitter.on('ANIM_SM_CHANGED', onChanged)
-    return () => { eventEmitter.off('ANIM_SM_CHANGED', onChanged) }
+    eventEmitter.on('ANIM_CLIPS_CHANGED', onChanged)
+    return () => { eventEmitter.off('ANIM_SM_CHANGED', onChanged); eventEmitter.off('ANIM_CLIPS_CHANGED', onChanged) }
   }, [eventEmitter])
 
   // On (re)entry, park on the first clip's first frame in bind pose.

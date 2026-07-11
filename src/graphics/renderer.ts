@@ -2,7 +2,7 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
-import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode, LightProbeNode, VolumetricCloudsNode } from '../core/scene/node';
+import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode, LightProbeNode, VolumetricCloudsNode, SkyAtmosphereNode } from '../core/scene/node';
 import { PointLight, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
@@ -28,6 +28,8 @@ import ShadowMapSkinnedVertex from './shaders/environment/shadowMapSkinned.vs'
 import SkyboxVertex from './shaders/environment/skybox.vs'
 import SkyboxFragment from './shaders/environment/skybox.fs'
 import VolumetricCloudsFragment from './shaders/environment/volumetricClouds.fs'
+import SkyAtmosphereFragment from './shaders/environment/skyAtmosphere.fs'
+import SkyFogFragment from './shaders/screen/skyFog.fs'
 
 import ScreenVertex from './shaders/screen/screen.vs'
 import ScreenFragment from './shaders/screen/screen.fs'
@@ -369,6 +371,10 @@ export class Renderer {
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
         // Volumetric clouds (fullscreen raymarch, runs on the screen vertex shader)
         const volumetricCloudsShader = new Shader().create(ScreenVertex, VolumetricCloudsFragment);
+        // Sky atmosphere (per-direction Nishita scattering, baked into a cubemap via the IBL cube VS)
+        const skyAtmosphereShader = new Shader().create(CubeVertex, SkyAtmosphereFragment);
+        // Sky fog (fullscreen distance fog whose colour is sampled from the atmosphere cubemap)
+        const skyFogShader = new Shader().create(ScreenVertex, SkyFogFragment);
         // Screen shaders
         const screenShader = new Shader().create(ScreenVertex, ScreenFragment);
         const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
@@ -418,6 +424,8 @@ export class Renderer {
         this._shaderManager.addShader('shadowMapSkinned', shadowMapSkinnedShader);
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('volumetricClouds', volumetricCloudsShader);
+        this._shaderManager.addShader('skyAtmosphere', skyAtmosphereShader);
+        this._shaderManager.addShader('skyFog', skyFogShader);
         this._shaderManager.addShader('screen', screenShader);
         this._shaderManager.addShader('debugView', debugViewShader);
         this._shaderManager.addShader('bloom', bloomShader);
@@ -483,6 +491,9 @@ export class Renderer {
         mat4.multiply(this._viewProj, proj, view);
         mat4.invert(this._invViewProj, this._viewProj);
         this._frustum.setFromViewProjection(this._viewProj);
+
+        // Re-bake the sky atmosphere cubemap when the sun moves (before IBL, so probes capture the sky).
+        this._updateSkyAtmosphere(scene);
 
         // Bake/refresh IBL (light probes + scene environment) before the main passes.
         this._updateIBL(scene);
@@ -1193,8 +1204,11 @@ export class Renderer {
             gl.clearColor(clear[0], clear[1], clear[2], clear[3]);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-            // Skybox background first, then opaque geometry over it.
-            if (scene.skybox) {
+            // Sky background first (atmosphere takes precedence over a static skybox), then geometry.
+            const atmo = scene.skyAtmosphere;
+            if (atmo && atmo.cubemap) {
+                this._drawAtmosphereSky(atmo.cubemap, cam.viewMatrix, cam.projectionMatrix);
+            } else if (scene.skybox) {
                 GLState.disable(gl.CULL_FACE);
                 this._shaderManager.bind('skybox');
                 this._shaderManager.setUniform('u_view', cam.viewMatrix);
@@ -1251,6 +1265,143 @@ export class Renderer {
         return null;
     }
 
+    // Direction TOWARD the sun for a SkyAtmosphere node: the scene directional light (negated travel
+    // direction) when useSceneSun, else the node's manual override. Always normalized.
+    private _atmosphereSunDir(scene: Scene, node: SkyAtmosphereNode): [number, number, number] {
+        let s: [number, number, number] = [node.sunDirection[0], node.sunDirection[1], node.sunDirection[2]];
+        if (node.useSceneSun) {
+            for (const light of scene.lights) {
+                if (light.type === 'directional') {
+                    const f = light.worldForward; // light travels along +forward, so the sun is at -forward
+                    s = [-f[0], -f[1], -f[2]];
+                    break;
+                }
+            }
+        }
+        const len = Math.hypot(s[0], s[1], s[2]) || 1;
+        return [s[0] / len, s[1] / len, s[2] / len];
+    }
+
+    // Re-bake the SkyAtmosphere cubemap when needed: on first use / parameter change (needsBake) or
+    // when the sun direction has moved past a small epsilon. No-op when no atmosphere node exists.
+    private _updateSkyAtmosphere(scene: Scene): void {
+        if (this._capturing) return;
+        const node = scene.skyAtmosphere;
+        if (!node) return;
+
+        const sun = this._atmosphereSunDir(scene, node);
+        const last = node.lastSunDir;
+        const dot = sun[0] * last[0] + sun[1] * last[1] + sun[2] * last[2];
+        const SUN_EPS = Math.cos(0.3 * Math.PI / 180); // re-bake once the sun rotates ~0.3 degrees
+        if (node.needsBake || dot < SUN_EPS)
+            this._bakeSkyAtmosphere(node, sun);
+    }
+
+    // Bake the Nishita single-scattering atmosphere into the node's cubemap (6 faces via the IBL cube
+    // machinery: _captureProj + _iblFaceViews + _iblCubeMesh + _cubeFBO). Stores a display-referred
+    // (tonemapped) cubemap so the existing 'skybox' draw can sample it unchanged.
+    private _bakeSkyAtmosphere(node: SkyAtmosphereNode, sun: [number, number, number]): void {
+        const res = node.resolution;
+        if (!node.cubemap || node.cubemapResolution !== res) {
+            const levels = Math.floor(Math.log2(res)) + 1;
+            const cube = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
+            cube.createCubemapTarget(res, levels);
+            node.setCubemap(cube, res);
+        }
+        const cube = node.cubemap!;
+
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthMask(false);
+        GLState.disable(gl.BLEND);
+        GLState.disable(gl.CULL_FACE);
+
+        this._shaderManager.bind('skyAtmosphere');
+        this._shaderManager.setUniform('u_projection', this._captureProj);
+        this._shaderManager.setUniform('u_sunDir', sun);
+        this._shaderManager.setUniform('u_sunColor', node.sunColor);
+        this._shaderManager.setUniform('u_sunIntensity', node.sunIntensity);
+        // Earth Rayleigh scattering coefficients (per metre), scaled by the user multiplier.
+        const rs = node.rayleighScatter;
+        this._shaderManager.setUniform('u_rayleigh', [5.8e-6 * rs, 13.5e-6 * rs, 33.1e-6 * rs]);
+        this._shaderManager.setUniform('u_mie', 21e-6 * node.mieScatter);
+        this._shaderManager.setUniform('u_rayleighHeight', node.rayleighHeight);
+        this._shaderManager.setUniform('u_mieHeight', node.mieHeight);
+        this._shaderManager.setUniform('u_mieG', node.mieG);
+        this._shaderManager.setUniform('u_planetRadius', node.planetRadius);
+        this._shaderManager.setUniform('u_atmosphereRadius', node.atmosphereRadius);
+        this._shaderManager.setUniform('u_sunDiskSize', node.sunDiskSize);
+        this._shaderManager.setUniform('u_exposure', node.exposure);
+        this._shaderManager.setUniform('u_groundColor', node.groundColor);
+        this._shaderManager.setUniform('u_viewSteps', node.viewSteps);
+        this._shaderManager.setUniform('u_lightSteps', node.lightSteps);
+
+        gl.viewport(0, 0, res, res);
+        for (let face = 0; face < 6; face++) {
+            this._cubeFBO.bindFace(cube, face, 0, false);
+            this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._iblCubeMesh.draw();
+        }
+        cube.generateMipmaps();
+        this._cubeFBO.unbind();
+        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        GLState.depthMask(true);
+        GLState.enable(gl.DEPTH_TEST);
+
+        node.markBaked(sun);
+    }
+
+    // Aerial-perspective fog for the SkyAtmosphere node. A fullscreen pass that tints opaque geometry
+    // toward the sky colour by distance: the fog colour is the atmosphere cubemap sampled in each
+    // pixel's view direction (so geometry fades into the sky behind it). Straight-alpha blended into
+    // the scene FBO; reads the G-buffer depth (a separate FBO) to avoid read/write feedback. Note this
+    // fogs deferred geometry; forward Blinn-Phong opaque isn't in the G-buffer depth so it stays clear.
+    private _renderSkyFog(scene: Scene): void {
+        const node = scene.skyAtmosphere;
+        if (!node || !node.fogEnabled || !node.cubemap || node.fogMaxOpacity <= 0 || node.fogDensity <= 0) return;
+
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthMask(false);
+        GLState.enable(gl.BLEND);   // global blend func is already SRC_ALPHA, ONE_MINUS_SRC_ALPHA
+
+        this._shaderManager.bind('skyFog');
+        this._shaderManager.setUniform('u_gDepth', 0);
+        this._gBufferFBO.depth.bind(0);
+        this._shaderManager.setUniform('u_atmosphere', 8);
+        node.cubemap.bind(8);
+        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_fogDensity', node.fogDensity);
+        this._shaderManager.setUniform('u_fogStart', node.fogStart);
+        this._shaderManager.setUniform('u_fogHeight', node.fogHeight);
+        this._shaderManager.setUniform('u_fogHeightFalloff', node.fogHeightFalloff);
+        this._shaderManager.setUniform('u_fogMaxOpacity', node.fogMaxOpacity);
+        this._shaderManager.setUniform('u_fogColor', node.fogColor);
+        this._shaderManager.setUniform('u_fogColorBlend', node.fogColorBlend);
+        // Sample the atmosphere a few mips up so fog is smooth colour haze (no crisp sun disk / detail
+        // showing through geometry). ~16px-per-face target regardless of the baked cubemap resolution.
+        const res = node.cubemapResolution || node.resolution;
+        this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 4));
+        this._screenQuad.draw();
+
+        // Restore the state the following overlay passes expect.
+        GLState.disable(gl.BLEND);
+        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthMask(true);
+    }
+
+    // Draw a computed sky cubemap (from a SkyAtmosphere bake) as the background using the 'skybox'
+    // shader (which strips view translation and forces far depth). Reuses the IBL unit-cube mesh.
+    private _drawAtmosphereSky(cubemap: Texture, view: mat4, proj: mat4): void {
+        GLState.disable(gl.CULL_FACE);
+        this._shaderManager.bind('skybox');
+        this._shaderManager.setUniform('u_view', view);
+        this._shaderManager.setUniform('u_projection', proj);
+        this._shaderManager.setUniform('u_skybox', 8);
+        cubemap.bind(8);
+        this._iblCubeMesh.draw();
+    }
+
     /** Forward passes drawn on top of the deferred-lit scene: skybox, transparent models, sprites, editor overlays. */
     private _renderForwardOverlay(scene: Scene, shadowLight: LightNode | null): void {
         this._sceneFBO.bind();
@@ -1283,8 +1434,15 @@ export class Renderer {
             this._bindEnvToForwardShaders(scene);
         }
 
-        // Skybox fills the background (fragments the geometry pass left at far depth).
-        if (scene.skybox) {
+        // Sky fills the background (fragments the geometry pass left at far depth). A baked atmosphere
+        // cubemap takes precedence over a static skybox.
+        const skyAtmo = scene.skyAtmosphere;
+        if (skyAtmo && skyAtmo.cubemap) {
+            const prevType = this._activeCamera.type;
+            this._activeCamera.type = 'perspective'; // ortho has no valid sky projection
+            this._drawAtmosphereSky(skyAtmo.cubemap, this._activeCamera.viewMatrix, this._activeCamera.projectionMatrix);
+            this._activeCamera.type = prevType;
+        } else if (scene.skybox) {
             // The skybox cube is viewed from the inside, so back-face culling would discard it.
             GLState.disable(gl.CULL_FACE);
             this._shaderManager.bind('skybox');
@@ -1309,6 +1467,10 @@ export class Renderer {
         GLState.depthMask(true);
         GLState.disable(gl.BLEND);
         for (const node of opaqueForwardQueue) this._renderModel(node);
+
+        // Atmospheric fog over the opaque scene (aerial perspective from the SkyAtmosphere node).
+        // Drawn before the grid/transparents so editor overlays stay crisp.
+        this._renderSkyFog(scene);
 
         // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
         this._renderGrid();
@@ -1605,7 +1767,13 @@ export class Renderer {
         gl.viewport(0, 0, this._canvas.width, this._canvas.height);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-        if (scene.skybox) {
+        const fwdAtmo = scene.skyAtmosphere;
+        if (fwdAtmo && fwdAtmo.cubemap) {
+            const prevType = this._activeCamera.type;
+            this._activeCamera.type = 'perspective';
+            this._drawAtmosphereSky(fwdAtmo.cubemap, this._activeCamera.viewMatrix, this._activeCamera.projectionMatrix);
+            this._activeCamera.type = prevType;
+        } else if (scene.skybox) {
             // The skybox cube is viewed from the inside, so back-face culling would discard it.
             GLState.disable(gl.CULL_FACE);
             this._shaderManager.bind('skybox');

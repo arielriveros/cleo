@@ -16,6 +16,7 @@ import TemplateExplorer from "./sceneInspector/TemplateExplorer";
 import MaterialExplorer from "./materials/MaterialExplorer";
 import MeshExplorer from "./meshes/MeshExplorer";
 import MeshImportModal from "./meshes/MeshImportModal";
+import AnimationImportModal from "./animation/AnimationImportModal";
 import UIOverlay from "./uiInspector/UIOverlay";
 import LoadingScreen from "../components/LoadingScreen";
 import { LAYOUT_KEY } from "../utils/projectStorage";
@@ -167,6 +168,8 @@ export default function Editor() {
       </Content>
       {/* Global mesh-import review modal — overlays the whole editor while an import awaits the user. */}
       <MeshImportModal />
+      {/* Global animation-import review modal (compatibility vs the skeleton). */}
+      <AnimationImportModal />
     </>
   );
 }

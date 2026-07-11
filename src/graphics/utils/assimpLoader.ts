@@ -95,6 +95,40 @@ async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[],
     }
 }
 
+/**
+ * Convert any assimp-readable model file (fbx/glb/obj/…) to glTF 2.0 in-memory and return the output
+ * files (the .gltf JSON + its .bin buffer [+ any textures]) as `File`s, so they can be fed straight to
+ * the engine's GLTFLoader. Used by the animation-import path to extract skeletal animation (which the
+ * assjson mesh path drops). The result files reference each other by relative name, which the
+ * GLTFLoader resolves — so we preserve the assimp output paths as the File names.
+ */
+async function convertToGltf2FromFiles(files: File[]): Promise<File[]> {
+    const ajs = await assimpjs();
+    let fileList = new ajs.FileList();
+    for (let file of files) {
+        const arrayBuffer = await file.arrayBuffer();
+        fileList.AddFile(file.name, new Uint8Array(arrayBuffer));
+    }
+
+    let result = ajs.ConvertFileList(fileList, 'gltf2');
+    if (!result.IsSuccess() || result.FileCount() == 0) {
+        console.error('Assimp glTF2 conversion error code:', result.GetErrorCode?.());
+        throw new Error('Failed to convert model to glTF2 (assimp)');
+    }
+
+    const out: File[] = [];
+    const count: number = result.FileCount();
+    for (let i = 0; i < count; i++) {
+        const rf = result.GetFile(i);
+        const path: string = (typeof rf.GetPath === 'function' ? rf.GetPath() : '') || `assimp_out_${i}.gltf`;
+        const name = path.split(/[\\/]/).pop() || path; // basename (URIs in the gltf are relative)
+        const content: Uint8Array = rf.GetContent();
+        // Copy into a fresh ArrayBuffer (the wasm view may be reused/freed after this call).
+        out.push(new File([content.slice()], name));
+    }
+    return out;
+}
+
 interface AiMaterialProperties {
     key: string;
     type: string;
@@ -269,4 +303,4 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
     });
 }
 
-export { loadAssimpModel, loadAssimpModelFromFiles, parseMaterial };
+export { loadAssimpModel, loadAssimpModelFromFiles, parseMaterial, convertToGltf2FromFiles };

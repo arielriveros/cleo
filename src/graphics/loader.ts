@@ -1,8 +1,8 @@
 import { Geometry } from "../core/geometry";
 import { Material } from "./material";
-import { OutputMaterial, loadAssimpModel, loadAssimpModelFromFiles, parseMaterial } from "./utils/assimpLoader";
+import { OutputMaterial, loadAssimpModel, loadAssimpModelFromFiles, parseMaterial, convertToGltf2FromFiles } from "./utils/assimpLoader";
 import { GLTFLoader } from "./utils/gltfLoader";
-import { AnimatedModel } from "./animatedModel";
+import { AnimatedModel, Animation, Skin } from "./animatedModel";
 import { TextureManager } from "./systems/textureManager";
 
 /**
@@ -384,5 +384,22 @@ export class Loader {
 
         // For non-GLTF files, throw an error since they don't support skeletal animation
         throw new Error('Animated models are only supported for GLTF files. Use loadModelsFromFile for static models.');
+    }
+
+    /**
+     * Parse animation clips (+ the source skeleton, with bone names) from an uploaded model file for
+     * IMPORT/retargeting. Supports glTF natively; glb/fbx/obj are converted to glTF2 via assimp first.
+     * Returns the first parsed model's clips + skin (all models in a file share one animations array).
+     */
+    public static async loadAnimationsFromFile(files: File[]): Promise<{ animations: Animation[]; skin: Skin | null }> {
+        const hasGltf = files.some(f => f.name.toLowerCase().endsWith('.gltf'));
+        let parseFiles = files;
+        if (!hasGltf) {
+            // glb/fbx/obj/… → convert to glTF2 (preserves skeleton + animations + node names).
+            parseFiles = await convertToGltf2FromFiles(files);
+        }
+        const gltfLoader = new GLTFLoader();
+        // Works whether or not the file contains a mesh/skin (animation-only files are supported).
+        return await gltfLoader.loadAnimationsFromFiles(parseFiles);
     }
 }
