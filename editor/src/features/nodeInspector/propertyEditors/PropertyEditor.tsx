@@ -1,4 +1,4 @@
-import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, SpriteNode } from 'cleo'
+import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, SpriteNode, VolumetricCloudsNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import SkyboxEditor from './SkyboxEditor'
@@ -10,6 +10,7 @@ import CameraEditor from './CameraEditor'
 import SpriteEditor from './SpriteEditor'
 import AnimatedSpriteEditor from './SpriteSheetEditor'
 import CustomVariablesEditor from './CustomVariablesEditor'
+import VolumetricCloudsEditor from './VolumetricCloudsEditor'
 
 export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) {
   // Check if the node is the root node
@@ -32,6 +33,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'lightProbe' && <LightProbeEditor node={props.node as LightProbeNode} /> }
           { props.node.nodeType === 'skybox' && <SkyboxEditor node={props.node as SkyboxNode} /> }
           { props.node.nodeType === 'camera' && <CameraEditor node={props.node as CameraNode} /> }
+          { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
 
           {!isRootNode && <CustomVariablesEditor node={props.node} />}
         </fieldset>

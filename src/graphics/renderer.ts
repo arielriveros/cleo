@@ -2,7 +2,7 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
-import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode, LightProbeNode } from '../core/scene/node';
+import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode, LightProbeNode, VolumetricCloudsNode } from '../core/scene/node';
 import { PointLight, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
@@ -27,6 +27,7 @@ import ShadowMapFragment from './shaders/environment/shadowMap.fs'
 import ShadowMapSkinnedVertex from './shaders/environment/shadowMapSkinned.vs'
 import SkyboxVertex from './shaders/environment/skybox.vs'
 import SkyboxFragment from './shaders/environment/skybox.fs'
+import VolumetricCloudsFragment from './shaders/environment/volumetricClouds.fs'
 
 import ScreenVertex from './shaders/screen/screen.vs'
 import ScreenFragment from './shaders/screen/screen.fs'
@@ -366,6 +367,8 @@ export class Renderer {
         // Skinned depth shader so animated meshes cast their animated-pose shadow (not the bind pose).
         const shadowMapSkinnedShader = new Shader().create(ShadowMapSkinnedVertex, ShadowMapFragment);
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
+        // Volumetric clouds (fullscreen raymarch, runs on the screen vertex shader)
+        const volumetricCloudsShader = new Shader().create(ScreenVertex, VolumetricCloudsFragment);
         // Screen shaders
         const screenShader = new Shader().create(ScreenVertex, ScreenFragment);
         const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
@@ -414,6 +417,7 @@ export class Renderer {
         this._shaderManager.addShader('shadowMap', shadowMapShader);
         this._shaderManager.addShader('shadowMapSkinned', shadowMapSkinnedShader);
         this._shaderManager.addShader('skybox', skybox);
+        this._shaderManager.addShader('volumetricClouds', volumetricCloudsShader);
         this._shaderManager.addShader('screen', screenShader);
         this._shaderManager.addShader('debugView', debugViewShader);
         this._shaderManager.addShader('bloom', bloomShader);
@@ -1296,6 +1300,10 @@ export class Renderer {
             skyboxNode.skybox.mesh.draw();
         }
 
+        // Volumetric clouds: raymarched fullscreen, composited over the sky and occluded by opaque
+        // geometry (the shader reads the blitted scene depth to bound each ray).
+        this._renderVolumetricClouds(scene);
+
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
         // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
         GLState.depthMask(true);
@@ -1325,6 +1333,84 @@ export class Renderer {
             for (const node of scene.sprites)
                 if (node.visible && node.id === this._selectedNodeId) selectedSprites.push(node);
         this._renderSelectionMask(selectedNodes, selectedSprites);
+    }
+
+    /**
+     * Volumetric cloud layer (fullscreen raymarch). Discovered as a scene singleton (like the
+     * skybox). No-op unless a VolumetricCloudsNode exists and is enabled. Reads the G-buffer depth
+     * to bound each ray so opaque geometry occludes the clouds, and composites with straight-alpha
+     * blending over the already-drawn sky/scene in the scene FBO.
+     */
+    private _renderVolumetricClouds(scene: Scene): void {
+        const node = scene.volumetricClouds;
+        if (!node || !node.enabled || node.opacity <= 0) return;
+
+        // Fullscreen overlay: no depth test/write (occlusion handled via the depth texture), alpha blend.
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthMask(false);
+        GLState.enable(gl.BLEND);   // global blend func is already SRC_ALPHA, ONE_MINUS_SRC_ALPHA
+
+        this._shaderManager.bind('volumetricClouds');
+        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_time', performance.now() * 0.001);
+        this._shaderManager.setUniform('u_gDepth', 0);
+        this._gBufferFBO.depth.bind(0);
+
+        // Sun: scene directional light (direction + color) by default, else the node's override.
+        let sunDir: any = node.sunDirection;
+        let sunColor: any = node.sunColor;
+        if (node.useSceneSun) {
+            for (const light of scene.lights) {
+                if (light.type === 'directional') {
+                    sunDir = light.worldForward;
+                    sunColor = light.light.diffuse;
+                    break;
+                }
+            }
+        }
+        this._shaderManager.setUniform('u_sunDir', sunDir);
+        this._shaderManager.setUniform('u_sunColor', sunColor);
+
+        // Shape
+        this._shaderManager.setUniform('u_coverage', node.coverage);
+        this._shaderManager.setUniform('u_density', node.density);
+        this._shaderManager.setUniform('u_cloudType', node.cloudType);
+        this._shaderManager.setUniform('u_baseAltitude', node.baseAltitude);
+        this._shaderManager.setUniform('u_thickness', node.thickness);
+        this._shaderManager.setUniform('u_baseScale', node.baseScale);
+        this._shaderManager.setUniform('u_detailScale', node.detailScale);
+        this._shaderManager.setUniform('u_detailStrength', node.detailStrength);
+        this._shaderManager.setUniform('u_curlStrength', node.curlStrength);
+        this._shaderManager.setUniform('u_anvilBias', node.anvilBias);
+        // Lighting
+        this._shaderManager.setUniform('u_sunIntensity', node.sunIntensity);
+        this._shaderManager.setUniform('u_ambientColor', node.ambientColor);
+        this._shaderManager.setUniform('u_ambientIntensity', node.ambientIntensity);
+        this._shaderManager.setUniform('u_groundColor', node.groundColor);
+        this._shaderManager.setUniform('u_phaseG', node.phaseG);
+        this._shaderManager.setUniform('u_silverIntensity', node.silverIntensity);
+        this._shaderManager.setUniform('u_silverSpread', node.silverSpread);
+        this._shaderManager.setUniform('u_powderStrength', node.powderStrength);
+        this._shaderManager.setUniform('u_absorption', node.absorption);
+        // Animation
+        this._shaderManager.setUniform('u_wind', node.windDirection);
+        this._shaderManager.setUniform('u_windSpeed', node.windSpeed);
+        this._shaderManager.setUniform('u_detailWindFactor', node.detailWindFactor);
+        // Quality
+        this._shaderManager.setUniform('u_steps', node.steps);
+        this._shaderManager.setUniform('u_lightSteps', node.lightSteps);
+        this._shaderManager.setUniform('u_maxDistance', node.maxDistance);
+        this._shaderManager.setUniform('u_jitter', node.jitter);
+        // Render
+        this._shaderManager.setUniform('u_opacity', node.opacity);
+
+        this._screenQuad.draw();
+
+        // Restore the state the following opaque/transparent overlay passes expect.
+        GLState.disable(gl.BLEND);
+        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthMask(true);
     }
 
     /**

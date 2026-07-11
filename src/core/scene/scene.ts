@@ -1,5 +1,5 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, LandscapeNode, LightNode, LightProbeNode, ModelNode, Node, SkyboxNode, SpriteNode } from "./node";
+import { CameraNode, LandscapeNode, LightNode, LightProbeNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode } from "./node";
 import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
@@ -14,6 +14,7 @@ export class Scene {
     private _landscapes: Set<LandscapeNode>;
     private _lightProbes: Set<LightProbeNode>;
     private _skybox: SkyboxNode | null;
+    private _volumetricClouds: VolumetricCloudsNode | null = null;
     private _environmentMap: Texture | null = null;
     private _dirty: boolean = true;
     private _hasStarted: boolean = false;
@@ -39,6 +40,7 @@ export class Scene {
         this._landscapes = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
+        this._volumetricClouds = null;
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
@@ -148,6 +150,7 @@ export class Scene {
         this._landscapes = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
+        this._volumetricClouds = null;
         for (const node of this._nodes) {
             if (node instanceof LightNode)
                 this._lights.add(node);
@@ -161,6 +164,8 @@ export class Scene {
                 this._lightProbes.add(node);
             if (node instanceof SkyboxNode)
                 this._skybox = node;
+            if (node instanceof VolumetricCloudsNode)
+                this._volumetricClouds = node;
             if (node instanceof CameraNode)
                 this._cameras.add(node);
         }
@@ -323,6 +328,12 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._skybox;
+    }
+
+    public get volumetricClouds(): VolumetricCloudsNode | null {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._volumetricClouds;
     }
 
     public get lightProbes(): Set<LightProbeNode> {

@@ -15,7 +15,8 @@ import {
   Spotlight,
   SpriteNode,
   Sprite,
-  AnimatedSpriteNode
+  AnimatedSpriteNode,
+  VolumetricCloudsNode
 } from 'cleo'
 import Collapsable from '../../components/Collapsable';
 import { useCleoEngine } from '../EngineContext';
@@ -35,6 +36,7 @@ import DirectionalLightIcon from '../../icons/directional-light.png'
 import SpotlightIcon from '../../icons/spotlight.png'
 import SpriteIcon from '../../icons/static-sprite.png'
 import AnimatedSpriteIcon from '../../icons/animated-sprite.png'
+import CloudsIcon from '../../icons/clouds.png'
 
 interface AddButtonProps {
   onClick: () => void;
@@ -146,6 +148,10 @@ export default function AddNew() {
     addNode(new LightProbeNode('light probe'));
   }
 
+  const addVolumetricClouds = () => {
+    addNode(new VolumetricCloudsNode('volumetric clouds'));
+  }
+
   const addSprite = () => {
     const sprite = new Sprite(Material.Basic({}));
     const spriteNode = new SpriteNode('sprite', sprite, 'spherical');
@@ -233,6 +239,7 @@ export default function AddNew() {
           <div className='flex flex-row w-full items-center justify-evenly'>
             <AddButton onClick={() => addSkybox()} label='Skybox' icon={SkyboxIcon} />
             <AddButton onClick={() => addLightProbe()} label='Light Probe' icon={SphereIcon} />
+            <AddButton onClick={() => addVolumetricClouds()} label='Clouds' icon={CloudsIcon} />
           </div>
         </div>
       </div>
