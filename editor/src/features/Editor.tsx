@@ -14,6 +14,7 @@ import Tabs, { Tab } from "../components/Tabs";
 import AssetExplorer from "./assets/AssetExplorer";
 import TemplateExplorer from "./sceneInspector/TemplateExplorer";
 import MaterialExplorer from "./materials/MaterialExplorer";
+import MeshExplorer from "./meshes/MeshExplorer";
 import UIOverlay from "./uiInspector/UIOverlay";
 import LoadingScreen from "../components/LoadingScreen";
 import { LAYOUT_KEY } from "../utils/projectStorage";
@@ -21,7 +22,7 @@ import { LAYOUT_KEY } from "../utils/projectStorage";
 const DEFAULT_BARS = { left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15 };
 
 // Restore persisted panel layout (falls back to defaults).
-function readLayout(): { barsDimensions: typeof DEFAULT_BARS; bottomTab: 'Logger' | 'Assets' | 'Templates' | 'Materials' } {
+function readLayout(): { barsDimensions: typeof DEFAULT_BARS; bottomTab: 'Logger' | 'Assets' | 'Templates' | 'Materials' | 'Meshes' } {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
     if (raw) {
@@ -35,7 +36,7 @@ function readLayout(): { barsDimensions: typeof DEFAULT_BARS; bottomTab: 'Logger
 export default function Editor() {
   const { instance, eventEmitter, isSceneReady, loadingProgress, editorMode, isPlayMode } = useCleoEngine();
   const [barsDimensions, setBarsDimensions] = useState(() => readLayout().barsDimensions);
-  const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets' | 'Templates' | 'Materials'>(() => readLayout().bottomTab);
+  const [bottomTab, setBottomTab] = useState<'Logger' | 'Assets' | 'Templates' | 'Materials' | 'Meshes'>(() => readLayout().bottomTab);
 
   // Landscape mode hides both side inspectors; renderer mode additionally hides the bottom bar,
   // leaving only the viewport + the floating Renderer Options window.
@@ -66,7 +67,7 @@ export default function Editor() {
 
   // The Template mode segment focuses the Templates bottom panel.
   useEffect(() => {
-    const onFocus = (tab: 'Logger' | 'Assets' | 'Templates' | 'Materials') => setBottomTab(tab);
+    const onFocus = (tab: 'Logger' | 'Assets' | 'Templates' | 'Materials' | 'Meshes') => setBottomTab(tab);
     eventEmitter.on('FOCUS_BOTTOM_TAB', onFocus);
     return () => { eventEmitter.off('FOCUS_BOTTOM_TAB', onFocus); };
   }, [eventEmitter]);
@@ -127,6 +128,7 @@ export default function Editor() {
                 <Tab title='Assets' onClick={() => setBottomTab('Assets')} selected={bottomTab === 'Assets'} />
                 <Tab title='Templates' onClick={() => setBottomTab('Templates')} selected={bottomTab === 'Templates'} />
                 <Tab title='Materials' onClick={() => setBottomTab('Materials')} selected={bottomTab === 'Materials'} />
+                <Tab title='Meshes' onClick={() => setBottomTab('Meshes')} selected={bottomTab === 'Meshes'} />
               </Tabs>
               <div className="flex flex-col text-white bg-[#202020] w-full h-full overflow-hidden">
                 <div className={`${bottomTab === 'Logger' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
@@ -140,6 +142,9 @@ export default function Editor() {
                 </div>
                 <div className={`${bottomTab === 'Materials' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
                   <MaterialExplorer />
+                </div>
+                <div className={`${bottomTab === 'Meshes' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
+                  <MeshExplorer />
                 </div>
               </div>
             </BottomBar>

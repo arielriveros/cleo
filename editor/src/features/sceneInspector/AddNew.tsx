@@ -53,7 +53,7 @@ function AddButton(props: AddButtonProps) {
 
 export default function AddNew() {
   const [node, setNode] = useState<Node | null>(null)
-  const { editorScene, selectedNode, eventEmitter: eventEmitter, triggers } = useCleoEngine();
+  const { editorScene, selectedNode, eventEmitter: eventEmitter, triggers, importMeshFiles } = useCleoEngine();
 
   useEffect(() => {
     if (editorScene && selectedNode) {
@@ -152,21 +152,14 @@ export default function AddNew() {
     addNode(node);
   }
 
-  // Shared import handler for both the single-file and whole-folder inputs.
-  // A folder pick (webkitdirectory) is what lets a .gltf with an external textures/ folder work:
-  // the browser hands us every file (each carrying webkitRelativePath), so the loader can resolve them.
+  // Shared import handler for both the single-file and whole-folder inputs. Imports now land in the
+  // Meshes library (each model file becomes a reusable mesh asset with a thumbnail); drag a card from
+  // the Meshes tab into the viewport to place it. A folder pick (webkitdirectory) lets a .gltf with an
+  // external textures/ folder resolve (the browser hands us every file with its webkitRelativePath).
   const importModelFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const filesArray = Array.from(files);
-    Model.fromFile({ files: filesArray }).then((models) => {
-      const node = new Node('model');
-      for (const model of models) {
-        const modelNode = new ModelNode(model.name, model.model);
-        node.addChild(modelNode);
-      }
-      addNode(node);
-    })
-    .catch(err => console.error(err));
+    eventEmitter.emit('FOCUS_BOTTOM_TAB', 'Meshes'); // surface the library so the new cards are visible
+    importMeshFiles(Array.from(files)).catch(err => console.error(err));
   }
 
 

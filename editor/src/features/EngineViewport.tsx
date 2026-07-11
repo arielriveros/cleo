@@ -7,10 +7,11 @@ import LandscapeInspector from "./landscape/LandscapeInspector";
 import RendererOptions from "./renderer/RendererOptions";
 import RendererStats from "./renderer/RendererStats";
 import { instantiateTemplate } from "../utils/templates";
+import { instantiateMeshAsset } from "../utils/meshes";
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            templates, scripts, bodies, triggers } = useCleoEngine();
+            templates, meshes, scripts, bodies, triggers } = useCleoEngine();
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -192,13 +193,32 @@ export default function EngineViewport() {
         }
     };
 
-    // Drop a template from the Templates panel to instantiate an independent copy.
+    // Drop a template (Templates panel) or a mesh (Meshes panel) into the viewport to instantiate a copy.
     const onViewportDragOver = (e: React.DragEvent) => {
-        if (Array.from(e.dataTransfer.types).includes('text/cleo-template')) e.preventDefault();
+        const types = Array.from(e.dataTransfer.types);
+        if (types.includes('text/cleo-template') || types.includes('text/cleo-mesh')) e.preventDefault();
     };
     const onViewportDrop = (e: React.DragEvent) => {
+        if (!editorScene) return;
+
+        const meshId = e.dataTransfer.getData('text/cleo-mesh');
+        if (meshId) {
+            e.preventDefault();
+            const mesh = meshes.find(m => m.id === meshId);
+            if (!mesh) return;
+            try {
+                const newId = instantiateMeshAsset(mesh, editorScene.root);
+                eventEmitter.emit('TEXTURES_CHANGED');
+                eventEmitter.emit('SCENE_CHANGED');
+                eventEmitter.emit('SELECT_NODE', newId);
+            } catch (err) {
+                console.error('Failed to instantiate mesh:', err);
+            }
+            return;
+        }
+
         const templateId = e.dataTransfer.getData('text/cleo-template');
-        if (!templateId || !editorScene) return;
+        if (!templateId) return;
         e.preventDefault();
         const template = templates.find(t => t.id === templateId);
         if (!template) return;

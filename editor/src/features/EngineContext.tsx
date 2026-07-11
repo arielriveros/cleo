@@ -10,6 +10,10 @@ import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback } from "../utils/materials";
+import { MeshAsset, buildMeshAsset } from "../utils/meshes";
+import { groupImportFiles } from "../utils/importGrouping";
+import { renderMeshThumbnail, renderMaterialThumbnail } from "../utils/meshThumbnails";
+import { Loader, AnimatedModel } from "cleo";
 import { buildGameData } from "./publish/buildGameData";
 import { loadProject, applyGameData, saveProject, ProjectPrefs } from "../utils/projectStorage";
 import { idbGet, idbSet } from "../utils/idb";
@@ -148,6 +152,10 @@ const EngineContext = createContext<{
   addMaterial: (m: MaterialAsset) => void;
   removeMaterial: (id: string) => void;
   updateMaterial: (id: string, m: MaterialAsset) => void;
+  // Mesh assets (imported models)
+  meshes: MeshAsset[];
+  removeMesh: (id: string) => void;
+  importMeshFiles: (files: File[]) => Promise<void>;
   // Project persistence
   saveProject: () => void;
   savingState: SavingState;
@@ -198,6 +206,9 @@ const EngineContext = createContext<{
     addMaterial: () => {},
     removeMaterial: () => {},
     updateMaterial: () => {},
+    meshes: [],
+    removeMesh: () => {},
+    importMeshFiles: async () => {},
     saveProject: () => {},
     savingState: 'idle',
   });
@@ -302,6 +313,27 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const addMaterial = (m: MaterialAsset) => setMaterials(prev => [...prev, m]);
   const updateMaterial = (id: string, m: MaterialAsset) => setMaterials(prev => prev.map(x => x.id === id ? m : x));
+
+  // Reusable mesh assets (imported models): persisted to IndexedDB (they embed base64 textures + a
+  // thumbnail). Mirrors the materials library above. Drag a mesh into the viewport to instantiate a copy.
+  const [meshes, setMeshes] = useState<MeshAsset[]>([]);
+  const meshesLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<MeshAsset[]>('cleo_meshes');
+        if (list && list.length) setMeshes(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load meshes:', e); }
+      finally { meshesLoadedRef.current = true; }
+    })();
+  }, []);
+  useEffect(() => {
+    if (!meshesLoadedRef.current) return;
+    idbSet('cleo_meshes', meshes).catch(e => console.warn('Failed to persist meshes:', e));
+  }, [meshes]);
+
+  const addMesh = (m: MeshAsset) => setMeshes(prev => [...prev, m]);
+  const removeMesh = (id: string) => setMeshes(prev => prev.filter(x => x.id !== id));
 
   // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
@@ -537,6 +569,74 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     openMaterialTab(asset); // seed directly: `asset` isn't in the `materials` state this render yet
+  };
+
+  // Import one or more model files (and folders) into the mesh library. Groups the selection into one
+  // bundle per model file; for each: parses (animated-first for GLTF, else static — textures land in
+  // TextureManager during parse), registers each material as a reusable MaterialAsset linked via
+  // __materialId, renders a thumbnail, and stores the mesh asset. Meshes land in the library only —
+  // the user drags a card into the viewport to place it.
+  const importMeshFiles = async (files: File[]) => {
+    const engine = instanceRef.current;
+    if (!engine) { Logger.error('Engine not ready for import', 'Editor'); return; }
+    const bundles = groupImportFiles(files);
+    if (bundles.length === 0) { Logger.warn('No model files (.gltf/.glb/.obj/.fbx) found in the selection', 'Editor'); return; }
+
+    for (const bundle of bundles) {
+      try {
+        // Animated-first for GLTF so skinned meshes keep their skeleton/animations; fall back to static.
+        const isGltf = bundle.files.some(f => f.name.toLowerCase().endsWith('.gltf'));
+        let parsed: { name: string; model: Model | AnimatedModel }[] = [];
+        if (isGltf) {
+          try { parsed = await Loader.loadAnimatedModelsFromFile(bundle.files) as any; }
+          catch { parsed = []; }
+        }
+        if (!parsed.length) parsed = await Model.fromFile({ files: bundle.files });
+        if (!parsed.length) { Logger.warn(`No meshes parsed from "${bundle.name}"`, 'Editor'); continue; }
+
+        // One parent Node holding a ModelNode per sub-mesh (mirrors the old import grouping). Animated
+        // models auto-get an Animator; their available animations serialize with the node — we leave
+        // animation mappings for the user to configure in the inspector.
+        const root = new Node(bundle.name);
+        const children: ModelNode[] = [];
+        for (const p of parsed) {
+          const modelNode = new ModelNode(p.name || bundle.name, p.model);
+          root.addChild(modelNode);
+          children.push(modelNode);
+        }
+
+        // Register a MaterialAsset per unique material (deduped within the bundle) and link each node.
+        const materialIds: string[] = [];
+        const assetByKey = new Map<string, MaterialAsset>();
+        for (const child of children) {
+          const mat = (child.model as any).material as Material;
+          if (!mat) continue;
+          const key = JSON.stringify(mat.serialize());
+          let asset = assetByKey.get(key);
+          if (!asset) {
+            let matThumb = '';
+            try { matThumb = await renderMaterialThumbnail(engine, mat); }
+            catch (e) { console.warn('Material thumbnail failed (using fallback):', e); }
+            asset = buildMaterialAsset(mat, `${bundle.name} ${mat.type}`, matThumb);
+            assetByKey.set(key, asset);
+            addMaterial(asset);
+            materialIds.push(asset.id);
+          }
+          applyMaterialAsset(child, asset); // stamps __materialId + rebuilds the node's material
+        }
+
+        // Render the completed mesh (with its materials + textures) and store the asset.
+        let thumbnail = '';
+        try { thumbnail = await renderMeshThumbnail(engine, root); }
+        catch (e) { console.warn('Mesh thumbnail failed (using fallback):', e); }
+        const meshAsset = await buildMeshAsset(root, materialIds, thumbnail);
+        addMesh(meshAsset);
+        eventEmitter.current.emit('TEXTURES_CHANGED');
+        Logger.info(`Imported mesh "${bundle.name}" (${children.length} sub-mesh${children.length === 1 ? '' : 'es'})`, 'Editor');
+      } catch (err) {
+        Logger.error(`Failed to import "${bundle.name}": ${err}`, 'Editor');
+      }
+    }
   };
 
   // Save the active material tab to the library (capturing a sphere thumbnail) and propagate to references.
@@ -1085,6 +1185,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addMaterial,
       removeMaterial,
       updateMaterial,
+      meshes,
+      removeMesh,
+      importMeshFiles,
       saveProject: saveProjectToStorage,
       savingState,
     }}>

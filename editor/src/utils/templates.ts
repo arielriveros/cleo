@@ -1,19 +1,6 @@
-import { Node, ModelNode, LightNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, TextureManager } from 'cleo'
+import { Node, TextureManager } from 'cleo'
 import { cryptoRandomId } from './UIModel'
-
-// Base Node.parse always creates a plain Node; dispatch by type so a template rooted at any
-// node subclass (model/light/sprite/...) is reconstructed correctly (mirrors Node._commonParse).
-function parseByType(parent: Node, json: any): void {
-  switch (json.type) {
-    case 'model': (ModelNode as any).parse(parent, json); break
-    case 'light': (LightNode as any).parse(parent, json); break
-    case 'skybox': (SkyboxNode as any).parse(parent, json); break
-    case 'camera': (CameraNode as any).parse(parent, json); break
-    case 'sprite': (SpriteNode as any).parse(parent, json); break
-    case 'animatedSprite': (AnimatedSpriteNode as any).parse(parent, json); break
-    default: (Node as any).parse(parent, json)
-  }
-}
+import { parseByType, stripDebug, collectIds, collectTextureIds, regenerateIds } from './nodeSubtree'
 
 // A reusable node template: a serialized node subtree plus every asset/script it depends on.
 export type Template = {
@@ -43,45 +30,6 @@ export function isWithinTemplateInstance(node: Node | null | undefined): boolean
     n = n.parent
   }
   return false
-}
-
-// Remove editor/debug helper children so templates only contain user content.
-function stripDebug(nodeJson: any): void {
-  if (Array.isArray(nodeJson.children)) {
-    nodeJson.children = nodeJson.children.filter((c: any) =>
-      !(String(c.name).includes('__debug__') || String(c.name).includes('__editor__')))
-    nodeJson.children.forEach(stripDebug)
-  }
-}
-
-function collectIds(nodeJson: any, out: string[] = []): string[] {
-  if (nodeJson?.id) out.push(nodeJson.id)
-  if (Array.isArray(nodeJson?.children)) nodeJson.children.forEach((c: any) => collectIds(c, out))
-  return out
-}
-
-// Collect every texture id referenced anywhere in the subtree (material.textures maps).
-function collectTextureIds(obj: any, set: Set<string>): void {
-  if (!obj || typeof obj !== 'object') return
-  if (Array.isArray(obj)) { obj.forEach(o => collectTextureIds(o, set)); return }
-  for (const key of Object.keys(obj)) {
-    const val = obj[key]
-    if (key === 'textures' && val && typeof val === 'object' && !Array.isArray(val)) {
-      for (const t of Object.values(val)) if (typeof t === 'string' && t) set.add(t)
-    } else {
-      collectTextureIds(val, set)
-    }
-  }
-}
-
-// Recursively assign fresh ids, returning the oldId -> newId map.
-function regenerateIds(nodeJson: any, map: Map<string, string>): void {
-  if (nodeJson?.id) {
-    const nid = cryptoRandomId()
-    map.set(nodeJson.id, nid)
-    nodeJson.id = nid
-  }
-  if (Array.isArray(nodeJson?.children)) nodeJson.children.forEach((c: any) => regenerateIds(c, map))
 }
 
 /** Build a Template capturing a node's subtree + its assets and out-of-band script/body/trigger data. */
