@@ -1,4 +1,4 @@
-import { Scene, ModelNode, AnimatedModel, Animator, Vec } from 'cleo'
+import { Scene, Node, ModelNode, AnimatedModel, Animator, Vec, canAccessVariable } from 'cleo'
 import type { Skin } from 'cleo'
 
 // Shared helpers for the Animation Editor: resolving the target skinned model, building the joint
@@ -91,4 +91,45 @@ export function worldPositionOf(matrix: any): [number, number, number] {
   const t = Vec.vec3.create()
   Vec.mat4.getTranslation(t, matrix)
   return [t[0], t[1], t[2]]
+}
+
+// ---- Variable-parameter binding (StateMachineEditor "Variable" parameter) ------------------------
+
+export type AccessGroup = 'Self' | 'Parent' | 'Scene'
+export interface AccessibleVariable {
+  nodeRef: 'self' | 'parent' | string // matches AnimationVariableBinding.nodeRef
+  group: AccessGroup
+  nodeLabel: string
+  varName: string
+  varType: 'number' | 'boolean'
+}
+
+/**
+ * Enumerate the node variables the given source node may bind an animation parameter to, per the
+ * access model: its own vars (Self), its parent's protected/public vars (Parent), and any other
+ * scene node's public vars (Scene). Only number/boolean variables are usable as transition inputs.
+ * Runs against the SOURCE node's real scene (the animation-editor clone is isolated).
+ */
+export function accessibleNodeVariables(sourceNode: Node | null, sourceScene: Scene | null): AccessibleVariable[] {
+  const out: AccessibleVariable[] = []
+  if (!sourceNode) return out
+  const usable = (t: string) => t === 'number' || t === 'boolean'
+  const collect = (owner: Node, requester: Node, nodeRef: string, group: AccessGroup, label: string) => {
+    for (const [name, v] of owner.variables) {
+      if (name.startsWith('__') || !usable(v.type)) continue
+      if (owner !== requester && !canAccessVariable(owner, requester, name)) continue
+      out.push({ nodeRef, group, nodeLabel: label, varName: name, varType: v.type as 'number' | 'boolean' })
+    }
+  }
+
+  collect(sourceNode, sourceNode, 'self', 'Self', 'Self')
+  const parent = sourceNode.parent
+  if (parent) collect(parent, sourceNode, 'parent', 'Parent', `Parent (${parent.name})`)
+  if (sourceScene) {
+    for (const node of sourceScene.nodes) {
+      if (node === sourceNode || node === parent || node.name.startsWith('__')) continue
+      collect(node, sourceNode, node.id, 'Scene', node.name)
+    }
+  }
+  return out
 }

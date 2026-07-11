@@ -20,22 +20,53 @@ import type { BVH } from "../bvh";
 type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape';
 
 export type NodeVariableType = 'number' | 'string' | 'boolean' | 'vec3';
+/**
+ * Cross-node access level for a variable (enforced at the scripting boundary — getData/setData):
+ * - 'public'    : any node may get/set it (default).
+ * - 'private'   : only the owning node may get/set it.
+ * - 'protected' : the owning node and any of its descendants (subtree) may get/set it.
+ */
+export type NodeVariableAccess = 'public' | 'private' | 'protected';
 export interface NodeVariable {
     type: NodeVariableType;
     value: any;
+    access?: NodeVariableAccess; // missing = 'public' (back-compat with old saves)
+}
+
+/**
+ * True if `requester` is allowed to get/set the variable `name` on `target`, per the variable's
+ * access level. Non-existent variables are always accessible (creating one is allowed).
+ */
+export function canAccessVariable(target: Node, requester: Node, name: string): boolean {
+    const v = target?.variables?.get(name);
+    if (!v) return true;
+    const access = v.access ?? 'public';
+    if (access === 'public') return true;
+    if (requester === target) return true;                 // owner always
+    if (access === 'protected') return requester.isDescendantOf(target);
+    return false;                                          // private, non-owner
 }
 
 /**
  * Returns a plain snapshot of a node's custom variables (name -> value). Read-only: assigning to
  * the returned object does NOT change the node — use `setData(node, name, value)` to write.
  *
+ * When `requester` is supplied (the node running a script), variables that `requester` is not
+ * allowed to read (private/protected owned by another node) are omitted. Called without a
+ * requester (engine/editor/self) it returns every variable.
+ *
  *   const data = getData(player);
  *   if (data.HealthPoints <= 0) { ... }
  *   console.log(data);                 // { HealthPoints: 3, ... }
  */
-export function getData(node: Node): Record<string, any> {
+export function getData(node: Node, requester?: Node): Record<string, any> {
     const out: Record<string, any> = {};
-    if (node && node.variables) for (const [name, v] of node.variables) out[name] = v.value;
+    if (node && node.variables) {
+        for (const [name, v] of node.variables) {
+            if (!requester || requester === node || canAccessVariable(node, requester, name))
+                out[name] = v.value;
+        }
+    }
     return out;
 }
 
@@ -49,6 +80,28 @@ export function setData(node: Node, name: string, ...params: any[]): void {
     if (!node || typeof node.setVariable !== 'function') return;
     const value = params.length <= 1 ? params[0] : params;
     node.setVariable(name, value);
+}
+
+/**
+ * Build the getData/setData a user script sees, bound to the running node as the "requester" so
+ * cross-node access respects each variable's public/private/protected level. Used by both the
+ * editor-play eval path (_parseScript) and the published no-eval path (attachScripts). Reads are
+ * filtered; blocked writes warn and no-op. Access to the script's OWN node is always allowed.
+ */
+export function bindDataAccessors(requester: Node): {
+    getData: (target: Node) => Record<string, any>;
+    setData: (target: Node, name: string, ...params: any[]) => void;
+} {
+    return {
+        getData: (target: Node) => getData(target, requester),
+        setData: (target: Node, name: string, ...params: any[]) => {
+            if (target && target !== requester && !canAccessVariable(target, requester, name)) {
+                Logger.warn(`Script on '${requester.name}' cannot set '${name}' on '${target.name}' (${target.variables.get(name)?.access ?? 'public'})`, 'Script');
+                return;
+            }
+            setData(target, name, ...params);
+        },
+    };
 }
 
 interface GlobalState {
@@ -331,9 +384,11 @@ export class Node {
       ) as (...args: any[]) => any;
 
       const findNode = (name: string) => node.scene?.getNodesByName(name)[0];
+      // Bind getData/setData to this node so cross-node access respects public/private/protected.
+      const acc = bindDataAccessors(node);
       const handlers = factory(
         node, node._globalStateObject, Logger, InputManager,
-        getData, setData, node.scene, findNode
+        acc.getData, acc.setData, node.scene, findNode
       ) || {};
 
       const adaptStartLike = (fn: any) => {
@@ -493,31 +548,43 @@ export class Node {
     const v = this._variables.get(name);
     return v ? v.value : undefined;
   }
-  public setVariable(name: string, value: any, type?: NodeVariableType): void {
+  public setVariable(name: string, value: any, type?: NodeVariableType, access?: NodeVariableAccess): void {
     const existing = this._variables.get(name);
     const resolvedType: NodeVariableType = type
       ?? existing?.type
       ?? (typeof value === 'number' ? 'number'
         : typeof value === 'boolean' ? 'boolean'
         : Array.isArray(value) ? 'vec3' : 'string');
-    this._variables.set(name, { type: resolvedType, value });
+    // Preserve the access level across value/type edits; default new variables to 'public'.
+    const resolvedAccess: NodeVariableAccess = access ?? existing?.access ?? 'public';
+    this._variables.set(name, { type: resolvedType, value, access: resolvedAccess });
   }
   public removeVariable(name: string): void { this._variables.delete(name); }
 
-  /** Serialize custom variables into a plain `{ name: { type, value } }` object. */
+  /** True if this node is somewhere beneath `ancestor` in the hierarchy (any depth). */
+  public isDescendantOf(ancestor: Node): boolean {
+    let n: Node | null = this._parent;
+    while (n) {
+      if (n === ancestor) return true;
+      n = n.parent;
+    }
+    return false;
+  }
+
+  /** Serialize custom variables into a plain `{ name: { type, value, access } }` object. */
   protected _serializeVariables(): Record<string, NodeVariable> {
     const out: Record<string, NodeVariable> = {};
-    for (const [name, v] of this._variables) out[name] = { type: v.type, value: v.value };
+    for (const [name, v] of this._variables) out[name] = { type: v.type, value: v.value, access: v.access ?? 'public' };
     return out;
   }
 
-  /** Populate a node's variables from serialized JSON (`{ name: { type, value } }`). */
+  /** Populate a node's variables from serialized JSON (`{ name: { type, value, access } }`). */
   protected static _parseVariables(node: Node, json: any): void {
     if (!json || typeof json !== 'object') return;
     for (const name of Object.keys(json)) {
       const entry = json[name];
       if (entry && typeof entry === 'object' && 'value' in entry)
-        node.setVariable(name, entry.value, entry.type);
+        node.setVariable(name, entry.value, entry.type, entry.access);
       else
         node.setVariable(name, entry);
     }
@@ -1060,7 +1127,10 @@ export class ModelNode extends Node {
 
     public update(delta: number, time: number): void {
         super.update(delta, time);
-        if (this._animator) {
+        // Skip animator playback when the scene has animations disabled (editor scenes) so skinned
+        // meshes hold their bind pose; Play scenes leave it enabled, and the Animation Editor drives
+        // its preview clone's animator directly (not via scene.update), so both still animate.
+        if (this._animator && this._scene?.animationsEnabled !== false) {
             this._animator.checkTriggers();
             this._animator.update(delta);
         }

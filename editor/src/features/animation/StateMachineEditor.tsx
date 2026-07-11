@@ -3,15 +3,18 @@ import { useCleoEngine } from '../EngineContext'
 import type {
   AnimationStateMachine, AnimationParameter, AnimationState,
   AnimationTransition, AnimationCondition, AnimationEventMarker,
-  AnimationParameterType, AnimationConditionOp,
+  AnimationParameterType, AnimationConditionOp, AnimationVariableBinding,
 } from 'cleo'
-import { getAnimationTarget } from './skeleton'
+import { getAnimationTarget, accessibleNodeVariables, AccessibleVariable } from './skeleton'
 import Collapsable from '../../components/Collapsable'
 
 const EMPTY: AnimationStateMachine = { parameters: [], states: [], transitions: [], events: [] }
 const clone = (sm: AnimationStateMachine): AnimationStateMachine => JSON.parse(JSON.stringify(sm))
 
-const OPS_FOR: Record<AnimationParameterType, AnimationConditionOp[]> = {
+// Condition operators keyed by a parameter's EFFECTIVE type. A 'variable' parameter behaves like a
+// float (number-bound) or bool (boolean-bound) for the purposes of conditions.
+type EffectiveType = 'float' | 'bool' | 'trigger'
+const OPS_FOR: Record<EffectiveType, AnimationConditionOp[]> = {
   float: ['gt', 'lt', 'eq', 'neq'],
   bool: ['true', 'false'],
   trigger: ['trigger'],
@@ -19,6 +22,10 @@ const OPS_FOR: Record<AnimationParameterType, AnimationConditionOp[]> = {
 const OP_LABEL: Record<AnimationConditionOp, string> = {
   gt: '>', lt: '<', eq: '==', neq: '!=', true: 'is true', false: 'is false', trigger: 'on',
 }
+const effectiveType = (p?: AnimationParameter): EffectiveType =>
+  !p ? 'float'
+    : p.type === 'variable' ? (p.variable?.varType === 'boolean' ? 'bool' : 'float')
+    : p.type
 
 const input = 'bg-[#3b3b3b] text-white border border-[#555] rounded px-1 py-0.5 text-xs'
 const btn = 'px-2 py-1 rounded bg-[#326acc] hover:bg-[#2a59a9] text-white border border-[#274b8f] text-xs'
@@ -26,7 +33,7 @@ const ghost = 'px-1.5 py-0.5 rounded border border-[#555] hover:bg-[#3b3b3b] tex
 const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
 
 export default function StateMachineEditor() {
-  const { editorScene, animationTargetId, commitAnimationStateMachine, closeTab, activeTabId, eventEmitter } = useCleoEngine()
+  const { editorScene, animationTargetId, animationSourceScene, animationSourceId, commitAnimationStateMachine, closeTab, activeTabId, eventEmitter } = useCleoEngine()
   const target = getAnimationTarget(editorScene, animationTargetId)
 
   const [sm, setSm] = useState<AnimationStateMachine>(EMPTY)
@@ -34,6 +41,10 @@ export default function StateMachineEditor() {
   const [, force] = useState(0)
 
   const clips = target ? target.model.animations.map(a => a.name) : []
+  // Variables a Variable-parameter can bind to (from the SOURCE node's real scene, not the clone).
+  const accessVars = useMemo<AccessibleVariable[]>(
+    () => accessibleNodeVariables(animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null, animationSourceScene),
+    [animationSourceScene, animationSourceId, animationTargetId])
 
   // Load the machine from the target on entry.
   useEffect(() => {
@@ -58,8 +69,18 @@ export default function StateMachineEditor() {
     update({ ...sm, parameters: [...sm.parameters, { name, type: 'float', default: 0 }] })
   }
   const setParam = (i: number, patch: Partial<AnimationParameter>) => {
+    const oldName = sm.parameters[i].name
     const parameters = sm.parameters.map((p, idx) => idx === i ? normalizeParam({ ...p, ...patch }) : p)
-    update({ ...sm, parameters })
+    // Renaming a parameter must follow through to the conditions that reference it (else they break
+    // silently and their transitions never fire).
+    let transitions = sm.transitions
+    if (patch.name && patch.name !== oldName) {
+      transitions = sm.transitions.map(t => ({
+        ...t,
+        conditions: t.conditions.map(c => c.param === oldName ? { ...c, param: patch.name! } : c),
+      }))
+    }
+    update({ ...sm, parameters, transitions })
   }
   const removeParam = (i: number) => update({ ...sm, parameters: sm.parameters.filter((_, idx) => idx !== i) })
 
@@ -114,7 +135,7 @@ export default function StateMachineEditor() {
   const addCondition = (ti: number) => {
     const p = sm.parameters[0]
     if (!p) return
-    const cond: AnimationCondition = { param: p.name, op: OPS_FOR[p.type][0], value: 0 }
+    const cond: AnimationCondition = { param: p.name, op: OPS_FOR[effectiveType(p)][0], value: 0 }
     setTransition(ti, { conditions: [...sm.transitions[ti].conditions, cond] })
   }
   const setCondition = (ti: number, ci: number, patch: Partial<AnimationCondition>) => {
@@ -160,12 +181,16 @@ export default function StateMachineEditor() {
                 <option value='float'>float</option>
                 <option value='bool'>bool</option>
                 <option value='trigger'>trigger</option>
+                <option value='variable'>variable</option>
               </select>
               {p.type === 'float'
                 ? <input className={input + ' w-[56px]'} type='number' step='0.1' value={Number(p.default)} onChange={e => setParam(i, { default: parseFloat(e.target.value) || 0 })} />
                 : p.type === 'bool'
                   ? <input type='checkbox' checked={!!p.default} onChange={e => setParam(i, { default: e.target.checked })} />
-                  : <span className='text-[10px] text-gray-500 w-[56px] text-center'>—</span>}
+                  : p.type === 'trigger'
+                    ? <span className='text-[10px] text-gray-500 w-[56px] text-center'>—</span>
+                    : <VariablePicker vars={accessVars} value={p.variable}
+                        onPick={b => setParam(i, { variable: b, default: b?.varType === 'boolean' ? false : 0 })} />}
               <button className={danger} onClick={() => removeParam(i)}>✕</button>
             </div>
           ))}
@@ -207,7 +232,7 @@ export default function StateMachineEditor() {
           {selectedState && stateTransitions.map(({ t, i }) => (
             <div key={i} className='border border-[#3b3b3b] rounded p-1.5 flex flex-col gap-1'>
               <div className='flex items-center gap-1'>
-                <span className='text-[10px] text-gray-400'>→</span>
+                <span className='text-[10px] text-gray-400 whitespace-nowrap'>{t.from} →</span>
                 <select className={input + ' flex-1'} value={t.to} onChange={e => setTransition(i, { to: e.target.value })}>
                   {sm.states.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                 </select>
@@ -224,13 +249,14 @@ export default function StateMachineEditor() {
               {/* Conditions */}
               <div className='flex flex-col gap-1'>
                 {t.conditions.map((c, ci) => {
-                  const type = paramOf(c.param)?.type ?? 'float'
+                  const type = effectiveType(paramOf(c.param))
                   return (
                     <div key={ci} className='flex items-center gap-1'>
-                      <select className={input} value={c.param} onChange={e => {
+                      <select className={input + (paramOf(c.param) ? '' : ' border-red-500 text-red-300')} value={c.param} onChange={e => {
                         const np = paramOf(e.target.value)
-                        setCondition(i, ci, { param: e.target.value, op: np ? OPS_FOR[np.type][0] : c.op })
+                        setCondition(i, ci, { param: e.target.value, op: OPS_FOR[effectiveType(np)][0] })
                       }}>
+                        {!paramOf(c.param) && <option value={c.param}>{c.param || '(none)'} — missing</option>}
                         {sm.parameters.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
                       </select>
                       <select className={input} value={c.op} onChange={e => setCondition(i, ci, { op: e.target.value as AnimationConditionOp })}>
@@ -276,12 +302,48 @@ export default function StateMachineEditor() {
               {p.type === 'float' && <input className={input + ' w-[64px]'} type='number' step='0.1' defaultValue={Number(p.default)} onChange={e => target.animator.setFloat(p.name, parseFloat(e.target.value) || 0)} />}
               {p.type === 'bool' && <input type='checkbox' defaultChecked={!!p.default} onChange={e => target.animator.setBool(p.name, e.target.checked)} />}
               {p.type === 'trigger' && <button className={ghost} onClick={() => target.animator.setTrigger(p.name)}>fire</button>}
+              {p.type === 'variable' && (
+                <span className='text-[10px] text-gray-500 truncate' title={p.variable ? `${p.variable.nodeRef}.${p.variable.varName}` : 'unbound'}>
+                  {p.variable ? `= ${String(target.animator.getParam(p.name))} (from ${p.variable.nodeRef}.${p.variable.varName})` : 'unbound'}
+                </span>
+              )}
             </div>
           ))}
           {sm.parameters.length === 0 && <p className='text-[11px] text-gray-400'>No parameters.</p>}
         </div>
       </Collapsable>
     </div>
+  )
+}
+
+// Grouped dropdown of the node variables a Variable parameter can bind to (Self / Parent / Scene).
+function VariablePicker({ vars, value, onPick }: {
+  vars: AccessibleVariable[]
+  value?: AnimationVariableBinding
+  onPick: (b: AnimationVariableBinding | undefined) => void
+}) {
+  const key = (nodeRef: string, varName: string) => `${nodeRef}|${varName}`
+  const current = value ? key(value.nodeRef, value.varName) : ''
+  const groups: Record<AccessibleVariable['group'], AccessibleVariable[]> = { Self: [], Parent: [], Scene: [] }
+  for (const v of vars) groups[v.group].push(v)
+  return (
+    <select className={input + ' w-[160px]'} value={current}
+      title='Bind to a node variable — Self (own), Parent (protected/public), Scene (public)'
+      onChange={e => {
+        const found = vars.find(v => key(v.nodeRef, v.varName) === e.target.value)
+        onPick(found ? { nodeRef: found.nodeRef, varName: found.varName, varType: found.varType } : undefined)
+      }}>
+      <option value=''>{value ? `${value.nodeRef} · ${value.varName} (missing)` : '— pick variable —'}</option>
+      {(['Self', 'Parent', 'Scene'] as const).map(g => groups[g].length > 0 && (
+        <optgroup key={g} label={g}>
+          {groups[g].map(v => (
+            <option key={key(v.nodeRef, v.varName)} value={key(v.nodeRef, v.varName)}>
+              {v.nodeLabel} · {v.varName} ({v.varType})
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
   )
 }
 
@@ -292,9 +354,14 @@ function uniqueName(base: string, existing: string[]): string {
   return name
 }
 
-// Keep a parameter's default value consistent with its type when the type changes.
+// Keep a parameter's default value + binding consistent when the type changes.
 function normalizeParam(p: AnimationParameter): AnimationParameter {
+  if (p.type !== 'variable' && p.variable) { const { variable, ...rest } = p; p = rest }
   if (p.type === 'float' && typeof p.default !== 'number') return { ...p, default: 0 }
   if ((p.type === 'bool' || p.type === 'trigger') && typeof p.default !== 'boolean') return { ...p, default: false }
+  if (p.type === 'variable') {
+    const wantNum = p.variable?.varType !== 'boolean'
+    return { ...p, default: wantNum ? (typeof p.default === 'number' ? p.default : 0) : (typeof p.default === 'boolean' ? p.default : false) }
+  }
   return p
 }

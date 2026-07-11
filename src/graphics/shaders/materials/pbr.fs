@@ -202,7 +202,7 @@ void main() {
     vec3 kD = 1.0 - kS;
     kD *= 1.0 - metallic;
 
-    vec3 ambient = vec3(0.1) * albedo; // simple ambient term
+    vec3 ambient = vec3(0.0); // no flat ambient floor — unlit PBR surfaces stay dark
     if (u_useEnvMap) {
         vec3 R = reflect(normalize(fragPos - u_viewPos), N);
         vec3 env = texture(u_envMap, R).rgb;
@@ -212,12 +212,14 @@ void main() {
         ambient += env * kS * specAtten;
     }
 
-    // Directional light
+    // Directional light (guard against an unset/zero direction -> normalize(0) = NaN)
     vec3 Lo = vec3(0.0);
-    float shadow = shadowCalculation(fragPosLightSpace);
-    vec3 Ld = normalize(-u_dirLight.direction);
-    vec3 radiance = u_dirLight.diffuse; // intensity/color
-    accumulateLight(N, V, albedo, metallic, roughness, Ld, radiance * (1.0 - shadow), Lo);
+    if (dot(u_dirLight.direction, u_dirLight.direction) > 1e-6) {
+        float shadow = shadowCalculation(fragPosLightSpace);
+        vec3 Ld = normalize(-u_dirLight.direction);
+        vec3 radiance = u_dirLight.diffuse; // intensity/color
+        accumulateLight(N, V, albedo, metallic, roughness, Ld, radiance * (1.0 - shadow), Lo);
+    }
 
     // Points
     for (int i = 0; i < u_numPointLights; i++) {

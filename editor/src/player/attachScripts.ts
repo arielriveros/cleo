@@ -1,4 +1,4 @@
-import { Logger, InputManager, getData, setData } from 'cleo';
+import { Logger, InputManager, bindDataAccessors } from 'cleo';
 
 // Attaches the published scripts (real functions from game.scripts.js, on window.CLEO_GAME_SCRIPTS) to
 // the parsed scene's nodes — the no-eval replacement for the engine's Node._parseScript. The factory
@@ -66,7 +66,9 @@ export function attachScripts(scene: any): number {
     const factory = registry[node.id];
     if (typeof factory !== 'function') continue;
     try {
-      const handlers = factory(node, global, Logger, InputManager, getData, setData, scene, findNode) || {};
+      // Bind getData/setData to this node so cross-node access respects public/private/protected.
+      const acc = bindDataAccessors(node);
+      const handlers = factory(node, global, Logger, InputManager, acc.getData, acc.setData, scene, findNode) || {};
       node.onStart = adaptStartLike(handlers.onStart);
       node.onSpawn = adaptStartLike(handlers.onSpawn);
       node.onUpdate = adaptUpdate(handlers.onUpdate);

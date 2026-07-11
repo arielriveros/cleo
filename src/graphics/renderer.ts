@@ -543,11 +543,30 @@ export class Renderer {
 
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
     private _renderForward(scene: Scene, shadowLight: LightNode | null): void {
+        this._resetForwardLighting(scene);
         for (const light of scene.lights)
             this._setLighting(light, scene.numPointLights, scene.numSpotlights);
         if (shadowLight) this._bindShadowToForwardShaders(shadowLight);
         this._bindEnvToForwardShaders(scene);
         this._renderScene(scene);
+    }
+
+    /**
+     * Zero the forward material shaders' directional slot and light counts before the current frame's
+     * lights are applied. Removed lights otherwise keep illuminating: their uniforms persist in the GL
+     * program, and (unlike point/spot lights) the directional light has no count guard. Called every
+     * frame — even with zero lights — so deleting the last light actually darkens the scene.
+     */
+    private _resetForwardLighting(scene: Scene): void {
+        for (const shaderName of ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned']) {
+            this._shaderManager.bind(shaderName);
+            this._shaderManager.setUniform('u_numPointLights', scene.numPointLights);
+            this._shaderManager.setUniform('u_numSpotlights', scene.numSpotlights);
+            this._shaderManager.setUniform('u_dirLight.direction', [0, 0, 0]);
+            this._shaderManager.setUniform('u_dirLight.diffuse', [0, 0, 0]);
+            this._shaderManager.setUniform('u_dirLight.specular', [0, 0, 0]);
+            this._shaderManager.setUniform('u_dirLight.ambient', [0, 0, 0]);
+        }
     }
 
     private _bindShadowToForwardShaders(light: LightNode): void {
@@ -897,9 +916,11 @@ export class Renderer {
         this._shaderManager.bind('deferredLighting');
         this._shaderManager.setUniform('u_numPointLights', scene.numPointLights);
         this._shaderManager.setUniform('u_numSpotlights', scene.numSpotlights);
+        let hasDirectional = false;
         for (const node of scene.lights) {
             switch (node.type) {
                 case 'directional':
+                    hasDirectional = true;
                     this._shaderManager.setUniform('u_dirLight.diffuse', node.light.diffuse);
                     this._shaderManager.setUniform('u_dirLight.specular', node.light.specular);
                     this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
@@ -927,6 +948,17 @@ export class Renderer {
                     this._shaderManager.setUniform(`u_spotlights[${node.index}].outerCutOff`, (node.light as Spotlight).outerCutOff * Math.PI / 180);
                     break;
             }
+        }
+
+        // Clear the directional slot when the scene has no directional light. Unlike point/spot lights
+        // (gated by the counts above), the directional light is applied by the shader whenever its
+        // direction is non-zero — so its last-set uniforms would otherwise persist in the program and
+        // keep lighting the scene after the light is deleted. Zeroing the direction trips that guard.
+        if (!hasDirectional) {
+            this._shaderManager.setUniform('u_dirLight.direction', [0, 0, 0]);
+            this._shaderManager.setUniform('u_dirLight.diffuse', [0, 0, 0]);
+            this._shaderManager.setUniform('u_dirLight.specular', [0, 0, 0]);
+            this._shaderManager.setUniform('u_dirLight.ambient', [0, 0, 0]);
         }
     }
 
@@ -1218,6 +1250,7 @@ export class Renderer {
         // Forward lighting is only needed if something is drawn through the material shaders.
         const needForward = transparentQueue.length > 0 || opaqueForwardQueue.length > 0 || scene.sprites.size > 0 || gizmoNodes.length > 0;
         if (needForward) {
+            this._resetForwardLighting(scene);
             for (const light of scene.lights)
                 this._setLighting(light, scene.numPointLights, scene.numSpotlights);
             if (shadowLight) this._bindShadowToForwardShaders(shadowLight);
@@ -2337,12 +2370,13 @@ export class Renderer {
 
     private _ensureOverlayMeshes(): void {
         if (this._overlaySphereMesh && this._overlayBoneMesh && this._overlayInstanceBuffer) return;
-        // Init the base VAO with a standard non-instanced 5-attribute shader; instance matrices are
-        // wired separately via setupInstanceMatrixBuffer (mirrors _foliagePass).
-        const attrs = this._shaderManager.getShader('blinn_phongGeometry').attributes;
+        // Position-only base geometry: init the VAO with the single-attribute shadowMap shader (spheres/
+        // cubes may lack tangents, so a 5-attr layout would mismatch). Instance matrices are wired
+        // separately via setupInstanceMatrixBuffer (mirrors _foliagePass).
+        const attrs = this._shaderManager.getShader('shadowMap').attributes;
         const build = (g: Geometry): Mesh => {
             const m = new Mesh();
-            m.create(g.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']), g.vertexCount, g.indices);
+            m.create(g.getData(['position']), g.vertexCount, g.indices);
             m.initializeVAO(attrs);
             return m;
         };

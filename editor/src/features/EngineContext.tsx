@@ -154,6 +154,7 @@ const EngineContext = createContext<{
   enterAnimationEditor: (nodeId: string) => void;
   animationTargetId: string | null; // cloned skinned model in the active animation tab's scene
   animationSourceId: string | null; // original node in the main scene (state-machine write-back target)
+  animationSourceScene: Scene | null; // scene the source node lives in (for Variable parameter pickers)
   commitAnimationStateMachine: (sm: any) => void;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   loadingProgress: LoadingProgress;
@@ -222,6 +223,7 @@ const EngineContext = createContext<{
     enterAnimationEditor: () => {},
     animationTargetId: null,
     animationSourceId: null,
+    animationSourceScene: null,
     commitAnimationStateMachine: () => {},
     terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null } },
     loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
@@ -409,6 +411,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // original node in the main scene (where authored state machines are written back).
   const animationTargetId = activeTab.kind === 'animation' && activeRuntime ? activeRuntime.rootId : null;
   const animationSourceId = activeTab.kind === 'animation' ? (activeTab.animationSourceId ?? null) : null;
+  // The scene the source node lives in (main or a template tab) — used to enumerate accessible
+  // node variables for the state machine's Variable parameters (the clone's scene is isolated).
+  const animationSourceScene = activeTab.kind === 'animation' ? (activeRuntime?.sourceScene ?? null) : null;
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
@@ -424,6 +429,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
 
     const scene = new Scene();
+    scene.animationsEnabled = false; // editing scene: skinned meshes hold bind pose (no playback)
     createEmptyScene(scene); // editor camera + a light so the template content is lit
 
     let rootId: string;
@@ -524,6 +530,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     // Clone the source node (with its skin, animations, mappings and state machine) into a fresh scene.
     const scene = new Scene();
+    scene.animationsEnabled = false; // the AnimationPlayer drives the clone directly, not scene.update
     const json = await source.serialize();
     stripDebug(json);
     regenerateIds(json, new Map()); // distinct ids so the clone never collides with the original
@@ -920,8 +927,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
           // Setting the editor scene and camera
           engine.setScene(editorSceneRef.current);
+          // The editor scene runs unpaused (for camera nav), so disable animator playback and pin
+          // skinned models to their bind/T pose — animations only play in Play mode + the Anim Editor.
+          editorSceneRef.current.animationsEnabled = false;
           editorSceneRef.current.start();
-          // Editor is paused (animators don't tick), so pin skinned models to their bind/T pose.
           showBindPoseForSkinnedModels(editorSceneRef.current);
 
           // Restore selection/dimension from saved prefs (falls back to the scene root / 3D).
@@ -1320,6 +1329,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       enterAnimationEditor,
       animationTargetId,
       animationSourceId,
+      animationSourceScene,
       commitAnimationStateMachine,
       terrainBrush,
       loadingProgress,

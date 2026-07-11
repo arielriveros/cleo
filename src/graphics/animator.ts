@@ -1,6 +1,6 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { AnimatedModel, Animation, AnimationSampler, AnimationChannel, Skin } from './animatedModel';
-import { Node, ModelNode } from '../core/scene/node';
+import { Node, ModelNode, canAccessVariable } from '../core/scene/node';
 import { InputManager } from '../input/inputManager';
 
 /**
@@ -35,13 +35,27 @@ export interface AnimationMapping {
 // events. The whole machine is a plain serializable object stored on the Animator/ModelNode.
 // ---------------------------------------------------------------------------
 
-export type AnimationParameterType = 'bool' | 'float' | 'trigger';
+export type AnimationParameterType = 'bool' | 'float' | 'trigger' | 'variable';
+
+/**
+ * Binds a 'variable' parameter to a node custom variable, read each frame through the access model
+ * ([[node-variable-access]]). `nodeRef` resolves relative to the model node running the machine:
+ * 'self', 'parent', or a specific node id in the scene.
+ */
+export interface AnimationVariableBinding {
+    nodeRef: 'self' | 'parent' | string;
+    varName: string;
+    /** Whether the bound variable reads as a number or boolean (decides which condition ops apply). */
+    varType: 'number' | 'boolean';
+}
 
 export interface AnimationParameter {
     name: string;
     type: AnimationParameterType;
-    /** Default value: number for 'float', boolean for 'bool'/'trigger'. */
+    /** Default value: number for 'float', boolean for 'bool'/'trigger'; fallback for 'variable'. */
     default: number | boolean;
+    /** Present only when type === 'variable': the node variable this parameter reads from. */
+    variable?: AnimationVariableBinding;
 }
 
 export interface AnimationState {
@@ -862,10 +876,41 @@ export class Animator {
         this._speed = state.speed ?? 1.0;
     }
 
+    /** Resolve the node a 'variable' parameter reads from, relative to this animator's model node. */
+    private _resolveVarNode(ref: string): Node | null {
+        if (ref === 'self') return this._node;
+        if (ref === 'parent') return this._node?.parent ?? null;
+        return this._node?.scene?.getNodeById(ref) ?? null;
+    }
+
+    /**
+     * Pull the live value of every 'variable' parameter into _paramValues, honoring the variable's
+     * public/private/protected access (requester = this model node). Falls back to the parameter's
+     * default when the source node is missing or access is denied.
+     */
+    private _refreshVariableParams(): void {
+        const sm = this._stateMachine;
+        if (!sm || !this._node) return;
+        for (const p of sm.parameters) {
+            if (p.type !== 'variable' || !p.variable) continue;
+            const src = this._resolveVarNode(p.variable.nodeRef);
+            let val: number | boolean = p.default;
+            if (src && canAccessVariable(src, this._node, p.variable.varName)) {
+                const v = src.getVariable(p.variable.varName);
+                // Coerce to the binding's declared type so conditions compare correctly even if the
+                // variable holds a numeric string / truthy value (otherwise the number ops, which
+                // require `typeof === 'number'`, silently never match).
+                if (v !== undefined) val = p.variable.varType === 'boolean' ? !!v : Number(v);
+            }
+            this._paramValues.set(p.name, val);
+        }
+    }
+
     /** Evaluate the active state's outgoing transitions and switch state when one fires. */
     private _evaluateStateMachine(): void {
         const sm = this._stateMachine;
         if (!sm) return;
+        this._refreshVariableParams(); // variable-bound params track their node variable each frame
         if (!this._currentStateName) { this.resetStateMachine(); return; }
 
         const duration = this._getAnimationDuration();

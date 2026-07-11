@@ -217,8 +217,9 @@ void main() {
 
         ambient = (kD * diffuseIBL + specularIBL) * u_iblIntensity;
     } else {
-        // No probe: original crude ambient + optional environment reflection.
-        ambient = vec3(0.1) * albedo;
+        // No probe: no flat ambient floor — unlit PBR surfaces stay dark (delete all lights => black).
+        // An optional crude environment reflection still applies when an env map is present.
+        ambient = vec3(0.0);
         if (u_useEnvMap) {
             vec3 kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
             vec3 R = reflect(-V, N);

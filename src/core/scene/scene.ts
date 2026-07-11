@@ -17,6 +17,10 @@ export class Scene {
     private _environmentMap: Texture | null = null;
     private _dirty: boolean = true;
     private _hasStarted: boolean = false;
+    // When false, ModelNode animators are NOT driven by scene.update (skinned meshes hold their bind/
+    // T pose). The editor sets this false on its editing scenes so animations only play in Play mode
+    // and the Animation Editor (which drives its preview clone directly). Default true = normal playback.
+    private _animationsEnabled: boolean = true;
 
     /** Back-reference to the physics system driving this scene (set by PhysicsSystem.set scene).
      *  Exposes physics to node scripts via the injected `scene` identifier (e.g. scene.physics.startRagdoll). */
@@ -56,6 +60,10 @@ export class Scene {
         this._hasStarted = false;
         Logger.info('Scene stopped');
     }
+
+    /** When false, skinned-model animators are not driven by scene.update (they hold bind pose). */
+    public get animationsEnabled(): boolean { return this._animationsEnabled; }
+    public set animationsEnabled(value: boolean) { this._animationsEnabled = value; }
 
     public addNode(node: Node): void {
         node.scene = this;
