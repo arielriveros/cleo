@@ -1,5 +1,6 @@
 import { gl } from './renderer';
 import { GLState } from './systems/glState';
+import { frameStats } from './renderStats';
 
 export class Mesh {
     private _vertexArray: WebGLVertexArrayObject;
@@ -90,18 +91,30 @@ export class Mesh {
 
     public draw(mode: number = gl.TRIANGLES): void {
         GLState.bindVAO(this._vertexArray);
+        const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
         if (this._indexBuffer && this._indexCount > 0)
             gl.drawElements(mode, this._indexCount, gl.UNSIGNED_SHORT, 0);
         else
             gl.drawArrays(mode, 0, this._vertexCount);
+        // Perf stats: every GL draw funnels through here (incl. fullscreen post-process quads).
+        frameStats.drawCalls++;
+        frameStats.vertices += count;
+        if (mode === gl.TRIANGLES) frameStats.triangles += count / 3;
     }
 
     public drawInstanced(instanceCount: number, mode: number = gl.TRIANGLES): void {
         GLState.bindVAO(this._vertexArray);
+        const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
         if (this._indexBuffer && this._indexCount > 0)
             gl.drawElementsInstanced(mode, this._indexCount, gl.UNSIGNED_SHORT, 0, instanceCount);
         else
             gl.drawArraysInstanced(mode, 0, this._vertexCount, instanceCount);
+        // Perf stats: instanced draws (PBR batches + foliage).
+        frameStats.drawCalls++;
+        frameStats.instancedDrawCalls++;
+        frameStats.instances += instanceCount;
+        frameStats.vertices += count * instanceCount;
+        if (mode === gl.TRIANGLES) frameStats.triangles += (count / 3) * instanceCount;
     }
 
     // Canonical interleaved vertex layout, matching the fixed order Geometry.getData() emits:

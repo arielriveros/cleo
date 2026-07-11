@@ -61,6 +61,7 @@ import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material } from './material';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
+import { frameStats, resetFrameStats } from './renderStats';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -384,6 +385,10 @@ export class Renderer {
         // Bake/refresh IBL (light probes + scene environment) before the main passes.
         this._updateIBL(scene);
 
+        // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the stats.
+        resetFrameStats();
+        const _statsT0 = performance.now();
+
         // Shadow map depth pass (shared by both pipelines). Keep the last shadow-casting light.
         let shadowLight: LightNode | null = null;
         for (const node of scene.lights)
@@ -419,6 +424,8 @@ export class Renderer {
 
         // Apply post processing
         this._applyPostProcessing();
+
+        frameStats.frameMs = performance.now() - _statsT0;
     }
 
     /**
@@ -627,6 +634,7 @@ export class Renderer {
         this._applyCull(node.model.material.config.side);
         const mode = node.model.material.config.wireframe ? gl.LINES : gl.TRIANGLES;
         node.model.mesh.draw(mode);
+        frameStats.objects++;
     }
 
     private _drawInstancedGroup(group: ModelNode[]): void {
@@ -655,6 +663,7 @@ export class Renderer {
         mesh.setupInstanceMatrixBuffer(this._instanceBuffer as WebGLBuffer, 5);
         const mode = first.model.material.config.wireframe ? gl.LINES : gl.TRIANGLES;
         mesh.drawInstanced(count, mode);
+        frameStats.objects += count; // each batched node is a distinct scene object
         // Reset the per-instance divisor so a later non-instanced draw of this (possibly shared) mesh
         // isn't left reading the instance buffer.
         mesh.teardownInstanceMatrixBuffer(5);
@@ -1464,6 +1473,7 @@ export class Renderer {
 
         // Set material uniforms + bind textures
         this._applyMaterial(node.model.material);
+        frameStats.objects++;
 
         const materialConfig = node.model.material.config;
 
@@ -1481,6 +1491,7 @@ export class Renderer {
     private _renderSprite(node: SpriteNode): void {
         if (!node.initialized)
             node.initializeSprite();
+        frameStats.objects++;
 
         this._shaderManager.bind(node.sprite.material.type);
 
@@ -1867,6 +1878,42 @@ export class Renderer {
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
+
+    /** Per-frame render statistics for the editor's performance HUD (last completed frame). */
+    public get stats() {
+        return {
+            drawCalls: frameStats.drawCalls,
+            instancedDrawCalls: frameStats.instancedDrawCalls,
+            objects: frameStats.objects,
+            instances: frameStats.instances,
+            triangles: frameStats.triangles,
+            vertices: frameStats.vertices,
+            frameMs: frameStats.frameMs,
+            pipeline: this._deferred ? 'deferred' as const : 'forward' as const,
+            width: this._canvas.width,
+            height: this._canvas.height,
+            gpuBytes: this._estimateGpuBytes(),
+        };
+    }
+
+    /** Rough GPU memory estimate: the renderer's own render-target framebuffers + registered asset
+     *  textures. Excludes vertex/instance buffers and IBL cubemaps, so it is a lower bound. */
+    private _estimateGpuBytes(): number {
+        let bytes = 0;
+        const addFbo = (fbo?: Framebuffer) => {
+            if (!fbo) return;
+            for (const c of fbo.colors) bytes += c.byteSize;
+            if (fbo.depth) bytes += fbo.depth.byteSize;
+        };
+        addFbo(this._sceneFBO); addFbo(this._gBufferFBO); addFbo(this._shadowMapFBO);
+        addFbo(this._bloomFBO); addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
+        addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO);
+        for (const f of this._shadowCascades) addFbo(f);
+        for (const f of this._blur_FBOs) addFbo(f);
+        for (const f of this._compose_FBOs) addFbo(f);
+        for (const tex of TextureManager.Instance.textures.values()) bytes += tex.byteSize;
+        return bytes;
+    }
 
     public get exposure(): number { return this._exposure; }
     public set exposure(exposure: number) { this._exposure = exposure; }

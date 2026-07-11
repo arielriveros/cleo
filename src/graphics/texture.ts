@@ -297,4 +297,13 @@ export class Texture {
             target: this._target === gl.TEXTURE_2D ? 'texture2D' : 'cubemap'
         }
     }
+
+    /** Rough VRAM footprint in bytes (width*height * bytes-per-pixel * faces * mip factor). bpp mirrors
+     *  the constructor's internalFormat choice (depth=4 / RGBA16F=8 / RGBA8=4). Used by the perf HUD. */
+    public get byteSize(): number {
+        const bpp = this._usage === 'depth' ? 4 : (this._precision === 'high' ? 8 : 4);
+        const faces = this._target === gl.TEXTURE_CUBE_MAP ? 6 : 1;
+        const mip = this._mipMap ? 4 / 3 : 1;
+        return this._width * this._height * bpp * faces * mip;
+    }
 }

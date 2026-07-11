@@ -5,6 +5,7 @@ import PositionGizmo from "./PositionGizmo";
 import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
 import RendererOptions from "./renderer/RendererOptions";
+import RendererStats from "./renderer/RendererStats";
 import { instantiateTemplate } from "../utils/templates";
 
 export default function EngineViewport() {
@@ -214,8 +215,9 @@ export default function EngineViewport() {
     return (
         <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}
              onContextMenu={(e) => e.preventDefault()}>
-            {/* Minimal floating 2D/3D switch, top-right of the viewport (Main tab only, not during play). */}
-            {editorMode !== 'template' && editorMode !== 'material' && !isPlayMode && (
+            {/* Minimal floating 2D/3D switch, top-right of the viewport (Main tab only, not during play).
+                Hidden in renderer mode where the top-right holds the perf HUD (and 2D makes no sense). */}
+            {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'renderer' && !isPlayMode && (
                 <select
                     data-cleo-overlay
                     value={dimension}
@@ -237,6 +239,7 @@ export default function EngineViewport() {
                 <LandscapeInspector />
             </>}
             {editorMode === 'renderer' && <RendererOptions />}
+            {editorMode === 'renderer' && <RendererStats />}
         </div>
     );
 }
