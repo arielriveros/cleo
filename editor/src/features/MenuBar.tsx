@@ -11,7 +11,10 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 
 export default function MenuBar() {
-  const { editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, savingState, eventEmitter: eventEmitter } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, savingState, eventEmitter: eventEmitter } = useCleoEngine();
+  // Current renderer look (post/SSAO/motion-blur/clear color) — embedded in exports/publishes so the
+  // standalone game reproduces what the editor is showing instead of falling back to renderer defaults.
+  const renderSettings = () => instance?.renderer.getRenderSettings();
   const templateMode = editorMode === 'template';
   const materialMode = editorMode === 'material';
   // Template and material tabs both hide the project/scene-level actions (they edit a library asset).
@@ -46,7 +49,7 @@ export default function MenuBar() {
       if (!data) return;
       try {
         const json = JSON.parse(data as string);
-        applyGameData(json, { scene: editorScene, scripts, bodies, triggers, setUI });
+        applyGameData(json, { scene: editorScene, scripts, bodies, triggers, setUI, renderer: instance?.renderer });
         eventEmitter.emit('TEXTURES_CHANGED');
         eventEmitter.emit('SCENE_CHANGED');
         eventEmitter.emit('SELECT_NODE', null);
@@ -62,7 +65,7 @@ export default function MenuBar() {
   // Export the scene as a downloadable .json file (the former Save behavior).
   const onExport = async () => {
     if (!editorScene) return;
-    const json = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui });
+    const json = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
     const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -97,13 +100,13 @@ export default function MenuBar() {
 
   const onPublishWeb = () => runPublish(async () => {
     if (!editorScene) throw new Error('No scene to publish');
-    const data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui });
+    const data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
     return publishWeb(data, { embedAssets });
   });
 
   const onPublishDesktop = (installer: boolean) => runPublish(async () => {
     if (!editorScene) throw new Error('No scene to publish');
-    const data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui });
+    const data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
     return publishDesktop(data, { installer, embedAssets });
   });
 

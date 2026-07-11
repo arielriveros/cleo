@@ -1,4 +1,4 @@
-import type { Scene } from 'cleo';
+import type { Scene, Renderer, RenderSettings } from 'cleo';
 import { Logger } from 'cleo';
 import { buildGameData } from '../features/publish/buildGameData';
 import { idbGet, idbSet, idbDelete } from './idb';
@@ -16,11 +16,12 @@ export interface ProjectPrefs {
   selectedNode?: string | null;
 }
 
-// The stored blob = the runtime game data ({ scene, textures?, ui }) plus editor prefs.
+// The stored blob = the runtime game data ({ scene, textures?, ui, config? }) plus editor prefs.
 export interface SavedProject {
   scene: any;
   textures?: any;
   ui?: { version: number; elements: any[] };
+  config?: { graphics?: { clearColor?: number[] }; render?: RenderSettings };
   prefs?: ProjectPrefs;
   savedAt?: number;
 }
@@ -43,6 +44,7 @@ export async function saveProject(params: {
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[] }>;
   ui: { version: number; elements: any[] };
+  settings?: RenderSettings;
   prefs?: ProjectPrefs;
 }): Promise<boolean> {
   try {
@@ -52,6 +54,7 @@ export async function saveProject(params: {
       bodies: params.bodies,
       triggers: params.triggers,
       ui: params.ui,
+      settings: params.settings,
     });
     const payload: SavedProject = { ...gameData, prefs: params.prefs, savedAt: Date.now() };
     await idbSet(PROJECT_KEY, payload);
@@ -92,11 +95,14 @@ export async function clearProject(): Promise<void> {
  * from the tree so they don't run in edit mode, then parse the tree into the scene.
  * Shared by the Import button and startup restore.
  */
-export function applyGameData(json: any, deps: EngineMaps & { setUI: (s: UIState) => void }): void {
+export function applyGameData(json: any, deps: EngineMaps & { setUI: (s: UIState) => void; renderer?: Renderer }): void {
   if (!json) return;
   // UI (top-level `ui`, or legacy `scene.ui`).
   if (json.ui) deps.setUI({ version: json.ui.version ?? 1, elements: json.ui.elements ?? [] });
   else if (json.scene?.ui) deps.setUI({ version: json.scene.ui.version ?? 1, elements: json.scene.ui.elements ?? [] });
+
+  // Restore the saved renderer look so the editor (and its Play mode) matches what was last saved.
+  if (deps.renderer && json.config?.render) deps.renderer.applyRenderSettings(json.config.render);
 
   const importNodeState = (node: any) => {
     if (!node || typeof node !== 'object') return;

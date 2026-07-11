@@ -8,7 +8,7 @@ export { Logger } from "./core/logger";
 export { Mesh } from "./graphics/mesh";
 export { Material } from "./graphics/material";
 export { Renderer } from "./graphics/renderer";
-export type { SkeletonOverlay } from "./graphics/renderer";
+export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";
 export { Texture } from "./graphics/texture";
 export { Loader } from "./graphics/loader";

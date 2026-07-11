@@ -53,6 +53,10 @@ async function boot(): Promise<void> {
     physics: data?.config?.physics ?? {},
   });
 
+  // Reproduce the editor's Renderer-panel look (exposure, SSAO, motion blur, foliage culling, clear
+  // color). Without this the standalone game would use renderer defaults and not match editor play.
+  engine.renderer.applyRenderSettings(data?.config?.render);
+
   const viewport = document.getElementById('game-viewport');
   if (!viewport) throw new Error('Missing #game-viewport element');
   engine.setViewport(viewport);

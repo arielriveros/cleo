@@ -91,6 +91,28 @@ interface RendererConfig {
 }
 
 /**
+ * Runtime-tunable render/look settings. Snapshotting these (getRenderSettings) and restoring them
+ * (applyRenderSettings) lets a published/standalone game reproduce exactly the look configured in the
+ * editor's Renderer panel — otherwise a freshly constructed renderer would fall back to defaults.
+ * Excludes editor-only state (debugView, grid, selection outline) which never ships with a game.
+ */
+export interface RenderSettings {
+    clearColor: number[];
+    exposure: number;
+    chromaticAberrationStrength: number;
+    ssaoEnabled: boolean;
+    ssaoRadius: number;
+    ssaoPower: number;
+    ssaoBias: number;
+    motionBlurEnabled: boolean;
+    motionBlurIntensity: number;
+    motionBlurSamples: number;
+    frustumCulling: boolean;
+    foliageCullDistance: number;
+    foliageCellSize: number;
+}
+
+/**
  * Editor-only skeleton overlay: joint spheres + bone connectors drawn instanced and always-on-top
  * (depth test off) in the gizmo pass. The caller packs world-space model matrices (16 floats each)
  * into `jointMatrices`/`boneMatrices` and refreshes them every frame via Renderer.setSkeletonOverlay.
@@ -2180,6 +2202,13 @@ export class Renderer {
         return bytes;
     }
 
+    /** Background/clear color (RGBA 0..1). Setter also updates the live GL clear color if a context exists. */
+    public get clearColor(): number[] { return this._config.clearColor ? [...this._config.clearColor] : [0, 0, 0, 1]; }
+    public set clearColor(color: number[]) {
+        this._config.clearColor = [...color];
+        if (typeof gl !== 'undefined' && gl) gl.clearColor(color[0], color[1], color[2], color[3] ?? 1);
+    }
+
     public get exposure(): number { return this._exposure; }
     public set exposure(exposure: number) { this._exposure = exposure; }
 
@@ -2219,6 +2248,47 @@ export class Renderer {
     /** Foliage spatial-grid cell size (world units); layers re-bucket to match on the next frame. */
     public get foliageCellSize(): number { return this._foliageCellSize; }
     public set foliageCellSize(s: number) { this._foliageCellSize = Math.max(1, s); }
+
+    /** Snapshot every runtime-tunable render setting (for persisting a scene's look / publishing). */
+    public getRenderSettings(): RenderSettings {
+        return {
+            clearColor: this.clearColor,
+            exposure: this._exposure,
+            chromaticAberrationStrength: this._chromaticAberrationStrength,
+            ssaoEnabled: this._ssaoEnabled,
+            ssaoRadius: this._ssaoRadius,
+            ssaoPower: this._ssaoPower,
+            ssaoBias: this._ssaoBias,
+            motionBlurEnabled: this._motionBlurEnabled,
+            motionBlurIntensity: this._motionBlurIntensity,
+            motionBlurSamples: this._motionBlurSamples,
+            frustumCulling: this._frustumCulling,
+            foliageCullDistance: this._foliageCullDistance,
+            foliageCellSize: this._foliageCellSize,
+        };
+    }
+
+    /**
+     * Restore settings captured by getRenderSettings. Partial-safe: missing/undefined keys keep their
+     * current value, so it tolerates older saved games that lack newer settings. Values pass through the
+     * individual setters, so their clamping still applies.
+     */
+    public applyRenderSettings(s: Partial<RenderSettings> | null | undefined): void {
+        if (!s) return;
+        if (s.clearColor) this.clearColor = s.clearColor;
+        if (s.exposure !== undefined) this.exposure = s.exposure;
+        if (s.chromaticAberrationStrength !== undefined) this.chromaticAberrationStrength = s.chromaticAberrationStrength;
+        if (s.ssaoEnabled !== undefined) this.ssaoEnabled = s.ssaoEnabled;
+        if (s.ssaoRadius !== undefined) this.ssaoRadius = s.ssaoRadius;
+        if (s.ssaoPower !== undefined) this.ssaoPower = s.ssaoPower;
+        if (s.ssaoBias !== undefined) this.ssaoBias = s.ssaoBias;
+        if (s.motionBlurEnabled !== undefined) this.motionBlurEnabled = s.motionBlurEnabled;
+        if (s.motionBlurIntensity !== undefined) this.motionBlurIntensity = s.motionBlurIntensity;
+        if (s.motionBlurSamples !== undefined) this.motionBlurSamples = s.motionBlurSamples;
+        if (s.frustumCulling !== undefined) this.frustumCulling = s.frustumCulling;
+        if (s.foliageCullDistance !== undefined) this.foliageCullDistance = s.foliageCullDistance;
+        if (s.foliageCellSize !== undefined) this.foliageCellSize = s.foliageCellSize;
+    }
 
     // Editor "Renderer" debug channel currently blitted to screen ('final' = normal image).
     public get debugView(): DebugView { return this._debugView; }

@@ -875,6 +875,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           bodies: bodiesRef.current,
           triggers: triggersRef.current,
           ui: uiStateRef.current,
+          settings: instanceRef.current?.renderer.getRenderSettings(),
           prefs: { dimension: dimensionRef.current, selectedNode },
         }),
         new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('Save timed out')), 15000)),
@@ -893,7 +894,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const setupInitialScene = async () => {
     const project = await loadProject();
     if (project) {
-      applyGameData(project, { ...engineMaps(), scene: editorSceneRef.current, setUI: setUiState });
+      applyGameData(project, { ...engineMaps(), scene: editorSceneRef.current, setUI: setUiState, renderer: instanceRef.current?.renderer });
       ensureEditorCamera(editorSceneRef.current);
       pendingPrefsRef.current = project.prefs ?? null;
     } else {

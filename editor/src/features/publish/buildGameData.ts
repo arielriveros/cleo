@@ -1,4 +1,4 @@
-import type { Scene } from 'cleo';
+import type { Scene, RenderSettings } from 'cleo';
 import { Logger } from 'cleo';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 
@@ -12,6 +12,10 @@ export interface GameDataSources {
   // Play mode passes `true` (textures already live in TextureManager, skip re-serializing them).
   // Publishing passes `false` so every texture is embedded as base64 in the output.
   useCache?: boolean;
+  // Snapshot of the live renderer's look settings (Renderer.getRenderSettings). Serialized into
+  // `config` so a standalone/published game reproduces the exact look the editor was showing —
+  // otherwise its fresh renderer falls back to defaults (black clear color, default post/SSAO/blur).
+  settings?: RenderSettings;
 }
 
 // Remove editor-only and debug helper nodes so they never ship in a play scene or published game.
@@ -69,5 +73,14 @@ export async function buildGameData(sources: GameDataSources): Promise<any> {
   injectScripts(json.scene, sources.scripts);
   injectBodies(json.scene, sources.bodies, sources.triggers);
   json.ui = { version: sources.ui.version, elements: sources.ui.elements };
+  // Persist the renderer look. `graphics` seeds the engine constructor (clear color from frame one);
+  // `render` is the full snapshot the player re-applies to its renderer after boot. Scene.parse ignores
+  // `config`, so it's inert for in-editor play (which reuses the live renderer anyway).
+  if (sources.settings) {
+    json.config = {
+      graphics: { clearColor: sources.settings.clearColor },
+      render: sources.settings,
+    };
+  }
   return json;
 }
