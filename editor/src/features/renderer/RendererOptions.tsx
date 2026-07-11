@@ -39,6 +39,18 @@ function Slider({ label, value, min, max, step, onChange }:
   );
 }
 
+function NumberField({ label, value, min, step, onChange }:
+  { label: string; value: number; min?: number; step?: number; onChange: (v: number) => void }) {
+  return (
+    <label className='flex items-center justify-between gap-2 my-1 text-xs'>
+      <span className='w-[70px] shrink-0'>{label}</span>
+      <input className='flex-1 bg-[#1e1e1e] border border-[#3b3b3b] rounded px-1 py-0.5 text-right tabular-nums'
+        type='number' min={min} step={step} value={value}
+        onChange={(e) => { const v = parseFloat(e.target.value); onChange(Number.isFinite(v) ? v : 0); }} />
+    </label>
+  );
+}
+
 export default function RendererOptions() {
   const { instance, isPlayMode } = useCleoEngine();
   const renderer: any = instance?.renderer ?? null;
@@ -53,6 +65,8 @@ export default function RendererOptions() {
   const [ssaoBias, setSsaoBias] = useState<number>(() => renderer?.ssaoBias ?? 0.025);
   const [gridVisible, setGridVisible] = useState<boolean>(() => renderer?.gridVisible ?? true);
   const [gridPlane, setGridPlane] = useState<string>(() => renderer?.gridPlane ?? 'xz');
+  const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
+  const [foliageCullDistance, setFoliageCullDistance] = useState<number>(() => renderer?.foliageCullDistance ?? 0);
 
   // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => { if (renderer) renderer.debugView = 'final'; }, [renderer]);
@@ -63,6 +77,8 @@ export default function RendererOptions() {
     setDebugViewState(renderer.debugView);
     setGridVisible(renderer.gridVisible);
     setGridPlane(renderer.gridPlane);
+    setFrustumCulling(renderer.frustumCulling);
+    setFoliageCullDistance(renderer.foliageCullDistance);
   }, [isPlayMode, renderer]);
 
   if (!renderer) {
@@ -92,6 +108,17 @@ export default function RendererOptions() {
             </button>
           ))}
         </div>
+      </Section>
+
+      <Section title='Optimizations'>
+        <label className='flex items-center gap-2 my-1 text-xs'>
+          <input type='checkbox' checked={frustumCulling}
+            onChange={(e) => { renderer.frustumCulling = e.target.checked; setFrustumCulling(e.target.checked); }} />
+          Frustum Culling
+        </label>
+        <NumberField label='Foliage Dist' value={foliageCullDistance} min={0} step={5}
+          onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); }} />
+        <div className='text-[10px] text-[#8a8aa0] mt-0.5'>Foliage cull distance in world units (0 = off).</div>
       </Section>
 
       <Section title='Tone / Post'>

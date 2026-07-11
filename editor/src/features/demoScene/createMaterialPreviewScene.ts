@@ -1,18 +1,54 @@
-import { Scene, LightNode, DirectionalLight } from 'cleo';
-import { makeEditorCamera } from './createEmptyScene';
+import { Scene, Node, Camera, CameraNode, LightNode, DirectionalLight, InputManager } from 'cleo';
+
+// Orbit preview tunables.
+const RADIUS = 3.2;       // camera distance from the sphere (at the origin)
+const MIN_RADIUS = 1.8;
+const MAX_RADIUS = 12;
+const INIT_PITCH = -18;   // degrees — slight downward tilt for a 3/4 view
+const INIT_YAW = 28;      // degrees
+const ROT_SPEED = 10;     // matches the editor's free-fly look sensitivity
+const ZOOM_SPEED = 0.005; // wheel delta -> radius
 
 /**
- * Dedicated preview scene for the Material editor: a navigable editor camera framed on the origin plus
- * key + fill directional lights so Basic / Blinn-Phong / PBR materials all read well on the preview
- * sphere. The caller adds the sphere (a ModelNode) as the editable root. No light icons are created —
- * the editor-helper reconciler is skipped in material mode (see EngineContext), keeping the frame clean.
+ * Dedicated preview scene for the Material editor. The camera is mounted on an **orbit rig**: a pivot
+ * Node at the origin (the sphere's centre) with the camera as a child sitting +Z away and looking back
+ * down its -Z at the pivot. Rotating the pivot orbits the camera around the sphere while it always
+ * frames the origin — drag to rotate, wheel to zoom, and there is no free-fly or panning. Key + fill
+ * directional lights make Basic/Blinn-Phong/PBR all read well. The caller adds the sphere (a ModelNode)
+ * as the editable root. No light icons appear because the editor-helper reconciler is skipped in
+ * material mode (see EngineContext).
  */
 export function createMaterialPreviewScene(scene: Scene): void {
-  const cam = makeEditorCamera();
-  cam.setPosition([2.4, 2.4, 2.4]); // closer than the default editor camera; same look-at-origin orientation
-  scene.addNode(cam);
+  const pivot = new Node('__editor__orbitPivot');
+  scene.addNode(pivot);
+  pivot.setRotation([INIT_PITCH, INIT_YAW, 0]);
 
-  // Key light. A touch of ambient keeps metallic PBR from going pitch-black without an environment map.
+  const cam = new CameraNode('__editor__Camera', new Camera({ far: 10000 }));
+  cam.active = true;
+  // The engine's forward is +Z, so sit the camera on the -Z side of the pivot; its forward then points
+  // back through the pivot at the origin. worldForward = pivot·[0,0,1] = -normalize(worldPos) = look-at-origin.
+  cam.setPosition([0, 0, -RADIUS]);
+  pivot.addChild(cam);
+
+  // Orbit controller lives on the camera's onUpdate (which CameraNode runs before it re-derives the view
+  // from the node transform). It rotates the pivot (orbit) and dollies the camera (zoom); the target is
+  // always the origin, so the sphere never leaves the centre of the frame.
+  let pitch = INIT_PITCH, yaw = INIT_YAW, radius = RADIUS;
+  cam.onUpdate = (node, delta) => {
+    const mouse = InputManager.instance.mouse;
+    if (mouse.buttons.Left) {
+      yaw -= mouse.velocity[0] * delta * ROT_SPEED;
+      pitch += mouse.velocity[1] * delta * ROT_SPEED;
+      pitch = Math.max(-85, Math.min(85, pitch)); // don't roll over the poles
+      pivot.setRotation([pitch, yaw, 0]);
+    }
+    if (Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
+      radius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, radius + mouse.wheel.deltaY * ZOOM_SPEED));
+      node.setPosition([0, 0, -radius]);
+    }
+  };
+
+  // Key light — a touch of ambient keeps metallic PBR from going pitch-black without an environment map.
   const key = new LightNode('key', new DirectionalLight({ ambient: [0.18, 0.18, 0.20] }));
   key.setPosition([0, 5, 0]).setRotation([120, -35, 0]);
   key.castShadows = false;

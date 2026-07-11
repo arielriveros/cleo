@@ -1,4 +1,4 @@
-import { mat4, vec3 } from "gl-matrix";
+import { mat4 } from "gl-matrix";
 
 /**
  * View frustum represented as 6 world-space planes, used for fast per-object culling. Planes are
@@ -49,7 +49,7 @@ export class Frustum {
     }
 
     /** True if the world-space AABB is at least partially inside the frustum (p-vertex test). */
-    public intersectsAABB(min: vec3, max: vec3): boolean {
+    public intersectsAABB(min: ArrayLike<number>, max: ArrayLike<number>): boolean {
         const p = this._planes;
         for (let i = 0; i < 6; i++) {
             const o = i * 4;

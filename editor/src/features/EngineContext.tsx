@@ -589,8 +589,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // SCENE_CHANGED as it adds light/gizmo helpers to the freshly-shown template scene).
     dirtyArmedRef.current = false;
     requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material'); }));
-    // Template/material scenes are authored in 3D; the Main tab restores its own remembered dimension.
-    eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'main' ? dimensionRef.current : '3D');
+    // Template scenes are authored in 3D; the Main tab restores its own remembered dimension. Material
+    // tabs are skipped: their preview camera uses a self-contained orbit rig (createMaterialPreviewScene)
+    // that the free-fly CHANGE_DIMENSION handler must not overwrite.
+    if (tab.kind !== 'material')
+      eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'main' ? dimensionRef.current : '3D');
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     eventEmitter.current.emit('SELECT_NODE', runtime ? runtime.rootId : null);

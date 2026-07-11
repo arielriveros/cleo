@@ -176,6 +176,8 @@ export class Renderer {
     // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _viewProj.
     private _frustum: Frustum = new Frustum();
     private _frustumCulling: boolean = true;
+    // Foliage cells beyond this camera distance are skipped (world units; 0 = disabled).
+    private _foliageCullDistance: number = 0;
 
     // Editor infinite grid overlay (off in published builds; toggled by the editor)
     private _gridEnabled: boolean = false;
@@ -581,6 +583,9 @@ export class Renderer {
 
     private _foliagePass(scene: Scene): void {
         const defaultAttrs = this._shaderManager.getShader('blinn_phongGeometry').attributes;
+        const camPos = this._activeCamera.position;
+        const maxD2 = this._foliageCullDistance > 0 ? this._foliageCullDistance * this._foliageCullDistance : Infinity;
+
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             for (const layer of landscape.terrain.foliage) {
@@ -594,14 +599,10 @@ export class Renderer {
                     layer.initialized = true;
                 }
 
-                // Re-upload the per-instance matrix buffer only when the scatter changed.
-                if (!layer.glBuffer) layer.glBuffer = gl.createBuffer();
-                if (layer.uploadedVersion !== layer.version) {
-                    gl.bindBuffer(gl.ARRAY_BUFFER, layer.glBuffer);
-                    gl.bufferData(gl.ARRAY_BUFFER, layer.matrices.subarray(0, layer.count * 16), gl.STATIC_DRAW);
-                    layer.uploadedVersion = layer.version;
-                }
+                // Free GPU buffers orphaned by a previous cell-layout rebuild (e.g. after painting).
+                for (const buf of layer.collectStaleBuffers()) gl.deleteBuffer(buf);
 
+                // Bind shader/material once per layer; only the instance buffer + draw vary per cell.
                 const shaderType = layer.kind === 'billboard' ? 'foliageBillboardInstanced'
                     : (layer.model.material.type === 'pbr' ? 'pbrGeometryInstanced' : 'blinn_phongGeometryInstanced');
                 this._shaderManager.bind(shaderType);
@@ -617,11 +618,43 @@ export class Renderer {
                     this._applyCull(layer.model.material.config.side);
                 }
 
-                layer.model.mesh.setupInstanceMatrixBuffer(layer.glBuffer as WebGLBuffer, 5);
-                layer.model.mesh.drawInstanced(layer.count);
-                layer.model.mesh.teardownInstanceMatrixBuffer(5);
+                for (const cell of layer.cells) {
+                    // Distance cull: nearest point of the cell's AABB to the camera.
+                    if (maxD2 !== Infinity && this._aabbDistSq(camPos, cell.min, cell.max) > maxD2) {
+                        frameStats.culled += cell.count;
+                        continue;
+                    }
+                    // Frustum cull (honors the global toggle).
+                    if (this._frustumCulling && !this._frustum.intersectsAABB(cell.min, cell.max)) {
+                        frameStats.culled += cell.count;
+                        continue;
+                    }
+
+                    // Upload this cell's static matrices once (per layout version).
+                    if (!cell.glBuffer) cell.glBuffer = gl.createBuffer();
+                    if (cell.uploadedVersion !== layer.version) {
+                        gl.bindBuffer(gl.ARRAY_BUFFER, cell.glBuffer);
+                        gl.bufferData(gl.ARRAY_BUFFER, cell.matrices, gl.STATIC_DRAW);
+                        cell.uploadedVersion = layer.version;
+                    }
+
+                    layer.model.mesh.setupInstanceMatrixBuffer(cell.glBuffer as WebGLBuffer, 5);
+                    layer.model.mesh.drawInstanced(cell.count);
+                    layer.model.mesh.teardownInstanceMatrixBuffer(5);
+                }
             }
         }
+    }
+
+    /** Squared distance from point `p` to the closest point of the AABB [min, max] (0 if inside). */
+    private _aabbDistSq(p: vec3, min: ArrayLike<number>, max: ArrayLike<number>): number {
+        let d2 = 0;
+        for (let a = 0; a < 3; a++) {
+            const v = p[a];
+            if (v < min[a]) d2 += (min[a] - v) * (min[a] - v);
+            else if (v > max[a]) d2 += (v - max[a]) * (v - max[a]);
+        }
+        return d2;
     }
 
     private _geometryShaderFor(node: ModelNode): string {
@@ -1960,6 +1993,10 @@ export class Renderer {
     /** Per-object camera frustum culling for the main color passes (on by default). */
     public get frustumCulling(): boolean { return this._frustumCulling; }
     public set frustumCulling(enabled: boolean) { this._frustumCulling = enabled; }
+
+    /** Distance (world units) beyond which foliage cells are culled; 0 disables distance culling. */
+    public get foliageCullDistance(): number { return this._foliageCullDistance; }
+    public set foliageCullDistance(d: number) { this._foliageCullDistance = Math.max(0, d); }
 
     // Editor "Renderer" debug channel currently blitted to screen ('final' = normal image).
     public get debugView(): DebugView { return this._debugView; }
