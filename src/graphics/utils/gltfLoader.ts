@@ -45,6 +45,7 @@ interface GLTFMaterial {
         metallicRoughnessTexture?: { index: number };
     };
     normalTexture?: { index: number };
+    occlusionTexture?: { index: number };
     emissiveTexture?: { index: number };
     emissiveFactor?: number[];
     alphaMode?: string;
@@ -413,10 +414,12 @@ export class GLTFLoader {
 
             // 3. External URI
             if (image.uri) {
-                // 3a. File-import flow: resolve against the provided files (folder or multi-select)
+                // 3a. File-import flow: resolve against the provided files (folder or multi-select).
+                // If the referenced file wasn't uploaded, return undefined (missing) rather than falling
+                // through to a doomed relative fetch — the latter rejects with an image error Event.
                 if (this.files.length) {
                     const file = this.findFile(image.uri);
-                    if (file) return TextureManager.Instance.addTextureFromFile(file, cfg);
+                    return file ? TextureManager.Instance.addTextureFromFile(file, cfg) : undefined;
                 }
                 // 3b. Path-load flow: resolve relative to the GLTF's base path
                 return TextureManager.Instance.addTextureFromPath(this.basePath + image.uri, cfg);
@@ -498,35 +501,36 @@ export class GLTFLoader {
 
     private async createMaterial(materialIndex?: number): Promise<Material> {
         if (materialIndex === undefined || !this.gltf.materials) {
-            return Material.Default({});
+            return Material.PBR({});
         }
 
         const gltfMaterial = this.gltf.materials[materialIndex];
         const pbr = gltfMaterial.pbrMetallicRoughness;
 
-        // Extract material properties
-        const diffuse: [number, number, number] = pbr?.baseColorFactor ? 
-            [pbr.baseColorFactor[0], pbr.baseColorFactor[1], pbr.baseColorFactor[2]] : 
+        const baseColor: [number, number, number] = pbr?.baseColorFactor ?
+            [pbr.baseColorFactor[0], pbr.baseColorFactor[1], pbr.baseColorFactor[2]] :
             [1, 1, 1];
 
-        const emissive: [number, number, number] = gltfMaterial.emissiveFactor ? 
-            [gltfMaterial.emissiveFactor[0], gltfMaterial.emissiveFactor[1], gltfMaterial.emissiveFactor[2]] : 
+        const emissiveFactor: [number, number, number] = gltfMaterial.emissiveFactor ?
+            [gltfMaterial.emissiveFactor[0], gltfMaterial.emissiveFactor[1], gltfMaterial.emissiveFactor[2]] :
             [0, 0, 0];
 
-        // Load textures
+        // GLTF is a PBR format: build a PBR material and load its full metallic-roughness texture set
+        // (baseColor, metallic-roughness, normal, occlusion, emissive) rather than a Blinn-Phong subset,
+        // so imported/uploaded textures are all actually used.
         const textures: any = {};
+        if (pbr?.baseColorTexture) textures.baseColorTexture = this.loadTexture(pbr.baseColorTexture.index);
+        if (pbr?.metallicRoughnessTexture) textures.metallicRoughnessTexture = this.loadTexture(pbr.metallicRoughnessTexture.index);
+        if (gltfMaterial.normalTexture) textures.normalMap = this.loadTexture(gltfMaterial.normalTexture.index);
+        if (gltfMaterial.occlusionTexture) textures.occlusionMap = this.loadTexture(gltfMaterial.occlusionTexture.index);
+        if (gltfMaterial.emissiveTexture) textures.emissiveMap = this.loadTexture(gltfMaterial.emissiveTexture.index);
 
-        if (pbr?.baseColorTexture) textures.base = this.loadTexture(pbr.baseColorTexture.index);
-        if (gltfMaterial.normalTexture) textures.normal = this.loadTexture(gltfMaterial.normalTexture.index);
-        if (gltfMaterial.emissiveTexture) textures.emissive = this.loadTexture(gltfMaterial.emissiveTexture.index);
-
-        return Material.Default({
-            diffuse,
-            emissive,
-            specular: [0.04, 0.04, 0.04], // Default for PBR
-            ambient: [0.1, 0.1, 0.1],
-            shininess: pbr?.roughnessFactor ? (1.0 - pbr.roughnessFactor) * 128 : 64,
+        return Material.PBR({
+            baseColor,
+            metallic: pbr?.metallicFactor === undefined ? 1.0 : pbr.metallicFactor,
+            roughness: pbr?.roughnessFactor === undefined ? 1.0 : pbr.roughnessFactor,
             opacity: pbr?.baseColorFactor ? pbr.baseColorFactor[3] : 1.0,
+            emissiveFactor,
             textures
         });
     }

@@ -81,6 +81,22 @@ export class Geometry {
         this._boundingSphere = { center, radius };
         return this._boundingSphere;
     }
+    /**
+     * Uniformly scale the geometry in object (vertex) space, multiplying every position by `factor` and
+     * invalidating the cached BVH + bounding sphere. Normals/tangents are unaffected by uniform scaling.
+     * Used to bake an import-normalization scale into the mesh so the asset keeps an identity transform.
+     */
+    public scale(factor: number): void {
+        if (factor === 1) return;
+        for (let i = 0; i < this._positions.length; i++) {
+            this._positions[i][0] *= factor;
+            this._positions[i][1] *= factor;
+            this._positions[i][2] *= factor;
+        }
+        this._bvh = undefined;
+        this._boundingSphere = undefined;
+    }
+
     public getData(attributes: string[] = []): number[] {
         const interleaved: number[] = [];
 

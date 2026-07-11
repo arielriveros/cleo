@@ -1,4 +1,4 @@
-import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine } from 'cleo';
+import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel } from 'cleo';
 import { createMeshPreviewScene } from '../features/demoScene/createMeshPreviewScene';
 import { createMaterialPreviewScene } from '../features/demoScene/createMaterialPreviewScene';
 
@@ -17,7 +17,7 @@ export function materialTextureIds(material: Material): string[] {
  * untextured mesh. Polls the referenced textures with a hard timeout, then yields one frame so the GPU
  * upload lands before the render.
  */
-async function awaitTexturesReady(ids: string[], timeoutMs = 5000): Promise<void> {
+async function awaitTexturesReady(ids: string[], timeoutMs = 10000): Promise<void> {
   const tm = TextureManager.Instance;
   const ready = () => ids.every(id => {
     const tex = tm.getTexture(id);
@@ -44,13 +44,13 @@ function captureClean(engine: CleoEngine, scene: Scene): string {
   }
 }
 
-function collectModelNodes(node: Node, out: ModelNode[]): void {
+export function collectModelNodes(node: Node, out: ModelNode[]): void {
   if ((node as any).nodeType === 'model') out.push(node as ModelNode);
   for (const c of node.children) collectModelNodes(c, out);
 }
 
 // Union of every child ModelNode's world-space bounding sphere (center + radius).
-function combineBounds(root: Node): { center: [number, number, number]; radius: number } {
+export function combineBounds(root: Node): { center: [number, number, number]; radius: number } {
   const models: ModelNode[] = [];
   collectModelNodes(root, models);
   const spheres = models.map(m => m.getBoundingSphere()).filter(s => s && isFinite(s.radius));
@@ -72,6 +72,60 @@ function combineBounds(root: Node): { center: [number, number, number]; radius: 
   return { center: [cx, cy, cz], radius: r };
 }
 
+/** Combined bounding-sphere radius of a subtree at its current scale (updates transforms first). */
+export function meshBoundsRadius(root: Node): number {
+  root.updateTransforms();
+  return combineBounds(root).radius;
+}
+
+/**
+ * Scale a model so its bounding diameter becomes `targetSize` world units (imported models arrive at
+ * wildly different scales — many far too big for the scene). Returns the applied factor.
+ *
+ * Scaling is baked into the mesh **vertices** (`Geometry.scale`) so the asset keeps an identity node
+ * transform. Skinned meshes are the exception: their vertices are bound to a skeleton, so vertex scaling
+ * would break the skinning — those fall back to transform-space scaling on the root.
+ */
+export function normalizeRootScale(root: Node, targetSize: number): number {
+  const radius = meshBoundsRadius(root);
+  if (!(radius > 0)) return 1;
+  const factor = targetSize / (2 * radius);
+  if (factor === 1) return 1;
+
+  const models: ModelNode[] = [];
+  collectModelNodes(root, models);
+  const hasSkinned = models.some(m => m.model instanceof AnimatedModel && (m.model as AnimatedModel).hasSkin);
+  if (hasSkinned) {
+    root.setUniformScale(factor); // transform-space to keep the skeleton consistent
+    return factor;
+  }
+
+  // Static subtree: scale each unique geometry's vertices (dedupe in case a geometry is shared).
+  const scaled = new Set<Geometry>();
+  for (const m of models) {
+    const geo = m.model.geometry;
+    if (scaled.has(geo)) continue;
+    scaled.add(geo);
+    geo.scale(factor);
+  }
+  root.updateTransforms(); // refresh cached bounds after the vertex edit
+  return factor;
+}
+
+/**
+ * Wait until every texture referenced by any material in the subtree has finished decoding. Imported
+ * textures (and modal-uploaded ones after a re-parse) load asynchronously, so callers must await this
+ * before serializing the mesh/material — TextureManager.serializeTextureData() silently drops any texture
+ * whose image hasn't loaded yet.
+ */
+export async function awaitSubtreeTexturesReady(root: Node): Promise<void> {
+  const models: ModelNode[] = [];
+  collectModelNodes(root, models);
+  const texIds = new Set<string>();
+  for (const m of models) for (const id of materialTextureIds(m.model.material)) texIds.add(id);
+  await awaitTexturesReady([...texIds]);
+}
+
 /**
  * Render a base64 PNG thumbnail of an imported mesh subtree: a throwaway scene auto-framed to the
  * model's bounds, lit by the mesh preview lights, captured after its textures finish loading.
@@ -85,11 +139,7 @@ export async function renderMeshThumbnail(engine: CleoEngine, root: Node): Promi
   createMeshPreviewScene(scene, center, radius);
   scene.start();
 
-  const models: ModelNode[] = [];
-  collectModelNodes(root, models);
-  const texIds = new Set<string>();
-  for (const m of models) for (const id of materialTextureIds(m.model.material)) texIds.add(id);
-  await awaitTexturesReady([...texIds]);
+  await awaitSubtreeTexturesReady(root);
 
   return captureClean(engine, scene);
 }

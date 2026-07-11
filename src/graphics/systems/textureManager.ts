@@ -23,12 +23,18 @@ export class TextureManager {
     }
 
     public addTextureFromPath(path: string, config?: TextureConfig, id?: string): string {
+        const identifier = id || uuidv4();
         const texture = new Texture(config);
+        this._textures.set(identifier, texture);
         Loader.loadImage(path).then((image: HTMLImageElement) => {
             texture.create(image, image.width, image.height);
+        }).catch((err) => {
+            // Missing/broken image path (e.g. a texture file not included in an import): drop the
+            // texture rather than leaving the load promise to surface as an unhandled rejection.
+            console.warn('Failed to load texture from path:', path, err);
+            this._textures.delete(identifier);
         });
-        const identifier = id || uuidv4();
-        return this.addTexture(texture, identifier);
+        return identifier;
     }
 
     public addTextureFromData(data: HTMLImageElement, config?: TextureConfig, id?: string): string {
@@ -109,33 +115,37 @@ export class TextureManager {
 
     public addTextureFromFile(file: File, config?: TextureConfig, id?: string): string | undefined {
         if (!file) return undefined;
-        
+
         const identifier = id || uuidv4();
         const texture = new Texture(config);
-        
-        // Add the texture to the map immediately but don't create it yet
+
+        // Register the texture immediately so callers can use the id synchronously; the image loads async.
         this._textures.set(identifier, texture);
-        
-        const objectURL = URL.createObjectURL(file);
-        const image = new Image();
-        
-        image.onerror = () => {
-            URL.revokeObjectURL(objectURL); // Clean up even on error
-            this._textures.delete(identifier); // Remove failed texture
+
+        // Read the file into a self-contained data URL rather than an object URL. Blob URLs created with
+        // URL.createObjectURL have a revoke/lifetime that can 404 (net::ERR_FILE_NOT_FOUND) when the load
+        // is deferred (e.g. an import re-parse after the review modal) or the source File's disk backing
+        // goes stale; a data URL carries the bytes inline and has no such lifetime.
+        const reader = new FileReader();
+        reader.onload = () => {
+            const image = new Image();
+            image.onerror = () => this._textures.delete(identifier);
+            image.onload = () => {
+                if (image.width > 0 && image.height > 0 && image.complete) {
+                    texture.create(image, image.width, image.height);
+                } else {
+                    console.error('Invalid file image dimensions:', image.width, image.height);
+                    this._textures.delete(identifier);
+                }
+            };
+            image.src = reader.result as string;
         };
-        
-        image.onload = () => {
-            if (image.width > 0 && image.height > 0 && image.complete) {
-                texture.create(image, image.width, image.height);
-            } else {
-                console.error('Invalid file image dimensions:', image.width, image.height);
-                this._textures.delete(identifier);
-            }
-            URL.revokeObjectURL(objectURL); // Clean up the object URL
+        reader.onerror = () => {
+            console.warn('Failed to read texture file:', file.name);
+            this._textures.delete(identifier);
         };
-        
-        image.src = objectURL;
-        
+        reader.readAsDataURL(file);
+
         return identifier;
     }
 

@@ -177,9 +177,9 @@ export class Renderer {
     private _frustum: Frustum = new Frustum();
     private _frustumCulling: boolean = true;
     // Foliage cells beyond this camera distance are skipped (world units; 0 = disabled).
-    private _foliageCullDistance: number = 0;
+    private _foliageCullDistance: number = 65;
     // Foliage spatial-grid cell size (world units); smaller = tighter culling, more draw calls.
-    private _foliageCellSize: number = 32;
+    private _foliageCellSize: number = 13;
 
     // Editor infinite grid overlay (off in published builds; toggled by the editor)
     private _gridEnabled: boolean = false;

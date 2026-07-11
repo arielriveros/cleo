@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useCleoEngine, GizmoMode } from "./EngineContext";
-import { Model, ModelNode, Material, Geometry } from "cleo";
+import { Model, ModelNode, Material, Geometry, Vec } from "cleo";
 import { GizmoGeometry } from "../utils/GizmoGeometry";
 import { Raycaster } from "cleo";
 
@@ -11,7 +11,7 @@ interface TransformGizmoProps {
 }
 
 type GizmoAxis = 'x' | 'y' | 'z' | null;
-type Transform = { pos: [number, number, number]; rot: [number, number, number]; scale: [number, number, number] };
+type Transform = { pos: [number, number, number]; rot: [number, number, number]; scale: [number, number, number]; rotQuat: number[] };
 
 export default function PositionGizmo({ selectedNodeId, onTransformChange, viewportRef }: TransformGizmoProps) {
     const { instance, editorScene, eventEmitter, gizmoMode } = useCleoEngine();
@@ -116,11 +116,19 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         const s = computeGizmoScale(worldPos);
         // Rings sit centered on the node; arrows/scale-handles sit half a unit out along their axis.
         const off = gizmoMode === 'rotation' ? 0 : 0.5;
+        // Rotation/scale handles follow the node's rotation (they operate in its local frame); the
+        // position gizmo stays world-aligned (translation is applied in world/parent space).
+        const oriented = gizmoMode !== 'position';
+        const q = selectedNode.worldQuaternion;
+        const identity: [number, number, number, number] = [0, 0, 0, 1];
 
         const place = (node: ModelNode | null, dir: [number, number, number]) => {
             if (!node) return;
             node.setScale([s, s, s]);
-            node.setPosition([worldPos[0] + dir[0] * off * s, worldPos[1] + dir[1] * off * s, worldPos[2] + dir[2] * off * s]);
+            node.setQuaternion(oriented ? q : identity);
+            // Offset the handle along its axis, rotated into the node's local frame when oriented.
+            const d = oriented ? (Vec.vec3.transformQuat(Vec.vec3.create(), dir, q) as unknown as [number, number, number]) : dir;
+            node.setPosition([worldPos[0] + d[0] * off * s, worldPos[1] + d[1] * off * s, worldPos[2] + d[2] * off * s]);
         };
         place(gizmoNodes.xAxis, [1, 0, 0]);
         place(gizmoNodes.yAxis, [0, 1, 0]);
@@ -129,6 +137,7 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         const placeLine = (node: ModelNode | null) => {
             if (!node) return;
             node.setScale([s, s, s]);
+            node.setQuaternion(oriented ? q : identity);
             node.setPosition([worldPos[0], worldPos[1], worldPos[2]]);
         };
         placeLine(gizmoNodes.xLine); placeLine(gizmoNodes.yLine); placeLine(gizmoNodes.zLine);
@@ -187,6 +196,7 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
                         pos: Array.from(selectedNode.position) as [number, number, number],
                         rot: Array.from(selectedNode.rotation) as [number, number, number],
                         scale: Array.from(selectedNode.scale) as [number, number, number],
+                        rotQuat: Array.from(selectedNode.worldQuaternion),
                     });
                 }
             }
@@ -242,7 +252,13 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
             newRotation[axisIndex] = initialTransform.rot[axisIndex] + moveDeltaX * ROT_SENSITIVITY;
             onTransformChange(selectedNodeId, 'rotation', newRotation);
         } else if (gizmoMode === 'scale') {
-            const delta = projectOntoAxis(0);
+            // Scale handles point along the node's local axes, so project the mouse onto the local axis
+            // direction (world axis rotated by the node's rotation captured at drag start).
+            const sensitivity = 0.01;
+            const axisUnit: [number, number, number] = [axisIndex === 0 ? 1 : 0, axisIndex === 1 ? 1 : 0, axisIndex === 2 ? 1 : 0];
+            const a = Vec.vec3.transformQuat(Vec.vec3.create(), axisUnit, initialTransform.rotQuat as any);
+            Vec.vec3.normalize(a, a);
+            const delta = (Vec.vec3.dot(a as any, cameraRight as any) * moveDeltaX + Vec.vec3.dot(a as any, cameraUp as any) * (-moveDeltaY)) * sensitivity;
             const newScale: [number, number, number] = [...initialTransform.scale];
             newScale[axisIndex] = Math.max(0.01, initialTransform.scale[axisIndex] + delta);
             onTransformChange(selectedNodeId, 'scale', newScale);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { readDroppedEntries } from '../../utils/importGrouping'
+import { useMultiSelect, BatchDeleteBar } from '../explorerSelection'
 
 // Bottom-bar "Meshes" panel: the global mesh library. Mirrors MaterialExplorer — cards show a rendered
 // thumbnail of the imported model and are draggable into the viewport to instantiate. The header hosts
@@ -34,6 +35,13 @@ export default function MeshExplorer() {
     e.dataTransfer.effectAllowed = 'copy'
   }
 
+  const { selected, toggle, clear, has } = useMultiSelect(meshes.map(m => m.id))
+  const batchDelete = () => {
+    if (!window.confirm(`Delete ${selected.size} selected meshes? Placed copies stay in the scene.`)) return
+    selected.forEach(id => removeMesh(id))
+    clear()
+  }
+
   return (
     <div className='w-full h-full p-2 text-white text-sm'>
       <div className='flex items-center gap-2 mb-2'>
@@ -49,6 +57,7 @@ export default function MeshExplorer() {
         <input id='mesh-import-folder' className='hidden' type='file' {...({ webkitdirectory: '', directory: '' } as any)}
           onChange={onPick} />
         {importing && <span className='text-xs text-[#ffd27a]'>Importing…</span>}
+        <BatchDeleteBar count={selected.size} noun='meshes' onDelete={batchDelete} onClear={clear} />
       </div>
 
       <div
@@ -65,9 +74,10 @@ export default function MeshExplorer() {
       <div className='flex flex-wrap gap-2'>
         {meshes.map(m => (
           <div key={m.id}
-            className='w-[96px] flex flex-col items-center bg-[#3b3b3b] border border-[#2d2d77] rounded p-1 cursor-grab'
+            className={`w-[96px] flex flex-col items-center bg-[#3b3b3b] border border-[#2d2d77] rounded p-1 cursor-grab ${has(m.id) ? 'ring-2 ring-[#2c2cff]' : ''}`}
             draggable
             onDragStart={(e) => onMeshDragStart(e, m.id)}
+            onClick={() => toggle(m.id)}
             title='Drag into the viewport to place'>
             <div className='w-[80px] h-[80px] rounded overflow-hidden bg-[#202020] flex items-center justify-center'>
               {m.thumbnail
@@ -77,7 +87,7 @@ export default function MeshExplorer() {
             <span className='truncate w-full text-center text-xs mt-1' title={m.name}>{m.name}</span>
             <div className='flex gap-3 mt-1'>
               <button className='text-red-300 text-xs'
-                onClick={() => { if (window.confirm(`Delete mesh "${m.name}"? Placed copies stay in the scene.`)) removeMesh(m.id) }}
+                onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete mesh "${m.name}"? Placed copies stay in the scene.`)) removeMesh(m.id) }}
                 title='Delete'>🗑</button>
             </div>
           </div>

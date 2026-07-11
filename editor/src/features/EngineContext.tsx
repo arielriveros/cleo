@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, Camera, LightNode, DirectionalLight, CameraNode, InputManager, Model, Geometry, Material, Node, ModelNode, Vec, TextureManager, SpriteNode, Sprite, Logger } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, Node, ModelNode, TextureManager, Logger } from "cleo";
 import NullImage from '../images/null.png';
-import DinosaurImage from '../images/dinosaur.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
@@ -12,8 +11,24 @@ import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR }
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback } from "../utils/materials";
 import { MeshAsset, buildMeshAsset } from "../utils/meshes";
 import { groupImportFiles } from "../utils/importGrouping";
-import { renderMeshThumbnail, renderMaterialThumbnail } from "../utils/meshThumbnails";
-import { Loader, AnimatedModel } from "cleo";
+import { renderMeshThumbnail, renderMaterialThumbnail, normalizeRootScale, meshBoundsRadius, awaitSubtreeTexturesReady } from "../utils/meshThumbnails";
+import { parseBundleToRoot } from "../utils/meshImport";
+import { detectMissingTextures } from "../utils/textureRefs";
+
+// A mesh awaiting user review in the import modal (parsed but not yet committed to the library).
+export type PendingMeshImportView = {
+  bundleName: string;
+  subMeshCount: number;
+  materialCount: number;
+  missing: string[];      // referenced texture basenames not present in the upload
+  sizeRadius: number;     // combined bounding radius at scale 1 (diameter = 2*radius)
+};
+// The user's decision from the import modal.
+export type MeshImportDecision = {
+  extraFiles: File[];     // textures uploaded to fill missing references (aliased to expected names)
+  normalize: boolean;
+  targetSize: number;     // desired bounding diameter in world units
+};
 import { buildGameData } from "./publish/buildGameData";
 import { loadProject, applyGameData, saveProject, ProjectPrefs } from "../utils/projectStorage";
 import { idbGet, idbSet } from "../utils/idb";
@@ -102,6 +117,7 @@ export type TerrainBrushState = {
 const EngineContext = createContext<{
   instance: CleoEngine | null;
   editorScene: Scene;
+  mainScene: Scene; // the game scene (editorScene may be a template/material preview scene)
   eventEmitter: EventEmitter;
   selectedNode: string | null;
   isGizmoDragging: boolean;
@@ -160,12 +176,16 @@ const EngineContext = createContext<{
   meshes: MeshAsset[];
   removeMesh: (id: string) => void;
   importMeshFiles: (files: File[]) => Promise<void>;
+  // Mesh import review modal
+  pendingMeshImport: PendingMeshImportView | null;
+  resolveMeshImport: (decision: MeshImportDecision | null) => void;
   // Project persistence
   saveProject: () => void;
   savingState: SavingState;
   }>({
     instance: null,
     editorScene: new Scene(),
+    mainScene: new Scene(),
     eventEmitter: new EventEmitter(),
     selectedNode: null,
     isGizmoDragging: false,
@@ -215,6 +235,8 @@ const EngineContext = createContext<{
     meshes: [],
     removeMesh: () => {},
     importMeshFiles: async () => {},
+    pendingMeshImport: null,
+    resolveMeshImport: () => {},
     saveProject: () => {},
     savingState: 'idle',
   });
@@ -342,6 +364,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const addMesh = (m: MeshAsset) => setMeshes(prev => [...prev, m]);
   const removeMesh = (id: string) => setMeshes(prev => prev.filter(x => x.id !== id));
+
+  // Mesh import review modal: importMeshFiles parks each parsed mesh here and awaits the user's decision
+  // (resolved by MeshImportModal via resolveMeshImport). The resolver lives in a ref so the promise in
+  // importMeshFiles can be settled from the modal without re-rendering churn.
+  const [pendingMeshImport, setPendingMeshImport] = useState<PendingMeshImportView | null>(null);
+  const pendingResolverRef = useRef<((d: MeshImportDecision | null) => void) | null>(null);
+  const resolveMeshImport = (decision: MeshImportDecision | null) => {
+    const r = pendingResolverRef.current;
+    pendingResolverRef.current = null;
+    setPendingMeshImport(null);
+    if (r) r(decision);
+  };
 
   // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
@@ -580,10 +614,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Import one or more model files (and folders) into the mesh library. Groups the selection into one
-  // bundle per model file; for each: parses (animated-first for GLTF, else static — textures land in
-  // TextureManager during parse), registers each material as a reusable MaterialAsset linked via
-  // __materialId, renders a thumbnail, and stores the mesh asset. Meshes land in the library only —
-  // the user drags a card into the viewport to place it.
+  // bundle per model file; for each: parses, then opens the review modal (missing textures + scale
+  // normalization) and awaits the user. On accept, applies any uploaded textures (re-parse), normalizes
+  // scale, registers each material as a reusable MaterialAsset linked via __materialId, renders a
+  // thumbnail, and stores the mesh asset. Meshes land in the library only — drag a card to place it.
   const importMeshFiles = async (files: File[]) => {
     const engine = instanceRef.current;
     if (!engine) { Logger.error('Engine not ready for import', 'Editor'); return; }
@@ -592,26 +626,38 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     for (const bundle of bundles) {
       try {
-        // Animated-first for GLTF so skinned meshes keep their skeleton/animations; fall back to static.
-        const isGltf = bundle.files.some(f => f.name.toLowerCase().endsWith('.gltf'));
-        let parsed: { name: string; model: Model | AnimatedModel }[] = [];
-        if (isGltf) {
-          try { parsed = await Loader.loadAnimatedModelsFromFile(bundle.files) as any; }
-          catch { parsed = []; }
-        }
-        if (!parsed.length) parsed = await Model.fromFile({ files: bundle.files });
-        if (!parsed.length) { Logger.warn(`No meshes parsed from "${bundle.name}"`, 'Editor'); continue; }
+        // Parse for review (registers textures; broken slots for any files missing from the upload).
+        let parsedResult: { root: Node; children: ModelNode[] };
+        try { parsedResult = await parseBundleToRoot(bundle.files, bundle.name); }
+        catch (e) { Logger.warn(`${e}`, 'Editor'); continue; }
+        let { root, children } = parsedResult;
 
-        // One parent Node holding a ModelNode per sub-mesh (mirrors the old import grouping). Animated
-        // models auto-get an Animator; their available animations serialize with the node — we leave
-        // animation mappings for the user to configure in the inspector.
-        const root = new Node(bundle.name);
-        const children: ModelNode[] = [];
-        for (const p of parsed) {
-          const modelNode = new ModelNode(p.name || bundle.name, p.model);
-          root.addChild(modelNode);
-          children.push(modelNode);
-        }
+        const missing = await detectMissingTextures(bundle.files);
+        const sizeRadius = meshBoundsRadius(root);
+        const matKeys = new Set<string>();
+        for (const c of children) { const m = (c.model as any).material; if (m) matKeys.add(JSON.stringify(m.serialize())); }
+
+        // Park the parsed mesh and await the user's decision from MeshImportModal.
+        const decision = await new Promise<MeshImportDecision | null>(resolve => {
+          pendingResolverRef.current = resolve;
+          setPendingMeshImport({
+            bundleName: bundle.name,
+            subMeshCount: children.length,
+            materialCount: matKeys.size,
+            missing,
+            sizeRadius,
+          });
+        });
+        if (!decision) { Logger.info(`Import of "${bundle.name}" cancelled`, 'Editor'); continue; }
+
+        // The user uploaded previously-missing textures → re-parse so they wire into the materials.
+        if (decision.extraFiles.length)
+          ({ root, children } = await parseBundleToRoot([...bundle.files, ...decision.extraFiles], bundle.name));
+        if (decision.normalize) normalizeRootScale(root, decision.targetSize);
+
+        // Textures decode asynchronously; wait for them before serializing any asset, otherwise
+        // serializeTextureData drops not-yet-loaded textures and the material imports untextured.
+        await awaitSubtreeTexturesReady(root);
 
         // Register a MaterialAsset per unique material (deduped within the bundle) and link each node.
         const materialIds: string[] = [];
@@ -643,6 +689,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         Logger.info(`Imported mesh "${bundle.name}" (${children.length} sub-mesh${children.length === 1 ? '' : 'es'})`, 'Editor');
       } catch (err) {
         Logger.error(`Failed to import "${bundle.name}": ${err}`, 'Editor');
+        // Make sure a stuck modal is cleared if we errored mid-review.
+        if (pendingResolverRef.current) { pendingResolverRef.current = null; setPendingMeshImport(null); }
       }
     }
   };
@@ -775,7 +823,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           await setupInitialScene();
 
           TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
-          TextureManager.Instance.addTextureFromBase64(DinosaurImage, {}, 'dinosaur.png');
           TextureManager.Instance.addTextureFromBase64(LightIcon, {
             mipMap: false
           }, '__editor__light_icon');
@@ -1151,6 +1198,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   <EngineContext.Provider value={{
       instance: instanceRef.current,
       editorScene: activeScene,
+      mainScene: editorSceneRef.current,
       eventEmitter: eventEmitter.current,
       selectedNode,
       isGizmoDragging,
@@ -1200,6 +1248,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       meshes,
       removeMesh,
       importMeshFiles,
+      pendingMeshImport,
+      resolveMeshImport,
       saveProject: saveProjectToStorage,
       savingState,
     }}>

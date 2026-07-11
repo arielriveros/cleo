@@ -1,0 +1,138 @@
+import React, { useEffect, useState } from 'react'
+import { useCleoEngine } from '../EngineContext'
+
+// Centered review modal shown once per imported model, between parsing and committing to the library.
+// Surfaces import state, lets the user upload textures the model references but that were missing from
+// the upload, and offers scale normalization. Accept commits (thumbnail + material assets + add); Cancel
+// discards. Mounted globally in Editor so it overlays the whole editor.
+export default function MeshImportModal() {
+  const { pendingMeshImport, resolveMeshImport } = useCleoEngine()
+
+  const [extraFiles, setExtraFiles] = useState<File[]>([])
+  const [resolved, setResolved] = useState<Set<string>>(new Set())
+  const [ignoredCount, setIgnoredCount] = useState(0)
+  const [normalize, setNormalize] = useState(true)
+  const [targetSize, setTargetSize] = useState(2)
+
+  // Reset per-import state whenever a new review opens.
+  useEffect(() => {
+    setExtraFiles([])
+    setResolved(new Set())
+    setIgnoredCount(0)
+    setNormalize(true)
+    setTargetSize(2)
+  }, [pendingMeshImport])
+
+  if (!pendingMeshImport) return null
+  const info = pendingMeshImport
+
+  const currentSize = info.sizeRadius * 2
+  const factor = normalize && info.sizeRadius > 0 ? targetSize / (info.sizeRadius * 2) : 1
+
+  const baseName = (p: string) => p.split(/[\\/]/).pop() || p
+
+  // Select all the missing texture files at once; each is matched to a missing entry by filename and linked.
+  const onSelectMissing = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+    // Lookup of still-unresolved missing names, keyed by lowercased basename.
+    const wanted = new Map<string, string>()
+    for (const name of info.missing) if (!resolved.has(name)) wanted.set(name.toLowerCase(), name)
+
+    let ignored = 0
+    for (const file of Array.from(fileList)) {
+      const target = wanted.get(baseName(file.name).toLowerCase())
+      if (!target) { ignored++; continue }
+      // Eagerly copy bytes before re-wrapping: an <input> File is disk-backed and can lose that backing
+      // (blob URL 404s with ERR_FILE_NOT_FOUND) by the time the deferred re-parse reads it.
+      const buf = await file.arrayBuffer()
+      const aliased = new File([buf], target, { type: file.type || 'image/png' }) // alias to expected name
+      setExtraFiles(prev => [...prev, aliased])
+      setResolved(prev => new Set(prev).add(target))
+      wanted.delete(baseName(file.name).toLowerCase()) // one file per missing entry
+    }
+    if (ignored) setIgnoredCount(c => c + ignored)
+  }
+
+  const accept = () => resolveMeshImport({ extraFiles, normalize, targetSize: targetSize > 0 ? targetSize : 2 })
+  const cancel = () => resolveMeshImport(null)
+
+  return (
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'
+         onClick={cancel}>
+      <div className='w-[420px] max-h-[85vh] overflow-y-auto bg-[#252525] border border-[#3b3b3b] rounded-md shadow-lg text-white select-none'
+           onClick={(e) => e.stopPropagation()}>
+        <div className='px-4 py-3 border-b border-[#3b3b3b]'>
+          <div className='text-sm font-semibold'>Import model</div>
+          <div className='text-lg font-bold truncate' title={info.bundleName}>{info.bundleName}</div>
+        </div>
+
+        <div className='px-4 py-3 space-y-4 text-sm'>
+          {/* Summary */}
+          <div className='flex gap-4 text-xs text-gray-300'>
+            <span>{info.subMeshCount} sub-mesh{info.subMeshCount === 1 ? '' : 'es'}</span>
+            <span>{info.materialCount} material{info.materialCount === 1 ? '' : 's'}</span>
+          </div>
+
+          {/* Missing textures */}
+          <div>
+            <div className='flex items-center justify-between mb-1'>
+              <span className='text-xs font-semibold'>Textures</span>
+              {info.missing.length > 0 && (
+                <label className='text-[11px] bg-[#3b3b3b] hover:bg-[#4b4b4b] rounded px-2 py-1 cursor-pointer'>
+                  Select missing textures…
+                  <input type='file' multiple className='hidden' accept='.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp'
+                         onChange={(e) => { onSelectMissing(e.target.files); e.target.value = '' }} />
+                </label>
+              )}
+            </div>
+            {info.missing.length === 0 ? (
+              <p className='text-xs text-gray-400'>All referenced textures are present.</p>
+            ) : (
+              <div className='space-y-1'>
+                <p className='text-[11px] text-[#ffd27a]'>
+                  {resolved.size} of {info.missing.length} linked — select the missing texture files (matched by filename).
+                </p>
+                {info.missing.map(name => {
+                  const done = resolved.has(name)
+                  return (
+                    <div key={name} className='flex items-center gap-2 bg-[#1e1e1e] border border-[#3b3b3b] rounded px-2 py-1'>
+                      <span className={`text-xs truncate flex-1 ${done ? 'text-green-400 line-through' : ''}`} title={name}>{name}</span>
+                      <span className={`text-xs ${done ? 'text-green-400' : 'text-gray-500'}`}>{done ? '✓ linked' : 'missing'}</span>
+                    </div>
+                  )
+                })}
+                {ignoredCount > 0 && (
+                  <p className='text-[11px] text-gray-500'>{ignoredCount} selected file{ignoredCount === 1 ? '' : 's'} didn’t match a missing name and {ignoredCount === 1 ? 'was' : 'were'} ignored.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Scale normalization */}
+          <div>
+            <div className='text-xs font-semibold mb-1'>Size</div>
+            <label className='flex items-center gap-2 text-xs cursor-pointer'>
+              <input type='checkbox' checked={normalize} onChange={(e) => setNormalize(e.target.checked)} />
+              Normalize size
+            </label>
+            <div className={`flex items-center gap-2 mt-2 text-xs ${normalize ? '' : 'opacity-40 pointer-events-none'}`}>
+              <span className='text-gray-300'>Fit to</span>
+              <input type='number' min={0.01} step={0.1} value={targetSize}
+                     onChange={(e) => setTargetSize(parseFloat(e.target.value) || 0)}
+                     className='w-[70px] bg-[#1e1e1e] border border-[#3b3b3b] rounded px-2 py-1 text-white' />
+              <span className='text-gray-300'>units</span>
+            </div>
+            <p className='text-[11px] text-gray-400 mt-1'>
+              Current size ≈ {currentSize.toFixed(2)} units{normalize && info.sizeRadius > 0 ? ` → scale ×${factor.toFixed(4)}` : ''}
+            </p>
+          </div>
+        </div>
+
+        <div className='px-4 py-3 border-t border-[#3b3b3b] flex justify-end gap-2'>
+          <button className='px-3 py-1.5 text-xs rounded bg-[#3b3b3b] hover:bg-[#4b4b4b]' onClick={cancel}>Cancel</button>
+          <button className='px-3 py-1.5 text-xs rounded bg-[#2c7a2c] hover:bg-[#358535] font-semibold' onClick={accept}>Accept & Import</button>
+        </div>
+      </div>
+    </div>
+  )
+}
