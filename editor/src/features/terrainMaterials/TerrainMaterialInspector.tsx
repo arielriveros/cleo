@@ -36,7 +36,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   const changed = () => { refreshTerrainMaterialPreview(); eventEmitter.emit('SCENE_CHANGED'); rerender() }
 
   const label = 'text-xs text-slate-300'
-  const num = 'w-16 bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-1 py-[2px] text-xs'
+  const num = 'w-16 bg-control text-white border border-border rounded px-1 py-[2px] text-xs'
 
   if (!isTerrain) {
     return <div className='p-3 text-xs text-gray-400'>Open a terrain material to edit it.</div>
@@ -71,11 +71,11 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   }
 
   return (
-    <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
-      <div className='p-2 border-b border-[#2d5d2d]'>
+    <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
+      <div className='p-2 border-b border-success'>
         <label className='text-xs text-slate-300 block mb-1'>Terrain material name</label>
         <input
-          className='bg-[#3b3b3b] text-white border border-[#2d5d2d] rounded px-2 py-1 w-full text-sm'
+          className='bg-control text-white border border-success rounded px-2 py-1 w-full text-sm'
           value={editingTerrainMaterialName ?? ''}
           onChange={(e) => setActiveTerrainMaterialName(e.target.value)} />
       </div>
@@ -114,7 +114,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
           </>}
 
           {/* Displacement (height) map: drives parallax depth + height-aware blending. */}
-          <div className='pt-1 border-t border-[#3b3b3b] space-y-1'>
+          <div className='pt-1 border-t border-control space-y-1'>
             <span className={label}>Displacement (height) map</span>
             <div onChange={() => changed()}>
               <TextureInspector tex='displacementMap' material={mat} />
@@ -134,23 +134,23 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
       <Collapsable title='Foliage'>
         <div className='p-2 space-y-2'>
           <p className='text-[11px] text-gray-400'>Foliage the landscape brush scatters where this material is painted.</p>
-          <div className='border border-[#3b3b3b] rounded p-2 space-y-1'>
+          <div className='border border-control rounded p-2 space-y-1'>
             <div className={label}>Add grass billboard</div>
             <div className='flex gap-1'>
               <select className={`${num} flex-1`} value={newFoliageTex} onChange={e => setNewFoliageTex(e.target.value)}>
                 <option value=''>(texture)</option>
                 {textureIds.map(id => <option key={id} value={id}>{id.length > 16 ? id.slice(0, 15) + '…' : id}</option>)}
               </select>
-              <button className='bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 text-xs' onClick={addBillboard}>+</button>
+              <button className='bg-success hover:bg-success-hover rounded px-2 text-xs' onClick={addBillboard}>+</button>
             </div>
-            <label className='block bg-[#3b3b3b] hover:bg-[#4a4a4a] rounded px-2 py-1 text-xs text-center cursor-pointer'>
+            <label className='block bg-control hover:bg-control-hover rounded px-2 py-1 text-xs text-center cursor-pointer'>
               Add mesh prop (import)
               <input type='file' className='hidden' accept='.obj,.gltf,.glb' multiple onChange={e => addMesh(e.target.files)} />
             </label>
           </div>
 
           {mat.foliageInclude.map((r, i) => (
-            <div key={i} className='border border-[#3b3b3b] rounded p-2 space-y-1'>
+            <div key={i} className='border border-control rounded p-2 space-y-1'>
               <div className='flex items-center gap-1'>
                 <input className={`${num} flex-1`} value={r.name} onChange={e => patchRule(i, { name: e.target.value })} title='Foliage name (referenced by exclude lists)' />
                 <span className='text-[10px] text-gray-400'>{r.kind}</span>

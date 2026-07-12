@@ -1,6 +1,8 @@
 import { CameraNode } from 'cleo';
 import { useState, useEffect } from 'react';
 import Collapsable from '../../../components/Collapsable';
+import { PropertyTable, PropertyRow, Select, NumberInput, Slider } from '../../../components/ui';
+import { CameraIcon } from '../sectionIcons';
 
 export default function CameraEditor(props: { node: CameraNode }) {
   const [cameraState, setCameraState] = useState({
@@ -38,122 +40,38 @@ export default function CameraEditor(props: { node: CameraNode }) {
     props.node.camera.top = cameraState.top;
   }, [cameraState, props.node]);
 
-  const number = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-[120px]';
-  const select = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1';
+  const set = (patch: Partial<typeof cameraState>) => setCameraState((prev) => ({ ...prev, ...patch }));
 
   return (
-    <Collapsable title="Camera">
-      <div className="w-full p-2">
-        <div className="w-full">
-          <table className='w-full border-collapse'>
-            <colgroup>
-              <col span={1} style={{ width: '50%' }} />
-              <col span={1} style={{ width: '50%' }} />
-            </colgroup>
-            <tbody>
-              <tr>
-                <td>Type</td>
-                <td>
-                  <select className={select}
-                    value={cameraState.type}
-                    onChange={(e) =>
-                      setCameraState((prev) => ({ ...prev, type: e.target.value as 'perspective' | 'orthographic' }))
-                    }
-                  >
-                    <option value="perspective">Perspective</option>
-                    <option value="orthographic">Orthographic</option>
-                  </select>
-                </td>
-              </tr>
-              {cameraState.type === 'perspective' && (
-                <tr>
-                  <td>Field of View</td>
-                  <td>
-                    <input
-                      className='w-[200px]'
-                      type="range"
-                      min="1"
-                      max="179"
-                      value={cameraState.fov}
-                      onChange={(e) => setCameraState((prev) => ({ ...prev, fov: parseFloat(e.target.value) }))}
-                    />
-                    {cameraState.fov.toFixed(2)}
-                  </td>
-                </tr>
-              )}
-              <tr>
-                <td>Near</td>
-                <td>
-                  <input
-                    className={number}
-                    type="number"
-                    value={cameraState.near}
-                    onChange={(e) => setCameraState((prev) => ({ ...prev, near: parseFloat(e.target.value) }))}
-                  />
-                </td>
-              </tr>
-              <tr>
-                <td>Far</td>
-                <td>
-                  <input
-                    className={number}
-                    type="number"
-                    value={cameraState.far}
-                    onChange={(e) => setCameraState((prev) => ({ ...prev, far: parseFloat(e.target.value) }))}
-                  />
-                </td>
-              </tr>
-              {cameraState.type === 'orthographic' && (
-                <>
-                  <tr>
-                    <td>Left</td>
-                    <td>
-                      <input
-                        className={number}
-                        type="number"
-                        value={cameraState.left}
-                        onChange={(e) => setCameraState((prev) => ({ ...prev, left: parseFloat(e.target.value) }))}
-                      />
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Right</td>
-                    <td>
-                      <input
-                        className={number}
-                        type="number"
-                        value={cameraState.right}
-                        onChange={(e) => setCameraState((prev) => ({ ...prev, right: parseFloat(e.target.value) }))}
-                      />
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Bottom</td>
-                    <td>
-                      <input
-                        className={number}
-                        type="number"
-                        value={cameraState.bottom}
-                        onChange={(e) => setCameraState((prev) => ({ ...prev, bottom: parseFloat(e.target.value) }))}
-                      />
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Top</td>
-                    <td>
-                      <input
-                        className={number}
-                        type="number"
-                        value={cameraState.top}
-                        onChange={(e) => setCameraState((prev) => ({ ...prev, top: parseFloat(e.target.value) }))}
-                      />
-                    </td>
-                  </tr>
-                </>
-              )}
-            </tbody>
-          </table>
-        </div>
+    <Collapsable title='Camera' icon={<CameraIcon />} persistKey='camera'>
+      <div className='w-full p-2'>
+        <PropertyTable columns={['45%', '55%']}>
+          <PropertyRow label='Type'>
+            <Select value={cameraState.type} onChange={(e) => set({ type: e.target.value as 'perspective' | 'orthographic' })}>
+              <option value='perspective'>Perspective</option>
+              <option value='orthographic'>Orthographic</option>
+            </Select>
+          </PropertyRow>
+          {cameraState.type === 'perspective' && (
+            <PropertyRow label='Field of View'>
+              <Slider min={1} max={179} step={1} value={cameraState.fov} onChange={(v) => set({ fov: v })} />
+            </PropertyRow>
+          )}
+          <PropertyRow label='Near'>
+            <NumberInput value={cameraState.near} onChange={(v) => set({ near: v })} />
+          </PropertyRow>
+          <PropertyRow label='Far' divider={cameraState.type === 'orthographic'}>
+            <NumberInput value={cameraState.far} onChange={(v) => set({ far: v })} />
+          </PropertyRow>
+          {cameraState.type === 'orthographic' && (
+            <>
+              <PropertyRow label='Left'><NumberInput value={cameraState.left} onChange={(v) => set({ left: v })} /></PropertyRow>
+              <PropertyRow label='Right'><NumberInput value={cameraState.right} onChange={(v) => set({ right: v })} /></PropertyRow>
+              <PropertyRow label='Bottom'><NumberInput value={cameraState.bottom} onChange={(v) => set({ bottom: v })} /></PropertyRow>
+              <PropertyRow label='Top' divider={false}><NumberInput value={cameraState.top} onChange={(v) => set({ top: v })} /></PropertyRow>
+            </>
+          )}
+        </PropertyTable>
       </div>
     </Collapsable>
   );

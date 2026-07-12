@@ -17,7 +17,7 @@ export default function TerrainLayerSlot(props: { landscape: LandscapeNode | nul
   const asset = layer?.materialId ? terrainMaterials.find(m => m.id === layer.materialId) : undefined
 
   const label = 'text-xs text-gray-300'
-  const num = 'w-14 bg-[#2b2b2b] text-white border border-[#444] rounded px-1 py-[2px] text-xs'
+  const num = 'w-14 bg-surface-raised text-white border border-control-hover rounded px-1 py-[2px] text-xs'
 
   if (!terrain) return <div className='text-[10px] text-gray-400'>Create a terrain first.</div>
 
@@ -40,10 +40,10 @@ export default function TerrainLayerSlot(props: { landscape: LandscapeNode | nul
 
   return (
     <div onDragOver={onDragOver} onDragLeave={() => setDragOver(false)} onDrop={onDrop}
-      className={`space-y-1 border rounded p-2 ${dragOver ? 'border-[#2c2cff]' : 'border-[#3b3b3b]'}`}>
+      className={`space-y-1 border rounded p-2 ${dragOver ? 'border-selected' : 'border-control'}`}>
       {asset ? (
         <div className='flex items-center gap-2'>
-          <div className='w-10 h-10 rounded overflow-hidden bg-[#202020] flex items-center justify-center shrink-0'>
+          <div className='w-10 h-10 rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
             {asset.thumbnail ? <img src={asset.thumbnail} className='w-full h-full object-cover' alt={asset.name} /> : <span>🏔️</span>}
           </div>
           <span className='truncate flex-1 text-xs' title={asset.name}>{asset.name}</span>
@@ -52,7 +52,7 @@ export default function TerrainLayerSlot(props: { landscape: LandscapeNode | nul
         </div>
       ) : (
         <div className='flex flex-col gap-1'>
-          {layer?.materialId && <p className='text-[10px] text-[#ffd27a]'>Linked terrain material missing from the library.</p>}
+          {layer?.materialId && <p className='text-[10px] text-warning'>Linked terrain material missing from the library.</p>}
           {terrainMaterials.length > 0 ? (
             <select className={`${num} w-full`} value='' onChange={e => { if (e.target.value) assign(e.target.value) }}>
               <option value=''>Link terrain material…</option>

@@ -53,16 +53,16 @@ export default function UIInspector() {
   return (
     <div className='w-full h-full p-2 text-white'>
       <div className='flex gap-2 mb-2'>
-        <button className='border border-[#2d2d77] rounded px-2 py-1 bg-[#3b3b3b]' onClick={() => addUIElement(createElement('container'))}>+ Container</button>
-        <button className='border border-[#2d2d77] rounded px-2 py-1 bg-[#3b3b3b]' onClick={() => addUIElement(createElement('text'))}>+ Text</button>
-        <button className='border border-[#2d2d77] rounded px-2 py-1 bg-[#3b3b3b]' onClick={() => addUIElement(createElement('image'))}>+ Image</button>
-        <button className='border border-[#2d2d77] rounded px-2 py-1 bg-[#3b3b3b]' onClick={() => addUIElement(createElement('button'))}>+ Button</button>
+        <button className='border border-border rounded px-2 py-1 bg-control' onClick={() => addUIElement(createElement('container'))}>+ Container</button>
+        <button className='border border-border rounded px-2 py-1 bg-control' onClick={() => addUIElement(createElement('text'))}>+ Text</button>
+        <button className='border border-border rounded px-2 py-1 bg-control' onClick={() => addUIElement(createElement('image'))}>+ Image</button>
+        <button className='border border-border rounded px-2 py-1 bg-control' onClick={() => addUIElement(createElement('button'))}>+ Button</button>
       </div>
 
       <Collapsable title='UI Elements'>
         <div className='max-h-[30vh] overflow-auto'>
           {flatList.map(el => (
-            <div key={el.id} className={`flex items-center justify-between px-2 py-1 cursor-pointer ${selected === el.id ? 'bg-[#2d2d77]' : ''}`}
+            <div key={el.id} className={`flex items-center justify-between px-2 py-1 cursor-pointer ${selected === el.id ? 'bg-border' : ''}`}
                  style={{ paddingLeft: 8 + ((el as any).__depth || 0) * 12 }}
                  onClick={() => setSelected(el.id)}>
               <span>{el.name || el.type}</span>
@@ -76,38 +76,38 @@ export default function UIInspector() {
         <Collapsable title='Properties'>
           <div className='grid grid-cols-2 gap-2'>
             <label>Name</label>
-            <input className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={selectedEl.name || ''} onChange={e => updateField('name', e.target.value)} />
+            <input className='bg-control border border-border rounded px-2 py-1' value={selectedEl.name || ''} onChange={e => updateField('name', e.target.value)} />
 
             <label>Type</label>
-            <input disabled className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={selectedEl.type} />
+            <input disabled className='bg-control border border-border rounded px-2 py-1' value={selectedEl.type} />
 
             {selectedEl.type === 'text' && <>
               <label>Content</label>
-              <input className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={(selectedEl as any).content || ''} onChange={e => updateField('content', e.target.value)} />
+              <input className='bg-control border border-border rounded px-2 py-1' value={(selectedEl as any).content || ''} onChange={e => updateField('content', e.target.value)} />
             </>}
 
             {selectedEl.type === 'image' && <>
               <label>Source</label>
-              <input className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={(selectedEl as any).src || ''} onChange={e => updateField('src', e.target.value)} />
+              <input className='bg-control border border-border rounded px-2 py-1' value={(selectedEl as any).src || ''} onChange={e => updateField('src', e.target.value)} />
             </>}
 
             {selectedEl.type === 'button' && <>
               <label>Label</label>
-              <input className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={(selectedEl as any).label || ''} onChange={e => updateField('label', e.target.value)} />
+              <input className='bg-control border border-border rounded px-2 py-1' value={(selectedEl as any).label || ''} onChange={e => updateField('label', e.target.value)} />
             </>}
 
             <label>Left</label>
-            <input type='number' className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={Number((selectedEl as any).style?.left ?? 0)} onChange={e => updateStyle('left', Number(e.target.value))} />
+            <input type='number' className='bg-control border border-border rounded px-2 py-1' value={Number((selectedEl as any).style?.left ?? 0)} onChange={e => updateStyle('left', Number(e.target.value))} />
             <label>Top</label>
-            <input type='number' className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={Number((selectedEl as any).style?.top ?? 0)} onChange={e => updateStyle('top', Number(e.target.value))} />
+            <input type='number' className='bg-control border border-border rounded px-2 py-1' value={Number((selectedEl as any).style?.top ?? 0)} onChange={e => updateStyle('top', Number(e.target.value))} />
             <label>Width</label>
-            <input type='number' className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={Number((selectedEl as any).style?.width ?? 0)} onChange={e => updateStyle('width', Number(e.target.value))} />
+            <input type='number' className='bg-control border border-border rounded px-2 py-1' value={Number((selectedEl as any).style?.width ?? 0)} onChange={e => updateStyle('width', Number(e.target.value))} />
             <label>Height</label>
-            <input type='number' className='bg-[#3b3b3b] border border-[#2d2d77] rounded px-2 py-1' value={Number((selectedEl as any).style?.height ?? 0)} onChange={e => updateStyle('height', Number(e.target.value))} />
+            <input type='number' className='bg-control border border-border rounded px-2 py-1' value={Number((selectedEl as any).style?.height ?? 0)} onChange={e => updateStyle('height', Number(e.target.value))} />
             <label>Background</label>
-            <input type='color' className='w-[32px] h-[32px] p-0 border border-[#2d2d77] rounded bg-transparent' value={(selectedEl as any).style?.backgroundColor || '#000000'} onChange={e => updateStyle('backgroundColor', e.target.value)} />
+            <input type='color' className='w-[32px] h-[32px] p-0 border border-border rounded bg-transparent' value={(selectedEl as any).style?.backgroundColor || '#000000'} onChange={e => updateStyle('backgroundColor', e.target.value)} />
             <label>Color</label>
-            <input type='color' className='w-[32px] h-[32px] p-0 border border-[#2d2d77] rounded bg-transparent' value={(selectedEl as any).style?.color || '#ffffff'} onChange={e => updateStyle('color', e.target.value)} />
+            <input type='color' className='w-[32px] h-[32px] p-0 border border-border rounded bg-transparent' value={(selectedEl as any).style?.color || '#ffffff'} onChange={e => updateStyle('color', e.target.value)} />
           </div>
         </Collapsable>
 
@@ -118,7 +118,7 @@ export default function UIInspector() {
               Context: <code>ctx.ui</code>, <code>ctx.scene</code>, <code>ctx.findNode</code>, <code>ctx.getData</code>, <code>ctx.setData</code>, <code>ctx.game</code>.
             </p>
             <textarea
-              className='w-full h-48 bg-[#1e1e1e] text-white border border-[#2d2d77] rounded p-2 font-mono text-xs'
+              className='w-full h-48 bg-surface-raised text-white border border-border rounded p-2 font-mono text-xs'
               spellCheck={false}
               placeholder={"function onUpdate(el, ctx) {\n  const p = ctx.findNode('playable');\n  const hp = ctx.getData(p).HealthPoints;\n  ctx.ui.setText(el, 'Health Left: ' + '❤'.repeat(Math.max(0, hp)));\n}"}
               value={(selectedEl as any).script || ''}

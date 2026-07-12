@@ -138,7 +138,7 @@ export default function Editor() {
                 <Tab title='Terrain Mat.' onClick={() => setBottomTab('TerrainMaterials')} selected={bottomTab === 'TerrainMaterials'} />
                 <Tab title='Meshes' onClick={() => setBottomTab('Meshes')} selected={bottomTab === 'Meshes'} />
               </Tabs>
-              <div className="flex flex-col text-white bg-[#202020] w-full h-full overflow-hidden">
+              <div className="flex flex-col text-white bg-surface-raised w-full h-full overflow-hidden">
                 <div className={`${bottomTab === 'Logger' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
                   <Logger />
                 </div>

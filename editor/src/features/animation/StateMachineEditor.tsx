@@ -27,9 +27,9 @@ const effectiveType = (p?: AnimationParameter): EffectiveType =>
     : p.type === 'variable' ? (p.variable?.varType === 'boolean' ? 'bool' : 'float')
     : p.type
 
-const input = 'bg-[#3b3b3b] text-white border border-[#555] rounded px-1 py-0.5 text-xs'
-const btn = 'px-2 py-1 rounded bg-[#326acc] hover:bg-[#2a59a9] text-white border border-[#274b8f] text-xs'
-const ghost = 'px-1.5 py-0.5 rounded border border-[#555] hover:bg-[#3b3b3b] text-xs'
+const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
+const btn = 'px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
+const ghost = 'px-1.5 py-0.5 rounded border border-control-hover hover:bg-control text-xs'
 const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
 
 export default function StateMachineEditor() {
@@ -180,15 +180,15 @@ export default function StateMachineEditor() {
   }
 
   if (!target) {
-    return <div className='flex flex-col bg-[#202020] w-full h-full p-3 text-sm text-gray-400'>No skinned model selected.</div>
+    return <div className='flex flex-col bg-surface-raised w-full h-full p-3 text-sm text-gray-400'>No skinned model selected.</div>
   }
 
   const paramOf = (name: string) => sm.parameters.find(p => p.name === name)
 
   return (
-    <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
-      <div className='p-2 border-b border-[#2d2d77] flex items-center justify-between'>
-        <div className='text-xs uppercase tracking-wide text-[#8f8fff]'>Animation State Machine</div>
+    <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
+      <div className='p-2 border-b border-border flex items-center justify-between'>
+        <div className='text-xs uppercase tracking-wide text-highlight'>Animation State Machine</div>
         <button className={ghost} title='Close the Animation Editor tab' onClick={() => closeTab(activeTabId)}>Close</button>
       </div>
 
@@ -202,7 +202,7 @@ export default function StateMachineEditor() {
             onChange={e => { const fs = e.target.files ? Array.from(e.target.files) : []; e.target.value = ''; if (fs.length) importAnimationFiles(fs) }} />
         </label>
         {!hasBoneNames && (
-          <label className={ghost + ' w-full text-center cursor-pointer border-[#ffd27a] text-[#ffd27a]'}
+          <label className={ghost + ' w-full text-center cursor-pointer border-warning text-warning'}
             title='This model has no bone names, so imported animations match by node index (wrong bones). Load the ORIGINAL file this character was imported from to add bone names.'>
             ⚠ Add bone names from file…
             <input type='file' multiple className='hidden' accept='.gltf,.glb,.fbx,.bin'
@@ -258,7 +258,7 @@ export default function StateMachineEditor() {
       <Collapsable title='States'>
         <div className='p-2 flex flex-col gap-1'>
           {sm.states.map((s, i) => (
-            <div key={i} className={`flex items-center gap-1 p-1.5 rounded border ${selectedState === s.name ? 'border-[#2c2cff] bg-[#26265a]' : 'border-[#3b3b3b]'}`}
+            <div key={i} className={`flex items-center gap-1 p-1.5 rounded border ${selectedState === s.name ? 'border-selected bg-border-subtle' : 'border-control'}`}
               onClick={() => setSelectedState(s.name)}>
               <input title='Entry state' type='radio' checked={!!s.isEntry} onChange={() => setState(i, { isEntry: true })} onClick={e => e.stopPropagation()} />
               <input className={input + ' flex-1 min-w-0'} title='State name' value={s.name} onChange={e => setState(i, { name: e.target.value })} onClick={e => e.stopPropagation()} />
@@ -282,7 +282,7 @@ export default function StateMachineEditor() {
         <div className='p-2 flex flex-col gap-2'>
           {!selectedState && <p className='text-[11px] text-gray-400'>Select a state to edit its transitions.</p>}
           {selectedState && stateTransitions.map(({ t, i }) => (
-            <div key={i} className='border border-[#3b3b3b] rounded p-1.5 flex flex-col gap-1'>
+            <div key={i} className='border border-control rounded p-1.5 flex flex-col gap-1'>
               <div className='flex items-center gap-1'>
                 <span className='text-[10px] text-gray-400 whitespace-nowrap'>{t.from} →</span>
                 <select className={input + ' flex-1'} value={t.to} onChange={e => setTransition(i, { to: e.target.value })}>

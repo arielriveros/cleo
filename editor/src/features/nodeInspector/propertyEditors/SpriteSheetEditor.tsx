@@ -3,6 +3,8 @@ import { AnimatedSpriteNode } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
 import TextureInspector from './TextureInspector';
 import { useCleoEngine } from '../../EngineContext';
+import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint } from '../../../components/ui';
+import { SpriteIcon } from '../sectionIcons';
 
 export default function SpriteSheetEditor() {
   const { editorScene, selectedNode, eventEmitter } = useCleoEngine();
@@ -47,93 +49,55 @@ export default function SpriteSheetEditor() {
 
   if (!animatedNode) return null;
 
-  const sprite = animatedNode.sprite;
-  const material = sprite.material;
+  const material = animatedNode.sprite.material;
 
   return (
-    <Collapsable title='Animated Sprite'>
-      <div className='w-full p-2 space-y-3'>
-        <div>
-          <h5 className='m-0 mb-1 font-bold'>Sprite Sheet Texture</h5>
+    <Collapsable title='Animated Sprite' icon={<SpriteIcon />} persistKey='animatedSprite'>
+      <div className='w-full p-2'>
+        <Section title='Sprite Sheet Texture'>
           <TextureInspector tex='texture' material={material} />
-        </div>
+        </Section>
 
-        <div className='grid grid-cols-2 gap-2'>
-          <label className='flex items-center gap-2'>
-            <span className='w-28'>Columns</span>
-            <input className='input' type='number' min={1} value={columns} onChange={(e) => {
-              const v = Math.max(1, parseInt(e.target.value || '1'));
-              setColumns(v); animatedNode.columns = v; setEndFrame(Math.min(endFrame, v*rows-1));
-            }} />
-          </label>
-          <label className='flex items-center gap-2'>
-            <span className='w-28'>Rows</span>
-            <input className='input' type='number' min={1} value={rows} onChange={(e) => {
-              const v = Math.max(1, parseInt(e.target.value || '1'));
-              setRows(v); animatedNode.rows = v; setEndFrame(Math.min(endFrame, columns*v-1));
-            }} />
-          </label>
-          <label className='flex items-center gap-2'>
-            <span className='w-28'>FPS</span>
-            <input className='input' type='number' min={0.01} step={0.01} value={fps} onChange={(e) => {
-              const v = Math.max(0.01, parseFloat(e.target.value || '0.01'));
-              setFps(v); animatedNode.fps = v;
-            }} />
-          </label>
-          <label className='flex items-center gap-2'>
-            <span className='w-28'>Loop</span>
-            <input type='checkbox' checked={loop} onChange={(e)=>{ setLoop(e.target.checked); animatedNode.loop = e.target.checked; }} />
-          </label>
-          <label className='flex items-center gap-2'>
-            <span className='w-28'>Start Frame</span>
-            <input className='input' type='number' min={0} max={maxFrames-1} value={startFrame} onChange={(e) => {
-              const v = Math.max(0, Math.min(parseInt(e.target.value || '0'), maxFrames-1));
-              setStartFrame(v); animatedNode.startFrame = v;
-            }} />
-          </label>
-          <label className='flex items-center gap-2'>
-            <span className='w-28'>End Frame</span>
-            <input className='input' type='number' min={0} max={maxFrames-1} value={endFrame} onChange={(e) => {
-              const v = Math.max(0, Math.min(parseInt(e.target.value || '0'), maxFrames-1));
-              setEndFrame(v); animatedNode.endFrame = v;
-            }} />
-          </label>
-        </div>
+        <Section title='Frames'>
+          <PropertyTable columns={['45%', '55%']}>
+            <PropertyRow label='Columns'>
+              <NumberInput min={1} value={columns} onChange={(v) => { const c = Math.max(1, Math.round(v)); setColumns(c); animatedNode.columns = c; setEndFrame(Math.min(endFrame, c * rows - 1)); }} />
+            </PropertyRow>
+            <PropertyRow label='Rows'>
+              <NumberInput min={1} value={rows} onChange={(v) => { const r = Math.max(1, Math.round(v)); setRows(r); animatedNode.rows = r; setEndFrame(Math.min(endFrame, columns * r - 1)); }} />
+            </PropertyRow>
+            <PropertyRow label='FPS'>
+              <NumberInput min={0.01} step={0.01} value={fps} onChange={(v) => { const f = Math.max(0.01, v); setFps(f); animatedNode.fps = f; }} />
+            </PropertyRow>
+            <PropertyRow label='Loop'>
+              <Toggle checked={loop} onChange={(c) => { setLoop(c); animatedNode.loop = c; }} />
+            </PropertyRow>
+            <PropertyRow label='Start Frame'>
+              <NumberInput min={0} max={maxFrames - 1} value={startFrame} onChange={(v) => { const f = Math.max(0, Math.min(Math.round(v), maxFrames - 1)); setStartFrame(f); animatedNode.startFrame = f; }} />
+            </PropertyRow>
+            <PropertyRow label='End Frame' divider={false}>
+              <NumberInput min={0} max={maxFrames - 1} value={endFrame} onChange={(v) => { const f = Math.max(0, Math.min(Math.round(v), maxFrames - 1)); setEndFrame(f); animatedNode.endFrame = f; }} />
+            </PropertyRow>
+          </PropertyTable>
+        </Section>
 
-        <div>
-          <h5 className='m-0 mb-1 font-bold'>Custom Sequence</h5>
-          <p className='text-xs text-slate-400 m-0'>Comma-separated frame indices. Leave empty to use range.</p>
-          <input className='input w-full' value={sequenceText} onChange={(e)=>applySequence(e.target.value)} placeholder='e.g. 0,1,2,3,2,1' />
-        </div>
+        <Section title='Custom Sequence'>
+          <Hint className='mb-1'>Comma-separated frame indices. Leave empty to use range.</Hint>
+          <TextInput value={sequenceText} onChange={applySequence} placeholder='e.g. 0,1,2,3,2,1' />
+        </Section>
 
-        <div>
-          <h5 className='m-0 mb-1 font-bold'>Constraints</h5>
-          <select className='input' value={animatedNode.constraints} onChange={(e)=>{ animatedNode.constraints = e.target.value as any; }}>
-            <option value='free'>Free</option>
-            <option value='spherical'>Spherical</option>
-            <option value='cylindrical'>Cylindrical</option>
-          </select>
-        </div>
+        <Section title='Constraints'>
+          <Field label='Mode'>
+            <Select value={animatedNode.constraints} onChange={(e) => { animatedNode.constraints = e.target.value as any; }}>
+              <option value='free'>Free</option>
+              <option value='spherical'>Spherical</option>
+              <option value='cylindrical'>Cylindrical</option>
+            </Select>
+          </Field>
+        </Section>
 
-        <FramePreview node={animatedNode} columns={columns} rows={rows} />
+        <Hint>Frames: {maxFrames} (0..{maxFrames - 1})</Hint>
       </div>
     </Collapsable>
-  )
-}
-
-function FramePreview({ node, columns, rows }: { node: AnimatedSpriteNode, columns: number, rows: number }) {
-  const texId = node.sprite.material.textures.get('texture');
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    // texture preview uses TextureInspector popup; here we just show grid overlay label
-    setSrc(null);
-  }, [texId]);
-
-  const total = columns * rows;
-  return (
-    <div className='mt-2 text-xs text-slate-300'>
-      Frames: {total} (0..{total-1})
-    </div>
   )
 }

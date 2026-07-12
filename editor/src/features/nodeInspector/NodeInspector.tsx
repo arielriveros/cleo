@@ -37,11 +37,11 @@ export default function NodeInspector() {
   // Material editor mode: the inspector focuses on the preview sphere's material only (name + controls).
   if (editorMode === 'material') {
     return (
-      <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
-        <div className='p-2 border-b border-[#2d2d77]'>
+      <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
+        <div className='p-2 border-b border-border'>
           <label className='text-xs text-slate-300 block mb-1'>Material name</label>
           <input
-            className='bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-full text-sm'
+            className='bg-control text-white border border-border rounded px-2 py-1 w-full text-sm'
             value={editingMaterialName ?? ''}
             onChange={(e) => setActiveMaterialName(e.target.value)} />
         </div>
@@ -66,8 +66,8 @@ export default function NodeInspector() {
         <Tab title='Scripts' onClick={()=>{setSelectedTab('Script')}} selected={selectedTab === 'Script'}/>
         <Tab title='Physics' onClick={()=>{setSelectedTab('Physics')}} selected={selectedTab === 'Physics'}/>
       </Tabs>
-      {readOnly && <div className='text-[11px] text-[#ffd27a] bg-[#3a2f12] px-2 py-1'>Template instance — edit the template to change its content (Transform is per-instance).</div>}
-      <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
+      {readOnly && <div className='text-[11px] text-warning bg-warning/15 px-2 py-1'>Template instance — edit the template to change its content (Transform is per-instance).</div>}
+      <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
         {selectedTab === 'Properties' && node && <PropertyEditor node={node} readOnly={readOnly}/>}
         {selectedTab === 'Script'  && <ScriptEditor readOnly={readOnly} /> }
         {selectedTab === 'Physics' && node && <fieldset disabled={readOnly} className={gate}><PhysicsEditor node={node} /></fieldset>}

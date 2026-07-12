@@ -5,6 +5,10 @@ import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineCo
 import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import ShapeEditor from './ShapeEditor';
+import { Field, Slider, Toggle, Select, NumberInput, Button, Section, Hint } from '../../../components/ui'
+import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
+
+const LABEL = 'w-[130px]';
 
 export default function PhysicsEditor(props: {node: Node}) {
   const { bodies, triggers, eventEmitter: eventEmitter } = useCleoEngine();
@@ -31,7 +35,6 @@ export default function PhysicsEditor(props: {node: Node}) {
     if(sceneChanged) setSceneChanged(false)
   }, [sceneChanged]);
 
-
   useEffect(() => {
     const body = bodies.get(props.node.id);
     if (body)
@@ -43,9 +46,7 @@ export default function PhysicsEditor(props: {node: Node}) {
         angularConstraints: body.angularConstraints,
         shapes: body.shapes
       })
-
     else setBodyProperties(null)
-
   }, [props.node, bodies])
 
   // Persist body edits to the shared map; the editor-helper reconciler rebuilds the debug wireframe.
@@ -91,45 +92,16 @@ export default function PhysicsEditor(props: {node: Node}) {
     if (ragdoll && isSkinned) (props.node as ModelNode).ragdollConfig = ragdoll;
   }, [ragdoll]);
 
-  const section = 'w-full p-2';
-  const row = 'flex items-center gap-2 my-1';
-  const label = 'w-[160px]';
-  const number = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-[120px]';
-
-  const addBtn = 'ml-2 px-2 py-1 bg-[#3b3b3b] border border-[#2d2d77] rounded hover:bg-[#3f3fb4]';
-
   const addShape = (type: string, target: 'body' | 'trigger') => {
-    switch (type) {
-      case 'box':
-        if (target === 'body')
-          setBodyProperties({...bodyProperties!, shapes: [...bodyProperties!.shapes, { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }]});
-        else
-          setTriggerProperties({...triggerProperties!, shapes: [...triggerProperties!.shapes, { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }]});
-        break;
-      case 'sphere':
-        if (target === 'body')
-          setBodyProperties({...bodyProperties!, shapes: [...bodyProperties!.shapes, { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }]});
-        else
-          setTriggerProperties({...triggerProperties!, shapes: [...triggerProperties!.shapes, { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }]});
-        break;
-      case 'cylinder':
-        if (target === 'body')
-          setBodyProperties({...bodyProperties!, shapes: [...bodyProperties!.shapes, { type: 'cylinder', radius: 1, height: 1, numSegments: 16, offset: [0, 0, 0], rotation: [0, 0, 0] }]});
-        else
-          setTriggerProperties({...triggerProperties, shapes: [...triggerProperties!.shapes, { type: 'cylinder', radius: 1, height: 1, numSegments: 16, offset: [0, 0, 0], rotation: [0, 0, 0] }]});
-        break;
-      case 'plane':
-        if (target === 'body')
-          setBodyProperties({...bodyProperties!, shapes: [...bodyProperties!.shapes, { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] }]});
-        else
-          setTriggerProperties({...triggerProperties, shapes: [...triggerProperties!.shapes, { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] }]});
-        break;
-    }
+    const shape: any =
+      type === 'box' ? { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } :
+      type === 'sphere' ? { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } :
+      type === 'cylinder' ? { type: 'cylinder', radius: 1, height: 1, numSegments: 16, offset: [0, 0, 0], rotation: [0, 0, 0] } :
+      { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] };
+    if (target === 'body') setBodyProperties({ ...bodyProperties!, shapes: [...bodyProperties!.shapes, shape] });
+    else setTriggerProperties({ ...triggerProperties!, shapes: [...triggerProperties!.shapes, shape] });
   }
 
-  // Shape/body/trigger removal just updates the data; the reconciler rebuilds or removes the debug
-  // wireframes (setBodyProperties/setTriggerProperties re-run the persist effects above, which emit
-  // PHYSICS_CHANGED; the explicit emits below cover the null case where those effects short-circuit).
   const removeShape = (shapeIndex: number, target: 'body' | 'trigger') => {
     if (target === 'body' && bodyProperties) {
       const newShapes = [...bodyProperties.shapes];
@@ -143,220 +115,107 @@ export default function PhysicsEditor(props: {node: Node}) {
     }
   };
 
-  const removeBody = () => {
-    bodies.delete(props.node.id);
-    setBodyProperties(null);
-    eventEmitter.emit('PHYSICS_CHANGED');
-  }
+  const removeBody = () => { bodies.delete(props.node.id); setBodyProperties(null); eventEmitter.emit('PHYSICS_CHANGED'); }
+  const removeTrigger = () => { triggers.delete(props.node.id); setTriggerProperties(null); eventEmitter.emit('PHYSICS_CHANGED'); }
 
-  const removeTrigger = () => {
-    triggers.delete(props.node.id);
-    setTriggerProperties(null);
-    eventEmitter.emit('PHYSICS_CHANGED');
-  }
+  // 3 axis toggles (used for linear/angular constraints; value is a [x,y,z] of 0|1).
+  const AxisToggles = ({ label, value, onChange }: { label: string; value: number[]; onChange: (v: number[]) => void }) => (
+    <Field label={label} labelClassName={LABEL}>
+      <div className='flex items-center gap-3'>
+        {(['X', 'Y', 'Z'] as const).map((ax, i) => (
+          <span key={ax} className='inline-flex items-center gap-1'>
+            <span className='text-[10px] text-muted w-2'>{ax}</span>
+            <Toggle checked={value[i] === 1} onChange={(c) => { const n = [...value]; n[i] = c ? 1 : 0; onChange(n); }} />
+          </span>
+        ))}
+      </div>
+    </Field>
+  );
+
+  const ShapeTools = ({ shapes, target, setShapes }: { shapes: ShapeDescription[]; target: 'body' | 'trigger'; setShapes: (i: number, s: any) => void }) => (
+    <Section title='Shapes'>
+      <div className='flex items-center gap-1.5 flex-wrap mb-2'>
+        <span className='text-xs text-muted mr-1'>Add:</span>
+        {['box', 'sphere', 'cylinder', 'plane'].map((t) => (
+          <Button key={t} size='sm' onClick={() => addShape(t, target)}>{t.charAt(0).toUpperCase() + t.slice(1)}</Button>
+        ))}
+      </div>
+      {shapes.map((shape, i) => (
+        <ShapeEditor key={i} shape={shape} setShape={(s: any) => setShapes(i, s)} removeShape={() => removeShape(i, target)} />
+      ))}
+    </Section>
+  );
 
   return ( <>
-    <Collapsable title='Rigid Body'>
-    <div className={section}>
-        { !bodyProperties ? 
-        <> {
-          props.node.name === 'root' ?
-            <p> Root node cannot have a rigid body. </p> :
-            /* TODO: Temporary solution, in the future inner nodes should be able to have bodies */
-            props.node.parent?.name !== 'root' ? <p> Can only add rigid bodies to nodes at root level. </p> :
-          <>
-            <p>Node does not have a rigid body.</p> 
-            <button className={addBtn} onClick={() => setBodyProperties({
-              mass: 0,
-              linearDamping: 0,
-              angularDamping: 0,
-              linearConstraints: [1, 1, 1],
-              angularConstraints: [1, 1, 1],
-              shapes: [] })}> Add Rigid Body </button>
-          </>
-        } </>
-        : <>
-            <div className={row}>
-              <label className={label}>Mass</label>
-              <div>
-                <input className={number} type='number' value={bodyProperties.mass} onChange={(e) => setBodyProperties({...bodyProperties, mass: parseFloat(e.target.value)})} />
-                {bodyProperties.mass === 0 && <p className='text-xs text-gray-300'>Mass of 0 will make the object static</p> }
+    <Collapsable title='Rigid Body' icon={<PhysicsIcon />} badge={bodyProperties?.shapes.length || undefined} persistKey='rigidBody'>
+      <div className='w-full p-2'>
+        { !bodyProperties ?
+          (props.node.name === 'root'
+            ? <Hint>Root node cannot have a rigid body.</Hint>
+            : props.node.parent?.name !== 'root'
+              ? <Hint>Can only add rigid bodies to nodes at root level.</Hint>
+              : <>
+                  <Hint className='mb-2'>Node does not have a rigid body.</Hint>
+                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], shapes: [] })}>Add Rigid Body</Button>
+                </>)
+          : <>
+              <Field label='Mass' labelClassName={LABEL}>
+                <NumberInput value={bodyProperties.mass} onChange={(v) => setBodyProperties({ ...bodyProperties, mass: v })} />
+              </Field>
+              {bodyProperties.mass === 0 && <Hint className='mb-1'>Mass of 0 will make the object static.</Hint>}
+              <Slider label='Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.linearDamping} onChange={(v) => setBodyProperties({ ...bodyProperties, linearDamping: v })} />
+              <Slider label='Angular Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.angularDamping} onChange={(v) => setBodyProperties({ ...bodyProperties, angularDamping: v })} />
+              <AxisToggles label='Linear Constraints' value={bodyProperties.linearConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, linearConstraints: v as [number, number, number] })} />
+              <AxisToggles label='Angular Constraints' value={bodyProperties.angularConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, angularConstraints: v as [number, number, number] })} />
+              <Button variant='danger' size='sm' className='mt-2' onClick={removeBody}>Remove Rigid Body</Button>
+              <div className='mt-2'>
+                <ShapeTools shapes={bodyProperties.shapes} target='body' setShapes={(i, s) => { const n = [...bodyProperties.shapes]; n[i] = s; setBodyProperties({ ...bodyProperties, shapes: n }); }} />
               </div>
-            </div>
-            <div className={row}>
-              <label className={label}>Damping</label>
-              <div>
-                <input className='w-[200px]' type='range' value={bodyProperties.linearDamping} step={0.01} min={0} max={1} onChange={(e) => setBodyProperties({...bodyProperties, linearDamping: parseFloat(e.target.value)})} />
-                { bodyProperties.linearDamping }
-              </div>
-            </div>
-            <div className={row}>
-              <label className={label}>Angular Damping</label>
-              <div>
-                <input className='w-[200px]' type='range' value={bodyProperties.angularDamping} step={0.01} min={0} max={1} onChange={(e) => setBodyProperties({...bodyProperties, angularDamping: parseFloat(e.target.value)})} />
-                { bodyProperties.angularDamping }
-              </div>
-            </div>
-            <div className={row}>
-              <label className={label}>Linear Constraints</label>
-              <div className='flex items-center gap-2'>
-                <label>X</label>
-                <input type='checkbox' checked={bodyProperties.linearConstraints[0] === 1} onChange={(e) => setBodyProperties({...bodyProperties, linearConstraints: [e.target.checked ? 1 : 0, bodyProperties.linearConstraints[1], bodyProperties.linearConstraints[2]]})} />
-                <label>Y</label>
-                <input type='checkbox' checked={bodyProperties.linearConstraints[1] === 1} onChange={(e) => setBodyProperties({...bodyProperties, linearConstraints: [bodyProperties.linearConstraints[0], e.target.checked ? 1 : 0, bodyProperties.linearConstraints[2]]})} />
-                <label>Z</label>
-                <input type='checkbox' checked={bodyProperties.linearConstraints[2] === 1} onChange={(e) => setBodyProperties({...bodyProperties, linearConstraints: [bodyProperties.linearConstraints[0], bodyProperties.linearConstraints[1], e.target.checked ? 1 : 0]})} />
-              </div>
-            </div>
-            <div className={row}>
-              <label className={label}>Angular Constraints</label>
-              <div className='flex items-center gap-2'>
-                <label>X</label>
-                <input type='checkbox' checked={bodyProperties.angularConstraints[0] === 1} onChange={(e) => setBodyProperties({...bodyProperties, angularConstraints: [e.target.checked ? 1 : 0, bodyProperties.angularConstraints[1], bodyProperties.angularConstraints[2]]})} />
-                <label>Y</label>
-                <input type='checkbox' checked={bodyProperties.angularConstraints[1] === 1} onChange={(e) => setBodyProperties({...bodyProperties, angularConstraints: [bodyProperties.angularConstraints[0], e.target.checked ? 1 : 0, bodyProperties.angularConstraints[2]]})} />
-                <label>Z</label>
-                <input type='checkbox' checked={bodyProperties.angularConstraints[2] === 1} onChange={(e) => setBodyProperties({...bodyProperties, angularConstraints: [bodyProperties.angularConstraints[0], bodyProperties.angularConstraints[1], e.target.checked ? 1 : 0]})} />
-              </div>
-            </div>
-            <button className={addBtn} onClick={() => removeBody()}>Remove Rigid Body</button>
-        </>
-        }
-      </div>
-    { bodyProperties &&
-      <div className={section}>
-        <p>Shapes</p>
-        <div className={row}>
-          Add Shape:
-          <button className={addBtn} onClick={() => addShape('box', 'body')}>Box</button>
-          <button className={addBtn} onClick={() => addShape('sphere', 'body')}>Sphere</button>
-          <button className={addBtn} onClick={() => addShape('cylinder', 'body')}>Cylinder</button>
-          <button className={addBtn} onClick={() => addShape('plane', 'body')}>Plane</button>
-        </div>
-        { bodyProperties.shapes.map((shape, i) => 
-          <ShapeEditor key={i} shape={shape} setShape={(newShape: any) => {
-            const newShapes = [...bodyProperties.shapes];
-            newShapes[i] = newShape;
-            setBodyProperties({...bodyProperties, shapes: newShapes})
-            }}
-            removeShape={() => {
-              removeShape(i, 'body');
-            }}
-          />
-        )}
-      </div>}
-    </Collapsable>
-    <Collapsable title='Trigger'>
-      <div className={section}>
-        {
-          !triggerProperties ? 
-          <>
-            <p>Node does not have a trigger.</p>
-            <button className={addBtn} onClick={() => setTriggerProperties({ shapes: [] })}> Add Trigger </button>
-          </>
-          :
-          <>
-          <button className={addBtn} onClick={() => removeTrigger()}>Remove Trigger</button>
-          { triggerProperties &&
-            <div className={section}>
-              <p>Shapes</p>
-              <div className={row}>
-                Add Shape:
-                <button className={addBtn} onClick={() => addShape('box', 'trigger')}>Box</button>
-                <button className={addBtn} onClick={() => addShape('sphere', 'trigger')}>Sphere</button>
-                <button className={addBtn} onClick={() => addShape('cylinder', 'trigger')}>Cylinder</button>
-                <button className={addBtn} onClick={() => addShape('plane', 'trigger')}>Plane</button>
-              </div>
-              { triggerProperties.shapes.map((shape, i) => 
-                <ShapeEditor key={i} shape={shape} setShape={(newShape: any) => {
-                  const newShapes = [...triggerProperties.shapes];
-                  newShapes[i] = newShape;
-                  setTriggerProperties({...triggerProperties, shapes: newShapes})
-                  }}
-                  removeShape={() => {
-                    removeShape(i, 'trigger');
-                  }}
-                />
-              )}
-            </div>}
-          </>
+            </>
         }
       </div>
     </Collapsable>
+
+    <Collapsable title='Trigger' icon={<ShapeIcon />} badge={triggerProperties?.shapes.length || undefined} persistKey='trigger'>
+      <div className='w-full p-2'>
+        { !triggerProperties
+          ? <>
+              <Hint className='mb-2'>Node does not have a trigger.</Hint>
+              <Button variant='primary' size='sm' onClick={() => setTriggerProperties({ shapes: [] })}>Add Trigger</Button>
+            </>
+          : <>
+              <Button variant='danger' size='sm' onClick={removeTrigger}>Remove Trigger</Button>
+              <div className='mt-2'>
+                <ShapeTools shapes={triggerProperties.shapes} target='trigger' setShapes={(i, s) => { const n = [...triggerProperties.shapes]; n[i] = s; setTriggerProperties({ ...triggerProperties, shapes: n }); }} />
+              </div>
+            </>
+        }
+      </div>
+    </Collapsable>
+
     { isSkinned && ragdoll &&
-    <Collapsable title='Ragdoll'>
-      <div className={section}>
-        <p className='text-xs text-gray-300 mb-2'>How this skinned mesh simulates when turned into a ragdoll.</p>
-        <div className={row}>
-          <label className={label}>Joint Type</label>
-          <select className={number} value={ragdoll.jointType}
-            onChange={(e) => setRagdoll({ ...ragdoll, jointType: e.target.value as 'ball' | 'coneTwist' })}>
+    <Collapsable title='Ragdoll' icon={<PhysicsIcon />} persistKey='ragdoll'>
+      <div className='w-full p-2'>
+        <Hint className='mb-2'>How this skinned mesh simulates when turned into a ragdoll.</Hint>
+        <Field label='Joint Type' labelClassName={LABEL}>
+          <Select value={ragdoll.jointType} onChange={(e) => setRagdoll({ ...ragdoll, jointType: e.target.value as 'ball' | 'coneTwist' })}>
             <option value='ball'>Ball (free, stable)</option>
             <option value='coneTwist'>Cone-Twist (limited)</option>
-          </select>
-        </div>
+          </Select>
+        </Field>
         { ragdoll.jointType === 'coneTwist' && <>
-          <div className={row}>
-            <label className={label}>Cone Angle</label>
-            <div>
-              <input className='w-[200px]' type='range' min={0} max={180} step={1} value={ragdoll.coneAngle}
-                onChange={(e) => setRagdoll({ ...ragdoll, coneAngle: parseFloat(e.target.value) })} />
-              {' '}{ragdoll.coneAngle}°
-            </div>
-          </div>
-          <div className={row}>
-            <label className={label}>Twist Angle</label>
-            <div>
-              <input className='w-[200px]' type='range' min={0} max={180} step={1} value={ragdoll.twistAngle}
-                onChange={(e) => setRagdoll({ ...ragdoll, twistAngle: parseFloat(e.target.value) })} />
-              {' '}{ragdoll.twistAngle}°
-            </div>
-          </div>
-          <div className={row}>
-            <label className={label}>Stiffness</label>
-            <input className={number} type='number' value={ragdoll.stiffness}
-              onChange={(e) => setRagdoll({ ...ragdoll, stiffness: parseFloat(e.target.value) })} />
-          </div>
+          <Slider label='Cone Angle' labelClassName={LABEL} min={0} max={180} step={1} value={ragdoll.coneAngle ?? 0} readout={(v) => `${v.toFixed(0)}°`} onChange={(v) => setRagdoll({ ...ragdoll, coneAngle: v })} />
+          <Slider label='Twist Angle' labelClassName={LABEL} min={0} max={180} step={1} value={ragdoll.twistAngle ?? 0} readout={(v) => `${v.toFixed(0)}°`} onChange={(v) => setRagdoll({ ...ragdoll, twistAngle: v })} />
+          <Field label='Stiffness' labelClassName={LABEL}><NumberInput value={ragdoll.stiffness ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, stiffness: v })} /></Field>
         </> }
-        <div className={row}>
-          <label className={label}>Angular Damping</label>
-          <div>
-            <input className='w-[200px]' type='range' min={0} max={1} step={0.01} value={ragdoll.angularDamping}
-              onChange={(e) => setRagdoll({ ...ragdoll, angularDamping: parseFloat(e.target.value) })} />
-            {' '}{ragdoll.angularDamping}
-          </div>
-        </div>
-        <div className={row}>
-          <label className={label}>Linear Damping</label>
-          <div>
-            <input className='w-[200px]' type='range' min={0} max={1} step={0.01} value={ragdoll.linearDamping}
-              onChange={(e) => setRagdoll({ ...ragdoll, linearDamping: parseFloat(e.target.value) })} />
-            {' '}{ragdoll.linearDamping}
-          </div>
-        </div>
-        <div className={row}>
-          <label className={label}>Bone Mass</label>
-          <input className={number} type='number' step={0.1} value={ragdoll.boneMass}
-            onChange={(e) => setRagdoll({ ...ragdoll, boneMass: parseFloat(e.target.value) })} />
-        </div>
-        <div className={row}>
-          <label className={label}>Radius Scale</label>
-          <input className={number} type='number' step={0.05} value={ragdoll.radiusScale}
-            onChange={(e) => setRagdoll({ ...ragdoll, radiusScale: parseFloat(e.target.value) })} />
-        </div>
-        <div className={row}>
-          <label className={label}>Self Collision</label>
-          <input type='checkbox' checked={!!ragdoll.selfCollision}
-            onChange={(e) => setRagdoll({ ...ragdoll, selfCollision: e.target.checked })} />
-        </div>
-        <div className={row}>
-          <label className={label}>Knockback Impulse</label>
-          <div className='w-[200px]'>
-            <AxisInput step={0.1}
-              value={[ragdoll.impulse?.[0] ?? 0, ragdoll.impulse?.[1] ?? 0, ragdoll.impulse?.[2] ?? 0]}
-              onChange={(v) => setRagdoll({ ...ragdoll, impulse: [v[0], v[1], v[2]] })} />
-          </div>
-        </div>
+        <Slider label='Angular Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={ragdoll.angularDamping ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, angularDamping: v })} />
+        <Slider label='Linear Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={ragdoll.linearDamping ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, linearDamping: v })} />
+        <Field label='Bone Mass' labelClassName={LABEL}><NumberInput step={0.1} value={ragdoll.boneMass ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, boneMass: v })} /></Field>
+        <Field label='Radius Scale' labelClassName={LABEL}><NumberInput step={0.05} value={ragdoll.radiusScale ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, radiusScale: v })} /></Field>
+        <Field label='Self Collision' labelClassName={LABEL}><Toggle checked={!!ragdoll.selfCollision} onChange={(c) => setRagdoll({ ...ragdoll, selfCollision: c })} /></Field>
+        <Field label='Knockback Impulse' labelClassName={LABEL}>
+          <AxisInput step={0.1} value={[ragdoll.impulse?.[0] ?? 0, ragdoll.impulse?.[1] ?? 0, ragdoll.impulse?.[2] ?? 0]} onChange={(v) => setRagdoll({ ...ragdoll, impulse: [v[0], v[1], v[2]] })} />
+        </Field>
       </div>
     </Collapsable>
     }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
+import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 
 // Centered review modal shown once per imported model, between parsing and committing to the library.
 // Surfaces import state, lets the user upload textures the model references but that were missing from
@@ -57,14 +58,11 @@ export default function MeshImportModal() {
   const cancel = () => resolveMeshImport(null)
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'
-         onClick={cancel}>
-      <div className='w-[420px] max-h-[85vh] overflow-y-auto bg-[#252525] border border-[#3b3b3b] rounded-md shadow-lg text-white select-none'
-           onClick={(e) => e.stopPropagation()}>
-        <div className='px-4 py-3 border-b border-[#3b3b3b]'>
+    <Modal onClose={cancel} className='w-[420px]'>
+        <ModalHeader>
           <div className='text-sm font-semibold'>Import model</div>
           <div className='text-lg font-bold truncate' title={info.bundleName}>{info.bundleName}</div>
-        </div>
+        </ModalHeader>
 
         <div className='px-4 py-3 space-y-4 text-sm'>
           {/* Summary */}
@@ -78,7 +76,7 @@ export default function MeshImportModal() {
             <div className='flex items-center justify-between mb-1'>
               <span className='text-xs font-semibold'>Textures</span>
               {info.missing.length > 0 && (
-                <label className='text-[11px] bg-[#3b3b3b] hover:bg-[#4b4b4b] rounded px-2 py-1 cursor-pointer'>
+                <label className='text-[11px] bg-control hover:bg-control-hover rounded px-2 py-1 cursor-pointer'>
                   Select missing textures…
                   <input type='file' multiple className='hidden' accept='.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp'
                          onChange={(e) => { onSelectMissing(e.target.files); e.target.value = '' }} />
@@ -89,13 +87,13 @@ export default function MeshImportModal() {
               <p className='text-xs text-gray-400'>All referenced textures are present.</p>
             ) : (
               <div className='space-y-1'>
-                <p className='text-[11px] text-[#ffd27a]'>
+                <p className='text-[11px] text-warning'>
                   {resolved.size} of {info.missing.length} linked — select the missing texture files (matched by filename).
                 </p>
                 {info.missing.map(name => {
                   const done = resolved.has(name)
                   return (
-                    <div key={name} className='flex items-center gap-2 bg-[#1e1e1e] border border-[#3b3b3b] rounded px-2 py-1'>
+                    <div key={name} className='flex items-center gap-2 bg-surface-raised border border-control rounded px-2 py-1'>
                       <span className={`text-xs truncate flex-1 ${done ? 'text-green-400 line-through' : ''}`} title={name}>{name}</span>
                       <span className={`text-xs ${done ? 'text-green-400' : 'text-gray-500'}`}>{done ? '✓ linked' : 'missing'}</span>
                     </div>
@@ -119,7 +117,7 @@ export default function MeshImportModal() {
               <span className='text-gray-300'>Fit to</span>
               <input type='number' min={0.01} step={0.1} value={targetSize}
                      onChange={(e) => setTargetSize(parseFloat(e.target.value) || 0)}
-                     className='w-[70px] bg-[#1e1e1e] border border-[#3b3b3b] rounded px-2 py-1 text-white' />
+                     className='w-[70px] bg-surface-raised border border-control rounded px-2 py-1 text-white' />
               <span className='text-gray-300'>units</span>
             </div>
             <p className='text-[11px] text-gray-400 mt-1'>
@@ -128,11 +126,10 @@ export default function MeshImportModal() {
           </div>
         </div>
 
-        <div className='px-4 py-3 border-t border-[#3b3b3b] flex justify-end gap-2'>
-          <button className='px-3 py-1.5 text-xs rounded bg-[#3b3b3b] hover:bg-[#4b4b4b]' onClick={cancel}>Cancel</button>
-          <button className='px-3 py-1.5 text-xs rounded bg-[#2c7a2c] hover:bg-[#358535] font-semibold' onClick={accept}>Accept & Import</button>
-        </div>
-      </div>
-    </div>
+        <ModalFooter>
+          <button className='px-3 py-1.5 text-xs rounded bg-control hover:bg-control-hover' onClick={cancel}>Cancel</button>
+          <button className='px-3 py-1.5 text-xs rounded bg-success hover:bg-success-hover font-semibold' onClick={accept}>Accept & Import</button>
+        </ModalFooter>
+    </Modal>
   )
 }

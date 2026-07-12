@@ -43,7 +43,7 @@ export function SidebarResizer(props: SidebarResizerProps) {
 
   return (
     <div
-      className="flex flex-col items-center justify-center w-[2px] h-full cursor-ew-resize bg-[#2d2d77] hover:w-[5px] hover:bg-[#3f3fb4]"
+      className="flex flex-col items-center justify-center w-[2px] h-full cursor-ew-resize bg-border hover:w-[5px] hover:bg-control-hover"
       onMouseDown={() => setDragging(true)}
     />
   );

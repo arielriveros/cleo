@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { ModelNode, Material, CustomMaterial } from 'cleo';
 import { useCleoEngine } from '../../EngineContext';
-import { colorToVec3, vec3ToHex } from '../../../utils/UtilFunctions';
+import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { newCustomMaterial } from '../../../utils/customMaterials';
 import Collapsable from '../../../components/Collapsable';
 import TextureInspector from './TextureInspector';
 import CustomMaterialEditor from './CustomMaterialEditor';
+import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section } from '../../../components/ui';
+import { MaterialIcon } from '../sectionIcons';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
   // Safety check to ensure the node has a model
@@ -159,351 +161,114 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     eventEmitter.emit('SCENE_CHANGED');
   };
 
-  const colorInput = 'w-[32px] h-[32px] p-0 border border-[#2d2d77] rounded bg-transparent';
-  const numberInput = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-[80px]';
-  const selectInput = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1';
+  const setColor = (key: string, setter: (hex: string) => void) => (c: [number, number, number]) => {
+    model.material.properties.set(key, c);
+    setter(vec3ToHex(c));
+  };
+  const setNum = (key: string, setter: (v: number) => void) => (v: number) => {
+    model.material.properties.set(key, v);
+    setter(v);
+  };
+
+  // Rendered as a function call (not a component) so the TextureInspector at each position stays
+  // mounted across re-renders instead of remounting.
+  const texSlot = (label: string, tex: string) => (
+    <div className='flex flex-col items-center gap-1'>
+      <span className='text-[10px] text-muted'>{label}</span>
+      <TextureInspector tex={tex} material={model.material} />
+    </div>
+  );
 
   return (
-    <Collapsable title='Material'>
+    <Collapsable title='Material' icon={<MaterialIcon />} persistKey='material'>
       <div className='w-full p-2'>
-        {/* Shader selector */}
-        <div className='mb-2 flex items-center gap-2'>
-          <span className='text-xs text-slate-300'>Shader</span>
-          <select className={selectInput} value={shaderType} onChange={(e) => handleShaderTypeChange(e.target.value as ShaderType)}>
+        <Field label='Shader'>
+          <Select value={shaderType} onChange={(e) => handleShaderTypeChange(e.target.value as ShaderType)}>
             <option value='basic'>Basic</option>
             <option value='blinn_phong'>Blinn-Phong</option>
             <option value='pbr'>PBR</option>
             <option value='custom'>Custom (shader)</option>
-          </select>
-        </div>
+          </Select>
+        </Field>
 
         {shaderType === 'custom' && <CustomMaterialEditor node={props.node} />}
 
         {shaderType === 'blinn_phong' && (
           <>
-            <h5 className='m-0 mb-1 font-bold'>Colors</h5>
-            <table className='w-full text-left border-collapse'>
-              <tbody>
-                <tr>
-                  <td>Diffuse</td>
-                  <td>Specular</td>
-                  <td>Shininess</td>
-                  <td>Ambient</td>
-                  <td>Emission</td>
-                </tr>
-                <tr>
-                  <td>
-                    <input type='color' className={colorInput} value={diffuse} onChange={(e) => {
-                      model.material.properties.set('diffuse', colorToVec3(e.target.value));
-                      setDiffuse(e.target.value); }} 
-                    />
-                  </td>
-                  
-                  <td>
-                    <input type='color' className={colorInput} value={specular} onChange={(e) => {
-                      model.material.properties.set('specular', colorToVec3(e.target.value));
-                      setSpecular(e.target.value); }}
-                    />
-                  </td>
-                  <td>
-                    <input type='number' className={numberInput} value={shininess} onChange={(e) => {
-                      model.material.properties.set('shininess', Number(e.target.value));
-                      setShininess(e.target.value); }}
-                    />
-                  </td>
-                  <td>
-                    <input type='color' className={colorInput} value={ambient} onChange={(e) => {
-                      model.material.properties.set('ambient', colorToVec3(e.target.value));
-                      setAmbient(e.target.value); }}
-                    />
-                  </td>
-                  <td>
-                    <input type='color' className={colorInput} value={emission} onChange={(e) => {
-                      model.material.properties.set('emissive', colorToVec3(e.target.value));
-                      setEmission(e.target.value); }}
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            {/* Opacity slider for Default material */}
-            <div className='mt-2'>
-              <span className='text-xs text-slate-300 mr-2'>Opacity</span>
-              <input
-                type='range'
-                min={0}
-                max={1}
-                step={0.01}
-                value={defaultOpacity}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setDefaultOpacity(v);
-                  model.material.properties.set('opacity', v);
-                }}
-              />
-              <span className='text-xs ml-2'>{defaultOpacity.toFixed(2)}</span>
-            </div>
-
-            <h5 className='m-0 mt-2 mb-1 font-bold'>Textures</h5>
-            <table className='w-full text-left border-collapse'>
-              <tbody>
-                <tr>
-                  <td>Diffuse</td>
-                  <td>Specular</td>
-                  <td>Normal</td>
-                </tr>
-                <tr>
-                  <td>
-                    <TextureInspector tex={'baseTexture'} material={model.material} />
-                  </td>
-                  <td>
-                    <TextureInspector tex={'specularMap'} material={model.material} />
-                  </td>
-                  <td>
-                    <TextureInspector tex={'normalMap'} material={model.material} />
-                  </td>
-                </tr>
-                <tr>
-                  <td>Emission</td>
-                  <td>Mask</td>
-                  <td>Reflectivity</td>
-                </tr>
-                <tr>
-                  <td>
-                    <TextureInspector tex={'emissiveMap'} material={model.material} />
-                  </td>
-                  <td>
-                    <TextureInspector tex={'maskMap'} material={model.material} />
-                  </td>
-                  <td>
-                    <TextureInspector tex={'reflectivityMap'} material={model.material} />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <Section title='Colors'>
+              <PropertyTable columns={['40%', '60%']}>
+                <PropertyRow label='Diffuse'><ColorInput color={diffuse} onChange={setColor('diffuse', setDiffuse)} /></PropertyRow>
+                <PropertyRow label='Specular'><ColorInput color={specular} onChange={setColor('specular', setSpecular)} /></PropertyRow>
+                <PropertyRow label='Ambient'><ColorInput color={ambient} onChange={setColor('ambient', setAmbient)} /></PropertyRow>
+                <PropertyRow label='Emission'><ColorInput color={emission} onChange={setColor('emissive', setEmission)} /></PropertyRow>
+                <PropertyRow label='Shininess'><NumberInput value={Number(shininess)} onChange={(v) => { model.material.properties.set('shininess', v); setShininess(v); }} /></PropertyRow>
+                <PropertyRow label='Opacity' divider={false}><Slider min={0} max={1} step={0.01} value={defaultOpacity} onChange={setNum('opacity', setDefaultOpacity)} /></PropertyRow>
+              </PropertyTable>
+            </Section>
+            <Section title='Textures'>
+              <div className='flex flex-wrap gap-3'>
+                {texSlot('Diffuse', 'baseTexture')}
+                {texSlot('Specular', 'specularMap')}
+                {texSlot('Normal', 'normalMap')}
+                {texSlot('Emission', 'emissiveMap')}
+                {texSlot('Mask', 'maskMap')}
+                {texSlot('Reflectivity', 'reflectivityMap')}
+              </div>
+            </Section>
           </>
         )}
 
         {shaderType === 'basic' && (
           <>
-            <h5 className='m-0 mb-1 font-bold'>Properties</h5>
-            <table className='w-full text-left border-collapse'>
-              <tbody>
-                <tr>
-                  <td>Color</td>
-                  <td>Opacity</td>
-                </tr>
-                <tr>
-                  <td>
-                    <input
-                      type='color'
-                      className={colorInput}
-                      value={basicColor}
-                      onChange={(e) => {
-                        model.material.properties.set('color', colorToVec3(e.target.value));
-                        setBasicColor(e.target.value);
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type='number'
-                      className={numberInput}
-                      value={basicOpacity}
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        model.material.properties.set('opacity', v);
-                        setBasicOpacity(v);
-                      }}
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            <h5 className='m-0 mt-2 mb-1 font-bold'>Texture</h5>
-            <table className='w-full text-left border-collapse'>
-              <tbody>
-                <tr>
-                  <td>Texture</td>
-                </tr>
-                <tr>
-                  <td>
-                    <TextureInspector tex={'texture'} material={model.material} />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <Section title='Properties'>
+              <PropertyTable columns={['40%', '60%']}>
+                <PropertyRow label='Color'><ColorInput color={basicColor} onChange={setColor('color', setBasicColor)} /></PropertyRow>
+                <PropertyRow label='Opacity' divider={false}><Slider min={0} max={1} step={0.01} value={basicOpacity} onChange={setNum('opacity', setBasicOpacity)} /></PropertyRow>
+              </PropertyTable>
+            </Section>
+            <Section title='Texture'>
+              <div className='flex flex-wrap gap-3'>{texSlot('Texture', 'texture')}</div>
+            </Section>
           </>
         )}
 
         {shaderType === 'pbr' && (
           <>
-            <h5 className='m-0 mb-1 font-bold'>Properties</h5>
-            <table className='w-full text-left border-collapse'>
-              <tbody>
-                <tr>
-                  <td>Base Color</td>
-                  <td>Metallic / Roughness</td>
-                  <td>Opacity</td>
-                  <td>Emissive</td>
-                </tr>
-                <tr>
-                  <td>
-                    <input type='color' className={colorInput} value={baseColor} onChange={(e) => {
-                      model.material.properties.set('baseColor', colorToVec3(e.target.value));
-                      setBaseColor(e.target.value);
-                    }} />
-                  </td>
-                  <td>
-                    <div className='flex flex-col gap-1'>
-                      <label className='text-xs text-slate-300'>Metallic</label>
-                      <div>
-                        <input
-                          type='range'
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          value={metallic}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            setMetallic(v);
-                            model.material.properties.set('metallic', v);
-                          }}
-                        />
-                        <span className='text-xs ml-2'>{metallic.toFixed(2)}</span>
-                      </div>
-                      <label className='text-xs text-slate-300 mt-1'>Roughness</label>
-                      <div>
-                        <input
-                          type='range'
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          value={roughness}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            setRoughness(v);
-                            model.material.properties.set('roughness', v);
-                          }}
-                        />
-                        <span className='text-xs ml-2'>{roughness.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <input
-                      type='range'
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={pbrOpacity}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        setPbrOpacity(v);
-                        model.material.properties.set('opacity', v);
-                      }}
-                    />
-                    <span className='text-xs ml-2'>{pbrOpacity.toFixed(2)}</span>
-                  </td>
-                  <td>
-                    <input type='color' className={colorInput} value={emissiveFactor} onChange={(e) => {
-                      model.material.properties.set('emissiveFactor', colorToVec3(e.target.value));
-                      setEmissiveFactor(e.target.value);
-                    }} />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            <h5 className='m-0 mt-2 mb-1 font-bold'>Textures</h5>
-            <table className='w-full text-left border-collapse'>
-              <tbody>
-                <tr>
-                  <td>Base Color</td>
-                  <td>Metallic+Roughness</td>
-                  <td>Normal</td>
-                </tr>
-                <tr>
-                  <td>
-                    <TextureInspector tex={'baseColorTexture'} material={model.material} />
-                  </td>
-                  <td>
-                    <TextureInspector tex={'metallicRoughnessTexture'} material={model.material} />
-                  </td>
-                  <td>
-                    <TextureInspector tex={'normalMap'} material={model.material} />
-                  </td>
-                </tr>
-                <tr>
-                  <td>Occlusion</td>
-                  <td>Emissive</td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td>
-                    <TextureInspector tex={'occlusionMap'} material={model.material} />
-                  </td>
-                  <td>
-                    <TextureInspector tex={'emissiveMap'} material={model.material} />
-                  </td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
+            <Section title='Properties'>
+              <PropertyTable columns={['40%', '60%']}>
+                <PropertyRow label='Base Color'><ColorInput color={baseColor} onChange={setColor('baseColor', setBaseColor)} /></PropertyRow>
+                <PropertyRow label='Metallic'><Slider min={0} max={1} step={0.01} value={metallic} onChange={setNum('metallic', setMetallic)} /></PropertyRow>
+                <PropertyRow label='Roughness'><Slider min={0} max={1} step={0.01} value={roughness} onChange={setNum('roughness', setRoughness)} /></PropertyRow>
+                <PropertyRow label='Opacity'><Slider min={0} max={1} step={0.01} value={pbrOpacity} onChange={setNum('opacity', setPbrOpacity)} /></PropertyRow>
+                <PropertyRow label='Emissive' divider={false}><ColorInput color={emissiveFactor} onChange={setColor('emissiveFactor', setEmissiveFactor)} /></PropertyRow>
+              </PropertyTable>
+            </Section>
+            <Section title='Textures'>
+              <div className='flex flex-wrap gap-3'>
+                {texSlot('Base Color', 'baseColorTexture')}
+                {texSlot('Metal+Rough', 'metallicRoughnessTexture')}
+                {texSlot('Normal', 'normalMap')}
+                {texSlot('Occlusion', 'occlusionMap')}
+                {texSlot('Emissive', 'emissiveMap')}
+              </div>
+            </Section>
           </>
         )}
 
-        <h5 className='m-0 mt-2 mb-1 font-bold'>Options</h5>
-        {/* Implemented: local state-bound Options */}
-        <table className='w-full text-left border-collapse'>
-            <tbody>
-              <tr>
-                  <td>Wireframe</td>
-                  <td>Transparent</td>
-                  <td>Side</td>
-                  <td>Cast Shadow</td>
-              </tr>
-              <tr>
-                <td>
-                  <input
-                    type='checkbox'
-                    checked={options.wireframe}
-                    onChange={(e) => setOptions((prev) => ({ ...prev, wireframe: e.target.checked }))}
-                  />
-                </td>
-                <td>
-                  <input
-                    type='checkbox'
-                    checked={options.transparent}
-                    onChange={(e) => setOptions((prev) => ({ ...prev, transparent: e.target.checked }))}
-                  />
-                </td>
-                <td>
-                  <select
-                    className={selectInput}
-                    value={options.side}
-                    onChange={(e) => setOptions((prev) => ({ ...prev, side: e.target.value as 'front' | 'back' | 'double' }))}
-                  > 
-                    <option value={'front'}>Front</option>
-                    <option value={'back'}>Back</option>
-                    <option value={'double'}>Both</option>
-                  </select>
-                </td>
-                <td>
-                  <input
-                    type='checkbox'
-                    checked={options.castShadow}
-                    onChange={(e) => setOptions((prev) => ({ ...prev, castShadow: e.target.checked }))}
-                  />
-                </td>
-              </tr>
-            </tbody>
-        </table>
+        <Section title='Options'>
+          <div className='flex flex-col gap-1.5'>
+            <Toggle label='Wireframe' checked={options.wireframe} onChange={(c) => setOptions((prev) => ({ ...prev, wireframe: c }))} />
+            <Toggle label='Transparent' checked={options.transparent} onChange={(c) => setOptions((prev) => ({ ...prev, transparent: c }))} />
+            <Toggle label='Cast Shadow' checked={options.castShadow} onChange={(c) => setOptions((prev) => ({ ...prev, castShadow: c }))} />
+            <Field label='Side'>
+              <Select value={options.side} onChange={(e) => setOptions((prev) => ({ ...prev, side: e.target.value as 'front' | 'back' | 'double' }))}>
+                <option value='front'>Front</option>
+                <option value='back'>Back</option>
+                <option value='double'>Both</option>
+              </Select>
+            </Field>
+          </div>
+        </Section>
       </div>
     </Collapsable>
   )

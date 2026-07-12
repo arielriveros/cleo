@@ -21,13 +21,13 @@ type Display = {
 function Row(props: { label: string; value: string; hl?: boolean }) {
   return (
     <div className='flex justify-between gap-3 leading-5'>
-      <span className='text-[#9aa0aa]'>{props.label}</span>
-      <span className={`font-mono ${props.hl ? 'text-[#7CFC98] font-semibold' : ''}`}>{props.value}</span>
+      <span className='text-muted'>{props.label}</span>
+      <span className={`font-mono ${props.hl ? 'text-success font-semibold' : ''}`}>{props.value}</span>
     </div>
   );
 }
 
-const Divider = () => <div className='my-1 border-t border-[#3b3b3b]' />;
+const Divider = () => <div className='my-1 border-t border-control' />;
 
 export default function RendererStats() {
   const { instance } = useCleoEngine();
@@ -78,9 +78,9 @@ export default function RendererStats() {
   }, [instance]);
 
   return (
-    <div data-cleo-overlay className='absolute top-2 right-2 z-20 w-52 bg-[#252525]/95 border border-[#3b3b3b] rounded-md p-3 text-white shadow-lg select-none text-[11px]'>
+    <div data-cleo-overlay className='absolute top-2 right-2 z-20 w-52 bg-surface-raised/95 border border-control rounded-md p-3 text-white shadow-lg select-none text-[11px]'>
       <div className='font-semibold text-sm mb-2'>Performance</div>
-      {!d ? <div className='text-[#aaa]'>Sampling…</div> : (
+      {!d ? <div className='text-muted'>Sampling…</div> : (
         <>
           <Row label='FPS' value={fmt(d.fps)} hl />
           <Row label='Frame' value={`${fmt(d.frameMs, 1)} ms`} />

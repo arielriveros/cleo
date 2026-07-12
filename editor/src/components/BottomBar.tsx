@@ -48,7 +48,7 @@ export function BottomBarResizer(props: BottomBarResizerProps) {
 
   return (
     <div
-      className="flex flex-row items-center justify-center w-full h-[2px] cursor-ns-resize bg-[#2d2d77] hover:h-[5px] hover:bg-[#3f3fb4]"
+      className="flex flex-row items-center justify-center w-full h-[2px] cursor-ns-resize bg-border hover:h-[5px] hover:bg-control-hover"
       onMouseDown={() => setDragging(true)}
     />
   );

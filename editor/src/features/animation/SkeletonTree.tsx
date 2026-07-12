@@ -20,7 +20,7 @@ function JointRow({ joint, depth, selected, skin, onSelect }: RowProps) {
   return (
     <div>
       <div
-        className={`group flex items-center h-[22px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap ${isSelected ? 'bg-[#2c2cff] border border-white' : 'border border-[#3b3b3b] hover:bg-[#3f3fb4] cursor-pointer'}`}
+        className={`group flex items-center h-[22px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap ${isSelected ? 'bg-selected border border-white' : 'border border-control hover:bg-control-hover cursor-pointer'}`}
         style={{ paddingLeft: 5 + depth * 12 }}
         onClick={() => onSelect(joint.index)}
         title={jointLabel(skin, joint.index)}>
@@ -31,7 +31,7 @@ function JointRow({ joint, depth, selected, skin, onSelect }: RowProps) {
             {expanded ? '▾' : '▸'}
           </span>
         ) : (
-          <span className='inline-block w-[16px] mr-1 text-center text-[#6a6ad0]'>•</span>
+          <span className='inline-block w-[16px] mr-1 text-center text-dim'>•</span>
         )}
         <span className='text-xs truncate'>{jointLabel(skin, joint.index)}</span>
       </div>
@@ -63,16 +63,16 @@ export default function SkeletonTree() {
 
   if (!target) {
     return (
-      <div className='flex flex-col text-white bg-[#202020] w-full h-full p-3 text-sm text-gray-400'>
+      <div className='flex flex-col text-white bg-surface-raised w-full h-full p-3 text-sm text-gray-400'>
         No skinned model selected.
       </div>
     )
   }
 
   return (
-    <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-hidden'>
-      <div className='px-3 py-2 border-b border-[#2d2d77] shrink-0'>
-        <div className='text-xs uppercase tracking-wide text-[#8f8fff]'>Skeleton</div>
+    <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-hidden'>
+      <div className='px-3 py-2 border-b border-border shrink-0'>
+        <div className='text-xs uppercase tracking-wide text-highlight'>Skeleton</div>
         <div className='text-[11px] text-gray-400 truncate' title={target.node.name}>{target.node.name}</div>
         <div className='text-[11px] text-gray-500'>{target.skin.joints.length} joints</div>
       </div>

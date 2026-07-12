@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useCleoEngine } from '../EngineContext';
+import { OverlayPanel, Section, Slider, Checkbox, Field, NumberInput, SegmentedControl, Hint } from '../../components/ui';
 
 // Debug channels map 1:1 to the renderer's `debugView` setter (see renderer.ts). Grouped only for
 // display; clicking one blits that internal buffer to the viewport instead of the composited image.
@@ -25,39 +26,6 @@ const MB_QUALITY: { label: string; samples: number }[] = [
   { label: 'Med',  samples: 16 },
   { label: 'High', samples: 24 },
 ];
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className='mb-3'>
-      <div className='text-[11px] uppercase tracking-wide text-[#9a9ad0] mb-1'>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Slider({ label, value, min, max, step, onChange }:
-  { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void }) {
-  return (
-    <label className='flex items-center justify-between gap-2 my-1 text-xs'>
-      <span className='w-[70px] shrink-0'>{label}</span>
-      <input className='flex-1' type='range' min={min} max={max} step={step} value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))} />
-      <span className='w-[34px] text-right tabular-nums'>{value.toFixed(2)}</span>
-    </label>
-  );
-}
-
-function NumberField({ label, value, min, step, onChange }:
-  { label: string; value: number; min?: number; step?: number; onChange: (v: number) => void }) {
-  return (
-    <label className='flex items-center justify-between gap-2 my-1 text-xs'>
-      <span className='w-[70px] shrink-0'>{label}</span>
-      <input className='flex-1 bg-[#1e1e1e] border border-[#3b3b3b] rounded px-1 py-0.5 text-right tabular-nums'
-        type='number' min={min} step={step} value={value}
-        onChange={(e) => { const v = parseFloat(e.target.value); onChange(Number.isFinite(v) ? v : 0); }} />
-    </label>
-  );
-}
 
 export default function RendererOptions() {
   const { instance, isPlayMode } = useCleoEngine();
@@ -102,44 +70,41 @@ export default function RendererOptions() {
 
   if (!renderer) {
     return (
-      <div data-cleo-overlay className='absolute top-2 left-2 z-20 w-64 bg-[#252525]/95 border border-[#3b3b3b] rounded-md p-3 text-white shadow-lg select-none'>
+      <OverlayPanel className='w-64'>
         <div className='font-semibold text-sm mb-2'>Renderer</div>
-        <div className='text-xs text-[#aaa]'>Renderer not ready.</div>
-      </div>
+        <div className='text-xs text-muted'>Renderer not ready.</div>
+      </OverlayPanel>
     );
   }
 
   const setDebug = (key: string) => { renderer.debugView = key; setDebugViewState(key); };
 
   return (
-    <div data-cleo-overlay className='absolute top-2 left-2 z-20 w-64 max-h-[85%] overflow-y-auto bg-[#252525]/95 border border-[#3b3b3b] rounded-md p-3 text-white shadow-lg select-none'>
+    <OverlayPanel className='w-64 max-h-[85%] overflow-y-auto'>
       <div className='font-semibold text-sm mb-2'>Renderer</div>
 
       <Section title='Channels'>
-        <div className='grid grid-cols-3 gap-1'>
-          {CHANNELS.map(({ key, label }) => (
-            <button key={key} title={label} onClick={() => setDebug(key)}
-              className={`text-[11px] px-1 py-1 rounded border transition-colors ${
-                debugView === key
-                  ? 'bg-[#2c2cff] border-white'
-                  : 'bg-[#3b3b3b] border-[#3b3b3b] hover:bg-[#4a4a4a]'}`}>
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          className='grid grid-cols-3 gap-1'
+          size='sm'
+          value={debugView}
+          onChange={setDebug}
+          options={CHANNELS.map(({ key, label }) => ({ value: key, label, title: label }))}
+        />
       </Section>
 
       <Section title='Optimizations'>
-        <label className='flex items-center gap-2 my-1 text-xs'>
-          <input type='checkbox' checked={frustumCulling}
-            onChange={(e) => { renderer.frustumCulling = e.target.checked; setFrustumCulling(e.target.checked); }} />
-          Frustum Culling
-        </label>
-        <NumberField label='Foliage Dist' value={foliageCullDistance} min={0} step={5}
-          onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); }} />
-        <NumberField label='Cell Size' value={foliageCellSize} min={1} step={4}
-          onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); }} />
-        <div className='text-[10px] text-[#8a8aa0] mt-0.5'>Foliage cull distance &amp; grid cell size in world units (distance 0 = off).</div>
+        <Checkbox label='Frustum Culling' checked={frustumCulling} labelClassName='my-1'
+          onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); }} />
+        <Field label='Foliage Dist'>
+          <NumberInput value={foliageCullDistance} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); }} />
+        </Field>
+        <Field label='Cell Size'>
+          <NumberInput value={foliageCellSize} min={1} step={4} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); }} />
+        </Field>
+        <Hint>Foliage cull distance &amp; grid cell size in world units (distance 0 = off).</Hint>
       </Section>
 
       <Section title='Tone / Post'>
@@ -156,36 +121,28 @@ export default function RendererOptions() {
           onChange={(v) => { renderer.bloomKnee = v; setBloomKnee(v); }} />
         <Slider label='Intensity' value={bloomIntensity} min={0} max={3} step={0.05}
           onChange={(v) => { renderer.bloomIntensity = v; setBloomIntensity(v); }} />
-        <div className='text-[10px] text-[#8a8aa0] mt-0.5'>HDR bright-pass (linear). Threshold is a luminance cutoff; knee softens the ramp.</div>
+        <Hint>HDR bright-pass (linear). Threshold is a luminance cutoff; knee softens the ramp.</Hint>
       </Section>
 
       <Section title='Motion Blur'>
-        <label className='flex items-center gap-2 my-1 text-xs'>
-          <input type='checkbox' checked={motionBlur}
-            onChange={(e) => { renderer.motionBlurEnabled = e.target.checked; setMotionBlur(e.target.checked); }} />
-          Enabled
-        </label>
+        <Checkbox label='Enabled' checked={motionBlur} labelClassName='my-1'
+          onChange={(c) => { renderer.motionBlurEnabled = c; setMotionBlur(c); }} />
         <Slider label='Amount' value={motionBlurIntensity} min={0} max={4} step={0.05}
           onChange={(v) => { renderer.motionBlurIntensity = v; setMotionBlurIntensity(v); }} />
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>Quality</span>
-          {MB_QUALITY.map((q) => (
-            <button key={q.label} onClick={() => { renderer.motionBlurSamples = q.samples; setMotionBlurSamples(q.samples); }}
-              className={`px-2 py-1 rounded border ${
-                motionBlurSamples === q.samples ? 'bg-[#2c2cff] border-white' : 'bg-[#3b3b3b] border-[#3b3b3b] hover:bg-[#4a4a4a]'}`}>
-              {q.label}
-            </button>
-          ))}
+          <SegmentedControl
+            value={motionBlurSamples}
+            onChange={(samples) => { renderer.motionBlurSamples = samples; setMotionBlurSamples(samples); }}
+            options={MB_QUALITY.map((q) => ({ value: q.samples, label: q.label }))}
+          />
         </div>
-        <div className='text-[10px] text-[#8a8aa0] mt-0.5'>Camera-reprojection motion blur (UE5-style). Amount scales the shutter length.</div>
+        <Hint>Camera-reprojection motion blur (UE5-style). Amount scales the shutter length.</Hint>
       </Section>
 
       <Section title='SSAO'>
-        <label className='flex items-center gap-2 my-1 text-xs'>
-          <input type='checkbox' checked={ssaoEnabled}
-            onChange={(e) => { renderer.ssaoEnabled = e.target.checked; setSsaoEnabled(e.target.checked); }} />
-          Enabled
-        </label>
+        <Checkbox label='Enabled' checked={ssaoEnabled} labelClassName='my-1'
+          onChange={(c) => { renderer.ssaoEnabled = c; setSsaoEnabled(c); }} />
         <Slider label='Radius' value={ssaoRadius} min={0} max={2} step={0.05}
           onChange={(v) => { renderer.ssaoRadius = v; setSsaoRadius(v); }} />
         <Slider label='Power' value={ssaoPower} min={0} max={5} step={0.1}
@@ -195,22 +152,18 @@ export default function RendererOptions() {
       </Section>
 
       <Section title='Grid'>
-        <label className='flex items-center gap-2 my-1 text-xs'>
-          <input type='checkbox' checked={gridVisible}
-            onChange={(e) => { renderer.setGridVisible(e.target.checked); setGridVisible(e.target.checked); }} />
-          Visible
-        </label>
+        <Checkbox label='Visible' checked={gridVisible} labelClassName='my-1'
+          onChange={(c) => { renderer.setGridVisible(c); setGridVisible(c); }} />
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>Plane</span>
-          {(['xz', 'xy'] as const).map((p) => (
-            <button key={p} onClick={() => { renderer.setGridPlane(p); setGridPlane(p); }}
-              className={`px-2 py-1 rounded border uppercase ${
-                gridPlane === p ? 'bg-[#2c2cff] border-white' : 'bg-[#3b3b3b] border-[#3b3b3b] hover:bg-[#4a4a4a]'}`}>
-              {p}
-            </button>
-          ))}
+          <SegmentedControl
+            value={gridPlane}
+            onChange={(p) => { renderer.setGridPlane(p); setGridPlane(p); }}
+            itemClassName='uppercase'
+            options={[{ value: 'xz', label: 'XZ' }, { value: 'xy', label: 'XY' }]}
+          />
         </div>
       </Section>
-    </div>
+    </OverlayPanel>
   );
 }

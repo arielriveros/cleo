@@ -102,15 +102,15 @@ export default function LandscapeInspector() {
     };
 
     const label = 'text-xs text-gray-300';
-    const num = 'w-14 bg-[#2b2b2b] text-white border border-[#444] rounded px-1 py-[2px] text-xs';
+    const num = 'w-14 bg-surface-raised text-white border border-control-hover rounded px-1 py-[2px] text-xs';
     const modeBtn = (m: TerrainBrushMode, text: string) =>
-        <button className={`flex-1 rounded px-2 py-1 text-xs ${mode === m ? 'bg-[#2c2cff]' : 'bg-[#3b3b3b] hover:bg-[#4a4a4a]'}`} onClick={() => setMode(m)}>{text}</button>;
+        <button className={`flex-1 rounded px-2 py-1 text-xs ${mode === m ? 'bg-selected' : 'bg-control hover:bg-control-hover'}`} onClick={() => setMode(m)}>{text}</button>;
 
     return (
-        <div data-cleo-overlay className="absolute top-2 left-2 z-20 w-64 max-h-[85%] overflow-y-auto bg-[#252525]/95 border border-[#3b3b3b] rounded-md p-3 text-white shadow-lg select-none">
+        <div data-cleo-overlay className="absolute top-2 left-2 z-20 w-64 max-h-[85%] overflow-y-auto bg-surface-raised/95 border border-control rounded-md p-3 text-white shadow-lg select-none">
             <div className="font-semibold text-sm mb-2">Landscape</div>
 
-            <div className="mb-3 border-b border-[#3b3b3b] pb-3">
+            <div className="mb-3 border-b border-control pb-3">
                 <div className="flex items-center justify-between mb-1">
                     <span className={label}>Size</span>
                     <input type="number" className={num} value={size} min={10} onChange={e => setSize(Number(e.target.value))} />
@@ -119,7 +119,7 @@ export default function LandscapeInspector() {
                     <span className={label}>Resolution</span>
                     <input type="number" className={num} value={resolution} min={8} max={513} onChange={e => setResolution(Number(e.target.value))} />
                 </div>
-                <button className="w-full bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-1 text-xs" onClick={createOrUpdateTerrain}>{hasTerrain ? 'Update Terrain' : 'Create Terrain'}</button>
+                <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={createOrUpdateTerrain}>{hasTerrain ? 'Update Terrain' : 'Create Terrain'}</button>
                 {hasTerrain && <div className="text-[10px] text-gray-400 mt-1">Update rebuilds the terrain at the new size/resolution, keeps materials + shape, and refills foliage.</div>}
             </div>
 
@@ -131,7 +131,7 @@ export default function LandscapeInspector() {
                     <div className="grid grid-cols-2 gap-1">
                         {TOOLS.map(t => (
                             <button key={t.id}
-                                className={`rounded px-2 py-1 text-xs ${tool === t.id ? 'bg-[#2c2cff]' : 'bg-[#3b3b3b] hover:bg-[#4a4a4a]'}`}
+                                className={`rounded px-2 py-1 text-xs ${tool === t.id ? 'bg-selected' : 'bg-control hover:bg-control-hover'}`}
                                 onClick={() => setTool(t.id)}>{t.label}</button>
                         ))}
                     </div>
@@ -144,7 +144,7 @@ export default function LandscapeInspector() {
                     <div className="grid grid-cols-4 gap-1 mb-2">
                         {[0, 1, 2, 3].map(i => (
                             <button key={i}
-                                className={`rounded px-2 py-1 text-xs ${paintLayer === i ? 'bg-[#2c2cff]' : 'bg-[#3b3b3b] hover:bg-[#4a4a4a]'}`}
+                                className={`rounded px-2 py-1 text-xs ${paintLayer === i ? 'bg-selected' : 'bg-control hover:bg-control-hover'}`}
                                 onClick={() => setPaintLayer(i)}>{i}</button>
                         ))}
                     </div>
@@ -158,7 +158,7 @@ export default function LandscapeInspector() {
                         <span className={label}>Erase mode</span>
                         <input type="checkbox" checked={foliageErase} onChange={e => setFoliageErase(e.target.checked)} />
                     </label>
-                    <button className="w-full bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-1 text-xs" onClick={generateFoliage}>Generate Foliage (whole terrain)</button>
+                    <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={generateFoliage}>Generate Foliage (whole terrain)</button>
                     <p className="text-[10px] text-gray-400">
                         The brush scatters each painted material’s foliage (and skips excluded types).
                         Define a material’s foliage in the “Terrain Mat.” tab, then paint that material here.
@@ -187,17 +187,17 @@ export default function LandscapeInspector() {
                 </div>
             </div>
 
-            <div className="mt-3 border-t border-[#3b3b3b] pt-3">
+            <div className="mt-3 border-t border-control pt-3">
                 <div className="flex items-center justify-between mb-1">
                     <span className={label}>Amplitude</span>
                     <input type="number" className={num} value={amplitude} onChange={e => setAmplitude(Number(e.target.value))} />
                 </div>
                 <div className="flex gap-1">
-                    <label className="flex-1 bg-[#3b3b3b] hover:bg-[#4a4a4a] rounded px-2 py-1 text-xs text-center cursor-pointer">
+                    <label className="flex-1 bg-control hover:bg-control-hover rounded px-2 py-1 text-xs text-center cursor-pointer">
                         Import
                         <input type="file" className="hidden" accept=".png,.jpg,.jpeg,.bmp" onChange={e => importHeightmap(e.target.files)} />
                     </label>
-                    <button className="flex-1 bg-[#3b3b3b] hover:bg-[#4a4a4a] rounded px-2 py-1 text-xs" onClick={exportHeightmap}>Export</button>
+                    <button className="flex-1 bg-control hover:bg-control-hover rounded px-2 py-1 text-xs" onClick={exportHeightmap}>Export</button>
                 </div>
             </div>
 

@@ -34,7 +34,7 @@ export default function Explorer() {
         { editorMode !== 'template' &&
           <Tab title='UI' onClick={()=>{setSelectedTab('UI')}} selected={selectedTab === 'UI'}/> }
       </Tabs>
-      <div className='flex flex-col text-white bg-[#202020] w-full h-full overflow-y-auto'>
+      <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
         {selectedTab === 'Scene' && <SceneInspector />}
         {selectedTab === 'UI' && <UIInspector />}
       </div>

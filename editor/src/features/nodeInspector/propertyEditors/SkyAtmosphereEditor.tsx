@@ -5,6 +5,8 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useCleoEngine } from '../../EngineContext'
+import { Slider, Toggle } from '../../../components/ui'
+import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
 
@@ -51,36 +53,27 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
 
   // Plain render helpers (invoked as functions so inputs keep identity across re-renders).
   const slider = (label: string, k: keyof AtmoState, min: number, max: number, step: number, fixed = 2) => (
-    <div className='flex flex-col gap-1 mb-2'>
-      <label className='flex justify-between text-sm'>
-        <span>{label}</span>
-        <span className='text-gray-400'>{(state[k] as number).toFixed(fixed)}</span>
-      </label>
-      <input type='range' className='w-full' min={min} max={max} step={step}
-        value={state[k] as number}
-        onChange={(e) => apply({ [k]: parseFloat(e.target.value) } as Partial<AtmoState>)} />
-    </div>
+    <Slider label={label} min={min} max={max} step={step} value={state[k] as number}
+      labelClassName='w-[104px]' readout={(v) => v.toFixed(fixed)}
+      onChange={(v) => apply({ [k]: v } as Partial<AtmoState>)} />
   )
 
   const check = (label: string, k: keyof AtmoState) => (
-    <label className='flex items-center gap-2 mb-2 text-sm cursor-pointer'>
-      <input type='checkbox' checked={state[k] as boolean}
-        onChange={(e) => apply({ [k]: e.target.checked } as Partial<AtmoState>)} />
-      {label}
-    </label>
+    <Toggle label={label} checked={state[k] as boolean} className='my-1'
+      onChange={(c) => apply({ [k]: c } as Partial<AtmoState>)} />
   )
 
   const color = (label: string, k: 'sunColor' | 'groundColor' | 'fogColor' | 'godRayTint') => (
-    <div className='flex items-center justify-between mb-2 text-sm'>
-      <span>{label}</span>
+    <div className='flex items-center justify-between my-1 text-xs'>
+      <span className='text-muted'>{label}</span>
       <ColorInput color={vec3ToHex(state[k])} onChange={(c) => apply({ [k]: c } as Partial<AtmoState>)} />
     </div>
   )
 
-  const header = (label: string) => <div className='mt-2 mb-1 font-semibold text-[#9aa0ff]'>{label}</div>
+  const header = (label: string) => <div className='mt-3 mb-1 text-[11px] uppercase tracking-wide text-dim'>{label}</div>
 
   return (
-    <Collapsable title='Sky Atmosphere'>
+    <Collapsable title='Sky Atmosphere' icon={<SkyIcon />} persistKey='skyAtmosphere'>
       <div className='w-full p-2'>
         {header('Sun')}
         {check('Use Scene Directional Light', 'useSceneSun')}
@@ -109,7 +102,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         {header('Quality')}
         <div className='flex items-center justify-between mb-2 text-sm'>
           <span>Resolution</span>
-          <select className='bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1'
+          <select className='bg-control text-white border border-border rounded px-2 py-1'
             value={state.resolution}
             onChange={(e) => apply({ resolution: parseInt(e.target.value) })}>
             <option value={64}>64</option>

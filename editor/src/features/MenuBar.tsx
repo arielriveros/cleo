@@ -22,7 +22,7 @@ export default function MenuBar() {
   const libEdit = templateMode || materialMode || terrainMaterialMode;
   const saving = savingState === 'saving';
   const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved ✓' : savingState === 'error' ? 'Save failed' : 'Save';
-  const saveBorder = savingState === 'error' ? 'border-red-400' : savingState === 'saved' ? 'border-green-400' : 'border-[#ccc]';
+  const saveBorder = savingState === 'error' ? 'border-red-400' : savingState === 'saved' ? 'border-green-400' : 'border-muted';
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
   const [showPublish, setShowPublish] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -121,50 +121,50 @@ export default function MenuBar() {
     <Topbar>
       <div className='flex items-center h-full'>
         {templateMode && (
-          <div className='text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-[#3f3fb4]' title='Save this template and update its placed instances' onClick={() => saveActiveTemplate()}>Save Template</div>
+          <div className='text-white h-[25px] border border-highlight bg-border text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-control-hover' title='Save this template and update its placed instances' onClick={() => saveActiveTemplate()}>Save Template</div>
         )}
         {materialMode && (
-          <div className='text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-[#3f3fb4]' title='Save this material (captures a thumbnail) and update nodes that use it' onClick={() => saveActiveMaterial()}>Save Material</div>
+          <div className='text-white h-[25px] border border-highlight bg-border text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-control-hover' title='Save this material (captures a thumbnail) and update nodes that use it' onClick={() => saveActiveMaterial()}>Save Material</div>
         )}
         {terrainMaterialMode && (
-          <div className='text-white h-[25px] border border-[#8fe08f] bg-[#2c7a2c] text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-[#3fb43f]' title='Save this terrain material (captures a thumbnail) and update layers that use it' onClick={() => saveActiveTerrainMaterial()}>Save Terrain Material</div>
+          <div className='text-white h-[25px] border border-success bg-success text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-success-hover' title='Save this terrain material (captures a thumbnail) and update layers that use it' onClick={() => saveActiveTerrainMaterial()}>Save Terrain Material</div>
         )}
-        <div className={`text-white h-[25px] border ${saveBorder} bg-[#3b3b3b] text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(libEdit || saving) ? 'opacity-50 pointer-events-none' : ''}`} title='Save the project to local storage' onClick={() => onSave()}>{saveLabel}</div>
-        <label htmlFor='load-scene-file' className={`text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Import a .json scene file'>Import</label>
+        <div className={`text-white h-[25px] border ${saveBorder} bg-control text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(libEdit || saving) ? 'opacity-50 pointer-events-none' : ''}`} title='Save the project to local storage' onClick={() => onSave()}>{saveLabel}</div>
+        <label htmlFor='load-scene-file' className={`text-white h-[25px] border border-muted bg-control text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Import a .json scene file'>Import</label>
         <input className="hidden" type='file' accept='.json' id='load-scene-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
-        <div className={`text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Export the scene to a .json file' onClick={() => onExport()}>Export</div>
+        <div className={`text-white h-[25px] border border-muted bg-control text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Export the scene to a .json file' onClick={() => onExport()}>Export</div>
         <div className='relative inline-block' ref={publishRef}>
           <div
-            className={`text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(publishing || libEdit) ? 'opacity-50 pointer-events-none' : ''}`}
+            className={`text-white h-[25px] border border-highlight bg-border text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(publishing || libEdit) ? 'opacity-50 pointer-events-none' : ''}`}
             title='Publish an optimized build of your game'
             onClick={() => setShowPublish(v => !v)}
           >
             {publishing ? 'Publishing…' : 'Publish ▾'}
           </div>
           {showPublish && (
-            <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-[#2b2b2b] border border-[#555] rounded shadow-lg py-1 text-white text-sm'>
-              <label className='flex items-start gap-2 px-3 py-2 border-b border-[#444] cursor-pointer select-none' onClick={(e) => e.stopPropagation()}>
+            <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-surface-raised border border-control-hover rounded shadow-lg py-1 text-white text-sm'>
+              <label className='flex items-start gap-2 px-3 py-2 border-b border-control-hover cursor-pointer select-none' onClick={(e) => e.stopPropagation()}>
                 <input type='checkbox' className='mt-[3px]' checked={embedAssets} onChange={(e) => setEmbedAssets(e.target.checked)} />
                 <span>
                   <span className='font-semibold'>Embed assets in data</span>
-                  <span className='block text-[11px] text-[#aaa]'>{embedAssets ? 'One self-contained game.json (larger)' : 'Loose assets/ files + small game.json'}</span>
+                  <span className='block text-[11px] text-muted'>{embedAssets ? 'One self-contained game.json (larger)' : 'Loose assets/ files + small game.json'}</span>
                 </span>
               </label>
-              <div className='px-3 py-2 hover:bg-[#3b3b3b] cursor-pointer' onClick={onPublishWeb}>
+              <div className='px-3 py-2 hover:bg-control cursor-pointer' onClick={onPublishWeb}>
                 <div className='font-semibold'>Web (HTML)</div>
-                <div className='text-[11px] text-[#aaa]'>{desktop ? 'Write index.html + game.js + game.json to a folder' : 'Download a .zip of the game'}</div>
+                <div className='text-[11px] text-muted'>{desktop ? 'Write index.html + game.js + game.json to a folder' : 'Download a .zip of the game'}</div>
               </div>
               <div
-                className={`px-3 py-2 ${desktop ? 'hover:bg-[#3b3b3b] cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
+                className={`px-3 py-2 ${desktop ? 'hover:bg-control cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
                 onClick={() => desktop && onPublishDesktop(false)}
               >
                 <div className='font-semibold'>Desktop (Electron)</div>
-                <div className='text-[11px] text-[#aaa]'>{desktop ? 'Runnable Electron game folder' : 'Only available in the desktop app'}</div>
+                <div className='text-[11px] text-muted'>{desktop ? 'Runnable Electron game folder' : 'Only available in the desktop app'}</div>
               </div>
               {desktop && (
-                <div className='px-3 py-2 hover:bg-[#3b3b3b] cursor-pointer' onClick={() => onPublishDesktop(true)}>
+                <div className='px-3 py-2 hover:bg-control cursor-pointer' onClick={() => onPublishDesktop(true)}>
                   <div className='font-semibold'>Desktop installer</div>
-                  <div className='text-[11px] text-[#aaa]'>Package a native installer (electron-builder)</div>
+                  <div className='text-[11px] text-muted'>Package a native installer (electron-builder)</div>
                 </div>
               )}
             </div>
@@ -172,13 +172,13 @@ export default function MenuBar() {
         </div>
       </div>
       <div className='flex items-center h-full'>
-        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='playing' || libEdit} onClick={() => onPlay()}>
+        <button className='text-white bg-selected cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-control disabled:cursor-not-allowed hover:bg-control-hover disabled:hover:bg-control' disabled={playState==='playing' || libEdit} onClick={() => onPlay()}>
           <img src={PlayIcon} alt='Play' className='inline-block h-full w-full align-middle' />
         </button>
-        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='paused' || playState==='stopped' || libEdit} onClick={() => onPause()}>
+        <button className='text-white bg-selected cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-control disabled:cursor-not-allowed hover:bg-control-hover disabled:hover:bg-control' disabled={playState==='paused' || playState==='stopped' || libEdit} onClick={() => onPause()}>
           <img src={PauseIcon} alt='Pause' className='inline-block h-full w-full align-middle' />
         </button>
-        <button className='text-white bg-[#2c2cff] cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-[#3b3b3b] disabled:cursor-not-allowed hover:bg-[#3f3fb4] disabled:hover:bg-[#3b3b3b]' disabled={playState==='stopped' || libEdit} onClick={() => onStop()}>
+        <button className='text-white bg-selected cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-control disabled:cursor-not-allowed hover:bg-control-hover disabled:hover:bg-control' disabled={playState==='stopped' || libEdit} onClick={() => onStop()}>
           <img src={StopIcon} alt='Stop' className='inline-block h-full w-full align-middle' />
         </button>
       </div>

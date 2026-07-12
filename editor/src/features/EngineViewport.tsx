@@ -17,8 +17,8 @@ function GizmoSeg({ active, title, onClick, children }: { active: boolean; title
     return (
         <button
             data-cleo-overlay
-            className={`flex items-center justify-center w-[26px] h-[25px] border-r border-[#555] last:border-r-0 transition-colors cursor-pointer
-                ${active ? 'bg-[#2c2cff] text-white' : 'bg-[#3b3b3b] text-[#ccc] hover:bg-[#4a4a4a]'}`}
+            className={`flex items-center justify-center w-[26px] h-[25px] border-r border-control-hover last:border-r-0 transition-colors cursor-pointer
+                ${active ? 'bg-selected text-white' : 'bg-control text-muted hover:bg-control-hover'}`}
             title={title}
             onClick={onClick}
         >
@@ -293,7 +293,7 @@ export default function EngineViewport() {
                 left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead. */}
             <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
                 {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && (
-                    <div className='flex items-center rounded overflow-hidden border border-[#555]'>
+                    <div className='flex items-center rounded overflow-hidden border border-control-hover'>
                         <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'rotation'} title='Rotate' onClick={() => setGizmoMode('rotation')}><RotateIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'scale'} title='Scale' onClick={() => setGizmoMode('scale')}><ScaleIcon /></GizmoSeg>
@@ -305,7 +305,7 @@ export default function EngineViewport() {
                         value={dimension}
                         onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', e.target.value as '2D' | '3D')}
                         title='Viewport dimension'
-                        className='bg-[#252525]/80 hover:bg-[#252525] text-white text-xs rounded px-1.5 py-1 border border-white/10 cursor-pointer focus:outline-none'
+                        className='bg-surface-raised/80 hover:bg-surface-raised text-white text-xs rounded px-1.5 py-1 border border-white/10 cursor-pointer focus:outline-none'
                     >
                         <option value='3D'>3D</option>
                         <option value='2D'>2D</option>

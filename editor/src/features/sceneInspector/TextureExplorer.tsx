@@ -5,7 +5,7 @@ import Collapsable from '../../components/Collapsable'
 
 function TextureItem({ textureName }: { textureName: string }) {
   return (
-    <div className='flex w-[90%] h-[20px] py-[1px] px-[5px] mb-[1px] border border-[#3b3b3b] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between'> {textureName} </div>
+    <div className='flex w-[90%] h-[20px] py-[1px] px-[5px] mb-[1px] border border-control rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between'> {textureName} </div>
   )
 }
 
@@ -55,7 +55,7 @@ export default function TextureExplorer() {
         <div>
           <b>Upload Textures</b>
           <br/>
-          <label htmlFor='file-upload' className='bg-[#3b3b3b] text-white border border-black m-[1px] px-2 py-1 rounded cursor-pointer'> Upload Files </label>
+          <label htmlFor='file-upload' className='bg-control text-white border border-black m-[1px] px-2 py-1 rounded cursor-pointer'> Upload Files </label>
           <input id='file-upload' className='hidden' type='file' multiple accept='.png, .jpg, .jpeg, .tga, .bmp' onChange={handleFileUpload} />
         </div>
         {

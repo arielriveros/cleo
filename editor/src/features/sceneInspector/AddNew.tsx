@@ -48,7 +48,7 @@ interface AddButtonProps {
 function AddButton(props: AddButtonProps) {
   return(
     <div className='flex flex-col items-center font-thin text-sm px-[1px]'>
-      <button className='flex items-center justify-center w-[40px] h-[40px] border border-[#3b3b3b] rounded-[2px] bg-[#3b3b3b] text-white cursor-pointer' onClick={() => props.onClick()}>
+      <button className='flex items-center justify-center w-[40px] h-[40px] border border-control rounded-[2px] bg-control text-white cursor-pointer' onClick={() => props.onClick()}>
         <img className='flex items-center justify-center w-[35px] h-[35px]' src={props.icon} alt={props.label} />
       </button>
       {props.label}
@@ -196,7 +196,7 @@ export default function AddNew() {
 
   return (
     <Collapsable title='Add'>
-      {locked && <div className='text-[11px] text-[#ffd27a] bg-[#3a2f12] px-2 py-1'>Template instance — edit the template to add nodes.</div>}
+      {locked && <div className='text-[11px] text-warning bg-warning/15 px-2 py-1'>Template instance — edit the template to add nodes.</div>}
       <fieldset disabled={locked} className={`border-0 m-0 p-0 min-w-0 ${locked ? 'opacity-50' : ''}`}>
       <div className='flex flex-row font-thin px-[2px] flex-wrap w-full'>
         <div className='flex flex-col items-center font-medium mr-[10px]'>
@@ -236,7 +236,7 @@ export default function AddNew() {
             <AddButton onClick={() => addCylinder()} label='Cylinder' icon={CylinderIcon} />
             <AddButton onClick={() => addPlane()} label='Plane' icon={PlaneIcon} />
             <div className='flex flex-col items-center font-thin text-sm px-[1px]'>
-              <label className='flex items-center justify-center w-[40px] h-[40px] border border-[#3b3b3b] rounded-[2px] bg-[#3b3b3b] text-white cursor-pointer' htmlFor="file">
+              <label className='flex items-center justify-center w-[40px] h-[40px] border border-control rounded-[2px] bg-control text-white cursor-pointer' htmlFor="file">
                 <img className='flex items-center justify-center w-[35px] h-[35px]' src={ImportIcon} alt='Import' />
               </label>
               <input className='hidden' type="file" id="file" name="file" multiple accept='.obj, .mtl, .gltf, .glb, .png, .jpg, .jpeg, .bmp, .tga, .tiff'
@@ -244,7 +244,7 @@ export default function AddNew() {
               Import
             </div>
             <div className='flex flex-col items-center font-thin text-sm px-[1px]'>
-              <label className='flex items-center justify-center w-[40px] h-[40px] border border-[#3b3b3b] rounded-[2px] bg-[#3b3b3b] text-white cursor-pointer' htmlFor="folder">
+              <label className='flex items-center justify-center w-[40px] h-[40px] border border-control rounded-[2px] bg-control text-white cursor-pointer' htmlFor="folder">
                 <img className='flex items-center justify-center w-[35px] h-[35px]' src={ImportIcon} alt='Import Folder' />
               </label>
               <input className='hidden' type="file" id="folder" name="folder" {...({ webkitdirectory: '', directory: '' } as any)}

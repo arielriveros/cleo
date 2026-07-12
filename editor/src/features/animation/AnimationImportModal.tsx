@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
+import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 
 // Centered review modal for importing animation clips. For each clip parsed from the file it shows a
 // compatibility report vs the model's skeleton — matched/total bones, target coverage, and (when
@@ -24,18 +25,16 @@ export default function AnimationImportModal() {
   const toggle = (i: number) => setInclude(prev => prev.map((v, idx) => idx === i ? !v : v))
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50' onClick={cancel}>
-      <div className='w-[480px] max-h-[85vh] overflow-y-auto bg-[#252525] border border-[#3b3b3b] rounded-md shadow-lg text-white select-none'
-           onClick={(e) => e.stopPropagation()}>
-        <div className='px-4 py-3 border-b border-[#3b3b3b]'>
+    <Modal onClose={cancel} className='w-[480px]'>
+        <ModalHeader>
           <div className='text-sm font-semibold'>Import animation</div>
           <div className='text-lg font-bold truncate' title={info.fileName}>{info.fileName}</div>
           <div className='text-xs text-gray-400 mt-0.5'>{info.clips.length} clip{info.clips.length === 1 ? '' : 's'} found</div>
-        </div>
+        </ModalHeader>
 
         <div className='px-4 py-3 space-y-3 text-sm'>
           {anyIndexMode && (
-            <p className='text-[11px] text-[#ffd27a] bg-[#3a2f12] rounded px-2 py-1'>
+            <p className='text-[11px] text-warning bg-warning/15 rounded px-2 py-1'>
               This model has no stored bone names, so clips are matched by node index (only works for the same export).
               Re-import the model to enable name-based matching.
             </p>
@@ -44,12 +43,12 @@ export default function AnimationImportModal() {
           {info.clips.map((c, i) => {
             const r = c.report
             return (
-              <div key={i} className={`rounded border p-2 ${r.compatible ? 'border-[#3b3b3b]' : 'border-red-700 bg-[#2a1414]'}`}>
+              <div key={i} className={`rounded border p-2 ${r.compatible ? 'border-control' : 'border-red-700 bg-danger/10'}`}>
                 <div className='flex items-center gap-2'>
                   <input type='checkbox' checked={!!include[i]} disabled={!r.compatible}
                          onChange={() => toggle(i)} title={r.compatible ? 'Include this clip' : 'No matching bones — cannot import'} />
                   <span className='font-semibold flex-1 truncate' title={c.name}>{c.name}</span>
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded ${r.compatible ? 'bg-[#194d19] text-green-300' : 'bg-red-900 text-red-300'}`}>
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded ${r.compatible ? 'bg-success/15 text-green-300' : 'bg-red-900 text-red-300'}`}>
                     {r.compatible ? '✓ compatible' : '✗ incompatible'}
                   </span>
                 </div>
@@ -68,8 +67,8 @@ export default function AnimationImportModal() {
 
                 {r.hierarchyMismatches.length > 0 && (
                   <div className='mt-1'>
-                    <div className='text-[11px] text-[#ffd27a]'>Different parent relationship ({r.hierarchyMismatches.length}):</div>
-                    <div className='text-[11px] text-[#ffd27a]/90 space-y-0.5'>
+                    <div className='text-[11px] text-warning'>Different parent relationship ({r.hierarchyMismatches.length}):</div>
+                    <div className='text-[11px] text-warning/90 space-y-0.5'>
                       {r.hierarchyMismatches.map((h, hi) => (
                         <div key={hi}>{h.bone}: parent <b>{h.sourceParent ?? '—'}</b> → skeleton has <b>{h.targetParent ?? '—'}</b></div>
                       ))}
@@ -81,15 +80,14 @@ export default function AnimationImportModal() {
           })}
         </div>
 
-        <div className='px-4 py-3 border-t border-[#3b3b3b] flex justify-between items-center gap-2'>
+        <ModalFooter className='justify-between items-center'>
           <span className='text-[11px] text-gray-400'>{chosen} selected</span>
           <div className='flex gap-2'>
-            <button className='px-3 py-1.5 text-xs rounded bg-[#3b3b3b] hover:bg-[#4b4b4b]' onClick={cancel}>Cancel</button>
-            <button className='px-3 py-1.5 text-xs rounded bg-[#2c7a2c] hover:bg-[#358535] font-semibold disabled:opacity-40 disabled:cursor-not-allowed'
+            <button className='px-3 py-1.5 text-xs rounded bg-control hover:bg-control-hover' onClick={cancel}>Cancel</button>
+            <button className='px-3 py-1.5 text-xs rounded bg-success hover:bg-success-hover font-semibold disabled:opacity-40 disabled:cursor-not-allowed'
                     disabled={chosen === 0} onClick={accept}>Add {chosen > 0 ? `${chosen} ` : ''}clip{chosen === 1 ? '' : 's'}</button>
           </div>
-        </div>
-      </div>
-    </div>
+        </ModalFooter>
+    </Modal>
   )
 }

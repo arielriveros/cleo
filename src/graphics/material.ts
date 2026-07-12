@@ -271,7 +271,12 @@ export class Material {
         // A serialized TerrainMaterial carries the extra terrain/foliage fields; delegate to its subclass.
         if (m.terrainMaterial) return TerrainMaterial.parse(m);
         // A serialized CustomMaterial carries user GLSL + uniform declarations; delegate to its subclass.
-        if (m.customMaterial) return CustomMaterial.parse(m);
+        // Route on the discriminator flag OR a self-identifying `custom:`/`customGeom:` type prefix, so
+        // blobs saved before the flag existed still reconstruct as a CustomMaterial instead of silently
+        // downgrading to a base Material (which keeps the custom type and crashes the inspector).
+        if (m.customMaterial ||
+            (typeof m.type === 'string' && (m.type.startsWith('custom:') || m.type.startsWith('customGeom:'))))
+            return CustomMaterial.parse(m);
         const config = {
             side: m.config?.side,
             wireframe: m.config?.wireframe,

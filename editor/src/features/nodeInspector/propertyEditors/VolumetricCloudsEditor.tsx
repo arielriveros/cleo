@@ -5,6 +5,8 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useCleoEngine } from '../../EngineContext'
+import { Slider, Toggle } from '../../../components/ui'
+import { CloudsIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
 
@@ -58,36 +60,27 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
   // Plain render helpers (invoked as functions, not JSX components) so the inputs keep their
   // identity across re-renders and don't remount mid-drag.
   const slider = (label: string, k: keyof CloudsState, min: number, max: number, step: number, fixed = 2) => (
-    <div className='flex flex-col gap-1 mb-2'>
-      <label className='flex justify-between text-sm'>
-        <span>{label}</span>
-        <span className='text-gray-400'>{(state[k] as number).toFixed(fixed)}</span>
-      </label>
-      <input type='range' className='w-full' min={min} max={max} step={step}
-        value={state[k] as number}
-        onChange={(e) => apply({ [k]: parseFloat(e.target.value) } as Partial<CloudsState>)} />
-    </div>
+    <Slider label={label} min={min} max={max} step={step} value={state[k] as number}
+      labelClassName='w-[104px]' readout={(v) => v.toFixed(fixed)}
+      onChange={(v) => apply({ [k]: v } as Partial<CloudsState>)} />
   )
 
   const check = (label: string, k: keyof CloudsState) => (
-    <label className='flex items-center gap-2 mb-2 text-sm cursor-pointer'>
-      <input type='checkbox' checked={state[k] as boolean}
-        onChange={(e) => apply({ [k]: e.target.checked } as Partial<CloudsState>)} />
-      {label}
-    </label>
+    <Toggle label={label} checked={state[k] as boolean} className='my-1'
+      onChange={(c) => apply({ [k]: c } as Partial<CloudsState>)} />
   )
 
   const color = (label: string, k: 'sunColor' | 'ambientColor' | 'groundColor') => (
-    <div className='flex items-center justify-between mb-2 text-sm'>
-      <span>{label}</span>
+    <div className='flex items-center justify-between my-1 text-xs'>
+      <span className='text-muted'>{label}</span>
       <ColorInput color={vec3ToHex(state[k])} onChange={(c) => apply({ [k]: c } as Partial<CloudsState>)} />
     </div>
   )
 
-  const header = (label: string) => <div className='mt-2 mb-1 font-semibold text-[#9aa0ff]'>{label}</div>
+  const header = (label: string) => <div className='mt-3 mb-1 text-[11px] uppercase tracking-wide text-dim'>{label}</div>
 
   return (
-    <Collapsable title='Volumetric Clouds'>
+    <Collapsable title='Volumetric Clouds' icon={<CloudsIcon />} persistKey='volumetricClouds'>
       <div className='w-full p-2'>
         {check('Enabled', 'enabled')}
         {slider('Opacity', 'opacity', 0, 1, 0.01)}
@@ -95,15 +88,9 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {header('Shape')}
         {slider('Coverage', 'coverage', 0, 1, 0.01)}
         {slider('Density', 'density', 0, 4, 0.01)}
-        <div className='flex flex-col gap-1 mb-2'>
-          <label className='flex justify-between text-sm'>
-            <span>Cloud Type</span>
-            <span className='text-gray-400'>{cloudTypeName(state.cloudType)}</span>
-          </label>
-          <input type='range' className='w-full' min={0} max={1} step={0.01}
-            value={state.cloudType}
-            onChange={(e) => apply({ cloudType: parseFloat(e.target.value) })} />
-        </div>
+        <Slider label='Cloud Type' min={0} max={1} step={0.01} value={state.cloudType}
+          labelClassName='w-[104px]' readout={() => cloudTypeName(state.cloudType)}
+          onChange={(v) => apply({ cloudType: v })} />
         {slider('Base Altitude', 'baseAltitude', 0, 5000, 10, 0)}
         {slider('Thickness', 'thickness', 50, 3000, 10, 0)}
         {slider('Base Noise Scale', 'baseScale', 0.00005, 0.002, 0.00005, 5)}

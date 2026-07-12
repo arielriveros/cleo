@@ -3,73 +3,113 @@
 @tailwind utilities;
 
 html, body {
-    font-family: Consolas, monaco, monospace;
+    font-family: var(--font-mono);
     height: 100%;
     width: 100%;
     padding: 0;
     margin: 0;
 }
 
-/* Design tokens */
+/* ============================================================================
+   Design tokens — the single source of truth for the editor's look.
+   Colors are stored as space-separated RGB channels so Tailwind's opacity
+   modifiers work (e.g. `bg-surface/95`). The Tailwind theme maps each semantic
+   name to `rgb(var(--token) / <alpha-value>)` (see tailwind.config.js).
+   ========================================================================== */
 :root {
-  --bg: #0f1117;
-  --panel: #1b1e27;
-  --panel-accent: #2d2d77;
-  --muted: #9aa4b2;
-  --text: #e5e7eb;
-  --primary: #326acc;
-  --primary-600: #2a59a9;
-  --primary-700: #244b8e;
-  --danger: #ef4444;
+  /* Surfaces (dark -> light) */
+  --bg:             15 17 23;    /* #0f1117  app background */
+  --surface-sunken: 20 22 32;    /* #141620  toolbars, status bar, sunken areas */
+  --surface:        27 30 39;    /* #1b1e27  panels, cards */
+  --surface-raised: 32 32 36;    /* #202024  section bodies, rows, popovers */
+  --control:        59 59 59;    /* #3b3b3b  inputs, buttons, tabs */
+  --control-hover:  69 69 69;    /* #454545  control hover */
+
+  /* Borders / accent */
+  --border:         45 45 119;   /* #2d2d77  signature purple-blue border/accent */
+  --border-subtle:  31 31 63;    /* #1f1f3f  dim borders, resizers, active-tab bg */
+  --menubar:        24 0 68;     /* #180044  deep-purple menu-bar gradient edge */
+
+  /* Brand / primary */
+  --primary:        50 106 204;  /* #326acc */
+  --primary-hover:  42 89 169;   /* #2a59a9 */
+  --primary-active: 36 75 142;   /* #244b8e */
+  --selected:       44 44 255;   /* #2c2cff  selected segmented button / active accent */
+  --highlight:      143 143 255; /* #8f8fff  bright indigo accent text/border */
+
+  /* Text */
+  --text:       229 231 235;     /* #e5e7eb */
+  --text-muted: 154 164 178;     /* #9aa4b2 */
+  --text-dim:   138 138 160;     /* #8a8aa0  helper/caption text */
+
+  /* Feedback */
+  --danger:              239 68 68;   /* #ef4444 */
+  --danger-hover:        185 28 28;   /* #b91c1c */
+  --danger-surface:      123 27 27;   /* #7b1b1b  confirm-button fill */
+  --danger-surface-hover:160 32 32;   /* #a02020 */
+  --danger-border:       170 34 34;   /* #aa2222 */
+  --success:             44 122 44;   /* #2c7a2c  create/confirm actions */
+  --success-hover:       53 133 53;   /* #358535 */
+  --warning:             255 210 122; /* #ffd27a  caution text */
+
+  /* Axis colors (vector inputs) */
+  --axis-x: 255 125 125;   /* #ff7d7d */
+  --axis-y: 125 255 125;   /* #7dff7d */
+  --axis-z: 125 125 255;   /* #7d7dff */
+
+  /* Shape / type */
+  --radius: 0.375rem;
+  --font-mono: Consolas, monaco, monospace;
 }
 
 @layer base {
   html, body { @apply h-full w-full antialiased; }
-  body { background-color: var(--bg); color: var(--text); }
-  a { @apply text-blue-400 hover:text-blue-300; }
-  ::selection { background: rgba(50,106,204,0.35); color: #fff; }
+  body { background-color: rgb(var(--bg)); color: rgb(var(--text)); }
+  a { @apply text-primary hover:brightness-125; }
+  ::selection { background: rgb(var(--primary) / 0.35); color: #fff; }
   [role='button'], button { @apply select-none; }
 }
 
 @layer components {
-  .panel { @apply rounded-md border bg-[#2b2b2b] border-[#2d2d77] shadow-md; }
-  .panel-header { @apply px-2 py-1 text-xs uppercase tracking-wide text-slate-300 bg-gradient-to-b from-[#2d2d77]/20 to-transparent; }
+  .panel { @apply rounded-md border border-border bg-surface-raised shadow-md; }
+  .panel-header { @apply px-2 py-1 text-xs uppercase tracking-wide text-muted bg-gradient-to-b from-border/20 to-transparent; }
 
-  .input { @apply bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1; }
-  .select { @apply bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1; }
+  .input { @apply bg-control text-white border border-border rounded px-2 py-1; }
+  .select { @apply bg-control text-white border border-border rounded px-2 py-1; }
 
-  .btn { @apply px-3 py-1 rounded border border-[#2d2d77] bg-[#3b3b3b] hover:bg-[#454545] text-white; }
-  .btn-primary { @apply px-3 py-1 rounded text-white border border-[#274b8f] bg-[#326acc] hover:bg-[#2a59a9]; }
-  .btn-danger { @apply px-3 py-1 rounded text-white border border-red-700 bg-red-600 hover:bg-red-700; }
-  .btn-ghost { @apply px-2 py-1 rounded border border-[#2d2d77] hover:bg-[#3b3b3b]; }
-  .icon-button { @apply inline-flex items-center justify-center rounded border border-[#2d2d77] bg-[#3b3b3b] hover:bg-[#454545]; width: 28px; height: 28px; }
+  .btn { @apply px-3 py-1 rounded border border-border bg-control hover:bg-control-hover text-white; }
+  .btn-primary { @apply px-3 py-1 rounded text-white border border-primary-active bg-primary hover:bg-primary-hover; }
+  .btn-danger { @apply px-3 py-1 rounded text-white border border-danger bg-danger hover:bg-danger-hover; }
+  .btn-ghost { @apply px-2 py-1 rounded border border-border hover:bg-control; }
+  .icon-button { @apply inline-flex items-center justify-center rounded border border-border bg-control hover:bg-control-hover; width: 28px; height: 28px; }
 
-  .resizer-x { @apply w-1 cursor-col-resize bg-[#1f1f3f] hover:w-1.5 hover:bg-[#2d2d77] transition-all; }
-  .resizer-y { @apply h-1 cursor-row-resize bg-[#1f1f3f] hover:h-1.5 hover:bg-[#2d2d77] transition-all; }
+  .resizer-x { @apply w-1 cursor-col-resize bg-border-subtle hover:w-1.5 hover:bg-border transition-all; }
+  .resizer-y { @apply h-1 cursor-row-resize bg-border-subtle hover:h-1.5 hover:bg-border transition-all; }
 
-  .tab { @apply px-2 py-1 rounded border border-transparent text-slate-300 hover:text-white hover:border-[#2d2d77]; }
-  .tab-active { @apply bg-[#1f1f3f] text-white border border-[#2d2d77]; }
+  .tab { @apply px-2 py-1 rounded border border-transparent text-muted hover:text-white hover:border-border; }
+  .tab-active { @apply bg-border-subtle text-white border border-border; }
 
-  .toolbar { @apply h-10 flex items-center gap-2 px-2 bg-[#12131a] border-b border-[#2d2d77] shadow; }
-  .status-bar { @apply h-6 flex items-center gap-2 px-2 bg-[#12131a] border-t border-[#2d2d77] text-xs text-slate-400; }
+  .toolbar { @apply h-10 flex items-center gap-2 px-2 bg-surface-sunken border-b border-border shadow; }
+  .status-bar { @apply h-6 flex items-center gap-2 px-2 bg-surface-sunken border-t border-border text-xs text-muted; }
 }
 
 /* Modern dark scrollbars (overrides) */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: #16181d; }
-::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #3b3b3b 0%, #2d2d77 100%); border-radius: 6px; border: 1px solid #1b1e27; }
-::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #4a4a4a 0%, #3737a3 100%); }
+::-webkit-scrollbar-track { background: rgb(var(--surface-sunken)); }
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg, rgb(var(--control)) 0%, rgb(var(--border)) 100%); border-radius: 6px; border: 1px solid rgb(var(--surface)); }
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, rgb(var(--control-hover)) 0%, rgb(var(--primary-hover)) 100%); }
 /* Firefox */
-* { scrollbar-color: #3b3b3b #16181d; scrollbar-width: thin; }
+* { scrollbar-color: rgb(var(--control)) rgb(var(--surface-sunken)); scrollbar-width: thin; }
 
 input[type="file"] { display: none; }
 
-/* Modern slider styling */
+/* Modern slider styling — the fill up to the thumb is driven by --slider-fill (set per-slider by the
+   Slider component); it falls back to a static 50% split when the var is absent. */
 input[type="range"] { -webkit-appearance: none; appearance: none; height: 1rem; background: transparent; }
-input[type="range"]::-webkit-slider-runnable-track { background: linear-gradient(90deg, #2d2d77, #326acc); height: 6px; border-radius: 9999px; }
-input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 9999px; background: #e5e7eb; border: 2px solid #1b1e27; margin-top: -4px; }
-input[type="range"]::-moz-range-track { background: linear-gradient(90deg, #2d2d77, #326acc); height: 6px; border-radius: 9999px; }
-input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 9999px; background: #e5e7eb; }
+input[type="range"]::-webkit-slider-runnable-track { background: linear-gradient(90deg, rgb(var(--primary)) 0 var(--slider-fill, 50%), rgb(var(--control)) var(--slider-fill, 50%) 100%); height: 6px; border-radius: 9999px; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 9999px; background: rgb(var(--text)); border: 2px solid rgb(var(--surface)); margin-top: -4px; box-shadow: 0 0 0 1px rgb(var(--border)); }
+input[type="range"]::-moz-range-track { background: linear-gradient(90deg, rgb(var(--primary)) 0 var(--slider-fill, 50%), rgb(var(--control)) var(--slider-fill, 50%) 100%); height: 6px; border-radius: 9999px; }
+input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 9999px; background: rgb(var(--text)); box-shadow: 0 0 0 1px rgb(var(--border)); }
 
 /* Focus styles */
-:focus-visible { outline: 2px solid #326acc; outline-offset: 2px; }
+:focus-visible { outline: 2px solid rgb(var(--primary)); outline-offset: 2px; }

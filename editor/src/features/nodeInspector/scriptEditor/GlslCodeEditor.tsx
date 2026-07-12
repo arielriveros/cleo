@@ -43,9 +43,9 @@ export default function GlslCodeEditor(props: { value: string, onChange: (src: s
 
   return (
     <div className='p-1'>
-      <div ref={editorRef} className='w-full bg-white text-black text-xs min-h-[260px] max-h-[440px] overflow-auto border border-[#2d2d77] rounded' />
+      <div ref={editorRef} className='w-full bg-white text-black text-xs min-h-[260px] max-h-[440px] overflow-auto border border-border rounded' />
       {props.error && (
-        <pre className='mt-1 whitespace-pre-wrap text-[11px] text-red-300 bg-[#3a1212] border border-red-800 rounded p-2 max-h-[160px] overflow-auto'>{props.error}</pre>
+        <pre className='mt-1 whitespace-pre-wrap text-[11px] text-red-300 bg-danger/15 border border-red-800 rounded p-2 max-h-[160px] overflow-auto'>{props.error}</pre>
       )}
     </div>
   )

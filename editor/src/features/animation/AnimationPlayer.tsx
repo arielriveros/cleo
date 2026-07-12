@@ -83,7 +83,7 @@ export default function AnimationPlayer() {
 
   if (!target) {
     return (
-      <div data-cleo-overlay className='absolute bottom-3 left-1/2 -translate-x-1/2 z-20 bg-[#202020]/95 border border-[#2d2d77] rounded px-3 py-2 text-xs text-gray-400'>
+      <div data-cleo-overlay className='absolute bottom-3 left-1/2 -translate-x-1/2 z-20 bg-surface-raised/95 border border-border rounded px-3 py-2 text-xs text-gray-400'>
         No skinned model selected — <button className='underline' onClick={() => closeTab(activeTabId)}>close</button>
       </div>
     )
@@ -132,18 +132,18 @@ export default function AnimationPlayer() {
     requestAnimationFrame(() => { scrubbingRef.current = false })
   }
 
-  const btn = 'px-2 py-1 rounded bg-[#3b3b3b] hover:bg-[#4a4a4a] border border-[#555] text-white'
+  const btn = 'px-2 py-1 rounded bg-control hover:bg-control-hover border border-control-hover text-white'
   const fmt = (s: number) => `${s.toFixed(2)}s`
 
   return (
     <div
       data-cleo-overlay
-      className='absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-col gap-2 bg-[#202020]/95 border border-[#2d2d77] rounded px-3 py-2 shadow-lg'
+      className='absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-col gap-2 bg-surface-raised/95 border border-border rounded px-3 py-2 shadow-lg'
       style={{ minWidth: 520 }}
       onMouseDown={(e) => e.stopPropagation()}>
       <div className='flex items-center gap-2 text-xs text-white'>
         <select
-          className='bg-[#3b3b3b] text-white border border-[#555] rounded px-2 py-1 max-w-[160px]'
+          className='bg-control text-white border border-control-hover rounded px-2 py-1 max-w-[160px]'
           value={clip}
           onChange={(e) => selectClip(e.target.value)}
           title='Animation clip'>
@@ -162,13 +162,13 @@ export default function AnimationPlayer() {
         <label className='flex items-center gap-1' title='Playback speed'>
           speed
           <input
-            className='w-[52px] bg-[#3b3b3b] text-white border border-[#555] rounded px-1'
+            className='w-[52px] bg-control text-white border border-control-hover rounded px-1'
             type='number' step='0.1' min='0' value={speed}
             onChange={(e) => { const v = Math.max(0, parseFloat(e.target.value) || 0); setSpeed(v); animator.speed = v }} />
         </label>
 
         {hasStateMachine && (
-          <label className='flex items-center gap-1 ml-1 text-[#8f8fff]' title='Play the state machine (evaluate transitions from parameters) instead of the raw clip'>
+          <label className='flex items-center gap-1 ml-1 text-highlight' title='Play the state machine (evaluate transitions from parameters) instead of the raw clip'>
             <input type='checkbox' checked={simulate} onChange={(e) => setSimulate(e.target.checked)} />
             simulate
           </label>
@@ -185,7 +185,7 @@ export default function AnimationPlayer() {
           value={Math.min(time, duration)}
           onChange={(e) => onScrub(parseFloat(e.target.value))} />
         <span className='tabular-nums w-[46px]'>{fmt(duration)}</span>
-        {simulate && hasStateMachine && <span className='text-[#8f8fff]'>state: {animator.currentStateName ?? '—'}</span>}
+        {simulate && hasStateMachine && <span className='text-highlight'>state: {animator.currentStateName ?? '—'}</span>}
       </div>
     </div>
   )

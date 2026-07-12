@@ -3,16 +3,7 @@ import { useCleoEngine } from '../EngineContext';
 import { Texture, TextureManager } from 'cleo';
 import { collectReferencedTextureIds } from '../../utils/references';
 import { useMultiSelect, BatchDeleteBar } from '../explorerSelection';
-
-// Yellow "!" badge marking an asset that isn't referenced anywhere. Shared by the Textures/Materials cards.
-function UnreferencedBadge() {
-  return (
-    <span
-      className='absolute top-0.5 left-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-yellow-400 text-black text-[10px] font-bold leading-none shadow pointer-events-none'
-      title='Not referenced anywhere'
-    >!</span>
-  );
-}
+import { UnreferencedBadge } from '../../components/ui';
 
 // A single loaded-texture card. Mirrors the Materials/Meshes explorer cards (96px, 80px thumbnail, name,
 // delete). Draggable as a `text/cleo-asset` texture payload to assign onto material slots.
@@ -58,13 +49,13 @@ function TextureCard({ id, unreferenced, selected, onToggle }: { id: string; unr
 
   return (
     <div
-      className={`w-[96px] flex flex-col items-center bg-[#3b3b3b] border border-[#2d2d77] rounded p-1 cursor-grab ${selected ? 'ring-2 ring-[#2c2cff]' : ''}`}
+      className={`w-[96px] flex flex-col items-center bg-control border border-border rounded p-1 cursor-grab ${selected ? 'ring-2 ring-selected' : ''}`}
       draggable
       onDragStart={onDragStart}
       onClick={() => onToggle(id)}
       title={`Drag onto a material slot to assign: ${id}`}
     >
-      <div className='relative w-[80px] h-[80px] rounded overflow-hidden bg-[#202020] flex items-center justify-center'>
+      <div className='relative w-[80px] h-[80px] rounded overflow-hidden bg-surface-raised flex items-center justify-center'>
         {unreferenced && <UnreferencedBadge />}
         {img
           ? <img src={img.src} className='w-full h-full object-cover' alt={id} draggable={false} />
@@ -132,13 +123,13 @@ export default function AssetExplorer() {
   return (
     <div className='w-full h-full p-2 text-white text-sm'>
       <div className='flex items-center gap-2 mb-3'>
-        <label htmlFor='asset-upload' className='bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-2 text-xs font-semibold cursor-pointer'>
+        <label htmlFor='asset-upload' className='bg-success hover:bg-success-hover rounded px-2 py-2 text-xs font-semibold cursor-pointer'>
           + Upload Textures
         </label>
         <input id='asset-upload' type='file' className='hidden' multiple accept='.png,.jpg,.jpeg,.tga,.bmp,.webp' onChange={onUpload} />
         <button
           onClick={() => { eventEmitter.emit('TEXTURES_CHANGED'); refreshTextures(); }}
-          className='bg-[#3b3b3b] hover:bg-[#4b4b4b] border border-[#2d2d77] rounded px-2 py-2 text-xs'>
+          className='bg-control hover:bg-control-hover border border-border rounded px-2 py-2 text-xs'>
           Refresh
         </button>
         <BatchDeleteBar count={selected.size} noun='textures' onDelete={batchDelete} onClear={clear} />

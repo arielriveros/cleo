@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Node } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
-import AxisInput from '../../../components/AxisInput';
+import { PropertyTable, PropertyRow, VectorInput, Button } from '../../../components/ui';
+import { TransformIcon } from '../sectionIcons';
 
 export default function TransformEditor(props: {node: Node}) {
 
@@ -28,62 +29,30 @@ export default function TransformEditor(props: {node: Node}) {
     setScale([1, 1, 1]);
   }
 
+  const readonlyVec = (v: ArrayLike<number>) => (
+    <div className='inline-flex gap-2 text-muted tabular-nums'>
+      {Array.from(v).map((value, index) => (<span key={index}>{value.toFixed(2)}</span>))}
+    </div>
+  );
+
   return (
-    <Collapsable title='Transform'>
-      <div className='w-full text-white'>
-        <div className='w-full p-2'>
-          <table className='w-full border-collapse'>
-            <colgroup>
-              <col span={1} style={{width: '25%'}} />
-              <col span={1} style={{width: '75%'}} />
-            </colgroup>
-            <tbody>
-              <tr className='border-b border-[#2d2d77]'>
-                <td className='py-1 pr-2'> Position </td>
-                <td className='py-1'>
-                  <AxisInput step={0.01} value={[position[0], position[1], position[2]]} onChange={(value) => setPosition(value)} />
-                </td>
-              </tr>
-              <tr className='border-b border-[#2d2d77]'>
-                <td className='py-1 pr-2'> Rotation </td>
-                <td className='py-1'>
-                  <AxisInput step={0.1} min={-180} max={180} value={[rotation[0], rotation[1], rotation[2]]} onChange={value => setRotation(value) } />
-                </td>
-              </tr>
-              <tr className='border-b border-[#2d2d77]'>
-                <td className='py-1 pr-2'> Scale </td>
-                <td className='py-1'>
-                  <AxisInput step={0.01} value={[scale[0], scale[1], scale[2]]} onChange={(value) => setScale(value)} />
-                </td>
-              </tr>
-              <tr className='border-b border-[#2d2d77]'>
-                <td className='py-1 pr-2'> World Position </td>
-                <td className='py-1'>
-                  <div className='inline-flex gap-2'>
-                    {Array.from(props.node.worldPosition).map((value, index) => ( <p key={index}>{value.toFixed(2)}</p> ))}
-                  </div>
-                </td>
-              </tr>
-              <tr className='border-b border-[#2d2d77]'>
-                <td className='py-1 pr-2'> Quaternion </td>
-                <td className='py-1'>
-                  <div className='inline-flex gap-2'>
-                    {Array.from(props.node.quaternion).map((value, index) => ( <p key={index}>{value.toFixed(2)}</p> ))}
-                  </div>
-                </td>
-              </tr>
-              <tr>
-                <td className='py-1 pr-2'> World Quaternion </td>
-                <td className='py-1'>
-                  <div className='inline-flex gap-2'>
-                    {Array.from(props.node.worldQuaternion).map((value, index) => ( <p key={index}>{value.toFixed(2)}</p> ))}
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <button className='mt-2 px-3 py-1 bg-[#3b3b3b] border border-[#2d2d77] rounded hover:bg-[#3f3fb4]' onClick={reset}>Reset</button>
-        </div>
+    <Collapsable title='Transform' icon={<TransformIcon />} persistKey='transform'>
+      <div className='w-full text-white p-2'>
+        <PropertyTable columns={['28%', '72%']}>
+          <PropertyRow label='Position'>
+            <VectorInput step={0.01} reset={[0, 0, 0]} value={[position[0], position[1], position[2]]} onChange={(v) => setPosition(v as any)} />
+          </PropertyRow>
+          <PropertyRow label='Rotation'>
+            <VectorInput step={0.1} min={-180} max={180} reset={[0, 0, 0]} value={[rotation[0], rotation[1], rotation[2]]} onChange={(v) => setRotation(v as any)} />
+          </PropertyRow>
+          <PropertyRow label='Scale'>
+            <VectorInput step={0.01} reset={[1, 1, 1]} value={[scale[0], scale[1], scale[2]]} onChange={(v) => setScale(v as any)} />
+          </PropertyRow>
+          <PropertyRow label='World Position'>{readonlyVec(props.node.worldPosition)}</PropertyRow>
+          <PropertyRow label='Quaternion'>{readonlyVec(props.node.quaternion)}</PropertyRow>
+          <PropertyRow label='World Quaternion' divider={false}>{readonlyVec(props.node.worldQuaternion)}</PropertyRow>
+        </PropertyTable>
+        <Button className='mt-2' size='sm' onClick={reset}>Reset</Button>
       </div>
     </Collapsable>
   )

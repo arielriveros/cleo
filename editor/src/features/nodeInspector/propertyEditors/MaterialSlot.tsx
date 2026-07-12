@@ -3,6 +3,8 @@ import { Node } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
 import { getMaterialIdOf, applyMaterialAsset, unlinkToFallback } from '../../../utils/materials'
+import { Select, Button, Hint } from '../../../components/ui'
+import { MaterialIcon } from '../sectionIcons'
 
 // The material reference control for model/sprite nodes: replaces inline material editing. Shows the
 // linked material (thumbnail + edit/unlink) or a create/link affordance when none is set.
@@ -38,38 +40,33 @@ export default function MaterialSlot(props: { node: Node }) {
   }
 
   return (
-    <Collapsable title='Material'>
+    <Collapsable title='Material' icon={<MaterialIcon />} persistKey='materialSlot'>
       <div className='w-full p-2' onDragOver={onDragOver} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
         {asset ? (
-          <div className={`flex items-center gap-2 p-2 bg-[#3b3b3b] border rounded ${dragOver ? 'border-[#2c2cff]' : 'border-[#2d2d77]'}`}>
-            <div className='w-[48px] h-[48px] rounded overflow-hidden bg-[#202020] flex items-center justify-center shrink-0'>
+          <div className={`flex items-center gap-2 p-2 bg-control border rounded ${dragOver ? 'border-selected' : 'border-border'}`}>
+            <div className='w-[48px] h-[48px] rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
               {asset.thumbnail
                 ? <img src={asset.thumbnail} className='w-full h-full object-cover' alt={asset.name} draggable={false} />
                 : <span className='text-lg'>🎨</span>}
             </div>
             <span className='truncate flex-1' title={asset.name}>{asset.name}</span>
-            <button className='text-blue-300 px-1' title='Edit this material' onClick={() => enterMaterialEditor(asset.id)}>✎</button>
-            <button className='text-red-300 px-1' title='Unlink (revert to a basic material)' onClick={unlink}>✕</button>
+            <Button variant='ghost' size='icon' className='text-highlight' title='Edit this material' onClick={() => enterMaterialEditor(asset.id)}>✎</Button>
+            <Button variant='ghost' size='icon' className='text-danger' title='Unlink (revert to a basic material)' onClick={unlink}>✕</Button>
           </div>
         ) : (
-          <div className={`flex flex-col gap-2 p-2 border-2 border-dashed rounded ${dragOver ? 'border-[#2c2cff] bg-[#2d2d77]/30' : 'border-[#2d2d77]'}`}>
-            {linkedId && <p className='text-[11px] text-[#ffd27a]'>Linked material is missing from the library — create or link one below.</p>}
-            <button
-              className='bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-2 text-xs font-semibold'
-              onClick={() => createMaterialForNode(props.node)}
+          <div className={`flex flex-col gap-2 p-2 border-2 border-dashed rounded ${dragOver ? 'border-selected bg-border/30' : 'border-border'}`}>
+            {linkedId && <Hint className='text-warning'>Linked material is missing from the library — create or link one below.</Hint>}
+            <Button variant='success' className='w-full py-2' onClick={() => createMaterialForNode(props.node)}
               title='Create a reusable material from this node’s current material and edit it'>
               + Create Material
-            </button>
+            </Button>
             {materials.length > 0 && (
-              <select
-                className='bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 text-xs'
-                value=''
-                onChange={(e) => { if (e.target.value) link(e.target.value) }}>
+              <Select className='text-xs' value='' onChange={(e) => { if (e.target.value) link(e.target.value) }}>
                 <option value=''>Link existing…</option>
                 {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+              </Select>
             )}
-            <p className='text-[11px] text-gray-400'>…or drag a material from the <b>Materials</b> tab here.</p>
+            <Hint>…or drag a material from the <b>Materials</b> tab here.</Hint>
           </div>
         )}
       </div>

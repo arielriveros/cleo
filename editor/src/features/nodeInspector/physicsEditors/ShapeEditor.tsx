@@ -1,212 +1,42 @@
 import { ShapeDescription } from '../../EngineContext';
 import AxisInput from '../../../components/AxisInput';
+import { PropertyTable, PropertyRow, NumberInput, Section, Button } from '../../../components/ui';
 
 export default function ShapeEditor(props: {
   shape: ShapeDescription;
   setShape: (shape: any) => void;
   removeShape: () => void;
 }) {
-
-  const number = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-[100px]';
+  const s = props.shape;
+  const patch = (p: any) => props.setShape({ ...s, ...p });
+  const title = s.type.charAt(0).toUpperCase() + s.type.slice(1);
 
   return (
     <div className='w-full p-2'>
-        <table className='w-full border-collapse'>
-          <tbody>
-            {props.shape.type === 'box' && (
-              <>
-                <tr>
-                  <td colSpan={2}>
-                    <b>Box</b>
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <label>Width</label>
-                  </td>
-                  <td>
-                    <input
-                      className={number}
-                      type='number'
-                      value={props.shape.width}
-                      step={0.01}
-                      onChange={(e) =>
-                        props.setShape({
-                          ...props.shape,
-                          width: parseFloat(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <label>Height</label>
-                  </td>
-                  <td>
-                    <input
-                      className={number}
-                      type='number'
-                      value={props.shape.height}
-                      step={0.01}
-                      onChange={(e) =>
-                        props.setShape({
-                          ...props.shape,
-                          height: parseFloat(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <label>Depth</label>
-                  </td>
-                  <td>
-                    <input
-                      className={number}
-                      type='number'
-                      value={props.shape.depth}
-                      step={0.01}
-                      onChange={(e) =>
-                        props.setShape({
-                          ...props.shape,
-                          depth: parseFloat(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                </tr>
-              </>
-            )}
-
-            {props.shape.type === 'sphere' && (
-              <>
-                <tr>
-                  <td colSpan={2}>
-                    <b>Sphere</b>
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <label>Radius</label>
-                  </td>
-                  <td>
-                    <input
-                      className={number}
-                      type='number'
-                      value={props.shape.radius}
-                      step={0.01}
-                      onChange={(e) =>
-                        props.setShape({
-                          ...props.shape,
-                          radius: parseFloat(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                </tr>
-              </>
-            )}
-
-            {props.shape.type === 'cylinder' && (
-              <>
-                <tr>
-                  <td colSpan={2}>
-                    <b>Cylinder</b>
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <label>Radius</label>
-                  </td>
-                  <td>
-                    <input
-                      className={number}
-                      type='number'
-                      value={props.shape.radius}
-                      step={0.01}
-                      onChange={(e) =>
-                        props.setShape({
-                          ...props.shape,
-                          radius: parseFloat(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <label>Height</label>
-                  </td>
-                  <td>
-                    <input
-                      className={number}
-                      type='number'
-                      value={props.shape.height}
-                      step={0.01}
-                      onChange={(e) =>
-                        props.setShape({
-                          ...props.shape,
-                          height: parseFloat(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <label>Segments</label>
-                  </td>
-                  <td>
-                    <input
-                      className={number}
-                      type='number'
-                      value={props.shape.numSegments}
-                      step={1}
-                      onChange={(e) =>
-                        props.setShape({
-                          ...props.shape,
-                          numSegments: parseInt(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                </tr>
-              </>
-            )}
-
-            {props.shape.type === 'plane' && (
-              <tr>
-                <td colSpan={2}>
-                  <b>Plane</b>
-                </td>
-              </tr>
-            )}
-
-            <tr>
-              <td>
-                <label>Offset</label>
-              </td>
-              <td>
-                <AxisInput value={[ props.shape.offset[0], props.shape.offset[1], props.shape.offset[2] ]} step={0.01} onChange={(value) => props.setShape({ ...props.shape, offset: [value[0], value[1], value[2]]})
-                  }
-                />
-              </td>
-            </tr>
-
-            <tr>
-              <td>
-                <label>Rotation</label>
-              </td>
-              <td>
-                <AxisInput value={[props.shape.rotation[0], props.shape.rotation[1], props.shape.rotation[2]]} step={0.1} min={-180} max={180} onChange={(value) => props.setShape({ ...props.shape, rotation: [ value[0], value[1], value[2] ] }) } />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <button className='mt-2 px-3 py-1 bg-[#3b3b3b] border border-[#2d2d77] rounded hover:bg-[#3f3fb4]' onClick={() => props.removeShape()}>Remove</button>
+      <Section title={title}>
+        <PropertyTable columns={['45%', '55%']}>
+          {s.type === 'box' && <>
+            <PropertyRow label='Width'><NumberInput value={s.width} step={0.01} onChange={(v) => patch({ width: v })} /></PropertyRow>
+            <PropertyRow label='Height'><NumberInput value={s.height} step={0.01} onChange={(v) => patch({ height: v })} /></PropertyRow>
+            <PropertyRow label='Depth'><NumberInput value={s.depth} step={0.01} onChange={(v) => patch({ depth: v })} /></PropertyRow>
+          </>}
+          {s.type === 'sphere' &&
+            <PropertyRow label='Radius'><NumberInput value={s.radius} step={0.01} onChange={(v) => patch({ radius: v })} /></PropertyRow>
+          }
+          {s.type === 'cylinder' && <>
+            <PropertyRow label='Radius'><NumberInput value={s.radius} step={0.01} onChange={(v) => patch({ radius: v })} /></PropertyRow>
+            <PropertyRow label='Height'><NumberInput value={s.height} step={0.01} onChange={(v) => patch({ height: v })} /></PropertyRow>
+            <PropertyRow label='Segments'><NumberInput value={s.numSegments} step={1} onChange={(v) => patch({ numSegments: Math.round(v) })} /></PropertyRow>
+          </>}
+          <PropertyRow label='Offset'>
+            <AxisInput value={[s.offset[0], s.offset[1], s.offset[2]]} step={0.01} onChange={(v) => patch({ offset: [v[0], v[1], v[2]] })} />
+          </PropertyRow>
+          <PropertyRow label='Rotation' divider={false}>
+            <AxisInput value={[s.rotation[0], s.rotation[1], s.rotation[2]]} step={0.1} min={-180} max={180} onChange={(v) => patch({ rotation: [v[0], v[1], v[2]] })} />
+          </PropertyRow>
+        </PropertyTable>
+      </Section>
+      <Button size='sm' variant='danger' onClick={() => props.removeShape()}>Remove</Button>
     </div>
   );
 }

@@ -32,8 +32,8 @@ interface SegmentProps {
 function Segment({ active, disabled, title, onClick, children }: SegmentProps) {
   return (
     <button
-      className={`flex items-center gap-1 px-2 h-[25px] text-xs border-r border-[#555] last:border-r-0 transition-colors
-        ${active ? 'bg-[#2c2cff] text-white' : 'bg-[#3b3b3b] text-[#ccc] hover:bg-[#4a4a4a]'}
+      className={`flex items-center gap-1 px-2 h-[25px] text-xs border-r border-control-hover last:border-r-0 transition-colors
+        ${active ? 'bg-selected text-white' : 'bg-control text-muted hover:bg-control-hover'}
         ${disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}
       title={title}
       onClick={onClick}
@@ -58,7 +58,7 @@ export default function ModeSelector() {
 
   return (
     <div className='flex items-center h-full mx-[5px]'>
-      <div className='flex items-center rounded overflow-hidden border border-[#555] my-[2px]'>
+      <div className='flex items-center rounded overflow-hidden border border-control-hover my-[2px]'>
         <Segment active={editorMode === 'scene'} disabled={isPlayMode} title='Scene editing' onClick={() => select('scene')}>
           <SceneIcon /> Scene
         </Segment>

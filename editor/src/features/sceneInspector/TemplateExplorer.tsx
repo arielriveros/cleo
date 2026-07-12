@@ -43,7 +43,7 @@ export default function TemplateExplorer() {
     <div className='w-full h-full p-2 text-white text-sm'>
       <div className='flex items-center gap-2 mb-3'>
         <button
-          className='flex-1 bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-2 text-xs font-semibold'
+          className='flex-1 bg-success hover:bg-success-hover rounded px-2 py-2 text-xs font-semibold'
           onClick={() => enterTemplateEditor()}
           title='Author a new template in a dedicated empty scene'>
           + New Template
@@ -52,7 +52,7 @@ export default function TemplateExplorer() {
       </div>
 
       <div
-        className={`border-2 border-dashed rounded p-3 mb-3 text-center ${dragOver ? 'border-[#2c2cff] bg-[#2d2d77]/30' : 'border-[#2d2d77]'}`}
+        className={`border-2 border-dashed rounded p-3 mb-3 text-center ${dragOver ? 'border-selected bg-border/30' : 'border-border'}`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
@@ -65,7 +65,7 @@ export default function TemplateExplorer() {
       <div className='flex flex-col gap-2'>
         {templates.map(t => (
           <div key={t.id}
-            className={`flex items-center justify-between px-2 py-2 bg-[#3b3b3b] border border-[#2d2d77] rounded cursor-grab ${has(t.id) ? 'ring-2 ring-[#2c2cff]' : ''}`}
+            className={`flex items-center justify-between px-2 py-2 bg-control border border-border rounded cursor-grab ${has(t.id) ? 'ring-2 ring-selected' : ''}`}
             draggable
             onDragStart={(e) => onTemplateDragStart(e, t)}
             onClick={() => toggle(t.id)}

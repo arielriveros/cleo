@@ -3,10 +3,11 @@ import type { NodeVariableAccess } from 'cleo'
 import { useState, useEffect } from 'react'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
+import { NumberInput, TextInput, Toggle, VectorInput, TypeSelect, AccessSelect, Button, Hint } from '../../../components/ui'
+import { VariablesIcon } from '../sectionIcons'
 
 type VarType = 'number' | 'string' | 'boolean' | 'vec3'
 const TYPES: VarType[] = ['number', 'string', 'boolean', 'vec3']
-const ACCESS: NodeVariableAccess[] = ['public', 'private', 'protected']
 
 function defaultValue(type: VarType): any {
   switch (type) {
@@ -16,8 +17,6 @@ function defaultValue(type: VarType): any {
     case 'vec3': return [0, 0, 0]
   }
 }
-
-const inputCls = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-full'
 
 export default function CustomVariablesEditor(props: { node: Node }) {
   const { eventEmitter } = useCleoEngine()
@@ -69,67 +68,39 @@ export default function CustomVariablesEditor(props: { node: Node }) {
 
   const renderValue = (v: { name: string, type: VarType, value: any }) => {
     if (v.type === 'number')
-      return <input className={inputCls} type='number' value={v.value}
-        onChange={e => setValue(v.name, 'number', parseFloat(e.target.value) || 0)} />
+      return <NumberInput value={v.value} onChange={n => setValue(v.name, 'number', n)} />
     if (v.type === 'string')
-      return <input className={inputCls} value={v.value}
-        onChange={e => setValue(v.name, 'string', e.target.value)} />
+      return <TextInput value={v.value ?? ''} onChange={s => setValue(v.name, 'string', s)} />
     if (v.type === 'boolean')
-      return <input type='checkbox' checked={!!v.value}
-        onChange={e => setValue(v.name, 'boolean', e.target.checked)} />
-    // vec3
+      return <Toggle checked={!!v.value} onChange={b => setValue(v.name, 'boolean', b)} />
     const arr = Array.isArray(v.value) ? v.value : [0, 0, 0]
-    return (
-      <div className='flex gap-1'>
-        {[0, 1, 2].map(i => (
-          <input key={i} className={inputCls} type='number' value={arr[i]}
-            onChange={e => {
-              const next = [...arr]; next[i] = parseFloat(e.target.value) || 0
-              setValue(v.name, 'vec3', next)
-            }} />
-        ))}
-      </div>
-    )
+    return <VectorInput value={arr} onChange={next => setValue(v.name, 'vec3', next)} />
   }
 
   return (
-    <Collapsable title='Variables'>
+    <Collapsable title='Variables' icon={<VariablesIcon />} badge={vars.length || undefined} persistKey='variables'>
       <div className='w-full p-2'>
-        <p className='text-xs text-gray-400 mb-2'>
+        <Hint className='mb-2'>
           Read via <code>getData(node).{'{name}'}</code>, write via <code>setData(node, '{'{name}'}', value)</code>.
-          Access from other nodes' scripts: <b>public</b> = any node, <b>private</b> = this node only, <b>protected</b> = this node + its descendants.
-        </p>
-        {vars.length === 0 && <p className='text-xs text-gray-500 mb-2'>No variables yet.</p>}
+          Access: <b>public</b> = any node, <b>private</b> = this node only, <b>protected</b> = this node + descendants.
+        </Hint>
+        {vars.length === 0 && <Hint className='mb-2'>No variables yet.</Hint>}
         {vars.map(v => (
-          <div key={v.name} className='flex items-center gap-2 mb-2'>
-            <span className='w-1/4 truncate' title={v.name}>{v.name}</span>
-            <select className={inputCls + ' w-auto'} value={v.type}
-              onChange={e => changeType(v.name, e.target.value as VarType)}>
-              {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <select className={inputCls + ' w-auto'} value={v.access}
-              title='Cross-node access: public = any node, private = this node only, protected = this node + its descendants'
-              onChange={e => changeAccess(v.name, e.target.value as NodeVariableAccess)}>
-              {ACCESS.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <div className='flex-1'>{renderValue(v)}</div>
-            <button className='text-red-400 px-1' title='Remove' onClick={() => removeVar(v.name)}>✕</button>
+          <div key={v.name} className='flex items-center gap-1.5 mb-2'>
+            <span className='w-[26%] truncate text-xs' title={v.name}>{v.name}</span>
+            <TypeSelect value={v.type} options={TYPES} onChange={t => changeType(v.name, t)} />
+            <AccessSelect value={v.access} onChange={a => changeAccess(v.name, a as NodeVariableAccess)} />
+            <div className='flex-1 min-w-0'>{renderValue(v)}</div>
+            <Button variant='ghost' size='icon' className='text-danger' title='Remove' onClick={() => removeVar(v.name)}>✕</Button>
           </div>
         ))}
-        <div className='flex items-center gap-2 mt-3 border-t border-[#2d2d77] pt-2'>
-          <input className={inputCls} placeholder='new variable name' value={newName}
-            onChange={e => setNewName(e.target.value)}
+        <div className='flex items-center gap-1.5 mt-3 border-t border-border pt-2'>
+          <TextInput className='flex-1' placeholder='new variable name' value={newName}
+            onChange={setNewName}
             onKeyDown={e => { if (e.key === 'Enter') addVar() }} />
-          <select className={inputCls + ' w-auto'} value={newType}
-            onChange={e => setNewType(e.target.value as VarType)}>
-            {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <select className={inputCls + ' w-auto'} value={newAccess}
-            title='Cross-node access level for the new variable'
-            onChange={e => setNewAccess(e.target.value as NodeVariableAccess)}>
-            {ACCESS.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-          <button className='bg-[#2d2d77] text-white rounded px-3 py-1' onClick={addVar}>Add</button>
+          <TypeSelect value={newType} options={TYPES} onChange={setNewType} />
+          <AccessSelect value={newAccess} onChange={a => setNewAccess(a as NodeVariableAccess)} />
+          <Button variant='primary' onClick={addVar}>Add</Button>
         </div>
       </div>
     </Collapsable>

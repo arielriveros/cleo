@@ -137,13 +137,13 @@ export default function CodeEditor(props: { readOnly?: boolean }) {
       {!hasScript && (
         <button
           disabled={props.readOnly}
-          className='px-3 py-1 rounded bg-[#326acc] hover:bg-[#2a59a9] text-white border border-[#274b8f] disabled:opacity-50 disabled:cursor-not-allowed'
+          className='px-3 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active disabled:opacity-50 disabled:cursor-not-allowed'
           onClick={handleAddScript}
         >
           Add Script
         </button>
       )}
-      <div style={{display: hasScript ?  'block' : 'none'}} className='mt-2 border border-[#2d2d77] rounded overflow-hidden'>
+      <div style={{display: hasScript ?  'block' : 'none'}} className='mt-2 border border-border rounded overflow-hidden'>
         <div ref={editorRef} className='w-full bg-white text-black min-h-[240px]' />
       </div>
       {hasScript && (

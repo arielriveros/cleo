@@ -54,7 +54,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
   return (
     <div
       id={props.nodeId}
-      className={`scene-item group flex w-[90%] h-[24px] py-[1px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between ${selected ? 'bg-[#2c2cff] border border-white cursor-default' : 'border border-[#3b3b3b] hover:bg-[#3f3fb4] cursor-pointer'}`}
+      className={`scene-item group flex w-[90%] h-[24px] py-[1px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between ${selected ? 'bg-selected border border-white cursor-default' : 'border border-control hover:bg-control-hover cursor-pointer'}`}
       onClick={() => props.onSelect(props.nodeId)}
       draggable={true}
       onDragStart={handleDragStart} >
@@ -75,7 +75,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
           <button
             title='Edit template'
             onClick={(e) => { e.stopPropagation(); enterTemplateEditor(props.templateId); }}
-            className='inline-flex items-center justify-center w-4 h-4 mr-1 text-white hover:text-[#8f8fff]'>
+            className='inline-flex items-center justify-center w-4 h-4 mr-1 text-white hover:text-highlight'>
             <PenIcon />
           </button>
         }
@@ -213,7 +213,7 @@ export default function SceneInspector() {
   }
 
   return (
-    <div className='flex flex-col text-white bg-[#202020] w-full h-full' onDragOver={handleDragOver} onDrop={handleDrop}>
+    <div className='flex flex-col text-white bg-surface-raised w-full h-full' onDragOver={handleDragOver} onDrop={handleDrop}>
       <AddNew />
       <Collapsable title='Scene'>
         { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode} handleSetVisibility={handleSetVisibility} /> }

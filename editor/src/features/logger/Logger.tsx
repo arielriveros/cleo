@@ -26,11 +26,11 @@ export default function Logger() {
     };
   }, [eventEmitter]);
 
-  const btn = 'text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[98px] inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded disabled:bg-[#2c2cff] disabled:border-white disabled:cursor-default';
+  const btn = 'text-white h-[25px] border border-muted bg-control text-center w-[98px] inline-block cursor-pointer my-[2px] mx-[5px] px-2 rounded disabled:bg-selected disabled:border-white disabled:cursor-default';
 
   return (
-    <div className='flex flex-col w-full h-full text-white bg-[#202020]'>
-      <div className='flex flex-row items-center border-b border-[#2d2d77] p-1'>
+    <div className='flex flex-col w-full h-full text-white bg-surface-raised'>
+      <div className='flex flex-row items-center border-b border-border p-1'>
         <button className={btn + (!filter.log ? ' opacity-50' : '')} onClick={() => setFilter({...filter, log: !filter.log})} >Log</button>
         <button className={btn + (!filter.info ? ' opacity-50' : '')} onClick={() => setFilter({...filter, info: !filter.info}) }>Info</button>
         <button className={btn + (!filter.warning ? ' opacity-50' : '')} onClick={() => setFilter({...filter, warning: !filter.warning})}>Warning</button>

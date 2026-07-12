@@ -5,6 +5,7 @@ import { useCleoEngine } from '../../EngineContext'
 import { seedCustomMaterial } from '../../../utils/customMaterials'
 import GlslCodeEditor from '../scriptEditor/GlslCodeEditor'
 import CustomUniformsEditor from './CustomUniformsEditor'
+import { Select, Field, Hint } from '../../../components/ui'
 
 const BASES: { value: string, label: string }[] = [
   { value: 'scratch', label: 'From scratch' },
@@ -14,8 +15,6 @@ const BASES: { value: string, label: string }[] = [
 ]
 const baseKey = (b: CustomBaseType) => (b == null ? 'scratch' : b)
 const keyToBase = (k: string): CustomBaseType => (k === 'scratch' ? null : k as CustomBaseType)
-
-const selectCls = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1'
 
 /**
  * Inspector body for a custom (user-authored shader) material. Provides the render-mode toggle
@@ -91,26 +90,24 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
   return (
     <div className='w-full p-2'>
       <div className='flex items-center gap-3 mb-2 flex-wrap'>
-        <div className='flex items-center gap-2'>
-          <span className='text-xs text-slate-300'>Mode</span>
-          <select className={selectCls} value={mat.renderMode} onChange={e => changeMode(e.target.value as CustomRenderMode)}>
+        <Field label='Mode' className='w-auto'>
+          <Select value={mat.renderMode} onChange={e => changeMode(e.target.value as CustomRenderMode)}>
             <option value='forward'>Forward (lit color)</option>
             <option value='deferred'>Deferred (G-buffer)</option>
-          </select>
-        </div>
-        <div className='flex items-center gap-2'>
-          <span className='text-xs text-slate-300'>Extend base</span>
-          <select className={selectCls} value={baseKey(mat.baseType)} onChange={e => changeBase(e.target.value)}>
+          </Select>
+        </Field>
+        <Field label='Extend base' className='w-auto' labelClassName='w-auto'>
+          <Select value={baseKey(mat.baseType)} onChange={e => changeBase(e.target.value)}>
             {BASES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
-          </select>
-        </div>
+          </Select>
+        </Field>
       </div>
 
-      <p className='text-[11px] text-slate-400 mb-2'>
+      <Hint className='mb-2'>
         {mat.renderMode === 'forward'
           ? 'Write vec4 fragment() returning the final lit color. Lights, shadows, the env map and helpers (accumulateLight, shadowCalculation) are available.'
           : 'Write void surface(inout Surface s) filling the G-buffer (albedo/normal/metallic/roughness/emissive); the engine lights it with SSAO/IBL/shadows.'}
-      </p>
+      </Hint>
 
       <GlslCodeEditor value={source} onChange={onSourceChange} error={error} />
 

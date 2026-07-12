@@ -1,55 +1,71 @@
-import { useEffect, useRef, useState } from 'react';
+import { useId, useState } from 'react';
+import { cn } from './ui/cn';
 
 interface CollapsableProps {
     title: string;
     children: React.ReactNode;
+    /** Small glyph shown before the title. */
+    icon?: React.ReactNode;
+    /** Count/label pill shown after the title (e.g. shape or uniform count). */
+    badge?: React.ReactNode;
+    /** Header-right actions (buttons); clicks here don't toggle the section. */
+    right?: React.ReactNode;
+    defaultOpen?: boolean;
+    /** When set, the open/closed state is remembered in localStorage under this key. */
+    persistKey?: string;
+    className?: string;
 }
-export default function Collapsable(props: CollapsableProps) {
-    const [collapsed, setCollapsed] = useState(false);
-    const contentRef = useRef<HTMLDivElement | null>(null);
 
-    const toggleCollapsed = () => setCollapsed((v) => !v);
+const storagePrefix = 'cleo.collapsable.';
 
-    useEffect(() => {
-        if (!contentRef.current) return;
-        const el = contentRef.current;
-        if (collapsed) {
-            el.style.maxHeight = '0px';
-        } else {
-            // Set to scrollHeight for smooth expand
-            el.style.maxHeight = el.scrollHeight + 'px';
+export default function Collapsable({ title, children, icon, badge, right, defaultOpen = true, persistKey, className }: CollapsableProps) {
+    const contentId = useId();
+    const storageKey = persistKey ? storagePrefix + persistKey : null;
+
+    const [open, setOpen] = useState<boolean>(() => {
+        if (storageKey) {
+            try { const v = localStorage.getItem(storageKey); if (v != null) return v === '1'; } catch { /* ignore */ }
         }
-    }, [collapsed, props.children]);
+        return defaultOpen;
+    });
 
-    // Initialize measured height after mount
-    useEffect(() => {
-        if (!contentRef.current) return;
-        const el = contentRef.current;
-        el.style.maxHeight = el.scrollHeight + 'px';
-    }, []);
+    const toggle = () => setOpen((prev) => {
+        const next = !prev;
+        if (storageKey) { try { localStorage.setItem(storageKey, next ? '1' : '0'); } catch { /* ignore */ } }
+        return next;
+    });
 
     return (
-        <div className={'w-full mb-[10px]'}>
+        <div className={cn('w-full mb-2', className)}>
             <div
-                className='flex justify-between items-center px-[5px] py-[6px] border-t border-[#2d2d77] rounded-t bg-[#3b3b3b] cursor-pointer select-none'
-                onClick={toggleCollapsed}
+                className='group flex items-center gap-2 px-2 py-1.5 border-t border-border rounded-t bg-control hover:bg-control-hover cursor-pointer select-none transition-colors'
+                onClick={toggle}
                 role='button'
-                aria-expanded={!collapsed}
-                aria-controls='collapsable-content'
+                aria-expanded={open}
+                aria-controls={contentId}
                 tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCollapsed(); } }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }}
             >
-                <div className='text-[16px] font-bold'>{props.title}</div>
-                <div className={`text-[14px] transition-transform duration-300 ${collapsed ? '-rotate-90' : ''}`}>▼</div>
+                <span className={cn('text-[11px] text-muted transition-transform duration-200', open ? '' : '-rotate-90')}>▼</span>
+                {icon && <span className='shrink-0 text-muted group-hover:text-white transition-colors'>{icon}</span>}
+                <span className='text-[13px] font-semibold tracking-wide truncate'>{title}</span>
+                {badge !== undefined && badge !== null && badge !== false && (
+                    <span className='shrink-0 min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center rounded-full bg-border-subtle text-[10px] text-muted tabular-nums'>
+                        {badge}
+                    </span>
+                )}
+                <span className='flex-1' />
+                {right && <span onClick={(e) => e.stopPropagation()} className='shrink-0 flex items-center gap-1'>{right}</span>}
             </div>
             <div
-                id='collapsable-content'
-                ref={contentRef}
-                className={`bg-[#202020] overflow-hidden transition-[max-height] duration-300 ease-in-out`}
-                style={{ maxHeight: collapsed ? '0px' as any : undefined }}
+                id={contentId}
+                className='grid transition-[grid-template-rows] duration-300 ease-in-out'
+                style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
             >
-                {props.children}
+                <div className='overflow-hidden bg-surface-raised'>
+                    {children}
+                </div>
             </div>
         </div>
-    )
+    );
 }
