@@ -70,13 +70,18 @@ import BRDFFragment from './shaders/ibl/brdf.fs'
 import { GLState } from './systems/glState';
 import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
-import { Material } from './material';
+import { Material, CustomMaterial } from './material';
+import { ensureCustomShader, customForwardTypes } from './systems/customShaders';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats } from './renderStats';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
+
+/** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
+ *  forward materials are appended at runtime via `customForwardTypes()`. */
+const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned'];
 
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
@@ -507,6 +512,9 @@ export class Renderer {
         this._activeCamera = scene.activeCamera.camera;
         this._activeCamera.resize(this._canvas.width, this._canvas.height);
 
+        // Compile+register any custom-material programs before any pass calls initializeModel/getShader.
+        this._ensureCustomShaders(scene);
+
         // Cache view/projection/inverse and update the culling frustum for this frame
         const view = this._activeCamera.viewMatrix;
         const proj = this._activeCamera.projectionMatrix;
@@ -617,7 +625,7 @@ export class Renderer {
      * frame — even with zero lights — so deleting the last light actually darkens the scene.
      */
     private _resetForwardLighting(scene: Scene): void {
-        for (const shaderName of ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned']) {
+        for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_numPointLights', scene.numPointLights);
             this._shaderManager.setUniform('u_numSpotlights', scene.numSpotlights);
@@ -629,7 +637,7 @@ export class Renderer {
     }
 
     private _bindShadowToForwardShaders(light: LightNode): void {
-        for (const shaderName of ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned']) {
+        for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_lightSpace', light.lightSpace);
             this._shaderManager.setUniform('u_shadowMap', 6);
@@ -638,12 +646,24 @@ export class Renderer {
     }
 
     private _bindEnvToForwardShaders(scene: Scene): void {
-        for (const shaderName of ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned']) {
+        for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
             this._shaderManager.setUniform('u_envMap', 7);
         }
         scene.environmentMap?.bind(7);
+    }
+
+    /**
+     * Lazily compile + register the runtime program for every custom material in the scene. Idempotent
+     * and cheap (a Set lookup after the first compile). Runs before any pass so `getShader(material.type)`
+     * (VAO init, shader bind) never throws; a compile failure registers a magenta fallback under the key.
+     */
+    private _ensureCustomShaders(scene: Scene): void {
+        for (const node of scene.models) {
+            const mat = node.model.material;
+            if (mat instanceof CustomMaterial) ensureCustomShader(mat);
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -700,7 +720,9 @@ export class Renderer {
             // Default (Blinn-Phong) materials are forward-rendered in the overlay so their full feature
             // set (specular/ambient/reflectivity + maps) works; they never enter the deferred G-buffer.
             const dtype = node.model.material.type;
-            if (dtype === 'blinn_phong' || dtype === 'blinn_phongSkinned') continue;
+            // Forward-rendered types are drawn in the overlay, not the G-buffer: Blinn-Phong and
+            // forward custom materials (deferred custom, 'customGeom:', DOES rasterize here).
+            if (dtype === 'blinn_phong' || dtype === 'blinn_phongSkinned' || dtype.startsWith('custom:')) continue;
             if (!node.initialized) node.initializeModel();
 
             const mat = node.model.material;
@@ -812,6 +834,8 @@ export class Renderer {
 
     private _geometryShaderFor(node: ModelNode): string {
         const type = node.model.material.type;
+        // A deferred custom material is drawn with its own runtime-compiled G-buffer program.
+        if (type.startsWith('customGeom:')) return type;
         const animated = node.model instanceof AnimatedModel;
         switch (type) {
             case 'pbr': return animated ? 'pbrGeometrySkinned' : 'pbrGeometry';
@@ -839,6 +863,8 @@ export class Renderer {
             this._shaderManager.setUniform('u_viewPos', this._activeCamera.position); // parallax view vector
             this._applyTerrainMaterial(node.model.material);
         }
+        else if (node.model.material instanceof CustomMaterial)
+            this._applyCustomMaterial(node.model.material);
         else this._applyMaterial(node.model.material);
         this._applyCull(node.model.material.config.side);
         const mode = node.model.material.config.wireframe ? gl.LINES : gl.TRIANGLES;
@@ -1509,7 +1535,7 @@ export class Renderer {
             if (this._selectedNodeId && node.id === this._selectedNodeId) selectedNodes.push(node);
             const mat = node.model.material;
             if (mat.config.transparent) transparentQueue.push(node);
-            else if (mat.type === 'blinn_phong' || mat.type === 'blinn_phongSkinned') opaqueForwardQueue.push(node);
+            else if (mat.type === 'blinn_phong' || mat.type === 'blinn_phongSkinned' || mat.type.startsWith('custom:')) opaqueForwardQueue.push(node);
         }
 
         // Forward lighting is only needed if something is drawn through the material shaders.
@@ -1754,6 +1780,32 @@ export class Renderer {
             this._shaderManager.setUniform(`u_material.${name}`, slot);
             const texture = TextureManager.Instance.getTexture(tex);
             if (texture) texture.bind(slot);
+        }
+    }
+
+    /**
+     * Upload a custom material's user uniforms to the currently bound program. Scalars/vectors go by bare
+     * `u_<name>` (from the live `properties` value, falling back to the uniform's declared default); user
+     * samplers bind from texture unit 9 upward (0-5 std material, 6 shadow, 7 env, 8 skybox are reserved),
+     * with the shared 'Null' texture as a fallback so every sampler references a valid texture. Shared by
+     * the forward (`_renderModel`) and deferred (`_drawGeometryNode`) paths.
+     */
+    private _applyCustomMaterial(material: CustomMaterial): void {
+        this._shaderManager.setUniform('u_time', performance.now() * 0.001);
+        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        const fallback = TextureManager.Instance.getTexture('Null');
+        let unit = 9;
+        for (const u of material.uniforms) {
+            if (u.type === 'sampler2D' || u.type === 'samplerCube') {
+                const texId = material.textures.get(u.name);
+                const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
+                this._shaderManager.setUniform(`u_${u.name}`, unit);
+                if (tex) tex.bind(unit);
+                unit++;
+            } else {
+                const value = material.properties.has(u.name) ? material.properties.get(u.name) : u.value;
+                this._shaderManager.setUniform(`u_${u.name}`, value);
+            }
         }
     }
 
@@ -2022,7 +2074,10 @@ export class Renderer {
         if (isAnimatedModel) this._uploadBoneMatrices(shaderType, node);
 
         // Set material uniforms + bind textures
-        this._applyMaterial(node.model.material);
+        if (node.model.material instanceof CustomMaterial)
+            this._applyCustomMaterial(node.model.material);
+        else
+            this._applyMaterial(node.model.material);
         frameStats.objects++;
 
         const materialConfig = node.model.material.config;
@@ -2297,7 +2352,7 @@ export class Renderer {
         }
 
         // Set lighting for both default shaders
-        for (const shaderName of ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned']) {
+        for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
             try {
                 this._shaderManager.bind(shaderName);
                 this._shaderManager.setUniform('u_numPointLights', numPointLights);

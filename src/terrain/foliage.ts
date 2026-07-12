@@ -125,6 +125,13 @@ export class FoliageLayer {
         return true;
     }
 
+    /** Remove all instances (used before regenerating foliage across the whole terrain). */
+    public clear(): void {
+        if (this._instances.length === 0) return;
+        this._instances = [];
+        this._rebuild();
+    }
+
     /** Scatter new instances within the brush disc; Y is sampled from the terrain surface. */
     public scatter(worldX: number, worldZ: number, radius: number, sampleHeight: (x: number, z: number) => number): boolean {
         if (this.count >= MAX_INSTANCES) return false;

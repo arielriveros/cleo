@@ -46,8 +46,15 @@ const ScaleIcon = () => (
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            gizmoMode, setGizmoMode, templateRootId, templates, meshes, scripts, bodies, triggers } = useCleoEngine();
+            gizmoMode, setGizmoMode, templateRootId, templates, meshes, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
     const viewportRef = useRef<HTMLDivElement>(null);
+    // The landscape brush mode is a ref (not reactive); mirror it so the terrain move-gizmo mounts on demand.
+    const [terrainMode, setTerrainMode] = useState(terrainBrush.current.mode);
+    useEffect(() => {
+        const onChange = () => setTerrainMode(terrainBrush.current.mode);
+        eventEmitter.on('TERRAIN_BRUSH_CHANGED', onChange);
+        return () => { eventEmitter.off('TERRAIN_BRUSH_CHANGED', onChange); };
+    }, [eventEmitter, terrainBrush]);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
     const wasDraggingRef = useRef(false);
@@ -119,7 +126,7 @@ export default function EngineViewport() {
             // In landscape/renderer modes the viewport is not a selection surface. In material mode the
             // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
             // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
-            if (editorMode === 'landscape' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'animation') return;
+            if (editorMode === 'landscape' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation') return;
             
             // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
@@ -285,14 +292,14 @@ export default function EngineViewport() {
             {/* Floating top-right overlays: the gizmo-mode toggle (where the gizmo is active) sits to the
                 left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead. */}
             <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
-                {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && !isPlayMode && (
+                {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && (
                     <div className='flex items-center rounded overflow-hidden border border-[#555]'>
                         <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'rotation'} title='Rotate' onClick={() => setGizmoMode('rotation')}><RotateIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'scale'} title='Scale' onClick={() => setGizmoMode('scale')}><ScaleIcon /></GizmoSeg>
                     </div>
                 )}
-                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'renderer' && !isPlayMode && (
+                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'renderer' && !isPlayMode && (
                     <select
                         data-cleo-overlay
                         value={dimension}
@@ -305,7 +312,7 @@ export default function EngineViewport() {
                     </select>
                 )}
             </div>
-            {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'animation' && <PositionGizmo
+            {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}
@@ -313,6 +320,12 @@ export default function EngineViewport() {
             {editorMode === 'landscape' && <>
                 <LandscapeBrush viewportRef={viewportRef} />
                 <LandscapeInspector />
+                {/* "Move" tool: a transform gizmo on the terrain node; its Y arrow sets the global height. */}
+                {terrainMode === 'move' && terrainBrush.current.activeLandscapeId && <PositionGizmo
+                    selectedNodeId={terrainBrush.current.activeLandscapeId}
+                    onTransformChange={handleTransformChange}
+                    viewportRef={viewportRef}
+                />}
             </>}
             {editorMode === 'renderer' && <RendererOptions />}
             {editorMode === 'renderer' && <RendererStats />}

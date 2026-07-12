@@ -1170,6 +1170,17 @@ export class LandscapeNode extends Node {
 
     public get terrain(): Terrain { return this._terrain; }
 
+    /** Swap in a rebuilt terrain (e.g. resized/re-resolutioned) while keeping this node + its transform.
+     *  Disposes the old physics body and replaces the internal chunk child nodes. */
+    public setTerrain(terrain: Terrain): void {
+        this._terrain.dispose();
+        for (const c of this._chunkNodes) this.removeChild(c);
+        this._chunkNodes = [];
+        this._terrain = terrain;
+        this._terrain.setOrigin(this.worldPosition);
+        this._buildChunkNodes();
+    }
+
     public update(delta: number, time: number): void {
         super.update(delta, time);
         // Keep the terrain's origin in sync with the node so sculpting/collision follow the node.

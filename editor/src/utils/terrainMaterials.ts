@@ -60,8 +60,12 @@ export function parseTerrainMaterialAsset(asset: TerrainMaterialAsset): TerrainM
   return TerrainMaterial.parse(asset.material)
 }
 
-/** Assign a terrain-material asset to a terrain paint layer (0..3): restore textures, parse, link by id. */
+/** Assign a terrain-material asset to a terrain paint layer (0..3): restore textures, parse, link by id.
+ *  If the layer already covers (almost) the whole terrain and the material defines foliage, auto-scatter it
+ *  across the entire terrain. */
 export function applyTerrainMaterialToLayer(terrain: Terrain, index: number, asset: TerrainMaterialAsset): void {
   const tm = parseTerrainMaterialAsset(asset)
   terrain.setLayer(index, tm, { materialId: asset.id })
+  if (tm.foliageInclude.length > 0 && terrain.layerCoverage(index) > 0.98)
+    terrain.generateFoliageEverywhere()
 }

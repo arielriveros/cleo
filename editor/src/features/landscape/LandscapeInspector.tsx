@@ -13,7 +13,7 @@ const TOOLS: { id: TerrainTool; label: string }[] = [
 /** Floating panel shown while landscape mode is active: create/import terrain, sculpt, paint terrain
  *  materials onto the 4 layers, and scatter each painted material's foliage. */
 export default function LandscapeInspector() {
-    const { editorScene, eventEmitter, terrainBrush } = useCleoEngine();
+    const { editorScene, eventEmitter, terrainBrush, setGizmoMode } = useCleoEngine();
 
     const [size, setSize] = useState(200);
     const [resolution, setResolution] = useState(129);
@@ -32,7 +32,9 @@ export default function LandscapeInspector() {
         const b = terrainBrush.current;
         b.mode = mode; b.tool = tool; b.radius = radius; b.strength = strength; b.falloff = falloff;
         b.paintLayer = paintLayer; b.foliageErase = foliageErase;
-    }, [mode, tool, radius, strength, falloff, paintLayer, foliageErase, terrainBrush]);
+        if (mode === 'move') setGizmoMode('position'); // the terrain move-gizmo is a position gizmo
+        eventEmitter.emit('TERRAIN_BRUSH_CHANGED'); // let the viewport mount/unmount the terrain gizmo
+    }, [mode, tool, radius, strength, falloff, paintLayer, foliageErase, terrainBrush, setGizmoMode, eventEmitter]);
 
     useEffect(() => {
         const refreshTerrain = () => setHasTerrain(Array.from(editorScene.landscapes).length > 0);
@@ -48,7 +50,23 @@ export default function LandscapeInspector() {
         return list[0] || null;
     };
 
-    const createTerrain = () => {
+    // Create the single terrain, or — if one already exists — rebuild it at the new size/resolution while
+    // preserving the sculpted shape (resampled), the layer materials, and regenerating foliage everywhere.
+    const createOrUpdateTerrain = () => {
+        const existing = activeLandscape();
+        if (existing) {
+            const old = existing.terrain;
+            const next = new Terrain({ size, resolution });
+            next.resampleHeightsFrom(old);
+            for (let i = 0; i < old.layers.length && i < 4; i++) {
+                const L = old.layers[i];
+                if (L.material) next.setLayer(i, L.material, { tiling: L.tiling, auto: L.auto, hRange: L.hRange, sRange: L.sRange, materialId: L.materialId ?? null });
+            }
+            existing.setTerrain(next);
+            next.generateFoliageEverywhere();
+            eventEmitter.emit('SCENE_CHANGED');
+            return;
+        }
         const terrain = new Terrain({ size, resolution });
         const node = new LandscapeNode('Landscape', terrain);
         editorScene.addNode(node);
@@ -56,6 +74,13 @@ export default function LandscapeInspector() {
         eventEmitter.emit('SCENE_CHANGED');
         eventEmitter.emit('SELECT_NODE', node.id);
         setHasTerrain(true);
+    };
+
+    const generateFoliage = () => {
+        const node = activeLandscape();
+        if (!node) { alert('Create a terrain first.'); return; }
+        node.terrain.generateFoliageEverywhere();
+        eventEmitter.emit('SCENE_CHANGED');
     };
 
     const importHeightmap = (files: FileList | null) => {
@@ -94,10 +119,11 @@ export default function LandscapeInspector() {
                     <span className={label}>Resolution</span>
                     <input type="number" className={num} value={resolution} min={8} max={513} onChange={e => setResolution(Number(e.target.value))} />
                 </div>
-                <button className="w-full bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-1 text-xs" onClick={createTerrain}>Create Terrain</button>
+                <button className="w-full bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-1 text-xs" onClick={createOrUpdateTerrain}>{hasTerrain ? 'Update Terrain' : 'Create Terrain'}</button>
+                {hasTerrain && <div className="text-[10px] text-gray-400 mt-1">Update rebuilds the terrain at the new size/resolution, keeps materials + shape, and refills foliage.</div>}
             </div>
 
-            <div className="flex gap-1 mb-2">{modeBtn('sculpt', 'Sculpt')}{modeBtn('paint', 'Paint')}{modeBtn('foliage', 'Foliage')}</div>
+            <div className="grid grid-cols-4 gap-1 mb-2">{modeBtn('sculpt', 'Sculpt')}{modeBtn('paint', 'Paint')}{modeBtn('foliage', 'Foliage')}{modeBtn('move', 'Move')}</div>
 
             {mode === 'sculpt' && (
                 <div className="mb-2">
@@ -132,10 +158,17 @@ export default function LandscapeInspector() {
                         <span className={label}>Erase mode</span>
                         <input type="checkbox" checked={foliageErase} onChange={e => setFoliageErase(e.target.checked)} />
                     </label>
+                    <button className="w-full bg-[#2c7a2c] hover:bg-[#358535] rounded px-2 py-1 text-xs" onClick={generateFoliage}>Generate Foliage (whole terrain)</button>
                     <p className="text-[10px] text-gray-400">
                         The brush scatters each painted material’s foliage (and skips excluded types).
                         Define a material’s foliage in the “Terrain Mat.” tab, then paint that material here.
                     </p>
+                </div>
+            )}
+
+            {mode === 'move' && (
+                <div className="mb-2">
+                    <p className="text-[10px] text-gray-400">Drag the vertical gizmo in the viewport to raise/lower the whole terrain.</p>
                 </div>
             )}
 

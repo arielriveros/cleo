@@ -81,7 +81,7 @@ function TextureCard({ id, unreferenced, selected, onToggle }: { id: string; unr
 // Bottom-bar "Textures" panel: every loaded (non-built-in) texture, with upload + per-texture delete.
 // Styled to match the Templates / Materials / Meshes explorers.
 export default function AssetExplorer() {
-  const { eventEmitter, mainScene, materials, meshes, templates } = useCleoEngine();
+  const { eventEmitter, mainScene, materials, meshes, templates, terrainMaterials } = useCleoEngine();
   const [textureIds, setTextureIds] = useState<string[]>([]);
 
   const refreshTextures = () => {
@@ -102,7 +102,7 @@ export default function AssetExplorer() {
   }, [eventEmitter]);
 
   // Texture ids used by any material anywhere; the rest get the "not referenced" badge.
-  const referenced = collectReferencedTextureIds(mainScene, materials, meshes, templates);
+  const referenced = collectReferencedTextureIds(mainScene, materials, meshes, templates, terrainMaterials);
 
   const { selected, toggle, clear, has } = useMultiSelect(textureIds);
   const batchDelete = () => {

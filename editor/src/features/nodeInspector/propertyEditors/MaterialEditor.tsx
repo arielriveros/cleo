@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ModelNode } from 'cleo';
+import { ModelNode, Material, CustomMaterial } from 'cleo';
 import { useCleoEngine } from '../../EngineContext';
 import { colorToVec3, vec3ToHex } from '../../../utils/UtilFunctions';
+import { newCustomMaterial } from '../../../utils/customMaterials';
 import Collapsable from '../../../components/Collapsable';
 import TextureInspector from './TextureInspector';
+import CustomMaterialEditor from './CustomMaterialEditor';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
   // Safety check to ensure the node has a model
@@ -14,10 +16,12 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const model = props.node.model;
   const material = model.material;
 
-  // Shader selection (basic | default)
-  const detectShaderType = (t: string): 'basic' | 'blinn_phong' | 'pbr' =>
-    (t.includes('blinn_phong') || t.includes('default')) ? 'blinn_phong' : t.includes('pbr') ? 'pbr' : 'basic';
-  const [shaderType, setShaderType] = useState<'basic' | 'blinn_phong' | 'pbr'>(detectShaderType(material.type as string));
+  // Shader selection (basic | blinn_phong | pbr | custom)
+  type ShaderType = 'basic' | 'blinn_phong' | 'pbr' | 'custom';
+  const detectShaderType = (t: string): ShaderType =>
+    t.startsWith('custom') ? 'custom'
+    : (t.includes('blinn_phong') || t.includes('default')) ? 'blinn_phong' : t.includes('pbr') ? 'pbr' : 'basic';
+  const [shaderType, setShaderType] = useState<ShaderType>(detectShaderType(material.type as string));
 
   // Default shader state
   const [diffuse, setDiffuse] = useState(vec3ToHex(material.properties.get('diffuse')));
@@ -84,6 +88,10 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   // Apply shader type change to material
   useEffect(() => {
+    // Custom materials own their own type key (a content hash) + properties — the CustomMaterialEditor
+    // manages them, and the instance swap to/from CustomMaterial happens in handleShaderTypeChange.
+    if (shaderType === 'custom') return;
+
     // Update material.type to selected shader
     material.type = shaderType as any;
 
@@ -133,6 +141,24 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   useEffect(() => { eventEmitter.emit('TEXTURES_CHANGED') }, [])
 
+  // Switching the shader type to/from 'custom' swaps the material INSTANCE (a CustomMaterial subclass),
+  // carrying the config across. Built-in <-> built-in stays on the same instance (the effect above seeds
+  // the required properties). Read model.material fresh each render so the swap is picked up.
+  const handleShaderTypeChange = (next: ShaderType) => {
+    const cur = detectShaderType(model.material.type as string);
+    if (next === cur) return;
+    const cfg = { ...model.material.config };
+    if (next === 'custom') {
+      model.material = newCustomMaterial('pbr', 'forward', cfg);
+    } else if (cur === 'custom') {
+      model.material = next === 'basic' ? Material.Basic({}, cfg)
+        : next === 'pbr' ? Material.PBR({}, cfg)
+        : Material.Default({}, cfg);
+    }
+    setShaderType(next);
+    eventEmitter.emit('SCENE_CHANGED');
+  };
+
   const colorInput = 'w-[32px] h-[32px] p-0 border border-[#2d2d77] rounded bg-transparent';
   const numberInput = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1 w-[80px]';
   const selectInput = 'bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-2 py-1';
@@ -143,12 +169,15 @@ export default function MaterialEditor(props: {node: ModelNode}) {
         {/* Shader selector */}
         <div className='mb-2 flex items-center gap-2'>
           <span className='text-xs text-slate-300'>Shader</span>
-          <select className={selectInput} value={shaderType} onChange={(e) => setShaderType(e.target.value as 'basic' | 'blinn_phong' | 'pbr')}>
+          <select className={selectInput} value={shaderType} onChange={(e) => handleShaderTypeChange(e.target.value as ShaderType)}>
             <option value='basic'>Basic</option>
             <option value='blinn_phong'>Blinn-Phong</option>
             <option value='pbr'>PBR</option>
+            <option value='custom'>Custom (shader)</option>
           </select>
         </div>
+
+        {shaderType === 'custom' && <CustomMaterialEditor node={props.node} />}
 
         {shaderType === 'blinn_phong' && (
           <>

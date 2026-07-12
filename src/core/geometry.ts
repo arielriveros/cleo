@@ -170,37 +170,58 @@ export class Geometry {
         }
     }
 
+    // Per-vertex tangent frame from UVs. Accumulate each face's UV-space tangent onto its 3 vertices, then
+    // Gram-Schmidt against the vertex normal. (The previous version pushed two tangents PER FACE while the
+    // interleaver reads them by VERTEX index — misaligned on any indexed mesh, breaking normal maps/parallax.)
     private _calculateTangents(): void {
-        const faces: number[][] = []
-        for (let i = 0; i < this._indices.length; i+=3)
-            faces.push([this._indices[i], this._indices[i+1], this._indices[i+2]]);
+        const n = this._positions.length;
+        const acc: [number, number, number][] = new Array(n);
+        for (let i = 0; i < n; i++) acc[i] = [0, 0, 0];
 
-        for (let face of faces) {
-            const v0 = this._positions[face[0]];
-            const v1 = this._positions[face[1]];
-            const v2 = this._positions[face[2]];
-            
-            const uv0 = this._uvs[face[0]];
-            const uv1 = this._uvs[face[1]];
-            const uv2 = this._uvs[face[2]];
-            const edge1 = vec3.fromValues(v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]);
-            const edge2 = vec3.fromValues(v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]);
-            const deltaUV1 = vec2.fromValues(uv1[0] - uv0[0], uv1[1] - uv0[1]);
-            const deltaUV2 = vec2.fromValues(uv2[0] - uv0[0], uv2[1] - uv0[1]);
-            
-            const f = 1.0 / (deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1]);
+        for (let i = 0; i + 2 < this._indices.length; i += 3) {
+            const i0 = this._indices[i], i1 = this._indices[i + 1], i2 = this._indices[i + 2];
+            const v0 = this._positions[i0], v1 = this._positions[i1], v2 = this._positions[i2];
+            const uv0 = this._uvs[i0], uv1 = this._uvs[i1], uv2 = this._uvs[i2];
+            if (!v0 || !v1 || !v2 || !uv0 || !uv1 || !uv2) continue;
+            const e1x = v1[0] - v0[0], e1y = v1[1] - v0[1], e1z = v1[2] - v0[2];
+            const e2x = v2[0] - v0[0], e2y = v2[1] - v0[1], e2z = v2[2] - v0[2];
+            const du1 = uv1[0] - uv0[0], dv1 = uv1[1] - uv0[1];
+            const du2 = uv2[0] - uv0[0], dv2 = uv2[1] - uv0[1];
+            const denom = du1 * dv2 - du2 * dv1;
+            const f = Math.abs(denom) < 1e-8 ? 0 : 1.0 / denom;
+            const tx = f * (dv2 * e1x - dv1 * e2x);
+            const ty = f * (dv2 * e1y - dv1 * e2y);
+            const tz = f * (dv2 * e1z - dv1 * e2z);
+            acc[i0][0] += tx; acc[i0][1] += ty; acc[i0][2] += tz;
+            acc[i1][0] += tx; acc[i1][1] += ty; acc[i1][2] += tz;
+            acc[i2][0] += tx; acc[i2][1] += ty; acc[i2][2] += tz;
+        }
 
-            const x = f * (deltaUV2[1] * edge1[0] - deltaUV1[1] * edge2[0]);
-            const y = f * (deltaUV2[1] * edge1[1] - deltaUV1[1] * edge2[1]);
-            const z = f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2]);
-            const tangent: [number, number, number] = [x, y, z]
-            this._tangents.push(tangent, tangent);
-
-            const vecBigangent = vec3.fromValues(this._normals[face[0]][1] * tangent[2] - this._normals[face[0]][2] * tangent[1],
-                                              this._normals[face[0]][2] * tangent[0] - this._normals[face[0]][0] * tangent[2],
-                                              this._normals[face[0]][0] * tangent[1] - this._normals[face[0]][1] * tangent[0]);
-            vec3.scale(vecBigangent, vecBigangent, -1.0)
-            this._bitangents.push([vecBigangent[0], vecBigangent[1], vecBigangent[2]], [vecBigangent[0], vecBigangent[1], vecBigangent[2]]);
+        this._tangents = new Array(n);
+        this._bitangents = new Array(n);
+        for (let i = 0; i < n; i++) {
+            const nrm = this._normals[i] || [0, 1, 0];
+            let tx = acc[i][0], ty = acc[i][1], tz = acc[i][2];
+            // Gram-Schmidt: remove the normal component.
+            const d = nrm[0] * tx + nrm[1] * ty + nrm[2] * tz;
+            tx -= nrm[0] * d; ty -= nrm[1] * d; tz -= nrm[2] * d;
+            let len = Math.hypot(tx, ty, tz);
+            if (len < 1e-8) {
+                // No UV gradient (or degenerate): pick any tangent perpendicular to the normal.
+                const a: [number, number, number] = Math.abs(nrm[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+                tx = a[1] * nrm[2] - a[2] * nrm[1];
+                ty = a[2] * nrm[0] - a[0] * nrm[2];
+                tz = a[0] * nrm[1] - a[1] * nrm[0];
+                len = Math.hypot(tx, ty, tz) || 1;
+            }
+            tx /= len; ty /= len; tz /= len;
+            this._tangents[i] = [tx, ty, tz];
+            // Bitangent = -(normal x tangent), matching the engine's existing convention (default.vs negates it).
+            this._bitangents[i] = [
+                -(nrm[1] * tz - nrm[2] * ty),
+                -(nrm[2] * tx - nrm[0] * tz),
+                -(nrm[0] * ty - nrm[1] * tx),
+            ];
         }
     }
 

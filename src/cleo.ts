@@ -6,8 +6,9 @@ export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, Spr
 export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export { Mesh } from "./graphics/mesh";
-export { Material, TerrainMaterial } from "./graphics/material";
-export type { TerrainBaseType, TerrainFoliageRule } from "./graphics/material";
+export { Material, TerrainMaterial, CustomMaterial } from "./graphics/material";
+export type { TerrainBaseType, TerrainFoliageRule, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
+export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment } from "./graphics/systems/customShaders";
 export { Renderer } from "./graphics/renderer";
 export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";

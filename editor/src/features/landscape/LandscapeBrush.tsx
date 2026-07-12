@@ -88,8 +88,13 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             const h = hit(clientX, clientY);
             if (!h) return;
             const b = terrainBrush.current;
-            if (b.mode === 'paint')
+            if (b.mode === 'move') { showCursor(h.point); return; } // gizmo drives the terrain; no brushing
+            if (b.mode === 'paint') {
                 h.node.terrain.paint(h.point as any, { radius: b.radius, strength: b.strength, falloff: b.falloff, layer: b.paintLayer }, dt);
+                // Keep only the painted material's own foliage in the stroke (erase everything it doesn't include).
+                const m = h.node.terrain.layers[b.paintLayer]?.material;
+                h.node.terrain.eraseFoliageExcept(h.point as any, b.radius, m ? m.foliageInclude.map(r => r.name) : []);
+            }
             else if (b.mode === 'foliage') {
                 // Material-driven: scatter each painted material's included foliage; erase clears all near the point.
                 if (b.foliageErase) h.node.terrain.eraseAllFoliage(h.point as any, b.radius);
@@ -106,6 +111,7 @@ export default function LandscapeBrush({ viewportRef }: Props) {
 
         const onDown = (e: MouseEvent) => {
             if (editorMode !== 'landscape' || e.button !== 0) return;
+            if (terrainBrush.current.mode === 'move') return; // let the terrain gizmo receive the click
             if (inOverlay(e.target)) return;
             const h = hit(e.clientX, e.clientY);
             if (!h) return;
@@ -120,6 +126,7 @@ export default function LandscapeBrush({ viewportRef }: Props) {
 
         const onMove = (e: MouseEvent) => {
             if (editorMode !== 'landscape') return;
+            if (terrainBrush.current.mode === 'move') { hideCursor(); return; } // gizmo mode: no brush cursor
             // While hovering a floating panel (and not mid-stroke), don't preview/apply the brush.
             if (!paintingRef.current && inOverlay(e.target)) { hideCursor(); return; }
             const now = performance.now();

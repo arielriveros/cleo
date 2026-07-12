@@ -9,7 +9,7 @@ import TextureInspector from '../nodeInspector/propertyEditors/TextureInspector'
 // TerrainMaterial in place: the base surface (via the shared MaterialEditor), the terrain blend fields,
 // and the foliage include/exclude lists. All edits emit SCENE_CHANGED so the tab tracks unsaved state.
 export default function TerrainMaterialInspector(props: { node: Node | null }) {
-  const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials } = useCleoEngine()
+  const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials, refreshTerrainMaterialPreview } = useCleoEngine()
   const [, force] = useState(0)
   const [newFoliageTex, setNewFoliageTex] = useState('')
   const rerender = () => force(x => x + 1)
@@ -33,7 +33,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     Array.from(TextureManager.Instance.textures.keys()).filter(id => !id.startsWith('__editor__') && !id.startsWith('__debug__')),
     [isTerrain])
 
-  const changed = () => { eventEmitter.emit('SCENE_CHANGED'); rerender() }
+  const changed = () => { refreshTerrainMaterialPreview(); eventEmitter.emit('SCENE_CHANGED'); rerender() }
 
   const label = 'text-xs text-slate-300'
   const num = 'w-16 bg-[#3b3b3b] text-white border border-[#2d2d77] rounded px-1 py-[2px] text-xs'

@@ -11,7 +11,7 @@ import TerrainMaterialInspector from '../terrainMaterials/TerrainMaterialInspect
 import { isWithinTemplateInstance } from '../../utils/templates';
 
 export default function NodeInspector() {
-  const { editorScene, selectedNode, editorMode, eventEmitter, editingMaterialName, setActiveMaterialName } = useCleoEngine()
+  const { editorScene, selectedNode, editorMode, eventEmitter, editingMaterialName, setActiveMaterialName, editingTerrainMaterialNode } = useCleoEngine()
   const [node, setNode] = useState<Node | null>(null)
   const [selectedTab, setSelectedTab] = useState<'Properties' | 'Script' | 'Physics'>('Properties')
 
@@ -28,9 +28,10 @@ export default function NodeInspector() {
     return <StateMachineEditor />
   }
 
-  // Terrain-material editor mode: surface (MaterialEditor) + terrain blend + foliage authoring.
+  // Terrain-material editor mode: surface (MaterialEditor) + terrain blend + foliage authoring. Edits the
+  // dedicated (unrendered) edit node — the visible preview node carries the composite terrain material.
   if (editorMode === 'terrainMaterial') {
-    return <TerrainMaterialInspector node={node} />
+    return <TerrainMaterialInspector node={editingTerrainMaterialNode} />
   }
 
   // Material editor mode: the inspector focuses on the preview sphere's material only (name + controls).

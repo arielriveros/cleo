@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, TerrainMaterial, Node, ModelNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, TerrainMaterial, Terrain, Node, ModelNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
 import type { AnimationCompatibility } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
@@ -92,6 +92,11 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
+// Soft pastel-blue editor viewport background, used across every editor mode. Projects saved with the old
+// grey default are migrated to this on load (see initializeEngine).
+export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
+const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
+
 export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
@@ -110,7 +115,7 @@ export interface EditorTab {
   animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
-export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
+export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage' | 'move';
 export type TerrainBrushState = {
   mode: TerrainBrushMode;
   tool: TerrainTool;
@@ -163,6 +168,8 @@ const EngineContext = createContext<{
   // Terrain-material editor
   enterTerrainMaterialEditor: (terrainMaterialId?: string) => void;
   editingTerrainMaterialName: string | null;
+  editingTerrainMaterialNode: Node | null;
+  refreshTerrainMaterialPreview: () => void;
   setActiveTerrainMaterialName: (name: string) => void;
   // Animation editor
   enterAnimationEditor: (nodeId: string) => void;
@@ -249,6 +256,8 @@ const EngineContext = createContext<{
     setActiveMaterialName: () => {},
     enterTerrainMaterialEditor: () => {},
     editingTerrainMaterialName: null,
+    editingTerrainMaterialNode: null,
+    refreshTerrainMaterialPreview: () => {},
     setActiveTerrainMaterialName: () => {},
     enterAnimationEditor: () => {},
     animationTargetId: null,
@@ -320,7 +329,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({}); // tab id -> has unsaved edits
   // Per-tab runtime scene + root. Animation tabs also record where the SOURCE node lives (its scene may
   // be the main scene OR a template tab's scene) so authored state machines are written back correctly.
-  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string }>>(new Map());
+  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; editNode?: ModelNode }>>(new Map());
   const activeTabIdRef = useRef<string>('main');
   const activeTabKindRef = useRef<TabKind>('main');
   const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
@@ -481,6 +490,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
   const editingMaterialName = activeTab.kind === 'material' ? activeTab.title : null;
   const editingTerrainMaterialName = activeTab.kind === 'terrainMaterial' ? activeTab.title : null;
+  // The unrendered edit node (its material is the TerrainMaterial) that the terrain-material inspector edits.
+  const editingTerrainMaterialNode = activeTab.kind === 'terrainMaterial' ? (activeRuntime?.editNode ?? null) : null;
   // Animation editor: the cloned skinned model in the tab's scene (target to preview/edit) and the
   // original node in the main scene (where authored state machines are written back).
   const animationTargetId = activeTab.kind === 'animation' && activeRuntime ? activeRuntime.rootId : null;
@@ -788,6 +799,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const idx = tabs.findIndex(t => t.id === id);
     if (idx < 0) return;
     const remaining = tabs.filter(t => t.id !== id);
+    tabRuntimeRef.current.get(id)?.helperTerrain?.dispose(); // free the preview terrain's splat/body
     tabRuntimeRef.current.delete(id);
     setDirtyTabs(prev => { const next = { ...prev }; delete next[id]; return next; });
     setTabs(remaining);
@@ -1047,15 +1059,27 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const openTerrainMaterialTab = (asset: TerrainMaterialAsset | null) => {
     const scene = new Scene();
     createMaterialPreviewScene(scene);
-    const material = asset ? parseTerrainMaterialAsset(asset) : TerrainMaterial.Create('pbr', { baseColor: [0.38, 0.5, 0.28] });
-    const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), material));
-    scene.addNode(sphere);
+    const tm = asset ? parseTerrainMaterialAsset(asset) : TerrainMaterial.Create('pbr', { baseColor: [0.38, 0.5, 0.28] });
+    // A tiny helper terrain owns a composite Material.Terrain (+ a fully-layer-0 splat); layer 0 = the edited
+    // material, so the preview renders through the terrain shader (displacement/parallax/height-blend visible).
+    const helperTerrain = new Terrain({ size: 2, resolution: 2 });
+    helperTerrain.setLayer(0, tm, { auto: false }); // auto off so the preview always shows the surface
+    const previewNode = new ModelNode('preview', new Model(Geometry.Sphere(48), helperTerrain.material));
+    scene.addNode(previewNode);
     scene.start();
+    // Unrendered node whose material IS the TerrainMaterial — the MaterialEditor/inspector edit target.
+    const editNode = new ModelNode('__tmedit', new Model(Geometry.Sphere(8), tm));
 
     const tabId = cryptoRandomId();
-    tabRuntimeRef.current.set(tabId, { scene, rootId: sphere.id });
+    tabRuntimeRef.current.set(tabId, { scene, rootId: previewNode.id, tm, helperTerrain, editNode });
     setTabs(prev => [...prev, { id: tabId, kind: 'terrainMaterial', title: asset?.name ?? 'New Terrain Material', terrainMaterialId: asset?.id ?? null }]);
     setActiveTabId(tabId);
+  };
+
+  // Re-derive the composite preview from the edited TerrainMaterial after any inspector change.
+  const refreshTerrainMaterialPreview = () => {
+    const runtime = tabRuntimeRef.current.get(activeTabId);
+    if (runtime?.helperTerrain && runtime.tm) runtime.helperTerrain.setLayer(0, runtime.tm, { auto: false });
   };
 
   const enterTerrainMaterialEditor = (terrainMaterialId?: string) => {
@@ -1078,9 +1102,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!instance || !tab || tab.kind !== 'terrainMaterial') return;
     const runtime = tabRuntimeRef.current.get(tab.id);
     if (!runtime) return;
-    const sphere = runtime.scene.getNodeById(runtime.rootId) as ModelNode | null;
-    if (!sphere || !sphere.model) return;
-    const material = sphere.model.material as TerrainMaterial;
+    const material = runtime.tm; // the edited TerrainMaterial (the preview node carries the composite)
+    if (!material) return;
     try {
       const thumbnail = instance.renderer.screenshot(runtime.scene, 256);
       if (tab.terrainMaterialId) {
@@ -1188,7 +1211,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         try {
           const engine = new CleoEngine({
               graphics: {
-                  clearColor: [0.65, 0.65, 0.71, 1.0],
+                  clearColor: EDITOR_CLEAR_COLOR,
               },
           });
 
@@ -1199,6 +1222,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           CleoEngine.eventEmitter.on('SCENE_CHANGED', () => { eventEmitter.current.emit('SCENE_CHANGED') });
           
           await setupInitialScene();
+
+          // Migrate projects saved with the old grey default to the pastel-blue editor background (leaves
+          // any intentionally-customised clear color alone). applyGameData may have restored a saved one.
+          const cc = engine.renderer.clearColor;
+          if (cc && Math.abs(cc[0] - LEGACY_CLEAR_COLOR[0]) < 0.01 && Math.abs(cc[1] - LEGACY_CLEAR_COLOR[1]) < 0.01 && Math.abs(cc[2] - LEGACY_CLEAR_COLOR[2]) < 0.01)
+            engine.renderer.clearColor = [...EDITOR_CLEAR_COLOR];
 
           TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
           TextureManager.Instance.addTextureFromBase64(LightIcon, {
@@ -1610,6 +1639,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setActiveMaterialName,
       enterTerrainMaterialEditor,
       editingTerrainMaterialName,
+      editingTerrainMaterialNode,
+      refreshTerrainMaterialPreview,
       setActiveTerrainMaterialName,
       enterAnimationEditor,
       animationTargetId,

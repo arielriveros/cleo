@@ -270,6 +270,8 @@ export class Material {
         m = m || {};
         // A serialized TerrainMaterial carries the extra terrain/foliage fields; delegate to its subclass.
         if (m.terrainMaterial) return TerrainMaterial.parse(m);
+        // A serialized CustomMaterial carries user GLSL + uniform declarations; delegate to its subclass.
+        if (m.customMaterial) return CustomMaterial.parse(m);
         const config = {
             side: m.config?.side,
             wireframe: m.config?.wireframe,
@@ -418,5 +420,127 @@ export class TerrainMaterial extends Material {
         tm.foliageInclude = Array.isArray(m.foliageInclude) ? m.foliageInclude.map((r: any) => ({ ...r })) : [];
         tm.foliageExclude = Array.isArray(m.foliageExclude) ? [...m.foliageExclude] : [];
         return tm;
+    }
+}
+
+/** The editor material a custom shader was seeded from (its "extend" base), or null when written from scratch. */
+export type CustomBaseType = 'basic' | 'blinn_phong' | 'pbr' | null;
+
+/**
+ * Whether a custom material's fragment shader outputs a final lit color (forward, drawn in the forward
+ * overlay with full lighting control) or writes G-buffer surface channels (deferred, lit by the engine's
+ * deferred pass with SSAO/IBL). Governs both the assembled shader template and the render path.
+ */
+export type CustomRenderMode = 'forward' | 'deferred';
+
+/** GLSL uniform types a user may declare — exactly the set `Shader.storeUniforms` can introspect (minus mat4, which is engine-owned). */
+export type CustomUniformType = 'float' | 'vec2' | 'vec3' | 'vec4' | 'int' | 'bool' | 'sampler2D' | 'samplerCube';
+
+/** A user-declared shader uniform (name/type/default) — analogous to a node variable. */
+export interface CustomUniform {
+    name: string;
+    type: CustomUniformType;
+    value: any;
+}
+
+/** Normalize typed arrays to plain arrays so uniform values survive a JSON round-trip. */
+function toPlainValue(v: any): any {
+    if (v instanceof Float32Array || v instanceof Int32Array) return Array.from(v as any);
+    if (Array.isArray(v)) return v.slice();
+    return v;
+}
+
+/** cyrb53 — small, stable, non-crypto string hash. Used to derive a unique-but-dedupable shader key. */
+function cyrb53(str: string, seed = 0): string {
+    let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+    for (let i = 0; i < str.length; i++) {
+        const ch = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+    h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+    h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/**
+ * A material whose surface is defined by a **user-written GLSL fragment shader** plus user-declared
+ * {@link CustomUniform}s. It is a plain {@link Material} for all asset/serialization purposes (library,
+ * thumbnails, `__materialId` links) — the runtime shader for its `type` key is compiled/registered lazily
+ * by `graphics/systems/customShaders.ts` (kept out of this data-only module to avoid a GL import cycle).
+ *
+ * - `renderMode` selects forward (`fragment()` → final color) vs deferred (`surface()` → G-buffer).
+ * - Scalar/vector uniform **values** live in the inherited `properties` map (bare name), samplers in
+ *   `textures` (bare name → TextureManager id); `uniforms[]` is the declaration list driving assembly.
+ * - `type` is a content hash (`custom:<h>` / `customGeom:<h>`) so identical shaders share one program and
+ *   any edit mints a fresh key (which also rebuilds the VAO via `ModelNode.initialized`).
+ */
+export class CustomMaterial extends Material {
+    public renderMode: CustomRenderMode = 'forward';
+    public baseType: CustomBaseType = null;
+    public fragmentSource: string = '';
+    public uniforms: CustomUniform[] = [];
+
+    /** Create a bare custom material. Callers (the editor) seed `fragmentSource`/`uniforms` from customShaders' templates, then `refreshType()`. */
+    public static Create(baseType: CustomBaseType, renderMode: CustomRenderMode = 'forward', config?: MaterialConfig): CustomMaterial {
+        const m = new CustomMaterial(config);
+        m.baseType = baseType;
+        m.renderMode = renderMode;
+        m.refreshType();
+        return m;
+    }
+
+    /**
+     * Recompute the shader-registry key from the shader's semantic inputs (mode + source + uniform
+     * declarations). Must be called after any edit to those fields. The value is used verbatim as the
+     * ShaderManager key that `ensureCustomShader` registers the compiled program under, and as the VAO key.
+     */
+    public refreshType(): void {
+        const sig = this.renderMode + '|' + (this.baseType ?? '') + '|' + this.fragmentSource + '|' +
+            this.uniforms.map(u => u.name + ':' + u.type).join(',');
+        this.type = ((this.renderMode === 'deferred' ? 'customGeom:' : 'custom:') + cyrb53(sig)) as any;
+    }
+
+    public serialize(): any {
+        const properties: { [k: string]: any } = {};
+        for (const [k, v] of this.properties) properties[k] = toPlainValue(v);
+        return {
+            type: this.type,
+            customMaterial: true,
+            renderMode: this.renderMode,
+            baseType: this.baseType,
+            fragmentSource: this.fragmentSource,
+            uniforms: this.uniforms.map(u => ({ name: u.name, type: u.type, value: toPlainValue(u.value) })),
+            properties,
+            textures: Object.fromEntries(this.textures),
+            config: {
+                side: this.config.side,
+                wireframe: this.config.wireframe,
+                transparent: this.config.transparent,
+                castShadow: this.config.castShadow,
+            },
+        };
+    }
+
+    public static parse(m: any): CustomMaterial {
+        m = m || {};
+        const cm = new CustomMaterial({
+            side: m.config?.side,
+            wireframe: m.config?.wireframe,
+            transparent: m.config?.transparent,
+            castShadow: m.config?.castShadow,
+        });
+        cm.renderMode = m.renderMode === 'deferred' ? 'deferred' : 'forward';
+        cm.baseType = m.baseType ?? null;
+        cm.fragmentSource = m.fragmentSource ?? '';
+        cm.uniforms = Array.isArray(m.uniforms)
+            ? m.uniforms.map((u: any) => ({ name: u.name, type: u.type, value: toPlainValue(u.value) }))
+            : [];
+        for (const [k, v] of Object.entries(m.properties ?? {})) cm.properties.set(k, toPlainValue(v));
+        for (const [k, v] of Object.entries(m.textures ?? {})) if (v) cm.textures.set(k, v as string);
+        cm.refreshType();
+        return cm;
     }
 }

@@ -337,6 +337,21 @@ export class Terrain {
         return changed;
     }
 
+    /** Fill this terrain's height field by resampling another terrain's surface (bilinear), stretching its
+     *  shape to this grid. Used by "Update Terrain" to preserve sculpting across a size/resolution change. */
+    public resampleHeightsFrom(other: Terrain): void {
+        const R = this._R, oldSize = other.size;
+        for (let r = 0; r < R; r++) {
+            for (let c = 0; c < R; c++) {
+                const fracX = R > 1 ? c / (R - 1) : 0;
+                const fracZ = R > 1 ? r / (R - 1) : 0;
+                this._heights[r * R + c] = other.heightAt((fracX - 0.5) * oldSize, (fracZ - 0.5) * oldSize);
+            }
+        }
+        for (const ch of this._chunks) this._refreshChunkGeometry(ch);
+        this._bodyDirty = true;
+    }
+
     /** Replace the height field from a heightmap image's red channel, scaled to [0, amplitude]. */
     public async importHeightmap(path: string, amplitude: number): Promise<void> {
         const image = await Loader.ImageToArray(path);
@@ -675,6 +690,67 @@ export class Terrain {
         let any = false;
         for (const layer of this._foliage) if (layer.erase(worldPoint[0], worldPoint[2], radius)) any = true;
         return any;
+    }
+
+    /** Erase foliage near a world point EXCEPT layers whose name is in keepNames. Used while painting so a
+     *  freshly-painted material's region keeps only that material's own included foliage. */
+    public eraseFoliageExcept(worldPoint: vec3, radius: number, keepNames: string[]): boolean {
+        let any = false;
+        for (const layer of this._foliage) {
+            if (keepNames.includes(layer.name)) continue;
+            if (layer.erase(worldPoint[0], worldPoint[2], radius)) any = true;
+        }
+        return any;
+    }
+
+    /** Fraction (0..1) of splat texels where layer `index` is the dominant channel. */
+    public layerCoverage(index: number): number {
+        if (index < 0 || index > 3) return 0;
+        const S = this._splatRes;
+        let count = 0;
+        const total = S * S;
+        for (let i = 0; i < total; i++) {
+            const b = i * 4;
+            let dom = 0, best = this._splat[b];
+            for (let k = 1; k < 4; k++) if (this._splat[b + k] > best) { best = this._splat[b + k]; dom = k; }
+            if (dom === index) count++;
+        }
+        return total > 0 ? count / total : 0;
+    }
+
+    /**
+     * Regenerate material-driven foliage across the ENTIRE terrain: clears existing instances, then for
+     * each foliage prototype an assigned layer material includes, scatters jittered points over the whole
+     * surface, placing where that rule's layer dominates and no present material excludes it. Density is
+     * scaled by area (rule.density is treated as instances per ~100x100 world-unit tile).
+     */
+    public generateFoliageEverywhere(): boolean {
+        const rules = this._activeFoliageRules();
+        for (const layer of this._foliage) layer.clear();
+        if (rules.length === 0) return false;
+
+        const half = this._cfg.size / 2, size = this._cfg.size;
+        const splat: [number, number, number, number] = [0, 0, 0, 0];
+        const touched = new Set<FoliageLayer>();
+        const areaTiles = Math.max(1, (size * size) / (100 * 100)); // density is per 100x100 tile
+        for (const { rule, layerIndex } of rules) {
+            const count = Math.max(1, Math.floor((rule.density ?? 8) * areaTiles));
+            for (let i = 0; i < count; i++) {
+                const lx = -half + Math.random() * size;
+                const lz = -half + Math.random() * size;
+                this.sampleSplat(lx, lz, splat);
+                let dom = -1, best = 0;
+                for (let k = 0; k < 4; k++) if (splat[k] > best) { best = splat[k]; dom = k; }
+                if (dom !== layerIndex || best < 1e-3) continue;
+                if (this._foliageExcludedAt(rule.name, splat)) continue;
+                const y = this._origin[1] + this.heightAt(lx, lz);
+                const layer = this._resolveFoliageLayer(rule);
+                layer.pushInstance(this._origin[0] + lx, y, this._origin[2] + lz);
+                touched.add(layer);
+            }
+        }
+        for (const l of this._foliage) l.commit();
+        return touched.size > 0;
     }
 
     // --- picking ------------------------------------------------------------------------------
