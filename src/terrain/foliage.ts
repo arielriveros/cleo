@@ -1,7 +1,7 @@
 import { mat4, quat } from 'gl-matrix';
 import { Geometry } from '../core/geometry';
 import { Model } from '../graphics/model';
-import { Material } from '../graphics/material';
+import { Material, TerrainFoliageRule } from '../graphics/material';
 
 export type FoliageKind = 'mesh' | 'billboard';
 
@@ -74,6 +74,9 @@ export class FoliageLayer {
     // GPU buffers orphaned by a rebuild (cells are recreated), drained + deleted by the renderer.
     private _stale: WebGLBuffer[] = [];
 
+    // Set by pushInstance(); commit() rebuilds once for a whole batch.
+    private _dirty = false;
+
     private _q = quat.create();
     private _m = mat4.create();
 
@@ -92,6 +95,34 @@ export class FoliageLayer {
 
     public static Mesh(name: string, model: Model, params?: Partial<FoliageParams>): FoliageLayer {
         return new FoliageLayer('mesh', name, model, null, params);
+    }
+
+    /** Build a runtime layer from a terrain-material foliage rule (billboard texture or mesh model). */
+    public static fromRule(rule: TerrainFoliageRule): FoliageLayer {
+        const params: Partial<FoliageParams> = {};
+        if (rule.density !== undefined) params.density = rule.density;
+        if (rule.minScale !== undefined) params.minScale = rule.minScale;
+        if (rule.maxScale !== undefined) params.maxScale = rule.maxScale;
+        if (rule.kind === 'billboard') return FoliageLayer.Billboard(rule.name, rule.textureId || 'Null', params);
+        return FoliageLayer.Mesh(rule.name, Model.parse(rule.model), params);
+    }
+
+    /** Append one instance at an exact position (random yaw + scale from params) without rebuilding.
+     *  Call {@link commit} once after a batch of pushes. */
+    public pushInstance(x: number, y: number, z: number): void {
+        if (this._instances.length / 5 >= MAX_INSTANCES) return;
+        const yaw = Math.random() * Math.PI * 2;
+        const scale = this.params.minScale + Math.random() * (this.params.maxScale - this.params.minScale);
+        this._instances.push(x, y, z, yaw, scale);
+        this._dirty = true;
+    }
+
+    /** Rebuild the spatial grid if any instances were pushed since the last commit. */
+    public commit(): boolean {
+        if (!this._dirty) return false;
+        this._dirty = false;
+        this._rebuild();
+        return true;
     }
 
     /** Scatter new instances within the brush disc; Y is sampled from the terrain surface. */

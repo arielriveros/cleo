@@ -65,7 +65,10 @@ export default function RendererOptions() {
 
   // Local mirror of renderer state so the controls re-render; initialized from the renderer getters.
   const [debugView, setDebugViewState] = useState<string>(() => renderer?.debugView ?? 'final');
-  const [exposure, setExposure] = useState<number>(() => renderer?.exposure ?? 1.5);
+  const [exposure, setExposure] = useState<number>(() => renderer?.exposure ?? 2.0);
+  const [bloomThreshold, setBloomThreshold] = useState<number>(() => renderer?.bloomThreshold ?? 1.0);
+  const [bloomKnee, setBloomKnee] = useState<number>(() => renderer?.bloomKnee ?? 0.5);
+  const [bloomIntensity, setBloomIntensity] = useState<number>(() => renderer?.bloomIntensity ?? 0.6);
   const [chromatic, setChromatic] = useState<number>(() => renderer?.chromaticAberrationStrength ?? 0);
   const [ssaoEnabled, setSsaoEnabled] = useState<boolean>(() => renderer?.ssaoEnabled ?? true);
   const [ssaoRadius, setSsaoRadius] = useState<number>(() => renderer?.ssaoRadius ?? 0.5);
@@ -144,6 +147,16 @@ export default function RendererOptions() {
           onChange={(v) => { renderer.exposure = v; setExposure(v); }} />
         <Slider label='Chromatic' value={chromatic} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.chromaticAberrationStrength = v; setChromatic(v); }} />
+      </Section>
+
+      <Section title='Bloom'>
+        <Slider label='Threshold' value={bloomThreshold} min={0} max={5} step={0.05}
+          onChange={(v) => { renderer.bloomThreshold = v; setBloomThreshold(v); }} />
+        <Slider label='Knee' value={bloomKnee} min={0} max={2} step={0.05}
+          onChange={(v) => { renderer.bloomKnee = v; setBloomKnee(v); }} />
+        <Slider label='Intensity' value={bloomIntensity} min={0} max={3} step={0.05}
+          onChange={(v) => { renderer.bloomIntensity = v; setBloomIntensity(v); }} />
+        <div className='text-[10px] text-[#8a8aa0] mt-0.5'>HDR bright-pass (linear). Threshold is a luminance cutoff; knee softens the ramp.</div>
       </Section>
 
       <Section title='Motion Blur'>

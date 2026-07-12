@@ -2,6 +2,7 @@
 
 #include "../constants.glsl";
 precision highp float;
+#include "../screen/tonemap.glsl";
 
 in vec3 fragPos;
 in vec2 fragTexCoord;
@@ -180,7 +181,7 @@ void main() {
     // Base color / albedo
     vec3 albedo = u_material.baseColor;
     if (u_material.hasBaseColorTexture) {
-        vec3 tex = texture(u_material.baseColorTexture, fragTexCoord).rgb;
+        vec3 tex = toLinear(texture(u_material.baseColorTexture, fragTexCoord).rgb); // sRGB -> linear
         albedo *= tex;
     }
 
@@ -202,10 +203,10 @@ void main() {
     vec3 kD = 1.0 - kS;
     kD *= 1.0 - metallic;
 
-    vec3 ambient = vec3(0.0); // no flat ambient floor — unlit PBR surfaces stay dark
+    vec3 ambient = u_dirLight.ambient * albedo; // simple ambient fill floor (zeroed when no dir light)
     if (u_useEnvMap) {
         vec3 R = reflect(normalize(fragPos - u_viewPos), N);
-        vec3 env = texture(u_envMap, R).rgb;
+        vec3 env = toLinear(texture(u_envMap, R).rgb);
         // Strong roughness falloff so only smooth surfaces reflect the env map; kS keeps it
         // metallic-aware. Matches deferredLighting.fs for forward/deferred parity.
         float specAtten = pow(1.0 - roughness, 4.0);
@@ -250,9 +251,9 @@ void main() {
 
     vec3 color = ambient * ao + Lo;
 
-    // Emission
+    // Emission (sRGB-decoded map). Output stays LINEAR HDR — tonemap/gamma happen at the final present.
     if (u_material.hasEmissiveMap) {
-        color += texture(u_material.emissiveMap, fragTexCoord).rgb * u_material.emissiveFactor;
+        color += toLinear(texture(u_material.emissiveMap, fragTexCoord).rgb) * u_material.emissiveFactor;
     } else {
         color += u_material.emissiveFactor;
     }

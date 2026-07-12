@@ -3,7 +3,7 @@ import { vec3 } from 'gl-matrix';
 import { v4 as uuidv4 } from 'uuid';
 import { Geometry } from '../core/geometry';
 import { Model } from '../graphics/model';
-import { Material } from '../graphics/material';
+import { Material, TerrainMaterial, TerrainFoliageRule } from '../graphics/material';
 import { Texture } from '../graphics/texture';
 import { TextureManager } from '../graphics/systems/textureManager';
 import { Loader } from '../graphics/loader';
@@ -12,8 +12,20 @@ import { FoliageLayer } from './foliage';
 
 /** One paintable terrain material layer (splat channel 0..3). */
 export interface TerrainLayer {
-    /** TextureManager id of the layer's albedo texture (null = unassigned). */
-    textureId: string | null;
+    /** Derived albedo texture id (TextureManager) or null. */
+    albedoId: string | null;
+    /** Derived normal-map id or null. */
+    normalId: string | null;
+    /** Derived displacement/height map id or null (r = height 0..1). */
+    dispId: string | null;
+    /** Parallax strength for the displacement map. */
+    dispScale: number;
+    /** Height-aware blend sharpness (0 = linear splat blend). */
+    heightBlend: number;
+    /** Albedo tint / base color (multiplies the albedo texture). */
+    color: number[];
+    metallic: number;
+    roughness: number;
     /** UV repeat across the whole terrain. */
     tiling: number;
     /** Enable automatic height/slope masking for this layer. */
@@ -22,6 +34,12 @@ export interface TerrainLayer {
     hRange: [number, number];
     /** Slope band (0 flat .. 1 vertical) the layer is visible in (auto blend). */
     sRange: [number, number];
+    /** Assigned terrain material (surface + foliage rules), if any. */
+    material: TerrainMaterial | null;
+    /** Terrain-material asset id (for scene serialize + edit-propagation). */
+    materialId: string | null;
+    /** @deprecated Legacy plain-albedo id; accepted by setLayer for back-compat with old scenes. */
+    textureId?: string | null;
 }
 
 export type PaintBrush = { radius: number; strength: number; falloff: number; layer: number };
@@ -114,6 +132,8 @@ export class Terrain {
     private _splatId: string;
     private _layers: TerrainLayer[] = [];
     private _foliage: FoliageLayer[] = [];
+    // Runtime foliage layers created on demand for material-driven scatter, keyed by prototype name.
+    private _foliageByKey: Map<string, FoliageLayer> = new Map();
 
     constructor(config: TerrainConfig = {}, material?: Material) {
         this._cfg = resolveConfig(config);
@@ -204,6 +224,8 @@ export class Terrain {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];
         const uvs: [number, number][] = [];
+        const tangents: [number, number, number][] = [];
+        const bitangents: [number, number, number][] = [];
         const indices: number[] = [];
         const half = this._cfg.size / 2, e = this._element, R = this._R;
         const cols = c1 - c0, rows = r1 - r0;
@@ -217,6 +239,11 @@ export class Terrain {
                 this._normalAt(c, r, n);
                 normals.push([n[0], n[1], n[2]]);
                 uvs.push([c / (R - 1), r / (R - 1)]);
+                // UVs are axis-aligned (u -> +X, v -> +Z), so the tangent frame is constant. Supplying it
+                // explicitly avoids Geometry._calculateTangents, which mis-aligns tangents on indexed
+                // meshes (breaks normal maps + parallax). default.vs negates the bitangent, so pass +Z.
+                tangents.push([1, 0, 0]);
+                bitangents.push([0, 0, 1]);
             }
         }
         const stride = cols + 1;
@@ -227,7 +254,7 @@ export class Terrain {
                 indices.push(tl, bl, tr, tr, bl, br);
             }
         }
-        return new Geometry(positions, normals, uvs, [], [], indices);
+        return new Geometry(positions, normals, uvs, tangents, bitangents, indices);
     }
 
     /** Rewrite a chunk geometry's Y + normals in place from the current heights and flag it dirty. */
@@ -356,27 +383,131 @@ export class Terrain {
     public get splatId(): string { return this._splatId; }
 
     private _defaultLayer(): TerrainLayer {
-        return { textureId: null, tiling: 20, auto: false, hRange: [0, 100], sRange: [0, 1] };
+        return {
+            albedoId: null, normalId: null, dispId: null, dispScale: 0.05, heightBlend: 0,
+            color: [1, 1, 1], metallic: 0, roughness: 1,
+            tiling: 20, auto: false, hRange: [0, 100], sRange: [0, 1],
+            material: null, materialId: null,
+        };
     }
 
-    /** Configure a layer slot (0..3) and push its uniforms/textures into the terrain material. */
-    public setLayer(index: number, opts: Partial<TerrainLayer>): void {
-        if (index < 0 || index > 3) return;
-        while (this._layers.length <= index) this._layers.push(this._defaultLayer());
-        const L = this._layers[index] = { ...this._layers[index], ...opts };
+    /** Read the per-layer surface (albedo/normal/displacement + scalar factors) out of a paint-layer
+     *  material, mapping each base shading model's texture/property keys to the terrain-blend inputs.
+     *  Displacement (height) is terrain-specific: stored under `displacementMap` for every base type. */
+    private _deriveLayerSurface(tm: TerrainMaterial): {
+        albedoId: string | null; normalId: string | null; dispId: string | null;
+        dispScale: number; heightBlend: number; color: number[]; metallic: number; roughness: number;
+    } {
+        const p = tm.properties, t = tm.textures, bt = tm.type as unknown as string;
+        const dispId = t.get('displacementMap') ?? null;
+        const dispScale = tm.displacementScale, heightBlend = tm.heightBlend;
+        if (bt === 'basic') {
+            return {
+                albedoId: t.get('texture') ?? null, normalId: null, dispId, dispScale, heightBlend,
+                color: p.get('color') ?? [1, 1, 1], metallic: 0, roughness: 1,
+            };
+        }
+        if (bt === 'pbr') {
+            return {
+                albedoId: t.get('baseColorTexture') ?? null,
+                normalId: t.get('normalMap') ?? null,
+                dispId, dispScale, heightBlend,
+                color: p.get('baseColor') ?? [1, 1, 1],
+                metallic: p.get('metallic') ?? 0,
+                roughness: p.get('roughness') ?? 1,
+            };
+        }
+        // blinn_phong
+        return {
+            albedoId: t.get('baseTexture') ?? null,
+            normalId: t.get('normalMap') ?? null,
+            dispId, dispScale, heightBlend,
+            color: p.get('diffuse') ?? [1, 1, 1],
+            metallic: 0, roughness: 0.7,
+        };
+    }
+
+    /** Push a resolved layer's surface + blend uniforms into the composite terrain material. */
+    private _writeLayerUniforms(index: number, L: TerrainLayer): void {
         const m = this._material;
-        if (L.textureId) m.textures.set(`u_layer${index}`, L.textureId);
-        else m.textures.delete(`u_layer${index}`);
+        const setTex = (key: string, id: string | null, hasKey: string) => {
+            if (id) { m.textures.set(key, id); m.properties.set(hasKey, 1); }
+            else { m.textures.delete(key); m.properties.set(hasKey, 0); }
+        };
+        setTex(`u_albedo${index}`, L.albedoId, `u_hasAlbedo${index}`);
+        setTex(`u_normal${index}`, L.normalId, `u_hasNormal${index}`);
+        setTex(`u_disp${index}`, L.dispId, `u_hasDisp${index}`);
+        m.properties.set(`u_color${index}`, [L.color[0], L.color[1], L.color[2]]);
+        m.properties.set(`u_metallic${index}`, L.metallic);
+        m.properties.set(`u_roughness${index}`, L.roughness);
+        m.properties.set(`u_dispScale${index}`, L.dispScale);
+        m.properties.set(`u_heightBlend${index}`, L.heightBlend);
         m.properties.set(`u_tiling${index}`, L.tiling);
         m.properties.set(`u_auto${index}`, L.auto ? 1 : 0);
         m.properties.set(`u_hRange${index}`, [L.hRange[0], L.hRange[1]]);
         m.properties.set(`u_sRange${index}`, [L.sRange[0], L.sRange[1]]);
+    }
+
+    /**
+     * Configure a layer slot (0..3) and push its uniforms/textures into the composite terrain material.
+     * `source` may be a {@link TerrainMaterial} (its surface + blend defaults are read), or — for
+     * back-compat with old saved scenes — a legacy `{ textureId, tiling, auto, ... }` object (treated
+     * as a plain Basic albedo). Passing null/undefined keeps the current surface and only applies `opts`.
+     * `opts` overrides the blend params (tiling/auto/hRange/sRange) and/or the linked `materialId`.
+     */
+    public setLayer(index: number, source?: TerrainMaterial | Partial<TerrainLayer> | null, opts: Partial<TerrainLayer> = {}): void {
+        if (index < 0 || index > 3) return;
+        while (this._layers.length <= index) this._layers.push(this._defaultLayer());
+        const L = this._layers[index];
+
+        if (source instanceof TerrainMaterial) {
+            const s = this._deriveLayerSurface(source);
+            L.material = source; L.materialId = null;
+            L.albedoId = s.albedoId; L.normalId = s.normalId; L.dispId = s.dispId;
+            L.dispScale = s.dispScale; L.heightBlend = s.heightBlend;
+            L.color = s.color; L.metallic = s.metallic; L.roughness = s.roughness;
+            L.tiling = source.tiling; L.auto = source.auto;
+            L.hRange = [source.hRange[0], source.hRange[1]];
+            L.sRange = [source.sRange[0], source.sRange[1]];
+        } else if (source && 'textureId' in source) {
+            // Legacy plain-albedo layer (old scenes / basic texture pick).
+            L.material = null; L.materialId = null;
+            L.albedoId = source.textureId ?? null;
+            L.normalId = null; L.dispId = null;
+            L.dispScale = 0.05; L.heightBlend = 0;
+            L.color = [1, 1, 1]; L.metallic = 0; L.roughness = 1;
+            if (source.tiling !== undefined) L.tiling = source.tiling;
+            if (source.auto !== undefined) L.auto = source.auto;
+            if (source.hRange) L.hRange = [source.hRange[0], source.hRange[1]];
+            if (source.sRange) L.sRange = [source.sRange[0], source.sRange[1]];
+        }
+        // else: keep existing surface/material; only opts below take effect.
+
+        if (opts.tiling !== undefined) L.tiling = opts.tiling;
+        if (opts.auto !== undefined) L.auto = opts.auto;
+        if (opts.hRange) L.hRange = [opts.hRange[0], opts.hRange[1]];
+        if (opts.sRange) L.sRange = [opts.sRange[0], opts.sRange[1]];
+        if (opts.materialId !== undefined) L.materialId = opts.materialId;
+
+        this._writeLayerUniforms(index, L);
         this._syncLayerUniforms();
+    }
+
+    /** Clear a layer slot (0..3): drop its material/surface and its composite uniforms. */
+    public clearLayer(index: number): void {
+        if (index < 0 || index > 3 || index >= this._layers.length) return;
+        this._layers[index] = this._defaultLayer();
+        this._writeLayerUniforms(index, this._layers[index]);
+        this._syncLayerUniforms();
+    }
+
+    private _layerActive(L: TerrainLayer | undefined): boolean {
+        return !!L && (!!L.material || !!L.albedoId);
     }
 
     private _syncLayerUniforms(): void {
         let count = 0;
-        for (let i = 0; i < this._layers.length; i++) if (this._layers[i]?.textureId) count = i + 1;
+        for (let i = 0; i < this._layers.length; i++) if (this._layerActive(this._layers[i])) count = i + 1;
         this._material.properties.set('u_layerCount', count);
         let useAuto = 0;
         for (const L of this._layers) if (L?.auto) useAuto = 1;
@@ -458,6 +589,92 @@ export class Terrain {
         const layer = this._foliage[index];
         if (!layer) return false;
         return layer.erase(worldPoint[0], worldPoint[2], radius);
+    }
+
+    /** Nearest-texel RGBA splat weights (0..1) at a terrain-local point, matching paint()'s mapping. */
+    public sampleSplat(localX: number, localZ: number, out: [number, number, number, number]): void {
+        const S = this._splatRes, half = this._cfg.size / 2, e = this._cfg.size / (S - 1);
+        let c = Math.round((localX + half) / e);
+        let r = Math.round((localZ + half) / e);
+        c = Math.max(0, Math.min(S - 1, c));
+        r = Math.max(0, Math.min(S - 1, r));
+        const idx = (r * S + c) * 4;
+        out[0] = this._splat[idx] / 255; out[1] = this._splat[idx + 1] / 255;
+        out[2] = this._splat[idx + 2] / 255; out[3] = this._splat[idx + 3] / 255;
+    }
+
+    /** Every foliage prototype contributed by an assigned layer material, tagged with its layer index. */
+    private _activeFoliageRules(): { rule: TerrainFoliageRule; layerIndex: number }[] {
+        const out: { rule: TerrainFoliageRule; layerIndex: number }[] = [];
+        for (let i = 0; i < this._layers.length; i++) {
+            const m = this._layers[i]?.material;
+            if (!m) continue;
+            for (const rule of m.foliageInclude) out.push({ rule, layerIndex: i });
+        }
+        return out;
+    }
+
+    /** True if any layer present (weight above threshold) at this point excludes the named foliage. */
+    private _foliageExcludedAt(name: string, splat: [number, number, number, number]): boolean {
+        for (let k = 0; k < 4; k++) {
+            if (splat[k] < 0.15) continue;
+            const m = this._layers[k]?.material;
+            if (m && m.foliageExclude.includes(name)) return true;
+        }
+        return false;
+    }
+
+    /** Lazily create (or reuse) the runtime foliage layer for a prototype, keyed by its name. */
+    private _resolveFoliageLayer(rule: TerrainFoliageRule): FoliageLayer {
+        let layer = this._foliageByKey.get(rule.name);
+        if (!layer) {
+            layer = FoliageLayer.fromRule(rule);
+            this._foliageByKey.set(rule.name, layer);
+            this._foliage.push(layer);
+        }
+        return layer;
+    }
+
+    /**
+     * Material-driven foliage scatter: for each foliage prototype an assigned layer material includes,
+     * place instances (density-controlled) at random disc points where that layer is the dominant one
+     * in the splat — skipping any point where a present material excludes that prototype. Instances go
+     * into per-prototype runtime layers (created lazily) so the renderer's foliage pass draws them.
+     */
+    public scatterFoliageFromMaterials(worldPoint: vec3, radius: number): boolean {
+        const rules = this._activeFoliageRules();
+        if (rules.length === 0) return false;
+        const wx = worldPoint[0], wz = worldPoint[2];
+        const splat: [number, number, number, number] = [0, 0, 0, 0];
+        const touched = new Set<FoliageLayer>();
+        for (const { rule, layerIndex } of rules) {
+            const density = Math.max(1, Math.floor(rule.density ?? 8));
+            for (let i = 0; i < density; i++) {
+                const a = Math.random() * Math.PI * 2;
+                const rr = Math.sqrt(Math.random()) * radius;
+                const px = wx + Math.cos(a) * rr;
+                const pz = wz + Math.sin(a) * rr;
+                this.sampleSplat(px - this._origin[0], pz - this._origin[2], splat);
+                // Place only where this rule's own layer dominates, and nowhere a present material excludes it.
+                let dom = -1, best = 0;
+                for (let k = 0; k < 4; k++) if (splat[k] > best) { best = splat[k]; dom = k; }
+                if (dom !== layerIndex || best < 1e-3) continue;
+                if (this._foliageExcludedAt(rule.name, splat)) continue;
+                const y = this._origin[1] + this.heightAt(px - this._origin[0], pz - this._origin[2]);
+                const layer = this._resolveFoliageLayer(rule);
+                layer.pushInstance(px, y, pz);
+                touched.add(layer);
+            }
+        }
+        for (const l of touched) l.commit();
+        return touched.size > 0;
+    }
+
+    /** Erase foliage instances of every layer near a world point (the material-driven erase brush). */
+    public eraseAllFoliage(worldPoint: vec3, radius: number): boolean {
+        let any = false;
+        for (const layer of this._foliage) if (layer.erase(worldPoint[0], worldPoint[2], radius)) any = true;
+        return any;
     }
 
     // --- picking ------------------------------------------------------------------------------
@@ -577,7 +794,15 @@ export class Terrain {
             heights: bytesToBase64(new Uint8Array(u16.buffer)),
             splatRes: this._splatRes,
             splat: bytesToBase64(this._splat),
-            layers: this._layers.map(L => ({ ...L, hRange: [...L.hRange], sRange: [...L.sRange] })),
+            layers: this._layers.map(L => ({
+                materialId: L.materialId,
+                material: L.material ? L.material.serialize() : null,
+                textureId: L.material ? null : L.albedoId, // legacy plain-albedo layers
+                tiling: L.tiling,
+                auto: L.auto,
+                hRange: [L.hRange[0], L.hRange[1]],
+                sRange: [L.sRange[0], L.sRange[1]],
+            })),
             foliage: this._foliage.map(f => f.serialize()),
         };
     }
@@ -607,10 +832,26 @@ export class Terrain {
             terrain._splatTex.updateRegion(0, 0, terrain._splatRes, terrain._splatRes, terrain._splat);
         }
         if (Array.isArray(json.layers)) {
-            for (let i = 0; i < json.layers.length && i < 4; i++) terrain.setLayer(i, json.layers[i]);
+            for (let i = 0; i < json.layers.length && i < 4; i++) {
+                const lj = json.layers[i];
+                if (!lj) continue;
+                if (lj.material) {
+                    const tm = TerrainMaterial.parse(lj.material);
+                    terrain.setLayer(i, tm, {
+                        tiling: lj.tiling, auto: lj.auto, hRange: lj.hRange, sRange: lj.sRange,
+                        materialId: lj.materialId ?? null,
+                    });
+                } else {
+                    terrain.setLayer(i, lj); // legacy plain-albedo (lj.textureId)
+                }
+            }
         }
         if (Array.isArray(json.foliage)) {
-            for (const f of json.foliage) terrain.addFoliage(FoliageLayer.deserialize(f));
+            for (const f of json.foliage) {
+                const layer = FoliageLayer.deserialize(f);
+                terrain.addFoliage(layer);
+                terrain._foliageByKey.set(layer.name, layer); // reuse on further material-driven scatter
+            }
         }
         return terrain;
     }

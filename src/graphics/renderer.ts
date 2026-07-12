@@ -33,11 +33,13 @@ import SkyFogFragment from './shaders/screen/skyFog.fs'
 
 import ScreenVertex from './shaders/screen/screen.vs'
 import ScreenFragment from './shaders/screen/screen.fs'
+import PresentFragment from './shaders/screen/present.fs'
 import DebugViewFragment from './shaders/screen/debugView.fs'
 import Bloom from './shaders/screen/bloom.fs'
 import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
+import GodRaysFragment from './shaders/screen/godRays.fs'
 import GridFragment from './shaders/screen/grid.fs'
 import OutlinePostFragment from './shaders/screen/outline.fs'
 import MotionBlurVelocity from './shaders/screen/motionBlurVelocity.fs'
@@ -102,6 +104,9 @@ interface RendererConfig {
 export interface RenderSettings {
     clearColor: number[];
     exposure: number;
+    bloomThreshold: number;
+    bloomKnee: number;
+    bloomIntensity: number;
     chromaticAberrationStrength: number;
     ssaoEnabled: boolean;
     ssaoRadius: number;
@@ -138,7 +143,14 @@ export class Renderer {
 
     private _activeCamera: Camera;
 
-    private _exposure: number = 1.5;
+    // Camera exposure, applied as a linear scale before the ACES tonemap in the final present. Default
+    // ~2 compensates for the physically-correct Lambertian (albedo/PI) diffuse: it makes a white light
+    // on a white surface read near-white after the tonemap, instead of the dim ~0.3 raw radiance.
+    private _exposure: number = 2.0;
+    // HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
+    private _bloomThreshold: number = 1.0;
+    private _bloomKnee: number = 0.5;
+    private _bloomIntensity: number = 0.6;
     private _chromaticAberrationStrength: number = 0.0;
     private _selectedNodeId: string | null = null;
 
@@ -301,8 +313,10 @@ export class Renderer {
             this._cascadeSplits.push(0);
         }
         this._gBufferFBO = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
-        this._bloomFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false } });
-        this._blur_FBOs = [new Framebuffer(), new Framebuffer()];
+        // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
+        // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
+        this._bloomFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._blur_FBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }), new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } })];
         this._compose_FBOs = [new Framebuffer({ colorTextureOptions: {precision: 'high'}}), new Framebuffer({ colorTextureOptions: {precision: 'high'}})];
         // Motion blur velocity buffers (signed velocity -> float precision).
         this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
@@ -324,7 +338,10 @@ export class Renderer {
         GLState.enable(gl.DEPTH_TEST);
         GLState.enable(gl.BLEND);
         gl.depthFunc(gl.LEQUAL);
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        // Standard alpha blend for RGB, but leave the destination ALPHA untouched (src factor ZERO,
+        // dst factor ONE). The scene buffer's alpha is repurposed as a "bloom eligibility" mask written
+        // only by opaque lit surfaces; blended overlays (sky/clouds/sprites/grid/gizmos) must not clobber it.
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
         gl.drawingBufferColorSpace = 'srgb';
         if (!gl.getExtension('EXT_color_buffer_float')) {
             const msg = 'Rendering to floating point textures is not supported on this platform';
@@ -377,6 +394,9 @@ export class Renderer {
         const skyFogShader = new Shader().create(ScreenVertex, SkyFogFragment);
         // Screen shaders
         const screenShader = new Shader().create(ScreenVertex, ScreenFragment);
+        // Final present: exposure -> tonemap -> sRGB (the single display resolve).
+        const presentShader = new Shader().create(ScreenVertex, PresentFragment);
+        const godRaysShader = new Shader().create(ScreenVertex, GodRaysFragment);
         const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
         const bloomShader = new Shader().create(ScreenVertex, Bloom);
         const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
@@ -427,6 +447,8 @@ export class Renderer {
         this._shaderManager.addShader('skyAtmosphere', skyAtmosphereShader);
         this._shaderManager.addShader('skyFog', skyFogShader);
         this._shaderManager.addShader('screen', screenShader);
+        this._shaderManager.addShader('present', presentShader);
+        this._shaderManager.addShader('godRays', godRaysShader);
         this._shaderManager.addShader('debugView', debugViewShader);
         this._shaderManager.addShader('bloom', bloomShader);
         this._shaderManager.addShader('blur', blurShader);
@@ -536,7 +558,7 @@ export class Renderer {
             this._renderForward(scene, shadowLight);
 
         // Apply post processing
-        this._applyPostProcessing();
+        this._applyPostProcessing(scene);
 
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
         mat4.copy(this._prevViewProj, this._viewProj);
@@ -813,7 +835,10 @@ export class Renderer {
 
         if (animated) this._uploadBoneMatrices(shaderType, node);
 
-        if (node.model.material.type === 'terrain') this._applyTerrainMaterial(node.model.material);
+        if (node.model.material.type === 'terrain') {
+            this._shaderManager.setUniform('u_viewPos', this._activeCamera.position); // parallax view vector
+            this._applyTerrainMaterial(node.model.material);
+        }
         else this._applyMaterial(node.model.material);
         this._applyCull(node.model.material.config.side);
         const mode = node.model.material.config.wireframe ? gl.LINES : gl.TRIANGLES;
@@ -862,11 +887,15 @@ export class Renderer {
         gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
 
         this._sceneFBO.bind();
-        // Depth was blitted in; clear only color.
+        // Depth was blitted in; clear only color. Clear alpha to 0 so the background starts with an
+        // empty bloom mask (only drawn lit surfaces set alpha=1); restore the configured clear alpha after.
         GLState.disable(gl.DEPTH_TEST);
         GLState.depthMask(false);
         GLState.disable(gl.BLEND);
+        const cc = this.clearColor;
+        gl.clearColor(cc[0], cc[1], cc[2], 0.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.clearColor(cc[0], cc[1], cc[2], cc[3] ?? 1);
 
         this._shaderManager.bind('deferredLighting');
         this._shaderManager.setUniform('u_gAlbedoMetallic', 0);
@@ -1282,6 +1311,64 @@ export class Renderer {
         return [s[0] / len, s[1] / len, s[2] / len];
     }
 
+    // Screen-space god rays for the SkyAtmosphere node's sun. Projects the (infinitely far) sun to a
+    // screen UV, then a radial-blur pass (godRays.fs) accumulates the bright sky — masked by depth so
+    // opaque geometry occludes the shafts — toward the sun, composited ADDITIVELY into the pre-bloom
+    // scene buffer. No-op unless a SkyAtmosphere node has god rays enabled and the sun is in front.
+    private _renderGodRays(scene: Scene): void {
+        const node = scene.skyAtmosphere;
+        if (!node || !node.godRaysEnabled) return;
+
+        // Project the sun as a point at infinity: clip = viewProj * vec4(sunDirTowardSun, 0).
+        const s = this._atmosphereSunDir(scene, node);
+        const m = this._viewProj;
+        const clipX = m[0] * s[0] + m[4] * s[1] + m[8] * s[2];
+        const clipY = m[1] * s[0] + m[5] * s[1] + m[9] * s[2];
+        const clipW = m[3] * s[0] + m[7] * s[1] + m[11] * s[2];
+        if (clipW <= 0.0) return; // sun is behind the camera
+        const sunUV: [number, number] = [(clipX / clipW) * 0.5 + 0.5, (clipY / clipW) * 0.5 + 0.5];
+
+        // Fade out as the sun leaves the viewport (radial blur has nothing to anchor to off-screen).
+        const dx = Math.max(0, Math.max(-sunUV[0], sunUV[0] - 1));
+        const dy = Math.max(0, Math.max(-sunUV[1], sunUV[1] - 1));
+        const fade = Math.max(0, 1 - Math.hypot(dx, dy) / 0.5);
+        if (fade <= 0) return;
+
+        // Additively composite the shafts into the pre-bloom scene buffer.
+        this._compose_FBOs[0].bind();
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthMask(false);
+        GLState.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE); // additive
+
+        this._shaderManager.bind('godRays');
+        this._shaderManager.setUniform('u_scene', 0);
+        this._sceneFBO.colors[0].bind(0);
+        this._shaderManager.setUniform('u_gDepth', 1);
+        this._gBufferFBO.depth.bind(1);
+        this._shaderManager.setUniform('u_sunUV', sunUV);
+        this._shaderManager.setUniform('u_fade', fade);
+        // Sun-cone mask: only sky within this angle of the sun direction emits shafts (keeps clouds from
+        // becoming light sources). Sun direction is the scene directional light (else the atmosphere sun).
+        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_sunDir', s);
+        this._shaderManager.setUniform('u_sunSpreadCos', Math.cos(node.godRaySunSpread * Math.PI / 180));
+        this._shaderManager.setUniform('u_samples', node.godRaySamples);
+        this._shaderManager.setUniform('u_density', node.godRayDensity);
+        this._shaderManager.setUniform('u_weight', node.godRayWeight);
+        this._shaderManager.setUniform('u_decay', node.godRayDecay);
+        this._shaderManager.setUniform('u_exposure', node.godRayExposure);
+        this._shaderManager.setUniform('u_threshold', node.godRayThreshold);
+        this._shaderManager.setUniform('u_tint', node.godRayTint);
+        this._screenQuad.draw();
+
+        // Restore the default (straight-alpha) blend func so later passes and next frame's alpha-blended
+        // sky/clouds/fog composite correctly.
+        GLState.disable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+
     // Re-bake the SkyAtmosphere cubemap when needed: on first use / parameter change (needsBake) or
     // when the sun direction has moved past a small epsilon. No-op when no atmosphere node exists.
     private _updateSkyAtmosphere(scene: Scene): void {
@@ -1398,6 +1485,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_view', view);
         this._shaderManager.setUniform('u_projection', proj);
         this._shaderManager.setUniform('u_skybox', 8);
+        this._shaderManager.setUniform('u_linearInput', true); // baked atmosphere cubemap is linear HDR
         cubemap.bind(8);
         this._iblCubeMesh.draw();
     }
@@ -1452,6 +1540,7 @@ export class Renderer {
             this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
             this._activeCamera.type = prevType;
             this._shaderManager.setUniform('u_skybox', 8);
+            this._shaderManager.setUniform('u_linearInput', false); // user cubemap is sRGB-authored
             const skyboxNode = scene.skybox as SkyboxNode;
             if (!skyboxNode.initialized) skyboxNode.initializeSkybox();
             skyboxNode.skybox.texture.bind(8);
@@ -1510,7 +1599,10 @@ export class Renderer {
         // Fullscreen overlay: no depth test/write (occlusion handled via the depth texture), alpha blend.
         GLState.disable(gl.DEPTH_TEST);
         GLState.depthMask(false);
-        GLState.enable(gl.BLEND);   // global blend func is already SRC_ALPHA, ONE_MINUS_SRC_ALPHA
+        GLState.enable(gl.BLEND);
+        // Composite cloud coverage into the bloom-mask alpha (clouds are bloom-eligible) instead of the
+        // default mask-preserving alpha blend: RGB straight-alpha, ALPHA = coverage over what's behind.
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
         this._shaderManager.bind('volumetricClouds');
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
@@ -1569,7 +1661,9 @@ export class Renderer {
 
         this._screenQuad.draw();
 
-        // Restore the state the following opaque/transparent overlay passes expect.
+        // Restore the state the following opaque/transparent overlay passes expect (incl. the default
+        // mask-preserving alpha blend so later overlays don't clobber the bloom mask).
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
         GLState.disable(gl.BLEND);
         GLState.enable(gl.DEPTH_TEST);
         GLState.depthMask(true);
@@ -1589,6 +1683,9 @@ export class Renderer {
         GLState.depthMask(false);       // overlay: test against scene depth, don't write
         GLState.enable(gl.BLEND);
         GLState.disable(gl.CULL_FACE);
+        // Erase the bloom mask under the grid lines (RGB straight-alpha as usual, ALPHA *= 1 - coverage)
+        // so the grid never appears in the bloom pass, even when drawn over the bloom-eligible sky.
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
 
         this._shaderManager.bind('grid');
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
@@ -1613,6 +1710,8 @@ export class Renderer {
 
         this._screenQuad.draw();
 
+        // Restore the default mask-preserving alpha blend for subsequent overlay passes.
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
         GLState.depthMask(true);
     }
 
@@ -1659,15 +1758,23 @@ export class Renderer {
     }
 
     private _applyTerrainMaterial(material: Material): void {
-        // Bind the splat + layer textures to sequential units, then push the blend/tiling/auto uniforms.
-        // Uniform names in the material already match the terrain shader (u_splat, u_layer0, u_tiling0, ...).
-        let slot = 0;
-        for (const [name, texId] of material.textures) {
-            const texture = TextureManager.Instance.getTexture(texId);
-            if (!texture) continue;
-            texture.bind(slot);
+        // Fixed slot layout so every sampler in the terrain shader references a valid texture (a
+        // shared fallback fills unassigned layer slots): 0 = splat, then per layer i albedo/normal/mr.
+        // 13 units total. The scalar/vector blend uniforms (u_color*, u_metallic*, u_tiling*, u_has*,
+        // u_baseColor, u_layerCount, u_useAuto, ...) already match the shader by name.
+        const fallback = TextureManager.Instance.getTexture('Null');
+        const bindAt = (name: string, slot: number) => {
+            const texId = material.textures.get(name);
+            const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
+            if (tex) tex.bind(slot);
             this._shaderManager.setUniform(name, slot);
-            slot++;
+        };
+        bindAt('u_splat', 0);
+        for (let i = 0; i < 4; i++) {
+            const base = 1 + i * 3;
+            bindAt(`u_albedo${i}`, base);
+            bindAt(`u_normal${i}`, base + 1);
+            bindAt(`u_disp${i}`, base + 2);
         }
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(name, value);
@@ -2203,7 +2310,7 @@ export class Renderer {
         }
     }
 
-    private _applyPostProcessing(): void {
+    private _applyPostProcessing(scene: Scene): void {
         // Fullscreen post passes want a known, blend-free, depth-write state.
         GLState.disable(gl.BLEND);
         GLState.disable(gl.DEPTH_TEST);
@@ -2225,6 +2332,10 @@ export class Renderer {
             this._screenQuad.draw();
         }
 
+        // God rays: additively composite the sun's light shafts into the scene BEFORE bloom, so the
+        // shafts bloom and go through the single final tonemap like any other light.
+        this._renderGodRays(scene);
+
         // Then, render the screen framebuffer to the bloom framebuffer
         this._bloomPass(10);
 
@@ -2239,7 +2350,8 @@ export class Renderer {
                 // Composite the selection outline over the final image on the way to the screen.
                 this._outlinePass();
             } else {
-                this._shaderManager.bind('screen');
+                // Single display resolve: exposure -> ACES -> sRGB on the linear-HDR composite.
+                this._shaderManager.bind('present');
                 this._shaderManager.setUniform('u_exposure', this._exposure);
                 this._shaderManager.setUniform('u_screenTexture', 0);
                 this._compose_FBOs[1].colors[0].bind();
@@ -2255,6 +2367,7 @@ export class Renderer {
     // final composited image. Renders to whatever framebuffer is currently bound (the screen).
     private _outlinePass(): void {
         this._shaderManager.bind('outlinePost');
+        this._shaderManager.setUniform('u_exposure', this._exposure); // this pass does the final resolve
         this._shaderManager.setUniform('u_screenTexture', 0);
         this._shaderManager.setUniform('u_maskTexture', 1);
         this._shaderManager.setUniform('u_texelSize', [1 / this._canvas.width, 1 / this._canvas.height]);
@@ -2272,7 +2385,7 @@ export class Renderer {
         let tex: Texture;
         let mode = 0;
         switch (this._debugView) {
-            case 'scene':     tex = this._sceneFBO.colors[0];      mode = 0; break;
+            case 'scene':     tex = this._sceneFBO.colors[0];      mode = 6; break;
             case 'albedo':    tex = this._gBufferFBO.colors[0];    mode = 0; break;
             case 'metallic':  tex = this._gBufferFBO.colors[0];    mode = 2; break;
             case 'normal':    tex = this._gBufferFBO.colors[1];    mode = 1; break;
@@ -2282,7 +2395,7 @@ export class Renderer {
             case 'depth':     tex = this._gBufferFBO.depth;        mode = 3; break;
             case 'ssao':      tex = this._ssaoBlurFBO.colors[0];   mode = 4; break;
             case 'shadow':    tex = this._shadowMapFBO.depth;      mode = 3; break;
-            case 'bloom':     tex = this._bloomFBO.colors[1];      mode = 0; break;
+            case 'bloom':     tex = this._bloomFBO.colors[1];      mode = 6; break;
             case 'mask':      tex = this._outlineMaskFBO.colors[0]; mode = 0; break;
             case 'velocity':  tex = this._velocityFBO.colors[0];   mode = 5; break;
             default:          tex = this._sceneFBO.colors[0];      mode = 0; break;
@@ -2290,6 +2403,7 @@ export class Renderer {
         this._shaderManager.bind('debugView');
         this._shaderManager.setUniform('u_screenTexture', 0);
         this._shaderManager.setUniform('u_mode', mode);
+        this._shaderManager.setUniform('u_exposure', this._exposure); // used by the tonemapped channels
         tex.bind();
         this._screenQuad.draw();
     }
@@ -2298,9 +2412,15 @@ export class Renderer {
         this._bloomFBO.bind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         this._shaderManager.bind('bloom');
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        // HDR bright-pass runs in linear scene space; threshold/knee are real luminance values.
+        this._shaderManager.setUniform('u_bloomThreshold', this._bloomThreshold);
+        this._shaderManager.setUniform('u_bloomKnee', this._bloomKnee);
         this._shaderManager.setUniform('u_screenTexture', 0);
-        this._compose_FBOs[0].colors[0].bind();
+        this._compose_FBOs[0].colors[0].bind(0);
+        // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
+        // read it from the scene FBO directly, not the post-processed copy on unit 0).
+        this._shaderManager.setUniform('u_bloomMask', 1);
+        this._sceneFBO.colors[0].bind(1);
         this._screenQuad.draw();
         // the bloom fbo contains 2 color textures: the original scene and the bright parts of the scene
 
@@ -2335,6 +2455,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_buffer1', 0);
         this._bloomFBO.colors[0].bind();
         this._shaderManager.setUniform('u_buffer2', 1);
+        this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
         this._blur_FBOs[1].colors[0].bind(1);
         this._screenQuad.draw();
     }
@@ -2464,7 +2585,16 @@ export class Renderer {
     }
 
     public get exposure(): number { return this._exposure; }
-    public set exposure(exposure: number) { this._exposure = exposure; }
+    public set exposure(exposure: number) { this._exposure = Math.max(0, exposure); }
+
+    public get bloomThreshold(): number { return this._bloomThreshold; }
+    public set bloomThreshold(v: number) { this._bloomThreshold = Math.max(0, v); }
+
+    public get bloomKnee(): number { return this._bloomKnee; }
+    public set bloomKnee(v: number) { this._bloomKnee = Math.max(0, v); }
+
+    public get bloomIntensity(): number { return this._bloomIntensity; }
+    public set bloomIntensity(v: number) { this._bloomIntensity = Math.max(0, v); }
 
     public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
     public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
@@ -2508,6 +2638,9 @@ export class Renderer {
         return {
             clearColor: this.clearColor,
             exposure: this._exposure,
+            bloomThreshold: this._bloomThreshold,
+            bloomKnee: this._bloomKnee,
+            bloomIntensity: this._bloomIntensity,
             chromaticAberrationStrength: this._chromaticAberrationStrength,
             ssaoEnabled: this._ssaoEnabled,
             ssaoRadius: this._ssaoRadius,
@@ -2531,6 +2664,9 @@ export class Renderer {
         if (!s) return;
         if (s.clearColor) this.clearColor = s.clearColor;
         if (s.exposure !== undefined) this.exposure = s.exposure;
+        if (s.bloomThreshold !== undefined) this.bloomThreshold = s.bloomThreshold;
+        if (s.bloomKnee !== undefined) this.bloomKnee = s.bloomKnee;
+        if (s.bloomIntensity !== undefined) this.bloomIntensity = s.bloomIntensity;
         if (s.chromaticAberrationStrength !== undefined) this.chromaticAberrationStrength = s.chromaticAberrationStrength;
         if (s.ssaoEnabled !== undefined) this.ssaoEnabled = s.ssaoEnabled;
         if (s.ssaoRadius !== undefined) this.ssaoRadius = s.ssaoRadius;

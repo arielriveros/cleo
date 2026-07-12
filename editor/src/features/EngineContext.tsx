@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, Node, ModelNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, TerrainMaterial, Node, ModelNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
 import type { AnimationCompatibility } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
@@ -12,6 +12,7 @@ import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback } from "../utils/materials";
+import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer } from "../utils/terrainMaterials";
 import { MeshAsset, buildMeshAsset } from "../utils/meshes";
 import { groupImportFiles } from "../utils/importGrouping";
 import { renderMeshThumbnail, renderMaterialThumbnail, normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady } from "../utils/meshThumbnails";
@@ -91,20 +92,21 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
-export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'animation';
+export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Browser-style editor tabs. The 'main' tab hosts the real game scene and its scene/landscape/
 // renderer sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef). `editorMode` is derived from the active tab (see EngineProvider).
-export type TabKind = 'main' | 'template' | 'material' | 'animation';
+export type TabKind = 'main' | 'template' | 'material' | 'terrainMaterial' | 'animation';
 export interface EditorTab {
   id: string;
   kind: TabKind;
   title: string;
   templateId?: string | null; // template tabs: source template id, null = unsaved new template
   materialId?: string | null; // material tabs: source material asset id, null = unsaved new material
+  terrainMaterialId?: string | null; // terrain-material tabs: source terrain-material asset id
   animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
@@ -117,8 +119,6 @@ export type TerrainBrushState = {
   falloff: number;
   /** Active splat layer (0..3) for the paint tool. */
   paintLayer: number;
-  /** Active foliage layer index for the foliage tool. */
-  foliageLayer: number;
   /** When true the foliage tool erases instead of scatters. */
   foliageErase: boolean;
   /** Id of the landscape node currently being edited (set by the inspector). */
@@ -150,6 +150,7 @@ const EngineContext = createContext<{
   reorderTabs: (fromId: string, toId: string) => void;
   saveActiveTemplate: () => void;
   saveActiveMaterial: () => void;
+  saveActiveTerrainMaterial: () => void;
   // Template editor
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
@@ -159,6 +160,10 @@ const EngineContext = createContext<{
   createMaterialForNode: (node: Node) => void;
   editingMaterialName: string | null;
   setActiveMaterialName: (name: string) => void;
+  // Terrain-material editor
+  enterTerrainMaterialEditor: (terrainMaterialId?: string) => void;
+  editingTerrainMaterialName: string | null;
+  setActiveTerrainMaterialName: (name: string) => void;
   // Animation editor
   enterAnimationEditor: (nodeId: string) => void;
   animationTargetId: string | null; // cloned skinned model in the active animation tab's scene
@@ -190,6 +195,11 @@ const EngineContext = createContext<{
   addMaterial: (m: MaterialAsset) => void;
   removeMaterial: (id: string) => void;
   updateMaterial: (id: string, m: MaterialAsset) => void;
+  // Terrain-material assets
+  terrainMaterials: TerrainMaterialAsset[];
+  addTerrainMaterial: (m: TerrainMaterialAsset) => void;
+  removeTerrainMaterial: (id: string) => void;
+  updateTerrainMaterial: (id: string, m: TerrainMaterialAsset) => void;
   // Mesh assets (imported models)
   meshes: MeshAsset[];
   removeMesh: (id: string) => void;
@@ -199,6 +209,9 @@ const EngineContext = createContext<{
   resolveMeshImport: (decision: MeshImportDecision | null) => void;
   // Animation import (into the Animation Editor's model)
   importAnimationFiles: (files: File[]) => Promise<void>;
+  importSkeletonNames: (files: File[]) => Promise<void>;
+  renameAnimationClip: (oldName: string, newName: string) => string;
+  removeAnimationClip: (name: string) => void;
   pendingAnimationImport: PendingAnimationImportView | null;
   resolveAnimationImport: (decision: AnimationImportDecision | null) => void;
   // Project persistence
@@ -226,6 +239,7 @@ const EngineContext = createContext<{
     reorderTabs: () => {},
     saveActiveTemplate: () => {},
     saveActiveMaterial: () => {},
+    saveActiveTerrainMaterial: () => {},
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -233,12 +247,15 @@ const EngineContext = createContext<{
     createMaterialForNode: () => {},
     editingMaterialName: null,
     setActiveMaterialName: () => {},
+    enterTerrainMaterialEditor: () => {},
+    editingTerrainMaterialName: null,
+    setActiveTerrainMaterialName: () => {},
     enterAnimationEditor: () => {},
     animationTargetId: null,
     animationSourceId: null,
     animationSourceScene: null,
     commitAnimationStateMachine: () => {},
-    terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null } },
+    terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null } },
     loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
     bodies: new Map(),
@@ -259,12 +276,19 @@ const EngineContext = createContext<{
     addMaterial: () => {},
     removeMaterial: () => {},
     updateMaterial: () => {},
+    terrainMaterials: [],
+    addTerrainMaterial: () => {},
+    removeTerrainMaterial: () => {},
+    updateTerrainMaterial: () => {},
     meshes: [],
     removeMesh: () => {},
     importMeshFiles: async () => {},
     pendingMeshImport: null,
     resolveMeshImport: () => {},
     importAnimationFiles: async () => {},
+    importSkeletonNames: async () => {},
+    renameAnimationClip: (o) => o,
+    removeAnimationClip: () => {},
     pendingAnimationImport: null,
     resolveAnimationImport: () => {},
     saveProject: () => {},
@@ -303,7 +327,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [savingState, setSavingState] = useState<SavingState>('idle');
   const dimensionRef = useRef<'2D' | '3D'>('3D'); // the Main tab's dimension (template tabs are always 3D)
   const pendingPrefsRef = useRef<ProjectPrefs | null>(null);
-  const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageLayer: 0, foliageErase: false, activeLandscapeId: null });
+  const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null });
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
   const scriptsRef = useRef(new Map<string, string>());
@@ -376,6 +400,28 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const addMaterial = (m: MaterialAsset) => setMaterials(prev => [...prev, m]);
   const updateMaterial = (id: string, m: MaterialAsset) => setMaterials(prev => prev.map(x => x.id === id ? m : x));
 
+  // Reusable terrain-material assets (global library like materials): a Basic/Blinn/PBR surface plus
+  // terrain blend + foliage rules. Persisted to IndexedDB (base64 textures + thumbnail). Terrain paint
+  // layers reference one via the layer's materialId.
+  const [terrainMaterials, setTerrainMaterials] = useState<TerrainMaterialAsset[]>([]);
+  const terrainMaterialsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<TerrainMaterialAsset[]>('cleo_terrain_materials');
+        if (list && list.length) setTerrainMaterials(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load terrain materials:', e); }
+      finally { terrainMaterialsLoadedRef.current = true; }
+    })();
+  }, []);
+  useEffect(() => {
+    if (!terrainMaterialsLoadedRef.current) return;
+    idbSet('cleo_terrain_materials', terrainMaterials).catch(e => console.warn('Failed to persist terrain materials:', e));
+  }, [terrainMaterials]);
+
+  const addTerrainMaterial = (m: TerrainMaterialAsset) => setTerrainMaterials(prev => [...prev, m]);
+  const updateTerrainMaterial = (id: string, m: TerrainMaterialAsset) => setTerrainMaterials(prev => prev.map(x => x.id === id ? m : x));
+
   // Reusable mesh assets (imported models): persisted to IndexedDB (they embed base64 textures + a
   // thumbnail). Mirrors the materials library above. Drag a mesh into the viewport to instantiate a copy.
   const [meshes, setMeshes] = useState<MeshAsset[]>([]);
@@ -421,18 +467,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
-  const activeRuntime = (activeTab.kind === 'template' || activeTab.kind === 'material' || activeTab.kind === 'animation') ? tabRuntimeRef.current.get(activeTab.id) : undefined;
+  const activeRuntime = (activeTab.kind === 'template' || activeTab.kind === 'material' || activeTab.kind === 'terrainMaterial' || activeTab.kind === 'animation') ? tabRuntimeRef.current.get(activeTab.id) : undefined;
   // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material/animation scene.
   const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
   // Legacy single mode value, now derived from the active tab kind. Keeps every existing
   // `editorMode === ...` consumer working unchanged.
   const editorMode: EditorMode = activeTab.kind === 'main' ? mainMode
     : activeTab.kind === 'material' ? 'material'
+    : activeTab.kind === 'terrainMaterial' ? 'terrainMaterial'
     : activeTab.kind === 'animation' ? 'animation'
     : 'template';
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
   const editingMaterialName = activeTab.kind === 'material' ? activeTab.title : null;
+  const editingTerrainMaterialName = activeTab.kind === 'terrainMaterial' ? activeTab.title : null;
   // Animation editor: the cloned skinned model in the tab's scene (target to preview/edit) and the
   // original node in the main scene (where authored state machines are written back).
   const animationTargetId = activeTab.kind === 'animation' && activeRuntime ? activeRuntime.rootId : null;
@@ -634,6 +682,73 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
       Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName}`, 'Editor');
     }
+  };
+
+  // Backfill bone names onto a skinned model that was imported before bone-name capture existed (so its
+  // skeleton has no names, and imported animations can only match by node index → wrong bones). The user
+  // loads the SAME file the character came from; we copy its bone names onto the model's skin joints by
+  // node index (identical for the same file). After this, animation import matches by name.
+  const importSkeletonNames = async (files: File[]) => {
+    const rt = tabRuntimeRef.current.get(activeTabId);
+    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    if (!(cloneNode instanceof ModelNode) || !(cloneNode.model instanceof AnimatedModel) || !cloneNode.model.skin) {
+      Logger.error('Open the Animation Editor for a skinned model first', 'Editor');
+      return;
+    }
+    let parsed: { animations: any[]; skin: any };
+    try { parsed = await Loader.loadAnimationsFromFile(files); }
+    catch (e) { Logger.error('Failed to parse file: ' + e, 'Editor'); return; }
+    const srcNames: Map<number, string> | undefined = parsed.skin?.nodeNames;
+    if (!srcNames || srcNames.size === 0) { Logger.warn('No bone names found in that file', 'Editor'); return; }
+
+    const applyTo = (skin: any): number => {
+      if (!skin) return 0;
+      const names: Map<number, string> = skin.nodeNames ?? new Map<number, string>();
+      let matched = 0;
+      for (const j of skin.joints) {
+        const n = srcNames.get(j.nodeIndex);
+        if (n) { names.set(j.nodeIndex, n); matched++; }
+      }
+      skin.nodeNames = names;
+      return matched;
+    };
+
+    const matched = applyTo(cloneNode.model.skin);
+    const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
+    if (src instanceof ModelNode && src.model instanceof AnimatedModel) applyTo(src.model.skin);
+
+    if (matched === 0) {
+      Logger.warn('No matching bones — load the SAME file this character was imported from (same format/export)', 'Editor');
+      return;
+    }
+    if (rt?.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+    Logger.info(`Added bone names to ${matched} joints — animation import now matches by name. Save the project to keep them.`, 'Editor');
+  };
+
+  // Rename an animation clip on the Animation Editor's model (preview clone + source node so it persists).
+  // Returns the final applied name (may be de-duped). Callers update state-machine references to it.
+  const renameAnimationClip = (oldName: string, newName: string): string => {
+    const rt = tabRuntimeRef.current.get(activeTabId);
+    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    if (!(cloneNode instanceof ModelNode) || !(cloneNode.model instanceof AnimatedModel)) return oldName;
+    const finalName = cloneNode.model.renameAnimation(oldName, newName) ?? oldName;
+    const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
+    if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.renameAnimation(oldName, finalName);
+    if (rt?.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+    return finalName;
+  };
+
+  // Delete an animation clip from the model (preview clone + source node).
+  const removeAnimationClip = (name: string) => {
+    const rt = tabRuntimeRef.current.get(activeTabId);
+    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) cloneNode.model.removeAnimation(name);
+    const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
+    if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.removeAnimation(name);
+    if (rt?.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
 
   const setActiveTab = (id: string) => setActiveTabId(id);
@@ -894,6 +1009,101 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setDirtyTabs(prev => ({ ...prev, [activeTabId]: true }));
   };
 
+  // --- Terrain materials (mirror the material asset flow above, but assigned to terrain paint layers) ---
+
+  // Re-apply a saved/edited terrain material to every terrain paint layer that references it (by materialId).
+  const syncTerrainMaterialInstances = (id: string, asset: TerrainMaterialAsset) => {
+    const scene = editorSceneRef.current;
+    let changed = false;
+    for (const ln of Array.from(scene.landscapes) as any[]) {
+      const terrain = ln.terrain;
+      const layers = terrain.layers;
+      for (let i = 0; i < layers.length; i++) {
+        if (layers[i]?.materialId === id) { applyTerrainMaterialToLayer(terrain, i, asset); changed = true; }
+      }
+    }
+    if (changed) { eventEmitter.current.emit('TEXTURES_CHANGED'); eventEmitter.current.emit('SCENE_CHANGED'); }
+  };
+
+  // Delete a terrain-material asset: clear any terrain layer referencing it and force-close its editor tab.
+  const removeTerrainMaterial = (id: string) => {
+    const scene = editorSceneRef.current;
+    let changed = false;
+    for (const ln of Array.from(scene.landscapes) as any[]) {
+      const terrain = ln.terrain;
+      const layers = terrain.layers;
+      for (let i = 0; i < layers.length; i++) {
+        if (layers[i]?.materialId === id) { terrain.clearLayer(i); changed = true; }
+      }
+    }
+    if (changed) { eventEmitter.current.emit('TEXTURES_CHANGED'); eventEmitter.current.emit('SCENE_CHANGED'); }
+    const openTab = tabs.find(t => t.kind === 'terrainMaterial' && t.terrainMaterialId === id);
+    if (openTab) removeTabById(openTab.id);
+    setTerrainMaterials(prev => prev.filter(x => x.id !== id));
+  };
+
+  // Build a terrain-material editor tab: a preview sphere carrying the TerrainMaterial to edit (its base
+  // surface previews as a normal Basic/Blinn/PBR sphere; blend + foliage are edited in the inspector).
+  const openTerrainMaterialTab = (asset: TerrainMaterialAsset | null) => {
+    const scene = new Scene();
+    createMaterialPreviewScene(scene);
+    const material = asset ? parseTerrainMaterialAsset(asset) : TerrainMaterial.Create('pbr', { baseColor: [0.38, 0.5, 0.28] });
+    const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), material));
+    scene.addNode(sphere);
+    scene.start();
+
+    const tabId = cryptoRandomId();
+    tabRuntimeRef.current.set(tabId, { scene, rootId: sphere.id });
+    setTabs(prev => [...prev, { id: tabId, kind: 'terrainMaterial', title: asset?.name ?? 'New Terrain Material', terrainMaterialId: asset?.id ?? null }]);
+    setActiveTabId(tabId);
+  };
+
+  const enterTerrainMaterialEditor = (terrainMaterialId?: string) => {
+    if (!instanceRef.current) return;
+    if (terrainMaterialId) {
+      const existing = tabs.find(t => t.kind === 'terrainMaterial' && t.terrainMaterialId === terrainMaterialId);
+      if (existing) { setActiveTabId(existing.id); return; }
+      const asset = terrainMaterials.find(m => m.id === terrainMaterialId);
+      if (!asset) { Logger.error('Terrain material not found', 'Editor'); return; }
+      openTerrainMaterialTab(asset);
+    } else {
+      openTerrainMaterialTab(null);
+    }
+  };
+
+  // Save the active terrain-material tab to the library (capturing a sphere thumbnail) + propagate to layers.
+  const saveActiveTerrainMaterial = () => {
+    const instance = instanceRef.current;
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!instance || !tab || tab.kind !== 'terrainMaterial') return;
+    const runtime = tabRuntimeRef.current.get(tab.id);
+    if (!runtime) return;
+    const sphere = runtime.scene.getNodeById(runtime.rootId) as ModelNode | null;
+    if (!sphere || !sphere.model) return;
+    const material = sphere.model.material as TerrainMaterial;
+    try {
+      const thumbnail = instance.renderer.screenshot(runtime.scene, 256);
+      if (tab.terrainMaterialId) {
+        const asset = buildTerrainMaterialAsset(material, tab.title, thumbnail, tab.terrainMaterialId);
+        updateTerrainMaterial(tab.terrainMaterialId, asset);
+        syncTerrainMaterialInstances(tab.terrainMaterialId, asset);
+      } else {
+        const asset = buildTerrainMaterialAsset(material, tab.title, thumbnail);
+        addTerrainMaterial(asset);
+        setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, terrainMaterialId: asset.id } : x));
+      }
+      setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+      Logger.info(`Terrain material "${tab.title}" saved`, 'Editor');
+    } catch (e) {
+      Logger.error('Failed to save terrain material: ' + e, 'Editor');
+    }
+  };
+
+  const setActiveTerrainMaterialName = (name: string) => {
+    setTabs(prev => prev.map(t => (t.id === activeTabId && t.kind === 'terrainMaterial') ? { ...t, title: name } : t));
+    setDirtyTabs(prev => ({ ...prev, [activeTabId]: true }));
+  };
+
   // Keep non-reactive mirrors of the active tab (read by the once-registered SCENE_CHANGED/dimension listeners).
   useEffect(() => { activeTabIdRef.current = activeTabId; activeTabKindRef.current = activeTab.kind; }, [activeTabId, activeTab.kind]);
 
@@ -903,18 +1113,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!instance) return;
     const tab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
     activeTabKindRef.current = tab.kind;
-    const runtime = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'animation') ? tabRuntimeRef.current.get(tab.id) : undefined;
+    const runtime = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'terrainMaterial' || tab.kind === 'animation') ? tabRuntimeRef.current.get(tab.id) : undefined;
     instance.setScene(runtime ? runtime.scene : editorSceneRef.current);
-    // Hide the editor ground grid in material tabs so the preview sphere + its thumbnail stay clean.
-    instance.renderer.setGridVisible(tab.kind !== 'material');
+    // Hide the editor ground grid in (terrain-)material tabs so the preview sphere + its thumbnail stay clean.
+    instance.renderer.setGridVisible(tab.kind !== 'material' && tab.kind !== 'terrainMaterial');
     // Arm dirty-tracking only after the editor-helper reconciler's initial pass settles (it emits
     // SCENE_CHANGED as it adds light/gizmo helpers to the freshly-shown template scene).
     dirtyArmedRef.current = false;
-    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material'); }));
-    // Template scenes are authored in 3D; the Main tab restores its own remembered dimension. Material
-    // tabs are skipped: their preview camera uses a self-contained orbit rig (createMaterialPreviewScene)
-    // that the free-fly CHANGE_DIMENSION handler must not overwrite.
-    if (tab.kind !== 'material')
+    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'terrainMaterial'); }));
+    // Template scenes are authored in 3D; the Main tab restores its own remembered dimension. (Terrain-)
+    // material tabs are skipped: their preview camera uses a self-contained orbit rig
+    // (createMaterialPreviewScene) that the free-fly CHANGE_DIMENSION handler must not overwrite.
+    if (tab.kind !== 'material' && tab.kind !== 'terrainMaterial')
       eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'main' ? dimensionRef.current : '3D');
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
@@ -925,7 +1135,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Mark the active template tab dirty on scene edits (after the open-settle window).
   useEffect(() => {
     const mark = () => {
-      if (!dirtyArmedRef.current || (activeTabKindRef.current !== 'template' && activeTabKindRef.current !== 'material')) return;
+      if (!dirtyArmedRef.current || (activeTabKindRef.current !== 'template' && activeTabKindRef.current !== 'material' && activeTabKindRef.current !== 'terrainMaterial')) return;
       const id = activeTabIdRef.current;
       setDirtyTabs(prev => prev[id] ? prev : { ...prev, [id]: true });
     };
@@ -1039,8 +1249,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     const runReconcile = () => {
       reconcileScheduledRef.current = false;
-      // Material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
-      if (isPlayMode || !activeScene || editorMode === 'material') return;
+      // (Terrain-)material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
+      if (isPlayMode || !activeScene || editorMode === 'material' || editorMode === 'terrainMaterial') return;
       suppressReconcileRef.current = true;
       try { reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current); }
       finally { suppressReconcileRef.current = false; }
@@ -1210,7 +1420,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // Use stencil-based outlining instead of creating outline nodes. In a material tab the preview
       // sphere is the (logical) selection so the inspector targets it, but it must not show the outline.
       if (instanceRef.current && instanceRef.current.renderer) {
-        const outlineTarget = activeTabKindRef.current === 'material' ? null : node;
+        const outlineTarget = (activeTabKindRef.current === 'material' || activeTabKindRef.current === 'terrainMaterial') ? null : node;
         instanceRef.current.renderer.setSelectedNode(outlineTarget);
         console.log('Selection updated in renderer:', outlineTarget);
       }
@@ -1390,6 +1600,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       reorderTabs,
       saveActiveTemplate,
       saveActiveMaterial,
+      saveActiveTerrainMaterial,
       enterTemplateEditor,
       editingTemplateName,
       templateRootId,
@@ -1397,6 +1608,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       createMaterialForNode,
       editingMaterialName,
       setActiveMaterialName,
+      enterTerrainMaterialEditor,
+      editingTerrainMaterialName,
+      setActiveTerrainMaterialName,
       enterAnimationEditor,
       animationTargetId,
       animationSourceId,
@@ -1423,12 +1637,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addMaterial,
       removeMaterial,
       updateMaterial,
+      terrainMaterials,
+      addTerrainMaterial,
+      removeTerrainMaterial,
+      updateTerrainMaterial,
       meshes,
       removeMesh,
       importMeshFiles,
       pendingMeshImport,
       resolveMeshImport,
       importAnimationFiles,
+      importSkeletonNames,
+      renameAnimationClip,
+      removeAnimationClip,
       pendingAnimationImport,
       resolveAnimationImport,
       saveProject: saveProjectToStorage,

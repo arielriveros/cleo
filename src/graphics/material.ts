@@ -189,6 +189,15 @@ export class Material {
             material.properties.set(`u_auto${i}`, 0);
             material.properties.set(`u_hRange${i}`, [0, 100]);
             material.properties.set(`u_sRange${i}`, [0, 1]);
+            // Per-layer PBR-blend surface factors (Terrain.setLayer overwrites these from the layer material).
+            material.properties.set(`u_color${i}`, [1, 1, 1]);
+            material.properties.set(`u_metallic${i}`, 0);
+            material.properties.set(`u_roughness${i}`, 1);
+            material.properties.set(`u_hasAlbedo${i}`, 0);
+            material.properties.set(`u_hasNormal${i}`, 0);
+            material.properties.set(`u_hasDisp${i}`, 0);
+            material.properties.set(`u_dispScale${i}`, 0.05);
+            material.properties.set(`u_heightBlend${i}`, 0);
         }
         return material;
     }
@@ -259,6 +268,8 @@ export class Material {
     /** Rebuild a Material from the JSON produced by serialize(). Missing/legacy 'default' type -> Blinn-Phong. */
     public static parse(m: any): Material {
         m = m || {};
+        // A serialized TerrainMaterial carries the extra terrain/foliage fields; delegate to its subclass.
+        if (m.terrainMaterial) return TerrainMaterial.parse(m);
         const config = {
             side: m.config?.side,
             wireframe: m.config?.wireframe,
@@ -306,5 +317,106 @@ export class Material {
                 }
             }, config);
         }
+    }
+}
+
+/** The base shading model a TerrainMaterial layers its terrain behaviour on top of. */
+export type TerrainBaseType = 'basic' | 'blinn_phong' | 'pbr';
+
+/**
+ * A foliage prototype a TerrainMaterial auto-instances (or, referenced by name in a material's
+ * exclude list, a foliage type to keep off that material). Plain data only — no runtime engine
+ * imports — so `material.ts` stays free of a circular dependency with `terrain/foliage.ts`.
+ */
+export interface TerrainFoliageRule {
+    kind: 'mesh' | 'billboard';
+    /** Stable identifier; also what exclude lists reference. */
+    name: string;
+    /** Billboard albedo (TextureManager id). Unused for 'mesh'. */
+    textureId?: string | null;
+    /** Model.serialize() JSON for 'mesh'. Unused for 'billboard'. */
+    model?: any;
+    density?: number;
+    minScale?: number;
+    maxScale?: number;
+}
+
+/**
+ * An authorable, reusable **paint-layer** material for terrains. It *is* a {@link Material} of a
+ * base type (basic / blinn_phong / pbr) — so it inherits all base shading and any future extension —
+ * plus terrain-specific blend fields (tiling + automatic height/slope masking) and foliage rules.
+ *
+ * A TerrainMaterial is never rendered on its own: when assigned to one of a terrain's 4 paint layers,
+ * the `Terrain` reads its surface (albedo/normal/metallic-roughness) into the composite terrain
+ * material's per-layer uniforms, and its foliage rules drive the material-driven foliage brush.
+ */
+export class TerrainMaterial extends Material {
+    /** UV repeat of this layer across the whole terrain. */
+    public tiling: number = 20;
+    /** Enable automatic height/slope masking for this layer. */
+    public auto: boolean = false;
+    /** World-Y band the layer is visible in (auto blend). */
+    public hRange: [number, number] = [0, 100];
+    /** Slope band (0 flat .. 1 vertical) the layer is visible in (auto blend). */
+    public sRange: [number, number] = [0, 1];
+    /** Parallax strength for the layer's displacement (height) map (0 = flat). */
+    public displacementScale: number = 0.05;
+    /** Height-aware blend sharpness (0 = plain linear splat blend; higher = high spots poke through). */
+    public heightBlend: number = 0;
+    /** Foliage prototypes this material scatters under the foliage brush. */
+    public foliageInclude: TerrainFoliageRule[] = [];
+    /** Foliage names kept off this material even when a neighbouring material would place them. */
+    public foliageExclude: string[] = [];
+
+    /** Build a terrain paint-layer material whose surface is the given base shading model. */
+    public static Create(baseType: TerrainBaseType, properties: any = {}, config?: MaterialConfig): TerrainMaterial {
+        const base = baseType === 'basic' ? Material.Basic(properties, config)
+            : baseType === 'pbr' ? Material.PBR(properties, config)
+            : Material.Default(properties, config);
+        const tm = new TerrainMaterial(config);
+        tm.type = base.type;
+        tm.properties = base.properties;
+        tm.textures = base.textures;
+        tm.config = base.config;
+        return tm;
+    }
+
+    public serialize(): any {
+        return {
+            ...super.serialize(), // base surface shape, keyed by this.type (basic/pbr/blinn_phong)
+            terrainMaterial: true,
+            tiling: this.tiling,
+            auto: this.auto,
+            hRange: [this.hRange[0], this.hRange[1]],
+            sRange: [this.sRange[0], this.sRange[1]],
+            // Displacement lives in the inherited textures map; super.serialize() only emits fixed base-type
+            // keys, so carry the terrain-specific displacement texture + params explicitly.
+            displacementMap: this.textures.get('displacementMap') ?? null,
+            displacementScale: this.displacementScale,
+            heightBlend: this.heightBlend,
+            foliageInclude: this.foliageInclude.map(r => ({ ...r })),
+            foliageExclude: [...this.foliageExclude],
+        };
+    }
+
+    public static parse(m: any): TerrainMaterial {
+        m = m || {};
+        // Parse the base surface without re-triggering the terrainMaterial delegation guard.
+        const base = Material.parse({ ...m, terrainMaterial: undefined });
+        const tm = new TerrainMaterial(base.config);
+        tm.type = base.type;
+        tm.properties = base.properties;
+        tm.textures = base.textures;
+        tm.config = base.config;
+        tm.tiling = m.tiling ?? 20;
+        tm.auto = !!m.auto;
+        tm.hRange = m.hRange ? [m.hRange[0], m.hRange[1]] : [0, 100];
+        tm.sRange = m.sRange ? [m.sRange[0], m.sRange[1]] : [0, 1];
+        if (m.displacementMap) tm.textures.set('displacementMap', m.displacementMap);
+        tm.displacementScale = m.displacementScale ?? 0.05;
+        tm.heightBlend = m.heightBlend ?? 0;
+        tm.foliageInclude = Array.isArray(m.foliageInclude) ? m.foliageInclude.map((r: any) => ({ ...r })) : [];
+        tm.foliageExclude = Array.isArray(m.foliageExclude) ? [...m.foliageExclude] : [];
+        return tm;
     }
 }

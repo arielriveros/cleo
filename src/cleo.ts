@@ -6,7 +6,8 @@ export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, Spr
 export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export { Mesh } from "./graphics/mesh";
-export { Material } from "./graphics/material";
+export { Material, TerrainMaterial } from "./graphics/material";
+export type { TerrainBaseType, TerrainFoliageRule } from "./graphics/material";
 export { Renderer } from "./graphics/renderer";
 export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";

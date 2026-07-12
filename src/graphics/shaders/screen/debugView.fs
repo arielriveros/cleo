@@ -1,12 +1,14 @@
 #version 300 es
 
 precision highp float;
+#include "./tonemap.glsl";
 
 // Fullscreen debug visualizer: displays one renderer buffer (G-buffer channel, SSAO, depth,
 // shadow map, bloom, lit scene …) chosen by u_mode. Used only by the editor's Renderer mode;
 // published builds always use the plain 'screen' shader.
 uniform sampler2D u_screenTexture;
 uniform int u_mode;
+uniform float u_exposure; // for the tonemapped (linear-HDR) channels
 
 in vec2 fragTexCoord;
 
@@ -30,8 +32,11 @@ void main() {
     } else if (u_mode == 5) {
         // Motion-blur velocity (screen-space, small UV units in .rg). Amplify + bias so it's visible.
         outColor = vec4(t.rg * 15.0 + 0.5, 0.5, 1.0);
+    } else if (u_mode == 6) {
+        // Linear-HDR channels (lit scene, bloom): resolve to display so the preview matches the image.
+        outColor = vec4(tonemap(t.rgb, u_exposure), 1.0);
     } else {
-        // Passthrough RGB (albedo, emissive, lit scene, bloom).
+        // Passthrough RGB (albedo, emissive, …).
         outColor = vec4(t.rgb, 1.0);
     }
 }

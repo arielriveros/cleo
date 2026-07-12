@@ -512,7 +512,32 @@ export class AnimatedModel {
         this._animations.push(stored);
         return stored;
     }
-    
+
+    /** Remove an animation clip by name. Returns true if one was removed. */
+    public removeAnimation(name: string): boolean {
+        const i = this._animations.findIndex(a => a.name === name);
+        if (i < 0) return false;
+        this._animations.splice(i, 1);
+        return true;
+    }
+
+    /** Rename a clip (de-duping the new name). Returns the final applied name, or null if not found. */
+    public renameAnimation(oldName: string, newName: string): string | null {
+        const clip = this._animations.find(a => a.name === oldName);
+        if (!clip) return null;
+        let name = (newName || '').trim() || oldName;
+        if (name !== oldName) {
+            const taken = new Set(this._animations.filter(a => a !== clip).map(a => a.name));
+            if (taken.has(name)) {
+                let n = 2;
+                while (taken.has(`${name} (${n})`)) n++;
+                name = `${name} (${n})`;
+            }
+        }
+        clip.name = name;
+        return name;
+    }
+
     public get hasSkin(): boolean { return this._skin !== null; }
     public get hasAnimations(): boolean { return this._animations.length > 0; }
     

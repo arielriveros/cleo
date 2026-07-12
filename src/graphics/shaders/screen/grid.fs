@@ -75,7 +75,9 @@ void main() {
     a = max(a, minor * 0.45); // subgrid dimmer than the primary lines
     a = max(a, major);
     a = max(a, coarse);
-    vec3 col = vec3(0.55);
+    // Neutral grey lines. The grid is composited in linear HDR and then exposed/tonemapped with the
+    // scene, which amplifies bright values — keep this low so the grid reads as a subtle grey.
+    vec3 col = vec3(0.22);
 
     // 5. Colored center axes baked into the grid (the two in-plane axes). AA, constant
     //    pixel width (see axisLine) so they stay thin and don't band out at the horizon.
@@ -83,16 +85,20 @@ void main() {
     // coord.x == 0 is the in-plane depth/vertical axis -> Z (ground, blue) or Y (front, green).
     float xAxis = axisLine(coord.x);
     float yAxis = axisLine(coord.y);
-    if (yAxis > 0.0) { col = vec3(0.90, 0.25, 0.25); a = max(a, yAxis); } // X = red
+    if (yAxis > 0.0) { col = vec3(0.55, 0.18, 0.18); a = max(a, yAxis); } // X = red (dimmed)
     if (xAxis > 0.0) {
-        col = (u_plane == 0) ? vec3(0.25, 0.45, 0.95)  // Z = blue (3D ground)
-                             : vec3(0.30, 0.85, 0.35); // Y = green (2D front)
+        col = (u_plane == 0) ? vec3(0.18, 0.30, 0.60)  // Z = blue (3D ground, dimmed)
+                             : vec3(0.20, 0.55, 0.24); // Y = green (2D front, dimmed)
         a = max(a, xAxis);
     }
 
     // 6. Distance fade => infinite illusion and no far-field shimmer.
     float dist = length(hit - u_viewPos);
     a *= 1.0 - smoothstep(u_fadeFar * 0.5, u_fadeFar, dist);
+
+    // Overall grid opacity: keep the grid a subtle overlay that doesn't dominate the scene. Also
+    // limits how much of the bloom mask the lines erase (grid alpha doubles as the mask-erase factor).
+    a *= 0.5;
 
     if (a <= 0.0) discard;
     fragColor = vec4(col, a);

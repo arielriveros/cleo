@@ -1862,6 +1862,17 @@ export interface SkyAtmosphereOptions {
     fogMaxOpacity?: number;     // 0..1 cap so distant geometry never fully disappears
     fogColor?: [number, number, number]; // custom tint, blended with the atmosphere color
     fogColorBlend?: number;     // 0 = pure atmosphere color, 1 = pure custom fogColor
+    // God rays (screen-space radial light shafts from the scene directional light — post-process)
+    godRaysEnabled?: boolean;
+    godRaySamples?: number;     // radial-blur samples toward the sun (quality/cost)
+    godRayDensity?: number;     // 0..1 — march length toward the sun (shaft length/spread)
+    godRayWeight?: number;      // per-sample weight
+    godRayDecay?: number;       // 0..1 — attenuation per sample
+    godRayExposure?: number;    // overall shaft intensity
+    godRayThreshold?: number;   // brightness cutoff that isolates the bright sun from dim sky
+    godRayTint?: [number, number, number]; // multiply tint on the shafts
+    godRaySunSpread?: number;   // angular radius (deg) of the sun source — only the sky within this
+                                // cone of the sun direction emits shafts (so clouds elsewhere don't)
 }
 
 /**
@@ -1901,6 +1912,16 @@ export class SkyAtmosphereNode extends Node {
     private _fogMaxOpacity: number;
     private _fogColor: [number, number, number];
     private _fogColorBlend: number;
+    // God rays (per-frame screen-space post pass; changing these does NOT require a cubemap re-bake)
+    private _godRaysEnabled: boolean;
+    private _godRaySamples: number;
+    private _godRayDensity: number;
+    private _godRayWeight: number;
+    private _godRayDecay: number;
+    private _godRayExposure: number;
+    private _godRayThreshold: number;
+    private _godRayTint: [number, number, number];
+    private _godRaySunSpread: number;
     // Runtime bake state (not serialized)
     private _cubemap: Texture | null = null;
     private _cubemapResolution: number = 0;
@@ -1937,6 +1958,16 @@ export class SkyAtmosphereNode extends Node {
         this._fogMaxOpacity = options.fogMaxOpacity ?? 0.7; // keep objects readable (never fully sky)
         this._fogColor = options.fogColor ?? [0.7, 0.8, 0.9];
         this._fogColorBlend = options.fogColorBlend ?? 0.0;
+
+        this._godRaysEnabled = options.godRaysEnabled ?? false; // opt-in
+        this._godRaySamples = options.godRaySamples ?? 64;
+        this._godRayDensity = options.godRayDensity ?? 0.9;
+        this._godRayWeight = options.godRayWeight ?? 0.5;
+        this._godRayDecay = options.godRayDecay ?? 0.95;
+        this._godRayExposure = options.godRayExposure ?? 0.3;
+        this._godRayThreshold = options.godRayThreshold ?? 0.5;
+        this._godRayTint = options.godRayTint ?? [1.0, 1.0, 1.0];
+        this._godRaySunSpread = options.godRaySunSpread ?? 15;
     }
 
     // --- Sun ---
@@ -1996,6 +2027,26 @@ export class SkyAtmosphereNode extends Node {
     public set fogColor(v: [number, number, number]) { this._fogColor = v; }
     public get fogColorBlend(): number { return this._fogColorBlend; }
     public set fogColorBlend(v: number) { this._fogColorBlend = Math.min(1, Math.max(0, v)); }
+
+    // --- God rays (per-frame screen pass; setters do NOT flip needsBake) ---
+    public get godRaysEnabled(): boolean { return this._godRaysEnabled; }
+    public set godRaysEnabled(v: boolean) { this._godRaysEnabled = v; }
+    public get godRaySamples(): number { return this._godRaySamples; }
+    public set godRaySamples(v: number) { this._godRaySamples = Math.min(128, Math.max(8, Math.floor(v))); }
+    public get godRayDensity(): number { return this._godRayDensity; }
+    public set godRayDensity(v: number) { this._godRayDensity = Math.min(1, Math.max(0, v)); }
+    public get godRayWeight(): number { return this._godRayWeight; }
+    public set godRayWeight(v: number) { this._godRayWeight = Math.max(0, v); }
+    public get godRayDecay(): number { return this._godRayDecay; }
+    public set godRayDecay(v: number) { this._godRayDecay = Math.min(1, Math.max(0, v)); }
+    public get godRayExposure(): number { return this._godRayExposure; }
+    public set godRayExposure(v: number) { this._godRayExposure = Math.max(0, v); }
+    public get godRayThreshold(): number { return this._godRayThreshold; }
+    public set godRayThreshold(v: number) { this._godRayThreshold = Math.max(0, v); }
+    public get godRayTint(): [number, number, number] { return this._godRayTint; }
+    public set godRayTint(v: [number, number, number]) { this._godRayTint = v; }
+    public get godRaySunSpread(): number { return this._godRaySunSpread; }
+    public set godRaySunSpread(v: number) { this._godRaySunSpread = Math.min(60, Math.max(2, v)); }
 
     // --- Runtime bake state (renderer-facing) ---
     public get cubemap(): Texture | null { return this._cubemap; }
@@ -2061,7 +2112,16 @@ export class SkyAtmosphereNode extends Node {
                         fogHeightFalloff: this._fogHeightFalloff,
                         fogMaxOpacity: this._fogMaxOpacity,
                         fogColor: this._fogColor,
-                        fogColorBlend: this._fogColorBlend
+                        fogColorBlend: this._fogColorBlend,
+                        godRaysEnabled: this._godRaysEnabled,
+                        godRaySamples: this._godRaySamples,
+                        godRayDensity: this._godRayDensity,
+                        godRayWeight: this._godRayWeight,
+                        godRayDecay: this._godRayDecay,
+                        godRayExposure: this._godRayExposure,
+                        godRayThreshold: this._godRayThreshold,
+                        godRayTint: this._godRayTint,
+                        godRaySunSpread: this._godRaySunSpread
                     }
                 });
             });

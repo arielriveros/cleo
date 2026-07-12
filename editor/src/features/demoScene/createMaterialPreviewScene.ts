@@ -48,15 +48,18 @@ export function createMaterialPreviewScene(scene: Scene): void {
     }
   };
 
+  // Dim fill from the opposite side to reveal the sphere's form. Added FIRST so that in the deferred
+  // pipeline (which supports a single directional light — the last one uploaded wins) the brighter key
+  // light below is the one that actually lights the sphere; the fill only contributes in forward
+  // (Basic/Blinn-Phong) previews.
+  const fill = new LightNode('fill', new DirectionalLight({ diffuse: [0.30, 0.32, 0.38], ambient: [0, 0, 0] }));
+  fill.setPosition([0, 5, 0]).setRotation([55, 150, 0]);
+  fill.castShadows = false;
+  scene.addNode(fill);
+
   // Key light — a touch of ambient keeps metallic PBR from going pitch-black without an environment map.
   const key = new LightNode('key', new DirectionalLight({ ambient: [0.18, 0.18, 0.20] }));
   key.setPosition([0, 5, 0]).setRotation([120, -35, 0]);
   key.castShadows = false;
   scene.addNode(key);
-
-  // Dim fill from the opposite side to reveal the sphere's form.
-  const fill = new LightNode('fill', new DirectionalLight({ diffuse: [0.30, 0.32, 0.38], ambient: [0, 0, 0] }));
-  fill.setPosition([0, 5, 0]).setRotation([55, 150, 0]);
-  fill.castShadows = false;
-  scene.addNode(fill);
 }

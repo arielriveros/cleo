@@ -11,14 +11,15 @@ import PauseIcon from '../icons/pause.png'
 import StopIcon from '../icons/stop.png'
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, savingState, eventEmitter: eventEmitter } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, savingState, eventEmitter: eventEmitter } = useCleoEngine();
   // Current renderer look (post/SSAO/motion-blur/clear color) — embedded in exports/publishes so the
   // standalone game reproduces what the editor is showing instead of falling back to renderer defaults.
   const renderSettings = () => instance?.renderer.getRenderSettings();
   const templateMode = editorMode === 'template';
   const materialMode = editorMode === 'material';
-  // Template and material tabs both hide the project/scene-level actions (they edit a library asset).
-  const libEdit = templateMode || materialMode;
+  const terrainMaterialMode = editorMode === 'terrainMaterial';
+  // Template and (terrain-)material tabs all hide the project/scene-level actions (they edit a library asset).
+  const libEdit = templateMode || materialMode || terrainMaterialMode;
   const saving = savingState === 'saving';
   const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved ✓' : savingState === 'error' ? 'Save failed' : 'Save';
   const saveBorder = savingState === 'error' ? 'border-red-400' : savingState === 'saved' ? 'border-green-400' : 'border-[#ccc]';
@@ -124,6 +125,9 @@ export default function MenuBar() {
         )}
         {materialMode && (
           <div className='text-white h-[25px] border border-[#8f8fe0] bg-[#2c2c7a] text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-[#3f3fb4]' title='Save this material (captures a thumbnail) and update nodes that use it' onClick={() => saveActiveMaterial()}>Save Material</div>
+        )}
+        {terrainMaterialMode && (
+          <div className='text-white h-[25px] border border-[#8fe08f] bg-[#2c7a2c] text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-[#3fb43f]' title='Save this terrain material (captures a thumbnail) and update layers that use it' onClick={() => saveActiveTerrainMaterial()}>Save Terrain Material</div>
         )}
         <div className={`text-white h-[25px] border ${saveBorder} bg-[#3b3b3b] text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(libEdit || saving) ? 'opacity-50 pointer-events-none' : ''}`} title='Save the project to local storage' onClick={() => onSave()}>{saveLabel}</div>
         <label htmlFor='load-scene-file' className={`text-white h-[25px] border border-[#ccc] bg-[#3b3b3b] text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Import a .json scene file'>Import</label>

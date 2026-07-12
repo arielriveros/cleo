@@ -15,6 +15,8 @@ interface AtmoState {
   resolution: number; viewSteps: number; lightSteps: number;
   fogEnabled: boolean; fogDensity: number; fogStart: number; fogHeight: number; fogHeightFalloff: number;
   fogMaxOpacity: number; fogColor: Vec3; fogColorBlend: number;
+  godRaysEnabled: boolean; godRaySamples: number; godRayDensity: number; godRayWeight: number;
+  godRayDecay: number; godRayExposure: number; godRayThreshold: number; godRayTint: Vec3; godRaySunSpread: number;
 }
 
 function readNode(node: SkyAtmosphereNode): AtmoState {
@@ -27,7 +29,10 @@ function readNode(node: SkyAtmosphereNode): AtmoState {
     resolution: node.resolution, viewSteps: node.viewSteps, lightSteps: node.lightSteps,
     fogEnabled: node.fogEnabled, fogDensity: node.fogDensity, fogStart: node.fogStart,
     fogHeight: node.fogHeight, fogHeightFalloff: node.fogHeightFalloff, fogMaxOpacity: node.fogMaxOpacity,
-    fogColor: node.fogColor, fogColorBlend: node.fogColorBlend
+    fogColor: node.fogColor, fogColorBlend: node.fogColorBlend,
+    godRaysEnabled: node.godRaysEnabled, godRaySamples: node.godRaySamples, godRayDensity: node.godRayDensity,
+    godRayWeight: node.godRayWeight, godRayDecay: node.godRayDecay, godRayExposure: node.godRayExposure,
+    godRayThreshold: node.godRayThreshold, godRayTint: node.godRayTint, godRaySunSpread: node.godRaySunSpread
   }
 }
 
@@ -65,7 +70,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
     </label>
   )
 
-  const color = (label: string, k: 'sunColor' | 'groundColor' | 'fogColor') => (
+  const color = (label: string, k: 'sunColor' | 'groundColor' | 'fogColor' | 'godRayTint') => (
     <div className='flex items-center justify-between mb-2 text-sm'>
       <span>{label}</span>
       <ColorInput color={vec3ToHex(state[k])} onChange={(c) => apply({ [k]: c } as Partial<AtmoState>)} />
@@ -126,6 +131,19 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
           {slider('Height Falloff', 'fogHeightFalloff', 0, 0.02, 0.0001, 4)}
           {color('Custom Color', 'fogColor')}
           {slider('Custom Color Blend', 'fogColorBlend', 0, 1, 0.01)}
+        </>}
+
+        {header('God Rays (light shafts)')}
+        {check('Enable God Rays', 'godRaysEnabled')}
+        {state.godRaysEnabled && <>
+          {slider('Exposure', 'godRayExposure', 0, 2, 0.01)}
+          {slider('Density (length)', 'godRayDensity', 0, 1, 0.01)}
+          {slider('Weight', 'godRayWeight', 0, 2, 0.01)}
+          {slider('Decay', 'godRayDecay', 0.8, 1, 0.001, 3)}
+          {slider('Threshold', 'godRayThreshold', 0, 5, 0.01)}
+          {slider('Sun Spread (deg)', 'godRaySunSpread', 2, 60, 1, 0)}
+          {slider('Samples', 'godRaySamples', 8, 128, 1, 0)}
+          {color('Tint', 'godRayTint')}
         </>}
       </div>
     </Collapsable>

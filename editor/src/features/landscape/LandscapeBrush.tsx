@@ -91,8 +91,9 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             if (b.mode === 'paint')
                 h.node.terrain.paint(h.point as any, { radius: b.radius, strength: b.strength, falloff: b.falloff, layer: b.paintLayer }, dt);
             else if (b.mode === 'foliage') {
-                if (b.foliageErase) h.node.terrain.eraseFoliage(b.foliageLayer, h.point as any, b.radius);
-                else h.node.terrain.scatterFoliage(b.foliageLayer, h.point as any, b.radius);
+                // Material-driven: scatter each painted material's included foliage; erase clears all near the point.
+                if (b.foliageErase) h.node.terrain.eraseAllFoliage(h.point as any, b.radius);
+                else h.node.terrain.scatterFoliageFromMaterials(h.point as any, b.radius);
             }
             else
                 h.node.terrain.sculpt(h.point as any, { radius: b.radius, strength: b.strength, falloff: b.falloff, mode: b.tool }, dt);

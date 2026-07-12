@@ -282,9 +282,7 @@ void main() {
     float alpha = (1.0 - transmittance) * u_opacity;
     if (alpha <= 0.0) { fragColor = vec4(0.0); return; }
 
-    // Match the scene buffer (deferred lighting + skybox are display-referred): tonemap + sRGB.
-    vec3 color = acesFilm(scatteredLight);
-    color = pow(color, vec3(1.0 / 2.2));
-
-    fragColor = vec4(color, alpha);
+    // The scene buffer is LINEAR HDR now — output linear scattered radiance and let the single final
+    // tonemapper handle exposure/tonemap/gamma like every other surface.
+    fragColor = vec4(scatteredLight, alpha);
 }

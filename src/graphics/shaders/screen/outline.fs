@@ -1,13 +1,16 @@
 #version 300 es
+
 precision highp float;
+#include "./tonemap.glsl";
 
 in vec2 fragTexCoord;
 
-uniform sampler2D u_screenTexture; // composited scene color
+uniform sampler2D u_screenTexture; // composited scene color (linear HDR)
 uniform sampler2D u_maskTexture;   // selection silhouette (white = selected)
 uniform vec2 u_texelSize;          // 1.0 / mask resolution
-uniform vec3 u_outlineColor;
+uniform vec3 u_outlineColor;       // sRGB display colour, composited after tonemapping
 uniform float u_outlineWidth;      // outline thickness, in pixels
+uniform float u_exposure;          // this pass writes to the display, so it does the final resolve
 
 out vec4 outColor;
 
@@ -16,7 +19,8 @@ out vec4 outColor;
 // repainting the object itself. Works by measuring the distance (in pixels) from each background
 // pixel to the nearest silhouette texel within a search radius.
 void main() {
-    vec3 scene = texture(u_screenTexture, fragTexCoord).rgb;
+    // Resolve the linear-HDR composite to display here (this pass replaces the normal present).
+    vec3 scene = tonemap(texture(u_screenTexture, fragTexCoord).rgb, u_exposure);
     float center = texture(u_maskTexture, fragTexCoord).r;
     if (center > 0.5) { outColor = vec4(scene, 1.0); return; } // inside the object: leave untouched
 

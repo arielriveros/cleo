@@ -1,5 +1,7 @@
 #version 300 es
+
 precision highp float;
+#include "../screen/tonemap.glsl";
 
 // Deferred geometry pass for unlit ("basic") materials.
 // Their color is written into the emissive channel with zero albedo so the deferred
@@ -20,9 +22,9 @@ uniform struct {
 } u_material;
 
 void main() {
-    vec3 color = u_material.color;
+    vec3 color = toLinear(u_material.color);
     if (u_material.hasTexture)
-        color *= texture(u_material.texture, fragTexCoord).rgb;
+        color *= toLinear(texture(u_material.texture, fragTexCoord).rgb); // sRGB -> linear
 
     gAlbedoMetallic  = vec4(0.0, 0.0, 0.0, 0.0);
     gNormalRoughness = vec4(0.0, 0.0, 1.0, 1.0);

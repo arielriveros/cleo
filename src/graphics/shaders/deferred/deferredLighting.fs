@@ -170,13 +170,6 @@ vec3 reconstructWorldPos(float depth) {
     return world.xyz / world.w;
 }
 
-// Filmic HDR -> LDR tonemap (Narkowicz 2015 ACES fit). Rolls bright values off to [0,1]
-// instead of hard-clipping. Followed by sRGB (gamma) encoding for display.
-vec3 acesFilm(vec3 x) {
-    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
-}
-
 void main() {
     float depth = texture(u_gDepth, fragTexCoord).r;
     // Background (no geometry) — leave for the skybox pass.
@@ -217,9 +210,10 @@ void main() {
 
         ambient = (kD * diffuseIBL + specularIBL) * u_iblIntensity;
     } else {
-        // No probe: no flat ambient floor — unlit PBR surfaces stay dark (delete all lights => black).
-        // An optional crude environment reflection still applies when an env map is present.
-        ambient = vec3(0.0);
+        // No probe: use the directional light's ambient as a simple fill floor (matches the forward
+        // Blinn-Phong path). It is zeroed when the directional light is removed, so deleting every
+        // light still goes to black. A crude env reflection still applies when an env map is present.
+        ambient = u_dirLight.ambient * albedo;
         if (u_useEnvMap) {
             vec3 kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
             vec3 R = reflect(-V, N);
@@ -256,13 +250,13 @@ void main() {
         accumulateLight(N, V, albedo, metallic, roughness, L, u_spotlights[i].diffuse * att * intensity, Lo);
     }
 
+    // Output LINEAR HDR radiance. Exposure, tonemap and sRGB encode are applied once at the final
+    // present (screen.fs). Unlit "basic" materials arrive as zero albedo + authored emissive, so
+    // they pass straight through here and are tonemapped uniformly with everything else.
     vec3 color = ambient * ao * ssao + Lo + emissive;
-    // Lit surfaces get the filmic tonemap + sRGB encode. Unlit "basic" materials write zero albedo
-    // and pass their authored color through the emissive channel (see geometryBasic.fs) — display
-    // those as-is so flat/debug colors keep their exact brightness and don't bloom.
-    if (dot(albedo, albedo) > 0.0) {
-        color = acesFilm(color);            // filmic HDR -> [0,1]
-        color = pow(color, vec3(1.0 / 2.2)); // linear -> sRGB
-    }
-    fragColor = vec4(color, 1.0);
+    // Alpha = bloom-eligibility mask: 1 for lit PBR-model surfaces (PBR / terrain / foliage), 0 for
+    // unlit "basic" pixels (which write zero albedo). Sampled by the bloom bright-pass so only lit
+    // material surfaces bloom.
+    float bloomMask = dot(albedo, albedo) > 0.0 ? 1.0 : 0.0;
+    fragColor = vec4(color, bloomMask);
 }

@@ -7,6 +7,7 @@ import MaterialEditor from './propertyEditors/MaterialEditor';
 import ScriptEditor from './scriptEditor/ScriptEditor';
 import PhysicsEditor from './physicsEditors/PhysicsEditor';
 import StateMachineEditor from '../animation/StateMachineEditor';
+import TerrainMaterialInspector from '../terrainMaterials/TerrainMaterialInspector';
 import { isWithinTemplateInstance } from '../../utils/templates';
 
 export default function NodeInspector() {
@@ -25,6 +26,11 @@ export default function NodeInspector() {
   // Animation editor mode: the right sidebar becomes the animation state machine / events authoring.
   if (editorMode === 'animation') {
     return <StateMachineEditor />
+  }
+
+  // Terrain-material editor mode: surface (MaterialEditor) + terrain blend + foliage authoring.
+  if (editorMode === 'terrainMaterial') {
+    return <TerrainMaterialInspector node={node} />
   }
 
   // Material editor mode: the inspector focuses on the preview sphere's material only (name + controls).

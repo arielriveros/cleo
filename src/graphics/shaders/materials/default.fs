@@ -2,6 +2,7 @@
 
 #include "../constants.glsl";
 precision mediump float;
+#include "../screen/tonemap.glsl";
 
 in vec3 fragPos;
 in vec2 fragTexCoord;
@@ -108,11 +109,9 @@ float shadowCalculation(vec4 fragPosLS) {
     return shadow;
 }
 
-vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light, vec3 materialAmbient, vec3 materialDiffuse, vec3 materialSpecular) {
-
-    //ambient
-    vec3 ambient = light.ambient * materialAmbient;
-
+// Per-light functions return direct diffuse + specular only. Ambient is applied once in main()
+// (a single term), not accumulated per light — otherwise ambient scales with the light count.
+vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light, vec3 materialDiffuse, vec3 materialSpecular) {
     // diffuse
     float diff = max(dot(normal, -light.direction), 0.0f);
     vec3 diffuse = light.diffuse * diff * materialDiffuse;
@@ -125,13 +124,10 @@ vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light, 
     // calculate shadow
     float shadow = shadowCalculation(fragPosLightSpace);
 
-    return (ambient + (1.0 - shadow) * (diffuse + specular));
+    return (1.0 - shadow) * (diffuse + specular);
 }
 
-vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light, vec3 materialAmbient, vec3 materialDiffuse, vec3 materialSpecular) {
-    // ambient
-    vec3 ambient = light.ambient * materialAmbient;
-
+vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light, vec3 materialDiffuse, vec3 materialSpecular) {
     // diffuse
     vec3 lightDir = normalize(light.position - fragPos);
     float diff = max(dot(normal, lightDir), 0.0f);
@@ -146,17 +142,10 @@ vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light, vec3 materia
     float distance = length(light.position - fragPos);
     float attenuation = 1.0f / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
 
-    ambient *= attenuation;
-    diffuse *= attenuation;
-    specular *= attenuation;
-
-    return (ambient + diffuse + specular);
+    return (diffuse + specular) * attenuation;
 }
 
-vec3 computeSpotlight(vec3 normal, vec3 viewDir, SpotLight light, vec3 materialAmbient, vec3 materialDiffuse, vec3 materialSpecular) {
-    // ambient
-    vec3 ambient = light.ambient * materialAmbient;
-
+vec3 computeSpotlight(vec3 normal, vec3 viewDir, SpotLight light, vec3 materialDiffuse, vec3 materialSpecular) {
     // diffuse
     vec3 lightDir = normalize(light.position - fragPos);
     float diff = max(dot(normal, lightDir), 0.0f);
@@ -170,19 +159,13 @@ vec3 computeSpotlight(vec3 normal, vec3 viewDir, SpotLight light, vec3 materialA
     // attenuation
     float distance = length(light.position - fragPos);
     float attenuation = 1.0f / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
-
-    ambient *= attenuation;
-    diffuse *= attenuation;
-    specular *= attenuation;
 
     // spotlight
     float theta = dot(lightDir, normalize(-light.direction));
     float epsilon = light.outerCutOff - light.cutOff;
     float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);
-    diffuse *= intensity;
-    specular *= intensity;
 
-    return (ambient + diffuse + specular);
+    return (diffuse + specular) * attenuation * intensity;
 }
 
 layout(location = 0) out vec4 fragColor;
@@ -201,35 +184,35 @@ void main() {
         normal = normalize(normal * 2.0 - 1.0);  
         normal = normalize(TBN * normal);
     }
-    vec3 result = vec3(0.0);
-
-    vec3 ambient = u_material.ambient;
+    // Decode the sRGB base colour once to linear; reuse it for both diffuse and ambient tints.
+    vec3 baseTex = vec3(1.0);
     if (u_material.hasBaseTexture)
-        ambient *= vec3(texture(u_material.baseTexture, fragTexCoord));
+        baseTex = toLinear(texture(u_material.baseTexture, fragTexCoord).rgb);
 
-    vec3 diffuse = u_material.diffuse;
-    if (u_material.hasBaseTexture)
-        diffuse *= vec3(texture(u_material.baseTexture, fragTexCoord));
+    vec3 matAmbient  = u_material.ambient * baseTex;
+    vec3 matDiffuse  = u_material.diffuse * baseTex;
 
-    vec3 specular = u_material.specular;
+    vec3 matSpecular = u_material.specular;
     if (u_material.hasSpecularMap)
-        specular *=  vec3(texture(u_material.specularMap, fragTexCoord));
+        matSpecular *= toLinear(texture(u_material.specularMap, fragTexCoord).rgb);
 
+    // Single ambient term (from the directional light's ambient); zeroed when there is no dir light.
+    vec3 result = u_dirLight.ambient * matAmbient;
 
-    result += computeDirectionalLight(normal, viewDir, u_dirLight, ambient, diffuse, specular);
+    result += computeDirectionalLight(normal, viewDir, u_dirLight, matDiffuse, matSpecular);
 
     for (int i = 0; i < u_numPointLights; i++) {
-        result += computePointLight(normal, viewDir, u_pointLights[i], ambient, diffuse, specular);
+        result += computePointLight(normal, viewDir, u_pointLights[i], matDiffuse, matSpecular);
     }
 
     for (int i = 0; i < u_numSpotlights; i++) {
-        result += computeSpotlight(normal, viewDir, u_spotlights[i], ambient, diffuse, specular);
+        result += computeSpotlight(normal, viewDir, u_spotlights[i], matDiffuse, matSpecular);
     }
 
     if (u_useEnvMap) {
         vec3 I = normalize(fragPos - u_viewPos);
         vec3 R = reflect(I, normal);
-        vec3 reflection = vec3(texture(u_envMap, R)) * specular;
+        vec3 reflection = toLinear(vec3(texture(u_envMap, R))) * matSpecular;
         float reflectivity = u_material.reflectivity;
         if (u_material.hasReflectivityMap)
             reflectivity = texture(u_material.reflectivityMap, fragTexCoord).b; // b channel if using roughmetal workflow
@@ -237,9 +220,9 @@ void main() {
         result = mix(result, reflection, reflectivity / 2.0);
     }
 
+    // Emissive (sRGB-decoded map). Output stays LINEAR HDR — tonemap/gamma happen at the final present.
     if (u_material.hasEmissiveMap)
-        result += vec3(texture(u_material.emissiveMap, fragTexCoord)) * u_material.emissive * 1.25;
-
+        result += toLinear(texture(u_material.emissiveMap, fragTexCoord).rgb) * u_material.emissive * 1.25;
     else
         result += u_material.emissive * 1.25;
 

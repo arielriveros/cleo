@@ -148,8 +148,8 @@ void main() {
         col = mix(col, ground, blend);
     }
 
-    // Exposure + tonemap + sRGB so the baked cubemap is display-referred.
-    col = acesFilm(col * u_exposure);
-    col = pow(col, vec3(1.0 / 2.2));
-    fragColor = vec4(col, 1.0);
+    // Bake LINEAR HDR radiance (no tonemap, no gamma) so the cubemap composites and feeds IBL in the
+    // same linear space as the rest of the scene; the single final tonemapper handles display. u_exposure
+    // stays a linear "sky brightness" scale relative to the scene (composes with the camera exposure).
+    fragColor = vec4(col * u_exposure, 1.0);
 }

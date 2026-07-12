@@ -1,6 +1,7 @@
 #version 300 es
 
 precision mediump float;
+#include "../screen/tonemap.glsl";
 
 uniform struct {
     vec3 color;
@@ -14,16 +15,16 @@ in vec2 fragTexCoord;
 layout(location = 0) out vec4 fragColor;
 
 void main() {
-    vec4 texColor;
-    
+    // Decode the sRGB-authored colour/texture to linear; this shader writes into the linear-HDR
+    // scene buffer and is tonemapped once at the final present like every other surface.
+    vec3 color = toLinear(u_material.color);
+    float alpha = u_material.opacity;
+
     if (u_material.hasTexture) {
-        texColor = texture(u_material.texture, fragTexCoord);
-    } else {
-        texColor = vec4(u_material.color, 1.0);
+        vec4 texColor = texture(u_material.texture, fragTexCoord);
+        color *= toLinear(texColor.rgb);
+        alpha *= texColor.a;
     }
 
-    // Use the alpha value from the texture or 1.0 if no texture
-    vec4 finalColor = vec4(texColor.rgb * u_material.color, texColor.a * u_material.opacity);
-
-    fragColor = finalColor;
+    fragColor = vec4(color, alpha);
 }

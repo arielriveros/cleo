@@ -33,8 +33,9 @@ const ghost = 'px-1.5 py-0.5 rounded border border-[#555] hover:bg-[#3b3b3b] tex
 const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
 
 export default function StateMachineEditor() {
-  const { editorScene, animationTargetId, animationSourceScene, animationSourceId, commitAnimationStateMachine, importAnimationFiles, closeTab, activeTabId, eventEmitter } = useCleoEngine()
+  const { editorScene, animationTargetId, animationSourceScene, animationSourceId, commitAnimationStateMachine, importAnimationFiles, importSkeletonNames, renameAnimationClip, removeAnimationClip, closeTab, activeTabId, eventEmitter } = useCleoEngine()
   const target = getAnimationTarget(editorScene, animationTargetId)
+  const hasBoneNames = !!(target && target.skin.nodeNames && target.skin.nodeNames.size > 0)
 
   const [sm, setSm] = useState<AnimationStateMachine>(EMPTY)
   const [selectedState, setSelectedState] = useState<string | null>(null)
@@ -158,6 +159,26 @@ export default function StateMachineEditor() {
     update({ ...sm, events: sm.events.map((e, idx) => idx === i ? { ...e, ...patch } : e) })
   const removeEvent = (i: number) => update({ ...sm, events: sm.events.filter((_, idx) => idx !== i) })
 
+  // ---- Clips (rename / delete on the model, keeping state/event references in sync) ----
+  const renameClip = (oldName: string, typed: string) => {
+    const next = typed.trim()
+    if (!next || next === oldName) return
+    const finalName = renameAnimationClip(oldName, next)
+    update({
+      ...sm,
+      states: sm.states.map(s => s.clipName === oldName ? { ...s, clipName: finalName } : s),
+      events: sm.events.map(ev => ev.clipName === oldName ? { ...ev, clipName: finalName } : ev),
+    })
+  }
+  const deleteClip = (name: string) => {
+    removeAnimationClip(name)
+    update({
+      ...sm,
+      states: sm.states.map(s => s.clipName === name ? { ...s, clipName: '' } : s),
+      events: sm.events.filter(ev => ev.clipName !== name),
+    })
+  }
+
   if (!target) {
     return <div className='flex flex-col bg-[#202020] w-full h-full p-3 text-sm text-gray-400'>No skinned model selected.</div>
   }
@@ -180,8 +201,31 @@ export default function StateMachineEditor() {
           <input type='file' multiple className='hidden' accept='.gltf,.glb,.fbx,.bin'
             onChange={e => { const fs = e.target.files ? Array.from(e.target.files) : []; e.target.value = ''; if (fs.length) importAnimationFiles(fs) }} />
         </label>
+        {!hasBoneNames && (
+          <label className={ghost + ' w-full text-center cursor-pointer border-[#ffd27a] text-[#ffd27a]'}
+            title='This model has no bone names, so imported animations match by node index (wrong bones). Load the ORIGINAL file this character was imported from to add bone names.'>
+            ⚠ Add bone names from file…
+            <input type='file' multiple className='hidden' accept='.gltf,.glb,.fbx,.bin'
+              onChange={e => { const fs = e.target.files ? Array.from(e.target.files) : []; e.target.value = ''; if (fs.length) importSkeletonNames(fs) }} />
+          </label>
+        )}
         <p className='text-[10px] text-gray-500 mt-0.5'>Writes back to the source node. Scripts drive it with <code>animator.setFloat/setBool/setTrigger()</code>.</p>
       </div>
+
+      {/* Clips */}
+      <Collapsable title='Clips'>
+        <div className='p-2 flex flex-col gap-1'>
+          {clips.length === 0 && <p className='text-[11px] text-gray-400'>No clips. Import one above.</p>}
+          {clips.map(name => (
+            <div key={name} className='flex items-center gap-1'>
+              <input className={input + ' flex-1'} defaultValue={name} title='Rename clip (Enter to apply)'
+                onBlur={e => renameClip(name, e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+              <button className={danger} title='Delete clip' onClick={() => deleteClip(name)}>✕</button>
+            </div>
+          ))}
+        </div>
+      </Collapsable>
 
       {/* Parameters */}
       <Collapsable title='Parameters'>
@@ -214,23 +258,19 @@ export default function StateMachineEditor() {
       <Collapsable title='States'>
         <div className='p-2 flex flex-col gap-1'>
           {sm.states.map((s, i) => (
-            <div key={i} className={`flex flex-col gap-1 p-1.5 rounded border ${selectedState === s.name ? 'border-[#2c2cff] bg-[#26265a]' : 'border-[#3b3b3b]'}`}
+            <div key={i} className={`flex items-center gap-1 p-1.5 rounded border ${selectedState === s.name ? 'border-[#2c2cff] bg-[#26265a]' : 'border-[#3b3b3b]'}`}
               onClick={() => setSelectedState(s.name)}>
-              <div className='flex items-center gap-1'>
-                <input title='Entry state' type='radio' checked={!!s.isEntry} onChange={() => setState(i, { isEntry: true })} />
-                <input className={input + ' flex-1'} value={s.name} onChange={e => setState(i, { name: e.target.value })} onClick={e => e.stopPropagation()} />
-                <button className={danger} onClick={(e) => { e.stopPropagation(); removeState(i) }}>✕</button>
-              </div>
-              <div className='flex items-center gap-1'>
-                <select className={input + ' flex-1'} value={s.clipName} onChange={e => setState(i, { clipName: e.target.value })} onClick={e => e.stopPropagation()}>
-                  <option value=''>(no clip)</option>
-                  {clips.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <label className='flex items-center gap-1 text-[10px]' onClick={e => e.stopPropagation()}>
-                  <input type='checkbox' checked={s.loop} onChange={e => setState(i, { loop: e.target.checked })} />loop
-                </label>
-                <input className={input + ' w-[46px]'} type='number' step='0.1' title='speed' value={s.speed} onChange={e => setState(i, { speed: parseFloat(e.target.value) || 0 })} onClick={e => e.stopPropagation()} />
-              </div>
+              <input title='Entry state' type='radio' checked={!!s.isEntry} onChange={() => setState(i, { isEntry: true })} onClick={e => e.stopPropagation()} />
+              <input className={input + ' flex-1 min-w-0'} title='State name' value={s.name} onChange={e => setState(i, { name: e.target.value })} onClick={e => e.stopPropagation()} />
+              <select className={input + ' flex-1 min-w-0'} title='Animation clip' value={s.clipName} onChange={e => setState(i, { clipName: e.target.value })} onClick={e => e.stopPropagation()}>
+                <option value=''>(no clip)</option>
+                {clips.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <label className='flex items-center gap-0.5 text-[10px] shrink-0' onClick={e => e.stopPropagation()} title='Loop'>
+                <input type='checkbox' checked={s.loop} onChange={e => setState(i, { loop: e.target.checked })} />loop
+              </label>
+              <input className={input + ' w-[42px] shrink-0'} type='number' step='0.1' title='Speed' value={s.speed} onChange={e => setState(i, { speed: parseFloat(e.target.value) || 0 })} onClick={e => e.stopPropagation()} />
+              <button className={danger + ' shrink-0'} title='Delete state' onClick={(e) => { e.stopPropagation(); removeState(i) }}>✕</button>
             </div>
           ))}
           <button className={ghost + ' self-start mt-1'} onClick={addState}>+ State</button>
