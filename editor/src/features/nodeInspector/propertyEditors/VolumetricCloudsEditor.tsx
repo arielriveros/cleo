@@ -5,7 +5,7 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useCleoEngine } from '../../EngineContext'
-import { Slider, Toggle } from '../../../components/ui'
+import { Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { CloudsIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
@@ -71,13 +71,13 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
   )
 
   const color = (label: string, k: 'sunColor' | 'ambientColor' | 'groundColor') => (
-    <div className='flex items-center justify-between my-1 text-xs'>
-      <span className='text-muted'>{label}</span>
+    <div className='flex items-center justify-between my-1'>
+      <span className={labelClass}>{label}</span>
       <ColorInput color={vec3ToHex(state[k])} onChange={(c) => apply({ [k]: c } as Partial<CloudsState>)} />
     </div>
   )
 
-  const header = (label: string) => <div className='mt-3 mb-1 text-[11px] uppercase tracking-wide text-dim'>{label}</div>
+  const header = (label: string) => <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>{label}</div>
 
   return (
     <Collapsable title='Volumetric Clouds' icon={<CloudsIcon />} persistKey='volumetricClouds'>
@@ -103,7 +103,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {check('Use Scene Directional Light', 'useSceneSun')}
         {!state.useSceneSun &&
           <div className='mb-2'>
-            <label className='text-sm'>Sun Direction</label>
+            <label className={labelClass}>Sun Direction</label>
             <AxisInput step={0.05} value={state.sunDirection}
               onChange={(v) => apply({ sunDirection: v })} />
           </div>
@@ -121,7 +121,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
 
         {header('Animation')}
         <div className='mb-2'>
-          <label className='text-sm'>Wind Direction</label>
+          <label className={labelClass}>Wind Direction</label>
           <AxisInput step={0.05} value={state.windDirection}
             onChange={(v) => apply({ windDirection: v })} />
         </div>

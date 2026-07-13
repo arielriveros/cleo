@@ -4,7 +4,7 @@ import type { CustomUniform, CustomUniformType } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import Collapsable from '../../../components/Collapsable'
-import { NumberInput, TextInput, Toggle, Select, VectorInput, ColorInput, TypeSelect, Button, Hint } from '../../../components/ui'
+import { NumberInput, TextInput, Toggle, Select, VectorInput, ColorInput, TypeSelect, Button, Hint, cn, labelClass } from '../../../components/ui'
 import { UniformsIcon } from '../sectionIcons'
 
 const TYPES: CustomUniformType[] = ['float', 'vec2', 'vec3', 'vec4', 'int', 'bool', 'sampler2D', 'samplerCube']
@@ -136,7 +136,7 @@ export default function CustomUniformsEditor(props: { material: CustomMaterial, 
         {list.length === 0 && <Hint className='mb-2'>No uniforms yet.</Hint>}
         {list.map(u => (
           <div key={u.name} className='flex items-center gap-1.5 mb-2'>
-            <span className='w-[26%] truncate text-xs' title={u.name}>{u.name}</span>
+            <span className={cn(labelClass, 'w-[26%] truncate')} title={u.name}>{u.name}</span>
             <TypeSelect value={u.type} options={TYPES} onChange={t => changeType(u.name, t)} />
             <div className='flex-1 min-w-0'>{renderValue(u)}</div>
             <Button variant='ghost' size='icon' className='text-danger' title='Remove' onClick={() => removeUniform(u.name)}>✕</Button>

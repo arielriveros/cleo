@@ -2,8 +2,9 @@ import React from 'react';
 import { cn } from './cn';
 
 // Shared control chrome — the token-based replacement for the grey-fill/indigo-border input
-// string that used to be copy-pasted across inspectors.
-export const controlClass = 'bg-control text-white border border-border rounded px-2 py-1 outline-none focus-visible:border-primary';
+// string that used to be copy-pasted across inspectors. It carries its own type (type-value) so a
+// control is the same size wherever it is hosted — a bare table cell used to leave it at 16px.
+export const controlClass = 'type-value bg-control text-white border border-border rounded px-2 py-1 outline-none focus-visible:border-primary';
 
 export interface NumberInputProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'type'> {

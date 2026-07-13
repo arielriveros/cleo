@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import { cn } from './ui/cn';
+import { headerClass } from './ui/typography';
 
 interface CollapsableProps {
     title: string;
@@ -48,7 +49,7 @@ export default function Collapsable({ title, children, icon, badge, right, defau
             >
                 <span className={cn('text-[11px] text-muted transition-transform duration-200', open ? '' : '-rotate-90')}>▼</span>
                 {icon && <span className='shrink-0 text-muted group-hover:text-white transition-colors'>{icon}</span>}
-                <span className='text-[13px] font-semibold tracking-wide truncate'>{title}</span>
+                <span className={cn(headerClass, 'truncate')}>{title}</span>
                 {badge !== undefined && badge !== null && badge !== false && (
                     <span className='shrink-0 min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center rounded-full bg-border-subtle text-[10px] text-muted tabular-nums'>
                         {badge}

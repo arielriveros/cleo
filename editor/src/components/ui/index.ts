@@ -3,6 +3,8 @@
 
 export { cn } from './cn';
 
+export { labelClass, valueClass, hintClass, sectionTitleClass, headerClass } from './typography';
+
 export { Button, buttonVariants, ButtonWithConfirm } from './Button';
 export type { ButtonProps, ButtonWithConfirmProps } from './Button';
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { cn } from './cn';
+import { labelClass, valueClass } from './typography';
 
 export interface SliderProps {
   value: number;
@@ -43,8 +44,8 @@ export function Slider({
   };
 
   return (
-    <label className={cn('flex items-center gap-2 my-1 text-xs', className)}>
-      {label !== undefined && <span className={cn('w-[70px] shrink-0 text-muted truncate', labelClassName)} title={typeof label === 'string' ? label : undefined}>{label}</span>}
+    <label className={cn('flex items-center gap-2 my-1', valueClass, className)}>
+      {label !== undefined && <span className={cn(labelClass, 'w-[70px] shrink-0 truncate', labelClassName)} title={typeof label === 'string' ? label : undefined}>{label}</span>}
       <input
         className='flex-1 min-w-0'
         style={{ ['--slider-fill' as any]: pct + '%' }}

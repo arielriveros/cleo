@@ -3,12 +3,16 @@
 @tailwind utilities;
 
 html, body {
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     height: 100%;
     width: 100%;
     padding: 0;
     margin: 0;
 }
+/* The inherited default. Without it, anything with no explicit text class falls back to the browser's
+   16px — which is what used to make PropertyRow labels and table-hosted inputs oversized. Set on body,
+   not html, so rem units (--radius) keep keying off the 16px root. */
+body { font-size: var(--text-ui); }
 
 /* ============================================================================
    Design tokens — the single source of truth for the editor's look.
@@ -60,6 +64,16 @@ html, body {
   /* Shape / type */
   --radius: 0.375rem;
   --font-mono: Consolas, monaco, monospace;
+
+  /* Typography — the inspector baseline (what the Rigid Body section resolves to). Every label, value
+     and control fetches from these; the .type-* classes below bind them to a role. */
+  --font-ui:          var(--font-mono);
+  --text-ui:          12px;  /* labels, values, controls */
+  --text-ui-sm:       11px;  /* section titles */
+  --text-ui-xs:       10px;  /* hints, badges, axis letters */
+  --text-ui-lg:       13px;  /* Collapsable section headers */
+  --weight-ui:        400;
+  --weight-ui-strong: 600;   /* section headers */
 }
 
 @layer base {
@@ -71,6 +85,15 @@ html, body {
 }
 
 @layer components {
+  /* Typography roles. Kept as component classes rather than Tailwind theme keys because Tailwind emits
+     both font-family and font-weight utilities under the same `font-*` prefix, so a `ui` key in both
+     would collide on `.font-ui`. Utilities still outrank these, so a deliberate local override works. */
+  .type-label   { font-family: var(--font-ui); font-size: var(--text-ui);    font-weight: var(--weight-ui); }
+  .type-value   { font-family: var(--font-ui); font-size: var(--text-ui);    font-weight: var(--weight-ui); }
+  .type-hint    { font-family: var(--font-ui); font-size: var(--text-ui-xs); font-weight: var(--weight-ui); }
+  .type-section { font-family: var(--font-ui); font-size: var(--text-ui-sm); font-weight: var(--weight-ui); }
+  .type-header  { font-family: var(--font-ui); font-size: var(--text-ui-lg); font-weight: var(--weight-ui-strong); }
+
   .panel { @apply rounded-md border border-border bg-surface-raised shadow-md; }
   .panel-header { @apply px-2 py-1 text-xs uppercase tracking-wide text-muted bg-gradient-to-b from-border/20 to-transparent; }
 

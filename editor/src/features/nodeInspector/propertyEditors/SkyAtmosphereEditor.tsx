@@ -5,7 +5,7 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useCleoEngine } from '../../EngineContext'
-import { Slider, Toggle } from '../../../components/ui'
+import { Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
@@ -64,13 +64,13 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
   )
 
   const color = (label: string, k: 'sunColor' | 'groundColor' | 'fogColor' | 'godRayTint') => (
-    <div className='flex items-center justify-between my-1 text-xs'>
-      <span className='text-muted'>{label}</span>
+    <div className='flex items-center justify-between my-1'>
+      <span className={labelClass}>{label}</span>
       <ColorInput color={vec3ToHex(state[k])} onChange={(c) => apply({ [k]: c } as Partial<AtmoState>)} />
     </div>
   )
 
-  const header = (label: string) => <div className='mt-3 mb-1 text-[11px] uppercase tracking-wide text-dim'>{label}</div>
+  const header = (label: string) => <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>{label}</div>
 
   return (
     <Collapsable title='Sky Atmosphere' icon={<SkyIcon />} persistKey='skyAtmosphere'>
@@ -79,7 +79,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         {check('Use Scene Directional Light', 'useSceneSun')}
         {!state.useSceneSun &&
           <div className='mb-2'>
-            <label className='text-sm'>Sun Direction (toward sun)</label>
+            <label className={labelClass}>Sun Direction (toward sun)</label>
             <AxisInput step={0.05} value={state.sunDirection}
               onChange={(v) => apply({ sunDirection: v })} />
           </div>
@@ -100,16 +100,14 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         {slider('Atmosphere Radius', 'atmosphereRadius', 1000000, 11000000, 100000, 0)}
 
         {header('Quality')}
-        <div className='flex items-center justify-between mb-2 text-sm'>
-          <span>Resolution</span>
-          <select className='bg-control text-white border border-border rounded px-2 py-1'
-            value={state.resolution}
-            onChange={(e) => apply({ resolution: parseInt(e.target.value) })}>
+        <div className='flex items-center justify-between mb-2'>
+          <span className={labelClass}>Resolution</span>
+          <Select value={state.resolution} onChange={(e) => apply({ resolution: parseInt(e.target.value) })}>
             <option value={64}>64</option>
             <option value={128}>128</option>
             <option value={256}>256</option>
             <option value={512}>512</option>
-          </select>
+          </Select>
         </div>
         {slider('View Steps', 'viewSteps', 4, 64, 1, 0)}
         {slider('Light Steps', 'lightSteps', 2, 32, 1, 0)}

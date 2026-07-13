@@ -3,7 +3,7 @@ import { Node } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
 import { getMaterialIdOf, applyMaterialAsset, unlinkToFallback } from '../../../utils/materials'
-import { Select, Button, Hint } from '../../../components/ui'
+import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
 import { MaterialIcon } from '../sectionIcons'
 
 // The material reference control for model/sprite nodes: replaces inline material editing. Shows the
@@ -49,7 +49,7 @@ export default function MaterialSlot(props: { node: Node }) {
                 ? <img src={asset.thumbnail} className='w-full h-full object-cover' alt={asset.name} draggable={false} />
                 : <span className='text-lg'>🎨</span>}
             </div>
-            <span className='truncate flex-1' title={asset.name}>{asset.name}</span>
+            <span className={cn(valueClass, 'truncate flex-1')} title={asset.name}>{asset.name}</span>
             <Button variant='ghost' size='icon' className='text-highlight' title='Edit this material' onClick={() => enterMaterialEditor(asset.id)}>✎</Button>
             <Button variant='ghost' size='icon' className='text-danger' title='Unlink (revert to a basic material)' onClick={unlink}>✕</Button>
           </div>
@@ -61,7 +61,7 @@ export default function MaterialSlot(props: { node: Node }) {
               + Create Material
             </Button>
             {materials.length > 0 && (
-              <Select className='text-xs' value='' onChange={(e) => { if (e.target.value) link(e.target.value) }}>
+              <Select value='' onChange={(e) => { if (e.target.value) link(e.target.value) }}>
                 <option value=''>Link existing…</option>
                 {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </Select>

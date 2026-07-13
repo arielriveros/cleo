@@ -3,7 +3,7 @@ import type { NodeVariableAccess } from 'cleo'
 import { useState, useEffect } from 'react'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
-import { NumberInput, TextInput, Toggle, VectorInput, TypeSelect, AccessSelect, Button, Hint } from '../../../components/ui'
+import { NumberInput, TextInput, Toggle, VectorInput, TypeSelect, AccessSelect, Button, Hint, cn, labelClass } from '../../../components/ui'
 import { VariablesIcon } from '../sectionIcons'
 
 type VarType = 'number' | 'string' | 'boolean' | 'vec3'
@@ -89,7 +89,7 @@ export default function CustomVariablesEditor(props: { node: Node }) {
         {vars.length === 0 && <Hint className='mb-2'>No variables yet.</Hint>}
         {vars.map(v => (
           <div key={v.name} className='flex items-center gap-1.5 mb-2'>
-            <span className='w-[26%] truncate text-xs' title={v.name}>{v.name}</span>
+            <span className={cn(labelClass, 'w-[26%] truncate')} title={v.name}>{v.name}</span>
             <TypeSelect value={v.type} options={TYPES} onChange={t => changeType(v.name, t)} />
             <AccessSelect value={v.access} onChange={a => changeAccess(v.name, a as NodeVariableAccess)} />
             <div className='flex-1 min-w-0'>{renderValue(v)}</div>

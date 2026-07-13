@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from './cn';
+import { sectionTitleClass } from './typography';
 
 /** Elevated bordered container (popovers, overlays, grouped chrome). */
 export function Panel({ className, children, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
@@ -30,7 +31,7 @@ export function Section({ title, children, className }: SectionProps) {
   return (
     <div className={cn('mb-3', className)}>
       {title !== undefined && (
-        <div className='text-[11px] uppercase tracking-wide text-dim mb-1'>{title}</div>
+        <div className={cn(sectionTitleClass, 'mb-1')}>{title}</div>
       )}
       {children}
     </div>

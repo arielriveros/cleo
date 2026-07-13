@@ -7,7 +7,7 @@ import AxisInput from '../../../components/AxisInput'
 import ShapeEditor from './ShapeEditor';
 import { HULL_QUALITIES } from './hullQuality';
 import { collectHullPositions } from '../../../utils/editorHelpers';
-import { Field, Slider, Toggle, Select, NumberInput, Button, Section, Hint, SegmentedControl } from '../../../components/ui'
+import { Field, Slider, Toggle, Select, NumberInput, Button, Section, Hint, SegmentedControl, cn, labelClass } from '../../../components/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 
 const LABEL = 'w-[130px]';
@@ -48,7 +48,7 @@ const ShapeTools = ({ shapes, canHull, addShape, addHull, regenerateHull, setSha
   return (
     <Section title='Shapes'>
       <div className='flex items-center gap-1.5 flex-wrap mb-2'>
-        <span className='text-xs text-muted mr-1'>Add:</span>
+        <span className={cn(labelClass, 'mr-1')}>Add:</span>
         {['box', 'sphere', 'cylinder', 'plane'].map((t) => (
           <Button key={t} size='sm' onClick={() => addShape(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</Button>
         ))}
