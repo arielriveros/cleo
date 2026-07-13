@@ -46,6 +46,9 @@ module.exports = {
       },
       {
         test: /\.css$/,
+        // Bare CSS imports are side effects. Without this, webpack drops stylesheets imported from
+        // packages that declare "sideEffects": false (e.g. @svar-ui/react-filemanager's all.css).
+        sideEffects: true,
         use: [
           "style-loader",
           {

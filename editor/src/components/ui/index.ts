@@ -51,11 +51,6 @@ export type { SectionProps } from './Panel';
 export { Modal, ModalHeader, ModalFooter } from './Modal';
 export type { ModalProps } from './Modal';
 
-export { AssetCard } from './AssetCard';
-export type { AssetCardProps } from './AssetCard';
-
-export { UnreferencedBadge } from './UnreferencedBadge';
-
 export { OverlayPanel } from './OverlayPanel';
 export type { OverlayPanelProps } from './OverlayPanel';
 

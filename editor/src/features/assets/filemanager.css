@@ -1,0 +1,556 @@
+/* Dedicated skin for the asset explorer's SVAR file manager.
+
+   Scope and precedence:
+   - The library stylesheet is @imported HERE (not in the component) so css-loader inlines it into this
+     module ahead of every rule below — the cascade order is deterministic, unlike two separate
+     style-loader tags whose injection order changes between rebuilds.
+   - SVAR still pairs every semantic class with a build hash (`.wx-toolbar.wx-5PZQQztG`, up to 0-4-0 when
+     nested), so contested geometry keeps !important: this file is a skin over a third-party stylesheet,
+     not a peer of it.
+   - Context menus and modals PORTAL to <body> inside their own `.wx-willow-dark-theme` wrapper, outside
+     `.cleo-fm`. Tokens and portal chrome are therefore bound to the theme class itself (doubled, to beat
+     the library's own definition deterministically); everything explorer-local stays under `.cleo-fm`.
+   - The editor's tokens are space-separated RGB channels (see src/index.css), so `rgb(var(--x))` and
+     `rgb(var(--x) / a)` both work. */
+
+@import '@svar-ui/react-filemanager/all.css';
+
+/* ==================================================================================================
+   1. Token bridge — global, so the portaled menu/modal layer inherits it too
+   ================================================================================================== */
+.wx-willow-dark-theme.wx-willow-dark-theme {
+  --wx-color-primary: rgb(var(--primary));
+  --wx-color-primary-selected: rgb(var(--selected) / 0.3);
+  --wx-color-primary-font: #fff;
+  --wx-color-secondary-hover: rgb(var(--control-hover));
+  --wx-color-success: rgb(var(--success));
+  --wx-color-warning: rgb(var(--warning));
+  --wx-color-danger: rgb(var(--danger));
+  --wx-color-disabled: rgb(var(--control));
+  --wx-color-disabled-alt: rgb(var(--control-hover));
+  --wx-color-font: rgb(var(--text));
+  --wx-color-font-alt: rgb(var(--text-muted));
+  --wx-color-font-disabled: rgb(var(--text-dim));
+
+  --wx-background: rgb(var(--surface));
+  --wx-background-alt: rgb(var(--surface-sunken));
+  --wx-background-hover: rgb(var(--control-hover));
+
+  --wx-font-family: var(--font-mono);
+  --wx-font-size: 12px;
+  --wx-line-height: 16px;
+  --wx-font-size-sm: 11px;
+  --wx-line-height-sm: 14px;
+  --wx-font-size-md: 12px;
+  --wx-line-height-md: 18px;
+
+  --wx-icon-color: rgb(var(--text-muted));
+  --wx-icon-size: 16px;
+  --wx-border-color: rgb(var(--border));
+  --wx-border: 1px solid rgb(var(--border));
+  --wx-border-light: 1px solid rgb(var(--border-subtle));
+  --wx-border-medium: 1px solid rgb(var(--border));
+  --wx-border-radius: var(--radius);
+  --wx-radius-major: var(--radius);
+  --wx-shadow-light: 0 4px 16px rgb(0 0 0 / 0.4);
+  --wx-shadow-medium: 0 4px 16px rgb(0 0 0 / 0.4);
+  --wx-box-shadow: 0 8px 32px rgb(0 0 0 / 0.5);
+  --wx-box-shadow-strong: 0 8px 32px rgb(0 0 0 / 0.6);
+  --wx-padding: 6px;
+
+  --wx-input-background: rgb(var(--control));
+  --wx-input-border: 1px solid rgb(var(--border));
+  --wx-input-border-focus: 1px solid rgb(var(--highlight));
+  --wx-input-height: 24px;
+  --wx-input-padding: 2px 6px;
+  --wx-input-border-radius: var(--radius);
+
+  --wx-button-height: 24px;
+  --wx-tooltip-background: rgb(var(--surface-sunken));
+
+  --wx-fm-background: rgb(var(--surface-raised));
+  --wx-fm-box-shadow: none;
+  --wx-fm-select-background: rgb(var(--selected) / 0.3);
+  --wx-fm-grid-border: 1px solid rgb(var(--border-subtle));
+  --wx-fm-grid-header-color: rgb(var(--surface-sunken));
+  --wx-fm-button-font-color: rgb(var(--text-muted));
+  --wx-fm-toolbar-height: 30px;
+}
+
+/* Focus: the browser default white ring reads as broken next to the editor's chrome. */
+.wx-willow-dark-theme button:focus-visible,
+.wx-willow-dark-theme input:focus-visible {
+  outline: 1px solid rgb(var(--highlight)) !important;
+  outline-offset: 0;
+}
+
+/* ==================================================================================================
+   2. Icons — monochrome SVG masks (the wxi icon font is never loaded: <WillowDark fonts={false}>).
+      background-color: currentColor makes every icon follow its context's text color.
+   ================================================================================================== */
+.wx-willow-dark-theme .wxi-search,   .wx-willow-dark-theme .wxi-eye,
+.wx-willow-dark-theme .wxi-view-grid, .wx-willow-dark-theme .wxi-view-sequential,
+.wx-willow-dark-theme .wxi-view-column,
+.wx-willow-dark-theme .wxi-angle-down, .wx-willow-dark-theme .wxi-angle-right,
+.wx-willow-dark-theme .wxi-angle-left, .wx-willow-dark-theme .wxi-arrow-left,
+.wx-willow-dark-theme .wxi-angle-dbl-left, .wx-willow-dark-theme .wxi-angle-dbl-right,
+.wx-willow-dark-theme .wxi-dots-v,   .wx-willow-dark-theme .wxi-close,
+.wx-willow-dark-theme .wxi-check,    .wx-willow-dark-theme .wxi-alert,
+.wx-willow-dark-theme .wxi-folder,   .wx-willow-dark-theme .wxi-file,
+.wx-willow-dark-theme .wxi-refresh,  .wx-willow-dark-theme .wxi-subtask,
+.wx-willow-dark-theme .wxi-content-copy, .wx-willow-dark-theme .wxi-content-cut,
+.wx-willow-dark-theme .wxi-content-paste, .wx-willow-dark-theme .wxi-edit,
+.wx-willow-dark-theme .wxi-download, .wx-willow-dark-theme .wxi-loading,
+.wx-willow-dark-theme .wxi-spin {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  font-size: 0 !important;
+  color: inherit;
+  background-color: currentColor;
+  -webkit-mask: var(--cleo-icon) center / contain no-repeat;
+  mask: var(--cleo-icon) center / contain no-repeat;
+}
+.wx-willow-dark-theme [class*='wxi-']::before { content: none !important; }
+
+.wx-willow-dark-theme .wxi-search { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-eye { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-view-sequential { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 6h16M4 12h16M4 18h16'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-view-grid { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='3' width='7' height='7' rx='1'/%3E%3Crect x='14' y='3' width='7' height='7' rx='1'/%3E%3Crect x='3' y='14' width='7' height='7' rx='1'/%3E%3Crect x='14' y='14' width='7' height='7' rx='1'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-view-column { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='4' width='8' height='16' rx='1'/%3E%3Crect x='13' y='4' width='8' height='16' rx='1'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-angle-down { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-angle-right { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6l6 6-6 6'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-angle-left { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 6l-6 6 6 6'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-angle-dbl-left { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 6l-6 6 6 6M18 6l-6 6 6 6'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-angle-dbl-right { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 6l6 6-6 6M13 6l6 6-6 6'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-arrow-left { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 12H5M12 19l-7-7 7-7'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-dots-v { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Ccircle cx='12' cy='5' r='2'/%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3Ccircle cx='12' cy='19' r='2'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-close { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M18 6L6 18M6 6l12 12'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-check { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-alert { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'/%3E%3Cpath d='M12 9v4M12 17h.01'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-folder { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-file { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z'/%3E%3Cpath d='M13 2v7h7'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-refresh { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M23 4v6h-6'/%3E%3Cpath d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-subtask { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cpath d='M9 3v18'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-content-copy { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-content-cut { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='6' cy='6' r='3'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Cpath d='M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-content-paste { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2'/%3E%3Crect x='8' y='2' width='8' height='4' rx='1'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-edit { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-download { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpath d='M7 10l5 5 5-5M12 15V3'/%3E%3C/svg%3E"); }
+.wx-willow-dark-theme .wxi-loading,
+.wx-willow-dark-theme .wxi-spin { --cleo-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M21 12a9 9 0 1 1-6.22-8.56'/%3E%3C/svg%3E"); animation: cleo-fm-spin 1s linear infinite; }
+@keyframes cleo-fm-spin { to { transform: rotate(360deg); } }
+
+/* ==================================================================================================
+   3. Frame — fill the bottom bar
+   ================================================================================================== */
+.cleo-fm,
+.cleo-fm > .wx-theme,
+.cleo-fm .wx-filemanager {
+  height: 100%;
+  min-height: 0;
+}
+.cleo-fm .wx-filemanager { background: rgb(var(--surface-raised)) !important; }
+
+/* ==================================================================================================
+   4. Toolbar — search, preview toggle, view-mode switcher
+   ================================================================================================== */
+.cleo-fm .wx-toolbar {
+  height: 30px !important;
+  padding: 0 8px !important;
+  gap: 8px;
+  background: rgb(var(--surface-sunken)) !important;
+  border-bottom: 1px solid rgb(var(--border-subtle)) !important;
+}
+/* The "Files" title is redundant — the bottom-bar tab already says Assets. */
+.cleo-fm .wx-toolbar .wx-left > .wx-name { display: none !important; }
+
+.cleo-fm .wx-search-input {
+  height: 22px !important;
+  max-width: 260px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px !important;
+  background: rgb(var(--control)) !important;
+  border: 1px solid rgb(var(--border)) !important;
+  border-radius: var(--radius) !important;
+}
+.cleo-fm .wx-search-input:focus-within { border-color: rgb(var(--highlight)) !important; }
+.cleo-fm .wx-search-input .wx-text {
+  background: transparent !important;
+  border: none !important;
+  font: 12px var(--font-mono) !important;
+  color: rgb(var(--text)) !important;
+  padding: 0 !important;
+  height: auto !important;
+}
+.cleo-fm .wx-search-input .wx-text::placeholder { color: rgb(var(--text-dim)); }
+.cleo-fm .wx-search-input .wxi-search { width: 13px; height: 13px; color: rgb(var(--text-dim)); }
+
+/* Icon buttons (preview toggle) and the cards/table/panels segmented switch. */
+.cleo-fm .wx-toolbar .wx-button {
+  width: 26px;
+  height: 22px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--radius) !important;
+  color: rgb(var(--text-muted)) !important;
+  box-shadow: none !important;
+}
+.cleo-fm .wx-toolbar .wx-button:hover { background: rgb(var(--control-hover)) !important; color: rgb(var(--text)) !important; }
+.cleo-fm .wx-toolbar .wxi-eye { width: 15px; height: 15px; }
+
+.cleo-fm .wx-segmented {
+  height: 24px !important;
+  padding: 2px !important;
+  gap: 2px;
+  background: rgb(var(--surface)) !important;
+  border: 1px solid rgb(var(--border-subtle)) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: none !important;
+}
+.cleo-fm .wx-segment {
+  width: 26px;
+  height: 18px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+  border: none !important;
+  border-radius: calc(var(--radius) - 2px) !important;
+  color: rgb(var(--text-muted)) !important;
+}
+.cleo-fm .wx-segment:hover { background: rgb(var(--control-hover)) !important; color: rgb(var(--text)) !important; }
+.cleo-fm .wx-segment.wx-selected { background: rgb(var(--selected)) !important; color: #fff !important; }
+.cleo-fm .wx-segment [class*='wxi-'] { width: 13px; height: 13px; }
+
+/* ==================================================================================================
+   5. Sidebar — Add New + folder tree
+   ================================================================================================== */
+.cleo-fm .wx-sidebar {
+  width: 170px !important;
+  padding: 6px !important;
+  background: rgb(var(--surface-sunken)) !important;
+  border-right: 1px solid rgb(var(--border-subtle)) !important;
+}
+/* The sidebar's built-in "Add New" button duplicates the toolbar's "+ Add" menu — remove it. */
+.cleo-fm .wx-sidebar .wx-wrapper > .wx-button { display: none !important; }
+
+.cleo-fm .wx-sidebar li.wx-folder {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius);
+  color: rgb(var(--text-muted));
+  font: 12px var(--font-mono);
+  cursor: pointer;
+}
+.cleo-fm .wx-sidebar li.wx-folder:hover { background: rgb(var(--control-hover)); color: rgb(var(--text)); }
+.cleo-fm .wx-sidebar li.wx-folder.wx-selected {
+  background: rgb(var(--selected) / 0.3) !important;
+  color: rgb(var(--text)) !important;
+}
+.cleo-fm .wx-sidebar .wx-toggle { width: 12px; height: 12px; flex: none; color: rgb(var(--text-dim)); }
+.cleo-fm .wx-sidebar .wxi-folder { width: 14px; height: 14px; flex: none; color: rgb(var(--highlight)); }
+.cleo-fm .wx-sidebar li.wx-folder .wx-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==================================================================================================
+   6. Breadcrumbs
+   ================================================================================================== */
+.cleo-fm .wx-breadcrumbs {
+  height: 24px !important;
+  padding: 0 6px !important;
+  gap: 2px;
+  align-items: center;
+  background: rgb(var(--surface-raised)) !important;
+  border-bottom: 1px solid rgb(var(--border-subtle)) !important;
+  font: 12px var(--font-mono) !important;
+}
+.cleo-fm .wx-breadcrumbs .wx-item {
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  color: rgb(var(--text-muted));
+  cursor: pointer;
+}
+.cleo-fm .wx-breadcrumbs .wx-item:hover { background: rgb(var(--control-hover)); color: rgb(var(--text)); }
+.cleo-fm .wx-breadcrumbs .wx-item:last-child { color: rgb(var(--text)); }
+.cleo-fm .wx-breadcrumbs .wxi-angle-right { width: 11px; height: 11px; color: rgb(var(--text-dim)); }
+.cleo-fm .wx-breadcrumbs .wx-refresh-icon { color: rgb(var(--text-dim)); cursor: pointer; }
+.cleo-fm .wx-breadcrumbs .wx-refresh-icon:hover { color: rgb(var(--text)); }
+.cleo-fm .wx-breadcrumbs .wxi-refresh { width: 13px; height: 13px; }
+
+/* ==================================================================================================
+   7. Cards view
+   ================================================================================================== */
+/* Card geometry is budgeted against the bottom bar: at 30vh on a ~900px window the card area under the
+   toolbars is ~130px tall, and a full card INCLUDING its name row must fit — a name below the fold reads
+   as broken, not as scrollable. 104 total = 66 preview + 36 info + 2 border. */
+.cleo-fm .wx-cards {
+  padding: 6px !important;
+  align-content: flex-start;
+  background: rgb(var(--surface-raised)) !important;
+}
+.cleo-fm .wx-cards .wx-item {
+  width: 92px !important;
+  height: 104px !important;
+  margin: 0 6px 6px 0 !important;
+  background: rgb(var(--control)) !important;
+  border: 1px solid rgb(var(--border)) !important;
+  border-radius: var(--radius) !important;
+  overflow: hidden;
+  cursor: grab;
+  box-shadow: none !important;
+}
+.cleo-fm .wx-cards .wx-item:hover { border-color: rgb(var(--highlight)) !important; }
+.cleo-fm .wx-cards .wx-item.wx-selected {
+  outline: none !important;
+  border-color: rgb(var(--selected)) !important;
+  box-shadow: 0 0 0 1px rgb(var(--selected)) !important;
+  background: rgb(var(--selected) / 0.15) !important;
+}
+
+/* Preview strip: fixed 66px, letterboxed — the library's own 154px rule loses to these. */
+.cleo-fm .wx-cards .wx-preview {
+  height: 66px !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  background: rgb(var(--surface-sunken));
+  overflow: hidden;
+}
+.cleo-fm .wx-cards .wx-preview .wx-card-preview {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+}
+/* Icon-only files (no thumbnail) and folders: a centered, smaller glyph. */
+.cleo-fm .wx-cards .wx-preview.wx-file-icon .wx-card-preview {
+  width: 38px !important;
+  height: 38px !important;
+}
+
+.cleo-fm .wx-cards .wx-info {
+  height: 36px !important;
+  padding: 0 4px 0 6px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px;
+  font: 11px/1.35 var(--font-mono) !important;
+  color: rgb(var(--text)) !important;
+}
+.cleo-fm .wx-cards .wx-info .wx-type { display: none !important; } /* the "Folder" caption is noise */
+.cleo-fm .wx-cards .wx-info .wx-file-name,
+.cleo-fm .wx-cards .wx-info .wx-folder-name {
+  flex: 1 !important;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+/* SVAR splits a filename into stem+extension spans for middle-truncation: let the stem shrink with an
+   ellipsis and pin the extension. */
+.cleo-fm .wx-cards .wx-info .wx-name {
+  display: flex !important;
+  align-items: baseline;
+  max-width: 100%;
+  color: rgb(var(--text)) !important;
+}
+.cleo-fm .wx-cards .wx-info .wx-name > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.cleo-fm .wx-cards .wx-info .wx-name > span:last-child { flex: none; color: rgb(var(--text-muted)); }
+
+/* Per-card ⋮ menu: an overlay on the preview's corner (not in the name row, where its 18px would eat a
+   third of the already-tight stem width), shown on hover. */
+.cleo-fm .wx-cards .wx-item { position: relative; }
+.cleo-fm .wx-cards .wx-more {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  border-radius: calc(var(--radius) - 2px);
+  background: rgb(var(--surface) / 0.85);
+  color: rgb(var(--text-muted));
+  opacity: 0;
+  cursor: pointer;
+}
+.cleo-fm .wx-cards .wx-item:hover .wx-more,
+.cleo-fm .wx-cards .wx-item.wx-selected .wx-more { opacity: 1; }
+.cleo-fm .wx-cards .wx-more:hover { background: rgb(var(--control-hover)); color: rgb(var(--text)); }
+.cleo-fm .wx-cards .wx-more .wxi-dots-v { width: 12px; height: 12px; }
+
+/* "Back to parent folder" pill */
+.cleo-fm .wx-back-item { margin: 0 8px 8px 0 !important; }
+.cleo-fm .wx-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  color: rgb(var(--text-muted));
+  font: 12px var(--font-mono);
+  cursor: pointer;
+}
+.cleo-fm .wx-back:hover { background: rgb(var(--control-hover)); color: rgb(var(--text)); }
+.cleo-fm .wx-back .wxi-arrow-left { width: 13px; height: 13px; }
+
+/* ==================================================================================================
+   7b. Info / preview pane (the toolbar eye toggle)
+   Structure: .wx-content > .wx-info > .wx-wrapper > [.wx-preview (.wx-toolbar + .wx-img-wrapper),
+   .wx-info-panel (.wx-title + .wx-list)]. NOTE: it reuses the class names .wx-toolbar and .wx-preview.
+   ================================================================================================== */
+.cleo-fm .wx-content > .wx-info,
+.cleo-fm .wx-info-narrow {
+  background: rgb(var(--surface-sunken)) !important;
+  border-left: 1px solid rgb(var(--border-subtle)) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  font: 12px var(--font-mono) !important;
+  color: rgb(var(--text)) !important;
+}
+/* Download is the one built-in operation the explorer doesn't support — remove its last entry point. */
+.cleo-fm .wx-info .wx-icons .wxi-download,
+.cleo-fm .wx-info-narrow .wxi-download { display: none !important; }
+.cleo-fm .wx-info .wx-img-wrapper img,
+.cleo-fm .wx-info-narrow .wx-img-wrapper img {
+  width: 100%;
+  max-height: 110px;
+  object-fit: contain;
+  background: rgb(var(--surface));
+  border-radius: var(--radius);
+}
+.cleo-fm .wx-info .wx-info-panel { background: transparent !important; box-shadow: none !important; }
+.cleo-fm .wx-info .wx-title { font: 600 12px var(--font-mono) !important; color: rgb(var(--text)) !important; }
+.cleo-fm .wx-info .wx-list .wx-name { color: rgb(var(--text-muted)) !important; }
+.cleo-fm .wx-info .wx-list .wx-value { color: rgb(var(--text)) !important; }
+
+/* Empty-folder placeholder */
+.cleo-fm .wx-not-found-text { color: rgb(var(--text-dim)) !important; font: 12px var(--font-mono) !important; }
+
+/* ==================================================================================================
+   8. Table view (react-grid)
+   ================================================================================================== */
+.cleo-fm .wx-grid { background: rgb(var(--surface-raised)) !important; font: 12px var(--font-mono) !important; }
+.cleo-fm .wx-grid .wx-header .wx-cell,
+.cleo-fm .wx-grid .wx-header-wrapper .wx-cell {
+  background: rgb(var(--surface-sunken)) !important;
+  color: rgb(var(--text-muted)) !important;
+  font: 600 11px var(--font-mono) !important;
+  border-bottom: 1px solid rgb(var(--border)) !important;
+}
+.cleo-fm .wx-grid .wx-row {
+  background: transparent !important;
+  color: rgb(var(--text)) !important;
+  border-bottom: 1px solid rgb(var(--border-subtle)) !important;
+  cursor: grab;
+}
+.cleo-fm .wx-grid .wx-row:hover { background: rgb(var(--control-hover)) !important; }
+.cleo-fm .wx-grid .wx-row.wx-selected { background: rgb(var(--selected) / 0.3) !important; }
+.cleo-fm .wx-grid .wx-cell { border-color: rgb(var(--border-subtle)) !important; }
+.cleo-fm .wx-name-cell img { width: 18px; height: 18px; object-fit: contain; }
+
+/* ==================================================================================================
+   9. Portal layer — context menu + modals (rendered under <body>, outside .cleo-fm)
+   ================================================================================================== */
+.wx-willow-dark-theme .wx-menu {
+  background: rgb(var(--surface-raised)) !important;
+  border: 1px solid rgb(var(--border)) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5) !important;
+  padding: 4px !important;
+  min-width: 170px;
+  font: 12px var(--font-mono) !important;
+}
+.wx-willow-dark-theme .wx-menu .wx-option {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px !important;
+  border-radius: calc(var(--radius) - 2px);
+  color: rgb(var(--text)) !important;
+}
+.wx-willow-dark-theme .wx-menu .wx-option:hover { background: rgb(var(--selected) / 0.3) !important; }
+.wx-willow-dark-theme .wx-menu .wx-option [class*='wxi-'] { width: 13px; height: 13px; color: rgb(var(--text-muted)); }
+
+.wx-willow-dark-theme .wx-modal {
+  font: 12px var(--font-mono) !important;
+}
+.wx-willow-dark-theme .wx-modal .wx-window,
+.wx-willow-dark-theme .wx-window {
+  background: rgb(var(--surface)) !important;
+  border: 1px solid rgb(var(--border)) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.6) !important;
+}
+.wx-willow-dark-theme .wx-modal .wx-button {
+  height: 24px !important;
+  border-radius: var(--radius) !important;
+  font: 600 11px var(--font-mono) !important;
+  box-shadow: none !important;
+}
+.wx-willow-dark-theme .wx-modal .wx-button.wx-primary {
+  background: rgb(var(--primary)) !important;
+  border: 1px solid rgb(var(--primary)) !important;
+  color: #fff !important;
+}
+.wx-willow-dark-theme .wx-modal .wx-button.wx-primary:hover { background: rgb(var(--primary-hover)) !important; }
+
+/* ==================================================================================================
+   10. Drag affordances (see useDragOutPatch / AssetsExplorer drop handlers)
+   ================================================================================================== */
+.cleo-fm .cleo-drop-target {
+  outline: 2px solid rgb(var(--highlight)) !important;
+  outline-offset: -2px;
+  background: rgb(var(--selected) / 0.18) !important;
+  border-radius: var(--radius);
+}
+
+.cleo-fm.is-file-drag::after,
+.cleo-fm.is-node-drag::after {
+  content: attr(data-drop-hint);
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font: 12px var(--font-mono);
+  color: rgb(var(--text));
+  background: rgb(var(--selected) / 0.12);
+  border: 2px dashed rgb(var(--highlight));
+  border-radius: var(--radius);
+}
+
+/* ==================================================================================================
+   11. Scrollbars
+   ================================================================================================== */
+.cleo-fm ::-webkit-scrollbar { width: 8px; height: 8px; }
+.cleo-fm ::-webkit-scrollbar-thumb { background: rgb(var(--control)); border-radius: 4px; }
+.cleo-fm ::-webkit-scrollbar-thumb:hover { background: rgb(var(--control-hover)); }
+.cleo-fm ::-webkit-scrollbar-track { background: transparent; }
+.cleo-fm ::-webkit-scrollbar-corner { background: transparent; }

@@ -94,9 +94,9 @@ type ConvexShapeDescription = {
   vertices: number[][];
   faces: number[][];
   /**
-   * Hull algorithm version. 2 = containment-guaranteed half-space carve over the whole node subtree.
-   * Anything older is rebuilt on load by the editor-helper reconciler (v1 hulled a vertex subset,
-   * which can cut inside the mesh).
+   * Hull algorithm version. 3 = AABB-anchored carve (low = the bounding box, higher levels cut
+   * volume off with supporting planes) with an absolute containment audit over every mesh vertex.
+   * Older hulls are rebuilt on load by the editor-helper reconciler.
    */
   v?: number;
 };
@@ -230,8 +230,12 @@ const EngineContext = createContext<{
   updateTerrainMaterial: (id: string, m: TerrainMaterialAsset) => void;
   // Mesh assets (imported models)
   meshes: MeshAsset[];
+  addMesh: (m: MeshAsset) => void;
   removeMesh: (id: string) => void;
+  updateMesh: (id: string, m: MeshAsset) => void;
   importMeshFiles: (files: File[]) => Promise<void>;
+  // True once every IndexedDB-backed asset library has finished its initial read.
+  assetsLoaded: boolean;
   // Mesh import review modal
   pendingMeshImport: PendingMeshImportView | null;
   resolveMeshImport: (decision: MeshImportDecision | null) => void;
@@ -311,8 +315,11 @@ const EngineContext = createContext<{
     removeTerrainMaterial: () => {},
     updateTerrainMaterial: () => {},
     meshes: [],
+    addMesh: () => {},
     removeMesh: () => {},
+    updateMesh: () => {},
     importMeshFiles: async () => {},
+    assetsLoaded: false,
     pendingMeshImport: null,
     resolveMeshImport: () => {},
     importAnimationFiles: async () => {},
@@ -472,6 +479,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const addMesh = (m: MeshAsset) => setMeshes(prev => [...prev, m]);
   const removeMesh = (id: string) => setMeshes(prev => prev.filter(x => x.id !== id));
+  const updateMesh = (id: string, m: MeshAsset) => setMeshes(prev => prev.map(x => x.id === id ? m : x));
+
+  // True once all four IndexedDB-backed libraries have finished their initial read. The asset explorer's
+  // path index must not prune entries before this — the arrays start empty, and a pruning pass against an
+  // empty library would drop every folder assignment the user has made.
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
+  useEffect(() => {
+    if (assetsLoaded) return;
+    const timer = window.setInterval(() => {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && meshesLoadedRef.current) {
+        setAssetsLoaded(true);
+        window.clearInterval(timer);
+      }
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [assetsLoaded]);
 
   // Mesh import review modal: importMeshFiles parks each parsed mesh here and awaits the user's decision
   // (resolved by MeshImportModal via resolveMeshImport). The resolver lives in a ref so the promise in
@@ -1694,8 +1717,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       removeTerrainMaterial,
       updateTerrainMaterial,
       meshes,
+      addMesh,
       removeMesh,
+      updateMesh,
       importMeshFiles,
+      assetsLoaded,
       pendingMeshImport,
       resolveMeshImport,
       importAnimationFiles,

@@ -97,19 +97,15 @@ export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, num
     case 'cylinder':
       model = new Model(Geometry.Cylinder(12, 1, 1), Material.Basic({ color }, { wireframe: true }));
       break;
-    case 'convex': {
-      // Hull faces are index loops (possibly polygons), so fan-triangulate them. Unlike the
-      // primitives above, a hull carries its own geometry rather than scaling a unit primitive.
-      const indices: number[] = [];
-      for (const face of shape.faces)
-        for (let i = 1; i < face.length - 1; i++) indices.push(face[0], face[i], face[i + 1]);
-      const positions = shape.vertices.map((v) => [v[0], v[1], v[2]] as [number, number, number]);
+    case 'convex':
+      // Geometry.ConvexHull emits each hull edge once as a gl.LINES pair AND fills normals/uvs —
+      // both are required: wireframe materials consume the index buffer as line pairs, and the VAO
+      // is strided by the shader's attribute list, so a positions-only geometry scrambles.
       model = new Model(
-        new Geometry(positions, [], [], [], [], indices, false),
+        Geometry.ConvexHull(shape.vertices, shape.faces),
         Material.Basic({ color }, { wireframe: true })
       );
       break;
-    }
     case 'plane':
     default:
       model = null;
@@ -261,24 +257,27 @@ function ensureShapeGroup(
  * stale ones. Idempotent — safe to call on every scene/physics change (in edit mode only).
  */
 /**
- * Upgrade legacy convex hulls in place. v1 hulls were built from a sampled subset of the mesh, whose
- * hull can cut inside the mesh; v2 hulls are containment-guaranteed and gather child meshes too.
- * Rebuild any convex shape without the v2 marker from the node's current geometry; if the geometry
- * is gone, just stamp it so the rebuild isn't retried every reconcile.
+ * Upgrade legacy convex hulls in place. v1 hulled a sampled vertex subset (can cut inside the
+ * mesh); v2's half-space clipper had numerical failures on vertices lying exactly on a cutting
+ * plane. v3 is the AABB-anchored carve with an absolute containment audit. Rebuild any convex
+ * shape without the v3 marker from the node's current geometry; if the geometry is gone, just
+ * stamp it so the rebuild isn't retried every reconcile.
  */
+const HULL_VERSION = 5; // 5 = greedy deepest-cut plane selection (angular FPS could fill the budget with box-parallel planes)
 function migrateConvexShapes(scene: Scene, shapeLists: Map<string, { shapes: ShapeDescription[] }>) {
   for (const [id, entry] of shapeLists) {
-    if (!entry.shapes.some((s) => s.type === 'convex' && s.v !== 2)) continue;
+    if (!entry.shapes.some((s) => s.type === 'convex' && s.v !== HULL_VERSION)) continue;
     const target = scene.getNodeById(id);
     if (!target) continue;
 
     const positions = collectHullPositions(target);
     entry.shapes = entry.shapes.map((s) => {
-      if (s.type !== 'convex' || s.v === 2) return s;
+      if (s.type !== 'convex' || s.v === HULL_VERSION) return s;
       const hull = positions ? hullFromPositions(positions, s.quality) : null;
+      console.log(`[hull] migrate v${s.v ?? 1}->v${HULL_VERSION} node='${target.name}' quality=${s.quality} -> ${hull ? `${hull.vertices.length} vertices, ${hull.faces.length} faces` : 'kept as-is (no geometry)'}`);
       return hull
-        ? { ...s, vertices: hull.vertices, faces: hull.faces, offset: hull.center, v: 2 as const }
-        : { ...s, v: 2 as const };
+        ? { ...s, vertices: hull.vertices, faces: hull.faces, offset: hull.center, v: HULL_VERSION }
+        : { ...s, v: HULL_VERSION };
     });
     shapeLists.set(id, entry);
   }

@@ -1,0 +1,256 @@
+import { TextureManager } from 'cleo'
+import type { MaterialAsset } from '../../utils/materials'
+import type { TerrainMaterialAsset } from '../../utils/terrainMaterials'
+import type { Template } from '../../utils/templates'
+import type { MeshAsset } from '../../utils/meshes'
+import { cryptoRandomId } from '../../utils/UIModel'
+import { AssetKind, KIND_LABEL } from '../../utils/vfs'
+
+// One adapter per asset kind, so the file-manager event bridge never has to branch five ways. Everything
+// the explorer does to an asset — read its name/thumbnail, rename it, duplicate it, delete it, open its
+// editor — goes through here.
+
+export type AssetDeps = {
+  materials: MaterialAsset[]
+  terrainMaterials: TerrainMaterialAsset[]
+  templates: Template[]
+  meshes: MeshAsset[]
+
+  addMaterial: (m: MaterialAsset) => void
+  updateMaterial: (id: string, m: MaterialAsset) => void
+  removeMaterial: (id: string) => void
+  addTerrainMaterial: (m: TerrainMaterialAsset) => void
+  updateTerrainMaterial: (id: string, m: TerrainMaterialAsset) => void
+  removeTerrainMaterial: (id: string) => void
+  addTemplate: (t: Template) => void
+  updateTemplate: (id: string, t: Template) => void
+  removeTemplate: (id: string) => void
+  addMesh: (m: MeshAsset) => void
+  updateMesh: (id: string, m: MeshAsset) => void
+  removeMesh: (id: string) => void
+
+  enterMaterialEditor: (id?: string) => void
+  enterTerrainMaterialEditor: (id?: string) => void
+  enterTemplateEditor: (id?: string) => void
+
+  emit: (event: string, payload?: any) => void
+}
+
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | MeshAsset
+
+function deepClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value))
+}
+
+/** The asset record behind an entry, or undefined. Textures have no record — they return undefined. */
+export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
+  switch (kind) {
+    case 'material': return deps.materials.find(m => m.id === id)
+    case 'terrainMaterial': return deps.terrainMaterials.find(m => m.id === id)
+    case 'template': return deps.templates.find(t => t.id === id)
+    case 'mesh': return deps.meshes.find(m => m.id === id)
+    case 'texture': return undefined
+  }
+}
+
+/** True when the asset still exists (a texture exists iff it is registered in the TextureManager). */
+export function assetExists(kind: AssetKind, id: string, deps: AssetDeps): boolean {
+  if (kind === 'texture') return !!TextureManager.Instance.getTexture(id)
+  return !!findAsset(kind, id, deps)
+}
+
+/** A rough byte size, computed once when an asset is first indexed — never per render. */
+export function sizeOfAsset(kind: AssetKind, id: string, deps: AssetDeps): number | undefined {
+  if (kind === 'texture') {
+    const data = TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined
+    const src = data instanceof HTMLImageElement ? data.src : ''
+    // A data: URL is base64, so ~3 bytes per 4 characters. A blob:/http: src tells us nothing.
+    return src.startsWith('data:') ? Math.round(src.length * 0.75) : undefined
+  }
+  const asset = findAsset(kind, id, deps)
+  if (!asset) return undefined
+  try { return JSON.stringify(asset).length } catch { return undefined }
+}
+
+/** The preview image for a card: the asset's rendered thumbnail, or the texture's own image. */
+export function thumbnailOf(kind: AssetKind, id: string, deps: AssetDeps): string | null {
+  if (kind === 'texture') {
+    const data = TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined
+    return data instanceof HTMLImageElement && data.src ? data.src : null
+  }
+  // Templates have no thumbnail field at all; materials/terrain materials start with an empty one until
+  // their first save. Both fall through to the kind's icon.
+  const asset = findAsset(kind, id, deps) as { thumbnail?: string } | undefined
+  return asset?.thumbnail || null
+}
+
+/**
+ * Rename an asset to `stem` (the new basename without its extension).
+ * Textures are deliberately exempt: a texture's id is its name, and that id is baked into every serialized
+ * material that references it — renaming it would orphan them. The VFS path carries the display name instead.
+ */
+export function renameAsset(kind: AssetKind, id: string, stem: string, deps: AssetDeps): void {
+  switch (kind) {
+    case 'material': {
+      const a = deps.materials.find(m => m.id === id)
+      if (a) deps.updateMaterial(id, { ...a, name: stem })
+      break
+    }
+    case 'terrainMaterial': {
+      const a = deps.terrainMaterials.find(m => m.id === id)
+      if (a) deps.updateTerrainMaterial(id, { ...a, name: stem })
+      break
+    }
+    case 'template': {
+      const a = deps.templates.find(t => t.id === id)
+      if (a) deps.updateTemplate(id, { ...a, name: stem })
+      break
+    }
+    case 'mesh': {
+      const a = deps.meshes.find(m => m.id === id)
+      if (a) deps.updateMesh(id, { ...a, name: stem })
+      break
+    }
+    case 'texture':
+      break
+  }
+}
+
+/** Delete an asset. Each library's remover already unlinks the nodes that referenced it. */
+export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void {
+  switch (kind) {
+    case 'material': deps.removeMaterial(id); break
+    case 'terrainMaterial': deps.removeTerrainMaterial(id); break
+    case 'template': deps.removeTemplate(id); break
+    case 'mesh': deps.removeMesh(id); break
+    case 'texture':
+      TextureManager.Instance.removeTexture(id)
+      deps.emit('TEXTURES_CHANGED')
+      break
+  }
+}
+
+/**
+ * Deep-clone an asset under a new id and name. Returns the new asset id, or null if it couldn't be cloned.
+ * A mesh's `materialIds` are intentionally NOT cloned — the copy shares the originals' material assets.
+ */
+export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: AssetDeps): string | null {
+  const newId = cryptoRandomId()
+  switch (kind) {
+    case 'material': {
+      const a = deps.materials.find(m => m.id === id)
+      if (!a) return null
+      deps.addMaterial({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'terrainMaterial': {
+      const a = deps.terrainMaterials.find(m => m.id === id)
+      if (!a) return null
+      deps.addTerrainMaterial({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'template': {
+      const a = deps.templates.find(t => t.id === id)
+      if (!a) return null
+      deps.addTemplate({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'mesh': {
+      const a = deps.meshes.find(m => m.id === id)
+      if (!a) return null
+      deps.addMesh({ ...deepClone(a), id: newId, name: stem, materialIds: [...(a.materialIds ?? [])] })
+      return newId
+    }
+    case 'texture': {
+      const tm = TextureManager.Instance
+      const source = tm.getTexture(id)
+      if (!source) return null
+      const data = tm.serializeTexture(id) // re-encodes the image to a PNG data URL
+      if (!data) return null
+      // Keep the pretty name as the TextureManager id when it is free — that id is what shows up inside
+      // serialized materials — but never collide with an existing texture.
+      const texId = tm.getTexture(stem) ? `${stem}-${newId.slice(0, 6)}` : stem
+      tm.addTextureFromBase64(data, source.config, texId)
+      deps.emit('TEXTURES_CHANGED')
+      return texId
+    }
+  }
+}
+
+/** Open the asset's editor. Returns false for kinds that have no editor (meshes, textures). */
+export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean {
+  switch (kind) {
+    case 'material': deps.enterMaterialEditor(id); return true
+    case 'terrainMaterial': deps.enterTerrainMaterialEditor(id); return true
+    case 'template': deps.enterTemplateEditor(id); return true
+    default: return false
+  }
+}
+
+/** What deleting this asset does to the things still referencing it — shown in the confirm dialog. */
+export function deleteConsequence(kind: AssetKind): string {
+  switch (kind) {
+    case 'material': return 'nodes using it fall back to a basic material'
+    case 'terrainMaterial': return 'terrain layers painted with it are cleared'
+    case 'template': return 'placed instances are unlinked and become normal nodes'
+    case 'mesh': return 'placed copies stay in the scene'
+    case 'texture': return 'materials using it show no texture'
+  }
+}
+
+/** The DataTransfer entries a drag of this asset must carry, so every existing drop target keeps working. */
+export function dragPayload(kind: AssetKind, assetId: string): [string, string][] {
+  switch (kind) {
+    case 'mesh': return [['text/cleo-mesh', assetId]]
+    case 'template': return [['text/cleo-template', assetId]]
+    case 'material': return [['text/cleo-material', assetId]]
+    case 'terrainMaterial': return [['text/cleo-terrain-material', assetId]]
+    case 'texture': return [
+      ['text/cleo-asset', JSON.stringify({ type: 'texture', id: assetId })],
+      ['text/plain', assetId], // TextureInspector's fallback
+    ]
+  }
+}
+
+/** Human-readable kind, for tooltips and dialogs. */
+export function labelOf(kind: AssetKind): string {
+  return KIND_LABEL[kind]
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Icons. Inlined as data URIs: the SVAR default hits its CDN for one SVG per card, which we never want.
+// ---------------------------------------------------------------------------------------------------
+
+// Line icons in the same stroke style as the chrome glyphs in filemanager.css, tinted per kind so a card
+// without a thumbnail still reads at a glance.
+function svg(stroke: string, body: string): string {
+  return `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`,
+  )}`
+}
+
+const ICONS: Record<AssetKind | 'folder', string> = {
+  folder: svg('#8f8fff',
+    `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="#8f8fff" fill-opacity=".16"/>`,
+  ),
+  material: svg('#6f9fe8',
+    `<circle cx="12" cy="12" r="8.5" fill="#326acc" fill-opacity=".2"/><path d="M7.5 9.5a5 5 0 0 1 4-2.9"/>`,
+  ),
+  terrainMaterial: svg('#5cbf5c',
+    `<path d="M2 19 8.5 8l4 5.6L15 10l7 9z" fill="#2c7a2c" fill-opacity=".2"/>`,
+  ),
+  template: svg('#b08fef',
+    `<rect x="4" y="4" width="16" height="16" rx="2.5" fill="#7a4fd4" fill-opacity=".18"/><path d="M8 10.5h8M8 14.5h5"/>`,
+  ),
+  mesh: svg('#4fc3d5',
+    `<path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" fill="#1f7f8f" fill-opacity=".18"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/>`,
+  ),
+  texture: svg('#9aa4b2',
+    `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>`,
+  ),
+}
+
+/** Icon URL for a file-manager entry, by kind (or 'folder'). */
+export function iconFor(kind: AssetKind | 'folder'): string {
+  return ICONS[kind]
+}

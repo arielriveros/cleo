@@ -11,11 +11,7 @@ import Explorer from "./sceneInspector/Explorer";
 import BottomBar, { BottomBarResizer } from "../components/BottomBar";
 import Logger from "./logger/Logger";
 import Tabs, { Tab } from "../components/Tabs";
-import AssetExplorer from "./assets/AssetExplorer";
-import TemplateExplorer from "./sceneInspector/TemplateExplorer";
-import MaterialExplorer from "./materials/MaterialExplorer";
-import TerrainMaterialExplorer from "./terrainMaterials/TerrainMaterialExplorer";
-import MeshExplorer from "./meshes/MeshExplorer";
+import AssetsExplorer from "./assets/AssetsExplorer";
 import MeshImportModal from "./meshes/MeshImportModal";
 import AnimationImportModal from "./animation/AnimationImportModal";
 import { StateMachineProvider } from "./animation/StateMachineContext";
@@ -24,17 +20,32 @@ import UIOverlay from "./uiInspector/UIOverlay";
 import LoadingScreen from "../components/LoadingScreen";
 import { LAYOUT_KEY } from "../utils/projectStorage";
 
-const DEFAULT_BARS = { left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15 };
+// The asset explorer needs a bit more room than the old card grids did — it has a folder tree, a toolbar
+// and breadcrumbs of its own — so the bottom bar's floor is higher than it used to be.
+const DEFAULT_BARS = { left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 22 };
+
+type BottomTab = 'Logger' | 'Assets';
+
+// The five per-kind asset tabs (Textures/Templates/Materials/TerrainMaterials/Meshes) were merged into one
+// file-manager-style Assets tab, so any of their persisted names now resolves to it.
+const LEGACY_ASSET_TABS = ['Textures', 'Templates', 'Materials', 'TerrainMaterials', 'Meshes', 'Assets'];
+
+export function normalizeBottomTab(tab: unknown): BottomTab {
+  return LEGACY_ASSET_TABS.includes(tab as string) ? 'Assets' : 'Logger';
+}
 
 // Restore persisted panel layout (falls back to defaults).
-function readLayout(): { barsDimensions: typeof DEFAULT_BARS; bottomTab: 'Logger' | 'Textures' | 'Templates' | 'Materials' | 'TerrainMaterials' | 'Meshes' } {
+function readLayout(): { barsDimensions: typeof DEFAULT_BARS; bottomTab: BottomTab } {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
     if (raw) {
       const l = JSON.parse(raw);
-      // Migrate the old 'Assets' tab name to 'Textures'.
-      const bottomTab = l.bottomTab === 'Assets' ? 'Textures' : (l.bottomTab ?? 'Logger');
-      return { barsDimensions: { ...DEFAULT_BARS, ...(l.barsDimensions ?? {}) }, bottomTab };
+      const saved = { ...DEFAULT_BARS, ...(l.barsDimensions ?? {}) };
+      // minHeight is a constraint, not a preference — a layout saved before the asset explorer landed would
+      // otherwise restore the old 15vh floor and squash it.
+      saved.minHeight = DEFAULT_BARS.minHeight;
+      saved.height = Math.max(saved.height, saved.minHeight);
+      return { barsDimensions: saved, bottomTab: normalizeBottomTab(l.bottomTab) };
     }
   } catch { /* ignore */ }
   return { barsDimensions: DEFAULT_BARS, bottomTab: 'Logger' };
@@ -43,7 +54,7 @@ function readLayout(): { barsDimensions: typeof DEFAULT_BARS; bottomTab: 'Logger
 export default function Editor() {
   const { instance, eventEmitter, isSceneReady, loadingProgress, editorMode, isPlayMode } = useCleoEngine();
   const [barsDimensions, setBarsDimensions] = useState(() => readLayout().barsDimensions);
-  const [bottomTab, setBottomTab] = useState<'Logger' | 'Textures' | 'Templates' | 'Materials' | 'TerrainMaterials' | 'Meshes'>(() => readLayout().bottomTab);
+  const [bottomTab, setBottomTab] = useState<BottomTab>(() => readLayout().bottomTab);
 
   // Landscape mode hides both side inspectors; renderer mode additionally hides the bottom bar,
   // leaving only the viewport + the floating Renderer Options window. Material mode hides only the
@@ -57,26 +68,20 @@ export default function Editor() {
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
       if (state === 'stop') {
-        setBarsDimensions({left: 20, right: 25, minLeft: 12, minRight: 21, height: 30, minHeight: 15});
+        setBarsDimensions({...DEFAULT_BARS});
       }
-  
+
       if (state === 'play' || state === 'pause') {
         setBarsDimensions({left: 0, right: 0, minLeft: 0, minRight: 0, height: 0, minHeight: 0});
       }
     }
     eventEmitter.on('SET_PLAY_STATE', handlePlayState);
-    return () => { eventEmitter.off('SET_PLAY_STATE', handlePlayState) };    
+    return () => { eventEmitter.off('SET_PLAY_STATE', handlePlayState) };
   }, [eventEmitter]);
 
+  // Any legacy per-kind asset tab name now resolves to the merged Assets tab.
   useEffect(() => {
-    if (bottomTab === 'Textures') {
-      eventEmitter.emit('TEXTURES_CHANGED');
-    }
-  }, [bottomTab]);
-
-  // The Template mode segment focuses the Templates bottom panel.
-  useEffect(() => {
-    const onFocus = (tab: 'Logger' | 'Textures' | 'Templates' | 'Materials' | 'TerrainMaterials' | 'Meshes') => setBottomTab(tab);
+    const onFocus = (tab: unknown) => setBottomTab(normalizeBottomTab(tab));
     eventEmitter.on('FOCUS_BOTTOM_TAB', onFocus);
     return () => { eventEmitter.off('FOCUS_BOTTOM_TAB', onFocus); };
   }, [eventEmitter]);
@@ -137,30 +142,16 @@ export default function Editor() {
             <BottomBar height={`${barsDimensions.height}vh`} minHeight={`${barsDimensions.minHeight}vh`}>
               <Tabs>
                 <Tab title='Logger' onClick={() => setBottomTab('Logger')} selected={bottomTab === 'Logger'} />
-                <Tab title='Textures' onClick={() => setBottomTab('Textures')} selected={bottomTab === 'Textures'} />
-                <Tab title='Templates' onClick={() => setBottomTab('Templates')} selected={bottomTab === 'Templates'} />
-                <Tab title='Materials' onClick={() => setBottomTab('Materials')} selected={bottomTab === 'Materials'} />
-                <Tab title='Terrain Mat.' onClick={() => setBottomTab('TerrainMaterials')} selected={bottomTab === 'TerrainMaterials'} />
-                <Tab title='Meshes' onClick={() => setBottomTab('Meshes')} selected={bottomTab === 'Meshes'} />
+                <Tab title='Assets' onClick={() => setBottomTab('Assets')} selected={bottomTab === 'Assets'} />
               </Tabs>
+              {/* Both panels stay mounted and are toggled with block/hidden: unmounting the asset explorer
+                  would tear down the file manager's store and lose the folder the user was browsing. */}
               <div className="flex flex-col text-white bg-surface-raised w-full h-full overflow-hidden">
                 <div className={`${bottomTab === 'Logger' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
                   <Logger />
                 </div>
-                <div className={`${bottomTab === 'Textures' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
-                  <AssetExplorer />
-                </div>
-                <div className={`${bottomTab === 'Templates' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
-                  <TemplateExplorer />
-                </div>
-                <div className={`${bottomTab === 'Materials' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
-                  <MaterialExplorer />
-                </div>
-                <div className={`${bottomTab === 'TerrainMaterials' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
-                  <TerrainMaterialExplorer />
-                </div>
-                <div className={`${bottomTab === 'Meshes' ? 'block' : 'hidden'} w-full h-full overflow-y-auto`}>
-                  <MeshExplorer />
+                <div className={`${bottomTab === 'Assets' ? 'block' : 'hidden'} w-full h-full overflow-hidden`}>
+                  <AssetsExplorer />
                 </div>
               </div>
             </BottomBar>

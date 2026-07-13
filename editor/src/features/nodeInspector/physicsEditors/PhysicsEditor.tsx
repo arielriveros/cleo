@@ -182,8 +182,9 @@ export default function PhysicsEditor(props: {node: Node}) {
   const buildHull = (quality: HullQuality): ShapeDescription | null => {
     const positions = collectHullPositions(props.node);
     const hull = positions ? hullFromPositions(positions, quality) : null;
+    console.log(`[hull] node='${props.node.name}' quality=${quality} positions=${positions?.length ?? 0} -> ${hull ? `${hull.vertices.length} vertices, ${hull.faces.length} faces` : 'null'}`);
     if (!hull) return null;
-    return { type: 'convex', quality, vertices: hull.vertices, faces: hull.faces, offset: hull.center, rotation: [0, 0, 0], v: 2 };
+    return { type: 'convex', quality, vertices: hull.vertices, faces: hull.faces, offset: hull.center, rotation: [0, 0, 0], v: 5 };
   };
 
   const addHull = (target: 'body' | 'trigger', quality: HullQuality): boolean => {

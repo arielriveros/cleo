@@ -68,12 +68,7 @@ export class Shape {
             faces: faces.map(f => [...f]),
         });
 
-        // Fan-triangulate the (possibly polygonal) faces for the debug wireframe.
-        const indices: number[] = [];
-        for (const face of faces)
-            for (let i = 1; i < face.length - 1; i++) indices.push(face[0], face[i], face[i + 1]);
-
-        return new Shape(hull, new Geometry(scaled, [], [], [], [], indices, false));
+        return new Shape(hull, Geometry.ConvexHull(scaled, faces));
     }
 
     /**

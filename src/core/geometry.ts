@@ -386,6 +386,44 @@ export class Geometry {
         return new Geometry(positions, normals, uvs, [], [], indices, !asWireframe);
     }
 
+    /**
+     * Wireframe geometry for a convex hull collider. `vertices` are the hull points (typically
+     * centered on their centroid, as `convexHull.ts` emits them) and `faces` are index loops.
+     * Each hull edge is emitted exactly once as a gl.LINES pair — wireframe materials draw the
+     * index buffer as line pairs, so triangle indices would render as edges that don't exist.
+     * Normals and uvs are filled for every vertex: `getData()` skips empty attribute arrays while
+     * the mesh VAO is strided by the *shader's* attribute list, so a positions-only geometry would
+     * be read at the wrong stride and scramble.
+     */
+    public static ConvexHull(vertices: number[][], faces: number[][]): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+
+        // The hull is centered on its centroid, so the outward direction doubles as a normal.
+        for (const v of vertices) {
+            positions.push([v[0], v[1], v[2]]);
+            const l = Math.hypot(v[0], v[1], v[2]) || 1;
+            normals.push([v[0] / l, v[1] / l, v[2] / l]);
+            uvs.push([0, 0]);
+        }
+
+        const indices: number[] = [];
+        const seen = new Set<string>();
+        for (const face of faces) {
+            for (let i = 0; i < face.length; i++) {
+                const a = face[i];
+                const b = face[(i + 1) % face.length];
+                const key = a < b ? `${a},${b}` : `${b},${a}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                indices.push(a, b);
+            }
+        }
+
+        return new Geometry(positions, normals, uvs, [], [], indices, false);
+    }
+
     public static Sphere(segments: number = 32, radius: number = 1): Geometry {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];

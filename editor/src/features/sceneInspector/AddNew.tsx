@@ -189,7 +189,7 @@ export default function AddNew() {
   // external textures/ folder resolve (the browser hands us every file with its webkitRelativePath).
   const importModelFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    eventEmitter.emit('FOCUS_BOTTOM_TAB', 'Meshes'); // surface the library so the new cards are visible
+    eventEmitter.emit('FOCUS_BOTTOM_TAB', 'Assets'); // surface the library so the new cards are visible
     importMeshFiles(Array.from(files)).catch(err => console.error(err));
   }
 

@@ -3,11 +3,16 @@
  * builder, so this is a self-contained quickhull producing exactly the `{ vertices, faces }` pair
  * cannon expects (faces are index loops, wound CCW seen from outside).
  *
- * The definition levels are an *outer* approximation, never an inner one: the hull is simplified by
- * intersecting supporting half-spaces of the mesh, and a supporting half-space contains every mesh
- * vertex by definition. Dropping planes can therefore only ever add volume, so a lower definition is
- * a looser wrapper around the same mesh — it never cuts into it. Plane selection is incremental, so
- * each level's planes are a superset of the level below: volume shrinks monotonically with quality.
+ * Definition semantics (v3):
+ *  - **Low is exactly the mesh's bounding box.** Every mesh vertex is inside it by construction.
+ *  - Each higher level carves volume off that box with *supporting half-spaces* of the mesh — a
+ *    supporting plane's offset is measured against every mesh position, so no accepted cut can ever
+ *    push a mesh vertex outside. Plane selection is incremental, so each level's planes are a
+ *    superset of the level below: volume shrinks monotonically with quality.
+ *  - Each carve step is validated (valid polytope, volume must not grow) and skipped on failure, so
+ *    the worst possible output at any level is the bounding box itself. A final audit checks every
+ *    input vertex against every face plane and falls back to the box outright if containment is
+ *    violated — degradation is allowed, a vertex outside the hull is not.
  *
  * Collision support (cannon-es 0.20): convex collides with convex, box, sphere, plane, cylinder,
  * heightfield and particle. There is no convex/trimesh narrowphase.
@@ -25,19 +30,18 @@ export type Hull = {
 export type HullQuality = 'low' | 'medium' | 'high' | 'veryHigh';
 
 /**
- * Face budgets per quality level. cannon's convex/convex narrowphase tests every face axis plus every
- * edge-edge pair, so this is a real runtime cost and not just a memory one. Six of the budget are
- * spent on the bounding box the hull is carved out of.
+ * Total face budgets per quality level: the 6 bounding-box planes plus carve planes. cannon's
+ * convex/convex narrowphase tests every face axis plus every edge-edge pair, so face count is a
+ * real runtime cost and not just a memory one.
  */
 export const HULL_BUDGETS: Record<HullQuality, number> = {
-    low: 12,
-    medium: 24,
-    high: 48,
-    veryHigh: 96,
+    low: 6,       // the bounding box, untouched
+    medium: 14,   // + up to 8 carve planes
+    high: 26,     // + up to 20
+    veryHigh: 50, // + up to 44
 };
 
 type V3 = number[];
-type Plane = { n: V3; d: number }; // half-space: dot(n, x) <= d
 type Poly = { vertices: V3[]; faces: number[][] };
 
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -67,6 +71,18 @@ function loopNormal(vertices: V3[], loop: number[]): V3 {
     return n;
 }
 
+/** Signed volume of a polytope with outward CCW faces (divergence theorem, fan per face). */
+function volumeOf(poly: Poly): number {
+    let v = 0;
+    for (const f of poly.faces) {
+        for (let i = 1; i < f.length - 1; i++) {
+            const a = poly.vertices[f[0]], b = poly.vertices[f[i]], c = poly.vertices[f[i + 1]];
+            v += dot(a, cross(b, c)) / 6;
+        }
+    }
+    return Math.abs(v);
+}
+
 function epsilonFor(points: number[][]): number {
     let extent = 0;
     for (const p of points) extent = Math.max(extent, Math.abs(p[0]), Math.abs(p[1]), Math.abs(p[2]));
@@ -75,16 +91,16 @@ function epsilonFor(points: number[][]): number {
 
 /**
  * Ceiling on how many points the quickhull runs over. Quickhull is superlinear in the number of
- * points that end up *on* the hull, and an organic 40k-vertex mesh puts most of them there — enough
- * to lock the editor up for minutes. It is safe to cap: the hull is only used to propose face
- * normals, and containment comes from measuring each plane's offset against the full point set.
+ * points that end up *on* the hull, and an organic 40k-vertex mesh puts most of them there. It is
+ * safe to cap: the silhouette hull only proposes carve-plane *normals* — containment comes from
+ * measuring each plane's offset against the full point set.
  */
 const MAX_HULL_POINTS = 600;
 
 /**
  * Reduce a cloud to at most `budget` points by support mapping: for each of N spread-out directions,
- * keep the furthest point along it. Every point kept is genuinely on the hull, so the normals derived
- * from them are representative of the real silhouette.
+ * keep the furthest point along it. Every point kept is genuinely on the hull, so the normals
+ * derived from them are representative of the real silhouette.
  */
 function supportSample(points: V3[], budget: number): V3[] {
     if (points.length <= budget) return points;
@@ -133,7 +149,7 @@ function deduplicate(points: number[][], eps: number): V3[] {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Quickhull
+// Quickhull (exact hull of a point set, triangle output)
 // ---------------------------------------------------------------------------------------------
 
 interface Face {
@@ -269,127 +285,83 @@ function quickhull(points: V3[], eps: number): Poly | null {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Half-space carving
+// Cleanup: coplanar merge, edge-consistent collinear removal, welding
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Clip a convex polytope with the half-space `dot(n, x) <= d`. Retained faces keep their winding;
- * the new cut face is wound CCW about `n` so it also faces outward. Returns the polytope unchanged
- * when the plane doesn't cut it.
+ * Merge adjacent coplanar faces into polygon loops (a carved box becomes 6 quads, not 12
+ * triangles), which cuts both cannon's SAT axis count and its O(E^2) edge construction. If a
+ * group's boundary doesn't walk into a single clean loop, its triangles are kept as-is — more
+ * faces, but still valid geometry.
  */
-function clipByPlane(poly: Poly, plane: Plane, eps: number): Poly {
-    const dist = poly.vertices.map((v) => dot(plane.n, v) - plane.d);
-    if (dist.every((x) => x <= eps)) return poly;
-
-    const vertices: V3[] = [];
-    const kept = new Map<number, number>();   // old vertex index -> new
-    const onEdge = new Map<string, number>(); // edge key -> new vertex on the cut
-
-    const keep = (i: number): number => {
-        let mapped = kept.get(i);
-        if (mapped === undefined) { mapped = vertices.length; kept.set(i, mapped); vertices.push(poly.vertices[i]); }
-        return mapped;
-    };
-    const cut = (a: number, b: number): number => {
-        const key = a < b ? `${a},${b}` : `${b},${a}`;
-        let mapped = onEdge.get(key);
-        if (mapped === undefined) {
-            const t = dist[a] / (dist[a] - dist[b]);
-            const va = poly.vertices[a], vb = poly.vertices[b];
-            mapped = vertices.length;
-            onEdge.set(key, mapped);
-            vertices.push([va[0] + (vb[0] - va[0]) * t, va[1] + (vb[1] - va[1]) * t, va[2] + (vb[2] - va[2]) * t]);
-        }
-        return mapped;
-    };
-
-    const faces: number[][] = [];
-    const capPoints = new Set<number>();
-
-    for (const loop of poly.faces) {
-        const out: number[] = [];
-        for (let i = 0; i < loop.length; i++) {
-            const cur = loop[i];
-            const nxt = loop[(i + 1) % loop.length];
-            const inCur = dist[cur] <= eps;
-            const inNxt = dist[nxt] <= eps;
-
-            if (inCur) out.push(keep(cur));
-            if (inCur !== inNxt) { const p = cut(cur, nxt); out.push(p); capPoints.add(p); }
-        }
-        // Drop consecutive duplicates introduced by vertices sitting exactly on the plane.
-        const cleaned = out.filter((v, i) => v !== out[(i + 1) % out.length]);
-        if (cleaned.length >= 3) faces.push(cleaned);
+function mergeCoplanar(poly: Poly, eps: number): Poly {
+    const groups: { normal: V3; offset: number; faces: number[][] }[] = [];
+    for (const face of poly.faces) {
+        const raw = loopNormal(poly.vertices, face);
+        const area = length(raw);
+        if (area <= eps * eps) continue; // zero-area sliver — drop
+        const n: V3 = [raw[0] / area, raw[1] / area, raw[2] / area];
+        const offset = dot(n, poly.vertices[face[0]]);
+        // Only faces lying on the SAME carve/box plane merge — those are exactly coplanar by
+        // construction, so the tolerance can be razor thin. A loose tolerance here is dangerous:
+        // merging two planes ~1 mrad apart yields a "face" whose representative plane is tilted by
+        // that much, which reads as a containment violation of tilt × face-size at the far corners.
+        const group = groups.find((g) => dot(g.normal, n) > 1 - 1e-9 && Math.abs(g.offset - offset) < eps * 2);
+        if (group) group.faces.push(face);
+        else groups.push({ normal: n, offset, faces: [face] });
     }
 
-    // The cut is a convex planar polygon; order its points by angle about the plane normal so the
-    // face comes out CCW from outside (u x v = n makes increasing angle a CCW loop about n).
-    if (capPoints.size >= 3) {
-        const idx = Array.from(capPoints);
-        const c: V3 = [0, 0, 0];
-        for (const i of idx) { c[0] += vertices[i][0]; c[1] += vertices[i][1]; c[2] += vertices[i][2]; }
-        c[0] /= idx.length; c[1] /= idx.length; c[2] /= idx.length;
+    const outFaces: number[][] = [];
+    for (const group of groups) {
+        if (group.faces.length === 1) { outFaces.push(group.faces[0].slice()); continue; }
 
-        const seed: V3 = Math.abs(plane.n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
-        const u = normalize(cross(plane.n, seed));
-        const v = cross(plane.n, u);
-        idx.sort((a, b) => {
-            const pa = sub(vertices[a], c), pb = sub(vertices[b], c);
-            return Math.atan2(dot(pa, v), dot(pa, u)) - Math.atan2(dot(pb, v), dot(pb, u));
-        });
-        faces.push(idx);
+        // Directed edges without an opposing twin inside the group form the region's boundary.
+        const edges = new Map<string, [number, number]>();
+        for (const f of group.faces) {
+            for (let i = 0; i < f.length; i++) {
+                const u = f[i];
+                const v = f[(i + 1) % f.length];
+                if (edges.has(`${v},${u}`)) edges.delete(`${v},${u}`);
+                else edges.set(`${u},${v}`, [u, v]);
+            }
+        }
+
+        const next = new Map<number, number>();
+        let doubled = false;
+        for (const [u, v] of edges.values()) { if (next.has(u)) doubled = true; next.set(u, v); }
+
+        const start = edges.values().next().value?.[0];
+        const loop: number[] = [];
+        if (!doubled && start !== undefined) {
+            let cur = start;
+            while (loop.length <= next.size) {
+                loop.push(cur);
+                const nxt = next.get(cur);
+                if (nxt === undefined) break;
+                cur = nxt;
+                if (cur === start) break;
+            }
+            if (cur === start && loop.length === next.size && loop.length >= 3) {
+                outFaces.push(loop);
+                continue;
+            }
+        }
+        for (const f of group.faces) outFaces.push(f.slice()); // walk failed — keep triangles
     }
-
-    return { vertices, faces };
+    return { vertices: poly.vertices, faces: outFaces };
 }
 
 /**
- * Pick up to `budget` well-spread face normals by farthest-point sampling, seeded from the largest
- * face. The sequence is incremental and depends only on the hull, so a bigger budget always yields a
- * superset of a smaller one — that is what makes higher definitions strictly tighter.
- */
-function selectNormals(poly: Poly, budget: number): V3[] {
-    const normals: V3[] = [];
-    const areas: number[] = [];
-    for (const loop of poly.faces) {
-        const n = loopNormal(poly.vertices, loop);
-        const area = length(n);
-        if (area <= 0) continue;
-        normals.push([n[0] / area, n[1] / area, n[2] / area]);
-        areas.push(area);
-    }
-    if (normals.length === 0) return [];
-    if (normals.length <= budget) return normals;
-
-    let seed = 0;
-    for (let i = 1; i < areas.length; i++) if (areas[i] > areas[seed]) seed = i;
-
-    const chosen = [seed];
-    // Angular distance to the nearest already-chosen normal, maintained incrementally.
-    const closeness = normals.map((n) => dot(n, normals[seed]));
-    while (chosen.length < budget) {
-        let best = -1;
-        let bestCloseness = Infinity;
-        for (let i = 0; i < normals.length; i++) {
-            if (closeness[i] < bestCloseness) { bestCloseness = closeness[i]; best = i; }
-        }
-        if (best < 0 || bestCloseness >= 0.9999) break; // nothing meaningfully new left to add
-        chosen.push(best);
-        for (let i = 0; i < normals.length; i++) closeness[i] = Math.max(closeness[i], dot(normals[i], normals[best]));
-    }
-    return chosen.map((i) => normals[i]);
-}
-
-/**
- * Weld coincident vertices, drop collinear ones from each loop, and discard the degenerate faces
- * that carving leaves behind — a bounding-box face that gets clipped down to a single touch point
- * survives as a zero-area sliver, and cannon would derive a zero-length (i.e. useless) SAT axis from
- * it. Removing them is what turns a carved AABB back into an exact box.
+ * Weld near-coincident vertices and remove collinear ones. Removal is *edge-consistent*: a vertex
+ * is dropped only when it is collinear with its neighbours on EVERY face that references it, so
+ * shared edges can never desync between faces (cannon derives each face's normal from the loop's
+ * first three vertices, and a T-junction would also leave cracks in the wireframe).
  */
 function weld(poly: Poly, eps: number): Poly {
+    // 1. Weld by epsilon grid (global, so remapping is identical across all faces).
     const cells = new Map<string, number>();
     const vertices: V3[] = [];
-    const inv = 1 / eps;
+    const inv = 1 / (eps * 2);
     const remap = poly.vertices.map((v) => {
         const key = `${Math.round(v[0] * inv)},${Math.round(v[1] * inv)},${Math.round(v[2] * inv)}`;
         let idx = cells.get(key);
@@ -397,36 +369,37 @@ function weld(poly: Poly, eps: number): Poly {
         return idx;
     });
 
-    const faces: number[][] = [];
-    for (const original of poly.faces) {
-        let loop = original.map((i) => remap[i]);
-        loop = loop.filter((v, i) => v !== loop[(i + 1) % loop.length]); // consecutive duplicates
+    let faces = poly.faces
+        .map((loop) => {
+            const l = loop.map((i) => remap[i]);
+            return l.filter((v, i) => v !== l[(i + 1) % l.length]); // drop consecutive duplicates
+        })
+        .filter((l) => l.length >= 3 && length(loopNormal(vertices, l)) > eps * eps);
 
-        // Collinear vertices add nothing to the plane but do break cannon's face-normal computation,
-        // which reads only the first three vertices of a loop.
-        for (let pass = 0; pass < 3 && loop.length >= 3; pass++) {
-            const kept = loop.filter((_, i) => {
-                const prev = vertices[loop[(i - 1 + loop.length) % loop.length]];
-                const cur = vertices[loop[i]];
-                const next = vertices[loop[(i + 1) % loop.length]];
-                const a = sub(cur, prev), b = sub(next, cur);
-                return length(cross(a, b)) > eps * Math.max(length(a), length(b));
-            });
-            if (kept.length === loop.length) break;
-            loop = kept;
+    // 2. A vertex is removable only if it adds nothing to ANY face that uses it.
+    const removable = new Map<number, boolean>();
+    for (const loop of faces) {
+        for (let i = 0; i < loop.length; i++) {
+            const v = loop[i];
+            const prev = vertices[loop[(i - 1 + loop.length) % loop.length]];
+            const cur = vertices[v];
+            const next = vertices[loop[(i + 1) % loop.length]];
+            const a = sub(cur, prev), b = sub(next, cur);
+            const collinearHere = length(cross(a, b)) <= eps * Math.max(length(a), length(b));
+            removable.set(v, (removable.get(v) ?? true) && collinearHere);
         }
-
-        if (loop.length < 3) continue;
-        if (length(loopNormal(vertices, loop)) <= eps * eps) continue; // zero area
-        faces.push(loop);
     }
+
+    faces = faces
+        .map((loop) => loop.filter((v) => !removable.get(v)))
+        .filter((l) => l.length >= 3 && length(loopNormal(vertices, l)) > eps * eps);
 
     return { vertices, faces };
 }
 
-/** Recentre on the centroid — cannon validates face planes against the origin — and compact. */
-function finalize(poly: Poly, eps: number): Hull | null {
-    const cleaned = weld(poly, eps);
+/** Compact to referenced vertices, recentre on the centroid, and guarantee outward CCW winding. */
+function finalize(poly: Poly, eps: number, merge: boolean = true): Hull | null {
+    const cleaned = weld(merge ? mergeCoplanar(poly, eps) : poly, eps);
 
     const remap = new Map<number, number>();
     const vertices: V3[] = [];
@@ -437,6 +410,7 @@ function finalize(poly: Poly, eps: number): Hull | null {
     }));
     if (vertices.length < 4 || faces.length < 4) return null;
 
+    // Recentre on the centroid — cannon validates every face plane against the origin.
     const center: V3 = [0, 0, 0];
     for (const v of vertices) { center[0] += v[0]; center[1] += v[1]; center[2] += v[2]; }
     center[0] /= vertices.length; center[1] /= vertices.length; center[2] /= vertices.length;
@@ -455,33 +429,41 @@ export function convexHull(points: number[][], eps?: number): Hull | null {
     return poly ? finalize(poly, epsilon) : null;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Definition carve: AABB progressively cut by supporting half-spaces
+// ---------------------------------------------------------------------------------------------
+
 /**
- * Convex hull of a mesh, simplified to the face budget for `quality`. The result is guaranteed to
- * contain every input position: it is carved out of the mesh's bounding box using only supporting
- * planes, whose offsets are measured against the full point set. Null for degenerate geometry.
+ * Distinct face normals of the silhouette hull, deduplicated (same-plane triangles aggregate their
+ * area) and returned largest-area first, capped. These are the carve-plane candidates; which of
+ * them actually get used is decided greedily by cut depth in `hullFromPositions` — selecting by
+ * angular spread is a trap, because meshes dominated by near-axis-aligned faces then fill the
+ * whole budget with planes that coincide with the bounding box and cannot cut anything.
  */
-export function hullFromPositions(positions: number[][], quality: HullQuality): Hull | null {
-    if (positions.length < 4) return null;
+function candidateNormals(poly: Poly, cap: number): V3[] {
+    const list: { n: V3; area: number }[] = [];
+    for (const loop of poly.faces) {
+        const raw = loopNormal(poly.vertices, loop);
+        const area = length(raw);
+        if (area <= 0) continue;
+        const n: V3 = [raw[0] / area, raw[1] / area, raw[2] / area];
+        const existing = list.find((c) => dot(c.n, n) > 1 - 1e-9);
+        if (existing) existing.area += area;
+        else list.push({ n, area });
+    }
+    list.sort((a, b) => b.area - a.area);
+    return list.slice(0, cap).map((c) => c.n);
+}
 
-    const eps = epsilonFor(positions);
-    const silhouette = quickhull(supportSample(deduplicate(positions, eps), MAX_HULL_POINTS), eps);
-    if (!silhouette) return null;
-
-    // Support of the *whole* point set along a direction. Measuring against every original position
-    // (not the deduplicated/hulled subset) is what makes containment exact rather than approximate.
-    const support = (n: V3): number => {
-        let max = -Infinity;
-        for (const p of positions) max = Math.max(max, dot(n, p));
-        return max;
-    };
-
+/** The mesh's axis-aligned bounding box as a polytope (8 vertices, 6 quads, CCW outward). */
+function boundingBoxPoly(positions: number[][]): Poly | null {
     const min = [Infinity, Infinity, Infinity];
     const max = [-Infinity, -Infinity, -Infinity];
     for (const p of positions)
         for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], p[i]); max[i] = Math.max(max[i], p[i]); }
+    if (!(max[0] > min[0]) || !(max[1] > min[1]) || !(max[2] > min[2])) return null; // flat or empty
 
-    // Start from the bounding box (6 supporting planes) and carve it down with the selected ones.
-    let poly: Poly = {
+    return {
         vertices: [
             [min[0], min[1], min[2]], [max[0], min[1], min[2]], [max[0], max[1], min[2]], [min[0], max[1], min[2]],
             [min[0], min[1], max[2]], [max[0], min[1], max[2]], [max[0], max[1], max[2]], [min[0], max[1], max[2]],
@@ -495,11 +477,167 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
             [1, 2, 6, 5], // +X
         ],
     };
+}
 
-    for (const n of selectNormals(silhouette, Math.max(4, HULL_BUDGETS[quality] - 6))) {
-        poly = clipByPlane(poly, { n, d: support(n) }, eps);
-        if (poly.faces.length < 4) return null;
+/**
+ * Cut `poly` with the half-space `dot(n, x) <= d`, rebuilding the topology with quickhull rather
+ * than maintaining face loops by hand: the clipped polytope is exactly the convex hull of the kept
+ * vertices plus the plane/edge crossing points. Vertices within eps of the plane count as kept and
+ * crossings are only computed for strict sign changes, so the interpolation denominator is bounded
+ * below by 2·eps — a vertex sitting exactly on the plane (ubiquitous in real meshes: flat bases on
+ * the AABB bottom, cylinder caps) can never produce a runaway intersection point.
+ *
+ * Returns null when the cut degenerates; the caller skips the plane in that case.
+ */
+function cutPoly(poly: Poly, n: V3, d: number, eps: number): Poly | null {
+    const dist = poly.vertices.map((v) => dot(n, v) - d);
+
+    let overshoot = 0;
+    for (const x of dist) overshoot = Math.max(overshoot, x);
+    if (overshoot <= 2 * eps) return poly; // plane doesn't meaningfully cut
+
+    const points: V3[] = [];
+    for (let i = 0; i < poly.vertices.length; i++)
+        if (dist[i] <= eps) points.push(poly.vertices[i]);
+
+    // Unique undirected edges from the face loops.
+    const seen = new Set<string>();
+    for (const loop of poly.faces) {
+        for (let i = 0; i < loop.length; i++) {
+            const a = loop[i];
+            const b = loop[(i + 1) % loop.length];
+            const key = a < b ? `${a},${b}` : `${b},${a}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            // Strict crossing only: one end clearly inside, the other clearly outside.
+            const lo = dist[a] < dist[b] ? a : b;
+            const hi = lo === a ? b : a;
+            if (dist[lo] >= -eps || dist[hi] <= eps) continue;
+
+            const t = Math.min(1, Math.max(0, dist[lo] / (dist[lo] - dist[hi])));
+            const va = poly.vertices[lo], vb = poly.vertices[hi];
+            points.push([va[0] + (vb[0] - va[0]) * t, va[1] + (vb[1] - va[1]) * t, va[2] + (vb[2] - va[2]) * t]);
+        }
     }
 
-    return finalize(poly, eps);
+    if (points.length < 4) return null;
+    return quickhull(points, eps);
+}
+
+/**
+ * Convex hull of a mesh at the requested definition. Low is the mesh's bounding box; higher levels
+ * carve it down with supporting half-spaces of the mesh, each measured against every input
+ * position — the result always contains the entire mesh, at every level. Null only for degenerate
+ * geometry (flat / fewer than 4 distinct points).
+ */
+export function hullFromPositions(positions: number[][], quality: HullQuality): Hull | null {
+    if (positions.length < 4) return null;
+
+    const eps = epsilonFor(positions);
+    let poly = boundingBoxPoly(positions);
+    if (!poly) return null;
+    const box = poly;
+
+    let extent = 0;
+    for (const p of positions) extent = Math.max(extent, Math.abs(p[0]), Math.abs(p[1]), Math.abs(p[2]));
+
+    // Defensive: a corrupt/legacy quality value must degrade to medium, not to a NaN budget that
+    // silently skips the carve and leaves every definition identical to the bounding box.
+    const planeBudget = (HULL_BUDGETS[quality] ?? HULL_BUDGETS.medium) - 6;
+    if (planeBudget > 0) {
+        // Candidate normals come from the exact hull of a bounded silhouette sample; offsets are
+        // measured against the FULL point set, which is what makes containment exact.
+        const silhouette = quickhull(supportSample(deduplicate(positions, eps), MAX_HULL_POINTS), eps);
+        if (!silhouette) {
+            console.warn(`convexHull: silhouette hull failed (${positions.length} positions); the '${quality}' hull stays at the bounding box.`);
+        } else {
+            const support = (n: V3): number => {
+                let max = -Infinity;
+                for (const p of positions) max = Math.max(max, dot(n, p));
+                return max;
+            };
+
+            const candidates = candidateNormals(silhouette, 256);
+            const supports = candidates.map((n) => support(n));
+            const used: boolean[] = new Array(candidates.length).fill(false);
+
+            // Greedy deepest-cut-first: each round applies the remaining supporting plane that the
+            // current polytope overhangs the most, until the budget is filled or nothing cuts
+            // deeper than tolerance. Box-parallel candidates have ~zero depth so they never waste
+            // budget, and the sequence is deterministic and quality-independent — a higher
+            // definition always extends the lower one's cuts, keeping volume monotone.
+            let cut = 0, failed = 0;
+            let vol = volumeOf(poly);
+            while (cut < planeBudget) {
+                let best = -1;
+                let bestDepth = 2 * eps;
+                for (let i = 0; i < candidates.length; i++) {
+                    if (used[i]) continue;
+                    let depth = -Infinity;
+                    for (const v of poly.vertices) depth = Math.max(depth, dot(candidates[i], v));
+                    depth -= supports[i];
+                    if (depth > bestDepth) { bestDepth = depth; best = i; }
+                }
+                if (best < 0) break; // nothing left that would cut — the hull IS this polytope
+
+                used[best] = true;
+                const next = cutPoly(poly, candidates[best], supports[best], eps);
+                if (!next || next === poly) { failed++; continue; }
+                // A cut can only remove volume; growth means the step went numerically wrong.
+                const nextVol = volumeOf(next);
+                if (next.faces.length < 4 || nextVol > vol + eps) { failed++; continue; }
+                poly = next;
+                vol = nextVol;
+                cut++;
+            }
+
+            if (cut === 0 && failed > 0) {
+                // Candidates wanted to cut but every attempt degenerated — a genuine anomaly worth
+                // capturing (a boxy mesh where nothing cuts at all is normal and stays silent).
+                console.warn(
+                    `convexHull: all ${failed} cutting planes failed (quality='${quality}'). ` +
+                    `candidates=${candidates.length} positions=${positions.length} extent=${extent.toExponential(3)} eps=${eps.toExponential(3)}. ` +
+                    `Mesh captured in __cleoHullDebug — run copy(JSON.stringify(__cleoHullDebug)) to export it.`
+                );
+                try { (globalThis as any).__cleoHullDebug = { quality, positions }; } catch { /* ignore */ }
+            }
+        }
+    }
+
+    // Absolute containment audit: every input vertex must be on or inside every face plane. Each
+    // plane is anchored at its own loop's outermost vertex (not an arbitrary first vertex), and the
+    // tolerance covers the legitimate eps-scale drift finalize introduces (weld snapping, coplanar
+    // merging) while remaining far below any user-visible violation.
+    const tol = Math.max(eps * 20, extent * 5e-4);
+    const containsAll = (hull: Hull): boolean => {
+        const planes = hull.faces.map((f) => {
+            const n = normalize(loopNormal(hull.vertices, f));
+            let d = -Infinity;
+            for (const i of f) d = Math.max(d, dot(n, hull.vertices[i]));
+            return { n, d };
+        });
+        for (const p of positions) {
+            const local = [p[0] - hull.center[0], p[1] - hull.center[1], p[2] - hull.center[2]];
+            for (const pl of planes) {
+                if (dot(pl.n, local) - pl.d > tol) return false;
+            }
+        }
+        return true;
+    };
+
+    // Failure ladder: a bad coplanar merge must cost faces, never definition. The unmerged variant
+    // keeps the carve's exact planes (as triangles), so only a genuine carve bug ever reaches the
+    // bounding-box fallback — which contains everything by construction.
+    const merged = finalize(poly, eps);
+    if (merged && containsAll(merged)) return merged;
+
+    const unmerged = finalize(poly, eps, false);
+    if (unmerged && containsAll(unmerged)) {
+        console.warn('convexHull: coplanar merge violated containment; using unmerged hull faces.');
+        return unmerged;
+    }
+
+    console.warn('convexHull: carve failed the containment audit; falling back to the bounding box.');
+    return finalize(box, eps);
 }

@@ -1,8 +1,8 @@
 import { Scene } from 'cleo'
 import { getNodeMaterial, getMaterialIdOf, MaterialAsset } from './materials'
 import { collectTextureIds } from './nodeSubtree'
-import { MeshAsset } from './meshes'
-import { Template } from './templates'
+import { MeshAsset, MESH_ID_VAR } from './meshes'
+import { Template, TEMPLATE_ID_VAR } from './templates'
 import { TerrainMaterialAsset } from './terrainMaterials'
 
 // Which texture / material asset ids are actually used anywhere — the main scene plus the asset libraries.
@@ -70,5 +70,43 @@ export function collectReferencedMaterialIds(scene: Scene | null | undefined, me
     }
   }
   for (const m of meshes) for (const id of (m.materialIds || [])) set.add(id)
+  return set
+}
+
+/** Template asset ids referenced by any placed instance (__templateId). */
+export function collectReferencedTemplateIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  if (scene) {
+    for (const node of scene.nodes) {
+      const id = node.getVariable(TEMPLATE_ID_VAR)
+      if (id) set.add(id)
+    }
+  }
+  return set
+}
+
+/** Mesh asset ids referenced by any placed instance (__meshId). */
+export function collectReferencedMeshIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  if (scene) {
+    for (const node of scene.nodes) {
+      const id = node.getVariable(MESH_ID_VAR)
+      if (id) set.add(id)
+    }
+  }
+  return set
+}
+
+/** Terrain-material asset ids referenced by any live terrain paint layer. */
+export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  if (scene) {
+    for (const ln of scene.landscapes) {
+      const terrain: any = (ln as any).terrain
+      for (const layer of terrain?.layers ?? []) {
+        if (layer?.materialId) set.add(layer.materialId)
+      }
+    }
+  }
   return set
 }
