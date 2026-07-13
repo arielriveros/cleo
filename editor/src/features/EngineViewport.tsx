@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
-import { Raycaster } from "cleo";
+import { Raycaster, Node, Vec } from "cleo";
 import PositionGizmo from "./PositionGizmo";
 import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
@@ -12,6 +12,7 @@ import { useStateMachine } from "./animation/StateMachineContext";
 import { SegmentedControl } from "../components/ui";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
 import { instantiateMeshAsset } from "../utils/meshes";
+import { NEW_NODE_MIME, addItemTo, findAddItem } from "./sceneInspector/addCatalog";
 import { captureViewport, releaseViewport } from "../utils/pointerCapture";
 import { GizmoMode } from "./EngineContext";
 
@@ -269,10 +270,43 @@ export default function EngineViewport() {
         else node.setPosition(value);
     };
 
-    // Drop a template (Templates panel) or a mesh (Meshes panel) into the viewport to instantiate a copy.
+    // The world-space point under the cursor, used to place anything dropped into the viewport:
+    // terrain → scene geometry → the ground plane → a fixed distance ahead when the ray hits the sky.
+    const dropPointAt = (clientX: number, clientY: number): Vec.vec3 | null => {
+        const cam = instance?.scene?.activeCamera?.camera;
+        if (!cam || !viewportRef.current) return null;
+        const rect = viewportRef.current.getBoundingClientRect();
+        const ray = Raycaster.screenToRay(clientX - rect.left, clientY - rect.top, rect.width, rect.height, cam);
+
+        for (const landscape of Array.from(editorScene.landscapes) as any[]) {
+            const p = landscape.terrain?.raycast(ray.origin, ray.direction);
+            if (p) return p as Vec.vec3;
+        }
+
+        // Raycaster already skips the __editor__/__debug__ helpers; drop the gizmo too, as click-select does.
+        const hits = Raycaster.raycast(ray, Array.from(editorScene.nodes).filter(n => !(n as any).isGizmo));
+        if (hits.length > 0) return hits[0].point as Vec.vec3;
+
+        const t = -ray.origin[1] / ray.direction[1]; // ground plane y = 0
+        const distance = (Number.isFinite(t) && t > 0) ? t : 10;
+        return Vec.vec3.scaleAndAdd(Vec.vec3.create(), ray.origin, ray.direction, distance);
+    };
+
+    // setPosition is parent-local, and a template drop parent can carry a transform of its own.
+    const placeAt = (node: Node, worldPoint: Vec.vec3, parent: Node) => {
+        const toLocal = Vec.mat4.invert(Vec.mat4.create(), parent.worldTransform);
+        const local = toLocal
+            ? Vec.vec3.transformMat4(Vec.vec3.create(), worldPoint, toLocal)
+            : worldPoint;
+        node.setPosition([local[0], local[1], local[2]]);
+    };
+
+    // Drop a template (Templates panel), a mesh (Meshes panel) or a new node (the Scene panel's Add
+    // section) into the viewport; it is instantiated under the cursor.
     const onViewportDragOver = (e: React.DragEvent) => {
         const types = Array.from(e.dataTransfer.types);
-        if (types.includes('text/cleo-template') || types.includes('text/cleo-mesh')) e.preventDefault();
+        if (types.includes('text/cleo-template') || types.includes('text/cleo-mesh') || types.includes(NEW_NODE_MIME))
+            e.preventDefault();
     };
     const onViewportDrop = (e: React.DragEvent) => {
         if (!editorScene) return;
@@ -282,6 +316,21 @@ export default function EngineViewport() {
         const dropParent = (editorMode === 'template' && templateRootId)
             ? (editorScene.getNodeById(templateRootId) ?? editorScene.root)
             : editorScene.root;
+        const point = dropPointAt(e.clientX, e.clientY);
+
+        const newNodeId = e.dataTransfer.getData(NEW_NODE_MIME);
+        if (newNodeId) {
+            e.preventDefault();
+            const item = findAddItem(newNodeId);
+            if (!item) return;
+            addItemTo(item, dropParent, { editorScene, eventEmitter, triggers })
+                .then(node => {
+                    // Sky/clouds fill the scene — a world position is meaningless for them.
+                    if (point && item.placeable !== false) placeAt(node, point, dropParent);
+                })
+                .catch(err => console.error('Failed to add node:', err));
+            return;
+        }
 
         const meshId = e.dataTransfer.getData('text/cleo-mesh');
         if (meshId) {
@@ -290,6 +339,8 @@ export default function EngineViewport() {
             if (!mesh) return;
             try {
                 const newId = instantiateMeshAsset(mesh, dropParent);
+                const node = editorScene.getNodeById(newId);
+                if (node && point) placeAt(node, point, dropParent);
                 eventEmitter.emit('TEXTURES_CHANGED');
                 eventEmitter.emit('SCENE_CHANGED');
                 eventEmitter.emit('SELECT_NODE', newId);
@@ -306,6 +357,8 @@ export default function EngineViewport() {
         if (!template) return;
         try {
             const newId = instantiateTemplate(template, dropParent, { scripts, bodies, triggers });
+            const node = editorScene.getNodeById(newId);
+            if (node && point) placeAt(node, point, dropParent);
             eventEmitter.emit('TEXTURES_CHANGED');
             eventEmitter.emit('SCENE_CHANGED');
             eventEmitter.emit('SELECT_NODE', newId);

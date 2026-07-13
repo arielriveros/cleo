@@ -2,16 +2,11 @@
 // the values are read from the design tokens in index.css so the console can't drift from the rest of
 // the editor. Read lazily (not at module init) because index.css is injected by style-loader after
 // this module's import is evaluated.
+import { token as color } from '../../utils/cssTokens';
+
 type ConsoleStyles = Record<string, any>;
 
 let cached: ConsoleStyles | null = null;
-
-/** `--danger` holds space-separated RGB channels ("239 68 68"), so alpha comes for free. */
-function color(token: string, alpha = 1): string {
-  const channels = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
-  if (!channels) return alpha === 1 ? '#e5e7eb' : 'transparent';
-  return alpha === 1 ? `rgb(${channels})` : `rgb(${channels} / ${alpha})`;
-}
 
 export function getConsoleStyles(): ConsoleStyles {
   if (cached) return cached;

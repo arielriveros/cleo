@@ -12,7 +12,8 @@ import VisibleIcon from '../../icons/visible.png'
 import HiddenIcon from '../../icons/hidden.png'
 import Collapsable from '../../components/Collapsable';
 import AddNew from './AddNew';
-import { TEMPLATE_ID_VAR } from '../../utils/templates';
+import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
+import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
 
 interface NodeDescription {
   id: string;
@@ -130,7 +131,7 @@ function SceneListRecursive(props: SceneListRecursiveProps) {
 
 
 export default function SceneInspector() {
-  const { editorScene, eventEmitter, bodies, isPlayMode, editorMode, templateRootId } = useCleoEngine()
+  const { editorScene, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
 
   // In template mode the inspector is rooted at the template node itself, so the editor camera/light
@@ -157,13 +158,32 @@ export default function SceneInspector() {
     }
   }
 
-  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => { event.preventDefault() };
-  
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    // Only the two kinds the tree actually accepts, so unrelated drags don't read as droppable here.
+    const types = Array.from(event.dataTransfer.types);
+    if (types.includes('text/cleo-node') || types.includes(NEW_NODE_MIME)) event.preventDefault();
+  };
+
   const handleDrop: React.DragEventHandler<HTMLDivElement> = (event) => {
     event.preventDefault();
 
     // Find the closest parent div with the class 'sceneItem'
     const targetElement = (event.target as HTMLDivElement).closest('.scene-item');
+
+    // A new node dragged out of the Add section: parent it under the row it was dropped on, or under the
+    // tree root when dropped on the empty space below the tree.
+    const newNodeId = event.dataTransfer.getData(NEW_NODE_MIME);
+    if (newNodeId) {
+      const item = findAddItem(newNodeId);
+      const parent = targetElement ? editorScene?.getNodeById(targetElement.id) : treeRoot();
+      if (!item || !parent) return;
+      if (editorMode === 'scene' && isWithinTemplateInstance(parent)) {
+        Logger.warn('Cannot add a node inside a template instance', 'Editor');
+        return;
+      }
+      addItemTo(item, parent, { editorScene, eventEmitter, triggers }).catch(err => console.error(err));
+      return;
+    }
 
     if (targetElement) {
       const targetId = targetElement.id;
@@ -216,10 +236,14 @@ export default function SceneInspector() {
   }
 
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full' onDragOver={handleDragOver} onDrop={handleDrop}>
+    <div className='flex flex-col text-white bg-surface-raised w-full h-full'>
       <AddNew />
+      {/* The drop target is the tree, not the whole panel: the panel also contains the Add section, and a
+          drag released back over Add must not register as a drop into the scene. */}
       <Collapsable title='Scene'>
-        { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode} handleSetVisibility={handleSetVisibility} /> }
+        <div className='min-h-[40px]' onDragOver={handleDragOver} onDrop={handleDrop}>
+          { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode} handleSetVisibility={handleSetVisibility} /> }
+        </div>
       </Collapsable>
     </div>
   )

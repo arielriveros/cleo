@@ -6,9 +6,39 @@ import { applyGameData } from "../utils/projectStorage";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import Topbar from "../components/Topbar";
 import ModeSelector from "./ModeSelector";
-import PlayIcon from '../icons/play.png'
-import PauseIcon from '../icons/pause.png'
-import StopIcon from '../icons/stop.png'
+import { Button, buttonVariants, cn } from "../components/ui";
+import {
+  SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
+  SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon,
+  PlayGlyph, PauseGlyph, StopGlyph,
+} from "./topbarIcons";
+
+// One playback control. Same shape as ModeSelector's Segment / the viewport's gizmo toggle — a 25px
+// segment in a bordered, rounded group — so the transport reads as part of the same toolbar family
+// instead of the three floating PNG circles it used to be.
+interface TransportProps {
+  title: string;
+  disabled: boolean;
+  active?: boolean;
+  accent: string;     // hover color when idle
+  activeClass: string; // fill when this is the current state
+  onClick: () => void;
+  children: React.ReactNode;
+}
+function Transport({ title, disabled, active, accent, activeClass, onClick, children }: TransportProps) {
+  return (
+    <button
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex items-center justify-center w-[30px] h-[25px] border-r border-control-hover last:border-r-0 transition-colors
+        ${active ? activeClass : `bg-control text-muted ${accent} hover:bg-control-hover`}
+        ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+    >
+      {children}
+    </button>
+  );
+}
 
 export default function MenuBar() {
   const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, savingState, eventEmitter: eventEmitter } = useCleoEngine();
@@ -21,8 +51,10 @@ export default function MenuBar() {
   // Template and (terrain-)material tabs all hide the project/scene-level actions (they edit a library asset).
   const libEdit = templateMode || materialMode || terrainMaterialMode;
   const saving = savingState === 'saving';
-  const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved ✓' : savingState === 'error' ? 'Save failed' : 'Save';
-  const saveBorder = savingState === 'error' ? 'border-red-400' : savingState === 'saved' ? 'border-green-400' : 'border-muted';
+  // Save carries its own status: the icon and the color say what happened, the label says it in words.
+  const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved' : savingState === 'error' ? 'Failed' : 'Save';
+  const saveIcon = savingState === 'saving' ? <SpinnerIcon /> : savingState === 'saved' ? <CheckIcon /> : savingState === 'error' ? <AlertIcon /> : <SaveIcon />;
+  const saveVariant = savingState === 'saved' ? 'success' : savingState === 'error' ? 'danger' : 'default';
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
   const [showPublish, setShowPublish] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -119,28 +151,53 @@ export default function MenuBar() {
 
   return (
     <Topbar>
-      <div className='flex items-center h-full'>
+      <div className='flex items-center gap-1.5 h-full px-1.5'>
         {templateMode && (
-          <div className='text-white h-[25px] border border-highlight bg-border text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-control-hover' title='Save this template and update its placed instances' onClick={() => saveActiveTemplate()}>Save Template</div>
+          <Button variant='primary' size='sm' className='h-[25px]' title='Save this template and update its placed instances' onClick={() => saveActiveTemplate()}>
+            <SaveIcon /> Save Template
+          </Button>
         )}
         {materialMode && (
-          <div className='text-white h-[25px] border border-highlight bg-border text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-control-hover' title='Save this material (captures a thumbnail) and update nodes that use it' onClick={() => saveActiveMaterial()}>Save Material</div>
+          <Button variant='primary' size='sm' className='h-[25px]' title='Save this material (captures a thumbnail) and update nodes that use it' onClick={() => saveActiveMaterial()}>
+            <SaveIcon /> Save Material
+          </Button>
         )}
         {terrainMaterialMode && (
-          <div className='text-white h-[25px] border border-success bg-success text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-success-hover' title='Save this terrain material (captures a thumbnail) and update layers that use it' onClick={() => saveActiveTerrainMaterial()}>Save Terrain Material</div>
+          <Button variant='primary' size='sm' className='h-[25px]' title='Save this terrain material (captures a thumbnail) and update layers that use it' onClick={() => saveActiveTerrainMaterial()}>
+            <SaveIcon /> Save Terrain Material
+          </Button>
         )}
-        <div className={`text-white h-[25px] border ${saveBorder} bg-control text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(libEdit || saving) ? 'opacity-50 pointer-events-none' : ''}`} title='Save the project to local storage' onClick={() => onSave()}>{saveLabel}</div>
-        <label htmlFor='load-scene-file' className={`text-white h-[25px] border border-muted bg-control text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Import a .json scene file'>Import</label>
+        <Button
+          variant={saveVariant} size='sm' className='h-[25px] w-[86px]'
+          disabled={libEdit || saving}
+          title='Save the project to local storage'
+          onClick={() => onSave()}
+        >
+          {saveIcon} {saveLabel}
+        </Button>
+        {/* A file input needs a <label> to trigger it, so it borrows the Button styles rather than being one. */}
+        <label
+          htmlFor='load-scene-file'
+          title='Import a .json scene file'
+          className={cn(buttonVariants({ variant: 'subtle', size: 'sm' }), 'h-[25px] cursor-pointer', libEdit && 'opacity-60 pointer-events-none')}
+        >
+          <ImportIcon /> Import
+        </label>
         <input className="hidden" type='file' accept='.json' id='load-scene-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
-        <div className={`text-white h-[25px] border border-muted bg-control text-center w-[80px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${libEdit ? 'opacity-50 pointer-events-none' : ''}`} title='Export the scene to a .json file' onClick={() => onExport()}>Export</div>
+        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the scene to a .json file' onClick={() => onExport()}>
+          <ExportIcon /> Export
+        </Button>
         <div className='relative inline-block' ref={publishRef}>
-          <div
-            className={`text-white h-[25px] border border-highlight bg-border text-center w-[90px] inline-block cursor-pointer my-[2px] mx-[4px] px-2 rounded ${(publishing || libEdit) ? 'opacity-50 pointer-events-none' : ''}`}
+          <Button
+            variant='primary' size='sm' className='h-[25px]'
+            disabled={publishing || libEdit}
             title='Publish an optimized build of your game'
             onClick={() => setShowPublish(v => !v)}
           >
-            {publishing ? 'Publishing…' : 'Publish ▾'}
-          </div>
+            {publishing ? <SpinnerIcon /> : <PublishIcon />}
+            {publishing ? 'Publishing…' : 'Publish'}
+            {!publishing && <ChevronDownIcon />}
+          </Button>
           {showPublish && (
             <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-surface-raised border border-control-hover rounded shadow-lg py-1 text-white text-sm'>
               <label className='flex items-start gap-2 px-3 py-2 border-b border-control-hover cursor-pointer select-none' onClick={(e) => e.stopPropagation()}>
@@ -172,25 +229,40 @@ export default function MenuBar() {
         </div>
       </div>
       <div className='flex items-center h-full'>
-        <button className='text-white bg-selected cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-control disabled:cursor-not-allowed hover:bg-control-hover disabled:hover:bg-control' disabled={playState==='playing' || libEdit} onClick={() => onPlay()}>
-          <img src={PlayIcon} alt='Play' className='inline-block h-full w-full align-middle' />
-        </button>
-        <button className='text-white bg-selected cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-control disabled:cursor-not-allowed hover:bg-control-hover disabled:hover:bg-control' disabled={playState==='paused' || playState==='stopped' || libEdit} onClick={() => onPause()}>
-          <img src={PauseIcon} alt='Pause' className='inline-block h-full w-full align-middle' />
-        </button>
-        <button className='text-white bg-selected cursor-pointer w-[30px] h-[30px] mx-[2px] p-0 rounded-full disabled:bg-control disabled:cursor-not-allowed hover:bg-control-hover disabled:hover:bg-control' disabled={playState==='stopped' || libEdit} onClick={() => onStop()}>
-          <img src={StopIcon} alt='Stop' className='inline-block h-full w-full align-middle' />
-        </button>
+        <div className='flex items-center rounded overflow-hidden border border-control-hover my-[2px]'>
+          <Transport
+            title='Play' disabled={playState === 'playing' || libEdit}
+            active={playState === 'playing'} activeClass='bg-success text-white'
+            accent='hover:text-success' onClick={() => onPlay()}
+          >
+            <PlayGlyph />
+          </Transport>
+          <Transport
+            title='Pause' disabled={playState === 'paused' || playState === 'stopped' || libEdit}
+            active={playState === 'paused'} activeClass='bg-selected text-white'
+            accent='hover:text-white' onClick={() => onPause()}
+          >
+            <PauseGlyph />
+          </Transport>
+          <Transport
+            title='Stop' disabled={playState === 'stopped' || libEdit}
+            active={false} activeClass=''
+            accent='hover:text-danger' onClick={() => onStop()}
+          >
+            <StopGlyph />
+          </Transport>
+        </div>
       </div>
       <ModeSelector />
-      <div className='flex items-center h-full'>
-        <div
-          className={`text-white h-[25px] border border-muted bg-control text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-control-hover ${playState !== 'stopped' ? 'opacity-50 pointer-events-none' : ''}`}
+      <div className='flex items-center h-full px-1.5'>
+        <Button
+          variant='subtle' size='sm' className='h-[25px]'
+          disabled={playState !== 'stopped'}
           title='Restore the default panel layout'
           onClick={() => eventEmitter.emit('RESET_DOCK_LAYOUT')}
         >
-          Reset Layout
-        </div>
+          <LayoutIcon /> Reset Layout
+        </Button>
       </div>
     </Topbar>
   )

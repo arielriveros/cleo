@@ -47,14 +47,15 @@ export interface ButtonWithConfirmProps {
   onClick: () => void;
   children: React.ReactNode;
   className?: string;
+  disabled?: boolean;
 }
 
 /** Destructive action that requires a second click. First click reveals Cancel / Confirm. */
-export function ButtonWithConfirm({ onClick, children, className }: ButtonWithConfirmProps) {
+export function ButtonWithConfirm({ onClick, children, className, disabled }: ButtonWithConfirmProps) {
   const [clicked, setClicked] = useState(false);
-  if (!clicked) {
+  if (!clicked || disabled) {
     return (
-      <Button variant='danger' className={className} onClick={() => setClicked(true)}>
+      <Button variant='danger' className={className} disabled={disabled} onClick={() => setClicked(true)}>
         {children}
       </Button>
     );
