@@ -10,10 +10,31 @@ import { dockComponents, PanelTab } from './panels';
 import { EditorMode, useCleoEngine } from '../EngineContext';
 import './dockview.css';
 
-const DOCK_LAYOUT_KEY = 'cleo_dock_layout_v1';
+const DOCK_LAYOUT_KEY = 'cleo_dock_layout_v2';
 // Pre-dockview layout blob ({ barsDimensions, bottomTab }); removed once on startup.
 const OLD_LAYOUT_KEY = 'cleo_project_layout';
-const CHROME_PANELS = ['explorer', 'inspector', 'logger', 'assets'] as const;
+// v1 grouped Scene/UI under one "explorer" panel and Properties/Scripts/Physics under one
+// "inspector" panel; v2 promotes all five to panels of their own.
+const OLD_DOCK_LAYOUT_KEY = 'cleo_dock_layout_v1';
+const LAYOUT_VERSION = 2;
+const CHROME_PANELS = ['scene', 'ui', 'properties', 'scripts', 'physics', 'logger', 'assets'] as const;
+
+// The Properties and Scene panels host the mode-specific editors (there is no separate dock panel for
+// them), so their tab label follows the mode.
+const PANEL_TITLES: Record<string, string> = {
+  viewport: 'Viewport', scene: 'Scene', ui: 'UI', properties: 'Properties',
+  scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
+};
+
+function panelTitle(id: string, mode: EditorMode): string {
+  if (id === 'scene' && mode === 'animation') return 'Skeleton';
+  if (id === 'properties') {
+    if (mode === 'animation') return 'State Machine';
+    if (mode === 'material') return 'Material';
+    if (mode === 'terrainMaterial') return 'Terrain Material';
+  }
+  return PANEL_TITLES[id];
+}
 
 const cleoTheme: DockviewTheme = { name: 'cleo', className: 'dockview-theme-cleo', colorScheme: 'dark' };
 
@@ -28,23 +49,38 @@ function assertViewportLock(api: DockviewApi): boolean {
   return true;
 }
 
-// Replicates the pre-dockview geometry: Explorer 20vw left, Inspector 25vw right, Logger/Assets
-// stacked in a 30vh strip under the viewport only (between the sidebars, like the old BottomBar).
+// Scene/UI stacked as tabs 20vw left, Properties/Scripts/Physics stacked as tabs 25vw right,
+// Logger/Assets stacked in a 30vh strip under the viewport only (between the sidebars). Every panel
+// is free to be dragged out of its group and re-docked anywhere.
 function buildDefaultLayout(api: DockviewApi) {
   api.clear();
   const width = api.width || window.innerWidth;
   const height = api.height || window.innerHeight;
   api.addPanel({ id: 'viewport', component: 'viewport', title: 'Viewport', renderer: 'always' });
-  api.addPanel({
-    id: 'explorer', component: 'explorer', title: 'Explorer',
+  const scene = api.addPanel({
+    id: 'scene', component: 'scene', title: 'Scene',
     position: { referencePanel: 'viewport', direction: 'left' },
     initialWidth: Math.round(width * 0.20),
   });
   api.addPanel({
-    id: 'inspector', component: 'inspector', title: 'Inspector',
+    id: 'ui', component: 'ui', title: 'UI',
+    position: { referencePanel: 'scene', direction: 'within' },
+  });
+  const properties = api.addPanel({
+    id: 'properties', component: 'properties', title: 'Properties',
     position: { referencePanel: 'viewport', direction: 'right' },
     initialWidth: Math.round(width * 0.25),
   });
+  api.addPanel({
+    id: 'scripts', component: 'scripts', title: 'Scripts',
+    position: { referencePanel: 'properties', direction: 'within' },
+  });
+  api.addPanel({
+    id: 'physics', component: 'physics', title: 'Physics',
+    position: { referencePanel: 'properties', direction: 'within' },
+  });
+  scene.api.setActive();
+  properties.api.setActive();
   // Logger and Assets keep renderer:'always' so the hidden tab stays in the DOM: unmounting the
   // asset explorer would tear down the SVAR store + drag patch and lose the folder being browsed.
   const logger = api.addPanel({
@@ -62,15 +98,18 @@ function buildDefaultLayout(api: DockviewApi) {
 
 function saveLayout(api: DockviewApi) {
   try {
-    localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify({ version: 1, layout: api.toJSON() }));
+    localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify({ version: LAYOUT_VERSION, layout: api.toJSON() }));
   } catch { /* ignore */ }
 }
 
-// Which panels a mode/play-state hides (the old hideLeft/hideSides/hideBottom rules).
+// Which panels a mode/play-state hides. Modes that take a host panel over (Properties shows the state
+// machine / material editors, Scene shows the skeleton tree) hide the panels that no longer apply.
 function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   if (playing || mode === 'renderer') return CHROME_PANELS;
-  if (mode === 'landscape') return ['explorer', 'inspector'];
-  if (mode === 'material' || mode === 'terrainMaterial') return ['explorer'];
+  if (mode === 'landscape') return ['scene', 'ui', 'properties', 'scripts', 'physics'];
+  if (mode === 'material' || mode === 'terrainMaterial') return ['scene', 'ui', 'scripts', 'physics'];
+  if (mode === 'animation') return ['ui', 'scripts', 'physics'];
+  if (mode === 'template') return ['ui']; // the UI layer is irrelevant while authoring a template
   return [];
 }
 
@@ -86,11 +125,12 @@ export default function DockLayout() {
   const onReady = (event: DockviewReadyEvent) => {
     const dock = event.api;
     try { localStorage.removeItem(OLD_LAYOUT_KEY); } catch { /* ignore */ }
+    try { localStorage.removeItem(OLD_DOCK_LAYOUT_KEY); } catch { /* ignore */ }
     try {
       const raw = localStorage.getItem(DOCK_LAYOUT_KEY);
       if (!raw) throw new Error('no saved layout');
       const saved = JSON.parse(raw);
-      if (saved?.version !== 1 || !saved.layout) throw new Error('unknown layout version');
+      if (saved?.version !== LAYOUT_VERSION || !saved.layout) throw new Error('unknown layout version');
       dock.fromJSON(saved.layout);
       if (!assertViewportLock(dock)) throw new Error('layout missing viewport');
     } catch {
@@ -126,6 +166,7 @@ export default function DockLayout() {
         buildDefaultLayout(api);
       }
     }
+    for (const id of Object.keys(PANEL_TITLES)) api.getPanel(id)?.api.setTitle(panelTitle(id, editorMode));
     const hidden = hiddenPanelIds(editorMode, isPlayMode);
     restrictedRef.current = hidden.length > 0;
     if (hidden.length > 0) {
@@ -136,6 +177,24 @@ export default function DockLayout() {
       for (const id of hidden) api.getPanel(id)?.api.close();
     }
   }, [api, editorMode, isPlayMode]);
+
+  // The in-viewport UI overlay only draws while the user is editing UI. Now that Scene and UI are
+  // separate panels, "the UI tab is active" becomes "the UI panel is visible" — which also covers the
+  // user splitting Scene and UI side by side (both visible: the overlay correctly stays on).
+  useEffect(() => {
+    if (!api) return;
+    let last: 'Scene' | 'UI' | null = null;
+    const sync = () => {
+      const tab = api.getPanel('ui')?.api.isVisible ? 'UI' : 'Scene';
+      if (tab === last) return;
+      last = tab;
+      eventEmitter.emit('EXPLORER_TAB', tab);
+      eventEmitter.emit(tab === 'UI' ? 'UI_CHANGED' : 'SCENE_CHANGED');
+    };
+    sync();
+    const disposables = [api.onDidLayoutChange(sync), api.onDidActivePanelChange(sync)];
+    return () => { disposables.forEach(d => d.dispose()); };
+  }, [api, eventEmitter]);
 
   // "New asset" flows focus the Assets tab (legacy per-kind tab names all meant Assets).
   useEffect(() => {

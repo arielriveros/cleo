@@ -56,5 +56,4 @@ export type { OverlayPanelProps } from './OverlayPanel';
 
 // Refactored (token-based) legacy primitives, re-exported for a single import surface.
 export { default as Collapsable } from '../Collapsable';
-export { default as Tabs, Tab } from '../Tabs';
 export { default as AxisInput } from '../AxisInput';

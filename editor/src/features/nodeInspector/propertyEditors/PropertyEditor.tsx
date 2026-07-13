@@ -9,7 +9,6 @@ import NodeInfo from './NodeInfo'
 import CameraEditor from './CameraEditor'
 import SpriteEditor from './SpriteEditor'
 import AnimatedSpriteEditor from './SpriteSheetEditor'
-import CustomVariablesEditor from './CustomVariablesEditor'
 import VolumetricCloudsEditor from './VolumetricCloudsEditor'
 import SkyAtmosphereEditor from './SkyAtmosphereEditor'
 
@@ -36,8 +35,6 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'camera' && <CameraEditor node={props.node as CameraNode} /> }
           { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }
-
-          {!isRootNode && <CustomVariablesEditor node={props.node} />}
         </fieldset>
     </>
   )
