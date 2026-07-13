@@ -5,6 +5,7 @@ export { Scene } from "./core/scene/scene";
 export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable } from "./core/scene/node";
 export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions } from "./core/scene/node";
 export { Logger } from "./core/logger";
+export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { Mesh } from "./graphics/mesh";
 export { Material, TerrainMaterial, CustomMaterial } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";

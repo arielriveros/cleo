@@ -378,10 +378,15 @@ export class Node {
         'scene',
         'findNode',
         `"use strict";
+         // Args are forwarded raw so objects stay inspectable in the editor console.
+         // console.flush(...) rewrites its own row instead of appending — for per-frame values.
          const console = {
-           log: (...args) => global.logger(args.map(a => String(a)).join(' ')),
-           warn: (...args) => Logger.warn(args.map(a => String(a)).join(' '), 'Script'),
-           error: (...args) => Logger.error(args.map(a => String(a)).join(' '), 'Script')
+           log: (...args) => Logger.print('log', args, 'Script'),
+           info: (...args) => Logger.print('info', args, 'Script'),
+           debug: (...args) => Logger.print('debug', args, 'Script'),
+           warn: (...args) => Logger.print('warn', args, 'Script'),
+           error: (...args) => Logger.print('error', args, 'Script'),
+           flush: (...args) => Logger.print('log', args, 'Script', { flush: true })
          };
          let exports = {};
          let module = { exports };

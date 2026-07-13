@@ -1268,7 +1268,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           instanceRef.current = engine;
           instanceRef.current.isPaused = false;
 
-          CleoEngine.eventEmitter.on('LOG', (log) => { eventEmitter.current.emit('LOG', log) });
+          // Logs bypass this bridge: the console panel's store subscribes to CleoEngine.eventEmitter
+          // directly (features/logger/logStore.ts), so it also catches everything logged before mount.
           CleoEngine.eventEmitter.on('SCENE_CHANGED', () => { eventEmitter.current.emit('SCENE_CHANGED') });
           
           await setupInitialScene();

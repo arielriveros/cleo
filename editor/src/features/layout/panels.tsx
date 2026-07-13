@@ -15,7 +15,7 @@ import ScriptEditor from '../nodeInspector/scriptEditor/ScriptEditor';
 import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
-import Logger from '../logger/Logger';
+import ConsolePanel from '../logger/ConsolePanel';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine } from '../EngineContext';
 
@@ -111,10 +111,11 @@ function PhysicsPanel(_: IDockviewPanelProps) {
   );
 }
 
+// The console owns its own scrolling (stick-to-bottom), so the wrapper must not add a second one.
 function LoggerPanel(_: IDockviewPanelProps) {
   return (
-    <div className="flex flex-col h-full w-full text-white bg-surface-raised overflow-y-auto">
-      <Logger />
+    <div className="flex flex-col h-full w-full overflow-hidden">
+      <ConsolePanel />
     </div>
   );
 }

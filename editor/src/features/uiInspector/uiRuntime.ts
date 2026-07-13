@@ -42,9 +42,12 @@ function compileHandlers(source?: string): UIHandlers {
     // declarations hoist to the function scope; module.exports handlers are also supported.
     const factory = new Function('Logger', `"use strict";
       const console = {
-        log: (...a) => Logger.log(a.map(x => String(x)).join(' '), 'UI'),
-        warn: (...a) => Logger.warn(a.map(x => String(x)).join(' '), 'UI'),
-        error: (...a) => Logger.error(a.map(x => String(x)).join(' '), 'UI')
+        log: (...a) => Logger.print('log', a, 'UI'),
+        info: (...a) => Logger.print('info', a, 'UI'),
+        debug: (...a) => Logger.print('debug', a, 'UI'),
+        warn: (...a) => Logger.print('warn', a, 'UI'),
+        error: (...a) => Logger.print('error', a, 'UI'),
+        flush: (...a) => Logger.print('log', a, 'UI', { flush: true })
       };
       let exports = {}; let module = { exports };
       ${source}

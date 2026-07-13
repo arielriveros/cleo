@@ -14,7 +14,8 @@ const description = `/*
 //  - node: the current Node instance (e.g., node.addX(1))
 //  - global.input: InputManager singleton
 //  - global.logger(text): log to the engine console
-//  - console.log/warn/error: forwarded to engine logs
+//  - console.log/info/debug/warn/error: forwarded to the editor console (objects stay inspectable)
+//  - console.flush(...): rewrites its own row instead of adding one — for per-frame values
 //  - scene: the current Scene; findNode(name): first node with that name
 //  - getData(node): read a node's custom Variables (returns { name: value, ... })
 //  - setData(node, name, value): write a variable (works on ANY node)

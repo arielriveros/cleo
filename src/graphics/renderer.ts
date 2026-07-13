@@ -1958,7 +1958,7 @@ export class Renderer {
         if (!gl) return;
         this._resizeBuffers(this._canvas.width, this._canvas.height);
 
-        Logger.info(`Resized to ${this._canvas.width}x${this._canvas.height}`)
+        Logger.info(`Resized to ${this._canvas.width}x${this._canvas.height}`, 'Runtime', { flush: true });
     }
 
     /**
