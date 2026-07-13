@@ -80,6 +80,7 @@ uniform SpotLight  u_spotlights[MAX_SPOTLIGHTS];
 // IBL
 uniform bool u_useEnvMap;
 uniform samplerCube u_envMap;
+uniform bool u_envMapLinear; // env cube is linear HDR (a light probe) -> skip the sRGB decode
 
 // Shadow mapping
 float shadowCalculation(vec4 fragPosLS) {
@@ -206,7 +207,8 @@ void main() {
     vec3 ambient = u_dirLight.ambient * albedo; // simple ambient fill floor (zeroed when no dir light)
     if (u_useEnvMap) {
         vec3 R = reflect(normalize(fragPos - u_viewPos), N);
-        vec3 env = toLinear(texture(u_envMap, R).rgb);
+        vec3 envC = texture(u_envMap, R).rgb;
+        vec3 env = u_envMapLinear ? envC : toLinear(envC);
         // Strong roughness falloff so only smooth surfaces reflect the env map; kS keeps it
         // metallic-aware. Matches deferredLighting.fs for forward/deferred parity.
         float specAtten = pow(1.0 - roughness, 4.0);

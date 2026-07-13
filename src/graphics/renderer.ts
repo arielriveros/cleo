@@ -646,12 +646,19 @@ export class Renderer {
     }
 
     private _bindEnvToForwardShaders(scene: Scene): void {
+        // Prefer the nearest baked light probe. Use its SHARP source capture (linear HDR, at the probe's
+        // resolution) for clear reflections rather than the roughness-convolved 128px prefiltered map;
+        // fall back to the scene environment map (sRGB). u_envMapLinear tells the shader which decode to apply.
+        const probe = scene.activeProbe(this._activeCamera.position);
+        const probeCube = probe && probe.hasBakedMaps ? (probe.envMap ?? probe.prefiltered) : null;
+        const envCube = probeCube ?? scene.environmentMap;
         for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
             this._shaderManager.bind(shaderName);
-            this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+            this._shaderManager.setUniform('u_useEnvMap', envCube ? true : false);
             this._shaderManager.setUniform('u_envMap', 7);
+            this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
         }
-        scene.environmentMap?.bind(7);
+        envCube?.bind(7);
     }
 
     /**

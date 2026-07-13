@@ -81,6 +81,7 @@ struct SpotLight {
 // Environment
 uniform bool u_useEnvMap;
 uniform samplerCube u_envMap;
+uniform bool u_envMapLinear; // env cube is linear HDR (a light probe) -> skip the sRGB decode
 
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 uniform SpotLight u_spotlights[MAX_SPOTLIGHTS];
@@ -212,7 +213,8 @@ void main() {
     if (u_useEnvMap) {
         vec3 I = normalize(fragPos - u_viewPos);
         vec3 R = reflect(I, normal);
-        vec3 reflection = toLinear(vec3(texture(u_envMap, R))) * matSpecular;
+        vec3 envC = vec3(texture(u_envMap, R));
+        vec3 reflection = (u_envMapLinear ? envC : toLinear(envC)) * matSpecular;
         float reflectivity = u_material.reflectivity;
         if (u_material.hasReflectivityMap)
             reflectivity = texture(u_material.reflectivityMap, fragTexCoord).b; // b channel if using roughmetal workflow

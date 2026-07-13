@@ -86,6 +86,7 @@ uniform SpotLight  u_spotlights[MAX_SPOTLIGHTS];
 
 uniform bool u_useEnvMap;
 uniform samplerCube u_envMap;
+uniform bool u_envMapLinear;   // true when u_envMap is a linear HDR probe cube (skip the sRGB decode)
 
 float shadowCalculation(vec4 fragPosLS) {
     vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
@@ -370,7 +371,8 @@ vec4 fragment() {
     vec3 ambient = u_dirLight.ambient * albedo;
     if (u_useEnvMap) {
         vec3 R = reflect(normalize(fragPos - u_viewPos), N);
-        ambient += toLinear(texture(u_envMap, R).rgb) * kS * pow(1.0 - roughness, 4.0);
+        vec3 envC = texture(u_envMap, R).rgb;
+        ambient += (u_envMapLinear ? envC : toLinear(envC)) * kS * pow(1.0 - roughness, 4.0);
     }
 
     vec3 Lo = vec3(0.0);

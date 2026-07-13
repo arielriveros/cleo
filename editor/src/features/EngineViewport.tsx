@@ -8,6 +8,8 @@ import RendererOptions from "./renderer/RendererOptions";
 import RendererStats from "./renderer/RendererStats";
 import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
 import AnimationPlayer from "./animation/AnimationPlayer";
+import { useStateMachine } from "./animation/StateMachineContext";
+import { SegmentedControl } from "../components/ui";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
 import { instantiateMeshAsset } from "../utils/meshes";
 import { GizmoMode } from "./EngineContext";
@@ -47,6 +49,7 @@ const ScaleIcon = () => (
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
             gizmoMode, setGizmoMode, templateRootId, templates, meshes, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
+    const { graphView, setGraphView } = useStateMachine();
     const viewportRef = useRef<HTMLDivElement>(null);
     // The landscape brush mode is a ref (not reactive); mirror it so the terrain move-gizmo mounts on demand.
     const [terrainMode, setTerrainMode] = useState(terrainBrush.current.mode);
@@ -330,6 +333,15 @@ export default function EngineViewport() {
             {editorMode === 'renderer' && <RendererOptions />}
             {editorMode === 'renderer' && <RendererStats />}
             {editorMode === 'animation' && <>
+                {/* 3D|Graph switch — shown while in 3D view (the graph has its own toolbar toggle). */}
+                {!graphView && (
+                    <div data-cleo-overlay className='absolute top-2 left-2 z-20' onMouseDown={e => e.stopPropagation()}>
+                        <SegmentedControl<'3d' | 'graph'>
+                            options={[{ value: '3d', label: '3D' }, { value: 'graph', label: 'Graph' }]}
+                            value='3d'
+                            onChange={v => setGraphView(v === 'graph')} />
+                    </div>
+                )}
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
             </>}

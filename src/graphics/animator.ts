@@ -66,6 +66,9 @@ export interface AnimationState {
     speed: number;
     /** The state the machine starts in. Exactly one state should be the entry. */
     isEntry?: boolean;
+    /** Graph-editor layout coordinates (authoring only — ignored at runtime). */
+    x?: number;
+    y?: number;
 }
 
 /** Comparison operator for a transition condition (interpreted per parameter type). */

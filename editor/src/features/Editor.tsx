@@ -18,6 +18,8 @@ import TerrainMaterialExplorer from "./terrainMaterials/TerrainMaterialExplorer"
 import MeshExplorer from "./meshes/MeshExplorer";
 import MeshImportModal from "./meshes/MeshImportModal";
 import AnimationImportModal from "./animation/AnimationImportModal";
+import { StateMachineProvider } from "./animation/StateMachineContext";
+import StateGraph from "./animation/StateGraph";
 import UIOverlay from "./uiInspector/UIOverlay";
 import LoadingScreen from "../components/LoadingScreen";
 import { LAYOUT_KEY } from "../utils/projectStorage";
@@ -106,6 +108,7 @@ export default function Editor() {
   return (
     <>
       <MenuBar />
+      <StateMachineProvider>
       <Content>
         <Sidebar width={`${effLeft}vw`} minWidth={`${hideLeft ? 0 : barsDimensions.minLeft}vw`}>
           <Explorer />
@@ -122,6 +125,8 @@ export default function Editor() {
               <EngineViewport />
               {/* UI overlay sits on top of the WebGL canvas */}
               <UIOverlay />
+              {/* Animation-mode node graph overlays the viewport when Graph view is active */}
+              <StateGraph />
               {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
               {!isSceneReady && <LoadingScreen progress={loadingProgress} />}
             </div>
@@ -171,6 +176,7 @@ export default function Editor() {
           <NodeInspector />
         </Sidebar>
       </Content>
+      </StateMachineProvider>
       {/* Global mesh-import review modal — overlays the whole editor while an import awaits the user. */}
       <MeshImportModal />
       {/* Global animation-import review modal (compatibility vs the skeleton). */}

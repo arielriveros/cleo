@@ -1451,6 +1451,8 @@ export class LightProbeNode extends Node {
     public get hasBakedMaps(): boolean { return this._irradiance !== null && this._prefiltered !== null; }
     public get irradiance(): Texture | null { return this._irradiance; }
     public get prefiltered(): Texture | null { return this._prefiltered; }
+    /** The sharp, full-resolution scene capture (linear HDR) — best for clear/mirror-like reflections. */
+    public get envMap(): Texture | null { return this._sourceCube; }
     /** Request a (re)capture on the next frame — used by the editor "Bake" button. */
     public bake(): void { this._needsBake = true; }
     public markBaked(time: number): void { this._needsBake = false; this._lastBakeTime = time; }
