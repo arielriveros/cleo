@@ -9,7 +9,7 @@ import * as cleo from 'cleo'
 import { ModelNode, Node } from 'cleo'
 import { Button, ButtonWithConfirm } from '../../../components/ui'
 import { codeSetup, readOnlyExtension } from './codeSetup'
-import { lintScript, thisCompletions } from './scriptLint'
+import { lintScript, nodeCompletions } from './scriptLint'
 import { getCodeTheme } from './codeMirrorTheme'
 import { useCodeTheme } from './codeThemeStore'
 import CodeEditorHeader from './CodeEditorHeader'
@@ -82,9 +82,9 @@ export default function CodeEditor(props: { readOnly?: boolean }) {
   //
   // scopeCompletionSource reflects over a live object, so spreading the engine's own namespace is what
   // makes every importable name (and its members) complete — there is no hand-maintained list to fall
-  // out of date. `node`/`other` are the handler arguments, not imports, so they map to the prototype of
-  // the selected node's class. `this` cannot be reflected this way (it is not in scope at edit time) —
-  // thisCompletions handles it.
+  // out of date. It is only the fallback: node-valued expressions (`this.`, `other.`, `findNode('x').`)
+  // are answered by nodeCompletions from the real node, which reflection cannot do. `node`/`other` are
+  // kept here for the case where they appear outside a handler, where there is no node to resolve.
   const scopeRef = React.useRef<Record<string, any>>({})
   scopeRef.current = {
     ...cleo,
@@ -140,8 +140,11 @@ export default function CodeEditor(props: { readOnly?: boolean }) {
           language: [
             javascript(),
             javascriptLanguage.data.of({
+              // Node-valued expressions first (this., other., findNode('x').) — they know the actual
+              // node, so they beat reflecting over a prototype. Everything else falls through to the
+              // engine namespace.
               autocomplete: (context: CompletionContext) =>
-                thisCompletions(context, nodeRef.current) ?? scopeCompletionSource(scopeRef.current)(context),
+                nodeCompletions(context, nodeRef.current) ?? scopeCompletionSource(scopeRef.current)(context),
             }),
           ],
           themeCompartment: themeComp.current,

@@ -1,30 +1,35 @@
-// Static checks for node scripts, run in the editor as CodeMirror diagnostics.
+// Static checks and contextual completions for node scripts, run in the editor as CodeMirror diagnostics.
 //
-// A script reaches its node's inspector Variables through `this` (this.HealthPoints), and other nodes'
-// through `this.parent.X` or the `other` handler argument. The engine resolves all of that at runtime
-// with a Proxy (src/core/scene/node.ts) — but Node.setVariable neither validates the value against the
-// declared type nor rejects unknown names, so `this.Alive = 5.0` and a typo'd `this.helth = 3` would both
-// pass silently, the latter quietly declaring a new variable. These are the checks that catch that at
-// author time, against the same node.variables map the Variables panel renders from.
+// A script reaches a node's inspector Variables as plain properties — `this.HealthPoints`,
+// `this.findNode('Player').Score`, `other.HealthPoints`. The engine resolves that at runtime with a Proxy
+// (src/core/scene/node.ts), but Node.setVariable neither validates the value against the declared type nor
+// rejects unknown names, so `this.Alive = 5.0` and a typo'd `this.helth = 3` would both pass silently, the
+// latter quietly declaring a new variable. These are the checks that catch it at author time, against the
+// same node.variables map the Variables panel renders from.
 //
-// Only statically resolvable chains are checked: `this.X` and `this.parent(.parent)*.X`. Anything
-// dynamic (a node from findNode, a computed key) is left alone rather than guessed at.
+// Which node an expression refers to is worked out by NodeResolver (nodeExpressions.ts). Where it can pin
+// the node — `this`, an ancestor, a literal lookup — everything is checked. Where the node only exists at
+// runtime (`this.getNodesByName(name)[0]`, or a handler's `other`), we still know it IS a node, so
+// completions are offered but nothing is reported: erroring there would flag nodes that are spawned later.
 
 import { syntaxTree } from '@codemirror/language'
 import type { Diagnostic } from '@codemirror/lint'
 import type { EditorView } from '@codemirror/view'
 import type { Text } from '@codemirror/state'
 import type { SyntaxNode } from '@lezer/common'
-import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
+import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete'
 import { canAccessVariable, SCRIPT_HANDLERS, Node } from 'cleo'
 import type { NodeVariableType } from 'cleo'
+import { NodeResolver } from './nodeExpressions'
 
 /** Variables the engine owns (template/mesh ids). The Variables panel hides them; so do we. */
 const RESERVED = '__'
 
 const HANDLER_LIST = SCRIPT_HANDLERS.join(', ')
 
-/** The declared type of a value, when it is knowable from syntax alone. Dynamic expressions -> null. */
+const isReserved = (name: string) => name.startsWith(RESERVED)
+
+/** The type of a value, when it is knowable from syntax alone. Dynamic expressions -> null. */
 function literalType(expr: SyntaxNode | null, doc: Text): NodeVariableType | null {
   if (!expr) return null
   switch (expr.name) {
@@ -43,17 +48,10 @@ function literalType(expr: SyntaxNode | null, doc: Text): NodeVariableType | nul
   }
 }
 
-/** Walks a `this`(.parent)* chain to the node it denotes. Anything else is not statically resolvable. */
-function resolveTarget(expr: SyntaxNode | null, self: Node, doc: Text): Node | null {
-  if (!expr) return null
-  if (expr.name === 'this') return self
-  if (expr.name !== 'MemberExpression') return null
-
-  const base = resolveTarget(expr.firstChild, self, doc)
-  const prop = expr.lastChild
-  if (!base || !prop || prop.name !== 'PropertyName') return null
-
-  return doc.sliceString(prop.from, prop.to) === 'parent' ? base.parent : null
+function resolverFor(state: EditorView['state'], self: Node): NodeResolver {
+  const resolver = new NodeResolver(self, state.doc)
+  resolver.collect(syntaxTree(state).topNode)
+  return resolver
 }
 
 export function lintScript(view: EditorView, self: Node | null): Diagnostic[] {
@@ -61,6 +59,8 @@ export function lintScript(view: EditorView, self: Node | null): Diagnostic[] {
 
   const doc = view.state.doc
   const text = (n: SyntaxNode) => doc.sliceString(n.from, n.to)
+  const resolver = resolverFor(view.state, self)
+
   const out: Diagnostic[] = []
   const error = (from: number, to: number, message: string) => out.push({ from, to, severity: 'error', message })
 
@@ -68,18 +68,18 @@ export function lintScript(view: EditorView, self: Node | null): Diagnostic[] {
     if (ref.name !== 'MemberExpression') return
 
     const expr = ref.node
-    const prop = expr.lastChild
-    if (!prop || prop.name !== 'PropertyName') return   // this['x'] — computed, skip
+    const property = expr.lastChild
+    if (!property || property.name !== 'PropertyName') return   // an index, or a computed key
 
-    const target = resolveTarget(expr.firstChild, self, doc)
-    if (!target) return
+    const { nodes, isNode } = resolver.candidates(expr.firstChild)
+    if (!isNode || nodes.length === 0) return   // not a node, or a node we cannot identify: say nothing
 
-    const name = text(prop)
-    if (name.startsWith(RESERVED)) return
+    const name = text(property)
+    if (isReserved(name)) return
 
-    // A real Node member (position, addZ, parent, and the six handler slots) always wins over a
-    // variable, exactly as the runtime proxy resolves it. Nothing to check.
-    if (name in target) return
+    // A real Node member (position, addZ, parent, the handler slots, the scene lookups) always wins over
+    // a variable, exactly as the runtime proxy resolves it. Nothing to check.
+    if (nodes.some((node) => name in node || LOOKUP_MEMBERS.includes(name))) return
 
     const parent = expr.parent
     const assignment = parent?.name === 'AssignmentExpression' && parent.firstChild?.from === expr.from ? parent : null
@@ -87,25 +87,31 @@ export function lintScript(view: EditorView, self: Node | null): Diagnostic[] {
     const value = assignment ? assignment.lastChild : null
     const increment = parent?.name === 'PostfixExpression' ? parent : null
 
-    const variable = target.variables.get(name)
+    const declaring = nodes.filter((node) => node.variables.has(name))
 
-    if (!variable) {
+    if (declaring.length === 0) {
       // `this.onUpdaet = (node) => {}` — a function assigned to a name that is not one of the handlers.
       if (value && (value.name === 'ArrowFunction' || value.name === 'FunctionExpression')) {
-        error(prop.from, prop.to, `'${name}' is not a script handler. Handlers are: ${HANDLER_LIST}.`)
+        error(property.from, property.to, `'${name}' is not a script handler. Handlers are: ${HANDLER_LIST}.`)
         return
       }
-      const where = target === self ? 'this node' : `'${target.name}'`
-      error(prop.from, prop.to, `No variable '${name}' on ${where}. Declare it in the Variables panel, or use a local 'let' for script state.`)
+      const where = nodes.length === 1 ? (nodes[0] === self ? 'this node' : `'${nodes[0].name}'`) : 'any matching node'
+      error(property.from, property.to, `No variable '${name}' on ${where}. Declare it in the Variables panel, or use a local 'let' for script state.`)
       return
     }
 
-    if (!canAccessVariable(target, self, name)) {
-      error(prop.from, prop.to, `'${name}' is ${variable.access ?? 'public'} on '${target.name}' and cannot be accessed from this script.`)
+    // With several candidates (a name matching more than one node) only report what holds for all of
+    // them — one node allowing the access is enough to make the line legitimate.
+    const readable = declaring.filter((node) => canAccessVariable(node, self, name))
+    if (readable.length === 0) {
+      const owner = declaring[0]
+      error(property.from, property.to, `'${name}' is ${owner.variables.get(name)!.access ?? 'public'} on '${owner.name}' and cannot be accessed from this script.`)
       return
     }
 
-    const declared = variable.type
+    const types = new Set(readable.map((node) => node.variables.get(name)!.type))
+    if (types.size !== 1) return   // candidates disagree on the type: no honest check to make
+    const declared = [...types][0]
 
     if (increment && declared !== 'number') {
       error(increment.from, increment.to, `'${name}' is ${declared}; ${text(increment.lastChild!)} only applies to a number.`)
@@ -142,24 +148,65 @@ export function lintScript(view: EditorView, self: Node | null): Diagnostic[] {
   return out
 }
 
+/** Synthesized on the script proxy rather than declared on Node, so `name in node` does not see them. */
+const LOOKUP_MEMBERS = ['findNode', 'getNodeById', 'getNodesByName']
+
 /**
- * Completions for `this.` — the node's declared variables (typed), the handler names, and the engine
- * members. scopeCompletionSource cannot do this: it reflects over an object, and `this` is not in scope
- * at edit time.
+ * Completions after a dot on any node-valued expression: `this.`, `this.parent.`, `other.`,
+ * `this.findNode('Player').`, `this.getNodesByName(name)[0].` …
+ *
+ * When the node is identified, its own Variables are offered. When it is only known to BE a node, every
+ * Variable in the scene is offered instead, tagged with the node it belongs to — a guess, but a labelled
+ * one, and the alternative is offering nothing on the most common way to reach another node.
  */
-export function thisCompletions(context: CompletionContext, self: Node | null): CompletionResult | null {
-  const before = context.matchBefore(/this\.\w*/)
-  if (!before || !self) return null
+export function nodeCompletions(context: CompletionContext, self: Node | null): CompletionResult | null {
+  if (!self) return null
 
-  const options = [
-    ...[...self.variables.entries()]
-      .filter(([name]) => !name.startsWith(RESERVED))
-      .map(([name, variable]) => ({ label: name, type: 'property', detail: variable.type, boost: 2 })),
-    ...SCRIPT_HANDLERS.map((name) => ({ label: name, type: 'method', detail: 'handler', boost: 1 })),
-    ...members(self).map((name) => ({ label: name, type: 'property' })),
-  ]
+  const tree = syntaxTree(context.state)
+  const at = tree.resolveInner(context.pos, -1)
 
-  return { from: before.from + 'this.'.length, options, validFor: /^\w*$/ }
+  // Either mid-word (`this.He|`) or straight after the dot (`this.|`).
+  const property = at.name === 'PropertyName' ? at : null
+  const dot = at.name === '.' ? at : property?.prevSibling
+  if (!dot || dot.name !== '.') return null
+
+  const member = dot.parent
+  if (!member || member.name !== 'MemberExpression') return null
+
+  const resolver = resolverFor(context.state, self)
+  const { nodes, isNode } = resolver.candidates(member.firstChild)
+  if (!isNode) return null
+
+  const known = nodes.length > 0
+  const options: Completion[] = []
+
+  if (known) {
+    const seen = new Set<string>()
+    for (const node of nodes)
+      for (const [name, variable] of node.variables)
+        if (!isReserved(name) && !seen.has(name)) {
+          seen.add(name)
+          options.push({ label: name, type: 'property', detail: variable.type, boost: 3 })
+        }
+  } else {
+    // Unknown node: everything the scene declares, labelled with its owner so the guess is visible.
+    const seen = new Set<string>()
+    for (const node of self.scene?.nodes ?? [])
+      for (const [name, variable] of node.variables)
+        if (!isReserved(name) && !seen.has(name)) {
+          seen.add(name)
+          options.push({ label: name, type: 'property', detail: `${variable.type} · from '${node.name}'`, boost: 1 })
+        }
+  }
+
+  // Handlers are only assignable on the script's own node.
+  if (known && nodes.length === 1 && nodes[0] === self)
+    options.push(...SCRIPT_HANDLERS.map((name) => ({ label: name, type: 'method', detail: 'handler', boost: 2 })))
+
+  options.push(...LOOKUP_MEMBERS.map((name) => ({ label: name, type: 'method', detail: 'scene lookup' })))
+  options.push(...members(known ? nodes[0] : self).map((name) => ({ label: name, type: 'property' })))
+
+  return { from: dot.to, options, validFor: /^\w*$/ }
 }
 
 /** Public members of a node, walking the prototype chain (so ModelNode etc. contribute their own). */

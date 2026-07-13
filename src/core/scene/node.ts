@@ -162,10 +162,15 @@ function wrapNode(target: Node | null | undefined, requester: Node): any {
             if (typeof prop !== 'string') return Reflect.get(node, prop, receiver);
             if (SCRIPT_HANDLERS.includes(prop as any)) return handlers[prop];
 
-            // findNode lives on Scene, so this.scene.findNode(...) would hand back a raw node. Synthesize
-            // it here instead, where the result can be proxied like every other node a script touches.
+            // The scene lookups live on Scene, so reaching them through `this.scene` would hand back raw
+            // nodes. Synthesize them here instead, where the results are proxied like every other node a
+            // script touches — `this.findNode('Player').HealthPoints` then works like `this.HealthPoints`.
             if (prop === 'findNode')
                 return (name: string) => wrapNode(node.scene?.findNode(name), requester);
+            if (prop === 'getNodeById')
+                return (id: string) => wrapNode(node.scene?.getNodeById(id), requester);
+            if (prop === 'getNodesByName')
+                return (name: string) => (node.scene?.getNodesByName(name) ?? []).map((found: Node) => wrapNode(found, requester));
 
             // Not a Node member: it is a Variable (or nothing). Unreadable ones read as undefined, which
             // is what getData already does for a variable the requester may not see.
