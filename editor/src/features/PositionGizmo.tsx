@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCleoEngine, GizmoMode } from "./EngineContext";
 import { Model, ModelNode, Material, Geometry, Vec } from "cleo";
 import { GizmoGeometry } from "../utils/GizmoGeometry";
 import { Raycaster } from "cleo";
+import { captureViewport, releaseViewport, isViewportCaptured } from "../utils/pointerCapture";
 
 interface TransformGizmoProps {
     selectedNodeId: string | null;
@@ -36,6 +37,9 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
     const [initialMousePos, setInitialMousePos] = useState<{ x: number; y: number } | null>(null);
     const [initialTransform, setInitialTransform] = useState<Transform | null>(null);
     const [isPlayMode, setIsPlayMode] = useState(false);
+    // While the mouse is captured `clientX/clientY` stop moving, so the drag tracks its own cursor,
+    // advanced by the raw movement deltas. Seeded at the grab point so the maths below is unchanged.
+    const cursor = useRef<{ x: number; y: number } | null>(null);
 
     // Create the gizmo node set for the given mode. Position uses arrows + shaft lines, scale uses cube
     // tips + shaft lines, rotation uses a ring per axis (no shafts). Returns every created node so the
@@ -187,6 +191,11 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
                 setInitialMousePos({ x, y });
                 setDragStartPos({ x, y });
 
+                // Grabbing a handle is unambiguous drag intent, so capture straight away — the drag can
+                // then run past the edge of the viewport (or the screen) without stalling.
+                cursor.current = { x, y };
+                captureViewport(instance);
+
                 // Emit event to disable camera controls
                 eventEmitter.emit('GIZMO_DRAG_START', { axis, nodeId: selectedNodeId });
 
@@ -208,9 +217,20 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
 
         event.preventDefault(); // Prevent default mouse behavior
 
-        const rect = viewportRef.current.getBoundingClientRect();
-        const x = event.clientX - rect.left;
-        const y = event.clientY - rect.top;
+        // Advance the drag cursor: by raw movement while captured (client coords are frozen), otherwise
+        // straight from the event.
+        const c = cursor.current ?? { x: initialMousePos.x, y: initialMousePos.y };
+        if (isViewportCaptured()) {
+            c.x += event.movementX;
+            c.y += event.movementY;
+        } else {
+            const rect = viewportRef.current.getBoundingClientRect();
+            c.x = event.clientX - rect.left;
+            c.y = event.clientY - rect.top;
+        }
+        cursor.current = c;
+        const x = c.x;
+        const y = c.y;
 
         // Check if we've moved enough to consider it a drag
         const deltaX = x - dragStartPos.x;
@@ -273,7 +293,7 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         updateGizmoPosition();
     };
 
-    const handleMouseUp = () => {
+    const endDrag = () => {
         if (isDragging) {
             // Emit event to re-enable camera controls
             eventEmitter.emit('GIZMO_DRAG_END', { axis: draggedAxis, nodeId: selectedNodeId });
@@ -284,6 +304,12 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         setInitialMousePos(null);
         setInitialTransform(null);
         setDragStartPos(null);
+        cursor.current = null;
+    };
+
+    const handleMouseUp = () => {
+        if (isDragging) releaseViewport();
+        endDrag();
     };
 
     // Build (and rebuild on mode change) the gizmo node set; remove the previous set on cleanup.
@@ -336,21 +362,29 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
     }, [selectedNodeId, gizmoNodes, isPlayMode, editorScene, gizmoMode]);
 
 
-    // Set up mouse event listeners
+    // Set up mouse event listeners. The grab is picked up from the viewport, but the drag itself lives
+    // on the document: a captured pointer delivers its events to the locked element, and even without
+    // capture a release outside the viewport must still end the drag rather than strand it.
     useEffect(() => {
         if (!viewportRef.current) return;
 
         const viewport = viewportRef.current;
+        // The browser drops the lock on Escape (or a tab switch); treat that as the end of the drag so
+        // the gizmo can't stay glued to the cursor.
+        const handleLockChange = () => { if (isDragging && !isViewportCaptured()) endDrag(); };
+
         viewport.addEventListener('mousedown', handleMouseDown);
-        viewport.addEventListener('mousemove', handleMouseMove);
-        viewport.addEventListener('mouseup', handleMouseUp);
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+        document.addEventListener('pointerlockchange', handleLockChange);
 
         return () => {
             viewport.removeEventListener('mousedown', handleMouseDown);
-            viewport.removeEventListener('mousemove', handleMouseMove);
-            viewport.removeEventListener('mouseup', handleMouseUp);
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.removeEventListener('pointerlockchange', handleLockChange);
         };
-    }, [selectedNodeId, isDragging, draggedAxis, initialMousePos, initialTransform, gizmoNodes, gizmoMode]);
+    }, [selectedNodeId, isDragging, draggedAxis, initialMousePos, initialTransform, dragStartPos, gizmoNodes, gizmoMode]);
 
     // Listen for play state changes
     useEffect(() => {

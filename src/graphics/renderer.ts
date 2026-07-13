@@ -75,6 +75,7 @@ import { ensureCustomShader, customForwardTypes } from './systems/customShaders'
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats } from './renderStats';
+import { TerrainLodSettings } from '../terrain/terrain';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -123,6 +124,11 @@ export interface RenderSettings {
     frustumCulling: boolean;
     foliageCullDistance: number;
     foliageCellSize: number;
+    terrainLodEnabled: boolean;
+    terrainLodDistance1: number;
+    terrainLodDistance2: number;
+    terrainLodStep1: number;
+    terrainLodStep2: number;
 }
 
 /**
@@ -258,6 +264,13 @@ export class Renderer {
     private _foliageCullDistance: number = 65;
     // Foliage spatial-grid cell size (world units); smaller = tighter culling, more draw calls.
     private _foliageCellSize: number = 13;
+    // Distance-based terrain LOD: chunks past distance1/distance2 drop to a grid decimated by step1/step2
+    // (triangles scale by 1/step²). Applied per chunk, per frame, before the shadow passes.
+    private _terrainLodEnabled: boolean = true;
+    private _terrainLodDistance1: number = 120;
+    private _terrainLodDistance2: number = 300;
+    private _terrainLodStep1: number = 2;
+    private _terrainLodStep2: number = 4;
 
     // Editor infinite grid overlay (off in published builds; toggled by the editor)
     private _gridEnabled: boolean = false;
@@ -521,6 +534,10 @@ export class Renderer {
         mat4.multiply(this._viewProj, proj, view);
         mat4.invert(this._invViewProj, this._viewProj);
         this._frustum.setFromViewProjection(this._viewProj);
+
+        // Pick each terrain chunk's detail level for this camera. Before the shadow passes, so the
+        // cascades/shadow map rasterize the same reduced terrain the color passes will.
+        this._updateTerrainLOD(scene);
 
         // Re-bake the sky atmosphere cubemap when the sun moves (before IBL, so probes capture the sky).
         this._updateSkyAtmosphere(scene);
@@ -826,6 +843,23 @@ export class Renderer {
                 }
             }
         }
+    }
+
+    /**
+     * Distance-based terrain LOD: let every landscape re-pick its chunks' detail levels for this frame's
+     * camera. The levels are alternate index buffers over each chunk's unchanged vertex buffer, so this
+     * costs nothing but a distance test per chunk (the buffers are built lazily, once).
+     */
+    private _updateTerrainLOD(scene: Scene): void {
+        if (scene.landscapes.size === 0) return;
+        const settings: TerrainLodSettings = {
+            enabled: this._terrainLodEnabled,
+            distance1: this._terrainLodDistance1,
+            distance2: this._terrainLodDistance2,
+            step1: this._terrainLodStep1,
+            step2: this._terrainLodStep2,
+        };
+        for (const landscape of scene.landscapes) landscape.updateLod(this._activeCamera.position, settings);
     }
 
     /** Squared distance from point `p` to the closest point of the AABB [min, max] (0 if inside). */
@@ -2695,6 +2729,26 @@ export class Renderer {
     public get foliageCellSize(): number { return this._foliageCellSize; }
     public set foliageCellSize(s: number) { this._foliageCellSize = Math.max(1, s); }
 
+    /** Distance-based terrain LOD (3 levels: full detail, step1-decimated, step2-decimated). */
+    public get terrainLodEnabled(): boolean { return this._terrainLodEnabled; }
+    public set terrainLodEnabled(enabled: boolean) { this._terrainLodEnabled = enabled; }
+
+    /** Camera distance (world units) past which a terrain chunk drops to level 1 / level 2. */
+    public get terrainLodDistance1(): number { return this._terrainLodDistance1; }
+    public set terrainLodDistance1(d: number) { this._terrainLodDistance1 = Math.max(0, d); }
+    public get terrainLodDistance2(): number { return this._terrainLodDistance2; }
+    public set terrainLodDistance2(d: number) { this._terrainLodDistance2 = Math.max(0, d); }
+
+    /** Vertex step of terrain LOD level 1 / level 2 (2, 4 or 8): triangles scale by 1/step². */
+    public get terrainLodStep1(): number { return this._terrainLodStep1; }
+    public set terrainLodStep1(s: number) { this._terrainLodStep1 = Renderer._clampLodStep(s); }
+    public get terrainLodStep2(): number { return this._terrainLodStep2; }
+    public set terrainLodStep2(s: number) { this._terrainLodStep2 = Renderer._clampLodStep(s); }
+
+    private static _clampLodStep(s: number): number {
+        return [2, 4, 8].includes(Math.round(s)) ? Math.round(s) : 2;
+    }
+
     /** Snapshot every runtime-tunable render setting (for persisting a scene's look / publishing). */
     public getRenderSettings(): RenderSettings {
         return {
@@ -2714,6 +2768,11 @@ export class Renderer {
             frustumCulling: this._frustumCulling,
             foliageCullDistance: this._foliageCullDistance,
             foliageCellSize: this._foliageCellSize,
+            terrainLodEnabled: this._terrainLodEnabled,
+            terrainLodDistance1: this._terrainLodDistance1,
+            terrainLodDistance2: this._terrainLodDistance2,
+            terrainLodStep1: this._terrainLodStep1,
+            terrainLodStep2: this._terrainLodStep2,
         };
     }
 
@@ -2740,6 +2799,11 @@ export class Renderer {
         if (s.frustumCulling !== undefined) this.frustumCulling = s.frustumCulling;
         if (s.foliageCullDistance !== undefined) this.foliageCullDistance = s.foliageCullDistance;
         if (s.foliageCellSize !== undefined) this.foliageCellSize = s.foliageCellSize;
+        if (s.terrainLodEnabled !== undefined) this.terrainLodEnabled = s.terrainLodEnabled;
+        if (s.terrainLodDistance1 !== undefined) this.terrainLodDistance1 = s.terrainLodDistance1;
+        if (s.terrainLodDistance2 !== undefined) this.terrainLodDistance2 = s.terrainLodDistance2;
+        if (s.terrainLodStep1 !== undefined) this.terrainLodStep1 = s.terrainLodStep1;
+        if (s.terrainLodStep2 !== undefined) this.terrainLodStep2 = s.terrainLodStep2;
     }
 
     // Editor "Renderer" debug channel currently blitted to screen ('final' = normal image).

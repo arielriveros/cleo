@@ -11,6 +11,10 @@ export class Mesh {
     private _vertexCount: number;
     private _indexCount: number;
     private _isAnimated: boolean;
+    // Alternate index buffers over the SAME vertex buffer (level 0 = the base one). Terrain LOD only.
+    private _lodBuffers: WebGLBuffer[] = [];
+    private _lodCounts: number[] = [];
+    private _lod: number = 0;
 
     constructor() {
         this._vertexArray = gl.createVertexArray() as WebGLVertexArrayObject;
@@ -89,8 +93,54 @@ export class Mesh {
         return this;
     }
 
+    /**
+     * Upload coarser index sets over this mesh's existing vertex buffer (used by the terrain LOD: the
+     * levels only decimate the triangulation, the vertices are shared). Level 0 stays the base index
+     * buffer from `create()`; `levels[i]` becomes level i+1. Re-uploading replaces any previous set.
+     */
+    public setLodIndices(levels: number[][]): void {
+        if (!this._indexBuffer) return;
+        // The ELEMENT_ARRAY_BUFFER binding belongs to whichever VAO is current, so bind THIS mesh's VAO
+        // before uploading: doing it with another mesh's VAO bound would rewrite that mesh's index binding.
+        GLState.bindVAO(this._vertexArray);
+
+        for (let i = 1; i < this._lodBuffers.length; i++) gl.deleteBuffer(this._lodBuffers[i]);
+        this._lodBuffers = [this._indexBuffer];
+        this._lodCounts = [this._indexCount];
+        for (const indices of levels) {
+            const buffer = gl.createBuffer() as WebGLBuffer;
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+            this._lodBuffers.push(buffer);
+            this._lodCounts.push(indices.length);
+        }
+        this._lod = Math.min(this._lod, this._lodBuffers.length - 1);
+
+        // Leave this VAO pointing at a valid index buffer (the uploads left the last level bound); every
+        // subsequent draw re-binds the selected level anyway, since `hasLods` is now true.
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod]);
+        GLState.bindVAO(null);
+    }
+
+    public get hasLods(): boolean { return this._lodBuffers.length > 1; }
+    public get activeLod(): number { return this._lod; }
+    public set activeLod(level: number) {
+        this._lod = Math.max(0, Math.min(Math.round(level), Math.max(0, this._lodBuffers.length - 1)));
+    }
+
     public draw(mode: number = gl.TRIANGLES): void {
         GLState.bindVAO(this._vertexArray);
+        // With LODs, the element binding is VAO state that the last draw may have left on another level,
+        // so the selected level's buffer is (re)bound every draw.
+        if (this.hasLods) {
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod]);
+            const lodCount = this._lodCounts[this._lod];
+            gl.drawElements(mode, lodCount, gl.UNSIGNED_SHORT, 0);
+            frameStats.drawCalls++;
+            frameStats.vertices += lodCount;
+            if (mode === gl.TRIANGLES) frameStats.triangles += lodCount / 3;
+            return;
+        }
         const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
         if (this._indexBuffer && this._indexCount > 0)
             gl.drawElements(mode, this._indexCount, gl.UNSIGNED_SHORT, 0);

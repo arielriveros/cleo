@@ -3,6 +3,7 @@ import {
   Node,
   Model,
   ModelNode,
+  AnimatedModel,
   Geometry,
   Material,
   Sprite,
@@ -11,6 +12,7 @@ import {
   CameraNode,
   LightProbeNode,
   Vec,
+  hullFromPositions,
 } from 'cleo';
 import { CameraGeometry } from './EditorModels';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
@@ -42,9 +44,46 @@ const sigMapFor = (scene: Scene): Map<string, string> => {
 const isHelperName = (name: string) => name.startsWith('__editor__') || name.startsWith('__debug__');
 
 /**
- * Build a single wireframe mesh visualizing one physics shape, positioned at its local
- * offset/rotation. Geometry is built at unit size and scaled by the shape dimensions (planes get no
- * wireframe). `color` is red for bodies, green for triggers.
+ * Every mesh vertex of `root` *and its descendants*, expressed in root-local space — the space
+ * collider shapes are authored in. A prop imported as several child meshes must contribute all of
+ * them, or the hull only wraps the parent's own geometry and visibly cuts through the rest.
+ * Editor helpers, gizmos and skinned meshes (whose bind pose doesn't follow animation) are skipped.
+ * Returns null when there is nothing usable to hull.
+ */
+export function collectHullPositions(root: Node): number[][] | null {
+  const rootInv = Vec.mat4.invert(Vec.mat4.create(), root.worldTransform);
+  if (!rootInv) return null;
+
+  const out: number[][] = [];
+  const visit = (node: Node) => {
+    if (isHelperName(node.name) || (node as any).isGizmo) return;
+    if (node instanceof ModelNode) {
+      const model = node.model;
+      const skinned = model instanceof AnimatedModel && model.hasSkin;
+      const positions = skinned ? null : model.geometry?.positions;
+      if (positions && positions.length) {
+        if (node === root) {
+          for (const p of positions) out.push([p[0], p[1], p[2]]);
+        } else {
+          const rel = Vec.mat4.multiply(Vec.mat4.create(), rootInv, node.worldTransform);
+          const v = Vec.vec3.create();
+          for (const p of positions) {
+            Vec.vec3.transformMat4(v, Vec.vec3.fromValues(p[0], p[1], p[2]), rel);
+            out.push([v[0], v[1], v[2]]);
+          }
+        }
+      }
+    }
+    for (const child of node.children) visit(child);
+  };
+  visit(root);
+  return out.length >= 4 ? out : null;
+}
+
+/**
+ * Build a single wireframe mesh visualizing one physics shape, at unit size (planes get no
+ * wireframe). `color` is red for bodies, green for triggers. The transform is applied separately by
+ * `applyShapeTransform`, which has to run every frame to track the owner's scale.
  */
 export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, number, number]): ModelNode | null {
   let model: Model | null;
@@ -58,19 +97,75 @@ export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, num
     case 'cylinder':
       model = new Model(Geometry.Cylinder(12, 1, 1), Material.Basic({ color }, { wireframe: true }));
       break;
+    case 'convex': {
+      // Hull faces are index loops (possibly polygons), so fan-triangulate them. Unlike the
+      // primitives above, a hull carries its own geometry rather than scaling a unit primitive.
+      const indices: number[] = [];
+      for (const face of shape.faces)
+        for (let i = 1; i < face.length - 1; i++) indices.push(face[0], face[i], face[i + 1]);
+      const positions = shape.vertices.map((v) => [v[0], v[1], v[2]] as [number, number, number]);
+      model = new Model(
+        new Geometry(positions, [], [], [], [], indices, false),
+        Material.Basic({ color }, { wireframe: true })
+      );
+      break;
+    }
     case 'plane':
     default:
       model = null;
   }
-  if (!model) return null;
+  return model ? new ModelNode(SHAPE_PREFIX, model) : null;
+}
 
-  const node = new ModelNode(SHAPE_PREFIX, model);
-  node.setPosition(Vec.vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]))
+/**
+ * Place one wireframe exactly where the physics engine puts the collider it stands for. A node's TRS
+ * applies scale before rotation, which is the same order `setShapes` (node.ts) and cannon use: the
+ * shape's dimensions and offset are scaled by the owner's world scale, then rotated. Getting this
+ * wrong is invisible on an unrotated, unscaled node and badly wrong on any other.
+ *
+ * Scale is resolved per shape type to mirror `Shape.*` in the engine — a sphere has no ellipsoid
+ * form in cannon, so it takes the dominant axis, and a cylinder takes max(X, Z) radially.
+ */
+function applyShapeTransform(node: ModelNode, shape: ShapeDescription, scale: Vec.vec3) {
+  const sx = Math.abs(scale[0]), sy = Math.abs(scale[1]), sz = Math.abs(scale[2]);
+
+  node.setPosition(Vec.vec3.fromValues(shape.offset[0] * sx, shape.offset[1] * sy, shape.offset[2] * sz))
       .setRotation(Vec.vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2]));
-  if (shape.type === 'box') node.setScale(Vec.vec3.fromValues(shape.width, shape.height, shape.depth));
-  else if (shape.type === 'sphere') node.setUniformScale(shape.radius);
-  else if (shape.type === 'cylinder') node.setScale(Vec.vec3.fromValues(shape.radius, shape.height, shape.radius));
-  return node;
+
+  switch (shape.type) {
+    case 'box':
+      node.setScale(Vec.vec3.fromValues(shape.width * sx, shape.height * sy, shape.depth * sz));
+      break;
+    case 'sphere':
+      node.setUniformScale(shape.radius * Math.max(sx, sy, sz));
+      break;
+    case 'cylinder': {
+      const radial = Math.max(sx, sz);
+      node.setScale(Vec.vec3.fromValues(shape.radius * radial, shape.height * sy, shape.radius * radial));
+      break;
+    }
+    case 'convex':
+      node.setScale(Vec.vec3.fromValues(sx, sy, sz));
+      break;
+  }
+}
+
+/**
+ * Cheap identity of a shape list. A baked convex hull carries hundreds of numbers, so hashing the
+ * whole descriptor on every scene change would be wasteful — its vertex count and transform are
+ * enough to notice a regenerate.
+ */
+function shapesSignature(shapes: ShapeDescription[]): string {
+  return shapes.map((s) => {
+    const common = `${s.type}|${s.offset.join(',')}|${s.rotation.join(',')}`;
+    switch (s.type) {
+      case 'box': return `${common}|${s.width},${s.height},${s.depth}`;
+      case 'sphere': return `${common}|${s.radius}`;
+      case 'cylinder': return `${common}|${s.radius},${s.height},${s.numSegments}`;
+      case 'convex': return `${common}|${s.quality},${s.vertices.length},${s.faces.length},v${s.v ?? 1}`;
+      default: return common;
+    }
+  }).join(';');
 }
 
 // Attach a billboard light icon under a light, tinted to the light's current diffuse color.
@@ -112,8 +207,12 @@ function ensureProbeHelper(probe: LightProbeNode) {
   probe.addChild(helper);
 }
 
-// Ensure a top-level debug node that follows `target` and carries one wireframe per shape. Rebuilds
-// its shape children only when the shapes signature changed (tracked per-scene).
+/**
+ * Ensure a top-level debug node that follows `target` and carries one wireframe per shape. The
+ * meshes are rebuilt only when the shapes signature changes, but the per-frame `onUpdate` is
+ * re-bound on every reconcile so it closes over the *current* shape list — the group outlives any
+ * given edit, and a stale closure would keep drawing the previous offsets.
+ */
 function ensureShapeGroup(
   scene: Scene,
   target: Node,
@@ -122,23 +221,36 @@ function ensureShapeGroup(
   color: [number, number, number],
   follow: (debug: Node) => void,
 ) {
-  const sig = JSON.stringify(shapes);
+  const sig = shapesSignature(shapes);
   const cache = sigMapFor(scene);
 
   let group = scene.getNodesByName(debugName)[0];
+  const isNew = !group;
   if (!group) {
     group = new Node(debugName);
-    group.onUpdate = () => follow(group!);
     scene.addNode(group);
-  } else if (cache.get(debugName) === sig) {
-    return; // unchanged — keep existing children
   }
 
+  // Track the owner's transform, and place each wireframe exactly where its collider will be. Both
+  // have to run every frame: dragging the transform gizmo changes neither the shapes nor their
+  // signature, but it does move and rescale every collider.
+  const debug = group;
+  debug.onUpdate = () => {
+    follow(debug);
+    for (const child of debug.children) {
+      if (!(child instanceof ModelNode) || !child.name.startsWith(SHAPE_PREFIX)) continue;
+      const shape = shapes[Number(child.name.slice(SHAPE_PREFIX.length))];
+      if (shape) applyShapeTransform(child, shape, target.worldScale);
+    }
+  };
+
+  if (!isNew && cache.get(debugName) === sig) return; // shapes unchanged — keep existing children
+
   // (Re)build shape children from scratch so type/size/count changes and shrinks are all handled.
-  for (const child of Array.from(group.children)) group.removeChild(child);
+  for (const child of Array.from(debug.children)) debug.removeChild(child);
   shapes.forEach((shape, i) => {
     const mesh = buildShapeDebugMesh(shape, color);
-    if (mesh) { mesh.name = `${SHAPE_PREFIX}${i}`; group!.addChild(mesh); }
+    if (mesh) { mesh.name = `${SHAPE_PREFIX}${i}`; debug.addChild(mesh); }
   });
   cache.set(debugName, sig);
 }
@@ -148,11 +260,38 @@ function ensureShapeGroup(
  * `bodies`/`triggers` maps. Adds missing helpers, rebuilds changed physics wireframes, and removes
  * stale ones. Idempotent — safe to call on every scene/physics change (in edit mode only).
  */
+/**
+ * Upgrade legacy convex hulls in place. v1 hulls were built from a sampled subset of the mesh, whose
+ * hull can cut inside the mesh; v2 hulls are containment-guaranteed and gather child meshes too.
+ * Rebuild any convex shape without the v2 marker from the node's current geometry; if the geometry
+ * is gone, just stamp it so the rebuild isn't retried every reconcile.
+ */
+function migrateConvexShapes(scene: Scene, shapeLists: Map<string, { shapes: ShapeDescription[] }>) {
+  for (const [id, entry] of shapeLists) {
+    if (!entry.shapes.some((s) => s.type === 'convex' && s.v !== 2)) continue;
+    const target = scene.getNodeById(id);
+    if (!target) continue;
+
+    const positions = collectHullPositions(target);
+    entry.shapes = entry.shapes.map((s) => {
+      if (s.type !== 'convex' || s.v === 2) return s;
+      const hull = positions ? hullFromPositions(positions, s.quality) : null;
+      return hull
+        ? { ...s, vertices: hull.vertices, faces: hull.faces, offset: hull.center, v: 2 as const }
+        : { ...s, v: 2 as const };
+    });
+    shapeLists.set(id, entry);
+  }
+}
+
 export function reconcileEditorHelpers(
   scene: Scene,
   bodies: Map<string, BodyDescription>,
   triggers: Map<string, { shapes: ShapeDescription[] }>,
 ) {
+  migrateConvexShapes(scene, bodies);
+  migrateConvexShapes(scene, triggers);
+
   const nodes = Array.from(scene.nodes);
   // The camera the editor views through (its own __editor__Camera, or whatever is active) must not
   // draw its own frustum model — it would appear stuck to the viewport.
@@ -178,6 +317,8 @@ export function reconcileEditorHelpers(
   for (const [id, body] of bodies) {
     const target = scene.getNodeById(id);
     if (!target) continue;
+    // The group carries only the body's transform; the owner's scale is folded into each shape by
+    // `applyShapeTransform`, exactly as `setShapes` folds it into the collider.
     ensureShapeGroup(scene, target, `${BODY_PREFIX}${id}`, body.shapes, [1, 0, 0], (debug) => {
       debug.setPosition(target.position);
       debug.setRotation(target.rotation);

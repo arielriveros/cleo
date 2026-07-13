@@ -1,14 +1,79 @@
-import { useEffect, useState } from 'react';
-import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS } from 'cleo'
-import type { RagdollOptions } from 'cleo'
+import { useEffect, useMemo, useState } from 'react';
+import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, hullFromPositions } from 'cleo'
+import type { RagdollOptions, HullQuality } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import ShapeEditor from './ShapeEditor';
-import { Field, Slider, Toggle, Select, NumberInput, Button, Section, Hint } from '../../../components/ui'
+import { HULL_QUALITIES } from './hullQuality';
+import { collectHullPositions } from '../../../utils/editorHelpers';
+import { Field, Slider, Toggle, Select, NumberInput, Button, Section, Hint, SegmentedControl } from '../../../components/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 
 const LABEL = 'w-[130px]';
+
+// 3 axis toggles (used for linear/angular constraints; value is a [x,y,z] of 0|1).
+// Declared at module scope: a component defined inside a render body is a *new type* on every render,
+// which remounts its subtree and would wipe the drag state of the vector inputs below it.
+const AxisToggles = ({ label, value, onChange }: { label: string; value: number[]; onChange: (v: number[]) => void }) => (
+  <Field label={label} labelClassName={LABEL}>
+    <div className='flex items-center gap-3'>
+      {(['X', 'Y', 'Z'] as const).map((ax, i) => (
+        <span key={ax} className='inline-flex items-center gap-1'>
+          <span className='text-[10px] text-muted w-2'>{ax}</span>
+          <Toggle checked={value[i] === 1} onChange={(c) => { const n = [...value]; n[i] = c ? 1 : 0; onChange(n); }} />
+        </span>
+      ))}
+    </div>
+  </Field>
+);
+
+/**
+ * Shape list plus the add-shape row. `canHull` is true when the node subtree has static mesh
+ * geometry to fit a convex hull to — skinned meshes don't qualify, because a hull of the bind pose
+ * would not follow the animated silhouette.
+ */
+const ShapeTools = ({ shapes, canHull, addShape, addHull, regenerateHull, setShape, removeShape }: {
+  shapes: ShapeDescription[];
+  canHull: boolean;
+  addShape: (type: string) => void;
+  addHull: (quality: HullQuality) => boolean;
+  regenerateHull: (index: number, quality: HullQuality) => boolean;
+  setShape: (i: number, s: any) => void;
+  removeShape: (i: number) => void;
+}) => {
+  const [quality, setQuality] = useState<HullQuality>('medium');
+  const [degenerate, setDegenerate] = useState(false);
+
+  return (
+    <Section title='Shapes'>
+      <div className='flex items-center gap-1.5 flex-wrap mb-2'>
+        <span className='text-xs text-muted mr-1'>Add:</span>
+        {['box', 'sphere', 'cylinder', 'plane'].map((t) => (
+          <Button key={t} size='sm' onClick={() => addShape(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</Button>
+        ))}
+      </div>
+
+      { canHull && <div className='mb-3'>
+        <Field label='Hull Definition' labelClassName='w-[100px]'>
+          <SegmentedControl size='sm' grow options={HULL_QUALITIES} value={quality} onChange={(v) => setQuality(v as HullQuality)} />
+        </Field>
+        <Button size='sm' className='mt-1.5' onClick={() => setDegenerate(!addHull(quality))}>Add Convex Hull</Button>
+        { degenerate && <Hint className='mt-1'>This mesh is flat or has too few vertices to form a hull.</Hint> }
+      </div> }
+
+      {shapes.map((shape, i) => (
+        <ShapeEditor
+          key={i}
+          shape={shape}
+          setShape={(s: any) => setShape(i, s)}
+          removeShape={() => removeShape(i)}
+          regenerateHull={canHull ? (q) => regenerateHull(i, q) : undefined}
+        />
+      ))}
+    </Section>
+  );
+};
 
 export default function PhysicsEditor(props: {node: Node}) {
   const { bodies, triggers, eventEmitter: eventEmitter } = useCleoEngine();
@@ -92,15 +157,50 @@ export default function PhysicsEditor(props: {node: Node}) {
     if (ragdoll && isSkinned) (props.node as ModelNode).ragdollConfig = ragdoll;
   }, [ragdoll]);
 
+  // Whether this node (or any of its descendants) has static mesh geometry to fit a hull to. The
+  // actual vertex gathering happens fresh on click, so child edits made after selection still count.
+  const canHull = useMemo(() => collectHullPositions(props.node) !== null, [props.node, sceneChanged]);
+
+  const writeShapes = (target: 'body' | 'trigger', shapes: ShapeDescription[]) => {
+    if (target === 'body') setBodyProperties({ ...bodyProperties!, shapes });
+    else setTriggerProperties({ ...triggerProperties!, shapes });
+  };
+  const shapesOf = (target: 'body' | 'trigger') =>
+    (target === 'body' ? bodyProperties!.shapes : triggerProperties!.shapes);
+
   const addShape = (type: string, target: 'body' | 'trigger') => {
     const shape: any =
       type === 'box' ? { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } :
       type === 'sphere' ? { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } :
       type === 'cylinder' ? { type: 'cylinder', radius: 1, height: 1, numSegments: 16, offset: [0, 0, 0], rotation: [0, 0, 0] } :
       { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] };
-    if (target === 'body') setBodyProperties({ ...bodyProperties!, shapes: [...bodyProperties!.shapes, shape] });
-    else setTriggerProperties({ ...triggerProperties!, shapes: [...triggerProperties!.shapes, shape] });
+    writeShapes(target, [...shapesOf(target), shape]);
   }
+
+  // Hull vertices are baked into the descriptor (and so into the scene) rather than rebuilt on load.
+  // They come back centered on their own centroid, which becomes the shape's starting offset.
+  const buildHull = (quality: HullQuality): ShapeDescription | null => {
+    const positions = collectHullPositions(props.node);
+    const hull = positions ? hullFromPositions(positions, quality) : null;
+    if (!hull) return null;
+    return { type: 'convex', quality, vertices: hull.vertices, faces: hull.faces, offset: hull.center, rotation: [0, 0, 0], v: 2 };
+  };
+
+  const addHull = (target: 'body' | 'trigger', quality: HullQuality): boolean => {
+    const shape = buildHull(quality);
+    if (!shape) return false;
+    writeShapes(target, [...shapesOf(target), shape]);
+    return true;
+  };
+
+  const regenerateHull = (target: 'body' | 'trigger', index: number, quality: HullQuality): boolean => {
+    const shape = buildHull(quality);
+    if (!shape) return false;
+    const shapes = [...shapesOf(target)];
+    shapes[index] = { ...shape, rotation: shapes[index].rotation }; // a manual re-orientation survives
+    writeShapes(target, shapes);
+    return true;
+  };
 
   const removeShape = (shapeIndex: number, target: 'body' | 'trigger') => {
     if (target === 'body' && bodyProperties) {
@@ -118,32 +218,16 @@ export default function PhysicsEditor(props: {node: Node}) {
   const removeBody = () => { bodies.delete(props.node.id); setBodyProperties(null); eventEmitter.emit('PHYSICS_CHANGED'); }
   const removeTrigger = () => { triggers.delete(props.node.id); setTriggerProperties(null); eventEmitter.emit('PHYSICS_CHANGED'); }
 
-  // 3 axis toggles (used for linear/angular constraints; value is a [x,y,z] of 0|1).
-  const AxisToggles = ({ label, value, onChange }: { label: string; value: number[]; onChange: (v: number[]) => void }) => (
-    <Field label={label} labelClassName={LABEL}>
-      <div className='flex items-center gap-3'>
-        {(['X', 'Y', 'Z'] as const).map((ax, i) => (
-          <span key={ax} className='inline-flex items-center gap-1'>
-            <span className='text-[10px] text-muted w-2'>{ax}</span>
-            <Toggle checked={value[i] === 1} onChange={(c) => { const n = [...value]; n[i] = c ? 1 : 0; onChange(n); }} />
-          </span>
-        ))}
-      </div>
-    </Field>
-  );
-
-  const ShapeTools = ({ shapes, target, setShapes }: { shapes: ShapeDescription[]; target: 'body' | 'trigger'; setShapes: (i: number, s: any) => void }) => (
-    <Section title='Shapes'>
-      <div className='flex items-center gap-1.5 flex-wrap mb-2'>
-        <span className='text-xs text-muted mr-1'>Add:</span>
-        {['box', 'sphere', 'cylinder', 'plane'].map((t) => (
-          <Button key={t} size='sm' onClick={() => addShape(t, target)}>{t.charAt(0).toUpperCase() + t.slice(1)}</Button>
-        ))}
-      </div>
-      {shapes.map((shape, i) => (
-        <ShapeEditor key={i} shape={shape} setShape={(s: any) => setShapes(i, s)} removeShape={() => removeShape(i, target)} />
-      ))}
-    </Section>
+  const shapeTools = (target: 'body' | 'trigger', shapes: ShapeDescription[]) => (
+    <ShapeTools
+      shapes={shapes}
+      canHull={canHull}
+      addShape={(t) => addShape(t, target)}
+      addHull={(q) => addHull(target, q)}
+      regenerateHull={(i, q) => regenerateHull(target, i, q)}
+      setShape={(i, s) => { const n = [...shapes]; n[i] = s; writeShapes(target, n); }}
+      removeShape={(i) => removeShape(i, target)}
+    />
   );
 
   return ( <>
@@ -169,7 +253,7 @@ export default function PhysicsEditor(props: {node: Node}) {
               <AxisToggles label='Angular Constraints' value={bodyProperties.angularConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, angularConstraints: v as [number, number, number] })} />
               <Button variant='danger' size='sm' className='mt-2' onClick={removeBody}>Remove Rigid Body</Button>
               <div className='mt-2'>
-                <ShapeTools shapes={bodyProperties.shapes} target='body' setShapes={(i, s) => { const n = [...bodyProperties.shapes]; n[i] = s; setBodyProperties({ ...bodyProperties, shapes: n }); }} />
+                {shapeTools('body', bodyProperties.shapes)}
               </div>
             </>
         }
@@ -186,7 +270,7 @@ export default function PhysicsEditor(props: {node: Node}) {
           : <>
               <Button variant='danger' size='sm' onClick={removeTrigger}>Remove Trigger</Button>
               <div className='mt-2'>
-                <ShapeTools shapes={triggerProperties.shapes} target='trigger' setShapes={(i, s) => { const n = [...triggerProperties.shapes]; n[i] = s; setTriggerProperties({ ...triggerProperties, shapes: n }); }} />
+                {shapeTools('trigger', triggerProperties.shapes)}
               </div>
             </>
         }

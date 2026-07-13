@@ -74,6 +74,23 @@ export interface TerrainChunk {
     c0: number; r0: number; c1: number; r1: number;
     /** Marked when its geometry has been re-deformed and needs a GPU re-upload. */
     dirty: boolean;
+    /** Terrain-local Y extent of this chunk (its AABB, kept in sync with the heights). */
+    minY: number; maxY: number;
+    /** Detail level currently selected for this chunk (0 = full). */
+    lod: number;
+    /** Vertex steps of the coarse index buffers currently uploaded, or null if none are. */
+    lodSteps: [number, number] | null;
+}
+
+/** Distance-based terrain LOD configuration (owned by the Renderer, applied per chunk per frame). */
+export interface TerrainLodSettings {
+    enabled: boolean;
+    /** World distance past which a chunk drops to level 1 / level 2. */
+    distance1: number;
+    distance2: number;
+    /** Vertex step of level 1 / level 2 (2, 4 or 8): triangles scale by 1/step². */
+    step1: number;
+    step2: number;
 }
 
 const ATTRIBUTES = ['position', 'normal', 'uv', 'tangent', 'bitangent'];
@@ -82,7 +99,7 @@ function resolveConfig(c: TerrainConfig): Required<TerrainConfig> {
     return {
         size: c.size ?? 200,
         resolution: Math.max(2, Math.floor(c.resolution ?? 129)),
-        chunkQuads: Math.max(4, Math.floor(c.chunkQuads ?? 64)),
+        chunkQuads: Math.max(4, Math.floor(c.chunkQuads ?? 32)),
     };
 }
 
@@ -213,7 +230,9 @@ export class Terrain {
                 const chunk: TerrainChunk = {
                     model: new Model(geometry, this._material),
                     c0, r0, c1, r1, dirty: false,
+                    minY: 0, maxY: 0, lod: 0, lodSteps: null,
                 };
+                this._updateChunkBounds(chunk);
                 this._chunks.push(chunk);
             }
         }
@@ -272,7 +291,23 @@ export class Terrain {
                 i++;
             }
         }
+        this._updateChunkBounds(chunk);
         chunk.dirty = true;
+    }
+
+    /** Refresh a chunk's terrain-local Y extent from the height grid (the Y half of its LOD-distance AABB). */
+    private _updateChunkBounds(chunk: TerrainChunk): void {
+        const R = this._R;
+        let min = Infinity, max = -Infinity;
+        for (let r = chunk.r0; r <= chunk.r1; r++) {
+            for (let c = chunk.c0; c <= chunk.c1; c++) {
+                const h = this._heights[r * R + c];
+                if (h < min) min = h;
+                if (h > max) max = h;
+            }
+        }
+        chunk.minY = isFinite(min) ? min : 0;
+        chunk.maxY = isFinite(max) ? max : 0;
     }
 
     private _markRegionDirty(cMin: number, rMin: number, cMax: number, rMax: number): void {
@@ -281,6 +316,106 @@ export class Terrain {
             this._refreshChunkGeometry(ch);
         }
         this._bodyDirty = true;
+    }
+
+    // --- level of detail ----------------------------------------------------------------------
+
+    /**
+     * Coarse index set for a chunk at the given vertex `step` (2/4/8), over the chunk's UNCHANGED
+     * full-resolution vertex buffer — an LOD level only decimates the triangulation, never the vertices.
+     *
+     * The chunk's border ring is kept at full resolution and fan-stitched to the decimated interior: every
+     * chunk edge therefore uses the exact same vertices at every level, so two neighbours at different
+     * levels always agree on their shared edge and no T-junction cracks can appear — whatever the
+     * combination of levels, with no neighbour bookkeeping.
+     */
+    public buildLodIndices(chunk: TerrainChunk, step: number): number[] {
+        const cols = chunk.c1 - chunk.c0, rows = chunk.r1 - chunk.r0;
+        const stride = cols + 1;
+        const v = (i: number, j: number) => j * stride + i;
+        const indices: number[] = [];
+
+        // Too small to decimate (the stitching needs at least a 2x2 grid of coarse cells): stay full-res.
+        if (step < 2 || cols < 2 * step || rows < 2 * step) {
+            for (let j = 0; j < rows; j++)
+                for (let i = 0; i < cols; i++)
+                    indices.push(v(i, j), v(i, j + 1), v(i + 1, j), v(i + 1, j), v(i, j + 1), v(i + 1, j + 1));
+            return indices;
+        }
+
+        // Cell boundaries along each axis. The last cell absorbs the remainder when the chunk isn't a
+        // whole number of steps across (edge chunks of a terrain whose resolution isn't a power of two + 1).
+        const cuts = (n: number): number[] => {
+            const out: number[] = [];
+            for (let x = 0; x < n; x += step) out.push(x);
+            out.push(n);
+            return out;
+        };
+        const cutsX = cuts(cols), cutsZ = cuts(rows);
+
+        for (let b = 0; b < cutsZ.length - 1; b++) {
+            for (let a = 0; a < cutsX.length - 1; a++) {
+                const x0 = cutsX[a], x1 = cutsX[a + 1];
+                const z0 = cutsZ[b], z1 = cutsZ[b + 1];
+                const onBorder = x0 === 0 || x1 === cols || z0 === 0 || z1 === rows;
+                if (!onBorder) {
+                    // Interior: a plain quad, same winding as the full-res builder.
+                    indices.push(v(x0, z0), v(x0, z1), v(x1, z0), v(x1, z0), v(x0, z1), v(x1, z1));
+                    continue;
+                }
+
+                // Walk the cell's outline (x0,z0) -> (x0,z1) -> (x1,z1) -> (x1,z0), subdividing into single
+                // grid steps every edge that lies on the chunk border so it keeps all its real vertices.
+                const ring: number[] = [];
+                const edge = (
+                    fromI: number, fromJ: number, toI: number, toJ: number, subdivide: boolean,
+                ) => {
+                    ring.push(v(fromI, fromJ));
+                    if (!subdivide) return;
+                    const di = Math.sign(toI - fromI), dj = Math.sign(toJ - fromJ);
+                    const n = Math.abs(toI - fromI) + Math.abs(toJ - fromJ);
+                    for (let k = 1; k < n; k++) ring.push(v(fromI + di * k, fromJ + dj * k));
+                };
+                edge(x0, z0, x0, z1, x0 === 0);
+                edge(x0, z1, x1, z1, z1 === rows);
+                edge(x1, z1, x1, z0, x1 === cols);
+                edge(x1, z0, x0, z0, z0 === 0);
+
+                // Fan from the corner that lies on no subdivided edge (guaranteed to exist by the 2*step
+                // guard above), so no fan triangle degenerates onto a border edge.
+                const xa = x0 === 0 ? x1 : x0;
+                const za = z0 === 0 ? z1 : z0;
+                const apex = ring.indexOf(v(xa, za));
+                const n = ring.length;
+                for (let k = 1; k <= n - 2; k++)
+                    indices.push(ring[apex], ring[(apex + k) % n], ring[(apex + k + 1) % n]);
+            }
+        }
+        return indices;
+    }
+
+    /** Detail level (0/1/2) for a chunk at this camera position, with hysteresis around the thresholds. */
+    public lodFor(chunk: TerrainChunk, camPos: vec3, s: TerrainLodSettings): number {
+        const half = this._cfg.size / 2, e = this._element;
+        const minX = this._origin[0] - half + chunk.c0 * e, maxX = this._origin[0] - half + chunk.c1 * e;
+        const minZ = this._origin[2] - half + chunk.r0 * e, maxZ = this._origin[2] - half + chunk.r1 * e;
+        const minY = this._origin[1] + chunk.minY, maxY = this._origin[1] + chunk.maxY;
+        // Distance to the closest point of the chunk's world AABB (0 when the camera is inside it).
+        const dx = camPos[0] < minX ? minX - camPos[0] : (camPos[0] > maxX ? camPos[0] - maxX : 0);
+        const dy = camPos[1] < minY ? minY - camPos[1] : (camPos[1] > maxY ? camPos[1] - maxY : 0);
+        const dz = camPos[2] < minZ ? minZ - camPos[2] : (camPos[2] > maxZ ? camPos[2] - maxZ : 0);
+        const d = Math.hypot(dx, dy, dz);
+
+        let lod = 0;
+        if (d >= s.distance2) lod = 2;
+        else if (d >= s.distance1) lod = 1;
+        // Refine only once comfortably inside the threshold, so a camera sitting on a boundary doesn't
+        // flip a chunk's triangulation every frame.
+        if (lod < chunk.lod) {
+            if (chunk.lod === 2 && d >= s.distance2 * 0.9) return 2;
+            if (lod === 0 && d >= s.distance1 * 0.9) return 1;
+        }
+        return lod;
     }
 
     // --- editing ------------------------------------------------------------------------------

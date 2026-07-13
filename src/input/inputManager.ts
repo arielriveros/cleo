@@ -201,7 +201,10 @@ export class InputManager {
 
     public isMouseOverCanvas(): boolean {
         if (!InputManager._canvas) return false;
-        
+        // Under pointer lock the cursor has no screen position (`position` becomes a free-running
+        // virtual one), but every event is delivered to the canvas by definition.
+        if (InputManager._mouseInfo.captured) return true;
+
         const rect = InputManager._canvas.getBoundingClientRect();
         const mouseX = InputManager._mouseInfo.position[0];
         const mouseY = InputManager._mouseInfo.position[1];

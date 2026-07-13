@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { CleoEngine, Scene, InputManager, Model, Geometry, Material, TerrainMaterial, Terrain, Node, ModelNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
-import type { AnimationCompatibility } from "cleo";
+import type { AnimationCompatibility, HullQuality } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
@@ -80,6 +80,27 @@ type PlaneShapeDescription = {
   rotation: number[];
 };
 
+/**
+ * Convex hull fitted to a mesh (see `hullFromPositions`). Vertices/faces are baked at authoring time
+ * rather than rebuilt on load, and are centered on the hull's centroid — that displacement is folded
+ * into `offset`, so the hull can be nudged around like any other shape.
+ */
+type ConvexShapeDescription = {
+  type: 'convex';
+  offset: number[];
+  rotation: number[];
+
+  quality: HullQuality;
+  vertices: number[][];
+  faces: number[][];
+  /**
+   * Hull algorithm version. 2 = containment-guaranteed half-space carve over the whole node subtree.
+   * Anything older is rebuilt on load by the editor-helper reconciler (v1 hulled a vertex subset,
+   * which can cut inside the mesh).
+   */
+  v?: number;
+};
+
 export type BodyDescription = {
   mass: number;
   linearDamping: number;
@@ -88,7 +109,7 @@ export type BodyDescription = {
   angularConstraints: [number, number, number];
   shapes: ShapeDescription[];
 }
-export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | PlaneShapeDescription;
+export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | PlaneShapeDescription | ConvexShapeDescription;
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 

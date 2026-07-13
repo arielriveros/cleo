@@ -17,6 +17,7 @@ export default function LandscapeInspector() {
 
     const [size, setSize] = useState(200);
     const [resolution, setResolution] = useState(129);
+    const [chunkQuads, setChunkQuads] = useState(32);
     const [amplitude, setAmplitude] = useState(30);
     const [mode, setMode] = useState<TerrainBrushMode>(terrainBrush.current.mode);
     const [tool, setTool] = useState<TerrainTool>(terrainBrush.current.tool);
@@ -56,7 +57,7 @@ export default function LandscapeInspector() {
         const existing = activeLandscape();
         if (existing) {
             const old = existing.terrain;
-            const next = new Terrain({ size, resolution });
+            const next = new Terrain({ size, resolution, chunkQuads });
             next.resampleHeightsFrom(old);
             for (let i = 0; i < old.layers.length && i < 4; i++) {
                 const L = old.layers[i];
@@ -67,7 +68,7 @@ export default function LandscapeInspector() {
             eventEmitter.emit('SCENE_CHANGED');
             return;
         }
-        const terrain = new Terrain({ size, resolution });
+        const terrain = new Terrain({ size, resolution, chunkQuads });
         const node = new LandscapeNode('Landscape', terrain);
         editorScene.addNode(node);
         terrainBrush.current.activeLandscapeId = node.id;
@@ -115,12 +116,17 @@ export default function LandscapeInspector() {
                     <span className={label}>Size</span>
                     <input type="number" className={num} value={size} min={10} onChange={e => setSize(Number(e.target.value))} />
                 </div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-1">
                     <span className={label}>Resolution</span>
                     <input type="number" className={num} value={resolution} min={8} max={513} onChange={e => setResolution(Number(e.target.value))} />
                 </div>
+                <div className="flex items-center justify-between mb-2">
+                    <span className={label} title="Quads per side of each render chunk: the unit of frustum culling and distance LOD.">Chunk</span>
+                    <input type="number" className={num} value={chunkQuads} min={8} max={64} step={8} onChange={e => setChunkQuads(Number(e.target.value))} />
+                </div>
                 <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={createOrUpdateTerrain}>{hasTerrain ? 'Update Terrain' : 'Create Terrain'}</button>
                 {hasTerrain && <div className="text-[10px] text-gray-400 mt-1">Update rebuilds the terrain at the new size/resolution, keeps materials + shape, and refills foliage.</div>}
+                <div className="text-[10px] text-gray-400 mt-1">Smaller chunks = finer culling &amp; LOD granularity, more draw calls.</div>
             </div>
 
             <div className="grid grid-cols-4 gap-1 mb-2">{modeBtn('sculpt', 'Sculpt')}{modeBtn('paint', 'Paint')}{modeBtn('foliage', 'Foliage')}{modeBtn('move', 'Move')}</div>

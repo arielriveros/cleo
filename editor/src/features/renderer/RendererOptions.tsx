@@ -20,6 +20,13 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'velocity',  label: 'Velocity' },
 ];
 
+// Terrain LOD detail steps: the grid stride a level draws with (triangles scale by 1/step²).
+const LOD_DETAIL: { label: string; step: number; title: string }[] = [
+  { label: '½', step: 2, title: 'Every 2nd vertex — a quarter of the triangles' },
+  { label: '¼', step: 4, title: 'Every 4th vertex — a sixteenth of the triangles' },
+  { label: '⅛', step: 8, title: 'Every 8th vertex — a sixty-fourth of the triangles' },
+];
+
 // Motion-blur quality presets: sample taps per pixel (higher = smoother, costlier).
 const MB_QUALITY: { label: string; samples: number }[] = [
   { label: 'Low',  samples: 8 },
@@ -47,6 +54,11 @@ export default function RendererOptions() {
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
   const [foliageCullDistance, setFoliageCullDistance] = useState<number>(() => renderer?.foliageCullDistance ?? 65);
   const [foliageCellSize, setFoliageCellSize] = useState<number>(() => renderer?.foliageCellSize ?? 13);
+  const [terrainLod, setTerrainLod] = useState<boolean>(() => renderer?.terrainLodEnabled ?? true);
+  const [terrainLodDist1, setTerrainLodDist1] = useState<number>(() => renderer?.terrainLodDistance1 ?? 120);
+  const [terrainLodDist2, setTerrainLodDist2] = useState<number>(() => renderer?.terrainLodDistance2 ?? 300);
+  const [terrainLodStep1, setTerrainLodStep1] = useState<number>(() => renderer?.terrainLodStep1 ?? 2);
+  const [terrainLodStep2, setTerrainLodStep2] = useState<number>(() => renderer?.terrainLodStep2 ?? 4);
   const [motionBlur, setMotionBlur] = useState<boolean>(() => renderer?.motionBlurEnabled ?? true);
   const [motionBlurIntensity, setMotionBlurIntensity] = useState<number>(() => renderer?.motionBlurIntensity ?? 1.0);
   const [motionBlurSamples, setMotionBlurSamples] = useState<number>(() => renderer?.motionBlurSamples ?? 12);
@@ -63,6 +75,11 @@ export default function RendererOptions() {
     setFrustumCulling(renderer.frustumCulling);
     setFoliageCullDistance(renderer.foliageCullDistance);
     setFoliageCellSize(renderer.foliageCellSize);
+    setTerrainLod(renderer.terrainLodEnabled);
+    setTerrainLodDist1(renderer.terrainLodDistance1);
+    setTerrainLodDist2(renderer.terrainLodDistance2);
+    setTerrainLodStep1(renderer.terrainLodStep1);
+    setTerrainLodStep2(renderer.terrainLodStep2);
     setMotionBlur(renderer.motionBlurEnabled);
     setMotionBlurIntensity(renderer.motionBlurIntensity);
     setMotionBlurSamples(renderer.motionBlurSamples);
@@ -105,6 +122,35 @@ export default function RendererOptions() {
             onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); }} />
         </Field>
         <Hint>Foliage cull distance &amp; grid cell size in world units (distance 0 = off).</Hint>
+
+        <Checkbox label='Terrain LOD' checked={terrainLod} labelClassName='my-1'
+          onChange={(c) => { renderer.terrainLodEnabled = c; setTerrainLod(c); }} />
+        <Field label='LOD1 Dist'>
+          <NumberInput value={terrainLodDist1} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.terrainLodDistance1 = v; setTerrainLodDist1(renderer.terrainLodDistance1); }} />
+        </Field>
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>LOD1 Detail</span>
+          <SegmentedControl
+            value={terrainLodStep1}
+            onChange={(step) => { renderer.terrainLodStep1 = step; setTerrainLodStep1(step); }}
+            options={LOD_DETAIL.map((d) => ({ value: d.step, label: d.label, title: d.title }))}
+          />
+        </div>
+        <Field label='LOD2 Dist'>
+          <NumberInput value={terrainLodDist2} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.terrainLodDistance2 = v; setTerrainLodDist2(renderer.terrainLodDistance2); }} />
+        </Field>
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>LOD2 Detail</span>
+          <SegmentedControl
+            value={terrainLodStep2}
+            onChange={(step) => { renderer.terrainLodStep2 = step; setTerrainLodStep2(step); }}
+            options={LOD_DETAIL.map((d) => ({ value: d.step, label: d.label, title: d.title }))}
+          />
+        </div>
+        <Hint>Terrain chunks past each distance (world units) draw on a coarser grid. Chunk borders stay
+          full-detail, so levels meet seamlessly.</Hint>
       </Section>
 
       <Section title='Tone / Post'>

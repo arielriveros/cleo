@@ -12,6 +12,7 @@ import { useStateMachine } from "./animation/StateMachineContext";
 import { SegmentedControl } from "../components/ui";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
 import { instantiateMeshAsset } from "../utils/meshes";
+import { captureViewport, releaseViewport } from "../utils/pointerCapture";
 import { GizmoMode } from "./EngineContext";
 
 // One segment of the Move/Rotate/Scale toggle, styled to match the top-toolbar ModeSelector.
@@ -87,16 +88,16 @@ export default function EngineViewport() {
         // listeners; ignore them so they don't deselect nodes or start a drag.
         const inOverlay = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-cleo-overlay]');
 
+        // Any button starts a potential drag: left orbits the camera, right pans, and both should end up
+        // captured (see handleMouseMove).
         const handleMouseDown = (event: MouseEvent) => {
             if (inOverlay(event.target)) return;
-            if (event.button === 0) { // Left mouse button
-                const rect = viewportRef.current!.getBoundingClientRect();
-                const x = event.clientX - rect.left;
-                const y = event.clientY - rect.top;
-                setDragStartPos({ x, y });
-                setIsDragging(false);
-                wasDraggingRef.current = false;
-            }
+            const rect = viewportRef.current!.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            setDragStartPos({ x, y });
+            setIsDragging(false);
+            wasDraggingRef.current = false;
         };
 
         const handleMouseMove = (event: MouseEvent) => {
@@ -104,19 +105,26 @@ export default function EngineViewport() {
                 const rect = viewportRef.current!.getBoundingClientRect();
                 const x = event.clientX - rect.left;
                 const y = event.clientY - rect.top;
-                
+
                 const deltaX = Math.abs(x - dragStartPos.x);
                 const deltaY = Math.abs(y - dragStartPos.y);
-                
+
                 // If mouse moved more than 5 pixels, consider it a drag
                 if (deltaX > 5 || deltaY > 5) {
                     setIsDragging(true);
                     wasDraggingRef.current = true;
+                    // The camera is being dragged, so capture the mouse: the orbit/pan can then run
+                    // indefinitely without the cursor escaping the viewport. Capturing only once the
+                    // threshold trips means a plain click-to-select never hides the cursor. From here on
+                    // client coordinates are frozen, but `wasDraggingRef` is already set so the click
+                    // handler below still knows to skip selection.
+                    captureViewport(instance);
                 }
             }
         };
 
         const handleMouseUp = () => {
+            if (wasDraggingRef.current) releaseViewport();
             setDragStartPos(null);
             // Don't reset isDragging immediately - let click handler check it first
         };
@@ -199,14 +207,16 @@ export default function EngineViewport() {
         // Use capture: false to allow events to bubble to the canvas
         viewport.addEventListener('mousedown', handleMouseDown, false);
         viewport.addEventListener('mousemove', handleMouseMove, false);
-        viewport.addEventListener('mouseup', handleMouseUp, false);
         viewport.addEventListener('click', handleClick, false);
+        // On the window, so a button released outside the viewport still ends the drag and releases the
+        // mouse capture instead of leaving the camera spinning.
+        window.addEventListener('mouseup', handleMouseUp);
 
         return () => {
             viewport.removeEventListener('mousedown', handleMouseDown);
             viewport.removeEventListener('mousemove', handleMouseMove);
-            viewport.removeEventListener('mouseup', handleMouseUp);
             viewport.removeEventListener('click', handleClick);
+            window.removeEventListener('mouseup', handleMouseUp);
         };
     }, [instance, editorScene, eventEmitter, isDragging, isGizmoDragging, dragStartPos, isPlayMode, editorMode]);
 

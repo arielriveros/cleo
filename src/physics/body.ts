@@ -39,14 +39,15 @@ class CBody extends CannonBody {
       this._name = config.name || 'body';
     }
 
+    /**
+     * `offset` is the shape's position in body space and `orientation` its euler rotation (degrees).
+     * cannon places a shape at `body.position + bodyQuaternion * offset`, i.e. the offset does not
+     * depend on the shape's own rotation — passing anything but the plain offset here would put the
+     * collider somewhere other than where the editor draws it.
+     */
     public attachShape(shape: Shape, offset: vec3 = [0, 0, 0], orientation: vec3 = [0, 0, 0]): CBody {
-        let q = quat.create();
+        const q = quat.create();
         quat.fromEuler(q, orientation[0], orientation[1], orientation[2]);
-        let q2 = quat.create();
-        quat.invert(q2, q);
-        let v = vec3.create();
-        vec3.transformQuat(v, offset, q2);
-        offset = v;
         this.addShape(shape.cShape, new Vec3(offset[0], offset[1], offset[2]), new Quaternion(q[0], q[1], q[2], q[3]));
         return this;
     }

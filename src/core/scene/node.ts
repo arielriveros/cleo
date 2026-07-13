@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
 import { CleoEngine, InputManager, Shape } from "../../cleo";
 import { Logger } from "../logger";
-import { Terrain } from "../../terrain/terrain";
+import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
 import type { BVH } from "../bvh";
 
 type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere';
@@ -262,12 +262,29 @@ export class Node {
 
   private _updateWorldCache(): void {
     vec3.set(this._worldPosition, this._worldTransform[12], this._worldTransform[13], this._worldTransform[14]);
-    mat4.getRotation(this._worldQuaternion, this._worldTransform);
     mat4.getScaling(this._worldScale, this._worldTransform);
+    // mat4.getRotation assumes an unscaled matrix: under non-uniform scale the quaternion comes out
+    // skewed and non-normalized (90° about Y reads back as ~94.6° with scale [3,1,2]), which then
+    // mis-rotates every physics body created from worldQuaternion. Divide the scale out of the
+    // basis vectors before extracting the rotation.
+    const m = this._worldTransform;
+    const sx = this._worldScale[0] || 1;
+    const sy = this._worldScale[1] || 1;
+    const sz = this._worldScale[2] || 1;
+    mat4.set(Node._rotationScratch,
+      m[0] / sx, m[1] / sx, m[2] / sx, 0,
+      m[4] / sy, m[5] / sy, m[6] / sy, 0,
+      m[8] / sz, m[9] / sz, m[10] / sz, 0,
+      0, 0, 0, 1);
+    mat4.getRotation(this._worldQuaternion, Node._rotationScratch);
+    quat.normalize(this._worldQuaternion, this._worldQuaternion);
     vec3.transformQuat(this._worldForward, vec3.set(this._worldForward, 0, 0, 1), this._worldQuaternion);
     vec3.normalize(this._worldForward, this._worldForward);
     this._worldCacheDirty = false;
   }
+
+  // Scratch matrix for _updateWorldCache (avoids a per-frame allocation).
+  private static readonly _rotationScratch: mat4 = mat4.create();
 
   public remove(): void {
     this._markForRemoval = true;
@@ -442,6 +459,15 @@ export class Node {
   }
 
   protected static _commonParse(node: Node, parent: Node, json: any) {
+    // Apply the serialized transform before anything that derives from it: the rigid body is created
+    // at the node's world position/orientation, collider shapes are sized by its world scale, and
+    // children compound their world transforms from this node's. These assignments used to run at
+    // the tail of this function, which created every physics body at the origin with unscaled
+    // shapes — position/rotation were silently corrected afterwards by the setters pushing into the
+    // body, but scale has no such path, so colliders never matched a scaled node.
+    if (json.position) node.setPosition(json.position);
+    if (json.rotation) node.setRotation(json.rotation);
+    if (json.scale) node.setScale(json.scale);
     node.updateTransforms(parent.worldTransform);
 
     // Restore custom variables before scripts so onStart can read them.
@@ -450,37 +476,49 @@ export class Node {
     if (json.script)
       Node._parseScript(node, json.script);
 
+    // Shape dimensions and offsets are authored in node-local units, so the node's world scale is
+    // applied here. Rotations are scale-invariant and pass through untouched, which is what keeps a
+    // scaled node's colliders in the same place and orientation relative to its mesh.
     const setShapes = (shapes: any, target: RigidBody | Trigger) => {
+      const scale = node.worldScale;
+      const scaledOffset = (offset: number[]) => vec3.fromValues(
+        offset[0] * scale[0], offset[1] * scale[1], offset[2] * scale[2]
+      );
+
       for (const shape of shapes) {
+        const offset = scaledOffset(shape.offset);
+        const rotation = vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2]);
+
         switch (shape.type) {
           case 'box':
-            target.attachShape(
-              Shape.Box(shape.width, shape.height, shape.depth),
-              vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-              vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-            );
+            target.attachShape(Shape.Box(shape.width, shape.height, shape.depth, scale), offset, rotation);
             break;
           case 'sphere':
-            target.attachShape(
-              Shape.Sphere(shape.radius),
-              vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-              vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-            );
+            target.attachShape(Shape.Sphere(shape.radius, scale), offset, rotation);
             break;
           case 'plane':
-            target.attachShape(
-              Shape.Plane(),
-              vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-              vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
-            );
+            target.attachShape(Shape.Plane(), offset, rotation);
             break;
           case 'cylinder':
+            target.attachShape(Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments, scale), offset, rotation);
+            break;
+          case 'convex': {
+            // A degenerate hull would feed NaN axes to cannon's SAT, so fall back to its bounding box.
+            const hull = Shape.ConvexHull(shape.vertices, shape.faces, scale);
+            if (hull) { target.attachShape(hull, offset, rotation); break; }
+
+            const min = [Infinity, Infinity, Infinity];
+            const max = [-Infinity, -Infinity, -Infinity];
+            for (const v of shape.vertices as number[][])
+              for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], v[i]); max[i] = Math.max(max[i], v[i]); }
+
+            Logger.warn(`Convex hull on node ${node.name} is degenerate; falling back to its bounding box.`);
             target.attachShape(
-              Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments),
-              vec3.fromValues(shape.offset[0], shape.offset[1], shape.offset[2]),
-              vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2])
+              Shape.Box(max[0] - min[0], max[1] - min[1], max[2] - min[2], scale),
+              offset, rotation
             );
             break;
+          }
           default:
             console.error(`Shape type ${shape.type} not supported`);
         }
@@ -529,9 +567,6 @@ export class Node {
           Node.parse(node, child);
       }
     }
-    node.setPosition(json.position);
-    node.setRotation(json.rotation);
-    node.setScale(json.scale);
     parent.addChild(node);
   }
 
@@ -810,8 +845,9 @@ export class Node {
       mass,
       linearDamping,
       angularDamping,
-      position: this.worldPosition, // TODO: Set the world position, problem when parsing because world position is not set yet
-      quaternion: this.worldQuaternion, // TODO: Set the world quaternion, same as above
+      // Valid during parse: _commonParse applies the JSON transform before creating the body.
+      position: this.worldPosition,
+      quaternion: this.worldQuaternion,
       linearConstraints, angularConstraints
     }, this);
 
@@ -1193,6 +1229,38 @@ export class LandscapeNode extends Node {
                 chunk.model.mesh.updateVertexData(chunk.model.geometry.getData(TERRAIN_ATTRIBUTES));
                 chunk.dirty = false;
             }
+        }
+    }
+
+    /**
+     * Pick each chunk's detail level for this camera position (called once per frame by the renderer,
+     * before any pass, so the shadow maps draw the reduced terrain too). The coarse index buffers are
+     * uploaded lazily on first use and re-built only when the configured vertex steps change; they index
+     * the chunk's existing vertex buffer, so this never interferes with sculpting's vertex re-uploads.
+     */
+    public updateLod(camPos: vec3, settings: TerrainLodSettings): void {
+        const chunks = this._terrain.chunks;
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const node = this._chunkNodes[i];
+            if (!node || !node.initialized) continue; // mesh not created yet: draws full-res this frame
+            const mesh = chunk.model.mesh;
+
+            if (!settings.enabled) {
+                chunk.lod = 0;
+                mesh.activeLod = 0;
+                continue;
+            }
+            const steps = chunk.lodSteps;
+            if (!steps || steps[0] !== settings.step1 || steps[1] !== settings.step2) {
+                mesh.setLodIndices([
+                    this._terrain.buildLodIndices(chunk, settings.step1),
+                    this._terrain.buildLodIndices(chunk, settings.step2),
+                ]);
+                chunk.lodSteps = [settings.step1, settings.step2];
+            }
+            chunk.lod = this._terrain.lodFor(chunk, camPos, settings);
+            mesh.activeLod = chunk.lod;
         }
     }
 

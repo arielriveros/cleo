@@ -1,20 +1,23 @@
+import type { HullQuality } from 'cleo';
 import { ShapeDescription } from '../../EngineContext';
-import AxisInput from '../../../components/AxisInput';
-import { PropertyTable, PropertyRow, NumberInput, Section, Button } from '../../../components/ui';
+import { HULL_QUALITIES } from './hullQuality';
+import { PropertyTable, PropertyRow, NumberInput, Section, Button, VectorInput, SegmentedControl, Hint } from '../../../components/ui';
 
 export default function ShapeEditor(props: {
   shape: ShapeDescription;
   setShape: (shape: any) => void;
   removeShape: () => void;
+  /** Rebuild a convex hull at a new definition, in place. Absent when the node has no usable mesh. */
+  regenerateHull?: (quality: HullQuality) => boolean;
 }) {
   const s = props.shape;
   const patch = (p: any) => props.setShape({ ...s, ...p });
-  const title = s.type.charAt(0).toUpperCase() + s.type.slice(1);
+  const title = s.type === 'convex' ? 'Convex Hull' : s.type.charAt(0).toUpperCase() + s.type.slice(1);
 
   return (
     <div className='w-full p-2'>
       <Section title={title}>
-        <PropertyTable columns={['45%', '55%']}>
+        <PropertyTable columns={['30%', '70%']}>
           {s.type === 'box' && <>
             <PropertyRow label='Width'><NumberInput value={s.width} step={0.01} onChange={(v) => patch({ width: v })} /></PropertyRow>
             <PropertyRow label='Height'><NumberInput value={s.height} step={0.01} onChange={(v) => patch({ height: v })} /></PropertyRow>
@@ -28,11 +31,24 @@ export default function ShapeEditor(props: {
             <PropertyRow label='Height'><NumberInput value={s.height} step={0.01} onChange={(v) => patch({ height: v })} /></PropertyRow>
             <PropertyRow label='Segments'><NumberInput value={s.numSegments} step={1} onChange={(v) => patch({ numSegments: Math.round(v) })} /></PropertyRow>
           </>}
+          {s.type === 'convex' && <>
+            <PropertyRow label='Definition'>
+              { props.regenerateHull
+                ? <SegmentedControl
+                    size='sm' grow options={HULL_QUALITIES} value={s.quality}
+                    onChange={(v) => props.regenerateHull!(v as HullQuality)}
+                  />
+                : <Hint>Source mesh unavailable.</Hint> }
+            </PropertyRow>
+            <PropertyRow label='Geometry'>
+              <span className='text-xs text-muted tabular-nums'>{s.vertices.length} vertices · {s.faces.length} faces</span>
+            </PropertyRow>
+          </>}
           <PropertyRow label='Offset'>
-            <AxisInput value={[s.offset[0], s.offset[1], s.offset[2]]} step={0.01} onChange={(v) => patch({ offset: [v[0], v[1], v[2]] })} />
+            <VectorInput value={[s.offset[0], s.offset[1], s.offset[2]]} step={0.01} reset={[0, 0, 0]} onChange={(v) => patch({ offset: [v[0], v[1], v[2]] })} />
           </PropertyRow>
           <PropertyRow label='Rotation' divider={false}>
-            <AxisInput value={[s.rotation[0], s.rotation[1], s.rotation[2]]} step={0.1} min={-180} max={180} onChange={(v) => patch({ rotation: [v[0], v[1], v[2]] })} />
+            <VectorInput value={[s.rotation[0], s.rotation[1], s.rotation[2]]} step={0.1} min={-180} max={180} reset={[0, 0, 0]} onChange={(v) => patch({ rotation: [v[0], v[1], v[2]] })} />
           </PropertyRow>
         </PropertyTable>
       </Section>

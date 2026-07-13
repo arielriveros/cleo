@@ -40,8 +40,10 @@ export type {
 export { Sprite } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
+export { convexHull, hullFromPositions, HULL_BUDGETS } from "./physics/convexHull";
+export type { Hull, HullQuality } from "./physics/convexHull";
 export { Terrain } from "./terrain/terrain";
-export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush } from "./terrain/terrain";
+export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings } from "./terrain/terrain";
 export { FoliageLayer, crossQuadGeometry } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
 export { Raycaster } from "./core/raycaster";
