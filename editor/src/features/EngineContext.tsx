@@ -15,7 +15,7 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer } from "../utils/terrainMaterials";
 import { MeshAsset, buildMeshAsset } from "../utils/meshes";
 import { groupImportFiles } from "../utils/importGrouping";
-import { renderMeshThumbnail, renderMaterialThumbnail, normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady } from "../utils/meshThumbnails";
+import { renderMeshThumbnail, renderMaterialThumbnail, normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere } from "../utils/meshThumbnails";
 import { parseBundleToRoot } from "../utils/meshImport";
 import { detectMissingTextures } from "../utils/textureRefs";
 
@@ -1042,7 +1042,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const sphere = runtime.scene.getNodeById(runtime.rootId) as ModelNode | null;
     if (!sphere || !sphere.model) return;
     try {
-      const thumbnail = instance.renderer.screenshot(runtime.scene, 256);
+      const thumbnail = captureMaterialSphere(instance, runtime.scene);
       if (tab.materialId) {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail, tab.materialId);
         updateMaterial(tab.materialId, asset);
@@ -1149,7 +1149,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const material = runtime.tm; // the edited TerrainMaterial (the preview node carries the composite)
     if (!material) return;
     try {
-      const thumbnail = instance.renderer.screenshot(runtime.scene, 256);
+      const thumbnail = captureMaterialSphere(instance, runtime.scene);
       if (tab.terrainMaterialId) {
         const asset = buildTerrainMaterialAsset(material, tab.title, thumbnail, tab.terrainMaterialId);
         updateTerrainMaterial(tab.terrainMaterialId, asset);

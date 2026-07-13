@@ -1,6 +1,10 @@
-import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel } from 'cleo';
+import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain } from 'cleo';
 import { createMeshPreviewScene } from '../features/demoScene/createMeshPreviewScene';
 import { createMaterialPreviewScene } from '../features/demoScene/createMaterialPreviewScene';
+import { fitDistance, MATERIAL_SPHERE_RADIUS } from '../features/demoScene/previewFraming';
+import type { MaterialAsset } from './materials';
+import { MeshAsset, instantiateMeshAsset } from './meshes';
+import { TerrainMaterialAsset, parseTerrainMaterialAsset } from './terrainMaterials';
 
 const THUMB_SIZE = 256;
 
@@ -33,14 +37,59 @@ async function awaitTexturesReady(ids: string[], timeoutMs = 10000): Promise<voi
   await new Promise<void>(r => requestAnimationFrame(() => r()));
 }
 
+/**
+ * Push the camera node's world transform into its Camera.
+ *
+ * `Camera` keeps its own position/eye and is only synced by `CameraNode.update()`, which runs from
+ * `scene.update()`. Preview scenes are throwaway — the engine's game loop only updates the *active* scene —
+ * so without this the capture renders from a camera still at the origin (position == eye == [0,0,0]) and the
+ * framing the preview scene computed is never actually applied.
+ */
+function syncPreviewCamera(scene: Scene): void {
+  scene.root.updateTransforms();
+  const cam = scene.activeCamera;
+  if (cam) cam.update(0, 0);
+}
+
 // Capture a scene to a base64 PNG with the ground grid hidden (kept clean, then restored).
 function captureClean(engine: CleoEngine, scene: Scene): string {
   const prevGrid = engine.renderer.gridVisible;
   engine.renderer.setGridVisible(false);
   try {
-    return engine.renderer.screenshot(scene, THUMB_SIZE);
+    syncPreviewCamera(scene);
+    return engine.renderer.screenshotOffscreen(scene, THUMB_SIZE);
   } finally {
     engine.renderer.setGridVisible(prevGrid);
+  }
+}
+
+/**
+ * Capture the material editor's live preview sphere.
+ *
+ * The orbit rig lets the user zoom closer than the sphere's fit distance to inspect the material, which
+ * crops it — a thumbnail must show the whole sphere, so the camera is dollied back out to the fit distance
+ * for the capture only (keeping the user's orbit orientation) and restored afterwards. The orbit controller
+ * is muted while dollied so it can't snap the camera back to its zoom radius mid-capture.
+ */
+export function captureMaterialSphere(engine: CleoEngine, scene: Scene): string {
+  const cam = scene.activeCamera;
+  if (!cam) return captureClean(engine, scene);
+
+  const fit = fitDistance(MATERIAL_SPHERE_RADIUS);
+  const prev: [number, number, number] = [cam.position[0], cam.position[1], cam.position[2]];
+  const dollied = Math.hypot(prev[0], prev[1], prev[2]) < fit;
+  const prevOnUpdate = cam.onUpdate;
+  try {
+    if (dollied) {
+      cam.onUpdate = () => {};
+      cam.setPosition([0, 0, -fit]); // the rig looks down its local -Z at the pivot (the sphere)
+    }
+    return captureClean(engine, scene);
+  } finally {
+    if (dollied) {
+      cam.setPosition(prev);
+      cam.onUpdate = prevOnUpdate; // the game loop's next update restores the live view
+    }
   }
 }
 
@@ -158,5 +207,62 @@ export async function renderMaterialThumbnail(engine: CleoEngine, material: Mate
   scene.start();
 
   await awaitTexturesReady(materialTextureIds(preview));
+  return captureClean(engine, scene);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Re-rendering a thumbnail from a *saved asset* (the explorer's refresh button), as opposed to from the
+// live object it was created from. Each of these rebuilds the same preview the asset's editor/import
+// showed, from the asset's own embedded data, so it can run for assets nothing currently has open.
+// ---------------------------------------------------------------------------------------------------
+
+/** Re-register an asset's embedded textures so its material parses against real images, not the fallback. */
+function restoreEmbeddedTextures(textures: any[] | undefined): string[] {
+  const ids: string[] = [];
+  for (const t of textures || []) {
+    if (!t?.id) continue;
+    ids.push(t.id);
+    if (!TextureManager.Instance.getTexture(t.id))
+      TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id);
+  }
+  return ids;
+}
+
+/** Re-render a saved MaterialAsset's preview sphere. */
+export async function renderMaterialAssetThumbnail(engine: CleoEngine, asset: MaterialAsset): Promise<string> {
+  restoreEmbeddedTextures(asset.textures);
+  return renderMaterialThumbnail(engine, Material.parse(asset.material));
+}
+
+/**
+ * Re-render a saved MeshAsset's preview. The subtree is instantiated into a throwaway holder (which also
+ * restores its embedded textures) and framed exactly as it was on import.
+ */
+export async function renderMeshAssetThumbnail(engine: CleoEngine, asset: MeshAsset): Promise<string> {
+  const holder = new Node('__thumb');
+  instantiateMeshAsset(asset, holder);
+  const root = holder.children[0];
+  if (!root) return '';
+  return renderMeshThumbnail(engine, root); // reparents `root` into its own preview scene
+}
+
+/**
+ * Re-render a saved TerrainMaterialAsset's preview sphere. Mirrors the terrain-material tab: the material
+ * is layer 0 of a tiny helper terrain, so the sphere renders through the terrain shader (height blending,
+ * displacement and parallax all show up) rather than as a plain PBR surface.
+ */
+export async function renderTerrainMaterialAssetThumbnail(engine: CleoEngine, asset: TerrainMaterialAsset): Promise<string> {
+  const texIds = restoreEmbeddedTextures(asset.textures);
+  const tm = parseTerrainMaterialAsset(asset);
+
+  const scene = new Scene();
+  createMaterialPreviewScene(scene);
+  const helperTerrain = new Terrain({ size: 2, resolution: 2 });
+  helperTerrain.setLayer(0, tm, { auto: false }); // auto off so the preview always shows the surface
+  const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), helperTerrain.material));
+  scene.addNode(sphere);
+  scene.start();
+
+  await awaitTexturesReady(texIds);
   return captureClean(engine, scene);
 }

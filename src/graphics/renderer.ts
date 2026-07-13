@@ -185,6 +185,15 @@ export class Renderer {
     private _shadowMapFBO: Framebuffer;
     private _gBufferFBO: Framebuffer;
 
+    // Offscreen thumbnail capture (editor asset previews). While `_presentTarget` is set the renderer is in
+    // "thumbnail mode": the pipeline renders at the target's square size, skips every background/atmosphere
+    // draw, and resolves into the target instead of the default framebuffer — so the visible canvas is never
+    // touched. 8-bit (no `precision: 'high'`): readPixels(RGBA, UNSIGNED_BYTE) is invalid against a float
+    // attachment, and the present pass already tonemaps to display-ready LDR. Allocated on first capture so
+    // published games never pay for it.
+    private _offscreenFBO: Framebuffer | null = null;
+    private _presentTarget: Framebuffer | null = null;
+
     // Cascaded shadow maps (directional light, deferred path)
     private readonly _cascadeCount: number = 3;
     private _shadowCascades: Framebuffer[] = [];
@@ -523,7 +532,7 @@ export class Renderer {
         // Set active camera
         if (!scene.activeCamera) return;
         this._activeCamera = scene.activeCamera.camera;
-        this._activeCamera.resize(this._canvas.width, this._canvas.height);
+        this._activeCamera.resize(this._renderWidth, this._renderHeight);
 
         // Compile+register any custom-material programs before any pass calls initializeModel/getShader.
         this._ensureCustomShaders(scene);
@@ -592,37 +601,54 @@ export class Renderer {
         frameStats.frameMs = performance.now() - _statsT0;
     }
 
-    /**
-     * Render `scene` and capture the result as a base64 PNG data URL, center-cropped to a `size`x`size`
-     * square. Synchronous so it works even though the context has no preserveDrawingBuffer: it draws,
-     * then reads the default framebuffer in the same tick. Used by the editor for asset thumbnails.
-     */
+    /** @deprecated Kept for compatibility — delegates to {@link screenshotOffscreen}. */
     public screenshot(scene: Scene, size: number = 256): string {
-        this.render(scene);
-        const w = this._canvas.width, h = this._canvas.height;
-        if (w === 0 || h === 0) return '';
+        return this.screenshotOffscreen(scene, size);
+    }
 
-        const pixels = new Uint8Array(w * h * 4);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    /**
+     * Render `scene` into a private offscreen framebuffer and return it as a base64 PNG data URL with a
+     * **transparent background**. The visible canvas is never bound, so unlike a naive "draw then read the
+     * default framebuffer" capture this leaves no flash in the editor viewport and works regardless of the
+     * viewport's size or visibility. Used for asset thumbnails.
+     *
+     * The pipeline is retargeted to a `size`x`size` square for the duration (camera aspect 1), so a caller
+     * that framed the subject against a square is guaranteed the framing it asked for. Background draws
+     * (skybox, sky, clouds, god rays, grid) are skipped and coverage alpha is taken from scene depth, so
+     * only actual geometry is opaque. Synchronous: it runs to completion between two game-loop frames.
+     */
+    public screenshotOffscreen(scene: Scene, size: number = 256): string {
+        if (size <= 0) return '';
+        if (!this._offscreenFBO) this._offscreenFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
+        if (this._offscreenFBO.width !== size || this._offscreenFBO.height !== size)
+            this._offscreenFBO.create(size, size);
 
-        // Blit into a full-size 2D canvas, flipping Y (WebGL's origin is bottom-left).
-        const full = document.createElement('canvas');
-        full.width = w; full.height = h;
-        const fctx = full.getContext('2d')!;
-        const img = fctx.createImageData(w, h);
-        for (let y = 0; y < h; y++) {
-            const src = (h - 1 - y) * w * 4;
-            img.data.set(pixels.subarray(src, src + w * 4), y * w * 4);
+        const prevW = this._canvas.width, prevH = this._canvas.height;
+        this._presentTarget = this._offscreenFBO;
+        this._resizeBuffers(size, size);
+        try {
+            this.render(scene); // resolves into _offscreenFBO (see _applyPostProcessing)
+
+            const pixels = new Uint8Array(size * size * 4);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this._offscreenFBO.framebuffer);
+            gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+            // Flip Y (WebGL's origin is bottom-left) into the output canvas. Already square — no crop.
+            const out = document.createElement('canvas');
+            out.width = size; out.height = size;
+            const ctx = out.getContext('2d')!;
+            const img = ctx.createImageData(size, size);
+            for (let y = 0; y < size; y++) {
+                const src = (size - 1 - y) * size * 4;
+                img.data.set(pixels.subarray(src, src + size * 4), y * size * 4);
+            }
+            ctx.putImageData(img, 0, 0); // straight (non-premultiplied) alpha — PNG preserves it
+            return out.toDataURL('image/png');
+        } finally {
+            this._presentTarget = null;
+            this._resizeBuffers(prevW, prevH); // hand the pipeline back to the live viewport
         }
-        fctx.putImageData(img, 0, 0);
-
-        // Center-crop the largest square and downscale into the requested thumbnail size.
-        const side = Math.min(w, h);
-        const out = document.createElement('canvas');
-        out.width = size; out.height = size;
-        out.getContext('2d')!.drawImage(full, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
-        return out.toDataURL('image/png');
     }
 
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
@@ -946,7 +972,7 @@ export class Renderer {
     }
 
     private _deferredLightingPass(scene: Scene, shadowLight: LightNode | null): void {
-        const w = this._canvas.width, h = this._canvas.height;
+        const w = this._renderWidth, h = this._renderHeight;
 
         // Copy the opaque depth into the scene FBO so forward passes depth-test correctly.
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this._gBufferFBO.framebuffer);
@@ -956,11 +982,14 @@ export class Renderer {
         this._sceneFBO.bind();
         // Depth was blitted in; clear only color. Clear alpha to 0 so the background starts with an
         // empty bloom mask (only drawn lit surfaces set alpha=1); restore the configured clear alpha after.
+        // Thumbnails clear to transparent black instead, so the clear color can't bleed a fringe into an
+        // image whose background is about to be made transparent.
         GLState.disable(gl.DEPTH_TEST);
         GLState.depthMask(false);
         GLState.disable(gl.BLEND);
         const cc = this.clearColor;
-        gl.clearColor(cc[0], cc[1], cc[2], 0.0);
+        const bg = this._thumbnailMode ? [0, 0, 0] : cc;
+        gl.clearColor(bg[0], bg[1], bg[2], 0.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.clearColor(cc[0], cc[1], cc[2], cc[3] ?? 1);
 
@@ -1145,7 +1174,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-        this._shaderManager.setUniform('u_noiseScale', [this._canvas.width / 4, this._canvas.height / 4]);
+        this._shaderManager.setUniform('u_noiseScale', [this._renderWidth / 4, this._renderHeight / 4]);
         this._shaderManager.setUniform('u_radius', this._ssaoRadius);
         this._shaderManager.setUniform('u_bias', this._ssaoBias);
         this._shaderManager.setUniform('u_power', this._ssaoPower);
@@ -1251,7 +1280,7 @@ export class Renderer {
         }
 
         this._cubeFBO.unbind();
-        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
         return { irradiance, prefiltered };
@@ -1334,7 +1363,7 @@ export class Renderer {
         const { irradiance, prefiltered } = this.bakeIBL(sourceCube, res);
         probe.setBakedMaps(sourceCube, irradiance, prefiltered);
 
-        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
         this._capturing = false;
     }
 
@@ -1498,7 +1527,7 @@ export class Renderer {
         }
         cube.generateMipmaps();
         this._cubeFBO.unbind();
-        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
 
@@ -1590,9 +1619,12 @@ export class Renderer {
         }
 
         // Sky fills the background (fragments the geometry pass left at far depth). A baked atmosphere
-        // cubemap takes precedence over a static skybox.
+        // cubemap takes precedence over a static skybox. Thumbnails want an empty background they can
+        // turn transparent, so every background draw below is skipped for them.
         const skyAtmo = scene.skyAtmosphere;
-        if (skyAtmo && skyAtmo.cubemap) {
+        if (this._thumbnailMode) {
+            // no background
+        } else if (skyAtmo && skyAtmo.cubemap) {
             const prevType = this._activeCamera.type;
             this._activeCamera.type = 'perspective'; // ortho has no valid sky projection
             this._drawAtmosphereSky(skyAtmo.cubemap, this._activeCamera.viewMatrix, this._activeCamera.projectionMatrix);
@@ -1616,7 +1648,7 @@ export class Renderer {
 
         // Volumetric clouds: raymarched fullscreen, composited over the sky and occluded by opaque
         // geometry (the shader reads the blitted scene depth to bound each ray).
-        this._renderVolumetricClouds(scene);
+        if (!this._thumbnailMode) this._renderVolumetricClouds(scene);
 
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
         // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
@@ -1626,16 +1658,19 @@ export class Renderer {
 
         // Atmospheric fog over the opaque scene (aerial perspective from the SkyAtmosphere node).
         // Drawn before the grid/transparents so editor overlays stay crisp.
-        this._renderSkyFog(scene);
+        if (!this._thumbnailMode) this._renderSkyFog(scene);
 
         // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
-        this._renderGrid();
+        if (!this._thumbnailMode) this._renderGrid();
 
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes.
+        // Thumbnails are the exception: their coverage alpha is read back from the scene depth, so a
+        // transparent asset that writes no depth would be cut out of its own thumbnail entirely. Writing
+        // depth is safe here because the queue is already sorted back-to-front.
         transparentQueue.sort((a, b) =>
             vec3.distance(this._activeCamera.position, b.worldPosition) -
             vec3.distance(this._activeCamera.position, a.worldPosition));
-        GLState.depthMask(false);
+        GLState.depthMask(this._thumbnailMode);
         for (const node of transparentQueue) this._renderModel(node);
         GLState.depthMask(true);
 
@@ -1906,32 +1941,52 @@ export class Renderer {
         }
     }
 
+    // Size the render path is currently targeting: the offscreen square while capturing a thumbnail,
+    // the canvas otherwise. Everything in the frame (camera aspect, texel sizes) must read these rather
+    // than the canvas, or a capture would be framed for the viewport it is deliberately bypassing.
+    private get _renderWidth(): number { return this._presentTarget ? this._presentTarget.width : this._canvas.width; }
+    private get _renderHeight(): number { return this._presentTarget ? this._presentTarget.height : this._canvas.height; }
+
+    /** True while capturing an offscreen thumbnail: backgrounds are skipped and the present writes coverage alpha. */
+    private get _thumbnailMode(): boolean { return this._presentTarget !== null; }
+
     public resize(): void {
         if (!this._viewport) return;
         this._canvas.width = this._viewport.clientWidth;
         this._canvas.height = this._viewport.clientHeight;
 
         if (!gl) return;
-        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
-
-        this._sceneFBO.resize(this._canvas.width, this._canvas.height);
-        this._gBufferFBO.resize(this._canvas.width, this._canvas.height);
-        this._ssaoFBO.resize(this._canvas.width, this._canvas.height);
-        this._ssaoBlurFBO.resize(this._canvas.width, this._canvas.height);
-        this._blur_FBOs[0].resize(this._canvas.width / 2, this._canvas.height / 2);
-        this._blur_FBOs[1].resize(this._canvas.width / 2, this._canvas.height / 2);
-        this._compose_FBOs[0].resize(this._canvas.width, this._canvas.height);
-        this._compose_FBOs[1].resize(this._canvas.width, this._canvas.height);
-        this._bloomFBO.resize(this._canvas.width, this._canvas.height);
-        this._outlineMaskFBO.resize(this._canvas.width, this._canvas.height);
-        const mbK = Renderer.MOTION_BLUR_TILE;
-        this._velocityFBO.resize(this._canvas.width, this._canvas.height);
-        this._velocityTileFBO.resize(Math.ceil(this._canvas.width / mbK), Math.ceil(this._canvas.height / mbK));
-        this._velocityNeighborFBO.resize(Math.ceil(this._canvas.width / mbK), Math.ceil(this._canvas.height / mbK));
-        // A resize invalidates the previous-frame camera transform; skip blur for one frame.
-        this._hasPrevViewProj = false;
+        this._resizeBuffers(this._canvas.width, this._canvas.height);
 
         Logger.info(`Resized to ${this._canvas.width}x${this._canvas.height}`)
+    }
+
+    /**
+     * Resize every screen-space buffer to `width`x`height`. Split out from `resize()` so an offscreen
+     * capture can retarget the pipeline to its square size and restore it afterwards **without touching
+     * `_canvas.width/height`** — reassigning those clears the visible canvas's drawing buffer, which is
+     * exactly the flash the offscreen path exists to avoid. Shadow-map/IBL/BRDF buffers are sized
+     * independently of the viewport and are deliberately left alone.
+     */
+    private _resizeBuffers(width: number, height: number): void {
+        gl.viewport(0, 0, width, height);
+
+        this._sceneFBO.resize(width, height);
+        this._gBufferFBO.resize(width, height);
+        this._ssaoFBO.resize(width, height);
+        this._ssaoBlurFBO.resize(width, height);
+        this._blur_FBOs[0].resize(width / 2, height / 2);
+        this._blur_FBOs[1].resize(width / 2, height / 2);
+        this._compose_FBOs[0].resize(width, height);
+        this._compose_FBOs[1].resize(width, height);
+        this._bloomFBO.resize(width, height);
+        this._outlineMaskFBO.resize(width, height);
+        const mbK = Renderer.MOTION_BLUR_TILE;
+        this._velocityFBO.resize(width, height);
+        this._velocityTileFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
+        this._velocityNeighborFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
+        // A resize invalidates the previous-frame camera transform; skip blur for one frame.
+        this._hasPrevViewProj = false;
     }
 
     public set viewport(viewport: HTMLElement) {
@@ -1964,11 +2019,17 @@ export class Renderer {
 
     private _renderScene(scene: Scene): void {
         this._sceneFBO.bind();
-        gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
+        // Thumbnails clear to transparent black (and skip the sky below) so only geometry ends up opaque.
+        const fwdCC = this.clearColor;
+        if (this._thumbnailMode) gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        if (this._thumbnailMode) gl.clearColor(fwdCC[0], fwdCC[1], fwdCC[2], fwdCC[3] ?? 1);
 
         const fwdAtmo = scene.skyAtmosphere;
-        if (fwdAtmo && fwdAtmo.cubemap) {
+        if (this._thumbnailMode) {
+            // no background
+        } else if (fwdAtmo && fwdAtmo.cubemap) {
             const prevType = this._activeCamera.type;
             this._activeCamera.type = 'perspective';
             this._drawAtmosphereSky(fwdAtmo.cubemap, this._activeCamera.viewMatrix, this._activeCamera.projectionMatrix);
@@ -2309,7 +2370,7 @@ export class Renderer {
         const cam = this._activeCamera;
         const proj = mat4.create();
         if (cam.type === 'perspective')
-            mat4.perspective(proj, cam.fov * Math.PI / 180, this._canvas.width / this._canvas.height, nearD, farD);
+            mat4.perspective(proj, cam.fov * Math.PI / 180, this._renderWidth / this._renderHeight, nearD, farD);
         else
             mat4.ortho(proj, cam.left, cam.right, cam.bottom, cam.top, nearD, farD);
 
@@ -2412,6 +2473,15 @@ export class Renderer {
         GLState.disable(gl.DEPTH_TEST);
         GLState.depthMask(true);
 
+        // Thumbnail capture resolves the lit scene straight into the offscreen target and stops: no bloom,
+        // god rays, chromatic aberration, motion blur, outline or debug channels. That keeps thumbnails
+        // deterministic (independent of the user's Renderer-panel settings) and, crucially, avoids the post
+        // chain's composer/CA passes, which hard-write alpha=1 and would destroy the transparency below.
+        if (this._presentTarget) {
+            this._presentThumbnail();
+            return;
+        }
+
         // First, bring the lit scene into _compose_FBOs[0]. Motion blur (when on) reconstructs the
         // image while doing so; otherwise it's a plain copy.
         const motionBlurOn = this._motionBlurEnabled && this._hasPrevViewProj && this._motionBlurIntensity > 0.0;
@@ -2450,6 +2520,9 @@ export class Renderer {
                 this._shaderManager.bind('present');
                 this._shaderManager.setUniform('u_exposure', this._exposure);
                 this._shaderManager.setUniform('u_screenTexture', 0);
+                // Opaque: GL uniforms persist across binds, so without this reset a preceding thumbnail
+                // capture would leave the flag on and punch the page background through the viewport.
+                this._shaderManager.setUniform('u_alphaFromDepth', 0.0);
                 this._compose_FBOs[1].colors[0].bind();
                 this._screenQuad.draw();
             }
@@ -2459,6 +2532,34 @@ export class Renderer {
         }
     }
 
+    /**
+     * Resolve the lit scene into the offscreen thumbnail target with a transparent background.
+     *
+     * Coverage comes from the scene **depth** buffer (< 1.0 means something was drawn), not from the scene
+     * colour's alpha: that alpha is a *bloom mask* (deferredLighting writes `vec4(color, bloomMask)`), so a
+     * dark, non-blooming asset would come out fully transparent if we trusted it. Depth works for both
+     * pipelines — deferred opaque geometry (blitted from the G-buffer) and the forward/Blinn-Phong objects
+     * the material editor's preview sphere uses.
+     */
+    private _presentThumbnail(): void {
+        const target = this._presentTarget!;
+        target.bind(); // also sets the viewport to the target's square size
+
+        const cc = this.clearColor;
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.clearColor(cc[0], cc[1], cc[2], cc[3] ?? 1);
+
+        this._shaderManager.bind('present');
+        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_screenTexture', 0);
+        this._shaderManager.setUniform('u_coverageDepth', 1);
+        this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
+        this._sceneFBO.colors[0].bind(0);
+        this._sceneFBO.depth.bind(1);
+        this._screenQuad.draw();
+    }
+
     // Screen-space selection outline: draws a border just outside the silhouette mask over the
     // final composited image. Renders to whatever framebuffer is currently bound (the screen).
     private _outlinePass(): void {
@@ -2466,7 +2567,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_exposure', this._exposure); // this pass does the final resolve
         this._shaderManager.setUniform('u_screenTexture', 0);
         this._shaderManager.setUniform('u_maskTexture', 1);
-        this._shaderManager.setUniform('u_texelSize', [1 / this._canvas.width, 1 / this._canvas.height]);
+        this._shaderManager.setUniform('u_texelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
         this._shaderManager.setUniform('u_outlineColor', this._outlineColor);
         this._shaderManager.setUniform('u_outlineWidth', this._outlineWidth);
         this._compose_FBOs[1].colors[0].bind(0);
@@ -2524,7 +2625,7 @@ export class Renderer {
         for (let i = 0; i < iterations; i++) {
             // blur horizontal
             this._blur_FBOs[0].bind();
-            gl.viewport(0, 0, this._canvas.width / 2, this._canvas.height / 2);
+            gl.viewport(0, 0, this._renderWidth / 2, this._renderHeight / 2);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             this._shaderManager.bind('blur');
             this._shaderManager.setUniform('u_horizontal', true);
@@ -2570,7 +2671,7 @@ export class Renderer {
     // project it with the previous frame's view-projection, and store the screen-space delta (UV
     // units, clamped to one tile) in _velocityFBO. Also used standalone by the 'velocity' debug view.
     private _velocityPass(): void {
-        const w = this._canvas.width, h = this._canvas.height;
+        const w = this._renderWidth, h = this._renderHeight;
         this._velocityFBO.bind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         this._shaderManager.bind('motionBlurVelocity');
@@ -2588,7 +2689,7 @@ export class Renderer {
     // gather. Reads the lit scene (_sceneFBO) and writes the blurred result into _compose_FBOs[0],
     // replacing the plain scene->compose copy so the rest of the post chain is unchanged.
     private _motionBlurPass(): void {
-        const w = this._canvas.width, h = this._canvas.height;
+        const w = this._renderWidth, h = this._renderHeight;
         const K = Renderer.MOTION_BLUR_TILE;
 
         // 1) Per-pixel velocity.

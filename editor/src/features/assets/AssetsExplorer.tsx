@@ -74,6 +74,28 @@ function AssetsExplorerHost() {
     try { return (localStorage.getItem(FM_MODE_KEY) as TMode) || 'cards' } catch { return 'cards' }
   }, [])
 
+  // SVAR's own toolbar is hidden (filemanager.css) so search, the preview toggle and the view-mode switch
+  // can share ONE row with the Add menu; these mirror its state and drive it through the store's actions.
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<TMode>(initialMode)
+  const [search, setSearch] = useState('')
+  const searchStartedRef = useRef(false)
+  useEffect(() => {
+    if (!searchStartedRef.current) { searchStartedRef.current = true; return }
+    const t = window.setTimeout(() => apiRef.current?.exec('filter-files', { text: search }), 200)
+    return () => window.clearTimeout(t)
+  }, [search, apiRef])
+
+  const togglePreview = () => {
+    const next = !previewOpen
+    setPreviewOpen(next)
+    apiRef.current?.exec('show-preview', { mode: next })
+  }
+  const setMode = (mode: TMode) => {
+    setViewMode(mode)
+    apiRef.current?.exec('set-mode', { mode }) // the bridge persists it to localStorage
+  }
+
   // --- import ---------------------------------------------------------------------------------------
   const runImport = useCallback(async (files: File[]) => {
     if (!files.length || importingRef.current) return
@@ -215,23 +237,38 @@ function AssetsExplorerHost() {
     return () => document.removeEventListener('click', onClick, true)
   }, [newFolder])
 
-  // One compact 28px strip — every pixel here comes out of the card area below, which at a 30vh bottom
-  // bar has only ~130px to show a full card row including its name.
-  const btn = 'shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold leading-none whitespace-nowrap cursor-pointer'
-  const addItems: { label: string; kind: Parameters<typeof iconFor>[0]; run: () => void; title: string }[] = [
-    { label: 'Material', kind: 'material', run: () => enterMaterialEditor(), title: 'Create a new material asset' },
-    { label: 'Terrain Material', kind: 'terrainMaterial', run: () => enterTerrainMaterialEditor(), title: 'Create a new terrain material asset' },
-    { label: 'Template', kind: 'template', run: () => enterTemplateEditor(), title: 'Author a new template in a dedicated empty scene' },
-    { label: 'Folder', kind: 'folder', run: newFolder, title: 'Create a folder in the current directory' },
+  // The explorer's entire chrome is ONE 28px row: Add menu, search, then the preview toggle and view-mode
+  // switch on the right. Every saved pixel goes to the card area below, which at a 30vh bottom bar has
+  // only ~130px to show a full card row including its name.
+  const addItems: { label: string; icon: React.ReactNode; run: () => void; title: string }[] = [
+    { label: 'Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterMaterialEditor(), title: 'Create a new material asset' },
+    { label: 'Terrain Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new terrain material asset' },
+    { label: 'Template', icon: <img src={iconFor('template')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTemplateEditor(), title: 'Author a new template in a dedicated empty scene' },
+    { label: 'Folder', icon: <img src={iconFor('folder')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: newFolder, title: 'Create a folder in the current directory' },
+    {
+      label: 'Import Files…',
+      icon: (
+        <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+          <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' /><path d='M17 8l-5-5-5 5M12 3v12' />
+        </svg>
+      ),
+      run: () => document.getElementById('asset-import-files')?.click(),
+      title: 'Import models and textures',
+    },
+  ]
+  const modeButtons: { mode: TMode; title: string; icon: React.ReactNode }[] = [
+    { mode: 'table', title: 'Table view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round'><path d='M4 6h16M4 12h16M4 18h16' /></svg> },
+    { mode: 'cards', title: 'Cards view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'><rect x='3' y='3' width='7' height='7' rx='1' /><rect x='14' y='3' width='7' height='7' rx='1' /><rect x='3' y='14' width='7' height='7' rx='1' /><rect x='14' y='14' width='7' height='7' rx='1' /></svg> },
+    { mode: 'panels', title: 'Split view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'><rect x='3' y='4' width='8' height='16' rx='1' /><rect x='13' y='4' width='8' height='16' rx='1' /></svg> },
   ]
   return (
     <div className='w-full h-full flex flex-col text-sm'>
       <div className='h-[28px] flex items-center gap-1.5 px-2 border-b border-border-subtle shrink-0 bg-surface-sunken'>
         <div className='relative shrink-0' ref={addMenuRef}>
           <button
-            className={`${btn} bg-success hover:bg-success-hover`}
+            className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold leading-none whitespace-nowrap cursor-pointer bg-success hover:bg-success-hover'
             onClick={() => setAddOpen(v => !v)}
-            title='Add a new asset or folder'>
+            title='Add a new asset or folder, or import files'>
             + Add <span className='ml-1 text-[9px]'>▾</span>
           </button>
           {addOpen && (
@@ -241,41 +278,52 @@ function AssetsExplorerHost() {
                   className='w-full flex items-center gap-2 h-[24px] px-2 text-[11px] text-left whitespace-nowrap hover:bg-selected/30'
                   onClick={() => { setAddOpen(false); item.run() }}
                   title={item.title}>
-                  <img src={iconFor(item.kind)} className='w-3.5 h-3.5' alt='' draggable={false} />
+                  {item.icon}
                   {item.label}
                 </button>
               ))}
             </div>
           )}
         </div>
-
-        <span className='w-px h-4 bg-border-subtle mx-0.5 shrink-0' />
-
-        <label
-          htmlFor='asset-import-files'
-          className={`${btn} bg-control hover:bg-control-hover border border-border ${importing ? 'opacity-50 pointer-events-none' : ''}`}
-          title='Import models and textures'>
-          Import Files
-        </label>
         <input id='asset-import-files' className='hidden' type='file' multiple
           accept='.obj,.mtl,.gltf,.glb,.fbx,.bin,.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp'
           onChange={onPick} />
 
-        <label
-          htmlFor='asset-import-folder'
-          className={`${btn} bg-control hover:bg-control-hover border border-border ${importing ? 'opacity-50 pointer-events-none' : ''}`}
-          title='Import a whole folder of models and textures'>
-          Import Folder
-        </label>
-        <input id='asset-import-folder' className='hidden' type='file'
-          {...({ webkitdirectory: '', directory: '' } as any)}
-          onChange={onPick} />
+        <input
+          id='asset-search'
+          className='shrink min-w-[80px] w-[200px] h-[20px] px-2 rounded bg-control border border-border text-[11px] text-fg placeholder:text-dim focus:outline-none focus:border-highlight'
+          placeholder='Search'
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
 
         {importing && <span className='shrink-0 text-[11px] text-warning whitespace-nowrap'>Importing…</span>}
 
         <span className='ml-auto min-w-0 truncate text-[11px] text-dim hidden xl:inline'>
           Drag assets into the viewport or onto a slot · drop files here to import
         </span>
+
+        <button
+          id='asset-preview-toggle'
+          className={`shrink-0 w-[24px] h-[20px] inline-flex items-center justify-center rounded ${previewOpen ? 'bg-selected text-white' : 'text-muted hover:bg-control-hover hover:text-fg'}`}
+          onClick={togglePreview}
+          title='Show the details pane for the selected asset'>
+          <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+            <path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z' /><circle cx='12' cy='12' r='3' />
+          </svg>
+        </button>
+
+        <div id='asset-view-modes' className='shrink-0 flex items-center gap-0.5 p-[2px] rounded bg-surface border border-border-subtle'>
+          {modeButtons.map(b => (
+            <button key={b.mode}
+              data-mode={b.mode}
+              className={`w-[24px] h-[16px] inline-flex items-center justify-center rounded-sm ${viewMode === b.mode ? 'bg-selected text-white' : 'text-muted hover:bg-control-hover hover:text-fg'}`}
+              onClick={() => setMode(b.mode)}
+              title={b.title}>
+              {b.icon}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div ref={wrapperRef} className='cleo-fm relative flex-1 min-h-0'>

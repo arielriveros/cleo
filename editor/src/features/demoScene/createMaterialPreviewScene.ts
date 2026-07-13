@@ -1,7 +1,10 @@
 import { Scene, Node, Camera, CameraNode, LightNode, DirectionalLight, InputManager } from 'cleo';
+import { PREVIEW_FOV } from './previewFraming';
 
 // Orbit preview tunables.
 const RADIUS = 3.2;       // camera distance from the sphere (at the origin)
+// Zooming closer than the sphere's fit distance (~2.8) crops it — fine for inspecting the material, but a
+// thumbnail must show the whole sphere, so the capture clamps the distance back out (see saveActiveMaterial).
 const MIN_RADIUS = 1.8;
 const MAX_RADIUS = 12;
 const INIT_PITCH = -18;   // degrees — slight downward tilt for a 3/4 view
@@ -23,7 +26,7 @@ export function createMaterialPreviewScene(scene: Scene): void {
   scene.addNode(pivot);
   pivot.setRotation([INIT_PITCH, INIT_YAW, 0]);
 
-  const cam = new CameraNode('__editor__Camera', new Camera({ far: 10000 }));
+  const cam = new CameraNode('__editor__Camera', new Camera({ fov: PREVIEW_FOV, far: 10000 }));
   cam.active = true;
   // The engine's forward is +Z, so sit the camera on the -Z side of the pivot; its forward then points
   // back through the pivot at the origin. worldForward = pivot·[0,0,1] = -normalize(worldPos) = look-at-origin.

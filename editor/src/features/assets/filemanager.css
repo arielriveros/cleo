@@ -154,94 +154,24 @@
 .cleo-fm .wx-filemanager { background: rgb(var(--surface-raised)) !important; }
 
 /* ==================================================================================================
-   4. Toolbar — search, preview toggle, view-mode switcher
+   4. Toolbar — replaced entirely by the host's single-row chrome (Add menu + search + preview toggle +
+   view modes live in AssetsExplorer's own 28px strip, driven through the store's actions). Scoped to the
+   direct child: the info pane reuses the .wx-toolbar class for its header.
    ================================================================================================== */
-.cleo-fm .wx-toolbar {
-  height: 30px !important;
-  padding: 0 8px !important;
-  gap: 8px;
-  background: rgb(var(--surface-sunken)) !important;
-  border-bottom: 1px solid rgb(var(--border-subtle)) !important;
-}
-/* The "Files" title is redundant — the bottom-bar tab already says Assets. */
-.cleo-fm .wx-toolbar .wx-left > .wx-name { display: none !important; }
-
-.cleo-fm .wx-search-input {
-  height: 22px !important;
-  max-width: 260px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px !important;
-  background: rgb(var(--control)) !important;
-  border: 1px solid rgb(var(--border)) !important;
-  border-radius: var(--radius) !important;
-}
-.cleo-fm .wx-search-input:focus-within { border-color: rgb(var(--highlight)) !important; }
-.cleo-fm .wx-search-input .wx-text {
-  background: transparent !important;
-  border: none !important;
-  font: 12px var(--font-mono) !important;
-  color: rgb(var(--text)) !important;
-  padding: 0 !important;
-  height: auto !important;
-}
-.cleo-fm .wx-search-input .wx-text::placeholder { color: rgb(var(--text-dim)); }
-.cleo-fm .wx-search-input .wxi-search { width: 13px; height: 13px; color: rgb(var(--text-dim)); }
-
-/* Icon buttons (preview toggle) and the cards/table/panels segmented switch. */
-.cleo-fm .wx-toolbar .wx-button {
-  width: 26px;
-  height: 22px !important;
-  min-width: 0 !important;
-  padding: 0 !important;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  border-radius: var(--radius) !important;
-  color: rgb(var(--text-muted)) !important;
-  box-shadow: none !important;
-}
-.cleo-fm .wx-toolbar .wx-button:hover { background: rgb(var(--control-hover)) !important; color: rgb(var(--text)) !important; }
-.cleo-fm .wx-toolbar .wxi-eye { width: 15px; height: 15px; }
-
-.cleo-fm .wx-segmented {
-  height: 24px !important;
-  padding: 2px !important;
-  gap: 2px;
-  background: rgb(var(--surface)) !important;
-  border: 1px solid rgb(var(--border-subtle)) !important;
-  border-radius: var(--radius) !important;
-  box-shadow: none !important;
-}
-.cleo-fm .wx-segment {
-  width: 26px;
-  height: 18px !important;
-  min-width: 0 !important;
-  padding: 0 !important;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent !important;
-  border: none !important;
-  border-radius: calc(var(--radius) - 2px) !important;
-  color: rgb(var(--text-muted)) !important;
-}
-.cleo-fm .wx-segment:hover { background: rgb(var(--control-hover)) !important; color: rgb(var(--text)) !important; }
-.cleo-fm .wx-segment.wx-selected { background: rgb(var(--selected)) !important; color: #fff !important; }
-.cleo-fm .wx-segment [class*='wxi-'] { width: 13px; height: 13px; }
+.cleo-fm .wx-filemanager > .wx-toolbar { display: none !important; }
 
 /* ==================================================================================================
    5. Sidebar — Add New + folder tree
    ================================================================================================== */
 .cleo-fm .wx-sidebar {
   width: 170px !important;
-  padding: 6px !important;
+  padding: 0 !important;
   background: rgb(var(--surface-sunken)) !important;
   border-right: 1px solid rgb(var(--border-subtle)) !important;
 }
+.cleo-fm .wx-sidebar .wx-wrapper { padding: 0 !important; margin: 0 !important; }
+.cleo-fm .wx-sidebar .wx-tree,
+.cleo-fm .wx-sidebar .wx-tree ul { padding: 0 !important; margin: 0 !important; }
 /* The sidebar's built-in "Add New" button duplicates the toolbar's "+ Add" menu — remove it. */
 .cleo-fm .wx-sidebar .wx-wrapper > .wx-button { display: none !important; }
 
@@ -274,65 +204,78 @@
    6. Breadcrumbs
    ================================================================================================== */
 .cleo-fm .wx-breadcrumbs {
-  height: 24px !important;
-  padding: 0 6px !important;
-  gap: 2px;
+  height: 18px !important;
+  min-height: 0 !important;
+  padding: 0 4px !important;
+  gap: 1px;
   align-items: center;
   background: rgb(var(--surface-raised)) !important;
   border-bottom: 1px solid rgb(var(--border-subtle)) !important;
-  font: 12px var(--font-mono) !important;
+  font: 11px/1 var(--font-mono) !important;
 }
 .cleo-fm .wx-breadcrumbs .wx-item {
-  padding: 1px 5px;
+  padding: 0 3px;
   border-radius: var(--radius);
   color: rgb(var(--text-muted));
   cursor: pointer;
+  line-height: 16px;
 }
 .cleo-fm .wx-breadcrumbs .wx-item:hover { background: rgb(var(--control-hover)); color: rgb(var(--text)); }
 .cleo-fm .wx-breadcrumbs .wx-item:last-child { color: rgb(var(--text)); }
-.cleo-fm .wx-breadcrumbs .wxi-angle-right { width: 11px; height: 11px; color: rgb(var(--text-dim)); }
-.cleo-fm .wx-breadcrumbs .wx-refresh-icon { color: rgb(var(--text-dim)); cursor: pointer; }
+.cleo-fm .wx-breadcrumbs .wxi-angle-right { width: 10px; height: 10px; color: rgb(var(--text-dim)); }
+.cleo-fm .wx-breadcrumbs .wx-refresh-icon {
+  display: flex;
+  align-items: center;
+  padding: 0 !important;
+  color: rgb(var(--text-dim));
+  cursor: pointer;
+}
 .cleo-fm .wx-breadcrumbs .wx-refresh-icon:hover { color: rgb(var(--text)); }
-.cleo-fm .wx-breadcrumbs .wxi-refresh { width: 13px; height: 13px; }
+.cleo-fm .wx-breadcrumbs .wxi-refresh { width: 11px; height: 11px; }
 
 /* ==================================================================================================
    7. Cards view
    ================================================================================================== */
 /* Card geometry is budgeted against the bottom bar: at 30vh on a ~900px window the card area under the
-   toolbars is ~130px tall, and a full card INCLUDING its name row must fit — a name below the fold reads
-   as broken, not as scrollable. 104 total = 66 preview + 36 info + 2 border. */
+   chrome is ~150px tall, and a full card INCLUDING its name row must fit — a name below the fold reads
+   as broken, not as scrollable. Tile design: the thumbnail is the visual, the name floats below it with
+   no box of its own; hover/selection tint the whole tile. 84 total = 56 preview + 26 info + 2 border. */
 .cleo-fm .wx-cards {
-  padding: 6px !important;
+  padding: 0 6px 6px !important; /* no top padding — the breadcrumb bar already separates */
   align-content: flex-start;
   background: rgb(var(--surface-raised)) !important;
 }
 .cleo-fm .wx-cards .wx-item {
-  width: 92px !important;
-  height: 104px !important;
-  margin: 0 6px 6px 0 !important;
-  background: rgb(var(--control)) !important;
-  border: 1px solid rgb(var(--border)) !important;
+  width: 80px !important;
+  height: 84px !important;
+  margin: 2px 4px 4px 0 !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
   border-radius: var(--radius) !important;
   overflow: hidden;
   cursor: grab;
   box-shadow: none !important;
 }
-.cleo-fm .wx-cards .wx-item:hover { border-color: rgb(var(--highlight)) !important; }
+.cleo-fm .wx-cards .wx-item:hover {
+  border-color: rgb(var(--border)) !important;
+  background: rgb(var(--control) / 0.4) !important;
+}
 .cleo-fm .wx-cards .wx-item.wx-selected {
   outline: none !important;
   border-color: rgb(var(--selected)) !important;
-  box-shadow: 0 0 0 1px rgb(var(--selected)) !important;
+  box-shadow: none !important;
   background: rgb(var(--selected) / 0.15) !important;
 }
 
-/* Preview strip: fixed 66px, letterboxed — the library's own 154px rule loses to these. */
+/* Preview tile: fixed 56px, letterboxed — the library's own 154px rule loses to these. */
 .cleo-fm .wx-cards .wx-preview {
-  height: 66px !important;
+  height: 56px !important;
   width: 100% !important;
   display: flex !important;
   align-items: center;
   justify-content: center;
   background: rgb(var(--surface-sunken));
+  border-radius: calc(var(--radius) - 2px);
   overflow: hidden;
 }
 .cleo-fm .wx-cards .wx-preview .wx-card-preview {
@@ -342,17 +285,19 @@
 }
 /* Icon-only files (no thumbnail) and folders: a centered, smaller glyph. */
 .cleo-fm .wx-cards .wx-preview.wx-file-icon .wx-card-preview {
-  width: 38px !important;
-  height: 38px !important;
+  width: 30px !important;
+  height: 30px !important;
 }
 
 .cleo-fm .wx-cards .wx-info {
-  height: 36px !important;
-  padding: 0 4px 0 6px !important;
+  height: 26px !important;
+  padding: 0 3px !important;
   display: flex !important;
   align-items: center !important;
+  justify-content: center;
   gap: 2px;
-  font: 11px/1.35 var(--font-mono) !important;
+  background: transparent !important;
+  font: 10px/1.3 var(--font-mono) !important;
   color: rgb(var(--text)) !important;
 }
 .cleo-fm .wx-cards .wx-info .wx-type { display: none !important; } /* the "Folder" caption is noise */
@@ -368,6 +313,7 @@
 .cleo-fm .wx-cards .wx-info .wx-name {
   display: flex !important;
   align-items: baseline;
+  justify-content: center;
   max-width: 100%;
   color: rgb(var(--text)) !important;
 }
@@ -384,10 +330,10 @@
 .cleo-fm .wx-cards .wx-item { position: relative; }
 .cleo-fm .wx-cards .wx-more {
   position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 18px;
-  height: 18px;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
   display: flex !important;
   align-items: center;
   justify-content: center;
@@ -402,20 +348,8 @@
 .cleo-fm .wx-cards .wx-more:hover { background: rgb(var(--control-hover)); color: rgb(var(--text)); }
 .cleo-fm .wx-cards .wx-more .wxi-dots-v { width: 12px; height: 12px; }
 
-/* "Back to parent folder" pill */
-.cleo-fm .wx-back-item { margin: 0 8px 8px 0 !important; }
-.cleo-fm .wx-back {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: var(--radius);
-  color: rgb(var(--text-muted));
-  font: 12px var(--font-mono);
-  cursor: pointer;
-}
-.cleo-fm .wx-back:hover { background: rgb(var(--control-hover)); color: rgb(var(--text)); }
-.cleo-fm .wx-back .wxi-arrow-left { width: 13px; height: 13px; }
+/* "Back to parent folder" is redundant next to the breadcrumbs and the sidebar tree — hidden. */
+.cleo-fm .wx-back-item { display: none !important; }
 
 /* ==================================================================================================
    7b. Info / preview pane (the toolbar eye toggle)
@@ -431,6 +365,16 @@
   font: 12px var(--font-mono) !important;
   color: rgb(var(--text)) !important;
 }
+/* The pane's filename header (it reuses the .wx-toolbar class, which the main-toolbar hide rule above
+   deliberately does not reach). */
+.cleo-fm .wx-info .wx-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  font: 600 12px var(--font-mono) !important;
+  color: rgb(var(--text)) !important;
+}
+
 /* Download is the one built-in operation the explorer doesn't support — remove its last entry point. */
 .cleo-fm .wx-info .wx-icons .wxi-download,
 .cleo-fm .wx-info-narrow .wxi-download { display: none !important; }
@@ -454,8 +398,16 @@
    8. Table view (react-grid)
    ================================================================================================== */
 .cleo-fm .wx-grid { background: rgb(var(--surface-raised)) !important; font: 12px var(--font-mono) !important; }
+.cleo-fm .wx-grid .wx-header,
+.cleo-fm .wx-grid .wx-header-wrapper {
+  height: 22px !important;
+  min-height: 0 !important;
+}
 .cleo-fm .wx-grid .wx-header .wx-cell,
 .cleo-fm .wx-grid .wx-header-wrapper .wx-cell {
+  height: 22px !important;
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
   background: rgb(var(--surface-sunken)) !important;
   color: rgb(var(--text-muted)) !important;
   font: 600 11px var(--font-mono) !important;

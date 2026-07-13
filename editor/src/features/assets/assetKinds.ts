@@ -1,8 +1,11 @@
-import { TextureManager } from 'cleo'
+import { TextureManager, CleoEngine } from 'cleo'
 import type { MaterialAsset } from '../../utils/materials'
 import type { TerrainMaterialAsset } from '../../utils/terrainMaterials'
 import type { Template } from '../../utils/templates'
 import type { MeshAsset } from '../../utils/meshes'
+import {
+  renderMaterialAssetThumbnail, renderMeshAssetThumbnail, renderTerrainMaterialAssetThumbnail,
+} from '../../utils/meshThumbnails'
 import { cryptoRandomId } from '../../utils/UIModel'
 import { AssetKind, KIND_LABEL } from '../../utils/vfs'
 
@@ -174,6 +177,46 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       deps.emit('TEXTURES_CHANGED')
       return texId
     }
+  }
+}
+
+/**
+ * Re-render an asset's thumbnail from its saved data and store it. Returns true if a new image was written.
+ *
+ * Only the kinds whose preview is *rendered* can be regenerated: a template has no thumbnail field, and a
+ * texture's preview is the texture image itself — neither involves the renderer, so both are no-ops.
+ */
+export async function regenerateThumbnail(
+  kind: AssetKind, id: string, engine: CleoEngine, deps: AssetDeps,
+): Promise<boolean> {
+  switch (kind) {
+    case 'material': {
+      const a = deps.materials.find(m => m.id === id)
+      if (!a) return false
+      const thumbnail = await renderMaterialAssetThumbnail(engine, a)
+      if (!thumbnail) return false
+      deps.updateMaterial(id, { ...a, thumbnail })
+      return true
+    }
+    case 'terrainMaterial': {
+      const a = deps.terrainMaterials.find(m => m.id === id)
+      if (!a) return false
+      const thumbnail = await renderTerrainMaterialAssetThumbnail(engine, a)
+      if (!thumbnail) return false
+      deps.updateTerrainMaterial(id, { ...a, thumbnail })
+      return true
+    }
+    case 'mesh': {
+      const a = deps.meshes.find(m => m.id === id)
+      if (!a) return false
+      const thumbnail = await renderMeshAssetThumbnail(engine, a)
+      if (!thumbnail) return false
+      deps.updateMesh(id, { ...a, thumbnail })
+      return true
+    }
+    case 'template':
+    case 'texture':
+      return false
   }
 }
 

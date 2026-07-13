@@ -9,11 +9,22 @@ precision highp float;
 uniform sampler2D u_screenTexture;
 uniform float u_exposure;
 
+// Offscreen thumbnail capture: make the background transparent so asset previews composite over the
+// editor's UI. Coverage is taken from the scene depth (1.0 == nothing was drawn there) rather than the
+// scene colour's alpha, which carries the bloom mask and would erase dark, non-blooming assets.
+uniform sampler2D u_coverageDepth;
+uniform float u_alphaFromDepth; // 0 = opaque background (on-screen), 1 = transparent (thumbnail)
+
 in vec2 fragTexCoord;
 
 out vec4 outColor;
 
 void main() {
     vec3 hdr = texture(u_screenTexture, fragTexCoord).rgb;
-    outColor = vec4(tonemap(hdr, u_exposure), 1.0);
+
+    float alpha = 1.0;
+    if (u_alphaFromDepth > 0.5)
+        alpha = texture(u_coverageDepth, fragTexCoord).r < 1.0 ? 1.0 : 0.0;
+
+    outColor = vec4(tonemap(hdr, u_exposure), alpha);
 }

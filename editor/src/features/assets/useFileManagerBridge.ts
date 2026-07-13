@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { IApi } from '@svar-ui/react-filemanager'
+import { Logger } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useVfs } from './VfsContext'
 import {
   applyCreateFolder, applyDelete, applyMoveOne, applyMoves, buildFileManagerData,
   ancestorsOf, baseOf, dirOf, ensureExt, remapSubtree, stemOf, subtreeOf, VfsEntry, VfsIndex,
 } from '../../utils/vfs'
-import { deleteAsset, deleteConsequence, duplicateAsset, openAsset, renameAsset, thumbnailOf } from './assetKinds'
+import {
+  deleteAsset, deleteConsequence, duplicateAsset, openAsset, regenerateThumbnail, renameAsset, thumbnailOf,
+} from './assetKinds'
 import {
   collectReferencedMaterialIds, collectReferencedMeshIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds,
@@ -26,7 +29,7 @@ export const FM_MODE_KEY = 'cleo_assets_view_mode'
 // appending '.new', so the path an action actually produced is never known up front.
 
 export function useFileManagerBridge() {
-  const { mainScene } = useCleoEngine()
+  const { mainScene, instance } = useCleoEngine()
   const { vfs, setVfs, libs, pathIndexRef, landingFolderRef, depsRef } = useVfs()
 
   const apiRef = useRef<IApi | null>(null)
@@ -36,6 +39,41 @@ export function useFileManagerBridge() {
   libsRef.current = libs
   const sceneRef = useRef(mainScene)
   sceneRef.current = mainScene
+  const engineRef = useRef(instance)
+  engineRef.current = instance
+  const refreshingRef = useRef(false)
+
+  /**
+   * Re-render the thumbnail of every asset shown in `folder` (the breadcrumb refresh button).
+   *
+   * Thumbnails are baked at import/save time, so they go stale whenever the thing behind them changes —
+   * a texture re-imported under the same id, a material edited outside its editor. Refresh re-captures
+   * them from the assets' own data. Sequential on purpose: each capture drives the shared renderer, and
+   * `depsRef.current` has to carry the previous iteration's write before the next one reads it.
+   */
+  const refreshFolderThumbnails = useCallback(async (folder: string) => {
+    const engine = engineRef.current
+    if (!engine || !folder || refreshingRef.current) return
+
+    const targets = vfsRef.current.entries.filter(e =>
+      dirOf(e.path) === folder && (e.kind === 'material' || e.kind === 'terrainMaterial' || e.kind === 'mesh'))
+    if (!targets.length) return
+
+    refreshingRef.current = true
+    let done = 0
+    try {
+      for (const entry of targets) {
+        try {
+          if (await regenerateThumbnail(entry.kind, entry.assetId, engine, depsRef.current)) done++
+        } catch (err) {
+          Logger.error(`Could not refresh the thumbnail for ${baseOf(entry.path)}: ${err}`, 'Editor')
+        }
+      }
+      if (done) Logger.info(`Refreshed ${done} thumbnail${done === 1 ? '' : 's'}`, 'Editor')
+    } finally {
+      refreshingRef.current = false
+    }
+  }, [depsRef])
 
   /** Is this asset still used by the scene (or by a mesh asset)? Drives the extra delete confirmation. */
   const isReferenced = useCallback((entry: VfsEntry): boolean => {
@@ -192,13 +230,20 @@ export function useFileManagerBridge() {
       if (!openAsset(entry.kind, entry.assetId, depsRef.current)) api.exec('show-preview', { mode: true })
     })
 
+    // --- refresh ------------------------------------------------------------------------------------
+    // The breadcrumb refresh icon is the *only* thing that execs 'request-data' (SVAR's own lazy-loading
+    // is not used here — the tree is fully in memory), so it can be repurposed: re-capture the thumbnail
+    // of every asset in the folder being viewed. useSyncVfsToStore notices the new images and swaps the
+    // cards' entities so SVAR drops its memoized previews.
+    api.on('request-data', (cfg: any) => { void refreshFolderThumbnails(cfg?.id) })
+
     // --- ambient state ------------------------------------------------------------------------------
     // Assets created outside the explorer (a mesh import, "New Material") land in the folder being browsed.
     api.on('set-path', (cfg: any) => { if (cfg.id) landingFolderRef.current = cfg.id })
     api.on('set-mode', (cfg: any) => {
       try { if (cfg.mode) localStorage.setItem(FM_MODE_KEY, cfg.mode) } catch { /* ignore */ }
     })
-  }, [isReferenced, setVfs, pathIndexRef, depsRef, landingFolderRef])
+  }, [isReferenced, setVfs, pathIndexRef, depsRef, landingFolderRef, refreshFolderThumbnails])
 
   useSyncVfsToStore(apiRef, vfs, libs, pathIndexRef, depsRef)
 

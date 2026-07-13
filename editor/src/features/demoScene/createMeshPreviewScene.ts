@@ -1,10 +1,10 @@
 import { Scene, Camera, CameraNode, LightNode, DirectionalLight } from 'cleo';
+import { PREVIEW_FOV, fitDistance, previewClipPlanes } from './previewFraming';
 
 // Fixed viewing direction (matches makeEditorCamera's [30,-135,0] look-at-origin orientation): the
 // camera forward for that rotation is exactly -normalize([1,1,1]), so placing the camera at
 // center + normalize([1,1,1]) * distance frames the target regardless of where it sits in space.
 const DIAG = 1 / Math.sqrt(3);
-const PREVIEW_FOV = 60;
 
 /**
  * Dedicated preview scene for a freshly-imported mesh: key + fill directional lights and an editor
@@ -15,9 +15,11 @@ const PREVIEW_FOV = 60;
 export function createMeshPreviewScene(scene: Scene, center: [number, number, number], radius: number): void {
   const r = Math.max(radius, 0.001);
   // Distance so the sphere of radius r fits within the vertical FOV, with a margin for breathing room.
-  const dist = (r / Math.sin((PREVIEW_FOV / 2) * Math.PI / 180)) * 1.4;
+  // Clip planes track the bounds too — the camera defaults would clip very small or very large meshes.
+  const dist = fitDistance(r);
+  const { near, far } = previewClipPlanes(dist, r);
 
-  const cam = new CameraNode('__editor__Camera', new Camera({ fov: PREVIEW_FOV, far: 100000 }));
+  const cam = new CameraNode('__editor__Camera', new Camera({ fov: PREVIEW_FOV, near, far }));
   cam.active = true;
   cam.setPosition([center[0] + DIAG * dist, center[1] + DIAG * dist, center[2] + DIAG * dist]);
   cam.setRotation([30, -135, 0]);
