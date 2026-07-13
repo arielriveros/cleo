@@ -153,6 +153,28 @@
 }
 .cleo-fm .wx-filemanager { background: rgb(var(--surface-raised)) !important; }
 
+/* The library insets the file area on every edge — a 10px `margin-top` on .wx-content-wrapper, 10px of
+   padding on .wx-content-item(-fit), and an inline `width: calc(100% - <sidebar>px - 10px)` on
+   .wx-content — then sizes the scroll area against a 48px breadcrumb bar we shrank to 18px, leaving
+   ~30px dead under the last row. The asset panel is a dense dock panel: the file area fills its box. */
+.cleo-fm .wx-content-wrapper { margin: 0 !important; }
+.cleo-fm .wx-content {
+  width: auto !important; /* drop the inline calc; let the flex row size it against the sidebar */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cleo-fm .wx-content-item,
+.cleo-fm .wx-content-item-fit { padding: 0 !important; }
+.cleo-fm .wx-content .wx-wrapper { padding: 0 !important; margin: 0 !important; }
+/* Cards mode hangs .wx-upload-area off the wrapper, table/panels mode hangs .wx-list off it; both carry
+   the stale `calc(100% - 48px)`. Flex-size them instead so they track the real breadcrumb height. */
+.cleo-fm .wx-content .wx-wrapper > .wx-upload-area,
+.cleo-fm .wx-content .wx-wrapper > .wx-list {
+  height: auto !important;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* ==================================================================================================
    4. Toolbar — replaced entirely by the host's single-row chrome (Add menu + search + preview toggle +
    view modes live in AssetsExplorer's own 28px strip, driven through the store's actions). Scoped to the
