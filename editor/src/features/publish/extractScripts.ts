@@ -2,13 +2,13 @@
 // separate game.scripts.js. The published game then loads scripts as normal JS (parsed by the browser)
 // instead of eval-ing script strings from JSON at runtime.
 //
-// The emitted factory body mirrors Node._parseScript's wrapper in the engine
-// (src/core/scene/node.ts) — keep the preamble/postamble here in sync if that contract changes.
-// The player (attachScripts.ts) calls each factory and arity-adapts the result, mirroring the same file.
+// The factory body is built by the engine's buildFactoryBody — the same function the editor's eval path
+// compiles through — so the two paths cannot drift apart. It is also what rewrites the script's `import`
+// statements into `__cleoImport(...)` calls, since an import statement is not legal inside a function.
 //
 // The final source is heavily obfuscated (see generateScriptsJs) so shipped game logic is unreadable.
 
-import { Logger } from 'cleo';
+import { Logger, buildFactoryBody } from 'cleo';
 
 export type ScriptMap = Record<string, string>;
 
@@ -31,34 +31,6 @@ export function extractScripts(data: any): { data: any; scripts: ScriptMap } {
   return { data, scripts };
 }
 
-// Same wrapper the engine uses in Node._parseScript, emitted as source instead of via `new Function`.
-function factorySource(script: string): string {
-  return `function(node, global, Logger, InputManager, getData, setData, scene, findNode) {
-"use strict";
-const console = {
-  log: (...args) => Logger.print('log', args, 'Script'),
-  info: (...args) => Logger.print('info', args, 'Script'),
-  debug: (...args) => Logger.print('debug', args, 'Script'),
-  warn: (...args) => Logger.print('warn', args, 'Script'),
-  error: (...args) => Logger.print('error', args, 'Script'),
-  flush: (...args) => Logger.print('log', args, 'Script', { flush: true })
-};
-let exports = {};
-let module = { exports };
-${script}
-const ex = (module && typeof module.exports === 'object' && module.exports) ? module.exports : {};
-const pick = (fn, name) => (typeof fn === 'function' ? fn : (typeof ex[name] === 'function' ? ex[name] : null));
-return {
-  onStart:     pick(typeof onStart === 'function' ? onStart : null, 'onStart'),
-  onSpawn:     pick(typeof onSpawn === 'function' ? onSpawn : null, 'onSpawn'),
-  onUpdate:    pick(typeof onUpdate === 'function' ? onUpdate : null, 'onUpdate'),
-  onCollision: pick(typeof onCollision === 'function' ? onCollision : null, 'onCollision'),
-  onTrigger:   pick(typeof onTrigger === 'function' ? onTrigger : null, 'onTrigger'),
-  onDespawn:   pick(typeof onDespawn === 'function' ? onDespawn : null, 'onDespawn')
-};
-}`;
-}
-
 // Build the plain (readable) game.scripts.js source. Scripts that fail to compile are skipped (with a
 // warning) so one broken script can't break the whole file's parse.
 export function buildScriptsSource(scripts: ScriptMap): string {
@@ -68,9 +40,11 @@ export function buildScriptsSource(scripts: ScriptMap): string {
   ];
 
   for (const [id, script] of Object.entries(scripts)) {
-    const source = factorySource(script);
+    let source: string;
     try {
-      // Validate the wrapped source compiles; skip broken scripts rather than break the file.
+      // buildFactoryBody throws on unsupported module syntax; `new Function` then catches plain syntax
+      // errors. Either way one broken script is skipped rather than breaking the whole file's parse.
+      source = `function(__cleoImport) {\n${buildFactoryBody(script)}\n}`;
       // eslint-disable-next-line no-new-func
       new Function(`return (${source});`);
     } catch (e) {

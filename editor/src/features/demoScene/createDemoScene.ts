@@ -147,8 +147,11 @@ export async function createDemoScene(params: {
 
   const playable = new Node('playable');
   playable.setPosition([1, 0, 0]);
-  // Custom variable driving the health HUD (read via getData / write via setData)
+  // Custom variables. Scripts reach these straight off the node — `this.HealthPoints` on the player's own
+  // script, `other.HealthPoints` from the hazards' — and the HUD reads HealthPoints to draw the hearts.
   playable.setVariable('HealthPoints', 3, 'number');
+  playable.setVariable('Score', 0, 'number');
+  playable.setVariable('InvulnerableUntil', 0, 'number');
   // Parent camera under pivot, and pivot under playable
   cameraPivot.addChild(cameraNode);
   playable.addChild(cameraPivot);
@@ -366,23 +369,207 @@ export async function createDemoScene(params: {
     triggers.set(ball.id, { shapes: [{ type: 'sphere', radius: 0.5, offset: [0, 0, 0], rotation: [0, 0, 0] }] });
   }
 
-  // Scripts using module-style exports
+  // Scripts. These are the reference examples for the scripting API: a script imports what it needs from
+  // 'cleo', and assigns its handlers to `this` — which IS the node, with the inspector's custom Variables
+  // as ordinary properties. Nothing is injected.
+
   // Playable controller and game state
-  scripts.set(playable.id, "module.exports = {\n  onStart(node, global) {\n    // Game state stored on the node instance\n    node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n    const jump = () => { if (!node.__game.alive || node.__game.quit) return; if (node.body) node.body.impulse([0, 10, 0]); global.logger('Jump!'); };\n    global.input.registerKeyPress('Space', jump);\n    global.input.registerKeyPress('Escape', () => {\n      node.__game.quit = true;\n      // trigger cleanup and final score logging via onDespawn\n      node.remove();\n    });\n    // Cache reference to camera pivot for movement relative to camera heading\n    for (let i = 0; i < node.children.length; i++) { if (node.children[i].name === 'cameraPivot') { node.__pivot = node.children[i]; break; } }\n  },\n  onUpdate(node, delta, time, global) {\n    const g = node.__game || (node.__game = { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 });\n    // Player death -> ragdoll (one-shot): hand the mannequin skeleton over to physics\n    if (g.alive && getData(node).HealthPoints <= 0) {\n      g.alive = false;\n      const skinned = [];\n      for (let i = 0; i < node.children.length; i++) { const c = node.children[i]; if (c.nodeType === 'model' && c.name !== 'camera' && c.animator) skinned.push(c); }\n      const physics = node.scene && node.scene.physics;\n      if (skinned.length && physics) {\n        if (node.body) { node.body.velocity.set(0,0,0); node.body.angularVelocity.set(0,0,0); node.body.linearFactor.set(0,0,0); node.body.angularFactor.set(0,0,0); node.body.collisionResponse = false; }\n        const rag = physics.startRagdoll(skinned[0]);\n        for (let i = 1; i < skinned.length; i++) skinned[i].animator.enableRagdoll(rag.bodies);\n        global.logger('You died!');\n      }\n      return;\n    }\n    if (!g.alive || g.quit) return;\n    const speed = 3;\n    const rotationSpeed = 360; // degrees per second for smooth rotation\n\n    // Resolve camera yaw from cached pivot (fallback to 0 if missing)\n    let yawDeg = 0;\n    const pivot = node.__pivot;\n    if (pivot && pivot.rotation && pivot.rotation.length > 1) { yawDeg = pivot.rotation[1] || 0; }\n    const yawRad = yawDeg * Math.PI / 180;\n\n    // Build forward/right on the XZ plane from camera yaw\n    const fwd = [Math.sin(yawRad), 0, Math.cos(yawRad)];\n    const right = [Math.cos(yawRad), 0, -Math.sin(yawRad)];\n\n    // Input axes (W/S forward/back, A/D left/right)\n    let axisF = 0, axisR = 0;\n    if (global.input.isKeyPressed('KeyW')) axisF += 1;\n    if (global.input.isKeyPressed('KeyS')) axisF -= 1;\n    // Fix inverted A/D: D should move right (+right), A should move left (-right)\n    if (global.input.isKeyPressed('KeyD')) axisR -= 1;\n    if (global.input.isKeyPressed('KeyA')) axisR += 1;\n\n    // Compose movement vector in world XZ based on camera facing\n    let move = [\n      fwd[0] * axisF + right[0] * axisR,\n      0,\n      fwd[2] * axisF + right[2] * axisR\n    ];\n    const len = Math.hypot(move[0], move[2]);\n\n    if (len > 0) {\n      // Normalize and apply movement\n      move = [move[0] / len, 0, move[2] / len];\n      const dx = move[0] * speed * delta;\n      const dz = move[2] * speed * delta;\n      node.setPosition([node.position[0] + dx, node.position[1], node.position[2] + dz]);\n\n      // Face the animated model child towards actual movement direction\n      const targetAngle = Math.atan2(move[0], move[2]) * (180 / Math.PI);\n      for (let i = 0; i < node.children.length; i++) {\n        const child = node.children[i];\n        if (child.nodeType === 'model' && child.name !== 'camera') {\n          const currentRotation = child.rotation;\n          let currentAngle = currentRotation[1];\n          let angleDiff = targetAngle - currentAngle;\n          while (angleDiff > 180) angleDiff -= 360;\n          while (angleDiff < -180) angleDiff += 360;\n          const maxRotation = rotationSpeed * delta;\n          if (Math.abs(angleDiff) > maxRotation) { currentAngle += Math.sign(angleDiff) * maxRotation; } else { currentAngle = targetAngle; }\n          child.setRotation([0, currentAngle, 0]);\n          child.movementDirection = [move[0], 0, move[2]];\n        }\n      }\n    } else {\n      // No movement - set direction to zero for idle\n      for (let i = 0; i < node.children.length; i++) {\n        const child = node.children[i];\n        if (child.nodeType === 'model' && child.name !== 'camera') {\n          child.movementDirection = [0, 0, 0];\n        }\n      }\n    }\n  },\n  onCollision(node, other, global) { /* not used; hazards are triggers */ },\n  onDespawn(node, global) {\n    const g = node.__game || { score: 0 };\n    global.logger('Final score: ' + g.score);\n  }\n};");
+  scripts.set(playable.id, `import { InputManager, Logger } from 'cleo';
+
+const SPEED = 3;
+const ROTATION_SPEED = 360; // degrees per second
+
+// Top-level state is per-node: this body runs once for each node the script is attached to. Only the
+// values other scripts (or the HUD) need to see are Variables — the rest just lives here.
+let alive = true;
+let quit = false;
+let pivot = null;
+
+this.onStart = (node) => {
+  const input = InputManager.instance;
+
+  // Movement is relative to the camera heading, so keep the pivot handy.
+  pivot = this.children.find(child => child.name === 'cameraPivot');
+
+  input.registerKeyPress('Space', () => {
+    if (!alive || quit) return;
+    if (this.body) this.body.impulse([0, 10, 0]);
+    Logger.log('Jump!', 'Script');
+  });
+
+  input.registerKeyPress('Escape', () => {
+    quit = true;
+    this.remove(); // onDespawn logs the final score
+  });
+};
+
+this.onUpdate = (node, delta, time) => {
+  // Death -> ragdoll (one-shot): hand the mannequin's skeleton over to physics.
+  if (alive && this.HealthPoints <= 0) {
+    alive = false;
+    const skinned = this.children.filter(child => child.nodeType === 'model' && child.name !== 'camera' && child.animator);
+    const physics = this.scene && this.scene.physics;
+    if (skinned.length && physics) {
+      if (this.body) {
+        this.body.velocity.set(0, 0, 0);
+        this.body.angularVelocity.set(0, 0, 0);
+        this.body.linearFactor.set(0, 0, 0);
+        this.body.angularFactor.set(0, 0, 0);
+        this.body.collisionResponse = false;
+      }
+      const ragdoll = physics.startRagdoll(skinned[0]);
+      for (let i = 1; i < skinned.length; i++) skinned[i].animator.enableRagdoll(ragdoll.bodies);
+      Logger.log('You died!', 'Script');
+    }
+    return;
+  }
+  if (!alive || quit) return;
+
+  const input = InputManager.instance;
+
+  // Forward/right on the XZ plane, derived from the camera's yaw.
+  const yaw = ((pivot && pivot.rotation[1]) || 0) * Math.PI / 180;
+  const forward = [Math.sin(yaw), 0, Math.cos(yaw)];
+  const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
+
+  let axisForward = 0, axisRight = 0;
+  if (input.isKeyPressed('KeyW')) axisForward += 1;
+  if (input.isKeyPressed('KeyS')) axisForward -= 1;
+  if (input.isKeyPressed('KeyD')) axisRight -= 1;
+  if (input.isKeyPressed('KeyA')) axisRight += 1;
+
+  let move = [
+    forward[0] * axisForward + right[0] * axisRight,
+    0,
+    forward[2] * axisForward + right[2] * axisRight
+  ];
+  const length = Math.hypot(move[0], move[2]);
+
+  const models = this.children.filter(child => child.nodeType === 'model' && child.name !== 'camera');
+
+  if (length === 0) {
+    for (const model of models) model.movementDirection = [0, 0, 0]; // idle
+    return;
+  }
+
+  move = [move[0] / length, 0, move[2] / length];
+  this.setPosition([
+    this.position[0] + move[0] * SPEED * delta,
+    this.position[1],
+    this.position[2] + move[2] * SPEED * delta
+  ]);
+
+  // Turn the animated model towards the direction of travel.
+  const target = Math.atan2(move[0], move[2]) * 180 / Math.PI;
+  for (const model of models) {
+    let angle = model.rotation[1];
+    let difference = target - angle;
+    while (difference > 180) difference -= 360;
+    while (difference < -180) difference += 360;
+
+    const maxStep = ROTATION_SPEED * delta;
+    angle += Math.abs(difference) > maxStep ? Math.sign(difference) * maxStep : difference;
+
+    model.setRotation([0, angle, 0]);
+    model.movementDirection = [move[0], 0, move[2]];
+  }
+};
+
+this.onDespawn = (node) => {
+  Logger.log('Final score: ' + this.Score, 'Script');
+};
+`);
 
   // Third-person orbit using a pivot node (camera child inherits rotation)
-  scripts.set(cameraPivot.id, "module.exports = {\n  onStart(node, global) {\n    node.__cam = { distance: 5, yaw: 0, pitch: 20, minPitch: -80, maxPitch: 85, minDist: 2, maxDist: 12 };\n    // Ensure the first child (camera) starts at the correct offset\n    if (node.children && node.children.length) { node.children[0].setPosition([0, 0, -5]).setRotation([0,0,0]); }\n  },\n  onUpdate(node, delta, time, global) {\n    const s = node.__cam; if (!s) return;\n    const mouse = global.input.mouse;\n    const lookSpeed = 0.15;\n    s.yaw   -= mouse.velocity[0] * lookSpeed;\n    // Invert vertical (Y) look direction\n    s.pitch += mouse.velocity[1] * lookSpeed;\n    s.pitch = Math.max(s.minPitch, Math.min(s.maxPitch, s.pitch));\n    if (Math.abs(mouse.wheel.deltaY) > 0) {\n      s.distance += mouse.wheel.deltaY * 0.01;\n      s.distance = Math.max(s.minDist, Math.min(s.maxDist, s.distance));\n    }\n    // Apply rotation to pivot so camera inherits it\n    node.setRotation([s.pitch, s.yaw, 0]);\n    // Update camera child local offset based on distance\n    if (node.children && node.children.length) { node.children[0].setPosition([0, 0, -s.distance]); }\n  }\n};");
+  scripts.set(cameraPivot.id, `import { InputManager } from 'cleo';
+
+const LOOK_SPEED = 0.15;
+const MIN_PITCH = -80, MAX_PITCH = 85;
+const MIN_DISTANCE = 2, MAX_DISTANCE = 12;
+
+let distance = 5;
+let yaw = 0;
+let pitch = 20;
+
+this.onStart = (node) => {
+  // The camera is the first child: start it at the resting offset.
+  if (this.children.length) this.children[0].setPosition([0, 0, -distance]).setRotation([0, 0, 0]);
+};
+
+this.onUpdate = (node, delta, time) => {
+  const mouse = InputManager.instance.mouse;
+
+  yaw -= mouse.velocity[0] * LOOK_SPEED;
+  pitch += mouse.velocity[1] * LOOK_SPEED;
+  pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, pitch));
+
+  if (mouse.wheel.deltaY !== 0) {
+    distance += mouse.wheel.deltaY * 0.01;
+    distance = Math.max(MIN_DISTANCE, Math.min(MAX_DISTANCE, distance));
+  }
+
+  // Rotate the pivot; the camera child inherits it.
+  this.setRotation([pitch, yaw, 0]);
+  if (this.children.length) this.children[0].setPosition([0, 0, -distance]);
+};
+`);
 
   // Log collisions for the physical box (debug)
-  scripts.set(physicalBox.id, "module.exports = {\n  onCollision(node, other, global) {\n    global.logger(`${node.name} collided with ${other.name}`);\n  }\n};");
+  scripts.set(physicalBox.id, `import { Logger } from 'cleo';
+
+this.onCollision = (node, other) => {
+  Logger.log(this.name + ' collided with ' + other.name, 'Script');
+};
+`);
 
   // Scripts for collectibles: hide on pickup and increase score
   for (const cube of collectibles) {
-    scripts.set(cube.id, "module.exports = {\n  onTrigger(node, other, global) {\n    if (other && other.name === 'playable' && node.visible) {\n      // Initialize game state on player if missing\n      other.__game = other.__game || { score: 0, hits: 0, alive: true, quit: false, invulnerableUntil: 0 };\n      other.__game.score += 1;\n      node.visible = false;\n      global.logger('Score: ' + other.__game.score);\n    }\n  }\n};");
+    scripts.set(cube.id, `import { Logger } from 'cleo';
+
+this.onTrigger = (node, other) => {
+  if (!this.visible || !other || other.name !== 'playable') return;
+
+  // 'other' is the player's node: its Variables are properties here too, access-checked against
+  // this node. Score is public, so the collectible may increment it.
+  other.Score += 1;
+  this.visible = false;
+
+  Logger.log('Score: ' + other.Score, 'Script');
+};
+`);
   }
 
-  // Scripts for hazards: move and damage player on contact; player dies after 3 hits
+  // Scripts for hazards: move and damage the player on contact; the player dies after 3 hits
   hazards.forEach((ball, i) => {
-    scripts.set(ball.id, "module.exports = {\n  onStart(node) {\n    node.__origin = [node.position[0], node.position[1], node.position[2]];\n    node.__phase = " + i + ";\n  },\n  onUpdate(node, delta, time) {\n    const o = node.__origin || [0,0,0];\n    const t = time / 700 + (node.__phase || 0);\n    node.setX(o[0] + Math.sin(t) * 2.5);\n    node.setZ(o[2] + Math.cos(t * 0.8) * 2.5);\n  },\n  onTrigger(node, other, global) {\n    if (!other || other.name !== 'playable') return;\n    const now = Date.now();\n    other.__iframe = other.__iframe || 0;\n    if (now < other.__iframe) return; // brief i-frames\n    other.__iframe = now + 1000;\n    const hp = getData(other).HealthPoints;\n    if (hp > 0) {\n      setData(other, 'HealthPoints', hp - 1);\n      global.logger('Ouch! Health: ' + (hp - 1));\n    }\n  }\n};");
+    scripts.set(ball.id, `import { Logger } from 'cleo';
+
+const PHASE = ${i};       // offsets this hazard's orbit from its siblings
+const IFRAME_MS = 1000;   // grace period after a hit
+
+let origin = [0, 0, 0];
+
+this.onStart = (node) => {
+  origin = [this.position[0], this.position[1], this.position[2]];
+};
+
+this.onUpdate = (node, delta, time) => {
+  const t = time / 700 + PHASE;
+  this.setX(origin[0] + Math.sin(t) * 2.5);
+  this.setZ(origin[2] + Math.cos(t * 0.8) * 2.5);
+};
+
+this.onTrigger = (node, other) => {
+  if (!other || other.name !== 'playable') return;
+
+  const now = Date.now();
+  if (now < other.InvulnerableUntil) return;
+  other.InvulnerableUntil = now + IFRAME_MS;
+
+  if (other.HealthPoints > 0) {
+    other.HealthPoints -= 1;
+    Logger.log('Ouch! Health: ' + other.HealthPoints, 'Script');
+  }
+};
+`);
   });
 }

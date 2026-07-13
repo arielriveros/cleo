@@ -189,6 +189,11 @@ export class Scene {
         return nodes;
     }
 
+    /** First node with this name, or undefined. The scripting shorthand for getNodesByName(name)[0]. */
+    public findNode(name: string): Node | undefined {
+        return this.getNodesByName(name)[0];
+    }
+
     public getNodeById(id: string): Node | undefined {
         if (this._dirty)
             this._breadthFirstTraversal();

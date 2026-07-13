@@ -12,8 +12,9 @@ import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
 import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
-import { CleoEngine, InputManager, Shape } from "../../cleo";
+import { CleoEngine, Shape } from "../../cleo";
 import { Logger } from "../logger";
+import { compileScript, createScriptImporter, ScriptFactory, SCRIPT_HANDLERS } from "../scripting/scriptRuntime";
 import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
 import type { BVH } from "../bvh";
 
@@ -104,9 +105,156 @@ export function bindDataAccessors(requester: Node): {
     };
 }
 
-interface GlobalState {
-    input: InputManager;
-    logger: (text: string) => void;
+/**
+ * The `this` a script sees: the node itself, with its inspector Variables as plain properties.
+ *
+ *   this.HealthPoints -= 1;      // a Variable declared in the inspector
+ *   this.addZ(2 * delta);        // an ordinary Node method
+ *   this.parent.teamScore += 1;  // a Variable on another node, access-checked
+ *
+ * Name resolution: the six handler slots first, then anything the Node itself has (own fields,
+ * prototype getters, subclass members), then Variables. Handlers must be intercepted BEFORE the node
+ * check because `Node` really does declare onStart/onUpdate/... — assigning straight through them would
+ * bypass the error guard in attachScriptFactory and hand the engine an unwrapped function.
+ *
+ * `requester` is the node whose script is running, which is what every Variable access is checked
+ * against. It differs from `target` for a proxy reached through `this.parent`, `this.children[i]`, or an
+ * `other` handler argument — so those follow exactly the same public/private/protected rules that
+ * getData/setData enforce.
+ */
+type ScriptHandlers = Record<string, Function>;
+
+const scriptProxies: WeakMap<Node, WeakMap<Node, any>> = new WeakMap();
+const proxyHandlers: WeakMap<object, ScriptHandlers> = new WeakMap();
+
+/** Reads the real node back out of a script proxy. */
+const RAW = Symbol('cleo.rawNode');
+
+/**
+ * The raw node behind a script proxy (or the value itself, if it is not one).
+ *
+ * The proxy is a script-facing *view* of a node: it must never be stored by the engine, which compares
+ * and keys nodes by identity. Anything that takes a Node from script code and keeps it has to unwrap
+ * first — the proxy does this for every Node method it forwards, and PhysicsSystem.startRagdoll does it
+ * because a script reaches it through `this.scene.physics`, which is not a Node member and so is not
+ * forwarded through the proxy at all.
+ */
+export function unwrapScriptNode<T>(value: T): T {
+    return (value && (value as any)[RAW]) || value;
+}
+
+function wrapNode(target: Node | null | undefined, requester: Node): any {
+    if (!target) return target;
+
+    let byTarget = scriptProxies.get(requester);
+    if (!byTarget) { byTarget = new WeakMap(); scriptProxies.set(requester, byTarget); }
+
+    // Memoised so proxy identity is stable: `other === this.parent` must still compare true, and a hot
+    // onUpdate that walks this.children must not allocate a proxy per frame.
+    const cached = byTarget.get(target);
+    if (cached) return cached;
+
+    const handlers: ScriptHandlers = {};
+
+    const proxy: any = new Proxy(target, {
+        get(node: any, prop: any, receiver: any) {
+            if (prop === RAW) return node;
+            if (typeof prop !== 'string') return Reflect.get(node, prop, receiver);
+            if (SCRIPT_HANDLERS.includes(prop as any)) return handlers[prop];
+
+            // findNode lives on Scene, so this.scene.findNode(...) would hand back a raw node. Synthesize
+            // it here instead, where the result can be proxied like every other node a script touches.
+            if (prop === 'findNode')
+                return (name: string) => wrapNode(node.scene?.findNode(name), requester);
+
+            // Not a Node member: it is a Variable (or nothing). Unreadable ones read as undefined, which
+            // is what getData already does for a variable the requester may not see.
+            if (!(prop in node)) {
+                if (!node.variables.has(prop)) return undefined;
+                return canAccessVariable(node, requester, prop) ? node.variables.get(prop).value : undefined;
+            }
+
+            const value = Reflect.get(node, prop, node);
+
+            // Anything that hands back a Node hands back a *proxied* Node, so the script never has to
+            // care which end of a reference it is holding: this.parent.hp works like this.hp.
+            if (value instanceof Node) return wrapNode(value, requester);
+            if (Array.isArray(value) && value.length && value[0] instanceof Node)
+                return value.map((child: Node) => wrapNode(child, requester));
+
+            // Methods run against the real node — otherwise every private field they touch would
+            // re-enter these traps — and any proxy handed to them is unwrapped first, so the engine only
+            // ever stores real nodes (this.addChild(other) must not park a proxy in the scene tree).
+            if (typeof value === 'function')
+                return (...args: any[]) => value.apply(node, args.map(unwrapScriptNode));
+
+            return value;
+        },
+
+        set(node: any, prop: any, value: any, receiver: any) {
+            if (typeof prop !== 'string') return Reflect.set(node, prop, value, receiver);
+
+            if (SCRIPT_HANDLERS.includes(prop as any)) {
+                handlers[prop] = value;
+                return true;
+            }
+
+            if (prop in node) return Reflect.set(node, prop, value, node);
+
+            if (!canAccessVariable(node, requester, prop)) {
+                Logger.warn(`Script on '${requester.name}' cannot set '${prop}' on '${node.name}' (${node.variables.get(prop)?.access ?? 'public'})`, 'Script');
+                return true;   // reporting, not throwing — a blocked write is a no-op, as it always was
+            }
+
+            node.setVariable(prop, value);
+            return true;
+        },
+
+        has(node: any, prop: any) {
+            return prop in node || (typeof prop === 'string' && node.variables.has(prop));
+        },
+    });
+
+    proxyHandlers.set(proxy, handlers);
+    byTarget.set(target, proxy);
+    return proxy;
+}
+
+/**
+ * Binds a compiled script's handlers to a node. Both paths that run scripts converge here: the editor
+ * evals the source (_parseScript) and the published player loads pre-compiled factories from
+ * game.scripts.js (editor/src/player/attachScripts.ts) — they share this function so the calling
+ * convention cannot drift between them.
+ *
+ * A script declares its handlers by assigning them to `this` (`this.onUpdate = (node, delta) => {}`),
+ * so the factory is called with `this` bound to the node's proxy and the handlers are collected from it
+ * afterwards. The engine API is imported, not injected — the importer resolves 'cleo' to the barrel's
+ * namespace, with getData/setData bound to this node for the scripts that still use them.
+ */
+export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
+    const context = wrapNode(node, node);
+    const handlers = proxyHandlers.get(context)!;
+
+    factory.call(context, createScriptImporter(bindDataAccessors(node)));
+
+    // The engine calls handlers with raw nodes; scripts must only ever see proxied ones. A throwing
+    // handler must not take the frame down with it either, and the node's name is the only thing that
+    // makes the error findable in a scene of hundreds.
+    const guard = (name: string) => {
+        const fn = handlers[name];
+        if (typeof fn !== 'function') return () => {};
+        return (...args: any[]) => {
+            try { fn.apply(context, args.map(arg => (arg instanceof Node ? wrapNode(unwrapScriptNode(arg), node) : arg))); }
+            catch (e) { Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'); }
+        };
+    };
+
+    node.onStart = guard('onStart');
+    node.onSpawn = guard('onSpawn');
+    node.onUpdate = guard('onUpdate');
+    node.onCollision = guard('onCollision');
+    node.onTrigger = guard('onTrigger');
+    node.onDespawn = guard('onDespawn');
 }
 
 export class Node {
@@ -155,17 +303,13 @@ export class Node {
   // readable from scripts via getData(node) and writable via setData(node, name, value).
   protected _variables: Map<string, NodeVariable> = new Map();
 
-  public onStart: (node: Node, global: GlobalState) => void = () => {};
-  public onSpawn: (node: Node, global: GlobalState) => void = () => {};
-  public onUpdate: (node: Node, delta: number, time: number, global: GlobalState) => void = () => {};
-  public onCollision: (node: Node, other: Node, global: GlobalState) => void = () => {};
-  public onTrigger: (node: Node, other: Node, global: GlobalState) => void = () => {};
-  public onDespawn: (node: Node, global: GlobalState) => void = () => {};
-
-  private _globalStateObject: GlobalState = {
-    input: InputManager.instance,
-    logger: (t)=>Logger.log(t, 'Script')
-  }
+  // Script handlers. The node is always the first argument; everything else a script needs it imports.
+  public onStart: (node: Node) => void = () => {};
+  public onSpawn: (node: Node) => void = () => {};
+  public onUpdate: (node: Node, delta: number, time: number) => void = () => {};
+  public onCollision: (node: Node, other: Node) => void = () => {};
+  public onTrigger: (node: Node, other: Node) => void = () => {};
+  public onDespawn: (node: Node) => void = () => {};
 
   constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
     this._name = name;
@@ -203,13 +347,13 @@ export class Node {
     
     node.parent = this;
     this._children.push(node);
-    node.onSpawn(node, this._globalStateObject);
+    node.onSpawn(node);
     if (this._hasStarted)
       node.start();
     if (this.scene) {
       node.scene = this.scene;
       for (const child of node.children) {
-        child.onSpawn(child, this._globalStateObject);
+        child.onSpawn(child);
         child.scene = this.scene;
       }
     }
@@ -218,7 +362,7 @@ export class Node {
 
   public removeChild(node: Node, reparent: boolean = false): void {
     if (!reparent) {
-      try { node.onDespawn(node, this._globalStateObject); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
+      try { node.onDespawn(node); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
     }
     node.parent = null;
     node.scene = null;
@@ -288,7 +432,7 @@ export class Node {
 
   public remove(): void {
     this._markForRemoval = true;
-    try { this.onDespawn(this, this._globalStateObject); } catch (e) { Logger.error(`Error in onDespawn function for node ${this._name}: ${e}`); }
+    try { this.onDespawn(this); } catch (e) { Logger.error(`Error in onDespawn function for node ${this._name}: ${e}`); }
     for (const child of this._children)
       child.remove();
   }
@@ -296,7 +440,7 @@ export class Node {
   public start(): void {
     try {
       this._hasStarted = true;
-      this.onStart(this, this._globalStateObject);
+      this.onStart(this);
       for (const child of this._children)
         child.start();
     } catch (error) {
@@ -306,7 +450,7 @@ export class Node {
 
   public update(delta: number, time: number): void {
     try {
-      this.onUpdate(this, delta, time, this._globalStateObject);
+      this.onUpdate(this, delta, time);
     } catch (error) {
       Logger.error(`Error in onUpdate function for node ${this._name}: ${error}`);
     }
@@ -323,143 +467,21 @@ export class Node {
           rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
           scale: [this._scale[0], this._scale[1], this._scale[2]],
           children: children,
-          variables: this._serializeVariables(),
-          scripts: {
-            // TODO: Only serialize the function body
-            onStart: this.onStart.toString(),
-            onSpawn: this.onSpawn.toString(),
-            onUpdate: this.onUpdate.toString(),
-            onDespawn: this.onDespawn.toString()
-          }
+          variables: this._serializeVariables()
         });
       });
     });
   }
 
-  private static _findToken(script: string, token: string): string | null {
-    let beginIndex = script.indexOf(token);
-    if (beginIndex === -1)
-      return null;
-    while (script[beginIndex] !== '{')
-      beginIndex++;
-
-    let endIndex = beginIndex;
-    let count = 0;
-    while (endIndex < script.length) {
-      if (script[endIndex] === '{') 
-        count++;
-      else if (script[endIndex] === '}') 
-        count--;
-      if (count === 0)
-        break;
-      endIndex++;
-    }
-
-    if (endIndex === script.length) {
-      return null;
-    }
-
-    return script.substring(beginIndex + 1, endIndex);
-  }
-
+  // Editor-play path: the script is a source string in the scene JSON, so it is compiled here. Published
+  // games never reach this — their scripts ship pre-compiled in game.scripts.js and are bound by
+  // attachScriptFactory directly. A script that fails to compile (syntax error, unknown import) is
+  // reported and skipped: it must not take the rest of the scene down with it.
   private static _parseScript(node: Node, script: string): void {
-    // Compile the entire script once, allowing helper functions and variables
-    // Scripts can either:
-    // 1) Define top-level functions: function onStart() {}, function onUpdate(...) {}, etc.
-    // 2) Export handlers via module.exports = { onStart, onUpdate, onSpawn, onCollision, onTrigger }
     try {
-      const factory = new Function(
-        'node',
-        'global',
-        'Logger',
-        'InputManager',
-        'getData',
-        'setData',
-        'scene',
-        'findNode',
-        `"use strict";
-         // Args are forwarded raw so objects stay inspectable in the editor console.
-         // console.flush(...) rewrites its own row instead of appending — for per-frame values.
-         const console = {
-           log: (...args) => Logger.print('log', args, 'Script'),
-           info: (...args) => Logger.print('info', args, 'Script'),
-           debug: (...args) => Logger.print('debug', args, 'Script'),
-           warn: (...args) => Logger.print('warn', args, 'Script'),
-           error: (...args) => Logger.print('error', args, 'Script'),
-           flush: (...args) => Logger.print('log', args, 'Script', { flush: true })
-         };
-         let exports = {};
-         let module = { exports };
-         // Source runs at the function top level so top-level \`function\` declarations hoist to
-         // the function scope; module.exports handlers are also supported.
-         ${script}
-         const ex = (module && typeof module.exports === 'object' && module.exports) ? module.exports : {};
-         const pick = (fn, name) => (typeof fn === 'function' ? fn : (typeof ex[name] === 'function' ? ex[name] : null));
-         return {
-           onStart:     pick(typeof onStart === 'function' ? onStart : null, 'onStart'),
-           onSpawn:     pick(typeof onSpawn === 'function' ? onSpawn : null, 'onSpawn'),
-           onUpdate:    pick(typeof onUpdate === 'function' ? onUpdate : null, 'onUpdate'),
-           onCollision: pick(typeof onCollision === 'function' ? onCollision : null, 'onCollision'),
-           onTrigger:   pick(typeof onTrigger === 'function' ? onTrigger : null, 'onTrigger'),
-           onDespawn:   pick(typeof onDespawn === 'function' ? onDespawn : null, 'onDespawn')
-         };`
-      ) as (...args: any[]) => any;
-
-      const findNode = (name: string) => node.scene?.getNodesByName(name)[0];
-      // Bind getData/setData to this node so cross-node access respects public/private/protected.
-      const acc = bindDataAccessors(node);
-      const handlers = factory(
-        node, node._globalStateObject, Logger, InputManager,
-        acc.getData, acc.setData, node.scene, findNode
-      ) || {};
-
-      const adaptStartLike = (fn: any) => {
-        if (typeof fn !== 'function') return () => {};
-        const ar = fn.length;
-        return (n: Node, g: GlobalState) => {
-          try {
-            if (ar >= 2) fn(n, g);           // (node, global)
-            else if (ar === 1) fn(n);        // (node)
-            else fn();                        // () with closure access to node/global
-          } catch (e) { Logger.error(`Error in script onStart/onSpawn for node ${n.name}: ${e}`); }
-        };
-      };
-
-      const adaptUpdate = (fn: any) => {
-        if (typeof fn !== 'function') return () => {};
-        const ar = fn.length;
-        return (n: Node, d: number, t: number, g: GlobalState) => {
-          try {
-            if (ar >= 4) fn(n, d, t, g);     // (node, delta, time, global)
-            else if (ar === 3) fn(n, d, t);  // (node, delta, time)
-            else if (ar === 2) fn(d, t);     // (delta, time)
-            else if (ar === 1) fn(d);        // (delta)
-            else fn();                        // () with closure access
-          } catch (e) { Logger.error(`Error in script onUpdate for node ${n.name}: ${e}`); }
-        };
-      };
-
-      const adaptOther = (fn: any) => {
-        if (typeof fn !== 'function') return () => {};
-        const ar = fn.length;
-        return (n: Node, other: Node, g: GlobalState) => {
-          try {
-            if (ar >= 3) fn(n, other, g);    // (node, other, global)
-            else if (ar === 2) fn(other, g); // (other, global)
-            else if (ar === 1) fn(other);    // (other)
-            else fn();                        // () with closure access
-          } catch (e) { Logger.error(`Error in script event for node ${n.name}: ${e}`); }
-        };
-      };
-
-      node.onStart = adaptStartLike(handlers.onStart) as (node: Node, global: GlobalState) => void;
-      node.onSpawn = adaptStartLike(handlers.onSpawn) as (node: Node, global: GlobalState) => void;
-      node.onUpdate = adaptUpdate(handlers.onUpdate) as (node: Node, delta: number, time: number, global: GlobalState) => void;
-      node.onCollision = adaptOther(handlers.onCollision) as (node: Node, other: Node, global: GlobalState) => void;
-      node.onTrigger = adaptOther(handlers.onTrigger) as (node: Node, other: Node, global: GlobalState) => void;
-      node.onDespawn = adaptStartLike(handlers.onDespawn) as (node: Node, global: GlobalState) => void;
+      attachScriptFactory(node, compileScript(script));
     } catch (error) {
-      Logger.error(`Error parsing script for node ${node.name}: ${error}`);
+      Logger.error(`Error parsing script for node ${node.name}: ${error}`, 'Script');
     }
   }
 
@@ -859,7 +881,7 @@ export class Node {
     // handle onCollision event
     this._body.addEventListener('collide', (event: any) => {
       if (event.body instanceof RigidBody || event.body instanceof Trigger)
-        this.onCollision(this, event.body.owner, this._globalStateObject);
+        this.onCollision(this, event.body.owner);
     });
 
     return this._body;
@@ -875,7 +897,7 @@ export class Node {
     // handle onTrigger event
     this._trigger.addEventListener('collide', (event: any) => {
       if (event.body instanceof RigidBody || event.body instanceof Trigger)
-        this.onTrigger(this, event.body.owner, this._globalStateObject);
+        this.onTrigger(this, event.body.owner);
     });
 
   }

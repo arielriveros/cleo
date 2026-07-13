@@ -50,6 +50,7 @@ export default function CustomVariablesEditor(props: { node: Node }) {
   const changeType = (name: string, type: VarType) => {
     props.node.setVariable(name, defaultValue(type), type)
     sync()
+    eventEmitter.emit('SCENE_CHANGED') // the script linter type-checks against this
   }
 
   const changeAccess = (name: string, access: NodeVariableAccess) => {
@@ -81,7 +82,8 @@ export default function CustomVariablesEditor(props: { node: Node }) {
     <Collapsable title='Variables' icon={<VariablesIcon />} badge={vars.length || undefined} persistKey='variables'>
       <div className='w-full p-2'>
         <Hint className='mb-2'>
-          Read via <code>getData(node).{'{name}'}</code>, write via <code>setData(node, '{'{name}'}', value)</code>.
+          In a script these are properties of the node: read and write <code>this.{'{name}'}</code>,
+          or <code>other.{'{name}'}</code> on another node. The editor checks the type as you type.
           Access: <b>public</b> = any node, <b>private</b> = this node only, <b>protected</b> = this node + descendants.
         </Hint>
         {vars.length === 0 && <Hint className='mb-2'>No variables yet.</Hint>}

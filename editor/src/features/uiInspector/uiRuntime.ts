@@ -33,8 +33,11 @@ export type UIContext = {
   game: GameActions
 }
 
-// Compile a UI element's script into { onStart, onUpdate, onClick } handlers, mirroring the
-// engine's node-script sandbox (top-level functions or module.exports).
+// Compile a UI element's script into { onStart, onUpdate, onClick } handlers.
+//
+// NOTE: UI scripts still use the old injected-sandbox contract (a `ctx` argument, a console shim, and
+// module.exports). Node scripts have moved to real `import`s — see src/core/scripting/scriptRuntime.ts —
+// and this sandbox is the last thing that has not; porting it would unify the two.
 function compileHandlers(source?: string): UIHandlers {
   if (!source || !source.trim()) return {}
   try {

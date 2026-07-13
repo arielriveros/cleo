@@ -1,6 +1,6 @@
 import { Logger } from "../cleo";
 import { Scene } from "../core/scene/scene";
-import { ModelNode } from "../core/scene/node";
+import { ModelNode, unwrapScriptNode } from "../core/scene/node";
 import { World, Body, Constraint } from 'cannon-es';
 import { Ragdoll, RagdollOptions } from "./ragdoll";
 
@@ -115,7 +115,10 @@ export class PhysicsSystem {
    * with ball joints, and drive the skeleton from physics. Returns the Ragdoll handle.
    */
   public startRagdoll(modelNode: ModelNode, options?: RagdollOptions): Ragdoll {
-    const ragdoll = new Ragdoll(modelNode, this, options);
+    // Scripts reach this through `this.scene.physics`, so the node they hand over is a script proxy.
+    // The ragdoll keeps it (and hangs bodies off it), and the engine compares nodes by identity — so it
+    // has to be the real one. See unwrapScriptNode in core/scene/node.ts.
+    const ragdoll = new Ragdoll(unwrapScriptNode(modelNode), this, options);
     this._ragdolls.push(ragdoll);
     return ragdoll;
   }

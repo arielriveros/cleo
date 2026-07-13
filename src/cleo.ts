@@ -2,7 +2,7 @@ export { CleoEngine } from "./core/engine";
 export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";
 export { Scene } from "./core/scene/scene";
-export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable } from "./core/scene/node";
+export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
 export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
@@ -52,4 +52,13 @@ export type { Ray, RaycastHit } from "./core/raycaster";
 export { BVH, rayTriangleIntersection } from "./core/bvh";
 export type { BVHHit } from "./core/bvh";
 export { Frustum } from "./core/frustum";
+export { registerScriptModule, resolveScriptModule, createScriptImporter, compileScript, buildFactoryBody, SCRIPT_HANDLERS } from "./core/scripting/scriptRuntime";
+export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
 export * as Vec from "gl-matrix";
+
+// This is what a user script's `import { ... } from 'cleo'` resolves to: the barrel's own namespace,
+// so everything exported above is importable from a script with no injection list to maintain. The
+// self-import is safe — every re-export above has been evaluated by the time this last statement runs.
+import * as CleoAPI from "./cleo";
+import { registerScriptModule as register } from "./core/scripting/scriptRuntime";
+register('cleo', CleoAPI);

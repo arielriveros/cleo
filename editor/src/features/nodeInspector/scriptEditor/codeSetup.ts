@@ -35,15 +35,19 @@ export interface CodeSetupOptions {
   language?: Extension;
   themeCompartment: Compartment;
   readOnlyCompartment: Compartment;
+  /** Diagnostics. Lives in a compartment because the script linter depends on the selected node's
+   *  variables, which change without the document changing (and lint only re-runs on doc changes). */
+  lintCompartment?: Compartment;
+  initialLint?: Extension;
   initialTheme: CodeThemeName;
   initialReadOnly: boolean;
   onDocChange: (doc: string) => void;
 }
 
 /**
- * The full extension list, in precedence order (earlier wins). The theme and read-only state live in
- * compartments so they can be reconfigured on a live view — never recreate the EditorView to apply them,
- * which would drop the undo history.
+ * The full extension list, in precedence order (earlier wins). The theme, read-only state and linter live
+ * in compartments so they can be reconfigured on a live view — never recreate the EditorView to apply
+ * them, which would drop the undo history.
  */
 export function codeSetup(opts: CodeSetupOptions): Extension[] {
   return [
@@ -51,6 +55,7 @@ export function codeSetup(opts: CodeSetupOptions): Extension[] {
     ...(opts.language ? [opts.language] : []),
     opts.themeCompartment.of(getCodeTheme(opts.initialTheme)),
     opts.readOnlyCompartment.of(readOnlyExtension(opts.initialReadOnly)),
+    ...(opts.lintCompartment ? [opts.lintCompartment.of(opts.initialLint ?? [])] : []),
     editorKeymap,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) opts.onDocChange(update.state.doc.toString());

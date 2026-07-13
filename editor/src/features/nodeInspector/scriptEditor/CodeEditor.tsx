@@ -2,78 +2,94 @@ import React, { useEffect } from 'react'
 import { EditorView } from "@codemirror/view"
 import { javascript, javascriptLanguage, scopeCompletionSource } from '@codemirror/lang-javascript'
 import { EditorState, Compartment } from "@codemirror/state"
+import { linter, lintGutter, forceLinting } from '@codemirror/lint'
 import type { CompletionContext } from '@codemirror/autocomplete'
 import { useCleoEngine } from '../../EngineContext'
-import { InputManager, Logger, ModelNode, Node } from 'cleo'
+import * as cleo from 'cleo'
+import { ModelNode, Node } from 'cleo'
 import { Button, ButtonWithConfirm } from '../../../components/ui'
 import { codeSetup, readOnlyExtension } from './codeSetup'
+import { lintScript, thisCompletions } from './scriptLint'
 import { getCodeTheme } from './codeMirrorTheme'
 import { useCodeTheme } from './codeThemeStore'
 import CodeEditorHeader from './CodeEditorHeader'
 
-const description = `/*
-// You can write full JavaScript here. Define helpers and export handlers.
-// Two ways to declare handlers:
-// 1) Top-level functions named onSpawn/onStart/onUpdate/onCollision/onTrigger
-// 2) Or export them using module.exports = { onStart, onUpdate, ... }
-// A minimal runtime is available:
-//  - node: the current Node instance (e.g., node.addX(1))
-//  - global.input: InputManager singleton
-//  - global.logger(text): log to the engine console
-//  - console.log/info/debug/warn/error: forwarded to the editor console (objects stay inspectable)
-//  - console.flush(...): rewrites its own row instead of adding one — for per-frame values
-//  - scene: the current Scene; findNode(name): first node with that name
-//  - getData(node): read a node's custom Variables (returns { name: value, ... })
-//  - setData(node, name, value): write a variable (works on ANY node)
-//      const hp = getData(other).HealthPoints;
-//      setData(other, 'HealthPoints', hp - 1);
+// Inserted verbatim by "Add Script". It is live code rather than one big comment block, so a new script
+// does something the moment it is created — and it doubles as the documentation for the contract.
+const description = `// Import what you need from the engine. The whole public API is available:
+// Logger, InputManager, Vec (gl-matrix), Geometry, Material, Body, Shape, Raycaster...
+import { Logger, InputManager } from 'cleo';
 
-function helperJump() {
-  node.body && node.body.impulse([0, 8, 0]);
-}
+// \`this\` IS the node: its methods (this.addZ), its properties (this.name), and the custom Variables
+// you declare in the panel above (this.HealthPoints). Variables are type-checked as you type.
+//
+// Handlers are assigned to \`this\`, and always take their node as the first argument:
+//   this.onStart / onSpawn / onDespawn = (node) => {}
+//   this.onUpdate = (node, delta, time) => {}
+//   this.onCollision / onTrigger = (node, other) => {}
 
-function onStart(node, global) {
-  global.logger('Started: ' + node.name);
-}
+// Top-level state is per-node: this body runs once for each node the script is attached to.
+let jumpsUsed = 0;
 
-function onUpdate(node, delta, time, global) {
-  if (global.input.isKeyPressed('Space')) helperJump();
-  // Example: read/write a custom variable defined in the inspector
-  // if (getData(node).HealthPoints <= 0) console.log('dead');
-}
+this.onStart = (node) => {
+  // Logger writes to the editor Console panel — a plain console.log only reaches the browser devtools.
+  Logger.log('Started: ' + this.name, 'Script');
 
-// Alternatively, using module.exports:
-// module.exports = {
-//   onStart(node, global) { /* ... */ },
-//   onUpdate(node, delta, time, global) { /* ... */ }
-// };
-*/`;
+  InputManager.instance.registerKeyPress('Space', () => {
+    if (this.body) { this.body.impulse([0, 8, 0]); jumpsUsed++; }
+  });
+};
+
+this.onUpdate = (node, delta, time) => {
+  if (InputManager.instance.isKeyPressed('KeyW')) this.addZ(2 * delta);
+
+  // Declare a Variable in the panel above, then read and write it straight off \`this\`:
+  // if (this.HealthPoints <= 0) this.remove();
+
+  // Logger.log(this.position, 'Script', { flush: true }) rewrites its own row, for per-frame values.
+};
+
+this.onCollision = (node, other) => {
+  // Other nodes are the same deal — their Variables are properties too, subject to access level:
+  // other.HealthPoints -= 1;
+  Logger.log(this.name + ' hit ' + other.name, 'Script');
+};
+
+// Reaching other nodes: this.parent, this.children, this.findNode('Player')
+`;
 
 export default function CodeEditor(props: { readOnly?: boolean }) {
-  const {selectedNode, scripts, editorScene} = useCleoEngine()
+  const {selectedNode, scripts, editorScene, eventEmitter} = useCleoEngine()
   const theme = useCodeTheme()
   const editorRef = React.useRef<HTMLDivElement>(null)
   const editorViewRef = React.useRef<EditorView | null>(null)
   const readOnlyComp = React.useRef(new Compartment())
   const themeComp = React.useRef(new Compartment())
+  const lintComp = React.useRef(new Compartment())
   const [editorText, setEditorText] = React.useState('')
   const [scriptText, setScriptText] = React.useState<string | null>(null)
   const [hasScript, setHasScript] = React.useState(false)
 
+  // The selected node, read through a ref for the same reason as the completion scope below: the linter
+  // and completion sources are baked into the view once, so they must reach the *current* node
+  // indirectly rather than close over whichever one was selected at mount.
+  const nodeRef = React.useRef<Node | null>(null)
+  nodeRef.current = selectedNode ? editorScene.getNodeById(selectedNode) ?? null : null
+
   // The completion scope is rebuilt on every render and read through a ref, because the view is created
   // once: capturing it in the extension array would pin the completions to whichever node happened to be
   // selected at mount (and to the edit-time scene, which `editorScene` stops being during play).
+  //
+  // scopeCompletionSource reflects over a live object, so spreading the engine's own namespace is what
+  // makes every importable name (and its members) complete — there is no hand-maintained list to fall
+  // out of date. `node`/`other` are the handler arguments, not imports, so they map to the prototype of
+  // the selected node's class. `this` cannot be reflected this way (it is not in scope at edit time) —
+  // thisCompletions handles it.
   const scopeRef = React.useRef<Record<string, any>>({})
   scopeRef.current = {
-    global: {
-      input: InputManager.prototype,
-      logger: (text: string) => Logger.log(text)
-    },
-    node: editorScene.getNodeById(selectedNode!)?.nodeType === 'model' ? ModelNode.prototype : Node.prototype,
-    getData: (_node: Node) => ({}),
-    setData: (_node: Node, _name: string, ..._params: any[]) => {},
-    findNode: (_name: string) => Node.prototype,
-    scene: editorScene
+    ...cleo,
+    node: nodeRef.current?.nodeType === 'model' ? ModelNode.prototype : Node.prototype,
+    other: Node.prototype,
   }
 
   useEffect(() => {
@@ -111,6 +127,10 @@ export default function CodeEditor(props: { readOnly?: boolean }) {
     }
   }, [selectedNode, hasScript])
 
+  // Diagnostics for `this.<variable>`: type, access level, and whether the variable exists at all. Read
+  // through nodeRef so the linter always checks against the currently selected node.
+  const lintExtension = () => [lintGutter(), linter((view) => lintScript(view, nodeRef.current))]
+
   useEffect(() => {
     if (!editorRef.current) return;
     editorViewRef.current = new EditorView({
@@ -120,11 +140,14 @@ export default function CodeEditor(props: { readOnly?: boolean }) {
           language: [
             javascript(),
             javascriptLanguage.data.of({
-              autocomplete: (context: CompletionContext) => scopeCompletionSource(scopeRef.current)(context),
+              autocomplete: (context: CompletionContext) =>
+                thisCompletions(context, nodeRef.current) ?? scopeCompletionSource(scopeRef.current)(context),
             }),
           ],
           themeCompartment: themeComp.current,
           readOnlyCompartment: readOnlyComp.current,
+          lintCompartment: lintComp.current,
+          initialLint: lintExtension(),
           initialTheme: theme,
           initialReadOnly: !!props.readOnly,
           onDocChange: setScriptText,
@@ -135,6 +158,24 @@ export default function CodeEditor(props: { readOnly?: boolean }) {
 
     return () => { editorViewRef.current?.destroy(); editorViewRef.current = null }
   }, [])
+
+  // Diagnostics only re-run when the *document* changes, but they depend on the node's variables — so
+  // adding, retyping or re-scoping a variable in the panel above would otherwise leave stale errors on
+  // screen until the script was touched. CustomVariablesEditor emits SCENE_CHANGED on every
+  // add/remove/type/access change; on that we swap the linter in (keeping the undo history, which
+  // recreating the view would drop) and force a run — reconfiguring alone installs the new source but
+  // does not re-lint, which is exactly the stale-error case.
+  useEffect(() => {
+    const relint = () => {
+      const view = editorViewRef.current
+      if (!view) return
+      view.dispatch({ effects: lintComp.current.reconfigure(lintExtension()) })
+      forceLinting(view)
+    }
+    relint()   // also covers switching to a different node
+    eventEmitter.on('SCENE_CHANGED', relint)
+    return () => { eventEmitter.off('SCENE_CHANGED', relint) }
+  }, [selectedNode])
 
   const handleAddScript = () => {
     if (!selectedNode) return;
