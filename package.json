@@ -4,17 +4,15 @@
   "description": "WebGL2 Game Engine",
   "main": "cleo.js",
   "scripts": {
-    "build": "webpack --mode=production --node-env=production",
-    "build:dev": "webpack --mode=development",
-    "build:editor": "cd editor && npm run build",
-    "build:player": "cd editor && npm run build:player",
     "watch": "webpack --watch",
-    "dev:example": "cd example && npm run dev",
-    "install:editor": "cd editor && npm ci",
-    "install:desktop": "cd desktop && npm install",
-    "editor": "cd editor && npm start",
-    "dev:editor": "concurrently \"npm run watch\" \"npm run editor\"",
-    "dev": "concurrently \"npm run watch\" \"npm run dev:example\"",
+    "build": "webpack --mode=production --node-env=production",
+    "editor": "cd editor && npm run start",
+    "build:dev": "webpack --mode=development",
+    "build:player": "cd editor && npm run build:player",
+    "editor:install": "cd editor && npm ci",
+    "editor:dev": "concurrently \"npm run watch\" \"npm run editor\"",
+    "editor:build": "cd editor && npm run build",
+    "desktop:install": "cd desktop && npm install",
     "desktop:dev": "concurrently \"npm run watch\" \"npm run editor\" \"cd desktop && npm run dev\"",
     "desktop:build": "npm run build && npm run build:editor && npm run build:player && cd desktop && npm run dist"
   },
@@ -24,7 +22,7 @@
     "@types/uuid": "^9.0.7",
     "@types/webgl2": "0.0.10",
     "concurrently": "^8.2.2",
-    "copy-webpack-plugin": "^12.0.2",
+    "copy-webpack-plugin": "^14.0.0",
     "file-loader": "^6.2.0",
     "ts-loader": "^9.5.1",
     "ts-shader-loader": "^2.0.2",
@@ -35,6 +33,6 @@
   "dependencies": {
     "cannon-es": "^0.20.0",
     "gl-matrix": "^3.4.3",
-    "uuid": "^9.0.1"
+    "uuid": "^14.0.1"
   }
 }
