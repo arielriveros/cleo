@@ -81,6 +81,21 @@ export default function EngineViewport() {
         }
     }, [instance, viewportRef]);
 
+    // The canvas is sized from this div's clientWidth/Height (renderer.resize measures the parent),
+    // and under dockview nothing else reacts to panel geometry — sash drags, docking, floating and
+    // per-mode panel changes all land here. rAF-throttled because resize() reallocates the FBOs.
+    useEffect(() => {
+        const el = viewportRef.current;
+        if (!el || !instance) return;
+        let raf = 0;
+        const observer = new ResizeObserver(() => {
+            cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(() => instance.renderer.resize());
+        });
+        observer.observe(el);
+        return () => { cancelAnimationFrame(raf); observer.disconnect(); };
+    }, [instance]);
+
     useEffect(() => {
         if (!viewportRef.current || !instance) return;
 

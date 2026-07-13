@@ -37,7 +37,7 @@ export interface PropertyRowProps {
 export function PropertyRow({
   label,
   children,
-  divider = true,
+  divider = false,
   className,
   labelClassName,
   valueClassName,

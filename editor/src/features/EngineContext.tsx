@@ -7,6 +7,7 @@ import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
 import { createAnimationEditorScene } from './demoScene/createAnimationEditorScene';
+import { applyPreviewEnvironment } from './demoScene/previewEnvironment';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
@@ -560,6 +561,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const scene = new Scene();
     scene.animationsEnabled = false; // editing scene: skinned meshes hold bind pose (no playback)
     createEmptyScene(scene); // editor camera + a light so the template content is lit
+    // Same cubemap background + reflections as the other editor tabs. The '__editor__' skybox node sits
+    // at the scene root, outside the template subtree, so Save Template never serializes it.
+    void applyPreviewEnvironment(scene);
 
     let rootId: string;
     let name: string;
@@ -905,7 +909,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // an id) lets callers open a just-created asset without waiting for the `materials` state to commit.
   const openMaterialTab = (asset: MaterialAsset | null) => {
     const scene = new Scene();
-    createMaterialPreviewScene(scene);
+    void createMaterialPreviewScene(scene); // env map + skybox attach once the cubemap images load
 
     if (asset) {
       for (const t of asset.textures || []) {
@@ -1102,12 +1106,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // surface previews as a normal Basic/Blinn/PBR sphere; blend + foliage are edited in the inspector).
   const openTerrainMaterialTab = (asset: TerrainMaterialAsset | null) => {
     const scene = new Scene();
-    createMaterialPreviewScene(scene);
+    void createMaterialPreviewScene(scene); // env map + skybox attach once the cubemap images load
     const tm = asset ? parseTerrainMaterialAsset(asset) : TerrainMaterial.Create('pbr', { baseColor: [0.38, 0.5, 0.28] });
     // A tiny helper terrain owns a composite Material.Terrain (+ a fully-layer-0 splat); layer 0 = the edited
     // material, so the preview renders through the terrain shader (displacement/parallax/height-blend visible).
     const helperTerrain = new Terrain({ size: 2, resolution: 2 });
-    helperTerrain.setLayer(0, tm, { auto: false }); // auto off so the preview always shows the surface
+    // auto off so the preview always shows the surface; tiling pinned to 1 so the sphere previews the
+    // surface itself, not the terrain-space texture repeat (the tm's own tiling is untouched).
+    helperTerrain.setLayer(0, tm, { auto: false, tiling: 1 });
     const previewNode = new ModelNode('preview', new Model(Geometry.Sphere(48), helperTerrain.material));
     scene.addNode(previewNode);
     scene.start();
@@ -1123,7 +1129,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Re-derive the composite preview from the edited TerrainMaterial after any inspector change.
   const refreshTerrainMaterialPreview = () => {
     const runtime = tabRuntimeRef.current.get(activeTabId);
-    if (runtime?.helperTerrain && runtime.tm) runtime.helperTerrain.setLayer(0, runtime.tm, { auto: false });
+    if (runtime?.helperTerrain && runtime.tm) runtime.helperTerrain.setLayer(0, runtime.tm, { auto: false, tiling: 1 });
   };
 
   const enterTerrainMaterialEditor = (terrainMaterialId?: string) => {

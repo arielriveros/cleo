@@ -199,7 +199,9 @@ export async function renderMeshThumbnail(engine: CleoEngine, root: Node): Promi
  */
 export async function renderMaterialThumbnail(engine: CleoEngine, material: Material): Promise<string> {
   const scene = new Scene();
-  createMaterialPreviewScene(scene);
+  // No skybox: thumbnail captures skip background draws anyway, but the environment map must be applied
+  // (awaited below) so the sphere's reflections make it into the capture.
+  const envReady = createMaterialPreviewScene(scene, { skybox: false });
   // Render an independent copy so we never share GPU/material state with the live node's material.
   const preview = Material.parse(material.serialize());
   const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), preview));
@@ -207,6 +209,7 @@ export async function renderMaterialThumbnail(engine: CleoEngine, material: Mate
   scene.start();
 
   await awaitTexturesReady(materialTextureIds(preview));
+  await envReady;
   return captureClean(engine, scene);
 }
 
@@ -256,13 +259,14 @@ export async function renderTerrainMaterialAssetThumbnail(engine: CleoEngine, as
   const tm = parseTerrainMaterialAsset(asset);
 
   const scene = new Scene();
-  createMaterialPreviewScene(scene);
+  const envReady = createMaterialPreviewScene(scene, { skybox: false }); // see renderMaterialThumbnail
   const helperTerrain = new Terrain({ size: 2, resolution: 2 });
-  helperTerrain.setLayer(0, tm, { auto: false }); // auto off so the preview always shows the surface
+  helperTerrain.setLayer(0, tm, { auto: false, tiling: 1 }); // always show the surface, without terrain-space tiling
   const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), helperTerrain.material));
   scene.addNode(sphere);
   scene.start();
 
   await awaitTexturesReady(texIds);
+  await envReady;
   return captureClean(engine, scene);
 }

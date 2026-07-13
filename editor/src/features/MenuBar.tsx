@@ -183,7 +183,15 @@ export default function MenuBar() {
         </button>
       </div>
       <ModeSelector />
-      <div />
+      <div className='flex items-center h-full'>
+        <div
+          className={`text-white h-[25px] border border-muted bg-control text-center inline-block cursor-pointer my-[2px] mx-[4px] px-3 rounded hover:bg-control-hover ${playState !== 'stopped' ? 'opacity-50 pointer-events-none' : ''}`}
+          title='Restore the default panel layout'
+          onClick={() => eventEmitter.emit('RESET_DOCK_LAYOUT')}
+        >
+          Reset Layout
+        </div>
+      </div>
     </Topbar>
   )
 }

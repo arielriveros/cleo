@@ -141,7 +141,10 @@ function AssetsExplorerHost() {
       const types = e.dataTransfer?.types ?? []
       if (types.includes('text/cleo-fm-path')) return null // an internal move; useDragOutPatch owns it
       if (types.includes('Files')) return 'file'
-      if (types.includes('text/plain')) return 'node' // a node dragged out of the scene tree
+      // Only the scene tree's dedicated MIME counts as a node. A bare text/plain check used to work
+      // here, but dock-panel tab drags and doc-tab drags also carry text/plain-ish payloads and must
+      // not light up "save as template".
+      if (types.includes('text/cleo-node')) return 'node'
       return null
     }
 
@@ -174,7 +177,7 @@ function AssetsExplorerHost() {
 
       // A node from the scene tree becomes a template — what the old Templates tab's drop zone did, except
       // the whole explorer is now the drop zone.
-      const nodeId = e.dataTransfer.getData('text/plain')
+      const nodeId = e.dataTransfer.getData('text/cleo-node')
       if (!nodeId || !editorScene) return
       const node = editorScene.getNodeById(nodeId)
       if (!node) return

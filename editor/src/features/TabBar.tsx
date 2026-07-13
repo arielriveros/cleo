@@ -18,9 +18,9 @@ export default function TabBar() {
           <div
             key={tab.id}
             draggable={!isPlayMode}
-            onDragStart={(e) => { setDragId(tab.id); e.dataTransfer.setData('text/plain', tab.id); e.dataTransfer.effectAllowed = 'move'; }}
+            onDragStart={(e) => { setDragId(tab.id); e.dataTransfer.setData('text/cleo-doctab', tab.id); e.dataTransfer.effectAllowed = 'move'; }}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-            onDrop={(e) => { e.preventDefault(); const from = e.dataTransfer.getData('text/plain') || dragId; if (from) reorderTabs(from, tab.id); setDragId(null); }}
+            onDrop={(e) => { e.preventDefault(); const from = e.dataTransfer.getData('text/cleo-doctab') || dragId; if (from) reorderTabs(from, tab.id); setDragId(null); }}
             onDragEnd={() => setDragId(null)}
             onClick={() => setActiveTab(tab.id)}
             title={tab.title}

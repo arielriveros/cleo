@@ -1,4 +1,5 @@
 import { Scene, Camera, CameraNode, LightNode, DirectionalLight, ModelNode, Model, Geometry, Material } from 'cleo';
+import { applyPreviewEnvironment } from './previewEnvironment';
 
 // Dedicated scene for the Animation Editor tab: an editor camera auto-framed to the skinned model
 // (which the caller has already added), a shadow-casting key light + fill, and a ground plane so the
@@ -38,4 +39,7 @@ export function createAnimationEditorScene(scene: Scene, center: [number, number
       Material.Default({ diffuse: [0.32, 0.33, 0.38] }, { castShadow: false })));
   ground.setPosition([center[0], center[1] - r, center[2]]);
   scene.addNode(ground);
+
+  // Same cubemap background + reflections as the other editor tabs (attaches when the images load).
+  void applyPreviewEnvironment(scene);
 }

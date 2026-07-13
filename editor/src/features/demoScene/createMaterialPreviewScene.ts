@@ -1,5 +1,6 @@
 import { Scene, Node, Camera, CameraNode, LightNode, DirectionalLight, InputManager } from 'cleo';
 import { PREVIEW_FOV } from './previewFraming';
+import { applyPreviewEnvironment } from './previewEnvironment';
 
 // Orbit preview tunables.
 const RADIUS = 3.2;       // camera distance from the sphere (at the origin)
@@ -20,8 +21,12 @@ const ZOOM_SPEED = 0.005; // wheel delta -> radius
  * directional lights make Basic/Blinn-Phong/PBR all read well. The caller adds the sphere (a ModelNode)
  * as the editable root. No light icons appear because the editor-helper reconciler is skipped in
  * material mode (see EngineContext).
+ *
+ * The rig is set up synchronously; the environment cubemap (reflections + skybox background) attaches
+ * asynchronously — the returned promise resolves once it has. Live tabs fire-and-forget; thumbnail
+ * renders await it (with `skybox: false` — the background is skipped in thumbnail captures anyway).
  */
-export function createMaterialPreviewScene(scene: Scene): void {
+export function createMaterialPreviewScene(scene: Scene, opts?: { skybox?: boolean }): Promise<void> {
   const pivot = new Node('__editor__orbitPivot');
   scene.addNode(pivot);
   pivot.setRotation([INIT_PITCH, INIT_YAW, 0]);
@@ -65,4 +70,6 @@ export function createMaterialPreviewScene(scene: Scene): void {
   key.setPosition([0, 5, 0]).setRotation([120, -35, 0]);
   key.castShadows = false;
   scene.addNode(key);
+
+  return applyPreviewEnvironment(scene, opts);
 }

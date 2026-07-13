@@ -204,20 +204,26 @@
    6. Breadcrumbs
    ================================================================================================== */
 .cleo-fm .wx-breadcrumbs {
-  height: 18px !important;
-  min-height: 0 !important;
-  padding: 0 4px !important;
+  /* SVAR sizes this bar with `flex: 0 0 48px` — in a column flex layout the flex-basis wins over any
+     height/padding, which is why zeroing those alone doesn't shrink it. */
+  flex: 0 0 18px !important;
+  height: 18px;
+  min-height: 0;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
   gap: 1px;
   align-items: center;
-  background: rgb(var(--surface-raised)) !important;
-  border-bottom: 1px solid rgb(var(--border-subtle)) !important;
+  background: rgb(var(--surface-raised));
   font: 11px/1 var(--font-mono) !important;
 }
 .cleo-fm .wx-breadcrumbs .wx-item {
-  padding: 0 3px;
+  padding: 0 2px;
   border-radius: var(--radius);
   color: rgb(var(--text-muted));
   cursor: pointer;
+  font-size: 11px; /* the library sets 16px on the item itself, so inheritance alone can't shrink it */
+  font-weight: 400;
   line-height: 16px;
 }
 .cleo-fm .wx-breadcrumbs .wx-item:hover { background: rgb(var(--control-hover)); color: rgb(var(--text)); }
@@ -278,6 +284,23 @@
   border-radius: calc(var(--radius) - 2px);
   overflow: hidden;
 }
+
+.cleo-fm .wx-icon-wrapper {
+  width: 100%;
+  height: 50%;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.cleo-fm .wx-icon-wrapper > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  align-items: center;
+  justify-content: center;
+}
+
 .cleo-fm .wx-cards .wx-preview .wx-card-preview {
   width: 100% !important;
   height: 100% !important;
@@ -364,6 +387,8 @@
   box-shadow: none !important;
   font: 12px var(--font-mono) !important;
   color: rgb(var(--text)) !important;
+  justify-content: center !important;
+  align-items: center !important;
 }
 /* The pane's filename header (it reuses the .wx-toolbar class, which the main-toolbar hide rule above
    deliberately does not reach). */

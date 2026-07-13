@@ -80,9 +80,11 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
           onChange={(e) => setActiveTerrainMaterialName(e.target.value)} />
       </div>
 
-      {/* Base surface (Basic / Blinn-Phong / PBR) — mutates the TerrainMaterial in place. */}
+      {/* Base surface (Basic / Blinn-Phong / PBR) — mutates the TerrainMaterial in place. MaterialEditor's
+          controls mutate before their change events bubble here, so `changed` re-derives the composite
+          preview (setLayer) with the new values — without it only the blend fields would refresh the sphere. */}
       {node && node.nodeType === 'model' &&
-        <div onChange={() => eventEmitter.emit('SCENE_CHANGED')}>
+        <div onChange={changed}>
           <MaterialEditor node={node as ModelNode} />
         </div>}
 

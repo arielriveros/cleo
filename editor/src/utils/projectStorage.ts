@@ -6,9 +6,9 @@ import type { BodyDescription, ShapeDescription } from '../features/EngineContex
 import type { UIState } from './UIModel';
 
 // Storage keys. The project blob lives in IndexedDB (scenes embed base64 textures and exceed the
-// ~5MB localStorage quota); the tiny panel layout stays in localStorage.
+// ~5MB localStorage quota). The dock layout lives in localStorage under its own key — see
+// features/layout/DockLayout.tsx.
 export const PROJECT_KEY = 'cleo_project';
-export const LAYOUT_KEY = 'cleo_project_layout';
 
 // Small editor-level settings persisted alongside the scene.
 export interface ProjectPrefs {

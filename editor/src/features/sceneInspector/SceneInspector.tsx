@@ -48,6 +48,9 @@ function SceneNodeItem(props: SceneNodeItemProps) {
   const selected = selectedNode === props.nodeId;
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+    // Dedicated MIME so drop targets can tell a scene node from other text/plain drags (dock tabs,
+    // text selections); text/plain kept as a fallback payload for anything generic.
+    event.dataTransfer.setData('text/cleo-node', props.nodeId);
     event.dataTransfer.setData('text/plain', props.nodeId);
   };
 
@@ -164,7 +167,7 @@ export default function SceneInspector() {
 
     if (targetElement) {
       const targetId = targetElement.id;
-      const draggedId = event.dataTransfer.getData('text/plain');
+      const draggedId = event.dataTransfer.getData('text/cleo-node') || event.dataTransfer.getData('text/plain');
 
       if (draggedId === targetId) return; // Don't allow dropping onto the same node
 
