@@ -1,4 +1,4 @@
-import { Node, TextureManager } from 'cleo'
+import { Node, ModelNode, TextureManager } from 'cleo'
 import { cryptoRandomId } from './UIModel'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
 
@@ -12,13 +12,21 @@ export const MESH_ID_VAR = '__meshId'
 export type MeshAsset = {
   id: string
   name: string
-  nodeJson: any        // serialized parent Node subtree (child ModelNodes; materials embedded + __materialId)
-  textures: any[]      // [{ id, data, config }] snapshots from TextureManager
-  materialIds: string[]// MaterialAsset ids this mesh references (informational)
-  thumbnail: string    // base64 PNG data URL
+  nodeJson: any          // serialized parent Node subtree (child ModelNodes; materials embedded + __materialId)
+  /** TextureManager ids this subtree references. The payloads live in the texture store (textureStore.ts). */
+  textureIds?: string[]
+  /** Legacy: textures embedded as base64 ([{ id, data, config }]). Still read; never written. */
+  textures?: any[]
+  materialIds: string[]  // MaterialAsset ids this mesh references (informational)
+  thumbnail: string      // base64 PNG data URL
 }
 
-/** Snapshot a live node subtree into a saveable mesh asset, embedding the textures it references. */
+/**
+ * Snapshot a live node subtree into a saveable mesh asset.
+ *
+ * Records only the texture IDS the subtree uses; the payloads live once in the texture store. Embedding
+ * them here duplicated every map the mesh's materials had already embedded themselves.
+ */
 export async function buildMeshAsset(root: Node, materialIds: string[], thumbnail: string, id?: string): Promise<MeshAsset> {
   const nodeJson = await root.serialize()
   stripDebug(nodeJson)
@@ -27,10 +35,63 @@ export async function buildMeshAsset(root: Node, materialIds: string[], thumbnai
 
   const texIds = new Set<string>()
   collectTextureIds(nodeJson, texIds)
-  const allTextures: any[] = (TextureManager.Instance as any).serializeTextureData?.() ?? []
-  const textures = allTextures.filter((t: any) => texIds.has(t.id))
 
-  return { id: id ?? cryptoRandomId(), name: root.name, nodeJson, textures, materialIds, thumbnail }
+  return { id: id ?? cryptoRandomId(), name: root.name, nodeJson, textureIds: [...texIds], materialIds, thumbnail }
+}
+
+/** Every texture id a mesh asset references, whichever format it was saved in. */
+export function meshAssetTextureIds(asset: MeshAsset): string[] {
+  if (asset.textureIds?.length) return asset.textureIds
+  return (asset.textures ?? []).map((t: any) => t?.id).filter(Boolean)
+}
+
+/**
+ * Turn one imported subtree into a separate MeshAsset per sub-mesh (the import modal's "Separate
+ * sub-meshes" option). Each asset is re-centred on its own bounds, so dragging it into the scene drops it
+ * where you point instead of wherever it happened to sit in the source file.
+ *
+ * The re-centring is done with the NODE TRANSFORM, never by translating vertices: a skinned mesh's
+ * vertices are bound to its skeleton and moving them would break the binding (the same reason
+ * normalizeRootScale falls back to transform-space scaling for skinned subtrees).
+ *
+ * Rotation and scale are deliberately KEPT — those are the sub-mesh's authored size and orientation. Only
+ * its position (the file's layout) is dropped.
+ */
+export async function separateSubMeshes(
+  root: Node,
+  children: ModelNode[],
+  bundleName: string,
+  materialIdOfChild: Map<ModelNode, string>,
+): Promise<MeshAsset[]> {
+  const assets: MeshAsset[] = []
+  const rootScale = root.scale
+
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    const name = child.name?.trim() || `${bundleName}_${i + 1}`
+
+    const holder = new Node(name)
+    // normalizeRootScale scales a SKINNED subtree through the root's transform (it cannot bake into the
+    // vertices), so a separated skinned child would silently lose its normalization without this.
+    holder.setScale([rootScale[0], rootScale[1], rootScale[2]])
+
+    child.setPosition([0, 0, 0]) // drop the file's authored layout; keep rotation + scale
+    holder.addChild(child)
+    holder.updateTransforms()
+
+    // Shift the child so its bounds land on the origin. getBoundingSphere is WORLD space, and the holder
+    // sits at the origin with only a scale, so dividing that scale back out converts it to the child's
+    // local space.
+    const center = child.getBoundingSphere().center
+    const sx = rootScale[0] || 1, sy = rootScale[1] || 1, sz = rootScale[2] || 1
+    child.setPosition([-center[0] / sx, -center[1] / sy, -center[2] / sz])
+    holder.updateTransforms()
+
+    const materialId = materialIdOfChild.get(child)
+    assets.push(await buildMeshAsset(holder, materialId ? [materialId] : [], ''))
+  }
+
+  return assets
 }
 
 /** Instantiate a mesh asset under `parent`, regenerating ids and restoring embedded textures. Returns the new root id. */

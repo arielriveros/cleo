@@ -4,6 +4,8 @@ import { useCleoEngine } from "./EngineContext";
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData } from "../utils/projectStorage";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
+import { parseJsonFile, stringifyJson } from "../workers/workerClient";
+import { startTask } from "./progress/progressStore";
 import Topbar from "../components/Topbar";
 import ModeSelector from "./ModeSelector";
 import { Button, buttonVariants, cn } from "../components/ui";
@@ -73,38 +75,52 @@ export default function MenuBar() {
   }, [eventEmitter]);
   
   // Import a .json scene file into the editor (delegates to the shared restore routine).
-  const onImport = (filelist: FileList | null) => {
+  // Reading and parsing the file happen in the project worker — a scene with embedded textures is many
+  // MB of JSON, and JSON.parse on it visibly stalls the editor. Only applyGameData (which parses into
+  // the live engine scene) has to run here.
+  const onImport = async (filelist: FileList | null) => {
     if (!filelist || !filelist.length) return;
-    const reader = new FileReader();
-    reader.readAsText(filelist[0]);
-    reader.onload = (e) => {
-      const data = e.target?.result;
-      if (!data) return;
-      try {
-        const json = JSON.parse(data as string);
-        applyGameData(json, { scene: editorScene, scripts, bodies, triggers, setUI, renderer: instance?.renderer });
-        eventEmitter.emit('TEXTURES_CHANGED');
-        eventEmitter.emit('SCENE_CHANGED');
-        eventEmitter.emit('SELECT_NODE', null);
-      } catch (err) {
-        Logger.error('Failed to import scene: ' + err, 'Editor');
-      }
-    };
+    try {
+      const json = await parseJsonFile(filelist[0]);
+      applyGameData(json, { scene: editorScene, scripts, bodies, triggers, setUI, renderer: instance?.renderer });
+      eventEmitter.emit('TEXTURES_CHANGED');
+      eventEmitter.emit('SCENE_CHANGED');
+      eventEmitter.emit('SELECT_NODE', null);
+    } catch (err) {
+      Logger.error('Failed to import scene: ' + err, 'Editor');
+    }
   };
 
   // Save the whole project (scene + scripts/bodies/triggers + UI + editor prefs) to local storage.
   const onSave = () => saveProject();
 
   // Export the scene as a downloadable .json file (the former Save behavior).
+  // The stringify runs in the worker and comes back as transferable bytes we wrap straight into a Blob.
   const onExport = async () => {
     if (!editorScene) return;
-    const json = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
-    const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'scene.json';
-    a.click();
+    const task = startTask({ title: 'Exporting scene', steps: ['Serializing scene', 'Writing file'] });
+    try {
+      task.setStep(0, { status: 'running', detail: 'Embedding textures' });
+      const json = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
+      task.setStep(0, { status: 'done' });
+
+      task.setStep(1, { status: 'running', detail: 'Encoding scene.json' });
+      const bytes = await stringifyJson(json);
+      const blob = new Blob([bytes], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'scene.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      task.setStep(1, { status: 'done', detail: 'Downloaded scene.json' });
+    } catch (e: any) {
+      const message = String(e?.message ?? e);
+      Logger.error(`Export failed: ${message}`, 'Editor');
+      task.setStep(1, { status: 'failed', error: message });
+    } finally {
+      task.finish();
+    }
   };
 
   // Close the Publish dropdown when clicking outside it.
@@ -118,30 +134,53 @@ export default function MenuBar() {
   }, [showPublish]);
 
   // Publish targets embed all assets: buildGameData with useCache=false so textures serialize to base64.
-  const runPublish = async (action: () => Promise<string>) => {
+  //
+  // Split into two reported phases because they fail for different reasons and take very different times:
+  // serializing the scene (embedding every texture) and then the build itself (script obfuscation, asset
+  // packing, zipping) — the latter runs in the project worker and is by far the longest thing the editor does.
+  const runPublish = async (
+    title: string,
+    ship: (data: any) => Promise<string>,
+  ) => {
     setShowPublish(false);
     setPublishing(true);
+    const task = startTask({ title, steps: ['Serializing scene', 'Building & writing files'] });
     try {
-      const message = await action();
+      if (!editorScene) throw new Error('No scene to publish');
+
+      task.setStep(0, { status: 'running', detail: 'Embedding textures' });
+      let data: any;
+      try {
+        data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
+      } catch (e: any) {
+        task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });
+        throw e;
+      }
+      task.setStep(0, { status: 'done' });
+
+      task.setStep(1, { status: 'running', detail: 'Obfuscating scripts, packing assets' });
+      let message: string;
+      try {
+        message = await ship(data);
+      } catch (e: any) {
+        task.setStep(1, { status: 'failed', error: String(e?.message ?? e) });
+        throw e;
+      }
+      task.setStep(1, { status: 'done', detail: message });
       Logger.info(message, 'Publish');
     } catch (e: any) {
       Logger.error(`Publish failed: ${e?.message || e}`, 'Publish');
     } finally {
+      task.finish();
       setPublishing(false);
     }
   };
 
-  const onPublishWeb = () => runPublish(async () => {
-    if (!editorScene) throw new Error('No scene to publish');
-    const data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
-    return publishWeb(data, { embedAssets });
-  });
+  const onPublishWeb = () => runPublish('Publishing web build', data => publishWeb(data, { embedAssets }));
 
-  const onPublishDesktop = (installer: boolean) => runPublish(async () => {
-    if (!editorScene) throw new Error('No scene to publish');
-    const data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
-    return publishDesktop(data, { installer, embedAssets });
-  });
+  const onPublishDesktop = (installer: boolean) =>
+    runPublish(installer ? 'Publishing desktop installer' : 'Publishing desktop build',
+      data => publishDesktop(data, { installer, embedAssets }));
 
   const onPlay = () => startPlay();
 

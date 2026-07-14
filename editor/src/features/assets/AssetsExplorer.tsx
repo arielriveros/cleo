@@ -11,7 +11,8 @@ import { useFileManagerBridge, FM_MODE_KEY } from './useFileManagerBridge'
 import { useDragOutPatch } from './useDragOutPatch'
 import { runUpload } from './uploadRouter'
 import { iconFor, thumbnailOf } from './assetKinds'
-import { buildFileManagerData, extOf, kindOfExt } from '../../utils/vfs'
+import MissingAssetsPopover from './MissingAssetsPopover'
+import { buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
 
@@ -52,6 +53,28 @@ function AssetsExplorerHost() {
 
   const [importing, setImporting] = useState(false)
   const importingRef = useRef(false)
+
+  // Audit: assets that are in a library but that the explorer isn't showing (a material the node inspector
+  // offers but the Assets tab doesn't have). Recomputed when the panel is opened, against BOTH the index
+  // and the file manager's live store — the two can disagree, and which one dropped the asset is the
+  // useful part. Cheap, so it also runs whenever the index/libraries change, just to drive the badge.
+  const [missingOpen, setMissingOpen] = useState(false)
+  const missingMenuRef = useRef<HTMLDivElement>(null)
+  const missing = useMemo(() => {
+    const treeIds = new Set((apiRef.current?.serialize('/') ?? []).map((e: any) => e.id))
+    return findMissingFromExplorer(vfs, libs, treeIds.size ? treeIds : undefined)
+  }, [vfs, libs, apiRef, missingOpen])
+
+  useEffect(() => {
+    if (!missingOpen) return
+    const onDown = (e: PointerEvent) => {
+      if (!missingMenuRef.current?.contains(e.target as Node)) setMissingOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMissingOpen(false) }
+    document.addEventListener('pointerdown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey) }
+  }, [missingOpen])
 
   // "+ Add ▾" dropdown: closes on outside pointerdown or Escape.
   const [addOpen, setAddOpen] = useState(false)
@@ -305,6 +328,32 @@ function AssetsExplorerHost() {
         <span className='ml-auto min-w-0 truncate text-[11px] text-dim hidden xl:inline'>
           Drag assets into the viewport or onto a slot · drop files here to import
         </span>
+
+        {/* Assets in a library that the explorer isn't showing. The badge advertises the problem rather
+            than waiting to be found — that is the whole reason this exists. */}
+        <div className='relative shrink-0' ref={missingMenuRef}>
+          <button
+            id='asset-missing-audit'
+            className={`shrink-0 w-[24px] h-[20px] inline-flex items-center justify-center rounded ${
+              missingOpen ? 'bg-selected text-white'
+                : missing.length ? 'text-warning hover:bg-control-hover'
+                : 'text-muted hover:bg-control-hover hover:text-fg'
+            }`}
+            onClick={() => setMissingOpen(v => !v)}
+            title={missing.length
+              ? `${missing.length} asset${missing.length === 1 ? '' : 's'} in your libraries are not showing in the explorer`
+              : 'Check for assets missing from the explorer'}>
+            <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+              <circle cx='11' cy='11' r='7' /><path d='M20 20l-3.5-3.5' /><path d='M11 8v3.5M11 14.5h.01' />
+            </svg>
+          </button>
+          {missing.length > 0 && !missingOpen && (
+            <span className='absolute -top-[2px] -right-[2px] min-w-[12px] h-[12px] px-[3px] inline-flex items-center justify-center rounded-full bg-warning text-[9px] font-bold leading-none text-black pointer-events-none'>
+              {missing.length > 99 ? '99+' : missing.length}
+            </span>
+          )}
+          {missingOpen && <MissingAssetsPopover missing={missing} onClose={() => setMissingOpen(false)} />}
+        </div>
 
         <button
           id='asset-preview-toggle'

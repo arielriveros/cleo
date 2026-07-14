@@ -52,6 +52,7 @@ export type { Ray, RaycastHit } from "./core/raycaster";
 export { BVH, rayTriangleIntersection } from "./core/bvh";
 export type { BVHHit } from "./core/bvh";
 export { Frustum } from "./core/frustum";
+export { bytesToBase64, base64ToBytes, bytesToDataUrl, parseBase64DataUri } from "./core/base64";
 export { registerScriptModule, resolveScriptModule, createScriptImporter, compileScript, buildFactoryBody, SCRIPT_HANDLERS } from "./core/scripting/scriptRuntime";
 export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
 export * as Vec from "gl-matrix";

@@ -1,20 +1,10 @@
-import JSZip from 'jszip';
-import { externalizeAssets, ExternalAsset } from './externalizeAssets';
-import { packAssets } from './packAssets';
-import { extractScripts, generateScriptsJs } from './extractScripts';
+import { Logger } from 'cleo';
+import { extractScripts, buildScriptsSource } from './extractScripts';
+import { runPublishJob } from '../../workers/workerClient';
+import type { PublishFiles, PublishOptions, PlayerTemplates } from '../../workers/projectJobs';
 
-// The files that make up a published game.
-export interface PublishFiles {
-  indexHtml: string;
-  gameJs: string;   // the player+engine bundle (static)
-  gameJson: string; // serialized game data (scene + `assets` table; no scripts)
-  scriptsJs: string; // per-game scripts as real functions (game.scripts.js)
-  assets?: ExternalAsset[]; // loose image files (only when publishing with embedAssets=false)
-}
-
-export interface PublishOptions {
-  embedAssets?: boolean; // default true — false extracts images to loose assets/ files
-}
+// Re-exported so callers keep importing the publish types from the publish module.
+export type { PublishFiles, PublishOptions } from '../../workers/projectJobs';
 
 export interface PublishResult {
   ok: boolean;
@@ -39,7 +29,7 @@ export function isDesktop(): boolean {
 
 // Load the prebuilt player templates (produced by `npm run build:player` into public/player/,
 // so they are served same-origin by both the dev server and the production editor build).
-async function loadPlayerTemplates(): Promise<{ indexHtml: string; gameJs: string }> {
+async function loadPlayerTemplates(): Promise<PlayerTemplates> {
   let htmlRes: Response, jsRes: Response;
   try {
     [htmlRes, jsRes] = await Promise.all([fetch('player/index.html'), fetch('player/game.js')]);
@@ -51,50 +41,49 @@ async function loadPlayerTemplates(): Promise<{ indexHtml: string; gameJs: strin
   return { indexHtml: await htmlRes.text(), gameJs: await jsRes.text() };
 }
 
-// Build the file set. Transform order: optional image externalization -> geometry/asset packing ->
-// script extraction. game.json ends up with an `assets` table and no script strings; scripts ship as
-// real functions in game.scripts.js.
-export async function assemblePublishFiles(data: any, options?: PublishOptions): Promise<PublishFiles> {
-  const { indexHtml, gameJs } = await loadPlayerTemplates();
+/**
+ * Assemble a publish, doing the expensive part in the project worker.
+ *
+ * Split of labour: script *extraction* happens here, because wrapping each script needs the engine's
+ * buildFactoryBody (see extractScripts.ts) and it is cheap. Everything genuinely costly — obfuscating
+ * that source, externalizing base64 images, deduping geometry, JSON.stringify of the whole scene and
+ * (optionally) zipping — runs off-thread. Note `data` is cloned into the worker, so unlike the old
+ * in-place path the caller's object is no longer mutated.
+ */
+async function assemble(data: any, options: PublishOptions | undefined, zip: boolean) {
+  const templates = await loadPlayerTemplates();
+  const { scripts } = extractScripts(data); // strips node scripts out of `data`
+  const scriptsSource = buildScriptsSource(scripts);
 
-  let assets: ExternalAsset[] | undefined;
-  if (options && options.embedAssets === false) {
-    const result = externalizeAssets(data);
-    data = result.data;
-    assets = result.assets;
-  }
-
-  packAssets(data); // dedupe geometry into data.assets.geometries + move textures under data.assets
-  const { scripts } = extractScripts(data); // strip node scripts out of data
-  const scriptsJs = await generateScriptsJs(scripts); // real functions, heavily obfuscated
-
-  return { indexHtml, gameJs, gameJson: JSON.stringify(data), scriptsJs, assets };
+  const output = await runPublishJob({ data, scriptsSource, templates, options, zip });
+  for (const warning of output.warnings) Logger.warn(warning, 'Publish');
+  return output;
 }
 
-function addAssetsToZip(zip: JSZip, assets?: ExternalAsset[]): void {
-  for (const a of assets || []) zip.file(a.path, a.base64, { base64: true });
+/** Build the published file set (used by the desktop bridge, which writes them itself). */
+export async function assemblePublishFiles(data: any, options?: PublishOptions): Promise<PublishFiles> {
+  const { files } = await assemble(data, options, false);
+  if (!files) throw new Error('Publish produced no files');
+  return files;
 }
 
 // Web publish. Desktop -> native folder write. Browser -> .zip download.
 export async function publishWeb(data: any, options?: PublishOptions, name = 'cleo-game'): Promise<string> {
-  const files = await assemblePublishFiles(data, options);
   const bridge = getDesktopBridge();
 
   if (bridge) {
+    const files = await assemblePublishFiles(data, options);
     const res = await bridge.publishWeb(files);
     if (res.canceled) return 'Publish canceled';
     if (!res.ok) throw new Error(res.error || 'Publish failed');
     return `Published web build to ${res.path}`;
   }
 
-  // Browser fallback: zip the files and download.
-  const zip = new JSZip();
-  zip.file('index.html', files.indexHtml);
-  zip.file('game.js', files.gameJs);
-  zip.file('game.scripts.js', files.scriptsJs);
-  zip.file('game.json', files.gameJson);
-  addAssetsToZip(zip, files.assets);
-  const blob = await zip.generateAsync({ type: 'blob' });
+  // Browser fallback: the worker also zips, so the main thread only wraps the bytes and downloads.
+  const { zip } = await assemble(data, options, true);
+  if (!zip) throw new Error('Publish produced no archive');
+
+  const blob = new Blob([zip], { type: 'application/zip' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

@@ -2,7 +2,7 @@ import { Geometry } from "../../core/geometry";
 import { Material } from "../material";
 import { TextureManager } from "../systems/textureManager";
 import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../animatedModel";
-import { mat4 } from "gl-matrix";
+import { mat4, quat, vec3 } from "gl-matrix";
 
 // GLTF Types based on the specification
 interface GLTFAsset {
@@ -145,13 +145,25 @@ const TYPE_SIZE = {
     MAT4: 16
 };
 
+/** World-space TRS of the glTF scene node an imported mesh entry came from. */
+export type ImportTransform = {
+    translation: [number, number, number];
+    rotation: [number, number, number, number];
+    scale: [number, number, number];
+};
+
 export class GLTFLoader {
     private gltf: GLTF;
     private buffers: ArrayBuffer[] = [];
     private basePath: string = '';
     private files: File[] = [];
+    // Shared glTF resources are referenced once PER PRIMITIVE by the parse loops; without these caches a
+    // file with N primitives realizes N copies of each material and texture (fresh TextureManager ids,
+    // re-decoded images) instead of sharing the handful the file actually defines.
+    private materialCache = new Map<number, Material>();
+    private textureIdCache = new Map<string, string | undefined>();
 
-    async loadFromPath(filePath: string): Promise<{name: string, geometry: Geometry, material: Material}[]> {
+    async loadFromPath(filePath: string): Promise<{name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[]> {
         // Extract base path for relative URI resolution
         this.basePath = filePath.substring(0, filePath.lastIndexOf('/') + 1);
         
@@ -167,7 +179,7 @@ export class GLTFLoader {
         return this.parseMeshes();
     }
 
-    async loadFromFiles(files: File[]): Promise<{name: string, geometry: Geometry, material: Material}[]> {
+    async loadFromFiles(files: File[]): Promise<{name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[]> {
         const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
         if (!gltfFile) {
             throw new Error('No GLTF file found in the uploaded files');
@@ -190,7 +202,7 @@ export class GLTFLoader {
     /**
      * Load animated models with skinning and animation data from a file path
      */
-    async loadAnimatedFromPath(filePath: string): Promise<{name: string, model: AnimatedModel}[]> {
+    async loadAnimatedFromPath(filePath: string): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
         // Extract base path for relative URI resolution
         this.basePath = filePath.substring(0, filePath.lastIndexOf('/') + 1);
         
@@ -209,7 +221,7 @@ export class GLTFLoader {
     /**
      * Load animated models with skinning and animation data from uploaded files
      */
-    async loadAnimatedFromFiles(files: File[]): Promise<{name: string, model: AnimatedModel}[]> {
+    async loadAnimatedFromFiles(files: File[]): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
         const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
         if (!gltfFile) {
             throw new Error('No GLTF file found in the uploaded files');
@@ -284,21 +296,22 @@ export class GLTFLoader {
         return { animations, skin: { joints, nodeParents, nodeTransforms, nodeNames } };
     }
 
+    /**
+     * Decode an embedded `data:` buffer URI. `fetch` handles data URIs and decodes base64 natively — the
+     * previous atob + per-character `charCodeAt` copy ran ~125 million iterations on a 125 MB embedded
+     * model and was one of the main reasons importing froze the editor.
+     */
+    private static async decodeDataUri(uri: string): Promise<ArrayBuffer> {
+        return (await fetch(uri)).arrayBuffer();
+    }
+
     private async loadBuffers(): Promise<void> {
         if (!this.gltf.buffers) return;
 
         for (const buffer of this.gltf.buffers) {
             if (buffer.uri) {
                 if (buffer.uri.startsWith('data:')) {
-                    // Data URI - decode base64
-                    const base64Data = buffer.uri.split(',')[1];
-                    const binaryString = atob(base64Data);
-                    const arrayBuffer = new ArrayBuffer(binaryString.length);
-                    const uint8Array = new Uint8Array(arrayBuffer);
-                    for (let i = 0; i < binaryString.length; i++) {
-                        uint8Array[i] = binaryString.charCodeAt(i);
-                    }
-                    this.buffers.push(arrayBuffer);
+                    this.buffers.push(await GLTFLoader.decodeDataUri(buffer.uri));
                 } else {
                     // External file
                     const bufferPath = this.basePath + buffer.uri;
@@ -325,15 +338,7 @@ export class GLTFLoader {
                     this.buffers.push(new ArrayBuffer(0));
                 }
             } else if (buffer.uri && buffer.uri.startsWith('data:')) {
-                // Data URI - decode base64
-                const base64Data = buffer.uri.split(',')[1];
-                const binaryString = atob(base64Data);
-                const arrayBuffer = new ArrayBuffer(binaryString.length);
-                const uint8Array = new Uint8Array(arrayBuffer);
-                for (let i = 0; i < binaryString.length; i++) {
-                    uint8Array[i] = binaryString.charCodeAt(i);
-                }
-                this.buffers.push(arrayBuffer);
+                this.buffers.push(await GLTFLoader.decodeDataUri(buffer.uri));
             } else {
                 // Embedded buffer or missing URI
                 this.buffers.push(new ArrayBuffer(0));
@@ -419,26 +424,16 @@ export class GLTFLoader {
     }
 
     /**
-     * Encode an image stored in a bufferView (embedded / .glb) as a base64 data URI.
+     * The raw compressed bytes of an image stored in a bufferView (embedded / .glb).
+     *
+     * Copied out rather than returned as a view: the Texture retains these bytes for serialization, and a
+     * view would pin the model's whole (often enormous) glTF buffer alive for as long as the texture exists.
      */
-    private encodeBufferViewImage(image: GLTFImage): string {
+    private bufferViewImageBytes(image: GLTFImage): Uint8Array {
         const bufferView = this.gltf.bufferViews![image.bufferView!];
         const buffer = this.buffers[bufferView.buffer];
         const byteOffset = bufferView.byteOffset || 0;
-        const byteLength = bufferView.byteLength;
-
-        const imageData = buffer.slice(byteOffset, byteOffset + byteLength);
-        const uint8Array = new Uint8Array(imageData);
-
-        // Convert to base64
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-        }
-        const base64 = btoa(binary);
-
-        const mimeType = image.mimeType || 'image/jpeg';
-        return `data:${mimeType};base64,${base64}`;
+        return new Uint8Array(buffer.slice(byteOffset, byteOffset + bufferView.byteLength));
     }
 
     /**
@@ -453,13 +448,27 @@ export class GLTFLoader {
         if (!texture || texture.source === undefined) return undefined;
 
         const image = this.gltf.images[texture.source];
+        // Many texture/material entries typically alias few images — and several image entries can even
+        // share one URI (Blender exports do this) — so key the cache on the image's actual source to
+        // decode/upload each underlying image exactly once.
+        const cacheKey = image.uri !== undefined ? `uri:${image.uri}` : `bv:${image.bufferView}`;
+        if (this.textureIdCache.has(cacheKey)) return this.textureIdCache.get(cacheKey);
+        const id = this.resolveTexture(image);
+        this.textureIdCache.set(cacheKey, id);
+        return id;
+    }
+
+    private resolveTexture(image: GLTFImage): string | undefined {
         const cfg = { wrapping: 'repeat' as const };
 
         try {
-            // 1. Embedded image (bufferView) -> base64
+            // 1. Embedded image (bufferView): hand the compressed bytes straight to the TextureManager. It
+            //    decodes them from a Blob — no base64 in either direction (this used to hand-roll a data
+            //    URL one character at a time, then make the browser decode it right back).
             if (image.bufferView !== undefined) {
-                const base64 = this.encodeBufferViewImage(image);
-                return TextureManager.Instance.addTextureFromBase64(base64, { ...cfg, mipMap: false });
+                const bytes = this.bufferViewImageBytes(image);
+                const mime = image.mimeType || 'image/jpeg';
+                return TextureManager.Instance.addTextureFromBytes(bytes, mime, { ...cfg, mipMap: false });
             }
 
             // 2. Inline data URI
@@ -486,20 +495,80 @@ export class GLTFLoader {
         return undefined;
     }
 
-    private async parseMeshes(): Promise<{name: string, geometry: Geometry, material: Material}[]> {
-        const result: {name: string, geometry: Geometry, material: Material}[] = [];
+    /**
+     * One entry per scene-node → mesh reference, carrying the node's name and world TRS so importers
+     * can place multi-part files (e.g. several variants laid out side by side) as authored, instead of
+     * flattening everything to the origin. Falls back to one identity-transform instance per mesh when
+     * no node references any mesh.
+     */
+    private getMeshInstances(): { meshIndex: number; name?: string; transform?: ImportTransform; skinIndex?: number }[] {
+        const instances: { meshIndex: number; name?: string; transform?: ImportTransform; skinIndex?: number }[] = [];
+        const nodes = this.gltf.nodes;
+        if (nodes && nodes.length) {
+            let roots: number[] | undefined = this.gltf.scenes?.[this.gltf.scene ?? 0]?.nodes;
+            if (!roots || !roots.length) {
+                // No scene list — treat every parentless node as a root.
+                const hasParent = new Set<number>();
+                for (const n of nodes) for (const c of n?.children ?? []) hasParent.add(c);
+                roots = nodes.map((_: any, i: number) => i).filter((i: number) => !hasParent.has(i));
+            }
+            const visit = (nodeIndex: number, parentWorld: mat4) => {
+                const node = nodes[nodeIndex];
+                if (!node) return;
+                const local = mat4.create();
+                if (node.matrix) {
+                    for (let k = 0; k < 16; k++) local[k] = node.matrix[k];
+                } else {
+                    mat4.fromRotationTranslationScale(local,
+                        (node.rotation ?? [0, 0, 0, 1]) as any,
+                        (node.translation ?? [0, 0, 0]) as any,
+                        (node.scale ?? [1, 1, 1]) as any);
+                }
+                const world = mat4.multiply(mat4.create(), parentWorld, local);
+                if (node.mesh !== undefined) {
+                    const t = vec3.create(), r = quat.create(), s = vec3.create();
+                    mat4.getTranslation(t, world);
+                    mat4.getRotation(r, world);
+                    mat4.getScaling(s, world);
+                    instances.push({
+                        meshIndex: node.mesh,
+                        name: typeof node.name === 'string' && node.name ? node.name : undefined,
+                        // Skinned vertices are posed by the skeleton, not the node's transform.
+                        transform: node.skin === undefined ? {
+                            translation: [t[0], t[1], t[2]],
+                            rotation: [r[0], r[1], r[2], r[3]],
+                            scale: [s[0], s[1], s[2]],
+                        } : undefined,
+                        skinIndex: node.skin,
+                    });
+                }
+                for (const c of node.children ?? []) visit(c, world);
+            };
+            for (const r of roots) visit(r, mat4.create());
+        }
+        if (!instances.length && this.gltf.meshes) {
+            for (let i = 0; i < this.gltf.meshes.length; i++) instances.push({ meshIndex: i });
+        }
+        return instances;
+    }
+
+    private async parseMeshes(): Promise<{name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[]> {
+        const result: {name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[] = [];
 
         if (!this.gltf.meshes) return result;
 
-        for (const mesh of this.gltf.meshes) {
+        for (const instance of this.getMeshInstances()) {
+            const mesh = this.gltf.meshes[instance.meshIndex];
+            if (!mesh) continue;
             for (const primitive of mesh.primitives) {
                 const geometry = await this.createGeometry(primitive);
                 const material = await this.createMaterial(primitive.material);
-                
+
                 result.push({
-                    name: mesh.name || 'Mesh',
+                    name: instance.name || mesh.name || 'Mesh',
                     geometry,
-                    material
+                    material,
+                    transform: instance.transform
                 });
             }
         }
@@ -508,28 +577,30 @@ export class GLTFLoader {
     }
 
     private async createGeometry(primitive: GLTFMesh['primitives'][0]): Promise<Geometry> {
-        const positions: [number, number, number][] = [];
-        const normals: [number, number, number][] = [];
-        const uvs: [number, number][] = [];
+        // Assign (never push(...spread)) the converted arrays: spreading 65k+ vertices as call
+        // arguments overflows the JS engine's argument limit and throws a RangeError on large meshes.
+        let positions: [number, number, number][] = [];
+        let normals: [number, number, number][] = [];
+        let uvs: [number, number][] = [];
         const tangents: [number, number, number][] = [];
         let indices: number[] = [];
 
         // Load positions
         if (primitive.attributes.POSITION !== undefined) {
             const positionData = this.getAccessorData(primitive.attributes.POSITION) as Float32Array;
-            positions.push(...this.convertToVec3Array(positionData));
+            positions = this.convertToVec3Array(positionData);
         }
 
         // Load normals
         if (primitive.attributes.NORMAL !== undefined) {
             const normalData = this.getAccessorData(primitive.attributes.NORMAL) as Float32Array;
-            normals.push(...this.convertToVec3Array(normalData));
+            normals = this.convertToVec3Array(normalData);
         }
 
         // Load texture coordinates
         if (primitive.attributes.TEXCOORD_0 !== undefined) {
             const uvData = this.getAccessorData(primitive.attributes.TEXCOORD_0) as Float32Array;
-            uvs.push(...this.convertToVec2Array(uvData));
+            uvs = this.convertToVec2Array(uvData);
         }
 
         // Load tangents
@@ -559,6 +630,9 @@ export class GLTFLoader {
             return Material.PBR({});
         }
 
+        const cached = this.materialCache.get(materialIndex);
+        if (cached) return cached;
+
         const gltfMaterial = this.gltf.materials[materialIndex];
         const pbr = gltfMaterial.pbrMetallicRoughness;
 
@@ -580,21 +654,26 @@ export class GLTFLoader {
         if (gltfMaterial.occlusionTexture) textures.occlusionMap = this.loadTexture(gltfMaterial.occlusionTexture.index);
         if (gltfMaterial.emissiveTexture) textures.emissiveMap = this.loadTexture(gltfMaterial.emissiveTexture.index);
 
-        return Material.PBR({
+        const material = Material.PBR({
             baseColor,
             metallic: pbr?.metallicFactor === undefined ? 1.0 : pbr.metallicFactor,
             roughness: pbr?.roughnessFactor === undefined ? 1.0 : pbr.roughnessFactor,
             opacity: pbr?.baseColorFactor ? pbr.baseColorFactor[3] : 1.0,
             emissiveFactor,
             textures
+        }, {
+            side: gltfMaterial.doubleSided ? 'double' : 'front',
+            transparent: gltfMaterial.alphaMode === 'BLEND',
         });
+        this.materialCache.set(materialIndex, material);
+        return material;
     }
 
     /**
      * Parse meshes with animation and skinning data
      */
-    private async parseAnimatedMeshes(): Promise<{name: string, model: AnimatedModel}[]> {
-        const result: {name: string, model: AnimatedModel}[] = [];
+    private async parseAnimatedMeshes(): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
+        const result: {name: string, model: AnimatedModel, transform?: ImportTransform}[] = [];
 
         if (!this.gltf.meshes) return result;
 
@@ -614,10 +693,11 @@ export class GLTFLoader {
             }
         }
 
-        // Parse meshes
-        for (let meshIndex = 0; meshIndex < this.gltf.meshes.length; meshIndex++) {
-            const mesh = this.gltf.meshes[meshIndex];
-            
+        // Parse meshes (one entry per scene-node reference, so node names/transforms are preserved)
+        for (const instance of this.getMeshInstances()) {
+            const mesh = this.gltf.meshes[instance.meshIndex];
+            if (!mesh) continue;
+
             for (const primitive of mesh.primitives) {
                 const geometry = await this.createGeometry(primitive);
                 const material = await this.createMaterial(primitive.material);
@@ -653,11 +733,11 @@ export class GLTFLoader {
                     const weightData = this.getAccessorData(primitive.attributes.WEIGHTS_0) as Float32Array;
                     jointWeights = weightData;
                     
-                    // Find the skin associated with this mesh
-                    // In GLTF, skins are typically referenced by nodes, not meshes directly
-                    // For now, we'll use the first available skin if any
-                    if (skins.length > 0 && skins[0]) {
-                        skin = skins[0];
+                    // Skins are referenced by the glTF node that instantiates the mesh; use that
+                    // node's skin when known, otherwise fall back to the first available skin.
+                    const skinIndex = instance.skinIndex !== undefined ? instance.skinIndex : 0;
+                    if (skins.length > skinIndex && skins[skinIndex]) {
+                        skin = skins[skinIndex]!;
                     }
                 }
                 
@@ -671,8 +751,9 @@ export class GLTFLoader {
                 );
                 
                 result.push({
-                    name: mesh.name || 'AnimatedMesh',
-                    model: animatedModel
+                    name: instance.name || mesh.name || 'AnimatedMesh',
+                    model: animatedModel,
+                    transform: instance.transform
                 });
             }
         }

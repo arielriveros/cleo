@@ -14,6 +14,7 @@ export default function MeshImportModal() {
   const [ignoredCount, setIgnoredCount] = useState(0)
   const [normalize, setNormalize] = useState(true)
   const [targetSize, setTargetSize] = useState(2)
+  const [separate, setSeparate] = useState(false)
 
   // Reset per-import state whenever a new review opens.
   useEffect(() => {
@@ -22,6 +23,7 @@ export default function MeshImportModal() {
     setIgnoredCount(0)
     setNormalize(true)
     setTargetSize(2)
+    setSeparate(false)
   }, [pendingMeshImport])
 
   if (!pendingMeshImport) return null
@@ -54,7 +56,12 @@ export default function MeshImportModal() {
     if (ignored) setIgnoredCount(c => c + ignored)
   }
 
-  const accept = () => resolveMeshImport({ extraFiles, normalize, targetSize: targetSize > 0 ? targetSize : 2 })
+  const accept = () => resolveMeshImport({
+    extraFiles,
+    normalize,
+    targetSize: targetSize > 0 ? targetSize : 2,
+    separate: separate && info.subMeshCount > 1,
+  })
   const cancel = () => resolveMeshImport(null)
 
   return (
@@ -105,6 +112,28 @@ export default function MeshImportModal() {
               </div>
             )}
           </div>
+
+          {/* Separation — only worth asking about when the file actually holds more than one piece. */}
+          {info.subMeshCount > 1 && (
+            <div>
+              <div className='text-xs font-semibold mb-1'>Contents</div>
+              <label className='flex items-center gap-2 text-xs cursor-pointer'>
+                <input type='checkbox' checked={separate} onChange={(e) => setSeparate(e.target.checked)} />
+                Separate sub-meshes into individual assets
+              </label>
+              <p className='text-[11px] text-gray-400 mt-1'>
+                {separate
+                  ? `Creates ${info.subMeshCount} separate mesh assets, each centred on its own origin.`
+                  : `Creates 1 mesh asset containing all ${info.subMeshCount} sub-meshes.`}
+              </p>
+              {separate && (
+                <p className='text-[11px] text-warning mt-1'>
+                  A single model split across several materials will import as separate pieces — leave this
+                  off for characters and props that are meant to stay together.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Scale normalization */}
           <div>

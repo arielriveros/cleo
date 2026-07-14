@@ -2,6 +2,7 @@ import type { Scene, Renderer, RenderSettings } from 'cleo';
 import { Logger } from 'cleo';
 import { buildGameData } from '../features/publish/buildGameData';
 import { idbGet, idbSet, idbDelete } from './idb';
+import { saveToStorage } from '../workers/workerClient';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
 import type { UIState } from './UIModel';
 
@@ -37,6 +38,10 @@ type EngineMaps = {
  * Persist the whole project (scene + scripts/bodies/triggers + UI + editor prefs) to IndexedDB.
  * Uses the same buildGameData path as Export so textures are embedded (useCache=false).
  * Returns true on success; warns (and returns false) on failure.
+ *
+ * The IndexedDB write runs in the project worker, so the structured clone of a scene carrying embedded
+ * base64 textures no longer lands on the main thread. buildGameData itself still does — Scene.serialize
+ * reads live engine objects and encodes textures via a canvas, neither of which a worker can touch.
  */
 export async function saveProject(params: {
   scene: Scene;
@@ -55,9 +60,13 @@ export async function saveProject(params: {
       triggers: params.triggers,
       ui: params.ui,
       settings: params.settings,
+      // The texture payloads live in the texture store, so the project blob does NOT embed them. It used
+      // to base64 every texture in the project on every save. Export and Publish still embed (useCache
+      // defaults to false) because those outputs have to be self-contained.
+      useCache: true,
     });
     const payload: SavedProject = { ...gameData, prefs: params.prefs, savedAt: Date.now() };
-    await idbSet(PROJECT_KEY, payload);
+    await saveToStorage(PROJECT_KEY, payload);
     return true;
   } catch (e: any) {
     Logger.error(`Failed to save project: ${e?.message || e}`, 'Editor');
@@ -113,5 +122,11 @@ export function applyGameData(json: any, deps: EngineMaps & { setUI: (s: UIState
     (node.children ?? []).forEach(importNodeState);
   };
   if (json.scene) importNodeState(json.scene);
-  deps.scene.parse(json);
+
+  // Does this payload carry its own textures? An imported/exported scene.json does (it must be
+  // self-contained); a saved project does NOT — its textures come from the texture store, preloaded into
+  // the TextureManager before this runs. Scene.parse's second argument means "skip restoring textures",
+  // so it is the inverse of "textures are embedded here".
+  const embedded = Array.isArray(json.textures) && json.textures.length > 0;
+  deps.scene.parse(json, !embedded);
 }

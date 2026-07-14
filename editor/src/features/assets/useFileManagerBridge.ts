@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { IApi } from '@svar-ui/react-filemanager'
 import { Logger } from 'cleo'
+import { startTask, StepStatus } from '../progress/progressStore'
 import { useCleoEngine } from '../EngineContext'
 import { useVfs } from './VfsContext'
 import {
@@ -60,17 +61,37 @@ export function useFileManagerBridge() {
     if (!targets.length) return
 
     refreshingRef.current = true
+
+    // Each capture is a full GL frame, so a folder of assets is a genuinely long operation. It used to run
+    // with nothing on screen until a Logger line at the very end.
+    const task = startTask({
+      title: 'Refreshing thumbnails',
+      steps: targets.map(e => ({ name: baseOf(e.path), status: 'pending' as StepStatus })),
+      cancellable: true,
+    })
+
     let done = 0
     try {
-      for (const entry of targets) {
+      for (let i = 0; i < targets.length; i++) {
+        const entry = targets[i]
+        if (task.cancelled) { task.setStep(i, { status: 'skipped', detail: 'Cancelled' }); continue }
+
+        task.setStep(i, { status: 'running', detail: 'Rendering preview' })
         try {
-          if (await regenerateThumbnail(entry.kind, entry.assetId, engine, depsRef.current)) done++
+          if (await regenerateThumbnail(entry.kind, entry.assetId, engine, depsRef.current)) {
+            done++
+            task.setStep(i, { status: 'done' })
+          } else {
+            task.setStep(i, { status: 'skipped', detail: 'Nothing to render' })
+          }
         } catch (err) {
           Logger.error(`Could not refresh the thumbnail for ${baseOf(entry.path)}: ${err}`, 'Editor')
+          task.setStep(i, { status: 'failed', error: String(err) })
         }
       }
       if (done) Logger.info(`Refreshed ${done} thumbnail${done === 1 ? '' : 's'}`, 'Editor')
     } finally {
+      task.finish()
       refreshingRef.current = false
     }
   }, [depsRef])

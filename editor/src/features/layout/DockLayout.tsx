@@ -110,6 +110,8 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   if (mode === 'material' || mode === 'terrainMaterial') return ['scene', 'ui', 'scripts', 'physics'];
   if (mode === 'animation') return ['ui', 'scripts', 'physics'];
   if (mode === 'template') return ['ui']; // the UI layer is irrelevant while authoring a template
+  // A mesh tab is a read-only preview: keep Scene + Properties to inspect the subtree, drop the rest.
+  if (mode === 'mesh') return ['ui', 'scripts', 'physics'];
   return [];
 }
 

@@ -8,9 +8,12 @@ import { cryptoRandomId } from './UIModel'
 export type TerrainMaterialAsset = {
   id: string
   name: string
-  material: any        // TerrainMaterial.serialize() output
-  textures: any[]      // [{ id, data, config }] snapshots from TextureManager
-  thumbnail: string    // base64 PNG data URL (empty until first save)
+  material: any          // TerrainMaterial.serialize() output
+  /** TextureManager ids this material references. The payloads live in the texture store (textureStore.ts). */
+  textureIds?: string[]
+  /** Legacy: textures embedded as base64 ([{ id, data, config }]). Still read; never written. */
+  textures?: any[]
+  thumbnail: string      // base64 PNG data URL (empty until first save)
 }
 
 // Texture ids referenced by a foliage mesh prototype's serialized model.
@@ -37,13 +40,20 @@ function collectTerrainMaterialTextureIds(serialized: any): Set<string> {
   return set
 }
 
-/** Snapshot a live TerrainMaterial into a saveable asset, embedding the textures it references. */
+/**
+ * Snapshot a live TerrainMaterial into a saveable asset. Records only the texture IDS it references —
+ * the payloads live once in the texture store (textureStore.ts), not embedded per asset.
+ */
 export function buildTerrainMaterialAsset(material: TerrainMaterial, name: string, thumbnail: string, id?: string): TerrainMaterialAsset {
   const serialized = material.serialize()
-  const texIds = collectTerrainMaterialTextureIds(serialized)
-  const allTextures: any[] = (TextureManager.Instance as any).serializeTextureData?.() ?? []
-  const textures = allTextures.filter((t: any) => texIds.has(t.id))
-  return { id: id ?? cryptoRandomId(), name, material: serialized, textures, thumbnail }
+  const textureIds = [...collectTerrainMaterialTextureIds(serialized)]
+  return { id: id ?? cryptoRandomId(), name, material: serialized, textureIds, thumbnail }
+}
+
+/** Every texture id a terrain-material asset references, whichever format it was saved in. */
+export function terrainMaterialAssetTextureIds(asset: TerrainMaterialAsset): string[] {
+  if (asset.textureIds?.length) return asset.textureIds
+  return (asset.textures ?? []).map((t: any) => t?.id).filter(Boolean)
 }
 
 /** Restore any of an asset's embedded textures not already registered in the TextureManager. */

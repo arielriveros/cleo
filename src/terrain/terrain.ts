@@ -2,6 +2,7 @@ import { Body, Heightfield, World } from 'cannon-es';
 import { vec3 } from 'gl-matrix';
 import { v4 as uuidv4 } from 'uuid';
 import { Geometry } from '../core/geometry';
+import { bytesToBase64, base64ToBytes } from '../core/base64';
 import { Model } from '../graphics/model';
 import { Material, TerrainMaterial, TerrainFoliageRule } from '../graphics/material';
 import { Texture } from '../graphics/texture';
@@ -101,21 +102,6 @@ function resolveConfig(c: TerrainConfig): Required<TerrainConfig> {
         resolution: Math.max(2, Math.floor(c.resolution ?? 129)),
         chunkQuads: Math.max(4, Math.floor(c.chunkQuads ?? 32)),
     };
-}
-
-// --- base64 <-> typed array helpers (browser) -------------------------------------------------
-function bytesToBase64(bytes: Uint8Array): string {
-    let bin = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk)
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as unknown as number[]);
-    return btoa(bin);
-}
-function base64ToBytes(b64: string): Uint8Array {
-    const bin = atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
 }
 
 /**

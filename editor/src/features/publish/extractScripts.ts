@@ -6,9 +6,12 @@
 // compiles through — so the two paths cannot drift apart. It is also what rewrites the script's `import`
 // statements into `__cleoImport(...)` calls, since an import statement is not legal inside a function.
 //
-// The final source is heavily obfuscated (see generateScriptsJs) so shipped game logic is unreadable.
+// The source this module produces is then heavily obfuscated (see ./obfuscate) so shipped game logic is
+// unreadable. Obfuscation lives in its own module because it runs in the project worker, while this one
+// cannot: buildFactoryBody comes from `cleo`, and importing the engine into a worker is neither needed
+// nor safe. Building the script source is cheap (a few KB of user code); obfuscating it is not.
 
-import { Logger, buildFactoryBody } from 'cleo';
+import { buildFactoryBody } from 'cleo';
 
 export type ScriptMap = Record<string, string>;
 
@@ -57,39 +60,3 @@ export function buildScriptsSource(scripts: ScriptMap): string {
   return lines.join('\n') + '\n';
 }
 
-// Aggressive-but-eval-free obfuscation. transformObjectKeys/renameGlobals are OFF on purpose so the
-// public interface survives: the returned { onStart, onUpdate, ... } keys are read by the player's
-// attachScripts.ts, and `window.CLEO_GAME_SCRIPTS` must keep its name. No debugProtection/selfDefending
-// so we never reintroduce the Function constructor / eval.
-const OBFUSCATOR_OPTIONS = {
-  compact: true,
-  controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.75,
-  deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.4,
-  identifierNamesGenerator: 'hexadecimal',
-  numbersToExpressions: true,
-  simplify: true,
-  splitStrings: true,
-  splitStringsChunkLength: 6,
-  stringArray: true,
-  stringArrayEncoding: ['base64'],
-  stringArrayThreshold: 1,
-  transformObjectKeys: false,
-  renameGlobals: false,
-};
-
-// Produce the shipped game.scripts.js: build the source, then heavily obfuscate it. The obfuscator is
-// lazy-loaded so it code-splits out of the editor's initial bundle. If obfuscation fails for any reason,
-// we fall back to the readable source rather than block a publish.
-export async function generateScriptsJs(scripts: ScriptMap): Promise<string> {
-  const source = buildScriptsSource(scripts);
-  try {
-    const mod: any = await import('javascript-obfuscator');
-    const obfuscator = mod.default ?? mod;
-    return obfuscator.obfuscate(source, OBFUSCATOR_OPTIONS).getObfuscatedCode() + '\n';
-  } catch (e) {
-    Logger.warn(`Script obfuscation failed, shipping un-obfuscated scripts: ${e}`, 'Publish');
-    return source;
-  }
-}

@@ -14,9 +14,12 @@ import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback } from "../utils/materials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer } from "../utils/terrainMaterials";
-import { MeshAsset, buildMeshAsset } from "../utils/meshes";
+import { MeshAsset, buildMeshAsset, instantiateMeshAsset, separateSubMeshes } from "../utils/meshes";
 import { groupImportFiles } from "../utils/importGrouping";
-import { renderMeshThumbnail, renderMaterialThumbnail, normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere } from "../utils/meshThumbnails";
+import {
+  normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
+  renderMeshAssetThumbnail, renderMaterialAssetThumbnail, renderTerrainMaterialAssetThumbnail,
+} from "../utils/meshThumbnails";
 import { parseBundleToRoot } from "../utils/meshImport";
 import { detectMissingTextures } from "../utils/textureRefs";
 
@@ -33,6 +36,40 @@ export type MeshImportDecision = {
   extraFiles: File[];     // textures uploaded to fill missing references (aliased to expected names)
   normalize: boolean;
   targetSize: number;     // desired bounding diameter in world units
+  /** Split the file's sub-meshes into one MeshAsset each, instead of a single asset for the whole file. */
+  separate: boolean;
+};
+
+// ---- Import progress -------------------------------------------------------------------------------
+// Every step importMeshFiles walks a bundle through, in order. These map onto the shared progress store's
+// generic steps (features/progress) — the stage a bundle is in IS what the user is told, so the window
+// cannot drift from what the importer is actually doing.
+type ImportStage =
+  | 'queued'       // not started
+  | 'parsing'      // Loader: assimp/GLTF parse of the model files
+  | 'review'       // parked on the user in MeshImportModal (indefinite — the bar deliberately stalls)
+  | 'reparsing'    // user supplied missing textures; parse again so they wire into the materials
+  | 'scaling'      // normalizeRootScale bakes the fit-to-size factor into the vertices
+  | 'textures'     // waiting on async image decode before anything can be serialized
+  | 'materials'    // registering a MaterialAsset per unique material
+  | 'saving'       // buildMeshAsset: serialize the subtree(s) into the mesh library
+  | 'done'
+  | 'failed'
+  | 'skipped';     // cancelled before it ran
+
+/** Each stage's label + how far through a bundle it is. `review` stalls: it is waiting on a human. */
+const IMPORT_STAGES: Record<ImportStage, { label: string; progress: number; status: StepStatus }> = {
+  queued:    { label: 'Queued',                       progress: 0,    status: 'pending' },
+  parsing:   { label: 'Parsing model',                progress: 0.15, status: 'running' },
+  review:    { label: 'Waiting for you',              progress: 0.25, status: 'paused'  },
+  reparsing: { label: 'Re-parsing with new textures', progress: 0.35, status: 'running' },
+  scaling:   { label: 'Normalizing scale',            progress: 0.45, status: 'running' },
+  textures:  { label: 'Decoding textures',            progress: 0.6,  status: 'running' },
+  materials: { label: 'Registering materials',        progress: 0.8,  status: 'running' },
+  saving:    { label: 'Saving to library',            progress: 0.92, status: 'running' },
+  done:      { label: 'Imported',                     progress: 1,    status: 'done'    },
+  failed:    { label: 'Failed',                       progress: 1,    status: 'failed'  },
+  skipped:   { label: 'Skipped',                      progress: 1,    status: 'skipped' },
 };
 // Animation clips parsed from a file, each with a compatibility report vs the target skeleton,
 // awaiting user review in the animation-import modal.
@@ -45,6 +82,9 @@ export type AnimationImportDecision = { include: boolean[] };
 import { buildGameData } from "./publish/buildGameData";
 import { loadProject, applyGameData, saveProject, ProjectPrefs } from "../utils/projectStorage";
 import { idbGet, idbSet } from "../utils/idb";
+import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf } from "../utils/textureStore";
+import { saveToStorage } from "../workers/workerClient";
+import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
 
 type BoxShapeDescription = {
@@ -119,14 +159,37 @@ export type LoadingProgress = { loaded: number; total: number; label: string };
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
 const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
 
-export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation';
+/**
+ * Persist an asset library to IndexedDB whenever it changes.
+ *
+ * Each library is stored under a single key, so a write rewrites the WHOLE array — and a mesh library
+ * carries full vertex data plus embedded base64 textures. Importing several models in a row would
+ * therefore re-clone the entire library once per model. Two things fix that:
+ *  - the write is debounced, so a burst of adds collapses into one write;
+ *  - it goes through the project worker (saveToStorage), so the IndexedDB transaction runs off-thread.
+ */
+function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefObject<boolean>): void {
+  useEffect(() => {
+    if (!loaded.current) return; // don't write back before the initial read lands (would clobber it)
+    const timer = setTimeout(() => {
+      saveToStorage(key, value).catch(e => console.warn(`Failed to persist ${key}:`, e));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [key, value, loaded]);
+}
+
+export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'mesh';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Browser-style editor tabs. The 'main' tab hosts the real game scene and its scene/landscape/
 // renderer sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef). `editorMode` is derived from the active tab (see EngineProvider).
-export type TabKind = 'main' | 'template' | 'material' | 'terrainMaterial' | 'animation';
+//
+// A 'mesh' tab is a read-only preview of an imported mesh asset. It exists so a mesh has something to
+// *open* — imports no longer render thumbnails (that used to stall the main thread), so opening the
+// asset is what produces its preview image.
+export type TabKind = 'main' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'mesh';
 export interface EditorTab {
   id: string;
   kind: TabKind;
@@ -135,6 +198,7 @@ export interface EditorTab {
   materialId?: string | null; // material tabs: source material asset id, null = unsaved new material
   terrainMaterialId?: string | null; // terrain-material tabs: source terrain-material asset id
   animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
+  meshId?: string | null; // mesh tabs: the previewed mesh asset id
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage' | 'move';
@@ -234,12 +298,15 @@ const EngineContext = createContext<{
   addMesh: (m: MeshAsset) => void;
   removeMesh: (id: string) => void;
   updateMesh: (id: string, m: MeshAsset) => void;
+  /** Open (or focus) a mesh asset's read-only preview tab, rendering its thumbnail on the way in. */
+  enterMeshEditor: (meshId?: string) => void;
   importMeshFiles: (files: File[]) => Promise<void>;
   // True once every IndexedDB-backed asset library has finished its initial read.
   assetsLoaded: boolean;
   // Mesh import review modal
   pendingMeshImport: PendingMeshImportView | null;
   resolveMeshImport: (decision: MeshImportDecision | null) => void;
+  // Live model-import progress (null when there is no run and nothing left to report)
   // Animation import (into the Animation Editor's model)
   importAnimationFiles: (files: File[]) => Promise<void>;
   importSkeletonNames: (files: File[]) => Promise<void>;
@@ -319,6 +386,7 @@ const EngineContext = createContext<{
     addMesh: () => {},
     removeMesh: () => {},
     updateMesh: () => {},
+    enterMeshEditor: () => {},
     importMeshFiles: async () => {},
     assetsLoaded: false,
     pendingMeshImport: null,
@@ -397,10 +465,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       finally { templatesLoadedRef.current = true; }
     })();
   }, []);
-  useEffect(() => {
-    if (!templatesLoadedRef.current) return;
-    idbSet('cleo_templates', templates).catch(e => console.warn('Failed to persist templates:', e));
-  }, [templates]);
+  usePersistedLibrary('cleo_templates', templates, templatesLoadedRef);
 
   const addTemplate = (t: Template) => setTemplates(prev => [...prev, t]);
   const removeTemplate = (id: string) => {
@@ -430,10 +495,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       finally { materialsLoadedRef.current = true; }
     })();
   }, []);
-  useEffect(() => {
-    if (!materialsLoadedRef.current) return;
-    idbSet('cleo_materials', materials).catch(e => console.warn('Failed to persist materials:', e));
-  }, [materials]);
+  usePersistedLibrary('cleo_materials', materials, materialsLoadedRef);
 
   const addMaterial = (m: MaterialAsset) => setMaterials(prev => [...prev, m]);
   const updateMaterial = (id: string, m: MaterialAsset) => setMaterials(prev => prev.map(x => x.id === id ? m : x));
@@ -452,10 +514,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       finally { terrainMaterialsLoadedRef.current = true; }
     })();
   }, []);
-  useEffect(() => {
-    if (!terrainMaterialsLoadedRef.current) return;
-    idbSet('cleo_terrain_materials', terrainMaterials).catch(e => console.warn('Failed to persist terrain materials:', e));
-  }, [terrainMaterials]);
+  usePersistedLibrary('cleo_terrain_materials', terrainMaterials, terrainMaterialsLoadedRef);
 
   const addTerrainMaterial = (m: TerrainMaterialAsset) => setTerrainMaterials(prev => [...prev, m]);
   const updateTerrainMaterial = (id: string, m: TerrainMaterialAsset) => setTerrainMaterials(prev => prev.map(x => x.id === id ? m : x));
@@ -473,13 +532,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       finally { meshesLoadedRef.current = true; }
     })();
   }, []);
-  useEffect(() => {
-    if (!meshesLoadedRef.current) return;
-    idbSet('cleo_meshes', meshes).catch(e => console.warn('Failed to persist meshes:', e));
-  }, [meshes]);
+  usePersistedLibrary('cleo_meshes', meshes, meshesLoadedRef);
 
   const addMesh = (m: MeshAsset) => setMeshes(prev => [...prev, m]);
-  const removeMesh = (id: string) => setMeshes(prev => prev.filter(x => x.id !== id));
+  const removeMesh = (id: string) => {
+    // A preview tab for a deleted mesh would render a subtree whose asset no longer exists — close it
+    // first (mirrors removeMaterial). Safe to reference the later-declared tab helpers: this only ever
+    // runs from a click, long after the component body has evaluated.
+    const openTab = tabs.find(t => t.kind === 'mesh' && t.meshId === id);
+    if (openTab) removeTabById(openTab.id);
+    setMeshes(prev => prev.filter(x => x.id !== id));
+  };
   const updateMesh = (id: string, m: MeshAsset) => setMeshes(prev => prev.map(x => x.id === id ? m : x));
 
   // True once all four IndexedDB-backed libraries have finished their initial read. The asset explorer's
@@ -496,6 +559,44 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }, 50);
     return () => window.clearInterval(timer);
   }, [assetsLoaded]);
+
+  // Keep the texture store in step with the libraries.
+  //
+  // Assets record only texture IDS; the payloads live once in the texture store. This effect is what puts
+  // them there — and it is deliberately a self-healing reconcile rather than a write inside each asset
+  // builder: the builders are synchronous, an IndexedDB write is not, and a missed write would mean an
+  // asset whose textures vanish on reload. Idempotent, so re-running it costs one key scan.
+  //
+  // It also RESCUES legacy assets: their base64 payloads are adopted into the store (and registered) so
+  // they survive, before anything relies on the store alone. Nothing is stripped from them here — the old
+  // inline copy stays until the new path has proven itself.
+  const [textureEpoch, setTextureEpoch] = useState(0);
+  useEffect(() => {
+    const bump = () => setTextureEpoch(n => n + 1);
+    const emitter = eventEmitter.current;
+    emitter.on('TEXTURES_CHANGED', bump);
+    return () => { emitter.off('TEXTURES_CHANGED', bump); };
+  }, []);
+
+  useEffect(() => {
+    if (!assetsLoaded) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const legacy = legacyTexturesOf(materials, terrainMaterials, templates, meshes);
+          if (legacy.length) await adoptLegacyTextures(legacy);
+
+          // No id list: persist every live texture with source bytes. A texture can belong to the scene
+          // without belonging to any library, and the project blob no longer embeds them.
+          const written = await persistTextures();
+          if (written) Logger.info(`Stored ${written} texture${written === 1 ? '' : 's'}`, 'Editor');
+        } catch (e) {
+          Logger.error(`Failed to store textures: ${e}`, 'Editor');
+        }
+      })();
+    }, 500); // debounced: an import registers textures and adds assets in a burst
+    return () => window.clearTimeout(timer);
+  }, [assetsLoaded, textureEpoch, materials, terrainMaterials, templates, meshes]);
 
   // Mesh import review modal: importMeshFiles parks each parsed mesh here and awaits the user's decision
   // (resolved by MeshImportModal via resolveMeshImport). The resolver lives in a ref so the promise in
@@ -521,7 +622,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
-  const activeRuntime = (activeTab.kind === 'template' || activeTab.kind === 'material' || activeTab.kind === 'terrainMaterial' || activeTab.kind === 'animation') ? tabRuntimeRef.current.get(activeTab.id) : undefined;
+  const activeRuntime = activeTab.kind !== 'main' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
   // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material/animation scene.
   const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
   // Legacy single mode value, now derived from the active tab kind. Keeps every existing
@@ -530,6 +631,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     : activeTab.kind === 'material' ? 'material'
     : activeTab.kind === 'terrainMaterial' ? 'terrainMaterial'
     : activeTab.kind === 'animation' ? 'animation'
+    : activeTab.kind === 'mesh' ? 'mesh'
     : 'template';
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
@@ -931,6 +1033,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const enterMaterialEditor = (materialId?: string) => {
     if (!instanceRef.current) return;
     if (materialId) {
+      // Opening is what produces the preview now that import no longer renders one.
+      captureAssetThumbnail('material', materialId);
       const existing = tabs.find(t => t.kind === 'material' && t.materialId === materialId);
       if (existing) { setActiveTabId(existing.id); return; }
       const asset = materials.find(m => m.id === materialId);
@@ -954,23 +1058,141 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     openMaterialTab(asset); // seed directly: `asset` isn't in the `materials` state this render yet
   };
 
+  // ---- Thumbnails on open --------------------------------------------------------------------------
+  //
+  // Importing no longer renders previews: every capture is a full GL frame, and doing one per material
+  // plus one per mesh froze the editor mid-import. Instead an asset is stored with an empty thumbnail
+  // (the explorer shows the kind's icon) and its preview is rendered the first time it is opened.
+  //
+  // Renders from the asset's *saved* data, not from a live tab scene — renderMeshThumbnail reparents the
+  // node it is given, which would rip the subtree out of the preview tab we just built.
+  const thumbnailPendingRef = useRef(new Set<string>());
+
+  const captureAssetThumbnail = (kind: 'material' | 'terrainMaterial' | 'mesh', id: string) => {
+    const engine = instanceRef.current;
+    if (!engine) return;
+    // One capture per asset in flight; a re-open while one is running must not queue a second GL render.
+    if (thumbnailPendingRef.current.has(id)) return;
+    thumbnailPendingRef.current.add(id);
+
+    // Deliberately not awaited: the tab opens immediately and the card updates whenever the render lands.
+    // The write patches only `thumbnail` through the functional setter, so an edit made while the render
+    // was in flight is not clobbered by a stale snapshot.
+    (async () => {
+      try {
+        if (kind === 'material') {
+          const asset = materials.find(m => m.id === id);
+          if (!asset) return;
+          const thumbnail = await renderMaterialAssetThumbnail(engine, asset);
+          if (thumbnail) setMaterials(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
+        } else if (kind === 'terrainMaterial') {
+          const asset = terrainMaterials.find(m => m.id === id);
+          if (!asset) return;
+          const thumbnail = await renderTerrainMaterialAssetThumbnail(engine, asset);
+          if (thumbnail) setTerrainMaterials(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
+        } else {
+          const asset = meshes.find(m => m.id === id);
+          if (!asset) return;
+          const thumbnail = await renderMeshAssetThumbnail(engine, asset);
+          if (thumbnail) setMeshes(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
+        }
+      } catch (e) {
+        Logger.warn(`Could not render the thumbnail for this asset: ${e}`, 'Editor');
+      } finally {
+        thumbnailPendingRef.current.delete(id);
+      }
+    })();
+  };
+
+  // ---- Mesh preview tab ----------------------------------------------------------------------------
+
+  // Build a read-only preview tab for a mesh asset: a throwaway scene holding an instance of the mesh,
+  // framed like its thumbnail. Meshes are not editable — the tab exists so a mesh can be *opened*, which
+  // is what triggers its thumbnail render.
+  const openMeshTab = (asset: MeshAsset) => {
+    const scene = new Scene();
+    scene.animationsEnabled = false; // skinned meshes hold their bind pose in a preview
+    createEmptyScene(scene);
+    void applyPreviewEnvironment(scene);
+
+    const holder = new Node(asset.name);
+    scene.addNode(holder);
+    instantiateMeshAsset(asset, holder); // also restores the asset's embedded textures
+    scene.start();
+
+    const tabId = cryptoRandomId();
+    tabRuntimeRef.current.set(tabId, { scene, rootId: holder.id });
+    setTabs(prev => [...prev, { id: tabId, kind: 'mesh', title: asset.name, meshId: asset.id }]);
+    setActiveTabId(tabId);
+    eventEmitter.current.emit('TEXTURES_CHANGED');
+  };
+
+  // Open (or focus) the preview tab for a library mesh, rendering its thumbnail on the way in.
+  const enterMeshEditor = (meshId?: string) => {
+    if (!instanceRef.current || !meshId) return;
+    const asset = meshes.find(m => m.id === meshId);
+    if (!asset) { Logger.error('Mesh not found', 'Editor'); return; }
+
+    captureAssetThumbnail('mesh', meshId);
+
+    const existing = tabs.find(t => t.kind === 'mesh' && t.meshId === meshId);
+    if (existing) { setActiveTabId(existing.id); return; }
+    openMeshTab(asset);
+  };
+
   // Import one or more model files (and folders) into the mesh library. Groups the selection into one
   // bundle per model file; for each: parses, then opens the review modal (missing textures + scale
   // normalization) and awaits the user. On accept, applies any uploaded textures (re-parse), normalizes
-  // scale, registers each material as a reusable MaterialAsset linked via __materialId, renders a
-  // thumbnail, and stores the mesh asset. Meshes land in the library only — drag a card to place it.
+  // scale, registers each material as a reusable MaterialAsset linked via __materialId, and stores the
+  // mesh asset. Meshes land in the library only — drag a card to place it.
+  //
+  // Every stage transition is published to the shared progress store, so what the window says is what the
+  // code is actually doing.
   const importMeshFiles = async (files: File[]) => {
     const engine = instanceRef.current;
     if (!engine) { Logger.error('Engine not ready for import', 'Editor'); return; }
     const bundles = groupImportFiles(files);
     if (bundles.length === 0) { Logger.warn('No model files (.gltf/.glb/.obj/.fbx) found in the selection', 'Editor'); return; }
 
-    for (const bundle of bundles) {
+    const task = startTask({
+      title: 'Importing models',
+      steps: bundles.map(b => ({ name: b.name, status: 'pending' as StepStatus, detail: 'Queued' })),
+      cancellable: true,
+      // Settling the review modal lets a loop parked on it reach the cancel check below.
+      onCancel: () => { if (pendingResolverRef.current) resolveMeshImport(null); },
+    });
+
+    // Map an import stage onto the store's generic step. One place, so the labels and the bar can't drift.
+    const setStage = (index: number, stage: ImportStage, detail?: string, error?: string) => {
+      const s = IMPORT_STAGES[stage];
+      task.setStep(index, {
+        status: s.status,
+        progress: s.progress,
+        detail: detail ?? (s.status === 'running' || s.status === 'paused' ? s.label : undefined),
+        error,
+      });
+    };
+
+    for (let i = 0; i < bundles.length; i++) {
+      const bundle = bundles[i];
+
+      // Cancellation is checked between bundles: a parse is one long JS task and cannot be interrupted
+      // mid-flight, so "Cancel" honestly means "stop after the current model" — the window says as much.
+      if (task.cancelled) {
+        setStage(i, 'skipped', 'Cancelled before it started');
+        continue;
+      }
+
       try {
         // Parse for review (registers textures; broken slots for any files missing from the upload).
+        setStage(i, 'parsing', `Reading ${bundle.files.length} file${bundle.files.length === 1 ? '' : 's'}`);
         let parsedResult: { root: Node; children: ModelNode[] };
         try { parsedResult = await parseBundleToRoot(bundle.files, bundle.name); }
-        catch (e) { Logger.warn(`${e}`, 'Editor'); continue; }
+        catch (e) {
+          Logger.warn(`${e}`, 'Editor');
+          setStage(i, 'failed', undefined, `${e}`);
+          continue;
+        }
         let { root, children } = parsedResult;
 
         const missing = await detectMissingTextures(bundle.files);
@@ -979,6 +1201,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         for (const c of children) { const m = (c.model as any).material; if (m) matKeys.add(JSON.stringify(m.serialize())); }
 
         // Park the parsed mesh and await the user's decision from MeshImportModal.
+        setStage(i, 'review', missing.length
+          ? `${missing.length} texture${missing.length === 1 ? '' : 's'} missing — awaiting review`
+          : 'Awaiting review');
         const decision = await new Promise<MeshImportDecision | null>(resolve => {
           pendingResolverRef.current = resolve;
           setPendingMeshImport({
@@ -989,51 +1214,86 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             sizeRadius,
           });
         });
-        if (!decision) { Logger.info(`Import of "${bundle.name}" cancelled`, 'Editor'); continue; }
+        if (!decision) {
+          Logger.info(`Import of "${bundle.name}" cancelled`, 'Editor');
+          setStage(i, 'skipped', 'Cancelled at review');
+          continue;
+        }
 
         // The user uploaded previously-missing textures → re-parse so they wire into the materials.
-        if (decision.extraFiles.length)
+        if (decision.extraFiles.length) {
+          setStage(i, 'reparsing', `Linking ${decision.extraFiles.length} texture${decision.extraFiles.length === 1 ? '' : 's'}`);
           ({ root, children } = await parseBundleToRoot([...bundle.files, ...decision.extraFiles], bundle.name));
-        if (decision.normalize) normalizeRootScale(root, decision.targetSize);
+        }
+        if (decision.normalize) {
+          setStage(i, 'scaling', `Fitting to ${decision.targetSize} units`);
+          normalizeRootScale(root, decision.targetSize);
+        }
 
         // Textures decode asynchronously; wait for them before serializing any asset, otherwise
         // serializeTextureData drops not-yet-loaded textures and the material imports untextured.
+        setStage(i, 'textures', 'Waiting for textures to decode');
         await awaitSubtreeTexturesReady(root);
 
         // Register a MaterialAsset per unique material (deduped within the bundle) and link each node.
+        //
+        // Thumbnails are deliberately NOT rendered here. Each capture builds a throwaway Scene and drives
+        // renderer.screenshot — a full GL frame — so importing a model with N materials used to cost N+1
+        // synchronous scene renders on the main thread and tanked the framerate. Assets are stored with an
+        // empty thumbnail; thumbnailOf() falls back to the kind's icon, and the real preview is rendered
+        // the first time the asset is opened (see captureAssetThumbnail).
         const materialIds: string[] = [];
         const assetByKey = new Map<string, MaterialAsset>();
+        // Which material asset each sub-mesh ended up on — a separated asset must list only the materials
+        // ITS own mesh uses, not every material in the file.
+        const materialIdOfChild = new Map<ModelNode, string>();
         for (const child of children) {
           const mat = (child.model as any).material as Material;
           if (!mat) continue;
           const key = JSON.stringify(mat.serialize());
           let asset = assetByKey.get(key);
           if (!asset) {
-            let matThumb = '';
-            try { matThumb = await renderMaterialThumbnail(engine, mat); }
-            catch (e) { console.warn('Material thumbnail failed (using fallback):', e); }
-            asset = buildMaterialAsset(mat, `${bundle.name} ${mat.type}`, matThumb);
+            asset = buildMaterialAsset(mat, `${bundle.name} ${mat.type}`, '');
             assetByKey.set(key, asset);
             addMaterial(asset);
             materialIds.push(asset.id);
+            setStage(i, 'materials', `Registering material ${materialIds.length} of ${matKeys.size}`);
           }
           applyMaterialAsset(child, asset); // stamps __materialId + rebuilds the node's material
+          materialIdOfChild.set(child, asset.id);
         }
 
-        // Render the completed mesh (with its materials + textures) and store the asset.
-        let thumbnail = '';
-        try { thumbnail = await renderMeshThumbnail(engine, root); }
-        catch (e) { console.warn('Mesh thumbnail failed (using fallback):', e); }
-        const meshAsset = await buildMeshAsset(root, materialIds, thumbnail);
-        addMesh(meshAsset);
-        eventEmitter.current.emit('TEXTURES_CHANGED');
-        Logger.info(`Imported mesh "${bundle.name}" (${children.length} sub-mesh${children.length === 1 ? '' : 'es'})`, 'Editor');
+        const separate = decision.separate && children.length > 1;
+        setStage(i, 'saving', separate
+          ? `Creating ${children.length} separate assets`
+          : 'Serializing to the mesh library');
+
+        if (separate) {
+          const assets = await separateSubMeshes(root, children, bundle.name, materialIdOfChild);
+          for (const asset of assets) addMesh(asset);
+          eventEmitter.current.emit('TEXTURES_CHANGED');
+
+          const summary = `${assets.length} separate mesh${assets.length === 1 ? '' : 'es'}`;
+          setStage(i, 'done', summary);
+          Logger.info(`Imported "${bundle.name}" as ${summary}`, 'Editor');
+        } else {
+          const meshAsset = await buildMeshAsset(root, materialIds, '');
+          addMesh(meshAsset);
+          eventEmitter.current.emit('TEXTURES_CHANGED');
+
+          const summary = `${children.length} sub-mesh${children.length === 1 ? '' : 'es'}, ${materialIds.length} material${materialIds.length === 1 ? '' : 's'}`;
+          setStage(i, 'done', summary);
+          Logger.info(`Imported mesh "${bundle.name}" (${summary})`, 'Editor');
+        }
       } catch (err) {
         Logger.error(`Failed to import "${bundle.name}": ${err}`, 'Editor');
+        setStage(i, 'failed', undefined, `${err}`);
         // Make sure a stuck modal is cleared if we errored mid-review.
         if (pendingResolverRef.current) { pendingResolverRef.current = null; setPendingMeshImport(null); }
       }
     }
+
+    task.finish();
   };
 
   // Save the active material tab to the library (capturing a sphere thumbnail) and propagate to references.
@@ -1135,6 +1395,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const enterTerrainMaterialEditor = (terrainMaterialId?: string) => {
     if (!instanceRef.current) return;
     if (terrainMaterialId) {
+      captureAssetThumbnail('terrainMaterial', terrainMaterialId); // opening is what produces the preview
       const existing = tabs.find(t => t.kind === 'terrainMaterial' && t.terrainMaterialId === terrainMaterialId);
       if (existing) { setActiveTabId(existing.id); return; }
       const asset = terrainMaterials.find(m => m.id === terrainMaterialId);
@@ -1186,7 +1447,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!instance) return;
     const tab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
     activeTabKindRef.current = tab.kind;
-    const runtime = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'terrainMaterial' || tab.kind === 'animation') ? tabRuntimeRef.current.get(tab.id) : undefined;
+    const runtime = tab.kind !== 'main' ? tabRuntimeRef.current.get(tab.id) : undefined;
     instance.setScene(runtime ? runtime.scene : editorSceneRef.current);
     // Hide the editor ground grid in (terrain-)material tabs so the preview sphere + its thumbnail stay clean.
     instance.renderer.setGridVisible(tab.kind !== 'material' && tab.kind !== 'terrainMaterial');
@@ -1219,6 +1480,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const saveProjectToStorage = async () => {
     setSavingState('saving');
+    // Indeterminate: serialize + IndexedDB write is one opaque operation, with no honest fraction to show.
+    // The Save button keeps its own inline state; this puts it in the shared place alongside everything else.
+    const task = startTask({
+      title: 'Saving project',
+      steps: [{ name: 'Saving project', status: 'running', detail: 'Serializing the scene' }],
+      indeterminate: true,
+    });
     try {
       // Race against a timeout as a defensive backstop so the UI never gets stuck "saving".
       const ok = await Promise.race<boolean>([
@@ -1233,18 +1501,36 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         }),
         new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('Save timed out')), 15000)),
       ]);
-      if (ok) { Logger.info('Project saved', 'Editor'); setSavingState('saved'); }
-      else { setSavingState('error'); }
+      if (ok) {
+        Logger.info('Project saved', 'Editor');
+        setSavingState('saved');
+        task.setStep(0, { status: 'done', detail: 'Saved' });
+      } else {
+        setSavingState('error');
+        task.setStep(0, { status: 'failed', error: 'Save failed' });
+      }
     } catch (e: any) {
       Logger.error('Save failed: ' + (e?.message || e), 'Editor');
       setSavingState('error');
+      task.setStep(0, { status: 'failed', error: String(e?.message || e) });
     } finally {
+      task.finish();
       setTimeout(() => setSavingState('idle'), 2000);
     }
   };
 
   // Startup: restore the saved project if present, otherwise open a blank scene.
   const setupInitialScene = async () => {
+    // Textures first. Payloads live once in the texture store, not embedded in the project blob or in the
+    // assets that reference them, so they have to be registered in the TextureManager BEFORE anything is
+    // parsed against them — that is what lets every asset restore path stay synchronous.
+    try {
+      const loaded = await preloadTextures();
+      if (loaded) Logger.info(`Loaded ${loaded} texture${loaded === 1 ? '' : 's'}`, 'Editor');
+    } catch (e) {
+      Logger.error(`Failed to load textures: ${e}`, 'Editor');
+    }
+
     const project = await loadProject();
     if (project) {
       applyGameData(project, { ...engineMaps(), scene: editorSceneRef.current, setUI: setUiState, renderer: instanceRef.current?.renderer });
@@ -1727,6 +2013,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addMesh,
       removeMesh,
       updateMesh,
+      enterMeshEditor,
       importMeshFiles,
       assetsLoaded,
       pendingMeshImport,

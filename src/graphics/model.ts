@@ -2,6 +2,7 @@ import { Mesh } from './mesh';
 import { Material } from './material';
 import { Geometry } from '../core/geometry';
 import { Loader } from './loader';
+import { ImportTransform } from './utils/gltfLoader';
 
 interface FromPathptions {
     filePaths: string[];
@@ -25,15 +26,16 @@ export class Model {
         this._mesh = new Mesh();
     }
 
-    public static fromPath(config: FromPathptions): Promise<{name: string, model: Model}[]> {
-        return new Promise<{name: string, model: Model}[]>((resolve, reject) => {
+    public static fromPath(config: FromPathptions): Promise<{name: string, model: Model, transform?: ImportTransform}[]> {
+        return new Promise<{name: string, model: Model, transform?: ImportTransform}[]>((resolve, reject) => {
             Loader.loadModelsFromPath(config.filePaths)
             .then((meshes) => {
-                const models: {name: string, model: Model}[] = [];
+                const models: {name: string, model: Model, transform?: ImportTransform}[] = [];
                 for (const mesh of meshes)
                     models.push({
                         name: mesh.name,
-                        model: new Model( mesh.geometry, config?.material ? config.material : mesh.material)
+                        model: new Model( mesh.geometry, config?.material ? config.material : mesh.material),
+                        transform: mesh.transform
                     });
                 resolve(models);
             })
@@ -41,15 +43,16 @@ export class Model {
         });
     }
 
-    public static fromFile(config: FromFileOptions): Promise<{name: string, model: Model}[]> {
-        return new Promise<{name: string, model: Model}[]>((resolve, reject) => {
+    public static fromFile(config: FromFileOptions): Promise<{name: string, model: Model, transform?: ImportTransform}[]> {
+        return new Promise<{name: string, model: Model, transform?: ImportTransform}[]>((resolve, reject) => {
             Loader.loadModelsFromFile(config.files)
             .then((meshes) => {
-                const models: {name: string, model: Model}[] = [];
+                const models: {name: string, model: Model, transform?: ImportTransform}[] = [];
                 for (const mesh of meshes)
                     models.push({
                         name: mesh.name,
-                        model: new Model( mesh.geometry, config?.material ? config.material : mesh.material)
+                        model: new Model( mesh.geometry, config?.material ? config.material : mesh.material),
+                        transform: mesh.transform
                     });
                 resolve(models);
             })

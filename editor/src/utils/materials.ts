@@ -8,9 +8,12 @@ export const MATERIAL_ID_VAR = '__materialId'
 export type MaterialAsset = {
   id: string
   name: string
-  material: any        // Material.serialize() output
-  textures: any[]      // [{ id, data, config }] snapshots from TextureManager
-  thumbnail: string    // base64 PNG data URL (empty until first save)
+  material: any          // Material.serialize() output
+  /** TextureManager ids this material references. The payloads live in the texture store (textureStore.ts). */
+  textureIds?: string[]
+  /** Legacy: textures embedded as base64 ([{ id, data, config }]). Still read; never written. */
+  textures?: any[]
+  thumbnail: string      // base64 PNG data URL (empty until first save)
 }
 
 /** The material asset id a node currently references, or undefined. */
@@ -48,18 +51,29 @@ function collectMaterialTextureIds(serialized: any): Set<string> {
   return set
 }
 
-/** Snapshot a live Material into a saveable asset, embedding the textures it references. */
+/**
+ * Snapshot a live Material into a saveable asset.
+ *
+ * The asset records only the texture IDS it uses — the payloads live once in the texture store, not
+ * embedded per asset. This used to serialize every texture in the project to base64 and then filter, once
+ * per material, which is what froze the editor on import.
+ */
 export function buildMaterialAsset(material: Material, name: string, thumbnail: string, id?: string): MaterialAsset {
   const serialized = material.serialize()
-  const texIds = collectMaterialTextureIds(serialized)
-  const allTextures: any[] = (TextureManager.Instance as any).serializeTextureData?.() ?? []
-  const textures = allTextures.filter((t: any) => texIds.has(t.id))
-  return { id: id ?? cryptoRandomId(), name, material: serialized, textures, thumbnail }
+  const textureIds = [...collectMaterialTextureIds(serialized)]
+  return { id: id ?? cryptoRandomId(), name, material: serialized, textureIds, thumbnail }
 }
 
-/** Apply a material asset to a node: restore its textures, rebuild the Material, and tag the link. */
+/** Every texture id a material asset references, whichever format it was saved in. */
+export function materialAssetTextureIds(asset: MaterialAsset): string[] {
+  if (asset.textureIds?.length) return asset.textureIds
+  return (asset.textures ?? []).map((t: any) => t?.id).filter(Boolean)
+}
+
+/** Apply a material asset to a node: rebuild the Material and tag the link. */
 export function applyMaterialAsset(node: Node, asset: MaterialAsset): void {
-  // Restore any embedded textures not already registered (the built-in 'Null' texture always exists).
+  // New assets carry no payloads — their textures are preloaded from the texture store at boot, so they
+  // are already registered. This loop only still matters for legacy assets with embedded base64.
   for (const t of asset.textures || []) {
     if (t?.id && !TextureManager.Instance.getTexture(t.id))
       TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id)

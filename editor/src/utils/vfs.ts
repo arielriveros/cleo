@@ -350,6 +350,65 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   return { next: { version: 1, folders, entries }, changed: true }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Audit — assets that exist in a library but do not show up in the explorer.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Why an asset is invisible. The distinction is the whole point: it says which of the two layers dropped
+ * it, which is not something you can tell by looking at the explorer.
+ *  - 'no-entry'    the index never got a VfsEntry for it (reconcileVfs didn't index it)
+ *  - 'not-in-tree' it HAS an entry, but the file manager's own store isn't showing that path (a desync)
+ */
+export type MissingReason = 'no-entry' | 'not-in-tree'
+
+export type MissingAsset = {
+  kind: AssetKind
+  assetId: string
+  name: string
+  reason: MissingReason
+  path?: string // set for 'not-in-tree'
+}
+
+/**
+ * Every library asset that the explorer isn't showing.
+ *
+ * `treeIds` is the set of ids the file manager's store currently holds (api.serialize). Pass it to catch
+ * store desyncs; omit it to check the index alone.
+ */
+export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeIds?: Set<string>): MissingAsset[] {
+  const byAsset = indexByAsset(vfs)
+  const out: MissingAsset[] = []
+
+  const check = (kind: AssetKind, assetId: string, name: string) => {
+    const entry = byAsset.get(assetKey(kind, assetId))
+    if (!entry) {
+      out.push({ kind, assetId, name, reason: 'no-entry' })
+      return
+    }
+    if (treeIds && !treeIds.has(entry.path))
+      out.push({ kind, assetId, name, reason: 'not-in-tree', path: entry.path })
+  }
+
+  for (const m of libs.materials) check('material', m.id, m.name)
+  for (const m of libs.terrainMaterials) check('terrainMaterial', m.id, m.name)
+  for (const t of libs.templates) check('template', t.id, t.name)
+  for (const m of libs.meshes) check('mesh', m.id, m.name)
+  for (const id of libs.textureIds) check('texture', id, id)
+
+  return out
+}
+
+/** Index a missing asset: give it a fresh, unique path in `folder`. Idempotent per asset. */
+export function restoreMissing(vfs: VfsIndex, missing: MissingAsset, folder: string, size?: number): VfsIndex {
+  if (missing.reason !== 'no-entry') return vfs // already indexed; only the store is out of step
+  const taken = new Set<string>([...vfs.entries.map(e => e.path), ...vfs.folders])
+  const ext = missing.kind === 'texture' ? extOf(missing.name) : KIND_EXT[missing.kind]
+  const stem = missing.kind === 'texture' ? stemOf(missing.name) : missing.name
+  const path = uniquePath(taken, folder || '/', stem, ext)
+  return applyAdd(vfs, { path, kind: missing.kind, assetId: missing.assetId, created: Date.now(), size })
+}
+
 // SVAR's IEntity, restated so vfs.ts stays free of library imports.
 export type FmEntity = { id: string; type: 'file' | 'folder'; date?: Date; size?: number }
 

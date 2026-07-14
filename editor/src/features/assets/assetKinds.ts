@@ -7,6 +7,7 @@ import {
   renderMaterialAssetThumbnail, renderMeshAssetThumbnail, renderTerrainMaterialAssetThumbnail,
 } from '../../utils/meshThumbnails'
 import { cryptoRandomId } from '../../utils/UIModel'
+import { deleteTextures } from '../../utils/textureStore'
 import { AssetKind, KIND_LABEL } from '../../utils/vfs'
 
 // One adapter per asset kind, so the file-manager event bridge never has to branch five ways. Everything
@@ -35,6 +36,7 @@ export type AssetDeps = {
   enterMaterialEditor: (id?: string) => void
   enterTerrainMaterialEditor: (id?: string) => void
   enterTemplateEditor: (id?: string) => void
+  enterMeshEditor: (id?: string) => void
 
   emit: (event: string, payload?: any) => void
 }
@@ -128,6 +130,9 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'mesh': deps.removeMesh(id); break
     case 'texture':
       TextureManager.Instance.removeTexture(id)
+      // Drop the payload too, or the texture store keeps it forever. Only done for an explicit texture
+      // delete: deleting a material or mesh must NOT evict its maps, which are shared by id.
+      void deleteTextures([id])
       deps.emit('TEXTURES_CHANGED')
       break
   }
@@ -220,12 +225,18 @@ export async function regenerateThumbnail(
   }
 }
 
-/** Open the asset's editor. Returns false for kinds that have no editor (meshes, textures). */
+/**
+ * Open the asset's editor. Returns false for kinds that have no editor (textures).
+ *
+ * A mesh opens a read-only preview tab. That is deliberate: imports no longer render thumbnails (each one
+ * cost a full GL frame and stalled the editor), so opening an asset is what renders its preview.
+ */
 export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean {
   switch (kind) {
     case 'material': deps.enterMaterialEditor(id); return true
     case 'terrainMaterial': deps.enterTerrainMaterialEditor(id); return true
     case 'template': deps.enterTemplateEditor(id); return true
+    case 'mesh': deps.enterMeshEditor(id); return true
     default: return false
   }
 }

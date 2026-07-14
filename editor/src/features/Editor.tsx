@@ -2,6 +2,7 @@ import MenuBar from "./MenuBar";
 import TabBar from "./TabBar";
 import DockLayout from "./layout/DockLayout";
 import MeshImportModal from "./meshes/MeshImportModal";
+import ProgressWindow from "./progress/ProgressWindow";
 import AnimationImportModal from "./animation/AnimationImportModal";
 import { StateMachineProvider } from "./animation/StateMachineContext";
 
@@ -18,6 +19,9 @@ export default function Editor() {
       </StateMachineProvider>
       {/* Global mesh-import review modal — overlays the whole editor while an import awaits the user. */}
       <MeshImportModal />
+      {/* The editor's one progress surface — import, publish, export, save, thumbnail refresh all report
+          here. A floating card stack, not a modal, so it can stay up underneath the review modal. */}
+      <ProgressWindow />
       {/* Global animation-import review modal (compatibility vs the skeleton). */}
       <AnimationImportModal />
     </div>

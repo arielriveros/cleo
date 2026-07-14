@@ -157,6 +157,15 @@ export function normalizeRootScale(root: Node, targetSize: number): number {
     scaled.add(geo);
     geo.scale(factor);
   }
+  // Sub-meshes can carry glTF node translations (multi-part layouts); scale those too, or the parts
+  // shrink in place while their spacing stays at the original size.
+  const scalePositions = (n: Node) => {
+    for (const c of n.children) {
+      c.setPosition([c.position[0] * factor, c.position[1] * factor, c.position[2] * factor]);
+      scalePositions(c);
+    }
+  };
+  scalePositions(root);
   root.updateTransforms(); // refresh cached bounds after the vertex edit
   return factor;
 }

@@ -1,20 +1,32 @@
-// Minimal promise-based key/value store over IndexedDB. Used for editor persistence (project + templates)
-// that would otherwise blow past localStorage's ~5MB quota (scenes/templates embed base64 textures).
+// Minimal promise-based store over IndexedDB. Used for editor persistence (project + libraries) that would
+// otherwise blow past localStorage's ~5MB quota.
+//
+// Two object stores:
+//   'kv'       key -> value. The project blob and the asset libraries.
+//   'textures' the texture payloads, keyed by TextureManager id. Held as Blobs, NOT base64 — see
+//              textureStore.ts. Kept out of 'kv' so a library write doesn't drag megabytes of image data
+//              through structured clone with it.
 
 const DB_NAME = 'cleo';
 const STORE = 'kv';
-const VERSION = 1;
+export const TEXTURE_STORE = 'textures';
+const VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-function openDB(): Promise<IDBDatabase> {
+export function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, VERSION);
+    // Runs for a fresh DB and for an existing v1 (which only has 'kv') — both end up with both stores.
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if (!db.objectStoreNames.contains(TEXTURE_STORE)) db.createObjectStore(TEXTURE_STORE);
     };
+    // Another tab still holds the DB open at the old version, so the upgrade can't run. Surface it — a
+    // silent hang here would look like the editor failing to load.
+    req.onblocked = () => reject(new Error('Cleo storage upgrade blocked — close the editor in other tabs and reload'));
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });

@@ -200,6 +200,10 @@ export class Renderer {
     private _cascadeMatrices: mat4[] = [];
     private _cascadeSplits: number[] = [];
     private _useCSM: boolean = false;
+    // True once something has been rendered into the shadow maps. A scene with no shadow-casting light
+    // must clear them (they'd otherwise still hold the previous scene's depth) — but only once, not every
+    // frame: these are several 4096² depth buffers.
+    private _shadowMapsDirty: boolean = false;
     // Whole-array upload buffers + cached base (`[0]`) locations for the cascade uniforms.
     // Basic-type uniform arrays are only reachable via their [0] location, not per element.
     private _cascadeMatPacked: Float32Array = new Float32Array(this._cascadeCount * 16);
@@ -584,6 +588,13 @@ export class Renderer {
             } else {
                 this._renderShadowMap(scene.models, shadowLight);
             }
+            this._shadowMapsDirty = true;
+        } else {
+            // No shadow caster: the shadow pass above is skipped, so the maps still hold the LAST scene's
+            // depth — and the material/lighting shaders sample them regardless. That leaked a ghost shadow
+            // of the previous scene's geometry into every preview render (asset thumbnails are throwaway
+            // scenes whose lights deliberately don't cast). Clear them to the far plane so nothing occludes.
+            this._clearShadowMaps();
         }
 
         if (this._deferred)
@@ -2270,6 +2281,30 @@ export class Renderer {
 
         // Restore depth writes after drawing sprite
         GLState.depthMask(true);
+    }
+
+    /**
+     * Reset the shadow map + cascades to the far plane (depth 1.0), so every shadow lookup passes and
+     * nothing is occluded. Used when a scene has no shadow-casting light: the shadow pass is skipped
+     * entirely, and without this the maps keep whatever the previously rendered scene left in them.
+     * Idempotent — the dirty flag keeps it to a single pass rather than clearing every frame.
+     */
+    private _clearShadowMaps(): void {
+        if (!this._shadowMapsDirty) return;
+
+        // The depth clear value is 1.0 by default; be explicit since post/other passes can change it.
+        gl.clearDepth(1.0);
+        GLState.depthMask(true); // a depth write mask of false would make the clear a no-op
+
+        this._shadowMapFBO.bind();
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+        for (const cascade of this._shadowCascades) {
+            cascade.bind();
+            gl.clear(gl.DEPTH_BUFFER_BIT);
+        }
+        this._shadowMapFBO.unbind();
+
+        this._shadowMapsDirty = false;
     }
 
     private _renderShadowMap(models: Set<ModelNode>, light: LightNode): void {

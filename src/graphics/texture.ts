@@ -1,4 +1,5 @@
 import { gl } from "./renderer";
+import { bytesToDataUrl } from "../core/base64";
 
 export interface TextureConfig {
     flipY?: boolean;
@@ -24,6 +25,13 @@ export class Texture {
     private _width: number = 0;
     private _height: number = 0;
     private _data: HTMLImageElement | CubemapFaces | null = null;
+    // The compressed bytes this texture was decoded from (PNG/JPEG/…), kept so it can be serialized
+    // without re-encoding it through a canvas. Import decodes from a Blob URL, so the image has no data:
+    // URL to reuse — these bytes are what `TextureManager.serializeTexture` falls back to, and the base64
+    // is only ever produced (and then memoized) when an asset is actually saved.
+    private _source: { bytes: Uint8Array; mime: string } | null = null;
+    private _sourceUri: string | null = null; // memoized data URL for _source
+    private _objectUrl: string | null = null; // blob: URL backing _data's src; revoked on delete()
     private _flipY: boolean;
     private _usage: 'color' | 'depth';
     private _precision: 'low' | 'high';
@@ -280,11 +288,50 @@ export class Texture {
 
     public delete(): void {
         gl.deleteTexture(this._texture);
+        if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
     }
 
     public get data(): HTMLImageElement | CubemapFaces | null { return this._data; }
     public get width(): number { return this._width; }
     public get height(): number { return this._height; }
+
+    /** Remember the compressed bytes this texture was decoded from, so it can be serialized without a canvas. */
+    public setSource(bytes: Uint8Array, mime: string): void {
+        this._source = { bytes, mime };
+        this._sourceUri = null;
+    }
+
+    /** The compressed bytes this texture was decoded from, or null (built-ins / path-loaded images). */
+    public get source(): { bytes: Uint8Array; mime: string } | null { return this._source; }
+
+    /**
+     * Hold the blob: URL the image was decoded from, alive for the texture's lifetime and revoked on
+     * delete().
+     *
+     * It must NOT be revoked once the image loads: the editor previews a texture card straight off
+     * `texture.data.src` (assetKinds.thumbnailOf), so revoking early leaves every texture card showing a
+     * broken image.
+     */
+    public setObjectUrl(url: string): void {
+        if (this._objectUrl && this._objectUrl !== url) URL.revokeObjectURL(this._objectUrl);
+        this._objectUrl = url;
+    }
+
+    /** Release the blob: URL without touching the GL texture (for drop paths that don't own its lifetime). */
+    public revokeObjectUrl(): void {
+        if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
+    }
+
+    /**
+     * The texture's original bytes as a data URL, or null if it wasn't created from bytes. Encoded on first
+     * call and memoized — importing never pays for this, only saving does.
+     */
+    public get sourceUri(): string | null {
+        if (this._sourceUri) return this._sourceUri;
+        if (!this._source) return null;
+        this._sourceUri = bytesToDataUrl(this._source.bytes, this._source.mime);
+        return this._sourceUri;
+    }
     public get texture(): WebGLTexture { return this._texture; }
     public get config(): TextureConfig {
         return {

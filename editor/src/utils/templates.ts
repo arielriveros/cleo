@@ -7,7 +7,10 @@ export type Template = {
   id: string
   name: string
   nodeJson: any                       // serialized node subtree (children + model/material/variables)
-  textures: any[]                     // [{ id, data, config }] snapshots from TextureManager
+  /** TextureManager ids this subtree references. The payloads live in the texture store (textureStore.ts). */
+  textureIds?: string[]
+  /** Legacy: textures embedded as base64 ([{ id, data, config }]). Still read; never written. */
+  textures?: any[]
   scripts: Record<string, string>     // originalNodeId -> script source
   bodies: Record<string, any>         // originalNodeId -> BodyDescription
   triggers: Record<string, any>       // originalNodeId -> { shapes }
@@ -55,12 +58,12 @@ export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promi
     const t = maps.triggers.get(id); if (t) triggers[id] = t
   }
 
+  // Only the texture IDS — the payloads live once in the texture store (textureStore.ts), not embedded
+  // in every asset that happens to reference them.
   const texIds = new Set<string>()
   collectTextureIds(nodeJson, texIds)
-  const allTextures: any[] = (TextureManager.Instance as any).serializeTextureData?.() ?? []
-  const textures = allTextures.filter((t: any) => texIds.has(t.id))
 
-  return { id: cryptoRandomId(), name: node.name, nodeJson, textures, scripts, bodies, triggers }
+  return { id: cryptoRandomId(), name: node.name, nodeJson, textureIds: [...texIds], scripts, bodies, triggers }
 }
 
 /** Instantiate a template under `parent`, regenerating ids and restoring assets/scripts. Returns the new root id. */
@@ -73,7 +76,8 @@ export function instantiateTemplate(template: Template, parent: Node, maps: Engi
   // and re-synced when the template is edited. Persists via the node's serialized `variables`.
   clone.variables = { ...(clone.variables || {}), [TEMPLATE_ID_VAR]: { type: 'string', value: template.id } }
 
-  // Restore any textures not already present.
+  // New templates carry no payloads — their textures come from the texture store, preloaded at boot. This
+  // loop only still matters for legacy templates with embedded base64.
   for (const t of template.textures || []) {
     if (!TextureManager.Instance.getTexture(t.id))
       TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id)

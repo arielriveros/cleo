@@ -27,6 +27,24 @@ interface BVHNode {
     count: number;  // leaf: triangle count
 }
 
+/**
+ * A built BVH flattened into transferable buffers, so it can be constructed in a worker and adopted on
+ * the main thread instead of being rebuilt there (the build is O(n log n) with a sort per node — one of
+ * the most expensive steps of importing a dense mesh).
+ *
+ * `nodes` packs 9 floats per node: [minX,minY,minZ, maxX,maxY,maxZ, left, right, start] — `count` is
+ * derivable but stored too, so 10 floats. Kept as a single Float32Array to transfer in one go.
+ */
+export interface SerializedBVH {
+    positions: Float32Array;
+    indices: Uint32Array;
+    order: Uint32Array;
+    nodes: Float32Array;   // 10 floats per node
+    nodeCount: number;
+}
+
+const NODE_STRIDE = 10;
+
 // Möller–Trumbore scratch (reused; the routine is never re-entrant with itself).
 const _e1 = vec3.create();
 const _e2 = vec3.create();
@@ -111,6 +129,54 @@ export class BVH {
         }
 
         return new BVH(flatPositions, flatIndices);
+    }
+
+    /** Build directly from flat buffers (the shape a worker/parser already has). Skips the tuple copy. */
+    public static fromBuffers(positions: Float32Array, indices: Uint32Array): BVH {
+        return new BVH(positions, indices);
+    }
+
+    /**
+     * Flatten this tree into transferable buffers. Pair with {@link BVH.fromSerialized} to build in a
+     * worker and adopt on the main thread without repeating the build.
+     */
+    public serialize(): SerializedBVH {
+        const nodes = new Float32Array(this._nodes.length * NODE_STRIDE);
+        for (let i = 0; i < this._nodes.length; i++) {
+            const n = this._nodes[i];
+            const o = i * NODE_STRIDE;
+            nodes[o] = n.min[0]; nodes[o + 1] = n.min[1]; nodes[o + 2] = n.min[2];
+            nodes[o + 3] = n.max[0]; nodes[o + 4] = n.max[1]; nodes[o + 5] = n.max[2];
+            nodes[o + 6] = n.left; nodes[o + 7] = n.right; nodes[o + 8] = n.start; nodes[o + 9] = n.count;
+        }
+        return {
+            positions: this._positions,
+            indices: this._indices,
+            order: this._order,
+            nodes,
+            nodeCount: this._nodes.length,
+        };
+    }
+
+    /** Rebuild a BVH from {@link BVH.serialize} output. Adopts the buffers as-is — no tree build. */
+    public static fromSerialized(data: SerializedBVH): BVH {
+        const bvh = Object.create(BVH.prototype) as BVH;
+        bvh._positions = data.positions;
+        bvh._indices = data.indices;
+        bvh._order = data.order;
+        bvh._triCount = Math.floor(data.indices.length / 3);
+        bvh._centroids = new Float32Array(0); // only needed while building
+        bvh._nodes = [];
+        for (let i = 0; i < data.nodeCount; i++) {
+            const o = i * NODE_STRIDE;
+            bvh._nodes.push({
+                min: [data.nodes[o], data.nodes[o + 1], data.nodes[o + 2]],
+                max: [data.nodes[o + 3], data.nodes[o + 4], data.nodes[o + 5]],
+                left: data.nodes[o + 6], right: data.nodes[o + 7],
+                start: data.nodes[o + 8], count: data.nodes[o + 9],
+            });
+        }
+        return bvh;
     }
 
     public get triangleCount(): number { return this._triCount; }
