@@ -17,8 +17,8 @@ interface AtmoState {
   resolution: number; viewSteps: number; lightSteps: number;
   fogEnabled: boolean; fogDensity: number; fogStart: number; fogHeight: number; fogHeightFalloff: number;
   fogMaxOpacity: number; fogColor: Vec3; fogColorBlend: number;
-  godRaysEnabled: boolean; godRaySamples: number; godRayDensity: number; godRayWeight: number;
-  godRayDecay: number; godRayExposure: number; godRayThreshold: number; godRayTint: Vec3; godRaySunSpread: number;
+  godRaysEnabled: boolean; godRaySamples: number; godRayDensity: number; godRayExposure: number;
+  godRayTint: Vec3; godRayAnisotropy: number; godRayMaxDistance: number;
 }
 
 function readNode(node: SkyAtmosphereNode): AtmoState {
@@ -33,8 +33,8 @@ function readNode(node: SkyAtmosphereNode): AtmoState {
     fogHeight: node.fogHeight, fogHeightFalloff: node.fogHeightFalloff, fogMaxOpacity: node.fogMaxOpacity,
     fogColor: node.fogColor, fogColorBlend: node.fogColorBlend,
     godRaysEnabled: node.godRaysEnabled, godRaySamples: node.godRaySamples, godRayDensity: node.godRayDensity,
-    godRayWeight: node.godRayWeight, godRayDecay: node.godRayDecay, godRayExposure: node.godRayExposure,
-    godRayThreshold: node.godRayThreshold, godRayTint: node.godRayTint, godRaySunSpread: node.godRaySunSpread
+    godRayExposure: node.godRayExposure, godRayTint: node.godRayTint,
+    godRayAnisotropy: node.godRayAnisotropy, godRayMaxDistance: node.godRayMaxDistance
   }
 }
 
@@ -124,16 +124,14 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
           {slider('Custom Color Blend', 'fogColorBlend', 0, 1, 0.01)}
         </>}
 
-        {header('God Rays (light shafts)')}
+        {header('God Rays (volumetric light shafts)')}
         {check('Enable God Rays', 'godRaysEnabled')}
         {state.godRaysEnabled && <>
-          {slider('Exposure', 'godRayExposure', 0, 2, 0.01)}
-          {slider('Density (length)', 'godRayDensity', 0, 1, 0.01)}
-          {slider('Weight', 'godRayWeight', 0, 2, 0.01)}
-          {slider('Decay', 'godRayDecay', 0.8, 1, 0.001, 3)}
-          {slider('Threshold', 'godRayThreshold', 0, 5, 0.01)}
-          {slider('Sun Spread (deg)', 'godRaySunSpread', 2, 60, 1, 0)}
-          {slider('Samples', 'godRaySamples', 8, 128, 1, 0)}
+          {slider('Intensity', 'godRayExposure', 0, 2, 0.01)}
+          {slider('Density', 'godRayDensity', 0, 1, 0.01)}
+          {slider('Anisotropy', 'godRayAnisotropy', 0, 0.95, 0.01)}
+          {slider('Max Distance', 'godRayMaxDistance', 5, 500, 5, 0)}
+          {slider('March Steps', 'godRaySamples', 8, 128, 1, 0)}
           {color('Tint', 'godRayTint')}
         </>}
       </div>

@@ -772,6 +772,18 @@ export class Terrain {
     }
 
     /**
+     * Re-derive every active foliage layer's prototypes (LOD models, billboard impostor, cull distance,
+     * scatter params) from its current rule, PRESERVING the scattered instances. Called by the editor
+     * after the source mesh asset or terrain material was edited — never re-scatters.
+     */
+    public refreshFoliagePrototypes(): void {
+        for (const { rule } of this._activeFoliageRules()) {
+            const layer = this._foliageByKey.get(rule.name);
+            if (layer) layer.setPrototype(rule);
+        }
+    }
+
+    /**
      * Material-driven foliage scatter: for each foliage prototype an assigned layer material includes,
      * place instances (density-controlled) at random disc points where that layer is the dominant one
      * in the splat — skipping any point where a present material excludes that prototype. Instances go

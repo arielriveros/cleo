@@ -68,13 +68,25 @@ struct SpotLight {
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 uniform SpotLight  u_spotlights[MAX_SPOTLIGHTS];
 
-// IBL (split-sum image-based lighting from the active light probe)
-uniform bool u_useIBL;
-uniform float u_iblIntensity;
-uniform samplerCube u_irradiance;   // diffuse irradiance
-uniform samplerCube u_prefiltered;  // prefiltered specular (mip = roughness)
-uniform sampler2D u_brdfLUT;        // BRDF integration LUT
-// Fallback crude environment reflection (used when no probe is active)
+// IBL: up to 2 light-probe slots with oriented-box influence volumes, selected PER PIXEL with a
+// feathered (smoothstep) boundary. Slot samplers are scalar uniforms — sampler arrays can't be
+// indexed dynamically in GLSL ES 3.00 (same constraint as the cascade unroll below). Keeping the
+// slot count at 2 holds this shader at 15 samplers (16 is the ES 3.00 guaranteed minimum).
+uniform int u_probeCount;           // 0 = no baked probes -> flat ambient / crude env fallback
+uniform float u_iblIntensity0;
+uniform float u_iblIntensity1;
+uniform bool u_probeUnbounded0;     // true = legacy whole-scene probe (weight 1 everywhere)
+uniform bool u_probeUnbounded1;
+uniform mat4 u_probeInvVolume0;     // world -> unit-cube volume space (inside = |xyz| <= 0.5)
+uniform mat4 u_probeInvVolume1;
+uniform vec3 u_probeBlend0;         // per-axis feather as a fraction of the unit cube (0 = hard edge)
+uniform vec3 u_probeBlend1;
+uniform samplerCube u_irradiance0;  // diffuse irradiance
+uniform samplerCube u_prefiltered0; // prefiltered specular (mip = roughness)
+uniform samplerCube u_irradiance1;
+uniform samplerCube u_prefiltered1;
+uniform sampler2D u_brdfLUT;        // BRDF integration LUT (shared by both slots)
+// Fallback crude environment reflection (used where no probe volume applies)
 uniform bool u_useEnvMap;
 uniform samplerCube u_envMap;
 
@@ -170,6 +182,30 @@ vec3 reconstructWorldPos(float depth) {
     return world.xyz / world.w;
 }
 
+// Feathered containment weight of worldPos in a probe's volume: 1 well inside, easing to 0 at the
+// boundary over the blend feather, 0 outside. Unbounded probes weigh 1 everywhere.
+float probeWeight(vec3 worldPos, mat4 invVolume, vec3 blend, bool unbounded) {
+    if (unbounded) return 1.0;
+    vec3 local = (invVolume * vec4(worldPos, 1.0)).xyz;
+    vec3 edge = vec3(0.5) - abs(local);          // distance to the boundary in unit-cube space
+    if (any(lessThanEqual(edge, vec3(0.0)))) return 0.0;
+    vec3 t = clamp(edge / max(blend, vec3(1e-5)), 0.0, 1.0);
+    vec3 s = t * t * (3.0 - 2.0 * t);            // smoothstep
+    return min(s.x, min(s.y, s.z));
+}
+
+// Split-sum IBL from one probe slot's cubemaps.
+vec3 probeIBL(samplerCube irr, samplerCube pref, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness, vec3 F0) {
+    vec3 F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+    vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+    vec3 diffuseIBL = texture(irr, N).rgb * albedo;
+    vec3 R = reflect(-V, N);
+    vec3 prefiltered = textureLod(pref, R, roughness * MAX_REFLECTION_LOD).rgb;
+    vec2 brdf = texture(u_brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+    vec3 specularIBL = prefiltered * (F * brdf.x + brdf.y);
+    return kD * diffuseIBL + specularIBL;
+}
+
 void main() {
     float depth = texture(u_gDepth, fragTexCoord).r;
     // Background (no geometry) — leave for the skybox pass.
@@ -195,32 +231,33 @@ void main() {
     float ssao = 1.0;
     if (u_ssaoEnabled) ssao = texture(u_ssao, fragTexCoord).r;
 
-    vec3 ambient;
-    if (u_useIBL) {
-        vec3 F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-        vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
-
-        vec3 irradiance = texture(u_irradiance, N).rgb;
-        vec3 diffuseIBL = irradiance * albedo;
-
+    // Fallback indirect term used where no probe volume applies: the directional light's ambient as
+    // a simple fill floor (matches the forward Blinn-Phong path; zeroed when the light is removed so
+    // deleting every light still goes to black), plus a crude env reflection when a map is present.
+    vec3 fallbackAmbient = u_dirLight.ambient * albedo;
+    if (u_useEnvMap) {
+        vec3 kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
         vec3 R = reflect(-V, N);
-        vec3 prefiltered = textureLod(u_prefiltered, R, roughness * MAX_REFLECTION_LOD).rgb;
-        vec2 brdf = texture(u_brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
-        vec3 specularIBL = prefiltered * (F * brdf.x + brdf.y);
+        vec3 env = texture(u_envMap, R).rgb;
+        float specAtten = pow(1.0 - roughness, 4.0);
+        fallbackAmbient += env * kS * specAtten;
+    }
 
-        ambient = (kD * diffuseIBL + specularIBL) * u_iblIntensity;
+    vec3 ambient;
+    if (u_probeCount > 0) {
+        // Priority blend: slot 0 (nearest/bounded first — see Scene.probesForFrame) claims its weight,
+        // slot 1 fills what remains, and the fallback covers the rest. A single unbounded probe
+        // reduces to w0 = 1 -> exactly the legacy full-IBL result.
+        float w0 = probeWeight(worldPos, u_probeInvVolume0, u_probeBlend0, u_probeUnbounded0);
+        float w1 = (u_probeCount > 1) ? probeWeight(worldPos, u_probeInvVolume1, u_probeBlend1, u_probeUnbounded1) : 0.0;
+        float c0 = w0;
+        float c1 = w1 * (1.0 - w0);
+        float rest = (1.0 - w0) * (1.0 - w1);
+        ambient = fallbackAmbient * rest;
+        if (c0 > 0.0) ambient += probeIBL(u_irradiance0, u_prefiltered0, N, V, albedo, metallic, roughness, F0) * u_iblIntensity0 * c0;
+        if (c1 > 0.0) ambient += probeIBL(u_irradiance1, u_prefiltered1, N, V, albedo, metallic, roughness, F0) * u_iblIntensity1 * c1;
     } else {
-        // No probe: use the directional light's ambient as a simple fill floor (matches the forward
-        // Blinn-Phong path). It is zeroed when the directional light is removed, so deleting every
-        // light still goes to black. A crude env reflection still applies when an env map is present.
-        ambient = u_dirLight.ambient * albedo;
-        if (u_useEnvMap) {
-            vec3 kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-            vec3 R = reflect(-V, N);
-            vec3 env = texture(u_envMap, R).rgb;
-            float specAtten = pow(1.0 - roughness, 4.0);
-            ambient += env * kS * specAtten;
-        }
+        ambient = fallbackAmbient;
     }
 
     vec3 Lo = vec3(0.0);

@@ -23,8 +23,8 @@ function collectModelTextureIds(modelJson: any, set: Set<string>): void {
 }
 
 // All texture ids a serialized terrain material references: base-surface textures + foliage-rule
-// billboard textures + foliage-rule mesh model textures.
-function collectTerrainMaterialTextureIds(serialized: any): Set<string> {
+// billboard/impostor textures + foliage-rule mesh model textures (every LOD level).
+export function collectTerrainMaterialTextureIds(serialized: any): Set<string> {
   const set = new Set<string>()
   const textures = serialized?.textures
   if (textures && typeof textures === 'object')
@@ -34,7 +34,12 @@ function collectTerrainMaterialTextureIds(serialized: any): Set<string> {
   if (Array.isArray(serialized?.foliageInclude)) {
     for (const r of serialized.foliageInclude) {
       if (r?.textureId) set.add(r.textureId)
+      if (r?.billboard?.textureId) set.add(r.billboard.textureId)
       collectModelTextureIds(r?.model, set)
+      if (Array.isArray(r?.models)) for (const m of r.models) collectModelTextureIds(m, set)
+      if (Array.isArray(r?.lods))
+        for (const l of r.lods)
+          if (Array.isArray(l?.models)) for (const m of l.models) collectModelTextureIds(m, set)
     }
   }
   return set
@@ -72,10 +77,17 @@ export function parseTerrainMaterialAsset(asset: TerrainMaterialAsset): TerrainM
 
 /** Assign a terrain-material asset to a terrain paint layer (0..3): restore textures, parse, link by id.
  *  If the layer already covers (almost) the whole terrain and the material defines foliage, auto-scatter it
- *  across the entire terrain. */
-export function applyTerrainMaterialToLayer(terrain: Terrain, index: number, asset: TerrainMaterialAsset): void {
+ *  across the entire terrain — unless `skipAutoGenerate` is set (sync paths re-apply an EDITED material and
+ *  must preserve the already-scattered instances, so they refresh prototypes instead of re-scattering). */
+export function applyTerrainMaterialToLayer(
+  terrain: Terrain, index: number, asset: TerrainMaterialAsset,
+  opts?: { skipAutoGenerate?: boolean },
+): void {
   const tm = parseTerrainMaterialAsset(asset)
   terrain.setLayer(index, tm, { materialId: asset.id })
+  // Existing scattered layers pick up the (possibly changed) prototypes without losing instances.
+  terrain.refreshFoliagePrototypes()
+  if (opts?.skipAutoGenerate) return
   if (tm.foliageInclude.length > 0 && terrain.layerCoverage(index) > 0.98)
     terrain.generateFoliageEverywhere()
 }

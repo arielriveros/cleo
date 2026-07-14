@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, TerrainMaterial, Terrain, Node, ModelNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
 import type { AnimationCompatibility, HullQuality } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
@@ -13,8 +13,10 @@ import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback } from "../utils/materials";
-import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer } from "../utils/terrainMaterials";
-import { MeshAsset, buildMeshAsset, instantiateMeshAsset, separateSubMeshes } from "../utils/meshes";
+import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
+import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
+import { buildFoliageRuleFromMeshAsset } from "../utils/foliageRules";
+import { MeshAsset, MeshLodDef, MESH_ID_VAR, buildMeshAsset, instantiateMeshAsset, separateSubMeshes, nodeJsonHasSkinnedModel } from "../utils/meshes";
 import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
@@ -186,10 +188,23 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // renderer sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef). `editorMode` is derived from the active tab (see EngineProvider).
 //
-// A 'mesh' tab is a read-only preview of an imported mesh asset. It exists so a mesh has something to
-// *open* — imports no longer render thumbnails (that used to stall the main thread), so opening the
-// asset is what produces its preview image.
+// A 'mesh' tab is an edit session for an imported mesh asset: one subtree per LOD level in a throwaway
+// scene (materials/transforms/sub-meshes edited via the normal Scene + Properties panels, LOD/cull via
+// the Mesh inspector), saved back to the library with Save Mesh and propagated to placed copies.
+// Opening one also renders the asset's thumbnail (imports don't — that used to stall the main thread).
 export type TabKind = 'main' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'mesh';
+
+// Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
+// node id of LOD level i's root inside the tab scene; distances[i] is the camera distance where level i
+// takes over (distances[0] is always 0).
+export type MeshEditSession = {
+  levelIds: string[];
+  distances: number[];
+  cullDistance: number;
+  activeLevel: number;
+  /** Any level contains a skinned model — LOD/cull authoring is disabled (static-only v1). */
+  skinned: boolean;
+};
 export interface EditorTab {
   id: string;
   kind: TabKind;
@@ -298,8 +313,19 @@ const EngineContext = createContext<{
   addMesh: (m: MeshAsset) => void;
   removeMesh: (id: string) => void;
   updateMesh: (id: string, m: MeshAsset) => void;
-  /** Open (or focus) a mesh asset's read-only preview tab, rendering its thumbnail on the way in. */
+  /** Open (or focus) a mesh asset's edit tab, rendering its thumbnail on the way in. */
   enterMeshEditor: (meshId?: string) => void;
+  // Mesh editor (active mesh tab): LOD/cull authoring + save-and-propagate
+  saveActiveMesh: () => void;
+  meshSession: MeshEditSession | null;
+  /** Node id of the active LOD level's root in the mesh tab scene (viewport drop parent), or null. */
+  meshEditTargetId: string | null;
+  setActiveMeshName: (name: string) => void;
+  addMeshLodFromFiles: (files: File[]) => Promise<void>;
+  removeMeshLod: (level: number) => void;
+  setMeshLodDistance: (level: number, distance: number) => void;
+  setMeshCullDistance: (distance: number) => void;
+  setActiveMeshLevel: (level: number) => void;
   importMeshFiles: (files: File[]) => Promise<void>;
   // True once every IndexedDB-backed asset library has finished its initial read.
   assetsLoaded: boolean;
@@ -387,6 +413,15 @@ const EngineContext = createContext<{
     removeMesh: () => {},
     updateMesh: () => {},
     enterMeshEditor: () => {},
+    saveActiveMesh: () => {},
+    meshSession: null,
+    meshEditTargetId: null,
+    setActiveMeshName: () => {},
+    addMeshLodFromFiles: async () => {},
+    removeMeshLod: () => {},
+    setMeshLodDistance: () => {},
+    setMeshCullDistance: () => {},
+    setActiveMeshLevel: () => {},
     importMeshFiles: async () => {},
     assetsLoaded: false,
     pendingMeshImport: null,
@@ -533,6 +568,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     })();
   }, []);
   usePersistedLibrary('cleo_meshes', meshes, meshesLoadedRef);
+
+  // Reactive edit state for open mesh tabs (tab id -> session). The tab's Scene stays in tabRuntimeRef;
+  // this holds what the Mesh inspector renders (LOD level ids/distances, cull distance, active level).
+  const [meshSessions, setMeshSessions] = useState<Record<string, MeshEditSession>>({});
 
   const addMesh = (m: MeshAsset) => setMeshes(prev => [...prev, m]);
   const removeMesh = (id: string) => {
@@ -951,6 +990,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const remaining = tabs.filter(t => t.id !== id);
     tabRuntimeRef.current.get(id)?.helperTerrain?.dispose(); // free the preview terrain's splat/body
     tabRuntimeRef.current.delete(id);
+    setMeshSessions(prev => { if (!(id in prev)) return prev; const next = { ...prev }; delete next[id]; return next; });
     setDirtyTabs(prev => { const next = { ...prev }; delete next[id]; return next; });
     setTabs(remaining);
     if (id === activeTabId) {
@@ -986,7 +1026,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const scene = editorSceneRef.current;
     const instances = Array.from(scene.nodes).filter(n => getMaterialIdOf(n) === materialId);
     for (const inst of instances) applyMaterialAsset(inst, asset);
-    if (instances.length) {
+    // Cameras referencing it in their ordered screen-space pass list: rebuild the list, substituting
+    // the freshly saved asset for its id (other slots resolve from the current library).
+    let cameraChanged = false;
+    for (const n of Array.from(scene.nodes)) {
+      if (n.nodeType !== 'camera') continue;
+      const cam = n as CameraNode;
+      const ids = getScreenMaterialIds(cam);
+      if (!ids.includes(materialId)) continue;
+      const assets = ids
+        .map(id => (id === materialId ? asset : materials.find(m => m.id === id)))
+        .filter((a): a is MaterialAsset => !!a);
+      applyScreenMaterials(cam, assets);
+      cameraChanged = true;
+    }
+    if (instances.length || cameraChanged) {
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
     }
@@ -999,6 +1053,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     let changed = false;
     for (const n of Array.from(scene.nodes)) {
       if (getMaterialIdOf(n) === id) { unlinkToFallback(n); changed = true; }
+      if (n.nodeType === 'camera') {
+        const cam = n as CameraNode;
+        const ids = getScreenMaterialIds(cam);
+        if (ids.includes(id)) {
+          const assets = ids.filter(x => x !== id)
+            .map(x => materials.find(m => m.id === x))
+            .filter((a): a is MaterialAsset => !!a);
+          applyScreenMaterials(cam, assets);
+          changed = true;
+        }
+      }
     }
     if (changed) { eventEmitter.current.emit('TEXTURES_CHANGED'); eventEmitter.current.emit('SCENE_CHANGED'); }
     const openTab = tabs.find(t => t.kind === 'material' && t.materialId === id);
@@ -1021,6 +1086,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const material: Material = asset ? Material.parse(asset.material) : Material.PBR({});
     const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), material));
     scene.addNode(sphere);
+    // Screen-mode custom materials are camera post passes, not mesh surfaces: run the SAME instance on
+    // the preview camera so it previews live (the sphere still carries it for the inspector; the
+    // renderer skips drawing meshes with a screen material). CustomMaterialEditor keeps the camera
+    // list in step when the mode is switched inside the tab.
+    if (material instanceof CustomMaterial && material.renderMode === 'screen' && scene.activeCamera)
+      scene.activeCamera.screenMaterials = [material];
     scene.start();
 
     const tabId = cryptoRandomId();
@@ -1104,30 +1175,298 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     })();
   };
 
-  // ---- Mesh preview tab ----------------------------------------------------------------------------
+  // ---- Mesh edit tab ---------------------------------------------------------------------------------
 
-  // Build a read-only preview tab for a mesh asset: a throwaway scene holding an instance of the mesh,
-  // framed like its thumbnail. Meshes are not editable — the tab exists so a mesh can be *opened*, which
-  // is what triggers its thumbnail render.
+  // Show exactly one LOD level's subtree in a mesh tab. Plain `visible` writes are fine here: this is a
+  // user-facing edit-session toggle, not the renderer's per-frame LOD switch.
+  const applyActiveMeshLevel = (scene: Scene, levelIds: string[], active: number) => {
+    for (let i = 0; i < levelIds.length; i++) {
+      const root = scene.getNodeById(levelIds[i]);
+      if (root) root.visible = i === active;
+    }
+  };
+
+  // Build an edit session for a mesh asset: a throwaway scene holding one subtree per LOD level,
+  // instantiated directly (NOT via the LodGroup wrapper — the renderer must not auto-swap levels while
+  // the user edits). Materials/transforms/sub-meshes are edited through the normal Scene + Properties
+  // panels; LOD levels, distances and the cull threshold through the Mesh inspector. Opening the tab
+  // also triggers the asset's thumbnail render.
   const openMeshTab = (asset: MeshAsset) => {
     const scene = new Scene();
-    scene.animationsEnabled = false; // skinned meshes hold their bind pose in a preview
+    scene.animationsEnabled = false; // skinned meshes hold their bind pose while editing
     createEmptyScene(scene);
     void applyPreviewEnvironment(scene);
 
     const holder = new Node(asset.name);
     scene.addNode(holder);
-    instantiateMeshAsset(asset, holder); // also restores the asset's embedded textures
+
+    // Restore legacy embedded textures (instantiateMeshAsset used to do this).
+    for (const t of asset.textures || []) {
+      if (t?.id && !TextureManager.Instance.getTexture(t.id))
+        TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id);
+    }
+
+    const levelJsons = [asset.nodeJson, ...(asset.lods ?? []).map(l => l.nodeJson)];
+    const levelIds: string[] = [];
+    for (const json of levelJsons) {
+      const clone = JSON.parse(JSON.stringify(json));
+      regenerateIds(clone, new Map());
+      parseByType(holder, clone);
+      levelIds.push(clone.id);
+    }
     scene.start();
 
     const tabId = cryptoRandomId();
     tabRuntimeRef.current.set(tabId, { scene, rootId: holder.id });
+    setMeshSessions(prev => ({
+      ...prev,
+      [tabId]: {
+        levelIds,
+        distances: [0, ...(asset.lods ?? []).map(l => l.distance)],
+        cullDistance: asset.cullDistance ?? 0,
+        activeLevel: 0,
+        skinned: levelJsons.some(nodeJsonHasSkinnedModel),
+      },
+    }));
+    applyActiveMeshLevel(scene, levelIds, 0);
     setTabs(prev => [...prev, { id: tabId, kind: 'mesh', title: asset.name, meshId: asset.id }]);
     setActiveTabId(tabId);
     eventEmitter.current.emit('TEXTURES_CHANGED');
   };
 
-  // Open (or focus) the preview tab for a library mesh, rendering its thumbnail on the way in.
+  // Rebuild every placed instance of a mesh asset after it was saved, preserving each instance's own
+  // transform (the template propagation pattern — a mesh instance is a whole copied subtree, so it is
+  // re-instantiated rather than patched in place). Runs on the game scene only.
+  const syncMeshInstances = (meshId: string, asset: MeshAsset) => {
+    const scene = editorSceneRef.current;
+    const maps = engineMaps();
+    const instances = Array.from(scene.nodes).filter(n => n.getVariable(MESH_ID_VAR) === meshId);
+    let reselectId: string | null = null;
+    for (const inst of instances) {
+      const parent = inst.parent;
+      if (!parent) continue;
+      const pos = Array.from(inst.position) as [number, number, number];
+      const rot = Array.from(inst.rotation) as [number, number, number];
+      const scl = Array.from(inst.scale) as [number, number, number];
+      const wasSelected = inst.id === selectedNode;
+      // Drop the old subtree's out-of-band data so map entries don't leak.
+      for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
+      // Detach synchronously with removeChild, not remove() — see syncTemplateInstances for why.
+      parent.removeChild(inst);
+      const newId = instantiateMeshAsset(asset, parent);
+      const newNode = scene.getNodeById(newId);
+      if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
+      if (wasSelected) reselectId = newId;
+    }
+    if (instances.length) {
+      eventEmitter.current.emit('TEXTURES_CHANGED');
+      eventEmitter.current.emit('SCENE_CHANGED');
+      if (reselectId) eventEmitter.current.emit('SELECT_NODE', reselectId);
+    }
+  };
+
+  // After a mesh asset is saved, refresh every terrain-material foliage rule that references it
+  // (rule.meshId): rebuild the embedded flattened LOD payload in the library asset, then swap
+  // prototypes on live terrain layers using those materials — WITHOUT re-scattering instances.
+  const syncFoliageRulesForMesh = (meshAsset: MeshAsset) => {
+    const updated: TerrainMaterialAsset[] = [];
+    for (const tmAsset of terrainMaterials) {
+      const rules = tmAsset.material?.foliageInclude;
+      if (!Array.isArray(rules) || !rules.some((r: any) => r?.meshId === meshAsset.id)) continue;
+      try {
+        const nextRules = rules.map((r: any) => r?.meshId === meshAsset.id ? buildFoliageRuleFromMeshAsset(meshAsset, r) : r);
+        const material = { ...tmAsset.material, foliageInclude: nextRules };
+        const patched: TerrainMaterialAsset = { ...tmAsset, material, textureIds: [...collectTerrainMaterialTextureIds(material)] };
+        updateTerrainMaterial(tmAsset.id, patched);
+        updated.push(patched);
+      } catch (e) {
+        Logger.warn(`Foliage rule for mesh "${meshAsset.name}" in terrain material "${tmAsset.name}" was not updated: ${e}`, 'Editor');
+      }
+    }
+    if (updated.length === 0) return;
+
+    // Re-apply each updated material to the game-scene terrain layers that link it. skipAutoGenerate:
+    // this is an edit sync, so scattered foliage keeps its instances and only the prototypes change.
+    for (const landscape of editorSceneRef.current.landscapes) {
+      const terrain = landscape.terrain;
+      for (const asset of updated) {
+        terrain.layers.forEach((layer, i) => {
+          if (layer.materialId === asset.id) applyTerrainMaterialToLayer(terrain, i, asset, { skipAutoGenerate: true });
+        });
+      }
+    }
+    eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
+  // Save the active mesh tab back to the library and propagate to placed instances.
+  const saveActiveMesh = async () => {
+    const engine = instanceRef.current;
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!engine || !tab || tab.kind !== 'mesh' || !tab.meshId) return;
+    const runtime = tabRuntimeRef.current.get(tab.id);
+    const session = meshSessions[tab.id];
+    if (!runtime || !session) return;
+    try {
+      const levelRoots = session.levelIds.map(id => runtime.scene.getNodeById(id));
+      if (levelRoots.some(r => !r)) { Logger.error('Mesh edit session lost a LOD level node', 'Editor'); return; }
+
+      // Extra levels serialize into the asset's `lods`; buildMeshAsset strips debug helpers and the
+      // instance back-link from every level.
+      const lodDefs: MeshLodDef[] = [];
+      for (let i = 1; i < levelRoots.length; i++)
+        lodDefs.push({ nodeJson: await levelRoots[i]!.serialize(), distance: session.distances[i] ?? 0 });
+
+      // materialIds is the informational list of library materials the subtrees reference.
+      const materialIdSet = new Set<string>();
+      const collectMats = (n: Node) => { const id = getMaterialIdOf(n); if (id) materialIdSet.add(id); n.children.forEach(collectMats); };
+      for (const root of levelRoots) collectMats(root!);
+
+      const prev = meshes.find(m => m.id === tab.meshId);
+      const asset = await buildMeshAsset(
+        levelRoots[0]!, [...materialIdSet], prev?.thumbnail ?? '', tab.meshId,
+        lodDefs, session.cullDistance,
+      );
+      asset.name = tab.title; // the tab title is the asset name (renames edit the title)
+
+      updateMesh(tab.meshId, asset);
+      syncMeshInstances(tab.meshId, asset);
+      syncFoliageRulesForMesh(asset);
+      setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+
+      // Refresh the thumbnail from the SAVED asset, never the live tab subtree (renderMeshThumbnail
+      // reparents the node it is given). Async: the card updates whenever the render lands.
+      renderMeshAssetThumbnail(engine, asset)
+        .then(thumbnail => { if (thumbnail) setMeshes(p => p.map(x => x.id === asset.id ? { ...x, thumbnail } : x)); })
+        .catch(() => {});
+      Logger.info(`Mesh "${asset.name}" saved`, 'Editor');
+    } catch (e) {
+      Logger.error('Failed to save mesh: ' + e, 'Editor');
+    }
+  };
+
+  // Rename the active mesh tab (the title becomes the asset name on save).
+  const setActiveMeshName = (name: string) => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'mesh') return;
+    setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, title: name } : x));
+    setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+  };
+
+  // Import a model file as a new LOD level of the active mesh tab. The level is scaled so its bounds
+  // match LOD0's, and its materials are registered as library assets exactly like a normal import.
+  const addMeshLodFromFiles = async (files: File[]) => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'mesh') return;
+    const runtime = tabRuntimeRef.current.get(tab.id);
+    const session = meshSessions[tab.id];
+    if (!runtime || !session) return;
+    if (session.skinned) { Logger.warn('LOD levels are not supported on skinned meshes yet', 'Editor'); return; }
+
+    const bundles = groupImportFiles(files);
+    if (!bundles.length) { Logger.warn('No model files (.gltf/.glb/.obj/.fbx) found in the selection', 'Editor'); return; }
+    try {
+      const { root, children } = await parseBundleToRoot(bundles[0].files, bundles[0].name);
+      if (children.some(c => c.model instanceof AnimatedModel)) {
+        Logger.warn('Skinned models cannot be LOD levels (static meshes only)', 'Editor');
+        return;
+      }
+      await awaitSubtreeTexturesReady(root);
+
+      // Register a MaterialAsset per unique material and link each sub-mesh (same as importMeshFiles).
+      const assetByKey = new Map<string, MaterialAsset>();
+      for (const child of children) {
+        const mat = (child.model as any).material as Material;
+        if (!mat) continue;
+        const key = JSON.stringify(mat.serialize());
+        let matAsset = assetByKey.get(key);
+        if (!matAsset) {
+          matAsset = buildMaterialAsset(mat, `${bundles[0].name} ${mat.type}`, '');
+          assetByKey.set(key, matAsset);
+          addMaterial(matAsset);
+        }
+        applyMaterialAsset(child, matAsset);
+      }
+
+      // Match LOD0's size so far levels line up with the near model.
+      const lod0 = runtime.scene.getNodeById(session.levelIds[0]);
+      if (lod0) {
+        const targetDiameter = 2 * meshBoundsRadius(lod0);
+        if (targetDiameter > 0) normalizeRootScale(root, targetDiameter);
+      }
+
+      const holder = runtime.scene.getNodeById(runtime.rootId);
+      if (!holder) return;
+      root.name = `${tab.title}_LOD${session.levelIds.length}`;
+      holder.addChild(root);
+
+      const lastDistance = session.distances[session.distances.length - 1] ?? 0;
+      const levelIds = [...session.levelIds, root.id];
+      const next: MeshEditSession = {
+        ...session,
+        levelIds,
+        distances: [...session.distances, lastDistance + 30],
+        activeLevel: levelIds.length - 1, // show what was just imported
+      };
+      setMeshSessions(prev => ({ ...prev, [tab.id]: next }));
+      applyActiveMeshLevel(runtime.scene, levelIds, next.activeLevel);
+      setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+      eventEmitter.current.emit('TEXTURES_CHANGED');
+      eventEmitter.current.emit('SCENE_CHANGED');
+    } catch (e) {
+      Logger.error('Failed to add LOD level: ' + e, 'Editor');
+    }
+  };
+
+  // Remove an extra LOD level (level 0 is the asset itself and cannot be removed).
+  const removeMeshLod = (level: number) => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'mesh' || level < 1) return;
+    const runtime = tabRuntimeRef.current.get(tab.id);
+    const session = meshSessions[tab.id];
+    if (!runtime || !session || level >= session.levelIds.length) return;
+
+    const root = runtime.scene.getNodeById(session.levelIds[level]);
+    if (root?.parent) root.parent.removeChild(root);
+
+    const levelIds = session.levelIds.filter((_, i) => i !== level);
+    const distances = session.distances.filter((_, i) => i !== level);
+    const activeLevel = Math.min(session.activeLevel >= level ? session.activeLevel - 1 : session.activeLevel, levelIds.length - 1);
+    setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, levelIds, distances, activeLevel: Math.max(0, activeLevel) } }));
+    applyActiveMeshLevel(runtime.scene, levelIds, Math.max(0, activeLevel));
+    setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+  };
+
+  const setMeshLodDistance = (level: number, distance: number) => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'mesh' || level < 1) return;
+    const session = meshSessions[tab.id];
+    if (!session || level >= session.distances.length) return;
+    const distances = session.distances.map((d, i) => i === level ? Math.max(0, distance) : d);
+    setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, distances } }));
+    setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+  };
+
+  const setMeshCullDistance = (distance: number) => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'mesh') return;
+    const session = meshSessions[tab.id];
+    if (!session) return;
+    setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, cullDistance: Math.max(0, distance) } }));
+    setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+  };
+
+  const setActiveMeshLevel = (level: number) => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'mesh') return;
+    const runtime = tabRuntimeRef.current.get(tab.id);
+    const session = meshSessions[tab.id];
+    if (!runtime || !session || level < 0 || level >= session.levelIds.length) return;
+    setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, activeLevel: level } }));
+    applyActiveMeshLevel(runtime.scene, session.levelIds, level);
+    eventEmitter.current.emit('SELECT_NODE', session.levelIds[level]);
+  };
+
+  // Open (or focus) the edit tab for a library mesh, rendering its thumbnail on the way in.
   const enterMeshEditor = (meshId?: string) => {
     if (!instanceRef.current || !meshId) return;
     const asset = meshes.find(m => m.id === meshId);
@@ -1454,7 +1793,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Arm dirty-tracking only after the editor-helper reconciler's initial pass settles (it emits
     // SCENE_CHANGED as it adds light/gizmo helpers to the freshly-shown template scene).
     dirtyArmedRef.current = false;
-    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'terrainMaterial'); }));
+    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'terrainMaterial' || tab.kind === 'mesh'); }));
     // Template scenes are authored in 3D; the Main tab restores its own remembered dimension. (Terrain-)
     // material tabs are skipped: their preview camera uses a self-contained orbit rig
     // (createMaterialPreviewScene) that the free-fly CHANGE_DIMENSION handler must not overwrite.
@@ -1469,7 +1808,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Mark the active template tab dirty on scene edits (after the open-settle window).
   useEffect(() => {
     const mark = () => {
-      if (!dirtyArmedRef.current || (activeTabKindRef.current !== 'template' && activeTabKindRef.current !== 'material' && activeTabKindRef.current !== 'terrainMaterial')) return;
+      if (!dirtyArmedRef.current || (activeTabKindRef.current !== 'template' && activeTabKindRef.current !== 'material' && activeTabKindRef.current !== 'terrainMaterial' && activeTabKindRef.current !== 'mesh')) return;
       const id = activeTabIdRef.current;
       setDirtyTabs(prev => prev[id] ? prev : { ...prev, [id]: true });
     };
@@ -2014,6 +2353,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       removeMesh,
       updateMesh,
       enterMeshEditor,
+      saveActiveMesh,
+      meshSession: activeTab.kind === 'mesh' ? (meshSessions[activeTab.id] ?? null) : null,
+      meshEditTargetId: activeTab.kind === 'mesh' && meshSessions[activeTab.id]
+        ? meshSessions[activeTab.id].levelIds[meshSessions[activeTab.id].activeLevel] ?? null
+        : null,
+      setActiveMeshName,
+      addMeshLodFromFiles,
+      removeMeshLod,
+      setMeshLodDistance,
+      setMeshCullDistance,
+      setActiveMeshLevel,
       importMeshFiles,
       assetsLoaded,
       pendingMeshImport,

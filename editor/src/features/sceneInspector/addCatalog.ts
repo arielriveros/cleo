@@ -187,7 +187,9 @@ export const ADD_ITEMS: AddItem[] = [
   },
   {
     id: 'lightProbe', label: 'Light Probe', icon: SphereIcon, category: 'environment',
-    create: async () => new LightProbeNode('light probe'),
+    // New probes get a bounded influence volume out of the box; probes from legacy scenes
+    // deserialize size [0,0,0] = unbounded (whole scene).
+    create: async () => new LightProbeNode('light probe', { size: [10, 10, 10] }),
   },
   {
     id: 'volumetricClouds', label: 'Clouds', icon: CloudsIcon, category: 'environment', placeable: false,

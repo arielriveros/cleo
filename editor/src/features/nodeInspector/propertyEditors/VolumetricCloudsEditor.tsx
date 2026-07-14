@@ -16,7 +16,7 @@ interface CloudsState {
   baseScale: number; detailScale: number; detailStrength: number;
   curlStrength: number; anvilBias: number;
   useSceneSun: boolean; sunDirection: Vec3; sunColor: Vec3; sunIntensity: number;
-  ambientColor: Vec3; ambientIntensity: number; groundColor: Vec3;
+  ambientColor: Vec3; ambientIntensity: number; groundColor: Vec3; sunsetColor: Vec3;
   phaseG: number; silverIntensity: number; silverSpread: number;
   powderStrength: number; absorption: number;
   windDirection: Vec3; windSpeed: number; detailWindFactor: number;
@@ -32,6 +32,7 @@ function readNode(node: VolumetricCloudsNode): CloudsState {
     curlStrength: node.curlStrength, anvilBias: node.anvilBias,
     useSceneSun: node.useSceneSun, sunDirection: node.sunDirection, sunColor: node.sunColor, sunIntensity: node.sunIntensity,
     ambientColor: node.ambientColor, ambientIntensity: node.ambientIntensity, groundColor: node.groundColor,
+    sunsetColor: node.sunsetColor,
     phaseG: node.phaseG, silverIntensity: node.silverIntensity, silverSpread: node.silverSpread,
     powderStrength: node.powderStrength, absorption: node.absorption,
     windDirection: node.windDirection, windSpeed: node.windSpeed, detailWindFactor: node.detailWindFactor,
@@ -70,7 +71,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
       onChange={(c) => apply({ [k]: c } as Partial<CloudsState>)} />
   )
 
-  const color = (label: string, k: 'sunColor' | 'ambientColor' | 'groundColor') => (
+  const color = (label: string, k: 'sunColor' | 'ambientColor' | 'groundColor' | 'sunsetColor') => (
     <div className='flex items-center justify-between my-1'>
       <span className={labelClass}>{label}</span>
       <ColorInput color={vec3ToHex(state[k])} onChange={(c) => apply({ [k]: c } as Partial<CloudsState>)} />
@@ -113,6 +114,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {color('Ambient (Sky) Color', 'ambientColor')}
         {slider('Ambient Intensity', 'ambientIntensity', 0, 5, 0.05)}
         {color('Ground Color', 'groundColor')}
+        {color('Sunset/Sunrise Color', 'sunsetColor')}
         {slider('Forward Scatter (Phase g)', 'phaseG', 0, 0.99, 0.01)}
         {slider('Silver Lining', 'silverIntensity', 0, 2, 0.01)}
         {slider('Silver Spread', 'silverSpread', 0.01, 0.5, 0.01)}

@@ -6,6 +6,7 @@ import { Animator, AnimationMapping, AnimationStateMachine } from "../../graphic
 import type { RagdollOptions } from "../../physics/ragdoll";
 import { Sprite } from "../../graphics/sprite";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
+import { Material, CustomMaterial } from "../../graphics/material";
 import { Skybox } from "../../graphics/skybox";
 import { Texture } from "../../graphics/texture";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
@@ -18,7 +19,7 @@ import { compileScript, createScriptImporter, ScriptFactory, SCRIPT_HANDLERS } f
 import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
 import type { BVH } from "../bvh";
 
-type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere';
+type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup';
 
 export type NodeVariableType = 'number' | 'string' | 'boolean' | 'vec3';
 /**
@@ -303,6 +304,11 @@ export class Node {
   protected _trigger: Trigger | null;
 
   protected _visible: boolean;
+
+  // Renderer-driven visibility for LOD level switching and distance culling (see LodGroupNode).
+  // Kept separate from _visible: the `visible` setter emits SCENE_CHANGED and (on ModelNode) writes
+  // material.config.castShadow — both unacceptable for a flag that flips per frame.
+  protected _lodVisible: boolean = true;
 
   // Custom user-defined variables editable in the inspector, serialized with the node, and
   // readable from scripts via getData(node) and writable via setData(node, name, value).
@@ -595,6 +601,8 @@ export class Node {
           VolumetricCloudsNode.parse(node, child);
         else if (child.type === 'skyAtmosphere')
           SkyAtmosphereNode.parse(node, child);
+        else if (child.type === 'lodGroup')
+          LodGroupNode.parse(node, child);
         else
           Node.parse(node, child);
       }
@@ -913,12 +921,19 @@ export class Node {
   public get quaternion(): quat { return this._quaternion; }
   public get scale(): vec3 { return this._scale; }
   public get nodeType(): string { return this._nodeType; }
-  public get visible(): boolean { return this._visible; }
+  public get visible(): boolean { return this._visible && this._lodVisible; }
   public set visible(value: boolean) {
     this._visible = value;
     for (const child of this._children)
       child.visible = value;
     CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+  }
+
+  /** Event-less recursive visibility used by LOD switching/culling; does not touch _visible. */
+  public setLodVisible(value: boolean): void {
+    this._lodVisible = value;
+    for (const child of this._children)
+      child.setLodVisible(value);
   }
 
   /**
@@ -1206,6 +1221,128 @@ export class ModelNode extends Node {
             this._animator.checkTriggers();
             this._animator.update(delta);
         }
+    }
+}
+
+/**
+ * Groups alternate LOD subtrees of one mesh asset: child i holds the whole level-i subtree and only
+ * one level shows at a time, selected each frame by camera distance (Renderer._updateModelLOD →
+ * updateLod). `distances[i]` is the distance at which child i becomes active (ascending,
+ * distances[0] = 0). When `cullDistance > 0` the whole group hides past it; 0 = never cull.
+ * Level switches use the event-less `setLodVisible` flag, never the `visible` setter (which emits
+ * SCENE_CHANGED and, on ModelNode, clobbers material.config.castShadow).
+ */
+export class LodGroupNode extends Node {
+    public distances: number[] = [0];
+    public cullDistance: number = 0;
+
+    private _activeLod: number = 0;
+    private _distanceCulled: boolean = false;
+
+    constructor(name: string, id: string = uuidv4()) {
+        super(name, 'lodGroup', id);
+    }
+
+    public get activeLod(): number { return this._activeLod; }
+    public get distanceCulled(): boolean { return this._distanceCulled; }
+
+    // Show exactly the active level (or nothing while distance-culled). Called on parse and on
+    // transitions only — subtree flag writes are not per-frame work.
+    private _applyActiveLod(): void {
+        for (let i = 0; i < this._children.length; i++)
+            this._children[i].setLodVisible(!this._distanceCulled && i === this._activeLod);
+    }
+
+    /**
+     * Distance from the camera to the *surface* of the group's bounding sphere picks the level, with
+     * the same ×0.9 hysteresis as Terrain.lodFor: coarsen (and cull) immediately, refine/un-cull only
+     * once comfortably inside the threshold, so a camera sitting on a boundary doesn't flip per frame.
+     */
+    public updateLod(camPos: vec3): void {
+        if (this._children.length === 0) return;
+
+        const sphere = this.getBoundingSphere();
+        const d = Math.max(0, vec3.distance(camPos, sphere.center) - sphere.radius);
+
+        const culled = this.cullDistance > 0 &&
+            (this._distanceCulled ? d > this.cullDistance * 0.9 : d > this.cullDistance);
+        if (culled !== this._distanceCulled) {
+            this._distanceCulled = culled;
+            this._applyActiveLod();
+        }
+        if (culled) return;
+
+        let target = 0;
+        for (let i = Math.min(this._children.length, this.distances.length) - 1; i > 0; i--) {
+            if (d >= this.distances[i]) { target = i; break; }
+        }
+        if (target > this._activeLod ||
+            (target < this._activeLod && d < this.distances[this._activeLod] * 0.9)) {
+            this._activeLod = target;
+            this._applyActiveLod();
+        }
+    }
+
+    /**
+     * Union of the level-0 subtree's ModelNode spheres — level 0 is the authored mesh, the other
+     * levels are stand-ins for the same object, so its bound serves the whole group (for LOD distance
+     * and frustum culling alike). Uses the shared per-frame _worldSphere cache.
+     */
+    public getBoundingSphere(): { center: vec3; radius: number } {
+        if (!this._worldSphereDirty) return this._worldSphere;
+
+        let found = false;
+        const center = vec3.create();
+        let radius = 0;
+        const merge = (s: { center: vec3; radius: number }) => {
+            if (!found) { vec3.copy(center, s.center); radius = s.radius; found = true; return; }
+            const dist = vec3.distance(center, s.center);
+            if (dist + s.radius <= radius) return;              // s inside current
+            if (dist + radius <= s.radius) {                    // current inside s
+                vec3.copy(center, s.center); radius = s.radius; return;
+            }
+            const newRadius = (dist + radius + s.radius) / 2;
+            vec3.lerp(center, center, s.center, (newRadius - radius) / dist);
+            radius = newRadius;
+        };
+        const visit = (node: Node) => {
+            if (node instanceof ModelNode) merge(node.getBoundingSphere());
+            for (const child of node.children) visit(child);
+        };
+        if (this._children[0]) visit(this._children[0]);
+        if (!found) return super.getBoundingSphere();
+
+        vec3.copy(this._worldSphere.center, center);
+        this._worldSphere.radius = radius;
+        this._worldSphereDirty = false;
+        return this._worldSphere;
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve) => {
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    id: this._id,
+                    name: this._name,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children: children,
+                    variables: this._serializeVariables(),
+                    distances: [...this.distances],
+                    cullDistance: this.cullDistance
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        const node = new LodGroupNode(json.name, json.id);
+        node.distances = Array.isArray(json.distances) && json.distances.length ? json.distances.map(Number) : [0];
+        node.cullDistance = typeof json.cullDistance === 'number' ? json.cullDistance : 0;
+        Node._commonParse(node, parent, json);
+        node._applyActiveLod(); // children exist only after _commonParse: start showing level 0
     }
 }
 
@@ -1517,15 +1654,24 @@ export class LightProbeNode extends Node {
     private _mode: 'baked' | 'realtime';
     private _updateFrequency: number; // seconds (realtime mode)
     private _intensity: number;
+    // Influence volume: an oriented box (the node's transform applied to a unit cube scaled by _size,
+    // full extents in world units at scale 1). [0,0,0] = unbounded — the probe affects the whole scene
+    // (the legacy global behavior, and what pre-volume scenes deserialize to).
+    private _size: [number, number, number];
+    // Feather width in world units: IBL fades to zero over this distance inside the volume boundary.
+    private _blendDistance: number;
     private _needsBake: boolean = true;
     private _lastBakeTime: number = 0;
     private _sourceCube: Texture | null = null;
     private _irradiance: Texture | null = null;
     private _prefiltered: Texture | null = null;
+    private _volScratch: mat4 = mat4.create();
+    private _invVolScratch: mat4 = mat4.create();
+    private static _pointScratch: vec3 = vec3.create();
 
     constructor(
         name: string,
-        options: { resolution?: number, mode?: 'baked' | 'realtime', updateFrequency?: number, intensity?: number } = {},
+        options: { resolution?: number, mode?: 'baked' | 'realtime', updateFrequency?: number, intensity?: number, size?: [number, number, number], blendDistance?: number } = {},
         id: string = uuidv4()
     ) {
         super(name, 'lightProbe', id);
@@ -1533,6 +1679,8 @@ export class LightProbeNode extends Node {
         this._mode = options.mode ?? 'baked';
         this._updateFrequency = options.updateFrequency ?? 1;
         this._intensity = options.intensity ?? 1;
+        this._size = options.size ? [options.size[0], options.size[1], options.size[2]] : [0, 0, 0];
+        this._blendDistance = options.blendDistance ?? 1;
     }
 
     // --- Editor-facing properties (setting the ones that affect the capture flags a re-bake) ---
@@ -1544,6 +1692,54 @@ export class LightProbeNode extends Node {
     public set updateFrequency(v: number) { this._updateFrequency = Math.max(0, v); }
     public get intensity(): number { return this._intensity; }
     public set intensity(v: number) { this._intensity = Math.max(0, v); }
+    // Volume setters do NOT flag a re-bake: the volume only governs where the probe applies, not what it captured.
+    public get size(): [number, number, number] { return this._size; }
+    public set size(v: [number, number, number]) { this._size = [Math.max(0, v[0]), Math.max(0, v[1]), Math.max(0, v[2])]; }
+    public get blendDistance(): number { return this._blendDistance; }
+    public set blendDistance(v: number) { this._blendDistance = Math.max(0, v); }
+
+    // --- Influence volume ---
+    /** True when the probe has a finite influence box; false = unbounded (affects the whole scene). */
+    public get bounded(): boolean { return this._size[0] > 0 && this._size[1] > 0 && this._size[2] > 0; }
+
+    /** world -> probe-volume unit cube (containment = |xyz| <= 0.5). Only meaningful when bounded. */
+    public get invVolumeMatrix(): mat4 {
+        mat4.scale(this._volScratch, this.worldTransform, [this._size[0], this._size[1], this._size[2]]);
+        mat4.invert(this._invVolScratch, this._volScratch);
+        return this._invVolScratch;
+    }
+
+    /** Per-axis feather as a fraction of the unit cube (blendDistance / world size, capped at 0.5).
+     *  Uploaded alongside invVolumeMatrix so the shader can smoothstep the boundary. */
+    public get volumeBlend(): [number, number, number] {
+        const ws = this.worldScale;
+        const out: [number, number, number] = [0, 0, 0];
+        for (let i = 0; i < 3; i++) {
+            const worldSize = Math.abs(this._size[i] * ws[i]);
+            out[i] = worldSize > 0 ? Math.min(0.5, this._blendDistance / worldSize) : 0;
+        }
+        return out;
+    }
+
+    /**
+     * Feathered containment weight of a world-space point: 1 well inside the volume, easing to 0 at
+     * the boundary (over blendDistance), 0 outside. Unbounded probes weigh 1 everywhere.
+     */
+    public probeWeight(p: vec3): number {
+        if (!this.bounded) return 1;
+        const local = vec3.transformMat4(LightProbeNode._pointScratch, p, this.invVolumeMatrix);
+        const blend = this.volumeBlend;
+        let w = 1;
+        for (let i = 0; i < 3; i++) {
+            const edge = 0.5 - Math.abs(local[i]); // distance to the boundary in unit-cube space
+            if (edge <= 0) return 0;
+            if (blend[i] > 0) {
+                const t = Math.min(1, edge / blend[i]);
+                w = Math.min(w, t * t * (3 - 2 * t)); // smoothstep
+            }
+        }
+        return w;
+    }
 
     // --- Renderer-facing baking state ---
     public get needsBake(): boolean { return this._needsBake; }
@@ -1566,6 +1762,20 @@ export class LightProbeNode extends Node {
     }
 
     public getBoundingBox(): { min: vec3, max: vec3 } {
+        if (this.bounded) {
+            // World AABB of the oriented influence box, so the editor's selection box shows the volume.
+            const world = mat4.scale(this._volScratch, this.worldTransform, [this._size[0], this._size[1], this._size[2]]);
+            const min = vec3.fromValues(Infinity, Infinity, Infinity);
+            const max = vec3.fromValues(-Infinity, -Infinity, -Infinity);
+            const corner = LightProbeNode._pointScratch;
+            for (let i = 0; i < 8; i++) {
+                vec3.set(corner, (i & 1) ? 0.5 : -0.5, (i & 2) ? 0.5 : -0.5, (i & 4) ? 0.5 : -0.5);
+                vec3.transformMat4(corner, corner, world);
+                vec3.min(min, min, corner);
+                vec3.max(max, max, corner);
+            }
+            return { min, max };
+        }
         const position = this.worldPosition;
         const scale = this.worldScale;
         const radius = Math.max(scale[0], scale[1], scale[2]) * 0.5;
@@ -1589,7 +1799,9 @@ export class LightProbeNode extends Node {
                     resolution: this._resolution,
                     mode: this._mode,
                     updateFrequency: this._updateFrequency,
-                    intensity: this._intensity
+                    intensity: this._intensity,
+                    size: [this._size[0], this._size[1], this._size[2]],
+                    blendDistance: this._blendDistance
                 });
             });
         });
@@ -1600,7 +1812,9 @@ export class LightProbeNode extends Node {
             resolution: json.resolution,
             mode: json.mode,
             updateFrequency: json.updateFrequency,
-            intensity: json.intensity
+            intensity: json.intensity,
+            size: json.size,           // absent in pre-volume scenes -> [0,0,0] = unbounded (legacy)
+            blendDistance: json.blendDistance
         }, json.id);
         Node._commonParse(node, parent, json);
         parent.addChild(node);
@@ -1705,6 +1919,7 @@ export interface VolumetricCloudsOptions {
     ambientColor?: [number, number, number];  // sky-side ambient
     ambientIntensity?: number;
     groundColor?: [number, number, number];    // ground bounce tint on cloud bottoms
+    sunsetColor?: [number, number, number];    // sunrise/sunset glow: tints sun/ambient/ground while the sun crosses the horizon
     phaseG?: number;          // 0..1 — Henyey-Greenstein forward-scatter anisotropy
     silverIntensity?: number; // silver-lining boost near the sun
     silverSpread?: number;    // silver-lining angular spread
@@ -1749,6 +1964,7 @@ export class VolumetricCloudsNode extends Node {
     private _ambientColor: [number, number, number];
     private _ambientIntensity: number;
     private _groundColor: [number, number, number];
+    private _sunsetColor: [number, number, number];
     private _phaseG: number;
     private _silverIntensity: number;
     private _silverSpread: number;
@@ -1787,6 +2003,7 @@ export class VolumetricCloudsNode extends Node {
         this._ambientColor = options.ambientColor ?? [0.55, 0.65, 0.8];
         this._ambientIntensity = options.ambientIntensity ?? 1.0;
         this._groundColor = options.groundColor ?? [0.4, 0.4, 0.42];
+        this._sunsetColor = options.sunsetColor ?? [1.0, 0.38, 0.16];
         this._phaseG = options.phaseG ?? 0.5;
         this._silverIntensity = options.silverIntensity ?? 0.6;
         this._silverSpread = options.silverSpread ?? 0.08;
@@ -1843,6 +2060,8 @@ export class VolumetricCloudsNode extends Node {
     public set ambientIntensity(v: number) { this._ambientIntensity = Math.max(0, v); }
     public get groundColor(): [number, number, number] { return this._groundColor; }
     public set groundColor(v: [number, number, number]) { this._groundColor = v; }
+    public get sunsetColor(): [number, number, number] { return this._sunsetColor; }
+    public set sunsetColor(v: [number, number, number]) { this._sunsetColor = v; }
     public get phaseG(): number { return this._phaseG; }
     public set phaseG(v: number) { this._phaseG = Math.min(0.999, Math.max(0, v)); }
     public get silverIntensity(): number { return this._silverIntensity; }
@@ -1916,6 +2135,7 @@ export class VolumetricCloudsNode extends Node {
                         ambientColor: this._ambientColor,
                         ambientIntensity: this._ambientIntensity,
                         groundColor: this._groundColor,
+                        sunsetColor: this._sunsetColor,
                         phaseG: this._phaseG,
                         silverIntensity: this._silverIntensity,
                         silverSpread: this._silverSpread,
@@ -1975,17 +2195,16 @@ export interface SkyAtmosphereOptions {
     fogMaxOpacity?: number;     // 0..1 cap so distant geometry never fully disappears
     fogColor?: [number, number, number]; // custom tint, blended with the atmosphere color
     fogColorBlend?: number;     // 0 = pure atmosphere color, 1 = pure custom fogColor
-    // God rays (screen-space radial light shafts from the scene directional light — post-process)
+    // God rays (volumetric light shafts from the scene directional light — a raymarched post pass
+    // that tests the sun's shadow map along each view ray). Legacy radial-blur keys (godRayWeight,
+    // godRayDecay, godRayThreshold, godRaySunSpread) are ignored when parsing old scenes.
     godRaysEnabled?: boolean;
-    godRaySamples?: number;     // radial-blur samples toward the sun (quality/cost)
-    godRayDensity?: number;     // 0..1 — march length toward the sun (shaft length/spread)
-    godRayWeight?: number;      // per-sample weight
-    godRayDecay?: number;       // 0..1 — attenuation per sample
-    godRayExposure?: number;    // overall shaft intensity
-    godRayThreshold?: number;   // brightness cutoff that isolates the bright sun from dim sky
+    godRaySamples?: number;      // raymarch steps per pixel (quality/cost)
+    godRayDensity?: number;      // 0..1 — scattering density of the participating medium
+    godRayExposure?: number;     // overall shaft intensity
     godRayTint?: [number, number, number]; // multiply tint on the shafts
-    godRaySunSpread?: number;   // angular radius (deg) of the sun source — only the sky within this
-                                // cone of the sun direction emits shafts (so clouds elsewhere don't)
+    godRayAnisotropy?: number;   // 0..0.95 — Henyey-Greenstein g: higher = light hugs the sun direction
+    godRayMaxDistance?: number;  // world units — how far from the camera the march extends
 }
 
 /**
@@ -2029,12 +2248,10 @@ export class SkyAtmosphereNode extends Node {
     private _godRaysEnabled: boolean;
     private _godRaySamples: number;
     private _godRayDensity: number;
-    private _godRayWeight: number;
-    private _godRayDecay: number;
     private _godRayExposure: number;
-    private _godRayThreshold: number;
     private _godRayTint: [number, number, number];
-    private _godRaySunSpread: number;
+    private _godRayAnisotropy: number;
+    private _godRayMaxDistance: number;
     // Runtime bake state (not serialized)
     private _cubemap: Texture | null = null;
     private _cubemapResolution: number = 0;
@@ -2075,12 +2292,10 @@ export class SkyAtmosphereNode extends Node {
         this._godRaysEnabled = options.godRaysEnabled ?? false; // opt-in
         this._godRaySamples = options.godRaySamples ?? 64;
         this._godRayDensity = options.godRayDensity ?? 0.9;
-        this._godRayWeight = options.godRayWeight ?? 0.5;
-        this._godRayDecay = options.godRayDecay ?? 0.95;
         this._godRayExposure = options.godRayExposure ?? 0.3;
-        this._godRayThreshold = options.godRayThreshold ?? 0.5;
         this._godRayTint = options.godRayTint ?? [1.0, 1.0, 1.0];
-        this._godRaySunSpread = options.godRaySunSpread ?? 15;
+        this._godRayAnisotropy = options.godRayAnisotropy ?? 0.6;
+        this._godRayMaxDistance = options.godRayMaxDistance ?? 80;
     }
 
     // --- Sun ---
@@ -2148,18 +2363,14 @@ export class SkyAtmosphereNode extends Node {
     public set godRaySamples(v: number) { this._godRaySamples = Math.min(128, Math.max(8, Math.floor(v))); }
     public get godRayDensity(): number { return this._godRayDensity; }
     public set godRayDensity(v: number) { this._godRayDensity = Math.min(1, Math.max(0, v)); }
-    public get godRayWeight(): number { return this._godRayWeight; }
-    public set godRayWeight(v: number) { this._godRayWeight = Math.max(0, v); }
-    public get godRayDecay(): number { return this._godRayDecay; }
-    public set godRayDecay(v: number) { this._godRayDecay = Math.min(1, Math.max(0, v)); }
     public get godRayExposure(): number { return this._godRayExposure; }
     public set godRayExposure(v: number) { this._godRayExposure = Math.max(0, v); }
-    public get godRayThreshold(): number { return this._godRayThreshold; }
-    public set godRayThreshold(v: number) { this._godRayThreshold = Math.max(0, v); }
     public get godRayTint(): [number, number, number] { return this._godRayTint; }
     public set godRayTint(v: [number, number, number]) { this._godRayTint = v; }
-    public get godRaySunSpread(): number { return this._godRaySunSpread; }
-    public set godRaySunSpread(v: number) { this._godRaySunSpread = Math.min(60, Math.max(2, v)); }
+    public get godRayAnisotropy(): number { return this._godRayAnisotropy; }
+    public set godRayAnisotropy(v: number) { this._godRayAnisotropy = Math.min(0.95, Math.max(0, v)); }
+    public get godRayMaxDistance(): number { return this._godRayMaxDistance; }
+    public set godRayMaxDistance(v: number) { this._godRayMaxDistance = Math.min(1000, Math.max(5, v)); }
 
     // --- Runtime bake state (renderer-facing) ---
     public get cubemap(): Texture | null { return this._cubemap; }
@@ -2229,12 +2440,10 @@ export class SkyAtmosphereNode extends Node {
                         godRaysEnabled: this._godRaysEnabled,
                         godRaySamples: this._godRaySamples,
                         godRayDensity: this._godRayDensity,
-                        godRayWeight: this._godRayWeight,
-                        godRayDecay: this._godRayDecay,
                         godRayExposure: this._godRayExposure,
-                        godRayThreshold: this._godRayThreshold,
                         godRayTint: this._godRayTint,
-                        godRaySunSpread: this._godRaySunSpread
+                        godRayAnisotropy: this._godRayAnisotropy,
+                        godRayMaxDistance: this._godRayMaxDistance
                     }
                 });
             });
@@ -2251,6 +2460,10 @@ export class SkyAtmosphereNode extends Node {
 export class CameraNode extends Node {
     private readonly _camera: Camera;
     private _active: boolean;
+    // Ordered fullscreen post-process passes (screen-mode CustomMaterials) run by the renderer for
+    // this camera, in array order. Serialized inline like mesh materials; the editor links them to
+    // material assets via the '__screenMaterialIds' node variable.
+    private _screenMaterials: CustomMaterial[] = [];
 
     constructor(name: string, camera: Camera, id: string = uuidv4()) {
         super(name, 'camera', id);
@@ -2277,6 +2490,9 @@ export class CameraNode extends Node {
         }), json.id);
         Node._commonParse(node, parent, json);
         node.active = json.active;
+        node.screenMaterials = (Array.isArray(json.screenMaterials) ? json.screenMaterials : [])
+            .map((m: any) => Material.parse(m))
+            .filter((m: Material): m is CustomMaterial => m instanceof CustomMaterial && m.renderMode === 'screen');
         parent.addChild(node);
     }
 
@@ -2302,7 +2518,8 @@ export class CameraNode extends Node {
                         bottom: this._camera.bottom,
                         top: this._camera.top
                     },
-                    active: this._active
+                    active: this._active,
+                    screenMaterials: this._screenMaterials.map(m => m.serialize())
                 });
             });
         });
@@ -2311,6 +2528,8 @@ export class CameraNode extends Node {
     public get camera(): Camera { return this._camera; }
     public get active(): boolean { return this._active; }
     public set active(value: boolean) { this._active = value; }
+    public get screenMaterials(): CustomMaterial[] { return this._screenMaterials; }
+    public set screenMaterials(mats: CustomMaterial[]) { this._screenMaterials = mats; }
 
     /**
      * Get bounding box for CameraNode - returns a small sphere bounding box

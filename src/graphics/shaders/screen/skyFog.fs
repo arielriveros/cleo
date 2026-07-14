@@ -36,7 +36,11 @@ vec3 reconstructWorldPos(float depth) {
 
 void main() {
     float depth = texture(u_gDepth, fragTexCoord).r;
-    if (depth >= 1.0) discard;                 // sky: already the atmosphere colour, don't fog it
+    // Sky: already the atmosphere colour, don't fog it. The margin below 1.0 guards against anything
+    // that rasterizes at forced far depth (NDC z = w) leaving pixels a float-epsilon short of the
+    // clear value — fogging those produces a z-fighting-like shimmer. Real geometry that close to
+    // the far plane is fog-saturated to the sky colour anyway, so skipping it is invisible.
+    if (depth >= 0.999999) discard;
 
     vec3 worldPos = reconstructWorldPos(depth);
     vec3 toPixel = worldPos - u_viewPos;

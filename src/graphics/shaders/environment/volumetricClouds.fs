@@ -169,7 +169,7 @@ float sampleDensity(vec3 pos, float h, bool cheap) {
         density = remap(density, detail * u_detailStrength, 1.0, 0.0, 1.0);
     }
 
-    return clamp(density, 0.0, 1.0) * u_density;
+    return clamp(density, 0.0, 1.0) * heightGradient(h, u_cloudType) * clamp(u_density / 2.5, 0.0, 1.0);
 }
 
 float henyeyGreenstein(float cosAngle, float g) {

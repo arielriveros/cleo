@@ -2,7 +2,7 @@ export { CleoEngine } from "./core/engine";
 export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";
 export { Scene } from "./core/scene/scene";
-export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
+export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, LodGroupNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
 export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";

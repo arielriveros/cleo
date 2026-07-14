@@ -1,4 +1,4 @@
-import { Node, ModelNode, LightNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode } from 'cleo'
+import { Node, ModelNode, LightNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LodGroupNode } from 'cleo'
 import { cryptoRandomId } from './UIModel'
 
 // Shared helpers for serialized node subtrees, used by both the Template and Mesh asset systems.
@@ -17,6 +17,7 @@ export function parseByType(parent: Node, json: any): void {
     case 'camera': (CameraNode as any).parse(parent, json); break
     case 'sprite': (SpriteNode as any).parse(parent, json); break
     case 'animatedSprite': (AnimatedSpriteNode as any).parse(parent, json); break
+    case 'lodGroup': (LodGroupNode as any).parse(parent, json); break
     default: (Node as any).parse(parent, json)
   }
 }

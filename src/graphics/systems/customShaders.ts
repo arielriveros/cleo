@@ -1,6 +1,7 @@
 import { Shader } from '../shader';
 import { ShaderManager } from './shaderManager';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
+import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
 import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } from '../material';
 
 // -----------------------------------------------------------------------------------------------
@@ -185,6 +186,40 @@ void main() {
 }
 `;
 
+/** Screen prelude: fullscreen post-process pass on screen.vs. User writes \`vec4 fragment()\`. */
+const SCREEN_PRELUDE = `#version 300 es
+precision highp float;
+
+in vec2 fragTexCoord;
+
+layout(location = 0) out vec4 fragColor;
+
+const float PI = 3.14159265359;
+
+uniform sampler2D u_screenTexture; // previous pass color (LINEAR HDR — before exposure/ACES/sRGB)
+uniform sampler2D u_depth;         // opaque scene depth (deferred + forward); 1.0 = sky
+uniform float u_time;              // seconds
+uniform vec2  u_resolution;        // render target size in pixels
+uniform vec3  u_viewPos;           // camera world position
+uniform mat4  u_invViewProj;       // clip -> world (reconstruct rays / positions)
+uniform vec3  u_sunDir;            // world dir TOWARD the sun ((0,0,0) when there is none)
+uniform vec2  u_sunUV;             // sun screen-space UV (only meaningful while u_sunVisible > 0)
+uniform float u_sunVisible;        // 0..1 edge fade; 0 = behind camera / far off-screen / no sun
+
+vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 toSrgb(vec3 c)   { return pow(c, vec3(1.0 / 2.2)); }
+
+vec3 reconstructWorldPos(vec2 uv, float depth) {
+    vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 world = u_invViewProj * clip;
+    return world.xyz / world.w;
+}
+`;
+
+const SCREEN_EPILOGUE = `
+void main() { fragColor = fragment(); }
+`;
+
 const GLSL_TYPE: Record<string, string> = {
     float: 'float', vec2: 'vec2', vec3: 'vec3', vec4: 'vec4',
     int: 'int', bool: 'bool', sampler2D: 'sampler2D', samplerCube: 'samplerCube',
@@ -203,7 +238,14 @@ export function assembleCustomFragment(renderMode: CustomRenderMode, fragmentSou
     const decls = uniformDeclarations(uniforms);
     if (renderMode === 'deferred')
         return `${DEFERRED_PRELUDE}\n${decls}\n${fragmentSource}\n${DEFERRED_EPILOGUE}`;
+    if (renderMode === 'screen')
+        return `${SCREEN_PRELUDE}\n${decls}\n${fragmentSource}\n${SCREEN_EPILOGUE}`;
     return `${FORWARD_PRELUDE}\n${decls}\n${fragmentSource}\n${FORWARD_EPILOGUE}`;
+}
+
+/** The vertex shader a custom material's program is linked against (screen passes use the fullscreen quad VS). */
+function vertexSource(renderMode: CustomRenderMode): string {
+    return renderMode === 'screen' ? SCREEN_VERTEX_SRC : PBR_VERTEX_SRC;
 }
 
 // --- Runtime registry ---------------------------------------------------------------------------
@@ -237,12 +279,23 @@ void main() {
 }
 `;
 
+const FALLBACK_SCREEN_FS = `#version 300 es
+precision highp float;
+in vec2 fragTexCoord;
+layout(location = 0) out vec4 fragColor;
+void main() {
+    float k = 0.0 * fragTexCoord.x;
+    fragColor = vec4(1.0, 0.0, 1.0, 1.0) + k;   // magenta = compile error
+}
+`;
+
 /** Lazily compiled magenta program per render mode; reused under any failing key. References all
- *  varyings so its VAO layout matches the standard material shaders. */
+ *  varyings so its VAO layout matches the standard material shaders (screen mode uses screen.vs). */
 function fallbackShader(mode: CustomRenderMode): Shader {
     let s = fallbackByMode.get(mode);
     if (!s) {
-        s = new Shader().create(PBR_VERTEX_SRC, mode === 'deferred' ? FALLBACK_DEFERRED_FS : FALLBACK_FORWARD_FS);
+        const fs = mode === 'deferred' ? FALLBACK_DEFERRED_FS : mode === 'screen' ? FALLBACK_SCREEN_FS : FALLBACK_FORWARD_FS;
+        s = new Shader().create(vertexSource(mode), fs);
         fallbackByMode.set(mode, s);
     }
     return s;
@@ -259,7 +312,7 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
     if (registered.has(key)) return !failed.has(key);
 
     try {
-        const shader = new Shader().create(PBR_VERTEX_SRC, assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms));
+        const shader = new Shader().create(vertexSource(mat.renderMode), assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms));
         ShaderManager.Instance.addShader(key, shader);
         registered.add(key);
         errors.delete(key);
@@ -276,7 +329,7 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
 /** Compile-check user source WITHOUT registering — used by the editor to surface inline compile errors. */
 export function tryCompileCustom(renderMode: CustomRenderMode, fragmentSource: string, uniforms: CustomUniform[]): { ok: boolean; error?: string } {
     try {
-        new Shader().create(PBR_VERTEX_SRC, assembleCustomFragment(renderMode, fragmentSource, uniforms));
+        new Shader().create(vertexSource(renderMode), assembleCustomFragment(renderMode, fragmentSource, uniforms));
         return { ok: true };
     } catch (e: any) {
         return { ok: false, error: String(e?.message ?? e) };
@@ -292,8 +345,11 @@ export function customForwardTypes(): string[] {
 
 // --- Seed templates ("extend a base material") --------------------------------------------------
 
-/** Default uniform declarations for a newly seeded custom material of the given base. */
-export function customSeedUniforms(baseType: CustomBaseType): CustomUniform[] {
+/** Default uniform declarations for a newly seeded custom material of the given base. Screen-mode
+ *  materials ignore the base (there is no surface to extend) and get the vignette template's inputs. */
+export function customSeedUniforms(baseType: CustomBaseType, renderMode: CustomRenderMode = 'forward'): CustomUniform[] {
+    if (renderMode === 'screen')
+        return [{ name: 'intensity', type: 'float', value: 1 }];
     switch (baseType) {
         case 'pbr':
             return [
@@ -429,8 +485,23 @@ void surface(inout Surface s) {
     // Override s.normal for normal mapping (declare a sampler2D uniform and read it here).
 }`;
 
+const SCREEN_SCRATCH = `// SCREEN custom material: a fullscreen post-process pass run from the camera's
+// Screen-Space Materials list (in linear HDR, before tonemapping).
+// Available: fragTexCoord, u_screenTexture (previous pass color), u_depth (opaque scene depth, 1.0 = sky),
+//   u_time, u_resolution, u_viewPos, u_invViewProj, reconstructWorldPos(uv, depth),
+//   u_sunDir / u_sunUV / u_sunVisible (sun world dir, screen UV, 0..1 visibility fade).
+// Declare your own inputs in the Uniforms panel; they appear here as u_<name>.
+vec4 fragment() {
+    vec3 color = texture(u_screenTexture, fragTexCoord).rgb;
+    // Vignette: darken toward the corners.
+    float d = length((fragTexCoord - 0.5) * vec2(u_resolution.x / u_resolution.y, 1.0));
+    color *= 1.0 - u_intensity * smoothstep(0.4, 0.9, d);
+    return vec4(color, 1.0);
+}`;
+
 /** The pre-seeded shader scaffold for a new custom material of the given base + render mode. */
 export function customSeedTemplate(baseType: CustomBaseType, renderMode: CustomRenderMode): string {
+    if (renderMode === 'screen') return SCREEN_SCRATCH;
     if (renderMode === 'deferred') {
         switch (baseType) {
             case 'pbr': return DEF_PBR;

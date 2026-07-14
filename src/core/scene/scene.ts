@@ -1,5 +1,5 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, LandscapeNode, LightNode, LightProbeNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode } from "./node";
+import { CameraNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode } from "./node";
 import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
@@ -12,6 +12,7 @@ export class Scene {
     private _models: Set<ModelNode>;
     private _sprites: Set<SpriteNode>;
     private _landscapes: Set<LandscapeNode>;
+    private _lodGroups: Set<LodGroupNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _skybox: SkyboxNode | null;
     private _volumetricClouds: VolumetricCloudsNode | null = null;
@@ -150,6 +151,7 @@ export class Scene {
         this._models = new Set();
         this._sprites = new Set();
         this._landscapes = new Set();
+        this._lodGroups = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
         this._volumetricClouds = null;
@@ -163,6 +165,8 @@ export class Scene {
                 this._sprites.add(node);
             if (node instanceof LandscapeNode)
                 this._landscapes.add(node);
+            if (node instanceof LodGroupNode)
+                this._lodGroups.add(node);
             if (node instanceof LightProbeNode)
                 this._lightProbes.add(node);
             if (node instanceof SkyboxNode)
@@ -322,6 +326,12 @@ export class Scene {
         return this._models;
     }
 
+    public get lodGroups(): Set<LodGroupNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._lodGroups;
+    }
+
     public get sprites(): Set<SpriteNode> {
         if (this._dirty)
             this._breadthFirstTraversal();
@@ -368,6 +378,48 @@ export class Scene {
             if (d < nearestDist) { nearestDist = d; nearest = probe; }
         }
         return nearest;
+    }
+
+    /**
+     * The baked probe with the highest feathered containment weight at `position` (bounded volumes
+     * first — an unbounded probe only wins when no volume contains the point), else null.
+     * Used for per-mesh probe selection on the forward path.
+     */
+    public probeForPoint(position: vec3): LightProbeNode | null {
+        let best: LightProbeNode | null = null;
+        let bestWeight = 0;
+        let nearestUnbounded: LightProbeNode | null = null;
+        let nearestDist = Infinity;
+        for (const probe of this.lightProbes) {
+            if (!probe.hasBakedMaps) continue;
+            if (probe.bounded) {
+                const w = probe.probeWeight(position);
+                if (w > bestWeight) { bestWeight = w; best = probe; }
+            } else {
+                const d = vec3.squaredDistance(position, probe.worldPosition);
+                if (d < nearestDist) { nearestDist = d; nearestUnbounded = probe; }
+            }
+        }
+        return best ?? nearestUnbounded;
+    }
+
+    /**
+     * Up to `max` baked probes for the deferred lighting pass's per-pixel volume selection:
+     * bounded probes (nearest volume centre to the camera first), then unbounded probes (nearest
+     * first) as the tail fallback slot(s).
+     */
+    public probesForFrame(cameraPos: vec3, max: number): LightProbeNode[] {
+        const bounded: LightProbeNode[] = [];
+        const unbounded: LightProbeNode[] = [];
+        for (const probe of this.lightProbes) {
+            if (!probe.hasBakedMaps) continue;
+            (probe.bounded ? bounded : unbounded).push(probe);
+        }
+        const byDist = (a: LightProbeNode, b: LightProbeNode) =>
+            vec3.squaredDistance(cameraPos, a.worldPosition) - vec3.squaredDistance(cameraPos, b.worldPosition);
+        bounded.sort(byDist);
+        unbounded.sort(byDist);
+        return [...bounded, ...unbounded].slice(0, max);
     }
 
     public get environmentMap(): Texture | null { return this._environmentMap; }

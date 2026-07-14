@@ -70,10 +70,21 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
     eventEmitter.emit('SCENE_CHANGED')
   }
 
+  // Keep the material-tab preview camera's pass list in step with the mode: a screen material previews
+  // as a fullscreen camera pass (same instance, so source/uniform edits stay live), any other mode as
+  // the sphere's surface. Only touches the editor preview camera, never a game camera.
+  const syncPreviewCamera = () => {
+    const cam = props.node.scene?.activeCamera
+    if (!cam || !cam.name.startsWith('__editor__')) return
+    if (mat.renderMode === 'screen') cam.screenMaterials = [mat]
+    else if (cam.screenMaterials.includes(mat)) cam.screenMaterials = cam.screenMaterials.filter(m => m !== mat)
+  }
+
   const changeMode = (mode: CustomRenderMode) => {
     if (mode === mat.renderMode) return
-    if (wouldDiscard() && !window.confirm('Switch render mode? Forward and deferred use different shader entry points, so this replaces the source.')) return
+    if (wouldDiscard() && !window.confirm('Switch render mode? Each mode uses a different shader entry point, so this replaces the source.')) return
     seedCustomMaterial(mat, mat.baseType, mode)
+    syncPreviewCamera()
     setSource(mat.fragmentSource)
     recompile(mat.fragmentSource)
     force(n => n + 1)
@@ -94,19 +105,24 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
           <Select value={mat.renderMode} onChange={e => changeMode(e.target.value as CustomRenderMode)}>
             <option value='forward'>Forward (lit color)</option>
             <option value='deferred'>Deferred (G-buffer)</option>
+            <option value='screen'>Screen (post-process)</option>
           </Select>
         </Field>
-        <Field label='Extend base' className='w-auto' labelClassName='w-auto'>
-          <Select value={baseKey(mat.baseType)} onChange={e => changeBase(e.target.value)}>
-            {BASES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
-          </Select>
-        </Field>
+        {mat.renderMode !== 'screen' && (
+          <Field label='Extend base' className='w-auto' labelClassName='w-auto'>
+            <Select value={baseKey(mat.baseType)} onChange={e => changeBase(e.target.value)}>
+              {BASES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+            </Select>
+          </Field>
+        )}
       </div>
 
       <Hint className='mb-2'>
         {mat.renderMode === 'forward'
           ? 'Write vec4 fragment() returning the final lit color. Lights, shadows, the env map and helpers (accumulateLight, shadowCalculation) are available.'
-          : 'Write void surface(inout Surface s) filling the G-buffer (albedo/normal/metallic/roughness/emissive); the engine lights it with SSAO/IBL/shadows.'}
+          : mat.renderMode === 'deferred'
+            ? 'Write void surface(inout Surface s) filling the G-buffer (albedo/normal/metallic/roughness/emissive); the engine lights it with SSAO/IBL/shadows.'
+            : 'Write vec4 fragment() sampling u_screenTexture at fragTexCoord — runs as a fullscreen pass from a camera’s Screen-Space Materials list (linear HDR, before tonemapping). Built-ins: u_depth, u_time, u_resolution, u_viewPos, u_invViewProj, u_sunDir/u_sunUV/u_sunVisible, reconstructWorldPos(uv, depth).'}
       </Hint>
 
       <GlslCodeEditor value={source} onChange={onSourceChange} error={error} />

@@ -28,6 +28,14 @@ export interface FoliageCell {
     max: [number, number, number];
     glBuffer: WebGLBuffer | null;         // renderer-owned; lazily created
     uploadedVersion: number;              // renderer's record of which layer.version is on the GPU
+    lod: number;                          // current detail level (renderer-owned hysteresis memory)
+}
+
+/** One detail level of a mesh foliage layer: the sub-mesh models drawn per instance (transforms baked
+ *  into the geometry editor-side) and the camera distance at which the level takes over. */
+export interface FoliageLodLevel {
+    models: Model[];
+    distance: number;                     // levels[0].distance is always 0
 }
 
 /** Build a two-quad crossed billboard (an "X"), base at y=0 up to y=1, UV 0..1, up-facing normals. */
@@ -54,9 +62,20 @@ export function crossQuadGeometry(): Geometry {
 export class FoliageLayer {
     public readonly kind: FoliageKind;
     public name: string;
+    /** The primary model — always levels[0].models[0] (kept as a field: legacy single-model paths use it). */
     public model: Model;
     public textureId: string | null;
     public params: FoliageParams;
+
+    // Detail levels (mesh layers; billboard layers always have exactly one). Per-cell selection happens
+    // in the renderer's foliage pass, by the same distance bands a mesh asset's LodGroup uses.
+    public levels: FoliageLodLevel[];
+    // Optional impostor: past this distance instances draw as textured cross-quads (the farthest LOD).
+    public billboardModel: Model | null = null;
+    public billboardTextureId: string | null = null;
+    public billboardDistance = Infinity;
+    /** Hide instances beyond this camera distance; 0 = use the renderer's global foliage cull distance. */
+    public cullDistance = 0;
 
     // Compact instance data, stride 5: [x, y, z, yaw, scale].
     private _instances: number[] = [];
@@ -86,6 +105,7 @@ export class FoliageLayer {
         this.model = model;
         this.textureId = textureId;
         this.params = { ...DEFAULT_PARAMS, ...params };
+        this.levels = [{ models: [model], distance: 0 }];
     }
 
     public static Billboard(name: string, textureId: string, params?: Partial<FoliageParams>): FoliageLayer {
@@ -97,14 +117,71 @@ export class FoliageLayer {
         return new FoliageLayer('mesh', name, model, null, params);
     }
 
-    /** Build a runtime layer from a terrain-material foliage rule (billboard texture or mesh model). */
+    /** Build a runtime layer from a terrain-material foliage rule (billboard texture or mesh model,
+     *  optionally with LOD levels, a billboard impostor and a cull distance). */
     public static fromRule(rule: TerrainFoliageRule): FoliageLayer {
         const params: Partial<FoliageParams> = {};
         if (rule.density !== undefined) params.density = rule.density;
         if (rule.minScale !== undefined) params.minScale = rule.minScale;
         if (rule.maxScale !== undefined) params.maxScale = rule.maxScale;
         if (rule.kind === 'billboard') return FoliageLayer.Billboard(rule.name, rule.textureId || 'Null', params);
-        return FoliageLayer.Mesh(rule.name, Model.parse(rule.model), params);
+        const base = (rule.models?.length ? rule.models[0] : rule.model);
+        const layer = FoliageLayer.Mesh(rule.name, Model.parse(base), params);
+        layer._applyMeshPrototype(rule);
+        return layer;
+    }
+
+    /** (Re-)derive the mesh prototypes (LOD level models, billboard impostor, cull distance) from a rule
+     *  or serialized-layer payload. `src.models`/`src.lods` hold flattened Model.serialize() JSON;
+     *  legacy single-`model` payloads still load (one level, no impostor). */
+    private _applyMeshPrototype(src: any): void {
+        if (this.kind !== 'mesh') return;
+        const baseModels: any[] | null = src.models?.length ? src.models : (src.model ? [src.model] : null);
+        // Levels are only rebuilt when the payload carries a base — appending `lods` to levels that were
+        // kept from before would duplicate them on every refresh.
+        if (baseModels) {
+            this.levels = [{ models: baseModels.map((m: any) => Model.parse(m)), distance: 0 }];
+            if (Array.isArray(src.lods)) {
+                for (const l of src.lods)
+                    if (l?.models?.length)
+                        this.levels.push({ models: l.models.map((m: any) => Model.parse(m)), distance: Math.max(0, Number(l.distance) || 0) });
+            }
+        }
+        this.model = this.levels[0].models[0];
+        if (src.billboard?.textureId) {
+            const material = Material.Basic({ color: [1, 1, 1], texture: src.billboard.textureId }, { side: 'double', castShadow: false });
+            this.billboardModel = new Model(crossQuadGeometry(), material);
+            this.billboardTextureId = src.billboard.textureId;
+            this.billboardDistance = Math.max(0, Number(src.billboard.distance) || 0);
+        } else {
+            this.billboardModel = null;
+            this.billboardTextureId = null;
+            this.billboardDistance = Infinity;
+        }
+        this.cullDistance = Math.max(0, Number(src.cullDistance) || 0);
+        this.initialized = false; // new Model objects — the foliage pass re-uploads their meshes
+    }
+
+    /** Swap this layer's prototypes for an updated rule WITHOUT touching the scattered instances (used
+     *  when the source mesh asset or terrain material was edited). Cells are re-bucketed only to refresh
+     *  their AABB extents against the new geometry. */
+    public setPrototype(rule: TerrainFoliageRule): void {
+        if (rule.density !== undefined) this.params.density = rule.density;
+        if (rule.minScale !== undefined) this.params.minScale = rule.minScale;
+        if (rule.maxScale !== undefined) this.params.maxScale = rule.maxScale;
+        if (this.kind === 'billboard') {
+            const tex = rule.textureId || 'Null';
+            if (tex !== this.textureId) {
+                this.textureId = tex;
+                const material = Material.Basic({ color: [1, 1, 1], texture: tex }, { side: 'double', castShadow: false });
+                this.model = new Model(crossQuadGeometry(), material);
+                this.levels = [{ models: [this.model], distance: 0 }];
+                this.initialized = false;
+            }
+            return;
+        }
+        this._applyMeshPrototype(rule);
+        this._rebuild();
     }
 
     /** Append one instance at an exact position (random yaw + scale from params) without rebuilding.
@@ -186,12 +263,15 @@ export class FoliageLayer {
     /** Largest absolute local-space coordinate of the instance geometry, scaled by the max instance scale.
      *  Used to expand each cell's AABB so it fully contains the meshes/billboards standing on it. */
     private _instanceExtent(): number {
-        const b = this.model.geometry.bvh.bounds;
-        const e = Math.max(
-            Math.abs(b.min[0]), Math.abs(b.max[0]),
-            Math.abs(b.min[1]), Math.abs(b.max[1]),
-            Math.abs(b.min[2]), Math.abs(b.max[2]),
-        );
+        let e = 0;
+        for (const m of this.levels[0].models) {
+            const b = m.geometry.bvh.bounds;
+            e = Math.max(e,
+                Math.abs(b.min[0]), Math.abs(b.max[0]),
+                Math.abs(b.min[1]), Math.abs(b.max[1]),
+                Math.abs(b.min[2]), Math.abs(b.max[2]),
+            );
+        }
         return e * this.params.maxScale;
     }
 
@@ -235,6 +315,7 @@ export class FoliageLayer {
                 max: [maxX + extent, maxY + extent, maxZ + extent],
                 glBuffer: null,
                 uploadedVersion: -1,
+                lod: 0,
             });
         }
 
@@ -254,7 +335,17 @@ export class FoliageLayer {
             name: this.name,
             textureId: this.textureId,
             params: this.params,
+            // `model` stays the single primary model so older builds still load this JSON; the full
+            // multi-sub-mesh + LOD payload rides in `models`/`lods`.
             model: this.kind === 'mesh' ? this.model.serialize() : undefined,
+            models: this.kind === 'mesh' && this.levels[0].models.length > 1
+                ? this.levels[0].models.map(m => m.serialize()) : undefined,
+            lods: this.kind === 'mesh' && this.levels.length > 1
+                ? this.levels.slice(1).map(l => ({ models: l.models.map(m => m.serialize()), distance: l.distance }))
+                : undefined,
+            billboard: this.kind === 'mesh' && this.billboardModel
+                ? { textureId: this.billboardTextureId, distance: this.billboardDistance } : undefined,
+            cullDistance: this.cullDistance > 0 ? this.cullDistance : undefined,
             instances: btoa(bin),
         };
     }
@@ -262,7 +353,10 @@ export class FoliageLayer {
     public static deserialize(json: any): FoliageLayer {
         let layer: FoliageLayer;
         if (json.kind === 'billboard') layer = FoliageLayer.Billboard(json.name, json.textureId, json.params);
-        else layer = FoliageLayer.Mesh(json.name, Model.parse(json.model), json.params);
+        else {
+            layer = FoliageLayer.Mesh(json.name, Model.parse(json.models?.length ? json.models[0] : json.model), json.params);
+            layer._applyMeshPrototype(json);
+        }
         if (json.instances) {
             const bin = atob(json.instances);
             const bytes = new Uint8Array(bin.length);

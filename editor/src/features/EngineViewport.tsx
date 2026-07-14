@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
-import { Raycaster, Node, Vec } from "cleo";
+import { Raycaster, Node, Vec, Logger } from "cleo";
 import PositionGizmo from "./PositionGizmo";
 import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
@@ -50,7 +50,7 @@ const ScaleIcon = () => (
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            gizmoMode, setGizmoMode, templateRootId, templates, meshes, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
+            gizmoMode, setGizmoMode, templateRootId, meshEditTargetId, templates, meshes, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
     const { graphView, setGraphView } = useStateMachine();
     const viewportRef = useRef<HTMLDivElement>(null);
     // The landscape brush mode is a ref (not reactive); mirror it so the terrain move-gizmo mounts on demand.
@@ -312,10 +312,13 @@ export default function EngineViewport() {
         if (!editorScene) return;
 
         // In a template tab the editable subtree is rooted at the template root (a child of the scene
-        // root); drops must parent there so they show in the hierarchy and save with the template.
+        // root); drops must parent there so they show in the hierarchy and save with the template. A mesh
+        // tab likewise parents drops under the ACTIVE LOD level's root, so they save with that level.
         const dropParent = (editorMode === 'template' && templateRootId)
             ? (editorScene.getNodeById(templateRootId) ?? editorScene.root)
-            : editorScene.root;
+            : (editorMode === 'mesh' && meshEditTargetId)
+                ? (editorScene.getNodeById(meshEditTargetId) ?? editorScene.root)
+                : editorScene.root;
         const point = dropPointAt(e.clientX, e.clientY);
 
         const newNodeId = e.dataTransfer.getData(NEW_NODE_MIME);
@@ -337,6 +340,12 @@ export default function EngineViewport() {
             e.preventDefault();
             const mesh = meshes.find(m => m.id === meshId);
             if (!mesh) return;
+            // A LOD-bearing asset instantiates as a LodGroupNode; nesting one inside a mesh being edited
+            // would bake a renderer-driven group into the asset. Keep mesh assets LodGroup-free inside.
+            if (editorMode === 'mesh' && (mesh.lods?.length || (mesh.cullDistance ?? 0) > 0)) {
+                Logger.warn('Meshes with LOD levels or a cull distance cannot be added as sub-meshes of another mesh', 'Editor');
+                return;
+            }
             try {
                 const newId = instantiateMeshAsset(mesh, dropParent);
                 const node = editorScene.getNodeById(newId);

@@ -1,7 +1,7 @@
 import { LightProbeNode } from 'cleo';
 import { useState, useEffect } from 'react';
 import Collapsable from '../../../components/Collapsable';
-import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Hint } from '../../../components/ui';
 import { ProbeIcon } from '../sectionIcons';
 
 export default function LightProbeEditor(props: { node: LightProbeNode }) {
@@ -10,6 +10,10 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     mode: props.node.mode,
     updateFrequency: props.node.updateFrequency,
     intensity: props.node.intensity,
+    sizeX: props.node.size[0],
+    sizeY: props.node.size[1],
+    sizeZ: props.node.size[2],
+    blendDistance: props.node.blendDistance,
   });
 
   useEffect(() => {
@@ -18,6 +22,10 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
       mode: props.node.mode,
       updateFrequency: props.node.updateFrequency,
       intensity: props.node.intensity,
+      sizeX: props.node.size[0],
+      sizeY: props.node.size[1],
+      sizeZ: props.node.size[2],
+      blendDistance: props.node.blendDistance,
     });
   }, [props.node]);
 
@@ -26,7 +34,11 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     props.node.mode = state.mode;
     props.node.updateFrequency = state.updateFrequency;
     props.node.intensity = state.intensity;
+    props.node.size = [state.sizeX, state.sizeY, state.sizeZ];
+    props.node.blendDistance = state.blendDistance;
   }, [state, props.node]);
+
+  const bounded = state.sizeX > 0 && state.sizeY > 0 && state.sizeZ > 0;
 
   return (
     <Collapsable title='Light Probe' icon={<ProbeIcon />} persistKey='lightProbe'>
@@ -51,10 +63,27 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
               <NumberInput min={0} step={0.1} value={state.updateFrequency} onChange={(v) => setState((prev) => ({ ...prev, updateFrequency: v }))} />
             </PropertyRow>
           )}
-          <PropertyRow label='Intensity' divider={false}>
+          <PropertyRow label='Intensity'>
             <Slider min={0} max={3} step={0.05} value={state.intensity} onChange={(v) => setState((prev) => ({ ...prev, intensity: v }))} />
           </PropertyRow>
+          <PropertyRow label='Size X'>
+            <NumberInput min={0} step={0.5} value={state.sizeX} onChange={(v) => setState((prev) => ({ ...prev, sizeX: Math.max(0, v) }))} />
+          </PropertyRow>
+          <PropertyRow label='Size Y'>
+            <NumberInput min={0} step={0.5} value={state.sizeY} onChange={(v) => setState((prev) => ({ ...prev, sizeY: Math.max(0, v) }))} />
+          </PropertyRow>
+          <PropertyRow label='Size Z'>
+            <NumberInput min={0} step={0.5} value={state.sizeZ} onChange={(v) => setState((prev) => ({ ...prev, sizeZ: Math.max(0, v) }))} />
+          </PropertyRow>
+          <PropertyRow label='Blend Distance' divider={false}>
+            <NumberInput min={0} step={0.1} value={state.blendDistance} onChange={(v) => setState((prev) => ({ ...prev, blendDistance: Math.max(0, v) }))} />
+          </PropertyRow>
         </PropertyTable>
+        <Hint className='mt-2'>
+          {bounded
+            ? 'This probe only lights meshes/pixels inside its box volume (moves and rotates with the node); the IBL feathers out over the blend distance. Set any size to 0 for an unbounded probe.'
+            : 'Size 0 = unbounded: the probe affects the whole scene (legacy behavior). Set all three sizes to bound it to a box volume.'}
+        </Hint>
         <Button variant='primary' size='sm' className='mt-2 w-full' onClick={() => props.node.bake()}>Bake Probe</Button>
       </div>
     </Collapsable>

@@ -43,15 +43,16 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, savingState, eventEmitter: eventEmitter } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, saveActiveMesh, savingState, eventEmitter: eventEmitter } = useCleoEngine();
   // Current renderer look (post/SSAO/motion-blur/clear color) — embedded in exports/publishes so the
   // standalone game reproduces what the editor is showing instead of falling back to renderer defaults.
   const renderSettings = () => instance?.renderer.getRenderSettings();
   const templateMode = editorMode === 'template';
   const materialMode = editorMode === 'material';
   const terrainMaterialMode = editorMode === 'terrainMaterial';
-  // Template and (terrain-)material tabs all hide the project/scene-level actions (they edit a library asset).
-  const libEdit = templateMode || materialMode || terrainMaterialMode;
+  const meshMode = editorMode === 'mesh';
+  // Template, (terrain-)material and mesh tabs all hide the project/scene-level actions (they edit a library asset).
+  const libEdit = templateMode || materialMode || terrainMaterialMode || meshMode;
   const saving = savingState === 'saving';
   // Save carries its own status: the icon and the color say what happened, the label says it in words.
   const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved' : savingState === 'error' ? 'Failed' : 'Save';
@@ -204,6 +205,11 @@ export default function MenuBar() {
         {terrainMaterialMode && (
           <Button variant='primary' size='sm' className='h-[25px]' title='Save this terrain material (captures a thumbnail) and update layers that use it' onClick={() => saveActiveTerrainMaterial()}>
             <SaveIcon /> Save Terrain Material
+          </Button>
+        )}
+        {meshMode && (
+          <Button variant='primary' size='sm' className='h-[25px]' title='Save this mesh (with its LOD levels) and update its placed copies' onClick={() => saveActiveMesh()}>
+            <SaveIcon /> Save Mesh
           </Button>
         )}
         <Button

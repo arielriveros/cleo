@@ -12,7 +12,7 @@ export function seedCustomMaterial(mat: CustomMaterial, base: CustomBaseType, mo
   mat.baseType = base
   mat.renderMode = mode
   mat.fragmentSource = customSeedTemplate(base, mode)
-  mat.uniforms = customSeedUniforms(base)
+  mat.uniforms = customSeedUniforms(base, mode)
   mat.properties.clear()
   mat.textures.clear()
   for (const u of mat.uniforms)

@@ -3,8 +3,13 @@ import { cryptoRandomId } from './UIModel'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
 
 // Node variable linking a placed instance back to its source mesh asset (mirrors TEMPLATE_ID_VAR /
-// MATERIAL_ID_VAR). Informational only — meshes are not edit-propagated — but handy for tooling.
+// MATERIAL_ID_VAR). Saving a mesh asset re-instantiates every scene node carrying it
+// (syncMeshInstances in EngineContext), the same way template edits propagate.
 export const MESH_ID_VAR = '__meshId'
+
+/** One extra detail level of a mesh asset: a whole serialized subtree (levels come from separate
+ *  files, so sub-mesh counts may differ) plus the camera distance at which it takes over. */
+export type MeshLodDef = { nodeJson: any; distance: number }
 
 // A reusable, named mesh imported from file(s): a serialized node subtree (the parent Node with its
 // child ModelNodes) plus every texture it embeds and a rendered thumbnail. Materials are embedded in
@@ -19,6 +24,10 @@ export type MeshAsset = {
   textures?: any[]
   materialIds: string[]  // MaterialAsset ids this mesh references (informational)
   thumbnail: string      // base64 PNG data URL
+  /** Extra LOD levels (ascending distance). Absent/empty = single-level mesh. */
+  lods?: MeshLodDef[]
+  /** Hide placed instances beyond this camera distance; 0/absent = never cull. */
+  cullDistance?: number
 }
 
 /**
@@ -27,7 +36,14 @@ export type MeshAsset = {
  * Records only the texture IDS the subtree uses; the payloads live once in the texture store. Embedding
  * them here duplicated every map the mesh's materials had already embedded themselves.
  */
-export async function buildMeshAsset(root: Node, materialIds: string[], thumbnail: string, id?: string): Promise<MeshAsset> {
+export async function buildMeshAsset(
+  root: Node,
+  materialIds: string[],
+  thumbnail: string,
+  id?: string,
+  lods?: MeshLodDef[],
+  cullDistance?: number,
+): Promise<MeshAsset> {
   const nodeJson = await root.serialize()
   stripDebug(nodeJson)
   // A definition must never carry an instance back-link; strip it so it isn't baked in.
@@ -36,7 +52,33 @@ export async function buildMeshAsset(root: Node, materialIds: string[], thumbnai
   const texIds = new Set<string>()
   collectTextureIds(nodeJson, texIds)
 
-  return { id: id ?? cryptoRandomId(), name: root.name, nodeJson, textureIds: [...texIds], materialIds, thumbnail }
+  const asset: MeshAsset = { id: id ?? cryptoRandomId(), name: root.name, nodeJson, textureIds: [...texIds], materialIds, thumbnail }
+
+  if (lods?.length) {
+    for (const lod of lods) {
+      stripDebug(lod.nodeJson)
+      if (lod.nodeJson.variables) delete lod.nodeJson.variables[MESH_ID_VAR]
+      collectTextureIds(lod.nodeJson, texIds)
+    }
+    asset.lods = lods
+    asset.textureIds = [...texIds]
+  }
+  if (cullDistance && cullDistance > 0) asset.cullDistance = cullDistance
+
+  return asset
+}
+
+/** True if a serialized subtree contains a skinned/animated model (LOD + foliage baking are static-only). */
+export function nodeJsonHasSkinnedModel(nodeJson: any): boolean {
+  if (!nodeJson || typeof nodeJson !== 'object') return false
+  const m = nodeJson.model
+  if (m && (m.skin || m.animations || m.jointIndices)) return true
+  return Array.isArray(nodeJson.children) && nodeJson.children.some(nodeJsonHasSkinnedModel)
+}
+
+/** True if the asset carries LOD levels or a cull distance (i.e. it instantiates as a LodGroupNode). */
+export function meshAssetHasLodBehavior(asset: MeshAsset): boolean {
+  return !!asset.lods?.length || (asset.cullDistance ?? 0) > 0
 }
 
 /** Every texture id a mesh asset references, whichever format it was saved in. */
@@ -94,9 +136,24 @@ export async function separateSubMeshes(
   return assets
 }
 
-/** Instantiate a mesh asset under `parent`, regenerating ids and restoring embedded textures. Returns the new root id. */
+/** Instantiate a mesh asset under `parent`, regenerating ids and restoring embedded textures. Returns the new root id.
+ *  Assets with LOD levels or a cull distance instantiate as a LodGroupNode wrapping one child subtree
+ *  per level (level 0 = the base nodeJson); plain assets keep the original single-subtree shape. */
 export function instantiateMeshAsset(asset: MeshAsset, parent: Node): string {
-  const clone = JSON.parse(JSON.stringify(asset.nodeJson))
+  const clone = meshAssetHasLodBehavior(asset)
+    ? {
+        id: cryptoRandomId(),
+        name: asset.name,
+        type: 'lodGroup',
+        distances: [0, ...(asset.lods ?? []).map(l => l.distance)],
+        cullDistance: asset.cullDistance ?? 0,
+        children: [
+          JSON.parse(JSON.stringify(asset.nodeJson)),
+          ...(asset.lods ?? []).map(l => JSON.parse(JSON.stringify(l.nodeJson))),
+        ],
+      } as any
+    : JSON.parse(JSON.stringify(asset.nodeJson))
+
   const idMap = new Map<string, string>()
   regenerateIds(clone, idMap)
 

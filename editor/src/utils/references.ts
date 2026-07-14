@@ -1,5 +1,6 @@
-import { Scene } from 'cleo'
+import { Scene, CameraNode } from 'cleo'
 import { getNodeMaterial, getMaterialIdOf, MaterialAsset } from './materials'
+import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
 import { MeshAsset, MESH_ID_VAR } from './meshes'
 import { Template, TEMPLATE_ID_VAR } from './templates'
@@ -60,13 +61,16 @@ export function collectReferencedTextureIds(
   return set
 }
 
-/** Material asset ids referenced by any placed node (__materialId) or listed by a mesh asset. */
+/** Material asset ids referenced by any placed node (__materialId), a camera's screen-space pass
+ *  list (__screenMaterialIds), or listed by a mesh asset. */
 export function collectReferencedMaterialIds(scene: Scene | null | undefined, meshes: MeshAsset[]): Set<string> {
   const set = new Set<string>()
   if (scene) {
     for (const node of scene.nodes) {
       const id = getMaterialIdOf(node)
       if (id) set.add(id)
+      if (node.nodeType === 'camera')
+        for (const sid of getScreenMaterialIds(node as CameraNode)) set.add(sid)
     }
   }
   for (const m of meshes) for (const id of (m.materialIds || [])) set.add(id)

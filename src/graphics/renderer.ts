@@ -39,7 +39,7 @@ import Bloom from './shaders/screen/bloom.fs'
 import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
-import GodRaysFragment from './shaders/screen/godRays.fs'
+import VolumetricGodRaysFragment from './shaders/screen/volumetricGodRays.fs'
 import GridFragment from './shaders/screen/grid.fs'
 import OutlinePostFragment from './shaders/screen/outline.fs'
 import MotionBlurVelocity from './shaders/screen/motionBlurVelocity.fs'
@@ -76,6 +76,7 @@ import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats } from './renderStats';
 import { TerrainLodSettings } from '../terrain/terrain';
+import type { FoliageCell } from '../terrain/foliage';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -182,6 +183,10 @@ export class Renderer {
     private _debugView: DebugView = 'final';
 
     private _sceneFBO: Framebuffer;
+    // Snapshot of _sceneFBO's depth (deferred blit + forward opaques), taken after the opaque forward
+    // draw so fullscreen passes (fog, god rays, screen materials) can sample the full opaque depth
+    // without a read/write feedback on the bound _sceneFBO.
+    private _sceneDepthFBO: Framebuffer;
     private _shadowMapFBO: Framebuffer;
     private _gBufferFBO: Framebuffer;
 
@@ -204,15 +209,17 @@ export class Renderer {
     // must clear them (they'd otherwise still hold the previous scene's depth) — but only once, not every
     // frame: these are several 4096² depth buffers.
     private _shadowMapsDirty: boolean = false;
-    // Whole-array upload buffers + cached base (`[0]`) locations for the cascade uniforms.
-    // Basic-type uniform arrays are only reachable via their [0] location, not per element.
+    // Whole-array upload buffers + per-program cached base (`[0]`) locations for the cascade uniforms.
+    // Basic-type uniform arrays are only reachable via their [0] location, not per element. Cached per
+    // program because both the deferred lighting and volumetric god-rays passes sample the cascades.
     private _cascadeMatPacked: Float32Array = new Float32Array(this._cascadeCount * 16);
     private _cascadeSplitPacked: Float32Array = new Float32Array(this._cascadeCount);
     private _cascadeUnitPacked: Int32Array = new Int32Array(this._cascadeCount);
-    private _cascadeMatLoc: WebGLUniformLocation | null | undefined = undefined;
-    private _cascadeSplitLoc: WebGLUniformLocation | null | undefined = undefined;
-    private _cascadeSamplerLoc: WebGLUniformLocation | null | undefined = undefined;
+    private _cascadeLocs: Map<WebGLProgram, { mat: WebGLUniformLocation | null, split: WebGLUniformLocation | null, sampler: WebGLUniformLocation | null }> = new Map();
     private _shadowDistance: number;
+    // The frame's shadow-casting light (last one wins, matching the shadow pass) so post passes
+    // (volumetric god rays) can transform samples into light space.
+    private _shadowLight: LightNode | null = null;
 
     // Post processing
     private _compose_FBOs: Framebuffer[];
@@ -257,8 +264,16 @@ export class Renderer {
     private static readonly PREFILTER_SIZE = 128;
     private static readonly PREFILTER_MIPS = 5;
     private static readonly BRDF_LUT_SIZE = 512;
+    private static readonly _IDENTITY_MAT4: mat4 = mat4.create();
 
     private _screenQuad: Mesh;
+
+    // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
+    private _warnedScreenMaterialMeshes: Set<string> = new Set();
+
+    // The scene being rendered this frame, for per-draw lookups that don't receive it (forward
+    // light-probe selection in _renderModel).
+    private _currentScene: Scene | null = null;
 
     private _shaderManager: ShaderManager;
 
@@ -337,6 +352,7 @@ export class Renderer {
 
         // Create framebuffers
         this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._sceneDepthFBO = new Framebuffer({ usage: 'depth' });
         this._shadowMapFBO = new Framebuffer({ usage: 'depth' });
         for (let i = 0; i < this._cascadeCount; i++) {
             this._shadowCascades.push(new Framebuffer({ usage: 'depth' }));
@@ -427,7 +443,7 @@ export class Renderer {
         const screenShader = new Shader().create(ScreenVertex, ScreenFragment);
         // Final present: exposure -> tonemap -> sRGB (the single display resolve).
         const presentShader = new Shader().create(ScreenVertex, PresentFragment);
-        const godRaysShader = new Shader().create(ScreenVertex, GodRaysFragment);
+        const godRaysShader = new Shader().create(ScreenVertex, VolumetricGodRaysFragment);
         const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
         const bloomShader = new Shader().create(ScreenVertex, Bloom);
         const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
@@ -537,6 +553,8 @@ export class Renderer {
         if (!scene.activeCamera) return;
         this._activeCamera = scene.activeCamera.camera;
         this._activeCamera.resize(this._renderWidth, this._renderHeight);
+        // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
+        this._currentScene = scene;
 
         // Compile+register any custom-material programs before any pass calls initializeModel/getShader.
         this._ensureCustomShaders(scene);
@@ -552,6 +570,9 @@ export class Renderer {
         // cascades/shadow map rasterize the same reduced terrain the color passes will.
         this._updateTerrainLOD(scene);
 
+        // Same for per-mesh LOD groups: each picks its active level (or distance-culls) before shadows.
+        this._updateModelLOD(scene);
+
         // Re-bake the sky atmosphere cubemap when the sun moves (before IBL, so probes capture the sky).
         this._updateSkyAtmosphere(scene);
 
@@ -566,6 +587,7 @@ export class Renderer {
         let shadowLight: LightNode | null = null;
         for (const node of scene.lights)
             if (node.castShadows) shadowLight = node;
+        this._shadowLight = shadowLight; // post passes (volumetric god rays) need its light space
 
         this._useCSM = false;
         if (shadowLight) {
@@ -700,11 +722,14 @@ export class Renderer {
     }
 
     private _bindEnvToForwardShaders(scene: Scene): void {
-        // Prefer the nearest baked light probe. Use its SHARP source capture (linear HDR, at the probe's
-        // resolution) for clear reflections rather than the roughness-convolved 128px prefiltered map;
-        // fall back to the scene environment map (sRGB). u_envMapLinear tells the shader which decode to apply.
-        const probe = scene.activeProbe(this._activeCamera.position);
-        const probeCube = probe && probe.hasBakedMaps ? (probe.envMap ?? probe.prefiltered) : null;
+        // Frame-default probe: the one whose volume covers the camera (bounded volumes win over
+        // unbounded/legacy probes — see Scene.probeForPoint). Use its SHARP source capture (linear HDR,
+        // at the probe's resolution) for clear reflections rather than the roughness-convolved 128px
+        // prefiltered map; fall back to the scene environment map (sRGB). u_envMapLinear tells the
+        // shader which decode to apply. _renderModel overrides this per draw when a mesh sits inside
+        // a different probe's volume.
+        const probe = scene.probeForPoint(this._activeCamera.position);
+        const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
         const envCube = probeCube ?? scene.environmentMap;
         for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
             this._shaderManager.bind(shaderName);
@@ -725,6 +750,9 @@ export class Renderer {
             const mat = node.model.material;
             if (mat instanceof CustomMaterial) ensureCustomShader(mat);
         }
+        // Screen-space post-process materials live on the active camera, not on meshes.
+        const screenMats = scene.activeCamera?.screenMaterials;
+        if (screenMats) for (const mat of screenMats) ensureCustomShader(mat);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -782,8 +810,9 @@ export class Renderer {
             // set (specular/ambient/reflectivity + maps) works; they never enter the deferred G-buffer.
             const dtype = node.model.material.type;
             // Forward-rendered types are drawn in the overlay, not the G-buffer: Blinn-Phong and
-            // forward custom materials (deferred custom, 'customGeom:', DOES rasterize here).
-            if (dtype === 'blinn_phong' || dtype === 'blinn_phongSkinned' || dtype.startsWith('custom:')) continue;
+            // forward custom materials (deferred custom, 'customGeom:', DOES rasterize here). Screen
+            // custom materials are camera post passes and never rasterize as mesh geometry at all.
+            if (dtype === 'blinn_phong' || dtype === 'blinn_phongSkinned' || dtype.startsWith('custom:') || dtype.startsWith('customScreen:')) continue;
             if (!node.initialized) node.initializeModel();
 
             const mat = node.model.material;
@@ -817,18 +846,22 @@ export class Renderer {
     private _foliagePass(scene: Scene): void {
         const defaultAttrs = this._shaderManager.getShader('blinn_phongGeometry').attributes;
         const camPos = this._activeCamera.position;
-        const maxD2 = this._foliageCullDistance > 0 ? this._foliageCullDistance * this._foliageCullDistance : Infinity;
 
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             for (const layer of landscape.terrain.foliage) {
                 if (layer.count === 0) continue;
 
-                // Lazily upload the (static) mesh + set up its per-vertex VAO (locations 0-4).
+                // Lazily upload every prototype's (static) mesh + per-vertex VAO (locations 0-4):
+                // all LOD levels' sub-models plus the billboard impostor, if any.
                 if (!layer.initialized) {
-                    const g = layer.model.geometry;
-                    layer.model.mesh.create(g.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']), g.vertexCount, g.indices);
-                    layer.model.mesh.initializeVAO(defaultAttrs);
+                    const initModel = (model: Model) => {
+                        const g = model.geometry;
+                        model.mesh.create(g.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']), g.vertexCount, g.indices);
+                        model.mesh.initializeVAO(defaultAttrs);
+                    };
+                    for (const level of layer.levels) for (const m of level.models) initModel(m);
+                    if (layer.billboardModel) initModel(layer.billboardModel);
                     layer.initialized = true;
                 }
 
@@ -838,25 +871,18 @@ export class Renderer {
                 // Free GPU buffers orphaned by a previous cell-layout rebuild (e.g. after painting or a resize).
                 for (const buf of layer.collectStaleBuffers()) gl.deleteBuffer(buf);
 
-                // Bind shader/material once per layer; only the instance buffer + draw vary per cell.
-                const shaderType = layer.kind === 'billboard' ? 'foliageBillboardInstanced'
-                    : (layer.model.material.type === 'pbr' ? 'pbrGeometryInstanced' : 'blinn_phongGeometryInstanced');
-                this._shaderManager.bind(shaderType);
-                this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-                this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+                // The layer's own (mesh-asset) cull threshold wins over the global foliage distance.
+                const cullDistance = layer.cullDistance > 0 ? layer.cullDistance : this._foliageCullDistance;
+                const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
 
-                if (layer.kind === 'billboard') {
-                    const tex = layer.textureId ? TextureManager.Instance.getTexture(layer.textureId) : null;
-                    if (tex) { tex.bind(0); this._shaderManager.setUniform('u_texture', 0); }
-                    GLState.disable(gl.CULL_FACE);
-                } else {
-                    this._applyMaterial(layer.model.material);
-                    this._applyCull(layer.model.material.config.side);
-                }
-
+                // Visible cells bucketed by detail level so shader/material binds stay one-per-level.
+                // Bucket index levels.length is the billboard-impostor bucket.
+                const billboardBucket = layer.levels.length;
+                const buckets: FoliageCell[][] = [];
                 for (const cell of layer.cells) {
+                    const d2 = this._aabbDistSq(camPos, cell.min, cell.max);
                     // Distance cull: nearest point of the cell's AABB to the camera.
-                    if (maxD2 !== Infinity && this._aabbDistSq(camPos, cell.min, cell.max) > maxD2) {
+                    if (d2 > maxD2) {
                         frameStats.culled += cell.count;
                         continue;
                     }
@@ -866,18 +892,69 @@ export class Renderer {
                         continue;
                     }
 
-                    // Upload this cell's static matrices once (per layout version).
-                    if (!cell.glBuffer) cell.glBuffer = gl.createBuffer();
-                    if (cell.uploadedVersion !== layer.version) {
-                        gl.bindBuffer(gl.ARRAY_BUFFER, cell.glBuffer);
-                        gl.bufferData(gl.ARRAY_BUFFER, cell.matrices, gl.STATIC_DRAW);
-                        cell.uploadedVersion = layer.version;
+                    // Per-cell LOD by the same distance bands a mesh asset's LodGroup uses, with the
+                    // same ×0.9 hysteresis: coarsen immediately, refine only comfortably inside.
+                    let target = 0;
+                    if (billboardBucket > 1 || layer.billboardModel) {
+                        const d = Math.sqrt(d2);
+                        if (layer.billboardModel && d >= layer.billboardDistance) {
+                            target = billboardBucket;
+                        } else {
+                            for (let i = layer.levels.length - 1; i > 0; i--)
+                                if (d >= layer.levels[i].distance) { target = i; break; }
+                        }
+                        if (target < cell.lod && cell.lod <= billboardBucket) {
+                            const backEdge = cell.lod === billboardBucket
+                                ? layer.billboardDistance
+                                : layer.levels[cell.lod].distance;
+                            if (d >= backEdge * 0.9) target = cell.lod; // stay coarse near the boundary
+                        }
                     }
-
-                    layer.model.mesh.setupInstanceMatrixBuffer(cell.glBuffer as WebGLBuffer, 5);
-                    layer.model.mesh.drawInstanced(cell.count);
-                    layer.model.mesh.teardownInstanceMatrixBuffer(5);
+                    cell.lod = target;
+                    (buckets[target] ??= []).push(cell);
                 }
+
+                const drawBucket = (cells: FoliageCell[] | undefined, models: Model[], billboard: boolean) => {
+                    if (!cells || cells.length === 0) return;
+                    // Upload each cell's static matrices once (per layout version); the one instance
+                    // buffer is then reused across every sub-model of the level.
+                    for (const cell of cells) {
+                        if (!cell.glBuffer) cell.glBuffer = gl.createBuffer();
+                        if (cell.uploadedVersion !== layer.version) {
+                            gl.bindBuffer(gl.ARRAY_BUFFER, cell.glBuffer);
+                            gl.bufferData(gl.ARRAY_BUFFER, cell.matrices, gl.STATIC_DRAW);
+                            cell.uploadedVersion = layer.version;
+                        }
+                    }
+                    for (const model of models) {
+                        const shaderType = billboard ? 'foliageBillboardInstanced'
+                            : (model.material.type === 'pbr' ? 'pbrGeometryInstanced' : 'blinn_phongGeometryInstanced');
+                        this._shaderManager.bind(shaderType);
+                        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+                        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+
+                        if (billboard) {
+                            const texId = layer.kind === 'billboard' ? layer.textureId : layer.billboardTextureId;
+                            const tex = texId ? TextureManager.Instance.getTexture(texId) : null;
+                            if (tex) { tex.bind(0); this._shaderManager.setUniform('u_texture', 0); }
+                            GLState.disable(gl.CULL_FACE);
+                        } else {
+                            this._applyMaterial(model.material);
+                            this._applyCull(model.material.config.side);
+                        }
+
+                        for (const cell of cells) {
+                            model.mesh.setupInstanceMatrixBuffer(cell.glBuffer as WebGLBuffer, 5);
+                            model.mesh.drawInstanced(cell.count);
+                            model.mesh.teardownInstanceMatrixBuffer(5);
+                        }
+                    }
+                };
+
+                for (let i = 0; i < layer.levels.length; i++)
+                    drawBucket(buckets[i], layer.levels[i].models, layer.kind === 'billboard');
+                if (layer.billboardModel)
+                    drawBucket(buckets[billboardBucket], [layer.billboardModel], true);
             }
         }
     }
@@ -897,6 +974,16 @@ export class Renderer {
             step2: this._terrainLodStep2,
         };
         for (const landscape of scene.landscapes) landscape.updateLod(this._activeCamera.position, settings);
+    }
+
+    /**
+     * Distance-based model LOD: every LodGroupNode picks which level subtree is visible for this
+     * frame's camera (and hides entirely past its cull distance). One sphere-distance test per group;
+     * subtree visibility flags are only rewritten on transitions.
+     */
+    private _updateModelLOD(scene: Scene): void {
+        if (scene.lodGroups.size === 0) return;
+        for (const group of scene.lodGroups) group.updateLod(this._activeCamera.position);
     }
 
     /** Squared distance from point `p` to the closest point of the AABB [min, max] (0 if inside). */
@@ -1028,49 +1115,46 @@ export class Renderer {
         this._shaderManager.setUniform('u_shadowMap', 6);
         this._shadowMapFBO.depth.bind(6);
         if (this._useCSM) {
-            // Basic-type uniform arrays can only be uploaded via their base ([0]) location, which
-            // fills every element — per-element setUniform('...[i]') silently misses elements 1..N.
-            const program = this._shaderManager.getShader('deferredLighting').program;
-            if (this._cascadeMatLoc === undefined) {
-                this._cascadeMatLoc = gl.getUniformLocation(program, 'u_cascadeMatrices[0]');
-                this._cascadeSplitLoc = gl.getUniformLocation(program, 'u_cascadeSplits[0]');
-                this._cascadeSamplerLoc = gl.getUniformLocation(program, 'u_shadowCascades[0]');
-            }
-            for (let i = 0; i < this._cascadeCount; i++) {
-                const slot = 9 + i; // 0-3 gbuffer, 6 shadow, 7 env, 8 skybox
-                this._cascadeMatPacked.set(this._cascadeMatrices[i], i * 16);
-                this._cascadeSplitPacked[i] = this._cascadeSplits[i];
-                this._cascadeUnitPacked[i] = slot;
-                this._shadowCascades[i].depth.bind(slot);
-            }
-            if (this._cascadeMatLoc) gl.uniformMatrix4fv(this._cascadeMatLoc, false, this._cascadeMatPacked);
-            if (this._cascadeSplitLoc) gl.uniform1fv(this._cascadeSplitLoc, this._cascadeSplitPacked);
-            if (this._cascadeSamplerLoc) gl.uniform1iv(this._cascadeSamplerLoc, this._cascadeUnitPacked);
+            this._uploadCascades('deferredLighting');
         } else if (shadowLight) {
             this._shaderManager.setUniform('u_lightSpace', shadowLight.lightSpace);
         }
 
-        // Image-based lighting from the nearest baked light probe (split-sum: irradiance on unit 5,
-        // prefiltered specular on unit 7, shared BRDF LUT on unit 12). With no probe, fall back to the
-        // original crude environment reflection (env cubemap on unit 7) so existing scenes are unchanged.
-        // The sampler units are assigned every frame (even when unused) so the cube samplers never
-        // alias the 2D G-buffer samplers on unit 0 (which would be a draw-time type-collision error).
-        this._shaderManager.setUniform('u_irradiance', 5);
-        this._shaderManager.setUniform('u_prefiltered', 7);
-        this._shaderManager.setUniform('u_envMap', 7);
+        // Image-based lighting from up to 2 baked light probes with influence volumes (split-sum:
+        // per-slot irradiance/prefiltered cubes + shared BRDF LUT on unit 12; slot 0 on the legacy
+        // units 5/7, slot 1 on 8/13, fallback env cube on 14). The shader picks/blends the slots per
+        // pixel by feathered volume containment (probeWeight); pixels no volume covers fall back to
+        // flat ambient + the crude u_envMap reflection so probe-less scenes are unchanged.
+        // Every sampler unit is assigned every frame (even when unused) so the cube samplers never
+        // alias the 2D G-buffer samplers on unit 0 (which would be a draw-time type-collision error),
+        // and every used cube slot is bound to SOME complete cubemap.
+        this._shaderManager.setUniform('u_irradiance0', 5);
+        this._shaderManager.setUniform('u_prefiltered0', 7);
+        this._shaderManager.setUniform('u_irradiance1', 8);
+        this._shaderManager.setUniform('u_prefiltered1', 13);
+        this._shaderManager.setUniform('u_envMap', 14);
         this._shaderManager.setUniform('u_brdfLUT', 12);
-        const ibl = this._activeIBL(scene);
-        if (ibl) {
-            this._shaderManager.setUniform('u_useIBL', true);
-            this._shaderManager.setUniform('u_useEnvMap', false);
-            this._shaderManager.setUniform('u_iblIntensity', ibl.intensity);
-            ibl.irradiance.bind(5);
-            ibl.prefiltered.bind(7);
-            this._brdfFBO.colors[0].bind(12);
-        } else {
-            this._shaderManager.setUniform('u_useIBL', false);
-            this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
-            scene.environmentMap?.bind(7);
+        this._brdfFBO.colors[0].bind(12);
+        this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+        scene.environmentMap?.bind(14);
+        const probes = scene.probesForFrame(this._activeCamera.position, 2);
+        this._shaderManager.setUniform('u_probeCount', probes.length);
+        for (let i = 0; i < 2; i++) {
+            const slot = probes[i] ?? null;
+            const fill = slot ?? probes[0] ?? null; // keep unused slots bound to a complete cube
+            const irrUnit = i === 0 ? 5 : 8;
+            const prefUnit = i === 0 ? 7 : 13;
+            if (fill) {
+                fill.irradiance!.bind(irrUnit);
+                fill.prefiltered!.bind(prefUnit);
+            } else if (scene.environmentMap) {
+                scene.environmentMap.bind(irrUnit);
+                scene.environmentMap.bind(prefUnit);
+            }
+            this._shaderManager.setUniform(`u_iblIntensity${i}`, slot ? slot.intensity : 0);
+            this._shaderManager.setUniform(`u_probeUnbounded${i}`, slot ? !slot.bounded : false);
+            this._shaderManager.setUniform(`u_probeInvVolume${i}`, slot && slot.bounded ? slot.invVolumeMatrix : Renderer._IDENTITY_MAT4);
+            this._shaderManager.setUniform(`u_probeBlend${i}`, slot && slot.bounded ? slot.volumeBlend : [0, 0, 0]);
         }
 
         // SSAO (unit 4). Always bind a complete texture so the sampler is valid; the shader only
@@ -1083,6 +1167,36 @@ export class Renderer {
 
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
+    }
+
+    /**
+     * Upload the CSM cascade matrices/splits/sampler units to the CURRENTLY BOUND program (registered
+     * under `shaderKey`) and bind the cascade depth textures to units 9-11. Basic-type uniform arrays
+     * can only be uploaded via their base ([0]) location, which fills every element — per-element
+     * setUniform('...[i]') silently misses elements 1..N — so the base locations are cached per program
+     * (both the deferred lighting and volumetric god-rays passes sample the cascades).
+     */
+    private _uploadCascades(shaderKey: string): void {
+        const program = this._shaderManager.getShader(shaderKey).program;
+        let locs = this._cascadeLocs.get(program);
+        if (!locs) {
+            locs = {
+                mat: gl.getUniformLocation(program, 'u_cascadeMatrices[0]'),
+                split: gl.getUniformLocation(program, 'u_cascadeSplits[0]'),
+                sampler: gl.getUniformLocation(program, 'u_shadowCascades[0]'),
+            };
+            this._cascadeLocs.set(program, locs);
+        }
+        for (let i = 0; i < this._cascadeCount; i++) {
+            const slot = 9 + i; // 0-3 gbuffer, 6 shadow, 7 env, 8 skybox
+            this._cascadeMatPacked.set(this._cascadeMatrices[i], i * 16);
+            this._cascadeSplitPacked[i] = this._cascadeSplits[i];
+            this._cascadeUnitPacked[i] = slot;
+            this._shadowCascades[i].depth.bind(slot);
+        }
+        if (locs.mat) gl.uniformMatrix4fv(locs.mat, false, this._cascadeMatPacked);
+        if (locs.split) gl.uniform1fv(locs.split, this._cascadeSplitPacked);
+        if (locs.sampler) gl.uniform1iv(locs.sampler, this._cascadeUnitPacked);
     }
 
     private _setDeferredLighting(scene: Scene): void {
@@ -1341,6 +1455,8 @@ export class Renderer {
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
             // Sky background first (atmosphere takes precedence over a static skybox), then geometry.
+            // Depth writes off for the sky (see _renderForwardOverlay — keeps background depth at 1.0).
+            GLState.depthMask(false);
             const atmo = scene.skyAtmosphere;
             if (atmo && atmo.cubemap) {
                 this._drawAtmosphereSky(atmo.cubemap, cam.viewMatrix, cam.projectionMatrix);
@@ -1355,6 +1471,7 @@ export class Renderer {
                 skyboxNode.skybox.texture.bind(8);
                 skyboxNode.skybox.mesh.draw();
             }
+            GLState.depthMask(true);
 
             for (const node of scene.models) {
                 if (!node.visible) continue;
@@ -1393,14 +1510,6 @@ export class Renderer {
         }
     }
 
-    // Pick the IBL source for this frame: the nearest baked light probe, or null (no probe -> no IBL).
-    private _activeIBL(scene: Scene): { irradiance: Texture, prefiltered: Texture, intensity: number } | null {
-        const probe = scene.activeProbe(this._activeCamera.position);
-        if (probe && probe.hasBakedMaps)
-            return { irradiance: probe.irradiance!, prefiltered: probe.prefiltered!, intensity: probe.intensity };
-        return null;
-    }
-
     // Direction TOWARD the sun for a SkyAtmosphere node: the scene directional light (negated travel
     // direction) when useSceneSun, else the node's manual override. Always normalized.
     private _atmosphereSunDir(scene: Scene, node: SkyAtmosphereNode): [number, number, number] {
@@ -1418,56 +1527,104 @@ export class Renderer {
         return [s[0] / len, s[1] / len, s[2] / len];
     }
 
-    // Screen-space god rays for the SkyAtmosphere node's sun. Projects the (infinitely far) sun to a
-    // screen UV, then a radial-blur pass (godRays.fs) accumulates the bright sky — masked by depth so
-    // opaque geometry occludes the shafts — toward the sun, composited ADDITIVELY into the pre-bloom
-    // scene buffer. No-op unless a SkyAtmosphere node has god rays enabled and the sun is in front.
+    /**
+     * Sun direction + screen-space UV + visibility fade for the scene's sun: the first directional
+     * light (negated travel direction), else the SkyAtmosphere sun. `visible` is 0 when there is no
+     * sun or it is behind the camera, fading to 0 as it leaves the viewport. Shared by the god-rays
+     * pass and the camera's screen-space material passes (u_sunDir/u_sunUV/u_sunVisible).
+     */
+    private _sunScreenInfo(scene: Scene): { dir: [number, number, number], uv: [number, number], visible: number } {
+        let dir: [number, number, number] | null = null;
+        for (const light of scene.lights) {
+            if (light.type === 'directional') {
+                const f = light.worldForward; // light travels along +forward, so the sun is at -forward
+                dir = [-f[0], -f[1], -f[2]];
+                break;
+            }
+        }
+        if (!dir && scene.skyAtmosphere) dir = this._atmosphereSunDir(scene, scene.skyAtmosphere);
+        if (!dir) return { dir: [0, 0, 0], uv: [0, 0], visible: 0 };
+        const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+        dir = [dir[0] / len, dir[1] / len, dir[2] / len];
+
+        // Project the sun as a point at infinity: clip = viewProj * vec4(dirTowardSun, 0).
+        const m = this._viewProj;
+        const clipX = m[0] * dir[0] + m[4] * dir[1] + m[8] * dir[2];
+        const clipY = m[1] * dir[0] + m[5] * dir[1] + m[9] * dir[2];
+        const clipW = m[3] * dir[0] + m[7] * dir[1] + m[11] * dir[2];
+        if (clipW <= 0.0) return { dir, uv: [0, 0], visible: 0 }; // sun is behind the camera
+        const uv: [number, number] = [(clipX / clipW) * 0.5 + 0.5, (clipY / clipW) * 0.5 + 0.5];
+        const dx = Math.max(0, Math.max(-uv[0], uv[0] - 1));
+        const dy = Math.max(0, Math.max(-uv[1], uv[1] - 1));
+        const visible = Math.max(0, 1 - Math.hypot(dx, dy) / 0.5);
+        return { dir, uv, visible };
+    }
+
+    // Volumetric god rays for the SkyAtmosphere node's sun: a half-resolution raymarch along each
+    // pixel's view ray (bounded by the opaque scene depth), testing the directional light's shadow
+    // map per step so only sunlit air scatters (volumetricGodRays.fs), then an additive LINEAR
+    // upsample into the pre-bloom scene buffer. Works with the sun off-screen or behind the camera —
+    // unlike the old radial blur, the shafts exist in world space. No shadow-casting directional
+    // light -> uniform (unoccluded) haze.
     private _renderGodRays(scene: Scene): void {
         const node = scene.skyAtmosphere;
         if (!node || !node.godRaysEnabled) return;
 
-        // Project the sun as a point at infinity: clip = viewProj * vec4(sunDirTowardSun, 0).
         const s = this._atmosphereSunDir(scene, node);
-        const m = this._viewProj;
-        const clipX = m[0] * s[0] + m[4] * s[1] + m[8] * s[2];
-        const clipY = m[1] * s[0] + m[5] * s[1] + m[9] * s[2];
-        const clipW = m[3] * s[0] + m[7] * s[1] + m[11] * s[2];
-        if (clipW <= 0.0) return; // sun is behind the camera
-        const sunUV: [number, number] = [(clipX / clipW) * 0.5 + 0.5, (clipY / clipW) * 0.5 + 0.5];
+        // Light color: the scene directional light's diffuse when the atmosphere tracks it, else the
+        // node's own sun color.
+        let lightColor: [number, number, number] = [node.sunColor[0], node.sunColor[1], node.sunColor[2]];
+        if (node.useSceneSun) {
+            for (const light of scene.lights) {
+                if (light.type === 'directional') {
+                    lightColor = [light.light.diffuse[0], light.light.diffuse[1], light.light.diffuse[2]];
+                    break;
+                }
+            }
+        }
+        const useCSM = this._useCSM && this._shadowLight?.type === 'directional';
+        const hasShadow = useCSM || (this._shadowLight?.type === 'directional');
 
-        // Fade out as the sun leaves the viewport (radial blur has nothing to anchor to off-screen).
-        const dx = Math.max(0, Math.max(-sunUV[0], sunUV[0] - 1));
-        const dy = Math.max(0, Math.max(-sunUV[1], sunUV[1] - 1));
-        const fade = Math.max(0, 1 - Math.hypot(dx, dy) / 0.5);
-        if (fade <= 0) return;
-
-        // Additively composite the shafts into the pre-bloom scene buffer.
-        this._compose_FBOs[0].bind();
+        // Pass A: raymarch at half resolution into the blur scratch buffer (safe to reuse — bloom,
+        // its only other consumer, runs after god rays and overwrites it). Blend off: plain write.
+        this._blur_FBOs[0].bind(); // also sets the half-res viewport
         GLState.disable(gl.DEPTH_TEST);
         GLState.depthMask(false);
-        GLState.enable(gl.BLEND);
-        gl.blendFunc(gl.ONE, gl.ONE); // additive
+        GLState.disable(gl.BLEND);
 
         this._shaderManager.bind('godRays');
-        this._shaderManager.setUniform('u_scene', 0);
-        this._sceneFBO.colors[0].bind(0);
-        this._shaderManager.setUniform('u_gDepth', 1);
-        this._gBufferFBO.depth.bind(1);
-        this._shaderManager.setUniform('u_sunUV', sunUV);
-        this._shaderManager.setUniform('u_fade', fade);
-        // Sun-cone mask: only sky within this angle of the sun direction emits shafts (keeps clouds from
-        // becoming light sources). Sun direction is the scene directional light (else the atmosphere sun).
+        this._shaderManager.setUniform('u_depth', 0);
+        this._sceneDepthFBO.depth.bind(0);
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
         this._shaderManager.setUniform('u_sunDir', s);
-        this._shaderManager.setUniform('u_sunSpreadCos', Math.cos(node.godRaySunSpread * Math.PI / 180));
-        this._shaderManager.setUniform('u_samples', node.godRaySamples);
-        this._shaderManager.setUniform('u_density', node.godRayDensity);
-        this._shaderManager.setUniform('u_weight', node.godRayWeight);
-        this._shaderManager.setUniform('u_decay', node.godRayDecay);
-        this._shaderManager.setUniform('u_exposure', node.godRayExposure);
-        this._shaderManager.setUniform('u_threshold', node.godRayThreshold);
+        this._shaderManager.setUniform('u_lightColor', lightColor);
         this._shaderManager.setUniform('u_tint', node.godRayTint);
+        this._shaderManager.setUniform('u_intensity', node.godRayExposure);
+        this._shaderManager.setUniform('u_density', node.godRayDensity);
+        this._shaderManager.setUniform('u_anisotropy', node.godRayAnisotropy);
+        this._shaderManager.setUniform('u_maxDistance', node.godRayMaxDistance);
+        this._shaderManager.setUniform('u_steps', node.godRaySamples);
+        this._shaderManager.setUniform('u_hasShadow', hasShadow);
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_cascadeCount', useCSM ? this._cascadeCount : 0);
+        this._shaderManager.setUniform('u_shadowMap', 2);
+        this._shadowMapFBO.depth.bind(2); // keep the single-map sampler complete even in CSM mode
+        if (useCSM) {
+            this._uploadCascades('godRays');
+        } else if (hasShadow && this._shadowLight) {
+            this._shaderManager.setUniform('u_lightSpace', this._shadowLight.lightSpace);
+        }
+        this._screenQuad.draw();
+
+        // Pass B: additively upsample (LINEAR) into the pre-bloom scene buffer so the shafts bloom
+        // and go through the single final tonemap like any other light.
+        this._compose_FBOs[0].bind(); // restores the full-res viewport
+        GLState.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE); // additive
+        this._shaderManager.bind('screen');
+        this._shaderManager.setUniform('u_screenTexture', 0);
+        this._blur_FBOs[0].colors[0].bind(0);
         this._screenQuad.draw();
 
         // Restore the default (straight-alpha) blend func so later passes and next frame's alpha-blended
@@ -1545,11 +1702,22 @@ export class Renderer {
         node.markBaked(sun);
     }
 
+    /** Blit _sceneFBO's depth (deferred blit + forward opaques) into _sceneDepthFBO so fullscreen
+     *  passes can sample the complete opaque depth without a read/write feedback on _sceneFBO,
+     *  then re-bind _sceneFBO (restores the overlay pass's render target + viewport). */
+    private _copySceneDepth(): void {
+        const w = this._renderWidth, h = this._renderHeight;
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this._sceneFBO.framebuffer);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this._sceneDepthFBO.framebuffer);
+        gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+        this._sceneFBO.bind();
+    }
+
     // Aerial-perspective fog for the SkyAtmosphere node. A fullscreen pass that tints opaque geometry
     // toward the sky colour by distance: the fog colour is the atmosphere cubemap sampled in each
     // pixel's view direction (so geometry fades into the sky behind it). Straight-alpha blended into
-    // the scene FBO; reads the G-buffer depth (a separate FBO) to avoid read/write feedback. Note this
-    // fogs deferred geometry; forward Blinn-Phong opaque isn't in the G-buffer depth so it stays clear.
+    // the scene FBO; reads the scene-depth snapshot (a separate FBO, see _copySceneDepth) so both
+    // deferred geometry and forward Blinn-Phong opaques fog at their own depth.
     private _renderSkyFog(scene: Scene): void {
         const node = scene.skyAtmosphere;
         if (!node || !node.fogEnabled || !node.cubemap || node.fogMaxOpacity <= 0 || node.fogDensity <= 0) return;
@@ -1560,7 +1728,7 @@ export class Renderer {
 
         this._shaderManager.bind('skyFog');
         this._shaderManager.setUniform('u_gDepth', 0);
-        this._gBufferFBO.depth.bind(0);
+        this._sceneDepthFBO.depth.bind(0);
         this._shaderManager.setUniform('u_atmosphere', 8);
         node.cubemap.bind(8);
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
@@ -1632,6 +1800,11 @@ export class Renderer {
         // Sky fills the background (fragments the geometry pass left at far depth). A baked atmosphere
         // cubemap takes precedence over a static skybox. Thumbnails want an empty background they can
         // turn transparent, so every background draw below is skipped for them.
+        // Depth WRITES are disabled for the sky: it renders at NDC z = w (pos.xyww), and float
+        // interpolation error writes some sky pixels a hair below 1.0 — which the depth-reading
+        // passes (sky fog, god rays, screen materials) would then treat as geometry, fogging random
+        // sky pixels (a z-fighting-like shimmer). The background must stay at the clear depth (1.0).
+        GLState.depthMask(false);
         const skyAtmo = scene.skyAtmosphere;
         if (this._thumbnailMode) {
             // no background
@@ -1666,6 +1839,10 @@ export class Renderer {
         GLState.depthMask(true);
         GLState.disable(gl.BLEND);
         for (const node of opaqueForwardQueue) this._renderModel(node);
+
+        // Snapshot the complete opaque depth (deferred + forward) for the fullscreen passes below
+        // and the later post-processing passes (god rays, screen-space materials).
+        if (!this._thumbnailMode) this._copySceneDepth();
 
         // Atmospheric fog over the opaque scene (aerial perspective from the SkyAtmosphere node).
         // Drawn before the grid/transparents so editor overlays stay crisp.
@@ -1736,8 +1913,40 @@ export class Renderer {
                 }
             }
         }
+        // Day / sunset / night response driven by the sun's elevation: the direct sun contribution
+        // shifts to a red-orange glow while the sun crosses the horizon (sunrise/sunset), then the
+        // clouds darken to a dim moonlit blue-gray once it drops below (night). Multiplicative
+        // tints on the authored colors, so the user's sun/ambient/ground settings remain the
+        // daytime look. u_sunDir is the sun's TRAVEL direction, so toward-sun elevation = -y.
+        const invLen = 1 / (Math.hypot(sunDir[0], sunDir[1], sunDir[2]) || 1);
+        const elevation = -sunDir[1] * invLen;
+        const smooth01 = (a: number, b: number, x: number) => {
+            const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+            return t * t * (3 - 2 * t);
+        };
+        const day = smooth01(0.08, 0.35, elevation);         // 1 = sun clearly above the horizon
+        const night = 1 - smooth01(-0.22, -0.03, elevation); // 1 = sun clearly below it
+        const sunset = (1 - day) * (1 - night);              // peaks with the sun on the horizon
+        const mix1 = (a: number, b: number, t: number) => a + (b - a) * t;
+        const sunsetColor = node.sunsetColor;                // user-set sunrise/sunset glow color
+        // Softer cast of the sunset color (pulled halfway toward white) for the indirect terms.
+        const sunsetCast = [0, 1, 2].map(i => mix1(sunsetColor[i], 1, 0.45));
+        const NIGHT_AMBIENT = [0.30, 0.36, 0.55];  // cool moonlit cast
+        const NIGHT_SUN_DIM = 0.04, NIGHT_AMBIENT_DIM = 0.15, NIGHT_GROUND_DIM = 0.12;
+        const effSunColor = [0, 1, 2].map(i =>
+            sunColor[i] * mix1(1, sunsetColor[i], sunset) * mix1(1, NIGHT_SUN_DIM, night));
+        const effAmbientColor = [0, 1, 2].map(i =>
+            node.ambientColor[i] * mix1(1, sunsetCast[i], sunset) * mix1(1, NIGHT_AMBIENT[i], night));
+        const effAmbientIntensity = node.ambientIntensity * mix1(1, NIGHT_AMBIENT_DIM, night);
+        const effGroundColor = [0, 1, 2].map(i =>
+            node.groundColor[i] * mix1(1, sunsetCast[i], sunset) * mix1(1, NIGHT_GROUND_DIM, night));
+        // Sun intensity follows elevation: dimmest on the horizon (long atmospheric path), ramping
+        // to the authored full value with the sun at the zenith.
+        const HORIZON_SUN_INTENSITY = 0.25;
+        const effSunIntensity = node.sunIntensity * mix1(HORIZON_SUN_INTENSITY, 1, smooth01(0, 1, elevation));
+
         this._shaderManager.setUniform('u_sunDir', sunDir);
-        this._shaderManager.setUniform('u_sunColor', sunColor);
+        this._shaderManager.setUniform('u_sunColor', effSunColor);
 
         // Shape
         this._shaderManager.setUniform('u_coverage', node.coverage);
@@ -1750,11 +1959,11 @@ export class Renderer {
         this._shaderManager.setUniform('u_detailStrength', node.detailStrength);
         this._shaderManager.setUniform('u_curlStrength', node.curlStrength);
         this._shaderManager.setUniform('u_anvilBias', node.anvilBias);
-        // Lighting
-        this._shaderManager.setUniform('u_sunIntensity', node.sunIntensity);
-        this._shaderManager.setUniform('u_ambientColor', node.ambientColor);
-        this._shaderManager.setUniform('u_ambientIntensity', node.ambientIntensity);
-        this._shaderManager.setUniform('u_groundColor', node.groundColor);
+        // Lighting (sun intensity + ambient/ground carry the sunset/night modulation computed above)
+        this._shaderManager.setUniform('u_sunIntensity', effSunIntensity);
+        this._shaderManager.setUniform('u_ambientColor', effAmbientColor);
+        this._shaderManager.setUniform('u_ambientIntensity', effAmbientIntensity);
+        this._shaderManager.setUniform('u_groundColor', effGroundColor);
         this._shaderManager.setUniform('u_phaseG', node.phaseG);
         this._shaderManager.setUniform('u_silverIntensity', node.silverIntensity);
         this._shaderManager.setUniform('u_silverSpread', node.silverSpread);
@@ -1983,6 +2192,7 @@ export class Renderer {
         gl.viewport(0, 0, width, height);
 
         this._sceneFBO.resize(width, height);
+        this._sceneDepthFBO.resize(width, height);
         this._gBufferFBO.resize(width, height);
         this._ssaoFBO.resize(width, height);
         this._ssaoBlurFBO.resize(width, height);
@@ -2037,6 +2247,10 @@ export class Renderer {
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         if (this._thumbnailMode) gl.clearColor(fwdCC[0], fwdCC[1], fwdCC[2], fwdCC[3] ?? 1);
 
+        // Sky background. Depth writes off: the sky renders at NDC z = w and interpolation error
+        // would write some pixels a hair below 1.0, breaking the "depth == 1.0 means sky" contract
+        // of the depth-reading passes (god rays, screen materials).
+        GLState.depthMask(false);
         const fwdAtmo = scene.skyAtmosphere;
         if (this._thumbnailMode) {
             // no background
@@ -2063,6 +2277,7 @@ export class Renderer {
             skyboxNode.skybox.mesh.draw();
             skyboxNode.skybox.texture.unbind();
         }
+        GLState.depthMask(true); // models below need depth writes again
 
         const transparentDrawQueue: ModelNode[] = [];
         const selectedNodes: ModelNode[] = [];
@@ -2093,6 +2308,10 @@ export class Renderer {
             if (!node.visible) continue;
             this._renderModel(node);
         }
+
+        // Snapshot the opaque depth for the post-processing passes (god rays, screen materials)
+        // that sample it after this pipeline finishes.
+        if (!this._thumbnailMode) this._copySceneDepth();
 
         // Sort transparent draw queue by distance to camera
         transparentDrawQueue.sort((a, b) => {
@@ -2141,6 +2360,15 @@ export class Renderer {
     }
 
     private _renderModel(node: ModelNode): void {
+        // Screen-mode custom materials are fullscreen camera passes (their program is linked against
+        // screen.vs); drawing a mesh with one would bind mismatched attributes. Skip with a warning.
+        if (node.model.material.type.startsWith('customScreen:')) {
+            if (!this._warnedScreenMaterialMeshes.has(node.id)) {
+                this._warnedScreenMaterialMeshes.add(node.id);
+                Logger.warn(`Model '${node.name}' uses a screen-space custom material; assign it to a camera's Screen-Space Materials list instead. The mesh is skipped.`);
+            }
+            return;
+        }
         if (!node.initialized)
             node.initializeModel();
 
@@ -2178,6 +2406,21 @@ export class Renderer {
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+
+        // Per-draw light-probe selection for forward-lit meshes: the probe whose volume contains THIS
+        // mesh supplies the env reflection cube (unit 7), so a mesh inside a probe volume reflects that
+        // probe and one outside falls back to the scene environment. Always re-set: a previous draw in
+        // the queue may have bound a different cube/flags. Skipped during probe capture (no feedback).
+        if (!this._capturing && this._currentScene &&
+            (shaderType === 'blinn_phong' || shaderType === 'blinn_phongSkinned' ||
+             shaderType === 'pbr' || shaderType === 'pbrSkinned' || shaderType.startsWith('custom:'))) {
+            const probe = this._currentScene.probeForPoint(node.worldPosition);
+            const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
+            const envCube = probeCube ?? this._currentScene.environmentMap;
+            this._shaderManager.setUniform('u_useEnvMap', envCube ? true : false);
+            this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
+            envCube?.bind(7);
+        }
 
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
@@ -2332,6 +2575,9 @@ export class Renderer {
     private _renderShadowCasters(models: Set<ModelNode>, lightSpace: mat4): void {
         let bound: 'shadowMap' | 'shadowMapSkinned' | null = null;
         for (const node of models) {
+            // LOD-hidden levels and user-hidden nodes must not cast shadows (user hides already force
+            // castShadow=false via the visible setter, but the LOD flag never touches the material).
+            if (!node.visible) continue;
             if (!node.model.material.config.castShadow || node.model.material.config.wireframe) continue;
             // Skip gizmo/overlay nodes from shadow casting
             if ((node as any).isGizmo) continue;
@@ -2543,6 +2789,10 @@ export class Renderer {
         // chromaticAberration
         this._chromaticAberrationPass();
 
+        // User-ordered screen-space custom materials from the active camera (still linear HDR,
+        // before the final exposure/ACES/sRGB resolve below).
+        this._screenMaterialsPass(scene);
+
         // Render to screen using default framebuffer
         this._sceneFBO.unbind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -2564,6 +2814,51 @@ export class Renderer {
         } else {
             // Editor Renderer-mode: blit one internal buffer instead of the composited image.
             this._blitDebugView();
+        }
+    }
+
+    /**
+     * Run the active camera's ordered screen-space custom materials as fullscreen passes, ping-ponging
+     * the compose buffers. Enters with the image in _compose_FBOs[1] (chromatic aberration's output)
+     * and guarantees it is back in _compose_FBOs[1] on exit (present/outline read from there). Passes
+     * run in linear HDR — the single exposure/ACES/sRGB resolve happens afterwards in 'present'.
+     * A material that failed to compile renders the magenta fallback (registered by ensureCustomShader).
+     */
+    private _screenMaterialsPass(scene: Scene): void {
+        const mats = scene.activeCamera?.screenMaterials;
+        if (!mats || mats.length === 0) return;
+
+        const sun = this._sunScreenInfo(scene);
+        let src = 1; // chromatic aberration left the image in _compose_FBOs[1]
+        for (const mat of mats) {
+            if (!(mat instanceof CustomMaterial) || mat.renderMode !== 'screen') continue;
+            ensureCustomShader(mat); // idempotent; magenta fallback under the key on compile error
+            const dst = 1 - src;
+            this._compose_FBOs[dst].bind();
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._shaderManager.bind(mat.type);
+            this._shaderManager.setUniform('u_screenTexture', 0);
+            this._compose_FBOs[src].colors[0].bind(0);
+            this._shaderManager.setUniform('u_depth', 1);
+            this._sceneDepthFBO.depth.bind(1);
+            this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
+            this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+            this._shaderManager.setUniform('u_sunDir', sun.dir);
+            this._shaderManager.setUniform('u_sunUV', sun.uv);
+            this._shaderManager.setUniform('u_sunVisible', sun.visible);
+            this._applyCustomMaterial(mat); // u_time, u_viewPos + user uniforms (samplers from unit 9 up)
+            this._screenQuad.draw();
+            src = dst;
+        }
+
+        // Present/outline read _compose_FBOs[1]; plain-copy back if an odd pass count ended in [0].
+        if (src === 0) {
+            this._compose_FBOs[1].bind();
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._shaderManager.bind('screen');
+            this._shaderManager.setUniform('u_screenTexture', 0);
+            this._compose_FBOs[0].colors[0].bind(0);
+            this._screenQuad.draw();
         }
     }
 

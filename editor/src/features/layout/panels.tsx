@@ -9,6 +9,7 @@ import UIInspector from '../uiInspector/UIInspector';
 import SkeletonTree from '../animation/SkeletonTree';
 import StateMachineEditor from '../animation/StateMachineEditor';
 import TerrainMaterialInspector from '../terrainMaterials/TerrainMaterialInspector';
+import MeshInspector from '../meshes/MeshInspector';
 import PropertyEditor from '../nodeInspector/propertyEditors/PropertyEditor';
 import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor';
 import ScriptEditor from '../nodeInspector/scriptEditor/ScriptEditor';
@@ -85,6 +86,13 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   // carries the composite terrain material.
   if (editorMode === 'terrainMaterial') return <SidePanel><TerrainMaterialInspector node={editingTerrainMaterialNode} /></SidePanel>;
   if (editorMode === 'material') return <SidePanel><MaterialPanel /></SidePanel>;
+  // Mesh mode keeps the normal node inspector below the mesh-level controls (LOD levels + cull).
+  if (editorMode === 'mesh') return (
+    <SidePanel>
+      <MeshInspector />
+      {node && <PropertyEditor node={node} readOnly={readOnly} />}
+    </SidePanel>
+  );
 
   return (
     <SidePanel>

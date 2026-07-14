@@ -275,7 +275,7 @@ export class Material {
         // blobs saved before the flag existed still reconstruct as a CustomMaterial instead of silently
         // downgrading to a base Material (which keeps the custom type and crashes the inspector).
         if (m.customMaterial ||
-            (typeof m.type === 'string' && (m.type.startsWith('custom:') || m.type.startsWith('customGeom:'))))
+            (typeof m.type === 'string' && (m.type.startsWith('custom:') || m.type.startsWith('customGeom:') || m.type.startsWith('customScreen:'))))
             return CustomMaterial.parse(m);
         const config = {
             side: m.config?.side,
@@ -341,8 +341,18 @@ export interface TerrainFoliageRule {
     name: string;
     /** Billboard albedo (TextureManager id). Unused for 'mesh'. */
     textureId?: string | null;
-    /** Model.serialize() JSON for 'mesh'. Unused for 'billboard'. */
+    /** Legacy single Model.serialize() JSON for 'mesh' (still honored). Superseded by `models`. */
     model?: any;
+    /** Editor-side link to the source mesh library asset (sync key). The engine ignores it. */
+    meshId?: string;
+    /** LOD0 as a flattened list of Model.serialize() JSON (one entry per sub-mesh, transforms baked). */
+    models?: any[];
+    /** Additional detail levels, ascending by the camera distance at which each takes over. */
+    lods?: { models: any[]; distance: number }[];
+    /** Optional impostor: past `distance`, instances draw as textured cross-quads (the farthest LOD). */
+    billboard?: { textureId: string; distance: number } | null;
+    /** Hide instances beyond this camera distance; 0/absent = the renderer's global foliage cull. */
+    cullDistance?: number;
     density?: number;
     minScale?: number;
     maxScale?: number;
@@ -433,10 +443,11 @@ export type CustomBaseType = 'basic' | 'blinn_phong' | 'pbr' | null;
 
 /**
  * Whether a custom material's fragment shader outputs a final lit color (forward, drawn in the forward
- * overlay with full lighting control) or writes G-buffer surface channels (deferred, lit by the engine's
- * deferred pass with SSAO/IBL). Governs both the assembled shader template and the render path.
+ * overlay with full lighting control), writes G-buffer surface channels (deferred, lit by the engine's
+ * deferred pass with SSAO/IBL), or is a fullscreen post-process pass (screen, run from the active
+ * camera's ordered screenMaterials list). Governs both the assembled shader template and the render path.
  */
-export type CustomRenderMode = 'forward' | 'deferred';
+export type CustomRenderMode = 'forward' | 'deferred' | 'screen';
 
 /** GLSL uniform types a user may declare — exactly the set `Shader.storeUniforms` can introspect (minus mat4, which is engine-owned). */
 export type CustomUniformType = 'float' | 'vec2' | 'vec3' | 'vec4' | 'int' | 'bool' | 'sampler2D' | 'samplerCube';
@@ -505,7 +516,8 @@ export class CustomMaterial extends Material {
     public refreshType(): void {
         const sig = this.renderMode + '|' + (this.baseType ?? '') + '|' + this.fragmentSource + '|' +
             this.uniforms.map(u => u.name + ':' + u.type).join(',');
-        this.type = ((this.renderMode === 'deferred' ? 'customGeom:' : 'custom:') + cyrb53(sig)) as any;
+        this.type = ((this.renderMode === 'deferred' ? 'customGeom:' :
+            this.renderMode === 'screen' ? 'customScreen:' : 'custom:') + cyrb53(sig)) as any;
     }
 
     public serialize(): any {
@@ -537,7 +549,7 @@ export class CustomMaterial extends Material {
             transparent: m.config?.transparent,
             castShadow: m.config?.castShadow,
         });
-        cm.renderMode = m.renderMode === 'deferred' ? 'deferred' : 'forward';
+        cm.renderMode = m.renderMode === 'deferred' ? 'deferred' : m.renderMode === 'screen' ? 'screen' : 'forward';
         cm.baseType = m.baseType ?? null;
         cm.fragmentSource = m.fragmentSource ?? '';
         cm.uniforms = Array.isArray(m.uniforms)

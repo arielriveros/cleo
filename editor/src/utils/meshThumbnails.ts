@@ -3,7 +3,8 @@ import { createMeshPreviewScene } from '../features/demoScene/createMeshPreviewS
 import { createMaterialPreviewScene } from '../features/demoScene/createMaterialPreviewScene';
 import { fitDistance, MATERIAL_SPHERE_RADIUS } from '../features/demoScene/previewFraming';
 import type { MaterialAsset } from './materials';
-import { MeshAsset, instantiateMeshAsset } from './meshes';
+import { MeshAsset } from './meshes';
+import { parseByType, regenerateIds } from './nodeSubtree';
 import { TerrainMaterialAsset, parseTerrainMaterialAsset } from './terrainMaterials';
 
 const THUMB_SIZE = 256;
@@ -247,12 +248,16 @@ export async function renderMaterialAssetThumbnail(engine: CleoEngine, asset: Ma
 }
 
 /**
- * Re-render a saved MeshAsset's preview. The subtree is instantiated into a throwaway holder (which also
- * restores its embedded textures) and framed exactly as it was on import.
+ * Re-render a saved MeshAsset's preview. Only the base level (LOD0) is instantiated — directly from its
+ * nodeJson, never via instantiateMeshAsset, so no LodGroupNode ends up auto-swapping levels inside a
+ * throwaway thumbnail scene.
  */
 export async function renderMeshAssetThumbnail(engine: CleoEngine, asset: MeshAsset): Promise<string> {
+  restoreEmbeddedTextures(asset.textures); // legacy embedded-texture assets
   const holder = new Node('__thumb');
-  instantiateMeshAsset(asset, holder);
+  const clone = JSON.parse(JSON.stringify(asset.nodeJson));
+  regenerateIds(clone, new Map());
+  parseByType(holder, clone);
   const root = holder.children[0];
   if (!root) return '';
   return renderMeshThumbnail(engine, root); // reparents `root` into its own preview scene
