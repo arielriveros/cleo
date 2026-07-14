@@ -49,6 +49,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   const {
     eventEmitter, assetsLoaded, isSceneReady,
     materials, terrainMaterials, templates, meshes,
+    sceneList,
   } = engine
 
   const [vfs, setVfs] = useState<VfsIndex>(EMPTY_VFS)
@@ -70,13 +71,14 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [eventEmitter])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, meshes, textureIds }),
-    [materials, terrainMaterials, templates, meshes, textureIds],
+    () => ({ materials, terrainMaterials, templates, meshes, scenes: sceneList, textureIds }),
+    [materials, terrainMaterials, templates, meshes, sceneList, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
     materials, terrainMaterials, templates, meshes,
+    scenes: sceneList,
     addMaterial: engine.addMaterial,
     updateMaterial: engine.updateMaterial,
     removeMaterial: engine.removeMaterial,
@@ -89,6 +91,12 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addMesh: engine.addMesh,
     updateMesh: engine.updateMesh,
     removeMesh: engine.removeMesh,
+    createScene: engine.createScene,
+    renameScene: engine.renameScene,
+    deleteScene: engine.deleteScene,
+    duplicateScene: engine.duplicateScene,
+    openScene: engine.openScene,
+    setMainScene: engine.setMainScene,
     enterMaterialEditor: engine.enterMaterialEditor,
     enterTerrainMaterialEditor: engine.enterTerrainMaterialEditor,
     enterTemplateEditor: engine.enterTemplateEditor,

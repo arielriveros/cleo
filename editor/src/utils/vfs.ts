@@ -15,13 +15,14 @@ import type { MeshAsset } from './meshes'
 // a virtual extension (.mat/.tmat/.tpl/.mesh); textures keep their real image extension. Path rules match
 // SVAR's own FileTree.normalizeFile: the extension is everything after the LAST dot.
 
-export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'mesh'
+export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'mesh' | 'scene'
 
 export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
   material: '.mat',
   terrainMaterial: '.tmat',
   template: '.tpl',
   mesh: '.mesh',
+  scene: '.scene',
 }
 
 export const KIND_LABEL: Record<AssetKind, string> = {
@@ -30,6 +31,7 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   terrainMaterial: 'terrain material',
   template: 'template',
   mesh: 'mesh',
+  scene: 'scene',
 }
 
 export type VfsEntry = {
@@ -55,6 +57,7 @@ export type LibSnapshot = {
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
   meshes: MeshAsset[]
+  scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
   textureIds: string[]
 }
 
@@ -332,6 +335,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const m of libs.terrainMaterials) visit('terrainMaterial', m.id, m.name)
   for (const t of libs.templates) visit('template', t.id, t.name)
   for (const m of libs.meshes) visit('mesh', m.id, m.name)
+  for (const s of libs.scenes) visit('scene', s.id, s.name)
   for (const id of libs.textureIds) visit('texture', id, id)
 
   // Entries whose asset wasn't visited: either a ghost (asset deleted behind our back) or an asset whose
@@ -394,6 +398,7 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const m of libs.terrainMaterials) check('terrainMaterial', m.id, m.name)
   for (const t of libs.templates) check('template', t.id, t.name)
   for (const m of libs.meshes) check('mesh', m.id, m.name)
+  for (const s of libs.scenes) check('scene', s.id, s.name)
   for (const id of libs.textureIds) check('texture', id, id)
 
   return out
@@ -426,6 +431,7 @@ export function buildFileManagerData(vfs: VfsIndex, libs: LibSnapshot): FmEntity
     terrainMaterial: new Set(libs.terrainMaterials.map(m => m.id)),
     template: new Set(libs.templates.map(t => t.id)),
     mesh: new Set(libs.meshes.map(m => m.id)),
+    scene: new Set(libs.scenes.map(s => s.id)),
     texture: new Set(libs.textureIds),
   }
 

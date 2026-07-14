@@ -82,9 +82,14 @@ export type PendingAnimationImportView = {
 // The user's decision from the animation-import modal: which clips to add (by index).
 export type AnimationImportDecision = { include: boolean[] };
 import { buildGameData } from "./publish/buildGameData";
-import { loadProject, applyGameData, saveProject, ProjectPrefs } from "../utils/projectStorage";
+import { applyGameData, ProjectPrefs } from "../utils/projectStorage";
+import {
+  ProjectMeta, SceneMeta, loadProjectMeta, saveProjectMeta, loadSceneData, saveSceneData,
+  deleteSceneData, migrateLegacyProject, createFreshProjectMeta,
+} from "../utils/sceneStorage";
 import { idbGet, idbSet } from "../utils/idb";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf } from "../utils/textureStore";
+import { collectReferencedMaterialIds, collectReferencedMeshIds, collectReferencedTemplateIds, collectReferencedTerrainMaterialIds } from "../utils/references";
 import { saveToStorage } from "../workers/workerClient";
 import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
@@ -343,6 +348,23 @@ const EngineContext = createContext<{
   // Project persistence
   saveProject: () => void;
   savingState: SavingState;
+  replaceProjectMeta: (meta: ProjectMeta) => Promise<void>;
+  // Multi-scene project
+  sceneList: SceneMeta[];
+  mainSceneId: string;
+  openSceneId: string;
+  mainDirty: boolean;
+  /** Open a scene asset in the Main tab (prompts Save/Discard/Cancel when the current scene is dirty). */
+  openScene: (sceneId: string) => Promise<boolean>;
+  createScene: (name?: string) => Promise<string>;
+  renameScene: (sceneId: string, name: string) => void;
+  /** Returns null on success, or a human-readable reason the scene cannot be deleted. */
+  deleteScene: (sceneId: string) => Promise<string | null>;
+  duplicateScene: (sceneId: string) => Promise<string | null>;
+  setMainScene: (sceneId: string) => void;
+  // Unsaved-scene confirm dialog (promise parked by openScene, resolved by UnsavedSceneModal)
+  pendingSceneConfirm: { sceneName: string } | null;
+  resolveSceneConfirm: (decision: 'save' | 'discard' | 'cancel') => void;
   }>({
     instance: null,
     editorScene: new Scene(),
@@ -434,6 +456,19 @@ const EngineContext = createContext<{
     resolveAnimationImport: () => {},
     saveProject: () => {},
     savingState: 'idle',
+    replaceProjectMeta: async () => {},
+    sceneList: [],
+    mainSceneId: '',
+    openSceneId: '',
+    mainDirty: false,
+    openScene: async () => false,
+    createScene: async () => '',
+    renameScene: () => {},
+    deleteScene: async () => null,
+    duplicateScene: async () => null,
+    setMainScene: () => {},
+    pendingSceneConfirm: null,
+    resolveSceneConfirm: () => {},
   });
   
   // Create a custom hook to access the engine and scene from anywhere
@@ -468,6 +503,23 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [savingState, setSavingState] = useState<SavingState>('idle');
   const dimensionRef = useRef<'2D' | '3D'>('3D'); // the Main tab's dimension (template tabs are always 3D)
   const pendingPrefsRef = useRef<ProjectPrefs | null>(null);
+
+  // Multi-scene project state. projectMetaRef is the authoritative copy (scene list + main/open ids);
+  // the useState mirrors exist so the Assets explorer and MenuBar re-render when it changes. The Main
+  // tab always shows the scene identified by openSceneId — its blob lives at 'cleo_scene:<id>'.
+  const projectMetaRef = useRef<ProjectMeta | null>(null);
+  const [sceneList, setSceneList] = useState<SceneMeta[]>([]);
+  const [mainSceneId, setMainSceneIdState] = useState<string>('');
+  const [openSceneId, setOpenSceneIdState] = useState<string>('');
+  const openSceneIdRef = useRef<string>('');
+  const scenesLoadedRef = useRef(false);
+  // Unsaved-changes tracking for the Main (game) scene — the per-tab dirtyTabs mechanism only covers
+  // library tabs. Ref mirror lets async flows (openScene) read the current value without a re-render.
+  const [mainDirty, setMainDirty] = useState(false);
+  const mainDirtyRef = useRef(false);
+  useEffect(() => { mainDirtyRef.current = mainDirty; }, [mainDirty]);
+  const isPlayModeRef = useRef(false);
+  useEffect(() => { isPlayModeRef.current = isPlayMode; }, [isPlayMode]);
   const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null });
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
@@ -584,14 +636,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const updateMesh = (id: string, m: MeshAsset) => setMeshes(prev => prev.map(x => x.id === id ? m : x));
 
-  // True once all four IndexedDB-backed libraries have finished their initial read. The asset explorer's
-  // path index must not prune entries before this — the arrays start empty, and a pruning pass against an
-  // empty library would drop every folder assignment the user has made.
+  // True once all IndexedDB-backed libraries (and the project's scene list) have finished their initial
+  // read. The asset explorer's path index must not prune entries before this — the arrays start empty,
+  // and a pruning pass against an empty library would drop every folder assignment the user has made.
   const [assetsLoaded, setAssetsLoaded] = useState(false);
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && meshesLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && meshesLoadedRef.current && scenesLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -656,6 +708,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const r = pendingAnimResolverRef.current;
     pendingAnimResolverRef.current = null;
     setPendingAnimationImport(null);
+    if (r) r(decision);
+  };
+
+  // Unsaved-scene confirm dialog — same "park then resolve a promise" pattern as the import modals.
+  // openScene parks here when the current scene has unsaved edits; UnsavedSceneModal resolves.
+  const [pendingSceneConfirm, setPendingSceneConfirm] = useState<{ sceneName: string } | null>(null);
+  const sceneConfirmResolverRef = useRef<((d: 'save' | 'discard' | 'cancel') => void) | null>(null);
+  const confirmUnsavedScene = (sceneName: string): Promise<'save' | 'discard' | 'cancel'> =>
+    new Promise(resolve => {
+      sceneConfirmResolverRef.current = resolve;
+      setPendingSceneConfirm({ sceneName });
+    });
+  const resolveSceneConfirm = (decision: 'save' | 'discard' | 'cancel') => {
+    const r = sceneConfirmResolverRef.current;
+    sceneConfirmResolverRef.current = null;
+    setPendingSceneConfirm(null);
     if (r) r(decision);
   };
 
@@ -1817,7 +1885,74 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return () => { emitter.off('SCENE_CHANGED', mark); };
   }, []);
 
-  const saveProjectToStorage = async () => {
+  // Update the project meta (authoritative ref + reactive mirrors) and persist it.
+  const updateProjectMeta = async (mutate: (m: ProjectMeta) => ProjectMeta): Promise<void> => {
+    const current = projectMetaRef.current;
+    if (!current) return;
+    const next = mutate(current);
+    projectMetaRef.current = next;
+    setSceneList(next.scenes);
+    setMainSceneIdState(next.mainSceneId);
+    setOpenSceneIdState(next.openSceneId);
+    openSceneIdRef.current = next.openSceneId;
+    try { await saveProjectMeta(next); } catch (e) { console.warn('Failed to persist project meta:', e); }
+  };
+
+  const replaceProjectMeta = async (meta: ProjectMeta): Promise<void> => {
+    const scenes = meta.scenes.length ? meta.scenes : [{ id: meta.mainSceneId, name: 'Main', updatedAt: Date.now() }];
+    const next: ProjectMeta = {
+      ...meta,
+      scenes,
+      mainSceneId: scenes.some(s => s.id === meta.mainSceneId) ? meta.mainSceneId : scenes[0].id,
+      openSceneId: scenes.some(s => s.id === meta.openSceneId) ? meta.openSceneId : scenes[0].id,
+    };
+    projectMetaRef.current = next;
+    setSceneList(next.scenes);
+    setMainSceneIdState(next.mainSceneId);
+    setOpenSceneIdState(next.openSceneId);
+    openSceneIdRef.current = next.openSceneId;
+    try { await saveProjectMeta(next); } catch (e) { console.warn('Failed to persist imported project meta:', e); }
+  };
+
+  /** Serialize the current (open) scene and write its blob + updated meta. The core of "Save". */
+  const saveCurrentScene = async (): Promise<boolean> => {
+    const sceneId = openSceneIdRef.current;
+    if (!sceneId) return false;
+    try {
+      const gameData = await buildGameData({
+        scene: editorSceneRef.current,
+        scripts: scriptsRef.current,
+        bodies: bodiesRef.current,
+        triggers: triggersRef.current,
+        ui: uiStateRef.current,
+        settings: instanceRef.current?.renderer.getRenderSettings(),
+        // Texture payloads live in the texture store; scene blobs never embed them.
+        useCache: true,
+      });
+      const now = Date.now();
+      const refs = {
+        materialIds: Array.from(collectReferencedMaterialIds(editorSceneRef.current, meshes)),
+        meshIds: Array.from(collectReferencedMeshIds(editorSceneRef.current)),
+        templateIds: Array.from(collectReferencedTemplateIds(editorSceneRef.current)),
+        terrainMaterialIds: Array.from(collectReferencedTerrainMaterialIds(editorSceneRef.current)),
+        textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, meshes)),
+      };
+      await saveSceneData(sceneId, { ...gameData, savedAt: now });
+      await updateProjectMeta(m => ({
+        ...m,
+        prefs: { dimension: dimensionRef.current, selectedNode },
+        scenes: m.scenes.map(s => s.id === sceneId ? { ...s, updatedAt: now, refs } : s),
+      }));
+      setMainDirty(false);
+      mainDirtyRef.current = false;
+      return true;
+    } catch (e: any) {
+      Logger.error(`Failed to save scene: ${e?.message || e}`, 'Editor');
+      return false;
+    }
+  };
+
+  const saveProjectToStorage = async (): Promise<boolean> => {
     setSavingState('saving');
     // Indeterminate: serialize + IndexedDB write is one opaque operation, with no honest fraction to show.
     // The Save button keeps its own inline state; this puts it in the shared place alongside everything else.
@@ -1829,33 +1964,189 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     try {
       // Race against a timeout as a defensive backstop so the UI never gets stuck "saving".
       const ok = await Promise.race<boolean>([
-        saveProject({
-          scene: editorSceneRef.current,
-          scripts: scriptsRef.current,
-          bodies: bodiesRef.current,
-          triggers: triggersRef.current,
-          ui: uiStateRef.current,
-          settings: instanceRef.current?.renderer.getRenderSettings(),
-          prefs: { dimension: dimensionRef.current, selectedNode },
-        }),
+        saveCurrentScene(),
         new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('Save timed out')), 15000)),
       ]);
       if (ok) {
-        Logger.info('Project saved', 'Editor');
+        Logger.info('Scene saved', 'Editor');
         setSavingState('saved');
         task.setStep(0, { status: 'done', detail: 'Saved' });
       } else {
         setSavingState('error');
         task.setStep(0, { status: 'failed', error: 'Save failed' });
       }
+      return ok;
     } catch (e: any) {
       Logger.error('Save failed: ' + (e?.message || e), 'Editor');
       setSavingState('error');
       task.setStep(0, { status: 'failed', error: String(e?.message || e) });
+      return false;
     } finally {
       task.finish();
       setTimeout(() => setSavingState('idle'), 2000);
     }
+  };
+
+  // ---- Scene assets (multi-scene project) ------------------------------------------------------
+
+  /** A name not already used by another scene, suffixing " (2)", " (3)", … */
+  const uniqueSceneName = (base: string, scenes: SceneMeta[]): string => {
+    const taken = new Set(scenes.map(s => s.name));
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(`${base} (${n})`)) n++;
+    return `${base} (${n})`;
+  };
+
+  /** Serialized blob for a brand-new empty scene (default light; the editor camera is stripped). */
+  const buildEmptySceneData = async () => {
+    const tmp = new Scene();
+    createEmptyScene(tmp);
+    return buildGameData({
+      scene: tmp,
+      scripts: new Map(),
+      bodies: new Map(),
+      triggers: new Map(),
+      ui: { version: 1, elements: [] },
+      useCache: true,
+    });
+  };
+
+  /** Create a new empty scene asset. Does not open it. Returns the new scene id. */
+  const createScene = async (name?: string): Promise<string> => {
+    const meta = projectMetaRef.current;
+    if (!meta) throw new Error('Project not loaded yet');
+    const id = cryptoRandomId();
+    const sceneName = uniqueSceneName(name?.trim() || 'New Scene', meta.scenes);
+    const data = await buildEmptySceneData();
+    await saveSceneData(id, { ...data, savedAt: Date.now() });
+    await updateProjectMeta(m => ({ ...m, scenes: [...m.scenes, { id, name: sceneName, updatedAt: Date.now() }] }));
+    Logger.info(`Scene "${sceneName}" created`, 'Editor');
+    return id;
+  };
+
+  const renameScene = (sceneId: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    void updateProjectMeta(m => ({
+      ...m,
+      scenes: m.scenes.map(s => s.id === sceneId ? { ...s, name: trimmed } : s),
+    }));
+  };
+
+  const setMainScene = (sceneId: string) => {
+    const meta = projectMetaRef.current;
+    if (!meta || !meta.scenes.some(s => s.id === sceneId)) return;
+    void updateProjectMeta(m => ({ ...m, mainSceneId: sceneId }));
+  };
+
+  /** Delete a scene asset. Returns null on success, or the reason it is not allowed. */
+  const deleteScene = async (sceneId: string): Promise<string | null> => {
+    const meta = projectMetaRef.current;
+    if (!meta) return 'Project not loaded yet';
+    const entry = meta.scenes.find(s => s.id === sceneId);
+    if (!entry) return null; // already gone
+    if (sceneId === meta.mainSceneId) return 'This is the main scene. Set another scene as main first.';
+    if (sceneId === openSceneIdRef.current) return 'This scene is currently open. Open another scene first.';
+    await updateProjectMeta(m => ({ ...m, scenes: m.scenes.filter(s => s.id !== sceneId) }));
+    try { await deleteSceneData(sceneId); } catch { /* the meta entry is gone; a stale blob is harmless */ }
+    return null;
+  };
+
+  /** Duplicate a scene asset (fresh node ids so scripts publish per-node without collisions). */
+  const duplicateScene = async (sceneId: string): Promise<string | null> => {
+    const meta = projectMetaRef.current;
+    if (!meta) return null;
+    const entry = meta.scenes.find(s => s.id === sceneId);
+    if (!entry) return null;
+    // Duplicating the open scene with unsaved edits should copy what the user sees — save first.
+    let data = sceneId === openSceneIdRef.current
+      ? (await saveCurrentScene(), await loadSceneData(sceneId))
+      : await loadSceneData(sceneId);
+    if (!data) data = { ...(await buildEmptySceneData()), savedAt: Date.now() };
+    const clone = JSON.parse(JSON.stringify(data));
+    regenerateIds(clone.scene, new Map());
+    const id = cryptoRandomId();
+    const name = uniqueSceneName(entry.name, meta.scenes);
+    await saveSceneData(id, { ...clone, savedAt: Date.now() });
+    await updateProjectMeta(m => ({ ...m, scenes: [...m.scenes, { id, name, updatedAt: Date.now() }] }));
+    return id;
+  };
+
+  /**
+   * Open a scene asset in the Main tab. Only one scene is ever open: the current scene's editor
+   * state (scripts/bodies/triggers/UI/selection) is torn down and the target's blob is parsed into
+   * the same live Scene object (exactly the Import path, which is proven on a started scene).
+   */
+  const openScene = async (sceneId: string): Promise<boolean> => {
+    const meta = projectMetaRef.current;
+    if (!meta) return false;
+    const entry = meta.scenes.find(s => s.id === sceneId);
+    if (!entry) return false;
+    if (sceneId === openSceneIdRef.current) { setActiveTabId('main'); return true; }
+
+    // Leave play mode first — play snapshots the open scene, and swapping it mid-run would leave the
+    // engine driving a scene the editor no longer shows.
+    if (startedRef.current) stopPlay();
+
+    if (mainDirtyRef.current) {
+      const current = meta.scenes.find(s => s.id === openSceneIdRef.current);
+      const decision = await confirmUnsavedScene(current?.name ?? 'current scene');
+      if (decision === 'cancel') return false;
+      if (decision === 'save' && !(await saveProjectToStorage())) return false;
+    }
+
+    // Load the target before tearing anything down, so a failed read aborts cleanly.
+    let data = await loadSceneData(sceneId);
+    if (!data) {
+      // A scene whose blob was never written (e.g. fresh "Main" before its first save): open it empty.
+      data = { ...(await buildEmptySceneData()), savedAt: Date.now() };
+    }
+
+    setActiveTabId('main');
+    // Animation tabs cloned their model out of the outgoing scene; their write-back target is about
+    // to disappear, so close them (batched — repeated removeTabById calls would each see stale tabs).
+    const staleTabs = tabs.filter(t => t.kind === 'animation' && tabRuntimeRef.current.get(t.id)?.sourceScene === editorSceneRef.current);
+    if (staleTabs.length) {
+      for (const t of staleTabs) {
+        tabRuntimeRef.current.get(t.id)?.helperTerrain?.dispose();
+        tabRuntimeRef.current.delete(t.id);
+      }
+      const staleIds = new Set(staleTabs.map(t => t.id));
+      setTabs(prev => prev.filter(t => !staleIds.has(t.id)));
+      setDirtyTabs(prev => {
+        const next = { ...prev };
+        for (const id of staleIds) delete next[id];
+        return next;
+      });
+    }
+
+    // Tear down per-scene editor state.
+    scriptsRef.current.clear();
+    bodiesRef.current.clear();
+    triggersRef.current.clear();
+    setSelectedNode(null);
+    eventEmitter.current.emit('SELECT_NODE', null);
+
+    // Parse the target into the live scene. Suppress dirty marking for the flurry of SCENE_CHANGED
+    // this emits; re-armed below once the helper reconciler settles.
+    dirtyArmedRef.current = false;
+    const scene = editorSceneRef.current;
+    scene.environmentMap = null; // parse only sets it when the JSON has one — don't leak the old scene's
+    applyGameData(data, { ...engineMaps(), scene, setUI: setUiState, renderer: instanceRef.current?.renderer });
+    ensureEditorCamera(scene);
+    showBindPoseForSkinnedModels(scene);
+
+    await updateProjectMeta(m => ({ ...m, openSceneId: sceneId }));
+    setMainDirty(false);
+    mainDirtyRef.current = false;
+    eventEmitter.current.emit('TEXTURES_CHANGED');
+    eventEmitter.current.emit('SCENE_CHANGED');
+    // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls.
+    eventEmitter.current.emit('CHANGE_DIMENSION', dimensionRef.current);
+    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
+    Logger.info(`Opened scene "${entry.name}"`, 'Editor');
+    return true;
   };
 
   // Startup: restore the saved project if present, otherwise open a blank scene.
@@ -1870,15 +2161,48 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       Logger.error(`Failed to load textures: ${e}`, 'Editor');
     }
 
-    const project = await loadProject();
-    if (project) {
-      applyGameData(project, { ...engineMaps(), scene: editorSceneRef.current, setUI: setUiState, renderer: instanceRef.current?.renderer });
-      ensureEditorCamera(editorSceneRef.current);
-      pendingPrefsRef.current = project.prefs ?? null;
-    } else {
+    // Multi-scene project: load the meta (migrating a legacy single-scene 'cleo_project' blob once),
+    // then parse the last-open scene's blob. A fresh install gets a meta with one empty "Main" scene
+    // whose blob is written on first save — the "a project always has ≥1 scene" invariant.
+    let meta = await loadProjectMeta();
+    if (!meta) meta = await migrateLegacyProject();
+    if (!meta) {
+      meta = createFreshProjectMeta();
+      try { await saveProjectMeta(meta); } catch (e) { console.warn('Failed to persist fresh project meta:', e); }
       createEmptyScene(editorSceneRef.current);
       pendingPrefsRef.current = null;
+    } else {
+      // Prefer the last-open scene; fall back to main, then to any scene that still has a blob.
+      let targetId = meta.openSceneId;
+      let data = await loadSceneData(targetId);
+      if (!data && targetId !== meta.mainSceneId) {
+        targetId = meta.mainSceneId;
+        data = await loadSceneData(targetId);
+      }
+      if (!data) {
+        for (const s of meta.scenes) {
+          if (s.id === targetId) continue;
+          const candidate = await loadSceneData(s.id);
+          if (candidate) { targetId = s.id; data = candidate; break; }
+        }
+      }
+      if (data) {
+        applyGameData(data, { ...engineMaps(), scene: editorSceneRef.current, setUI: setUiState, renderer: instanceRef.current?.renderer });
+        ensureEditorCamera(editorSceneRef.current);
+      } else {
+        // No scene has a saved blob yet (fresh meta, or blobs lost) — open the target empty.
+        createEmptyScene(editorSceneRef.current);
+      }
+      if (targetId !== meta.openSceneId) meta = { ...meta, openSceneId: targetId };
+      try { await saveProjectMeta(meta); } catch { /* meta re-persists on next save */ }
+      pendingPrefsRef.current = meta.prefs ?? null;
     }
+    projectMetaRef.current = meta;
+    setSceneList(meta.scenes);
+    setMainSceneIdState(meta.mainSceneId);
+    setOpenSceneIdState(meta.openSceneId);
+    openSceneIdRef.current = meta.openSceneId;
+    scenesLoadedRef.current = true;
   };
 
   useEffect(() => {
@@ -2374,8 +2698,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       removeAnimationClip,
       pendingAnimationImport,
       resolveAnimationImport,
+      replaceProjectMeta,
       saveProject: saveProjectToStorage,
       savingState,
+      sceneList,
+      mainSceneId,
+      openSceneId,
+      mainDirty,
+      openScene,
+      createScene,
+      renameScene,
+      deleteScene,
+      duplicateScene,
+      setMainScene,
+      pendingSceneConfirm,
+      resolveSceneConfirm,
     }}>
     {props.children}
   </EngineContext.Provider>

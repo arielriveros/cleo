@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Logger } from "cleo";
 import { useCleoEngine } from "./EngineContext";
+import { useVfs } from "./assets/VfsContext";
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData } from "../utils/projectStorage";
+import { buildProjectConfig, parseProjectConfig } from "../utils/projectConfig";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import { parseJsonFile, stringifyJson } from "../workers/workerClient";
 import { startTask } from "./progress/progressStore";
@@ -43,7 +45,8 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, saveActiveMesh, savingState, eventEmitter: eventEmitter } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, saveActiveMesh, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta } = useCleoEngine();
+  const { vfs, setVfs } = useVfs();
   // Current renderer look (post/SSAO/motion-blur/clear color) — embedded in exports/publishes so the
   // standalone game reproduces what the editor is showing instead of falling back to renderer defaults.
   const renderSettings = () => instance?.renderer.getRenderSettings();
@@ -63,6 +66,7 @@ export default function MenuBar() {
   const [publishing, setPublishing] = useState(false);
   const [embedAssets, setEmbedAssets] = useState(true);
   const publishRef = useRef<HTMLDivElement>(null);
+  const configImportRef = useRef<HTMLInputElement>(null);
   const desktop = isDesktop();
 
   useEffect(() => {
@@ -94,6 +98,51 @@ export default function MenuBar() {
 
   // Save the whole project (scene + scripts/bodies/triggers + UI + editor prefs) to local storage.
   const onSave = () => saveProject();
+
+  const onExportConfig = async () => {
+    const task = startTask({ title: 'Exporting config', steps: ['Serializing configuration', 'Writing file'] });
+    try {
+      task.setStep(0, { status: 'running', detail: 'Building project config' });
+      const json = buildProjectConfig(vfs, {
+        version: 2,
+        mainSceneId,
+        openSceneId,
+        scenes: sceneList,
+      });
+      task.setStep(0, { status: 'done' });
+
+      task.setStep(1, { status: 'running', detail: 'Encoding project-config.json' });
+      const bytes = await stringifyJson(json);
+      const blob = new Blob([bytes], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'project-config.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      task.setStep(1, { status: 'done', detail: 'Downloaded project-config.json' });
+    } catch (e: any) {
+      const message = String(e?.message ?? e);
+      Logger.error(`Config export failed: ${message}`, 'Editor');
+      task.setStep(1, { status: 'failed', error: message });
+    } finally {
+      task.finish();
+    }
+  };
+
+  const onImportConfig = async (filelist: FileList | null) => {
+    if (!filelist || !filelist.length) return;
+    try {
+      const raw = await parseJsonFile(filelist[0]);
+      const cfg = parseProjectConfig(raw);
+      if (!cfg) throw new Error('Invalid project config');
+      setVfs(cfg.vfs);
+      await replaceProjectMeta(cfg.project);
+      Logger.info('Imported project config', 'Editor');
+    } catch (err) {
+      Logger.error('Failed to import project config: ' + err, 'Editor');
+    }
+  };
 
   // Export the scene as a downloadable .json file (the former Save behavior).
   // The stringify runs in the worker and comes back as transferable bytes we wrap straight into a Blob.
@@ -232,6 +281,17 @@ export default function MenuBar() {
         <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the scene to a .json file' onClick={() => onExport()}>
           <ExportIcon /> Export
         </Button>
+        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the project configuration' onClick={onExportConfig}>
+          <ExportIcon /> Config
+        </Button>
+        <label
+          htmlFor='load-config-file'
+          title='Import a project configuration file'
+          className={cn(buttonVariants({ variant: 'subtle', size: 'sm' }), 'h-[25px] cursor-pointer', libEdit && 'opacity-60 pointer-events-none')}
+        >
+          <ImportIcon /> Config
+        </label>
+        <input className="hidden" type='file' accept='.json' id='load-config-file' name='file' ref={configImportRef} onChange={(e) => { onImportConfig(e.target.files); e.currentTarget.value = ''; }} />
         <div className='relative inline-block' ref={publishRef}>
           <Button
             variant='primary' size='sm' className='h-[25px]'

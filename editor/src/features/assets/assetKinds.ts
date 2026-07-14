@@ -3,6 +3,7 @@ import type { MaterialAsset } from '../../utils/materials'
 import type { TerrainMaterialAsset } from '../../utils/terrainMaterials'
 import type { Template } from '../../utils/templates'
 import type { MeshAsset } from '../../utils/meshes'
+import type { SceneMeta } from '../../utils/sceneStorage'
 import {
   renderMaterialAssetThumbnail, renderMeshAssetThumbnail, renderTerrainMaterialAssetThumbnail,
 } from '../../utils/meshThumbnails'
@@ -19,6 +20,7 @@ export type AssetDeps = {
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
   meshes: MeshAsset[]
+  scenes: SceneMeta[]
 
   addMaterial: (m: MaterialAsset) => void
   updateMaterial: (id: string, m: MaterialAsset) => void
@@ -32,6 +34,12 @@ export type AssetDeps = {
   addMesh: (m: MeshAsset) => void
   updateMesh: (id: string, m: MeshAsset) => void
   removeMesh: (id: string) => void
+  createScene: (name?: string) => Promise<string>
+  renameScene: (sceneId: string, name: string) => void
+  deleteScene: (sceneId: string) => Promise<string | null>
+  duplicateScene: (sceneId: string) => Promise<string | null>
+  openScene: (sceneId: string) => Promise<boolean>
+  setMainScene: (sceneId: string) => void
 
   enterMaterialEditor: (id?: string) => void
   enterTerrainMaterialEditor: (id?: string) => void
@@ -54,6 +62,7 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'terrainMaterial': return deps.terrainMaterials.find(m => m.id === id)
     case 'template': return deps.templates.find(t => t.id === id)
     case 'mesh': return deps.meshes.find(m => m.id === id)
+    case 'scene': return deps.scenes.find(s => s.id === id)
     case 'texture': return undefined
   }
 }
@@ -116,6 +125,11 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateMesh(id, { ...a, name: stem })
       break
     }
+    case 'scene': {
+      const a = deps.scenes.find(s => s.id === id)
+      if (a) deps.renameScene(id, stem)
+      break
+    }
     case 'texture':
       break
   }
@@ -128,6 +142,10 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'terrainMaterial': deps.removeTerrainMaterial(id); break
     case 'template': deps.removeTemplate(id); break
     case 'mesh': deps.removeMesh(id); break
+    case 'scene': {
+      void deps.deleteScene(id)
+      break
+    }
     case 'texture':
       TextureManager.Instance.removeTexture(id)
       // Drop the payload too, or the texture store keeps it forever. Only done for an explicit texture
@@ -168,6 +186,11 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       if (!a) return null
       deps.addMesh({ ...deepClone(a), id: newId, name: stem, materialIds: [...(a.materialIds ?? [])] })
       return newId
+    }
+    case 'scene': {
+      const a = deps.scenes.find(s => s.id === id)
+      if (!a) return null
+      return null
     }
     case 'texture': {
       const tm = TextureManager.Instance
@@ -219,6 +242,8 @@ export async function regenerateThumbnail(
       deps.updateMesh(id, { ...a, thumbnail })
       return true
     }
+    case 'scene':
+      return false
     case 'template':
     case 'texture':
       return false
@@ -237,6 +262,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'terrainMaterial': deps.enterTerrainMaterialEditor(id); return true
     case 'template': deps.enterTemplateEditor(id); return true
     case 'mesh': deps.enterMeshEditor(id); return true
+    case 'scene': void deps.openScene(id); return true
     default: return false
   }
 }
@@ -248,6 +274,7 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'terrainMaterial': return 'terrain layers painted with it are cleared'
     case 'template': return 'placed instances are unlinked and become normal nodes'
     case 'mesh': return 'placed copies stay in the scene'
+    case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials using it show no texture'
   }
 }
@@ -259,6 +286,7 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
     case 'template': return [['text/cleo-template', assetId]]
     case 'material': return [['text/cleo-material', assetId]]
     case 'terrainMaterial': return [['text/cleo-terrain-material', assetId]]
+    case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
     case 'texture': return [
       ['text/cleo-asset', JSON.stringify({ type: 'texture', id: assetId })],
       ['text/plain', assetId], // TextureInspector's fallback
@@ -298,6 +326,9 @@ const ICONS: Record<AssetKind | 'folder', string> = {
   ),
   mesh: svg('#4fc3d5',
     `<path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" fill="#1f7f8f" fill-opacity=".18"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/>`,
+  ),
+  scene: svg('#f2b84b',
+    `<path d="M4 19V5h16v14z" fill="#7f5a10" fill-opacity=".18"/><path d="M7 15l3-3 2 2 3-4 2 2"/>`,
   ),
   texture: svg('#9aa4b2',
     `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>`,
