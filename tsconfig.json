@@ -2,7 +2,11 @@
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
     "noImplicitAny": true,
-    "removeComments": true, 
+    // false (not the previous true) so JSDoc survives into dist/**/*.d.ts — Monaco's TypeScript worker
+    // reads it verbatim for hover/signature help on the whole `cleo` API (editor/.../scriptEditor/
+    // cleoTypes.ts loads that same declaration tree). The cost is a few KB of comment text left in the
+    // emitted cleo.js, negligible next to its existing multi-MB size (dominated by assimpjs.js).
+    "removeComments": false,
     "preserveConstEnums": true,
     "moduleResolution": "node",
     "module": "es6",

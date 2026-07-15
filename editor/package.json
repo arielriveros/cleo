@@ -32,6 +32,7 @@
     "dockview-react": "^7.0.2",
     "javascript-obfuscator": "^4.2.2",
     "jszip": "^3.10.1",
+    "monaco-editor": "^0.52.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tailwind-merge": "^3.6.0"
@@ -48,6 +49,7 @@
     "copy-webpack-plugin": "^13.0.1",
     "css-loader": "^6.9.0",
     "html-webpack-plugin": "^5.6.0",
+    "monaco-editor-webpack-plugin": "^7.1.1",
     "postcss": "^8.5.6",
     "postcss-loader": "^7.3.4",
     "style-loader": "^3.3.4",

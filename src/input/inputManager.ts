@@ -1,5 +1,6 @@
 import { vec2 } from "gl-matrix";
 import { KEYS } from "./keys";
+import { Logger } from "../core/logger";
 
 interface MouseInfo {
     buttons: {
@@ -157,7 +158,12 @@ export class InputManager {
         if (!keysInfo[event.code]) return;
         keysInfo[event.code].pressed = true;
         // dont call onPress if the key is not released
-        if (keysInfo[event.code].released) keysInfo[event.code].onPress();
+        // A script's onPress runs off the browser's keydown dispatch, outside every guard the engine
+        // wraps its own lifecycle handlers in — a throw here would otherwise escape to the page.
+        if (keysInfo[event.code].released) {
+            try { keysInfo[event.code].onPress(); }
+            catch (e) { Logger.error(`Error in registerKeyPress('${event.code}') callback: ${e}`, 'Script'); }
+        }
         keysInfo[event.code].released = false;
 
     }
@@ -196,7 +202,12 @@ export class InputManager {
         return InputManager._instance;
     }
 
+    /** Buttons/position/velocity/wheel this frame. `velocity`/`wheel` reset to 0 every frame — read them
+     *  in onUpdate, not once in onStart. Under pointer lock, `position` is a free-running virtual point
+     *  (there is no real cursor), and `velocity` is relative movement, not a delta of `position`. */
     public get mouse(): MouseInfo { return InputManager._mouseInfo; }
+    /** Every known key's live pressed/released state, keyed by `KeyboardEvent.code` (see keys.ts). Most
+     *  scripts want `isKeyPressed`/`registerKeyPress` instead of reading this directly. */
     public get keys(): KeysInfo { return InputManager._keysInfo; }
 
     public isMouseOverCanvas(): boolean {
@@ -215,37 +226,50 @@ export class InputManager {
                mouseY <= rect.bottom;
     }
 
+    /** True every frame the key is held — poll this in onUpdate for continuous movement (`isKeyPressed`
+     *  is `KeyboardEvent.code`, e.g. `'KeyW'`, `'Space'`, not the printed character). */
     public isKeyPressed(key: string): boolean {
         if (!InputManager._keysInfo[key]) return false;
         return InputManager._keysInfo[key].pressed;
     }
 
+    /** Stops the browser's default action for every handled key/mouse event (e.g. Space scrolling the
+     *  page) for the remainder of this session. */
     public preventDefault() {
         InputManager._prevetDefault = true;
     }
 
+    /** Calls `onPress` once on each press of `key` (edge-triggered — held-down does not repeat it; pair
+     *  with `isKeyPressed` for continuous movement instead). A throwing `onPress` is caught and logged,
+     *  not thrown to the page. */
     public registerKeyPress(key: string, onPress: () => void) {
         if (!InputManager._keysInfo[key]) return;
         InputManager._keysInfo[key].onPress = onPress;
     }
 
+    /** Cancels a callback registered with `registerKeyPress` for `key`. */
     public unregisterKeyPress(key: string) {
         if (!InputManager._keysInfo[key]) return;
         InputManager._keysInfo[key].onPress = () => {};
     }
 
     // Public API to control pointer lock
+    /** Allows `captureMouse`/a left click on the canvas to request pointer lock. Off by default. */
     public enableMouseCapture() {
         InputManager._mouseCaptureEnabled = true;
     }
+    /** Disallows pointer lock and releases it now, if currently captured. */
     public disableMouseCapture() {
         InputManager._mouseCaptureEnabled = false;
         try { (document as any).exitPointerLock?.(); } catch {}
         InputManager._mouseInfo.captured = false;
     }
+    /** Requests pointer lock on the canvas (mouse hidden, `mouse.velocity` becomes relative movement).
+     *  Browsers require a user gesture (click/keypress) in the same event to grant this. */
     public captureMouse() {
         try { (InputManager._canvas as any)?.requestPointerLock?.(); } catch {}
     }
+    /** Releases pointer lock, if currently captured. */
     public releaseMouse() {
         try { (document as any).exitPointerLock?.(); } catch {}
         InputManager._mouseInfo.captured = false;

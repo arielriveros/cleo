@@ -150,4 +150,13 @@ export class PhysicsSystem {
     this._scene = scene;
     scene.physics = this;
   }
+
+  /** Current gravity vector (m/s^2). Constructor-configured; this lets it change at runtime too. */
+  public get gravity(): [number, number, number] {
+    return this._world ? [this._world.gravity.x, this._world.gravity.y, this._world.gravity.z] : (this._gravity as [number, number, number]);
+  }
+  public set gravity(g: [number, number, number]) {
+    this._gravity = g;
+    this._world?.gravity.set(g[0], g[1], g[2]);
+  }
 }

@@ -25,7 +25,7 @@ export class CleoEngine {
   private _lastTimestamp: number = performance.now();
   private _timeSinceStart: number = 0;
   private _ready: boolean = false;
-  
+
   private _viewport!: HTMLElement;
   private _renderer: Renderer;
   private _physicsSystem: PhysicsSystem;
@@ -33,12 +33,18 @@ export class CleoEngine {
   private _scene!: Scene;
 
   private _paused: boolean = true;
-  
+
   public onUpdate: (delta: number, time: number) => void;
   public onPreInitialize: () => Promise<void>;
   public onPostInitialize: () => void;
 
   public static eventEmitter = new EventEmitter();
+
+  // The one engine running in this process — the editor reuses a single instance for both the edit-time
+  // viewport and Play mode, and a published build only ever constructs one. Lets a script-facing facade
+  // (Game, src/core/game.ts) reach the live engine without every caller threading it through by hand.
+  private static _instance: CleoEngine | null = null;
+  public static get instance(): CleoEngine | null { return CleoEngine._instance; }
 
   constructor(config?: CleoConfig) {
     this._renderer = new Renderer({ clearColor: config?.graphics?.clearColor,
@@ -54,6 +60,8 @@ export class CleoEngine {
     this.onUpdate = () => {};
     this.onPreInitialize = async () => {};
     this.onPostInitialize = () => {};
+
+    CleoEngine._instance = this;
   }
 
   private async _initialize(): Promise<void> {
@@ -144,4 +152,6 @@ export class CleoEngine {
   public get isPaused(): boolean { return this._paused; }
   public set isPaused(paused: boolean) { this._paused = paused; }
   public get physics(): PhysicsSystem { return this._physicsSystem; }
+  /** Milliseconds of unpaused game time since the engine started — the same clock onUpdate's `time` gets. */
+  public get timeSinceStart(): number { return this._timeSinceStart; }
 }

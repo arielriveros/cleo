@@ -4,6 +4,15 @@ import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 
+/** One scheduled `this.after`/`this.every` call. `interval === null` means one-shot. */
+interface ScheduledTimer {
+    node: Node;
+    remaining: number;
+    interval: number | null;
+    cb: () => void;
+    cancelled: boolean;
+}
+
 export class Scene {
     private _root: Node = new Node('root');
     private _nodes: Set<Node>;
@@ -14,6 +23,10 @@ export class Scene {
     private _landscapes: Set<LandscapeNode>;
     private _lodGroups: Set<LodGroupNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
+    // Built alongside _nodes so getNodesByName/getNodeById (called from scripts, sometimes per-frame)
+    // are an O(1) map lookup instead of a scan over every node in the scene.
+    private _nodesByName: Map<string, Node[]> = new Map();
+    private _nodesById: Map<string, Node> = new Map();
     private _skybox: SkyboxNode | null;
     private _volumetricClouds: VolumetricCloudsNode | null = null;
     private _skyAtmosphere: SkyAtmosphereNode | null = null;
@@ -32,6 +45,10 @@ export class Scene {
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
     private _numSpotlights: number;
+
+    // this.wait/this.after/this.every. Ticked once per Scene.update (not per node), gated the same as
+    // node.update so timers pause with the game; cancelled per-node on despawn (see Node.remove/removeChild).
+    private _timers: ScheduledTimer[] = [];
 
     constructor() {
         this._root.scene = this;
@@ -104,20 +121,71 @@ export class Scene {
     public update(delta: number, time: number, paused: boolean): void {
         try {
             this._root.updateTransforms();
+
+            if (this._hasStarted && !paused)
+                this._updateTimers(delta);
+
             for (const node of this._nodes) {
                 if (node instanceof LightNode) this._asignLightIndices();
-    
+
                 if (node.markForRemoval) {
                     this.removeNode(node);
                     continue;
                 }
-                
+
                 if (this._hasStarted && !paused)
                     node.update(delta, time);
             }
         } catch (e) {
             Logger.error(e);
         }
+    }
+
+    /** Backs `this.after(seconds, cb)`. Returns a function that cancels this one timer. */
+    public scheduleAfter(node: Node, seconds: number, cb: () => void): () => void {
+        const timer: ScheduledTimer = { node, remaining: Math.max(0, seconds), interval: null, cb, cancelled: false };
+        this._timers.push(timer);
+        return () => { timer.cancelled = true; };
+    }
+
+    /** Backs `this.every(seconds, cb)`. Returns a function that cancels this one repeat. */
+    public scheduleEvery(node: Node, seconds: number, cb: () => void): () => void {
+        // A period of 0 (or negative) would refire every tick forever; floor it to something sane instead
+        // of silently spinning the frame.
+        const timer: ScheduledTimer = { node, remaining: Math.max(0.0001, seconds), interval: Math.max(0.0001, seconds), cb, cancelled: false };
+        this._timers.push(timer);
+        return () => { timer.cancelled = true; };
+    }
+
+    /** Cancels every pending timer scheduled by `node` — called on despawn so a removed node's
+     *  this.after/this.every callbacks never fire against a node no longer in the scene. */
+    public cancelTimers(node: Node): void {
+        for (const timer of this._timers)
+            if (timer.node === node) timer.cancelled = true;
+    }
+
+    private _updateTimers(delta: number): void {
+        if (this._timers.length === 0) return;
+
+        const surviving: ScheduledTimer[] = [];
+        for (const timer of this._timers) {
+            if (timer.cancelled) continue;
+
+            timer.remaining -= delta;
+            if (timer.remaining > 0) { surviving.push(timer); continue; }
+
+            try { timer.cb(); }
+            catch (e) { Logger.error(`Error in a scheduled timer for node ${timer.node.name}: ${e}`, 'Script'); }
+
+            // The callback may have cancelled its own repeat (or the node may have despawned from
+            // inside it) — re-check before deciding whether it keeps its slot.
+            if (timer.cancelled) continue;
+            if (timer.interval !== null) {
+                timer.remaining += timer.interval;
+                surviving.push(timer);
+            }
+        }
+        this._timers = surviving;
     }
     
     private _breadthFirstTraversal(): void {
@@ -156,6 +224,8 @@ export class Scene {
         this._skybox = null;
         this._volumetricClouds = null;
         this._skyAtmosphere = null;
+        this._nodesByName = new Map();
+        this._nodesById = new Map();
         for (const node of this._nodes) {
             if (node instanceof LightNode)
                 this._lights.add(node);
@@ -177,35 +247,34 @@ export class Scene {
                 this._skyAtmosphere = node;
             if (node instanceof CameraNode)
                 this._cameras.add(node);
+
+            const byName = this._nodesByName.get(node.name);
+            if (byName) byName.push(node); else this._nodesByName.set(node.name, [node]);
+            this._nodesById.set(node.id, node);
         }
     }
- 
+
     public getNodesByName(name: string): Node[] {
         if (this._dirty)
             this._breadthFirstTraversal();
 
-        const nodes: Node[] = [];
-        for (const node of this._nodes) {
-            if (node.name === name)
-                nodes.push(node);
-        }
-
-        return nodes;
+        // Copied out: this is the same list backing the index, and a caller mutating its own result
+        // (script or engine code) must not corrupt future lookups.
+        const nodes = this._nodesByName.get(name);
+        return nodes ? [...nodes] : [];
     }
 
     /** First node with this name, or undefined. The scripting shorthand for getNodesByName(name)[0]. */
     public findNode(name: string): Node | undefined {
-        return this.getNodesByName(name)[0];
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._nodesByName.get(name)?.[0];
     }
 
     public getNodeById(id: string): Node | undefined {
         if (this._dirty)
             this._breadthFirstTraversal();
-        for (const node of this._nodes) {
-            if (node.id === id)
-                return node;
-        }
-        return undefined;
+        return this._nodesById.get(id);
     }
 
     public serialize(useCache: boolean = false): Promise<any> {

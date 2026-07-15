@@ -173,6 +173,14 @@ function wrapNode(target: Node | null | undefined, requester: Node): any {
             if (prop === 'getNodesByName')
                 return (name: string) => (node.scene?.getNodesByName(name) ?? []).map((found: Node) => wrapNode(found, requester));
 
+            // `this.scene` itself must go through the same re-wrapping, or `this.scene.getNodesByName(...)`
+            // / `this.scene.models` would hand back raw, un-access-checked nodes — the one remaining way a
+            // script could reach a node that bypasses public/private/protected.
+            if (prop === 'scene') {
+                const scene = node.scene;
+                return scene ? wrapScene(scene, requester) : scene;
+            }
+
             // Not a Node member: it is a Variable (or nothing). Unreadable ones read as undefined, which
             // is what getData already does for a variable the requester may not see.
             if (!(prop in node)) {
@@ -205,7 +213,15 @@ function wrapNode(target: Node | null | undefined, requester: Node): any {
                 return true;
             }
 
-            if (prop in node) return Reflect.set(node, prop, value, node);
+            if (prop in node) {
+                // A false return (a getter-only member, e.g. `this.worldPosition = ...`) is not just
+                // ignored: under the "use strict" every script runs in, a Proxy `set` trap returning
+                // falsish throws a TypeError back into the handler. Warn instead — the assignment was
+                // always a no-op, it just used to crash on the way to becoming one.
+                const ok = Reflect.set(node, prop, value, node);
+                if (!ok) Logger.warn(`Script on '${requester.name}' cannot set '${prop}' on '${node.name}' — it has no setter.`, 'Script');
+                return true;
+            }
 
             if (!canAccessVariable(node, requester, prop)) {
                 Logger.warn(`Script on '${requester.name}' cannot set '${prop}' on '${node.name}' (${node.variables.get(prop)?.access ?? 'public'})`, 'Script');
@@ -226,6 +242,55 @@ function wrapNode(target: Node | null | undefined, requester: Node): any {
     return proxy;
 }
 
+const sceneProxies: WeakMap<Node, WeakMap<Scene, any>> = new WeakMap();
+
+/**
+ * Re-wraps whatever a Scene member hands back, so a script reaching a node through `this.scene` (e.g.
+ * `this.scene.models`, `this.scene.getNodesByName(...)`) gets the same access-checked view it gets through
+ * `this.parent`/`this.findNode(...)`. Generic over Scene's surface — a lone Node, a Node[], or a
+ * Set<Node> — so a new Node-returning Scene member does not need a matching line added here to stay
+ * consistent. `Set`s are rebuilt rather than proxied: a live Proxy over a built-in Set breaks its methods
+ * (they need the real internal slot), and a fresh copy is exactly as correct for the read-only iteration
+ * scripts actually do — precisely how getNodesByName already hands back a fresh array per call.
+ */
+function wrapSceneValue(value: any, requester: Node): any {
+    if (value instanceof Node) return wrapNode(value, requester);
+    if (value instanceof Set) {
+        const first = value.values().next().value;
+        return first instanceof Node ? new Set([...value].map((n: Node) => wrapNode(n, requester))) : value;
+    }
+    if (Array.isArray(value) && value.length && value[0] instanceof Node)
+        return value.map((n: Node) => wrapNode(n, requester));
+    return value;
+}
+
+function wrapScene(scene: Scene, requester: Node): any {
+    let byRequester = sceneProxies.get(requester);
+    if (!byRequester) { byRequester = new WeakMap(); sceneProxies.set(requester, byRequester); }
+
+    const cached = byRequester.get(scene);
+    if (cached) return cached;
+
+    const proxy: any = new Proxy(scene as any, {
+        get(target: any, prop: any, receiver: any) {
+            if (typeof prop !== 'string') return Reflect.get(target, prop, receiver);
+
+            const value = Reflect.get(target, prop, target);
+
+            // Methods run against the real scene (same reasoning as wrapNode: private fields must not
+            // re-enter these traps), unwrapping any proxied node passed in, and their result gets the
+            // same re-wrap as a plain property would.
+            if (typeof value === 'function')
+                return (...args: any[]) => wrapSceneValue(value.apply(target, args.map(unwrapScriptNode)), requester);
+
+            return wrapSceneValue(value, requester);
+        },
+    });
+
+    byRequester.set(scene, proxy);
+    return proxy;
+}
+
 /**
  * Binds a compiled script's handlers to a node. Both paths that run scripts converge here: the editor
  * evals the source (_parseScript) and the published player loads pre-compiled factories from
@@ -241,7 +306,11 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
     const context = wrapNode(node, node);
     const handlers = proxyHandlers.get(context)!;
 
-    factory.call(context, createScriptImporter(bindDataAccessors(node)));
+    // `unwrapScriptNode` is a real export of 'cleo' — the engine needs it internally (e.g. PhysicsSystem
+    // reaching a raw node through `this.scene.physics`). Handing a script the real function would let it
+    // strip the proxy off `this` or any node it holds and read/write variables straight past the
+    // public/private/protected checks below, so it is shadowed to identity for the script-facing 'cleo'.
+    factory.call(context, createScriptImporter({ ...bindDataAccessors(node), unwrapScriptNode: (value: any) => value }));
 
     // The engine calls handlers with raw nodes; scripts must only ever see proxied ones. A throwing
     // handler must not take the frame down with it either, and the node's name is the only thing that
@@ -250,7 +319,13 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
         const fn = handlers[name];
         if (typeof fn !== 'function') return () => {};
         return (...args: any[]) => {
-            try { fn.apply(context, args.map(arg => (arg instanceof Node ? wrapNode(unwrapScriptNode(arg), node) : arg))); }
+            try {
+                const result = fn.apply(context, args.map(arg => (arg instanceof Node ? wrapNode(unwrapScriptNode(arg), node) : arg)));
+                // An `async` handler's body runs synchronously up to its first `await` — a throw before
+                // that point is already caught below. A rejection after it only ever surfaces here.
+                if (result && typeof result.then === 'function')
+                    result.catch((e: any) => Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'));
+            }
             catch (e) { Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'); }
         };
     };
@@ -373,6 +448,9 @@ export class Node {
 
   public removeChild(node: Node, reparent: boolean = false): void {
     if (!reparent) {
+      // Before onDespawn, and before `scene` is cleared below: a pending this.after/this.every must not
+      // fire against a node no longer in the tree.
+      node.scene?.cancelTimers(node);
       try { node.onDespawn(node); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
     }
     node.parent = null;
@@ -441,11 +519,30 @@ export class Node {
   // Scratch matrix for _updateWorldCache (avoids a per-frame allocation).
   private static readonly _rotationScratch: mat4 = mat4.create();
 
+  /** Despawns this node (and all its children) — fires onDespawn, cancels its pending timers, detaches
+   *  its physics body, and removes it from the scene at the next update. */
   public remove(): void {
     this._markForRemoval = true;
+    this.scene?.cancelTimers(this);
     try { this.onDespawn(this); } catch (e) { Logger.error(`Error in onDespawn function for node ${this._name}: ${e}`); }
     for (const child of this._children)
       child.remove();
+  }
+
+  /** Resolves after `seconds` of unpaused game time. For `async onStart/onUpdate/...` handlers. */
+  public wait(seconds: number): Promise<void> {
+    return new Promise((resolve) => this.after(seconds, resolve));
+  }
+
+  /** Calls `cb` once after `seconds` of unpaused game time. Returns a function that cancels it early. */
+  public after(seconds: number, cb: () => void): () => void {
+    return this.scene ? this.scene.scheduleAfter(this, seconds, cb) : () => {};
+  }
+
+  /** Calls `cb` every `seconds` of unpaused game time until cancelled (or this node despawns). Returns
+   *  the cancel function. */
+  public every(seconds: number, cb: () => void): () => void {
+    return this.scene ? this.scene.scheduleEvery(this, seconds, cb) : () => {};
   }
 
   public start(): void {
@@ -617,7 +714,12 @@ export class Node {
 
   public get id(): string { return this._id; }
   public get name(): string { return this._name; }
-  public set name(name: string) { this._name = name; }
+  public set name(name: string) {
+    this._name = name;
+    // The scene indexes nodes by name for getNodesByName/findNode; a rename must invalidate that
+    // exactly like the visible setter already invalidates scene-derived state below.
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+  }
   public set parent(node: Node | null) { this._parent = node; }
   public get parent(): Node | null { return this._parent; }
   public get children(): Node[] { return this._children; }
@@ -708,54 +810,64 @@ export class Node {
     return this._worldForward;
   }
 
+  /** Sets local-space X (local to this node's parent). Returns `this`, so calls chain: `node.setX(1).setY(2)`. */
   public setX(value: number): Node {
     this._position[0] = value;
     this._updateTranslationMatrix();
     return this;
   }
 
+  /** Moves by `value` along local X. Frame-rate independent when scaled by `delta`: `this.addX(2 * delta)`. */
   public addX(value: number): Node {
     this._position[0] += value;
     this._updateTranslationMatrix();
     return this;
   }
 
+  /** Sets local-space Y (local to this node's parent). */
   public setY(value: number): Node {
     this._position[1] = value;
     this._updateTranslationMatrix();
     return this;
   }
 
+  /** Moves by `value` along local Y. */
   public addY(value: number): Node {
     this._position[1] += value;
     this._updateTranslationMatrix();
     return this;
   }
 
+  /** Sets local-space Z (local to this node's parent). */
   public setZ(value: number): Node {
     this._position[2] = value;
     this._updateTranslationMatrix();
     return this;
   }
 
+  /** Moves by `value` along local Z. */
   public addZ(value: number): Node {
     this._position[2] += value;
     this._updateTranslationMatrix();
     return this;
   }
 
+  /** Sets local-space position (local to this node's parent — use `worldPosition` to read world-space). */
   public setPosition(pos: vec3): Node {
     vec3.copy(this._position, pos);
     this._updateTranslationMatrix();
     return this;
   }
 
+  /** Moves by `value` along this node's own forward vector (its local -Z/+Z facing, not a world axis) —
+   *  the usual "walk forward" control. */
   public addForward(value: number) {
     //vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.worldForward, value));
     vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.forward, value));
     this._updateTranslationMatrix();
   }
 
+  /** Moves by `value` along this node's own right vector (perpendicular to `forward`) — "strafe". */
   public addRight(value: number) {
     // normalize forward vector
     vec3.normalize(this.forward, this.forward);
@@ -767,6 +879,7 @@ export class Node {
     this._updateTranslationMatrix();
   }
 
+  /** Moves by `value` along this node's own up vector. */
   public addUp(value: number) {
     vec3.normalize(this.forward, this.forward);
     let right = vec3.cross(vec3.create(), this.forward, vec3.fromValues(0, 1, 0));
@@ -780,34 +893,39 @@ export class Node {
   private _updateTranslationMatrix(): void {
     if (this._body)
       this._body.setPosition(this._position);
-    
+
     mat4.fromTranslation(this._translationMatrix, this._position);
   }
 
+  /** Rotates by `value` radians around local X (pitch). */
   public rotateX(value: number): Node {
     this._euler[0] += value;
     this._updateRotationMatrix();
     return this;
   }
-  
+
+  /** Rotates by `value` radians around local Y (yaw) — the usual "turn left/right" control. */
   public rotateY(value: number): Node {
     this._euler[1] += value;
     this._updateRotationMatrix();
     return this;
   }
-  
+
+  /** Rotates by `value` radians around local Z (roll). */
   public rotateZ(value: number): Node {
     this._euler[2] += value;
     this._updateRotationMatrix();
     return this;
   }
   
+  /** Sets local-space rotation as Euler angles in radians `[x, y, z]` (pitch, yaw, roll). */
   public setRotation(value: vec3): Node {
     vec3.copy(this._euler, value);
     this._updateRotationMatrix();
     return this;
   }
 
+  /** Sets local-space rotation directly as a quaternion — use this over setRotation to avoid gimbal lock. */
   public setQuaternion(quaternion: quat): Node {
     quat.copy(this._quaternion, quaternion);
     mat4.fromQuat(this._rotationMatrix, this._quaternion);
@@ -856,6 +974,8 @@ export class Node {
     return this;
   }
 
+  /** Sets local-space scale `[x, y, z]`. Non-uniform scale is fine for rendering; physics colliders on a
+   *  non-uniformly-scaled node fall back to a convex hull (see the physics collider feature). */
   public setScale(scale: vec3): Node {
     vec3.copy(this._scale, scale);
     this._updateScaleMatrix();

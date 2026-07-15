@@ -6,6 +6,11 @@ const path = require("path");
 // every published game reuses; only game.json changes per game. They land in public/ so the
 // editor dev server and production build both serve them (used by the browser ZIP publish path),
 // and so publishing can fetch them from same-origin.
+//
+// Do not import monaco-editor (or anything under features/nodeInspector/scriptEditor/Monaco*) from
+// anything reachable from src/player/index.tsx. The script editor's IntelliSense is an editor-only
+// tool, not part of a published game, and this config has no MonacoWebpackPlugin/worker/asset rules
+// for it — a published build must stay lean.
 module.exports = {
   mode: "production",
   entry: "./src/player/index.tsx",

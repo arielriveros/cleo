@@ -2,6 +2,7 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import { AnimatedModel, Animation, AnimationSampler, AnimationChannel, Skin } from './animatedModel';
 import { Node, ModelNode, canAccessVariable } from '../core/scene/node';
 import { InputManager } from '../input/inputManager';
+import { Logger } from '../core/logger';
 
 /**
  * Minimal structural view of a physics body used to drive ragdoll bones.
@@ -964,7 +965,12 @@ export class Animator {
             for (const ev of sm.events) {
                 if (ev.clipName !== clip) continue;
                 if (ev.time > from && ev.time <= to) {
-                    for (const cb of this._eventCallbacks) cb(ev.eventName, clip);
+                    // Fired straight from the update loop, outside the handler guards attachScriptFactory
+                    // installs — a throwing subscriber must not take the frame down with it.
+                    for (const cb of this._eventCallbacks) {
+                        try { cb(ev.eventName, clip); }
+                        catch (e) { Logger.error(`Error in onAnimationEvent('${ev.eventName}') for node ${this._node?.name}: ${e}`, 'Script'); }
+                    }
                 }
             }
         };
