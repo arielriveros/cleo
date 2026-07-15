@@ -34,11 +34,14 @@ export function parseScript(source: string): ParsedScript {
   return { tree: javascriptLanguage.parser.parse(source), doc: Text.of(source.split('\n')) }
 }
 
-/** Editor-agnostic diagnostic: a character range (Lezer/CodeMirror offsets, UTF-16 code units) + message. */
+/** Editor-agnostic diagnostic: a character range (Lezer/CodeMirror offsets, UTF-16 code units) + message.
+ *  `severity` defaults to 'error'; 'warning' is for advisories that don't break the script (e.g. a
+ *  Variable shadowed by a built-in Node member — legal, but unreachable at runtime). */
 export interface CoreDiagnostic {
   from: number
   to: number
   message: string
+  severity?: 'error' | 'warning'
 }
 
 function resolverFor(tree: Tree, doc: Text, self: Node): NodeResolver {
@@ -76,7 +79,8 @@ export function lintScriptCore(tree: Tree, doc: Text, self: Node): CoreDiagnosti
   const resolver = resolverFor(tree, doc, self)
 
   const out: CoreDiagnostic[] = []
-  const error = (from: number, to: number, message: string) => out.push({ from, to, message })
+  const error = (from: number, to: number, message: string) => out.push({ from, to, message, severity: 'error' })
+  const warn = (from: number, to: number, message: string) => out.push({ from, to, message, severity: 'warning' })
 
   tree.cursor().iterate((ref) => {
     if (ref.name !== 'MemberExpression') return
@@ -92,8 +96,16 @@ export function lintScriptCore(tree: Tree, doc: Text, self: Node): CoreDiagnosti
     if (isReserved(name)) return
 
     // A real Node member (position, addZ, parent, the handler slots, the scene lookups) always wins over
-    // a variable, exactly as the runtime proxy resolves it. Nothing to check.
-    if (nodes.some((node) => name in node || LOOKUP_MEMBERS.includes(name))) return
+    // a variable, exactly as the runtime proxy resolves it (node.ts's `prop in node` gate). Normally
+    // nothing to check — but if a candidate ALSO declares a Variable of this name, that Variable is
+    // unreachable at runtime. Warn rather than staying silent, so it never looks like it "disappeared".
+    const isBuiltin = (node: Node) => name in node || LOOKUP_MEMBERS.includes(name)
+    if (nodes.some(isBuiltin)) {
+      const shadowed = nodes.find((node) => isBuiltin(node) && node.variables.has(name))
+      if (shadowed)
+        warn(property.from, property.to, `Variable '${name}' is hidden by the built-in Node member of the same name and can't be reached at runtime — rename it in the Variables panel.`)
+      return
+    }
 
     const parent = expr.parent
     const assignment = parent?.name === 'AssignmentExpression' && parent.firstChild?.from === expr.from ? parent : null
@@ -207,23 +219,21 @@ export function nodeCompletionCore(tree: Tree, doc: Text, self: Node, at: Syntax
   const known = nodes.length > 0
   const items: CoreCompletion[] = []
 
+  // Only a node we can actually pin down contributes Variables — and only the ones this script may see.
+  // The script's OWN node exposes all of its Variables (private included); any OTHER node exposes only
+  // what canAccessVariable permits, so a private Variable on 'Enemy' never completes from a different
+  // script. An `unknown` node (a runtime-only `other`, or a lookup like findNode('Ghost') that matches
+  // nothing in the edit-time scene) has no identifiable Variables — offering another node's would be a
+  // wrong guess, and a leak — so it contributes only the structural members/lookups/handlers below.
   if (known) {
     const seen = new Set<string>()
     for (const node of nodes)
-      for (const [name, variable] of node.variables)
-        if (!isReserved(name) && !seen.has(name)) {
-          seen.add(name)
-          items.push({ label: name, kind: 'variable', detail: variable.type, boost: 3 })
-        }
-  } else {
-    // Unknown node: everything the scene declares, labelled with its owner so the guess is visible.
-    const seen = new Set<string>()
-    for (const node of self.scene?.nodes ?? [])
-      for (const [name, variable] of node.variables)
-        if (!isReserved(name) && !seen.has(name)) {
-          seen.add(name)
-          items.push({ label: name, kind: 'variable', detail: `${variable.type} · from '${node.name}'`, boost: 1 })
-        }
+      for (const [name, variable] of node.variables) {
+        if (isReserved(name) || seen.has(name)) continue
+        if (node !== self && !canAccessVariable(node, self, name)) continue
+        seen.add(name)
+        items.push({ label: name, kind: 'variable', detail: variable.type, boost: 3 })
+      }
   }
 
   // Handlers are only assignable on the script's own node.
@@ -273,8 +283,17 @@ export function nodeNameCompletionCore(self: Node, at: SyntaxNode, doc: Text): C
   return { replaceFrom: at.from + 1, replaceTo: at.to - 1, items }
 }
 
-/** The Variable (name, type, access) that `this.<name>`/`other.<name>` at `at` refers to, for hover. */
-export function nodeVariableAt(tree: Tree, doc: Text, self: Node, at: SyntaxNode): { name: string; type: NodeVariableType; access: string; owner: string } | null {
+/** The Variable that `this.<name>` / `findNode('X').<name>` / `this.parent.<name>` … at `at` refers to,
+ *  for hover. This is the "dynamic" cross-node resolution: whenever NodeResolver can pin the receiver to
+ *  a concrete scene node (a literal lookup, `parent`, `children[i]`, …), we read that node's own declared
+ *  Variables — so a reference to a Variable declared in another node's script reports its exact type and
+ *  owner. `ownerIsSelf` distinguishes the script's own node from a referenced one, for the hover wording. */
+export function nodeVariableAt(
+  tree: Tree,
+  doc: Text,
+  self: Node,
+  at: SyntaxNode,
+): { name: string; type: NodeVariableType; access: string; owner: string; ownerIsSelf: boolean } | null {
   if (at.name !== 'PropertyName') return null
   const member = at.parent
   if (!member || member.name !== 'MemberExpression' || member.lastChild !== at) return null
@@ -284,9 +303,12 @@ export function nodeVariableAt(tree: Tree, doc: Text, self: Node, at: SyntaxNode
   if (!isNode) return null
 
   const name = doc.sliceString(at.from, at.to)
-  const owner = nodes.find((node) => node.variables.has(name))
+  // Same access rule as completion: the own node reveals any Variable, another node only what this script
+  // may access — so hovering `findNode('Enemy').secret` where `secret` is private on Enemy resolves to
+  // nothing (falls through to the plain `any` from the shadow), never leaking a private type.
+  const owner = nodes.find((node) => node.variables.has(name) && (node === self || canAccessVariable(node, self, name)))
   if (!owner) return null
 
   const v = owner.variables.get(name)!
-  return { name, type: v.type, access: v.access ?? 'public', owner: owner.name }
+  return { name, type: v.type, access: v.access ?? 'public', owner: owner.name, ownerIsSelf: owner === self }
 }

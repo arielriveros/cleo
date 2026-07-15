@@ -10,7 +10,6 @@
 // Never call defineCleoThemes before an editor mounts: like codeMirrorTheme.ts, it reads computed
 // styles, and style-loader only injects index.css once the app's stylesheet import has run.
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { token } from '../../../utils/cssTokens';
 
 /** Same CSS custom property token() reads, as 6 hex digits (channels, no separators/prefix). */
 function channelsHex(name: string): string {
@@ -28,13 +27,17 @@ function hex(name: string): string {
 }
 
 /**
- * For the `colors` entries that ALSO seed the token theme's default foreground/background —
- * `editor.foreground`/`editor.background` specifically. Every other `colors` key genuinely accepts any
- * CSS color string (rgb()/rgba() included, so token() is fine there), but these two feed the same
- * hex-only parser `rules` does — token()'s rgb(...) format throws "Illegal value for token color" here.
+ * For `colors` entries: #rrggbb, or #rrggbbaa when alpha < 1. Monaco parses EVERY themeData.colors value
+ * with Color.fromHex (standaloneThemeService), which accepts hex only and silently falls back to pure red
+ * (#ff0000) for anything it can't parse — including token()'s `rgb(r g b)` / `rgb(r g b / a)` strings.
+ * That fallback is what turned the Monaco gutter, cursor, line-highlight and selection solid red. Always
+ * feed `colors` hex through here; token() is for DOM widgets (console, CodeMirror) only.
  */
-function hexColor(name: string): string {
-  return `#${channelsHex(name)}`;
+function colorHex(name: string, alpha = 1): string {
+  const h = channelsHex(name);
+  if (alpha >= 1) return `#${h}`;
+  const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0');
+  return `#${h}${a}`;
 }
 
 interface MonacoPalette {
@@ -52,26 +55,28 @@ interface MonacoPalette {
 function darkPalette(): MonacoPalette {
   return {
     colors: {
-      'editor.background': hexColor('--surface-sunken'),
-      'editor.foreground': hexColor('--text'),
-      'editorLineNumber.foreground': token('--text-dim'),
-      'editorLineNumber.activeForeground': token('--text'),
-      'editor.selectionBackground': token('--primary', 0.35),
-      'editor.lineHighlightBackground': token('--highlight', 0.06),
-      'editorGutter.background': token('--bg'),
-      'editorCursor.foreground': token('--highlight'),
-      'editorBracketMatch.background': token('--highlight', 0.2),
-      'editorBracketMatch.border': token('--highlight', 0.5),
-      'editor.findMatchBackground': token('--primary', 0.5),
-      'editor.findMatchHighlightBackground': token('--warning', 0.25),
-      'editorWidget.background': token('--surface-raised'),
-      'editorWidget.border': token('--border'),
-      'editorHoverWidget.background': token('--surface-raised'),
-      'editorHoverWidget.border': token('--border'),
-      'editorSuggestWidget.background': token('--surface-raised'),
-      'editorSuggestWidget.border': token('--border'),
-      'editorSuggestWidget.selectedBackground': token('--primary'),
-      'editorError.foreground': token('--danger'),
+      'editor.background': colorHex('--surface-sunken'),
+      'editor.foreground': colorHex('--text'),
+      'editorLineNumber.foreground': colorHex('--text-dim'),
+      'editorLineNumber.activeForeground': colorHex('--text'),
+      'editor.selectionBackground': colorHex('--primary', 0.35),
+      'editor.lineHighlightBackground': colorHex('--highlight', 0.06),
+      'editorGutter.background': colorHex('--bg'),
+      'editorCursor.foreground': colorHex('--highlight'),
+      'editorBracketMatch.background': colorHex('--highlight', 0.2),
+      'editorBracketMatch.border': colorHex('--highlight', 0.5),
+      'editor.findMatchBackground': colorHex('--primary', 0.5),
+      'editor.findMatchHighlightBackground': colorHex('--warning', 0.25),
+      'editorWidget.background': colorHex('--surface-raised'),
+      'editorWidget.border': colorHex('--border'),
+      'editorHoverWidget.background': colorHex('--surface-raised'),
+      'editorHoverWidget.border': colorHex('--border'),
+      'editorSuggestWidget.background': colorHex('--surface-raised'),
+      'editorSuggestWidget.border': colorHex('--border'),
+      'editorSuggestWidget.selectedBackground': colorHex('--primary'),
+      // A muted rose rather than the harsh --danger red: error squiggles should read as a gentle hint in a
+      // casual scripting surface, not alarm the whole editor. Hex (not rgb()) so Monaco's parser accepts it.
+      'editorError.foreground': '#e08a8a',
     },
     // Same hues as codeMirrorTheme.ts's darkPalette(): keyword/comment/cursor share --highlight/--text-dim
     // with the console inspector; string/number/type are the same seeded literals.
@@ -93,13 +98,13 @@ function lightPalette(): MonacoPalette {
       'editor.foreground': '#1f2430',
       'editorLineNumber.foreground': '#8a919c',
       'editorLineNumber.activeForeground': '#1f2430',
-      'editor.selectionBackground': token('--primary', 0.2),
+      'editor.selectionBackground': colorHex('--primary', 0.2),
       'editor.lineHighlightBackground': '#f0f3f9',
       'editorGutter.background': '#f5f6f8',
-      'editorCursor.foreground': token('--primary'),
-      'editorBracketMatch.background': token('--primary', 0.18),
-      'editorBracketMatch.border': token('--primary', 0.45),
-      'editor.findMatchBackground': token('--primary', 0.35),
+      'editorCursor.foreground': colorHex('--primary'),
+      'editorBracketMatch.background': colorHex('--primary', 0.18),
+      'editorBracketMatch.border': colorHex('--primary', 0.45),
+      'editor.findMatchBackground': colorHex('--primary', 0.35),
       'editor.findMatchHighlightBackground': '#ffe08a',
       'editorWidget.background': '#ffffff',
       'editorWidget.border': '#d4d8e0',
@@ -107,8 +112,9 @@ function lightPalette(): MonacoPalette {
       'editorHoverWidget.border': '#d4d8e0',
       'editorSuggestWidget.background': '#ffffff',
       'editorSuggestWidget.border': '#d4d8e0',
-      'editorSuggestWidget.selectedBackground': token('--primary'),
-      'editorError.foreground': token('--danger'),
+      'editorSuggestWidget.selectedBackground': colorHex('--primary'),
+      // Deeper muted rose than the dark theme's, for contrast on white; still softer than --danger.
+      'editorError.foreground': '#c15858',
     },
     keyword: '4b3bd6',
     string: 'a24a12',

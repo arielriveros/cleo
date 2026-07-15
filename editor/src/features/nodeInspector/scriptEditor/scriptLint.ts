@@ -19,7 +19,7 @@ import { lintScriptCore, nodeCompletionCore, type CoreCompletion } from './scrip
 export function lintScript(view: EditorView, self: Node | null): Diagnostic[] {
   if (!self) return []
   const tree = syntaxTree(view.state)
-  return lintScriptCore(tree, view.state.doc, self).map((d) => ({ from: d.from, to: d.to, severity: 'error', message: d.message }))
+  return lintScriptCore(tree, view.state.doc, self).map((d) => ({ from: d.from, to: d.to, severity: d.severity ?? 'error', message: d.message }))
 }
 
 const CM_TYPE: Record<CoreCompletion['kind'], string> = {

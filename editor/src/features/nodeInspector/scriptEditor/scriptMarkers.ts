@@ -20,7 +20,7 @@ export function refreshMarkers(monaco: typeof Monaco, model: Monaco.editor.IText
     const start = model.getPositionAt(d.from)
     const end = model.getPositionAt(d.to)
     return {
-      severity: monaco.MarkerSeverity.Error,
+      severity: d.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error,
       message: d.message,
       startLineNumber: start.lineNumber,
       startColumn: start.column,

@@ -6,8 +6,9 @@ import { Button, ButtonWithConfirm } from '../../../components/ui'
 import { ensureMonaco } from './monacoSetup'
 import { refreshMarkers } from './scriptMarkers'
 import { registerNodeCompletionProvider } from './nodeCompletionProvider'
-import { registerNodeHoverProvider } from './nodeHoverProvider'
+import { registerScriptHoverProvider } from './scriptHoverProvider'
 import { registerScriptSnippetsProvider } from './scriptSnippetsProvider'
+import { createThisTypeController, type ThisTypeController } from './thisTypeProvider'
 import { useCodeTheme } from './codeThemeStore'
 import CodeEditorHeader from './CodeEditorHeader'
 import { DEFAULT_SCRIPT_TEMPLATE as description } from './scriptTemplate'
@@ -28,6 +29,7 @@ export default function MonacoCodeEditor(props: { readOnly?: boolean }) {
   const monacoRef = React.useRef<typeof Monaco | null>(null)
   const editorRef = React.useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const modelsRef = React.useRef<Map<string, Monaco.editor.ITextModel>>(new Map())
+  const thisTypeRef = React.useRef<ThisTypeController | null>(null)
   const [hasScript, setHasScript] = React.useState(false)
 
   // Read through refs (not closed-over values) for the same reason as CodeEditor.tsx: the editor instance
@@ -41,7 +43,11 @@ export default function MonacoCodeEditor(props: { readOnly?: boolean }) {
     const cached = modelsRef.current.get(nodeId)
     if (cached) return cached
 
-    const uri = monaco.Uri.parse(`inmemory://cleo/${nodeId}.ts`)
+    // Must be a file:/// URI, not inmemory://: TypeScript resolves `import ... from 'cleo'` by walking
+    // node_modules within the model's OWN URI scheme, and the engine's types are registered under
+    // file:///node_modules/cleo (cleoTypes.ts). An inmemory:// model can never reach them, so every cleo
+    // import would resolve to nothing — no completions, a red "cannot find module 'cleo'" on line 1.
+    const uri = monaco.Uri.parse(`file:///cleo/${nodeId}.ts`)
     // getModel first: a stale model can outlive this map across a fast-refresh/remount, and createModel
     // throws if a model already exists at the URI.
     const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(initialText, 'typescript', uri)
@@ -54,6 +60,9 @@ export default function MonacoCodeEditor(props: { readOnly?: boolean }) {
       scripts.set(id, model.getValue())
       const m = monacoRef.current
       if (m) refreshMarkers(m, model, nodeRef.current)
+      // Node/Variables are unchanged on a keystroke, so the `this` lib is already current — only re-map
+      // the typed-`this` diagnostics against the new text.
+      thisTypeRef.current?.refresh(model, nodeRef.current)
     })
 
     return model
@@ -76,13 +85,18 @@ export default function MonacoCodeEditor(props: { readOnly?: boolean }) {
     editorRef.current = editor
 
     const completionDisposable = registerNodeCompletionProvider(monaco, () => nodeRef.current)
-    const hoverDisposable = registerNodeHoverProvider(monaco, () => nodeRef.current)
     const snippetsDisposable = registerScriptSnippetsProvider(monaco)
+    thisTypeRef.current = createThisTypeController(monaco)
+    // Hover: cross-node Variable types from NodeResolver, everything else from the typed-`this` shadow.
+    // Monaco's own TS hover stays disabled (monacoSetup) — the visible model types `this` as undefined.
+    const hoverDisposable = registerScriptHoverProvider(monaco, () => nodeRef.current, thisTypeRef.current)
 
     return () => {
       completionDisposable.dispose()
       hoverDisposable.dispose()
       snippetsDisposable.dispose()
+      thisTypeRef.current?.dispose()
+      thisTypeRef.current = null
       editor.dispose()
       editorRef.current = null
       // Models outlive a single editor instance by design (undo history, SCENE_CHANGED re-lint while
@@ -108,6 +122,9 @@ export default function MonacoCodeEditor(props: { readOnly?: boolean }) {
     const model = getOrCreateModel(monaco, selectedNode, scripts.get(selectedNode) ?? '')
     editor.setModel(model)
     refreshMarkers(monaco, model, nodeRef.current)
+    // Switching nodes changes the concrete `this` type: re-register the lib, then re-map diagnostics.
+    thisTypeRef.current?.update(nodeRef.current)
+    thisTypeRef.current?.refresh(model, nodeRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNode, hasScript])
 
@@ -119,6 +136,9 @@ export default function MonacoCodeEditor(props: { readOnly?: boolean }) {
       const model = editorRef.current?.getModel()
       if (!monaco || !model) return
       refreshMarkers(monaco, model, nodeRef.current)
+      // A Variables edit changes the `this` interface (a Variable added/removed/retyped), so rebuild it.
+      thisTypeRef.current?.update(nodeRef.current)
+      thisTypeRef.current?.refresh(model, nodeRef.current)
     }
     eventEmitter.on('SCENE_CHANGED', relint)
     return () => { eventEmitter.off('SCENE_CHANGED', relint) }

@@ -4,6 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build:engine": "cd .. && npm run build:dev",
+    "prebuild": "npm run build:engine",
+    "prebuild:player": "npm run build:engine",
     "start": "webpack serve  --hot --open",
     "build": "webpack --config webpack.config.js --mode development",
     "build:player": "webpack --config webpack.player.config.js"

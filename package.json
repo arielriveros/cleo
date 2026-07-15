@@ -10,7 +10,7 @@
     "build:dev": "webpack --mode=development",
     "build:player": "cd editor && npm run build:player",
     "editor:install": "cd editor && npm ci",
-    "editor:dev": "concurrently \"npm run watch\" \"npm run editor\"",
+    "editor:dev": "npm run build:dev && concurrently \"npm run watch\" \"npm run editor\"",
     "editor:build": "cd editor && npm run build",
     "desktop:install": "cd desktop && npm install",
     "desktop:dev": "concurrently \"npm run watch\" \"npm run editor\" \"cd desktop && npm run dev\"",
@@ -33,6 +33,7 @@
   "dependencies": {
     "cannon-es": "^0.20.0",
     "gl-matrix": "^3.4.3",
+    "sucrase": "^3.35.1",
     "uuid": "^14.0.1"
   }
 }

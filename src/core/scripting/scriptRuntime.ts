@@ -10,6 +10,12 @@
 // This module deliberately imports nothing from the engine: node.ts depends on it, so any engine import
 // here would close a cycle. The engine's public API reaches scripts through registerScriptModule(),
 // which src/cleo.ts calls with its own namespace.
+//
+// Scripts are authored as TypeScript (the editor types them, see editor/.../monacoSetup.ts). `new Function`
+// only parses JavaScript, so buildFactoryBody() strips the type syntax with Sucrase before the module
+// rewrite runs. Sucrase is purely syntactic (no type-checking) and preserves line numbers, so error line
+// numbers keep meaning and transformScript still sees the untouched `import` statements to rewrite.
+import { transform } from 'sucrase';
 
 export type ScriptModule = Record<string, any>;
 
@@ -275,7 +281,10 @@ export function transformScript(source: string): string {
  * must stay a plain `function` — an arrow would capture the wrong `this`.
  */
 export function buildFactoryBody(source: string): string {
-    return `"use strict";\n${transformScript(source)}`;
+    // Strip TypeScript first (leaves `import` statements intact — we don't enable Sucrase's 'imports'
+    // transform), then rewrite the module syntax transformScript understands.
+    const js = transform(source, { transforms: ['typescript'], preserveDynamicImport: true }).code;
+    return `"use strict";\n${transformScript(js)}`;
 }
 
 /** Called with `this` bound to the script's node proxy; handlers are collected from there, not returned. */
