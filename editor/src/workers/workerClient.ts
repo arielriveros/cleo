@@ -9,6 +9,7 @@
 // backstop, not the happy path, so publishing never becomes impossible just because a worker failed.
 
 import { runJob, ProjectJob, ProjectJobResult, PublishFiles, PublishOptions, PlayerTemplates } from './projectJobs';
+import type { BundleData } from '../utils/bundle';
 
 interface Response {
   id: number;
@@ -125,4 +126,21 @@ export async function runPublishJob(input: PublishJobInput): Promise<PublishJobO
   const result = await dispatch({ kind: 'publish', ...input });
   if (result.kind !== 'publish') throw new Error('Unexpected job result');
   return { files: result.files, zip: result.zip, warnings: result.warnings };
+}
+
+/** Zip a gathered project/asset-pack bundle off the main thread. Returns the archive bytes. */
+export async function exportBundleJob(bundle: BundleData): Promise<ArrayBuffer> {
+  // Inputs deliberately NOT transferred: transferring detaches the texture ArrayBuffers here, which
+  // would strand the inline retry in getWorker().onerror. The result zip IS transferred back.
+  const result = await dispatch({ kind: 'exportBundle', bundle });
+  if (result.kind !== 'exportBundle') throw new Error('Unexpected job result');
+  return result.zip;
+}
+
+/** Unzip + parse a bundle file off the main thread into its structured contents. */
+export async function importBundleJob(file: File): Promise<BundleData> {
+  const buffer = await file.arrayBuffer();
+  const result = await dispatch({ kind: 'importBundle', buffer });
+  if (result.kind !== 'importBundle') throw new Error('Unexpected job result');
+  return result.bundle;
 }

@@ -104,6 +104,22 @@ export async function clearProject(): Promise<void> {
  * from the tree so they don't run in edit mode, then parse the tree into the scene.
  * Shared by the Import button and startup restore.
  */
+// Pull each node's script/body/trigger out of a serialized tree into the editor side-maps (the source
+// of truth for Play/Publish) and strip them from the tree so they don't run in edit mode. Mutates the
+// tree in place. Shared by applyGameData and the multi-scene publish path (which runs it on a temp tree
+// before re-serializing a closed scene).
+export function extractNodeState(root: any, maps: Pick<EngineMaps, 'scripts' | 'bodies' | 'triggers'>): void {
+  const visit = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.script === 'string' && node.script.trim()) maps.scripts.set(node.id, node.script);
+    if (node.body) maps.bodies.set(node.id, node.body);
+    if (node.trigger) maps.triggers.set(node.id, node.trigger);
+    delete node.script; delete node.scripts; delete node.body; delete node.trigger;
+    (node.children ?? []).forEach(visit);
+  };
+  visit(root);
+}
+
 export function applyGameData(json: any, deps: EngineMaps & { setUI: (s: UIState) => void; renderer?: Renderer }): void {
   if (!json) return;
   // UI (top-level `ui`, or legacy `scene.ui`).
@@ -113,15 +129,7 @@ export function applyGameData(json: any, deps: EngineMaps & { setUI: (s: UIState
   // Restore the saved renderer look so the editor (and its Play mode) matches what was last saved.
   if (deps.renderer && json.config?.render) deps.renderer.applyRenderSettings(json.config.render);
 
-  const importNodeState = (node: any) => {
-    if (!node || typeof node !== 'object') return;
-    if (typeof node.script === 'string' && node.script.trim()) deps.scripts.set(node.id, node.script);
-    if (node.body) deps.bodies.set(node.id, node.body);
-    if (node.trigger) deps.triggers.set(node.id, node.trigger);
-    delete node.script; delete node.scripts; delete node.body; delete node.trigger;
-    (node.children ?? []).forEach(importNodeState);
-  };
-  if (json.scene) importNodeState(json.scene);
+  if (json.scene) extractNodeState(json.scene, deps);
 
   // Does this payload carry its own textures? An imported/exported scene.json does (it must be
   // self-contained); a saved project does NOT — its textures come from the texture store, preloaded into

@@ -55,6 +55,8 @@ export { Frustum } from "./core/frustum";
 export { bytesToBase64, base64ToBytes, bytesToDataUrl, parseBase64DataUri } from "./core/base64";
 export { registerScriptModule, resolveScriptModule, createScriptImporter, compileScript, buildFactoryBody, SCRIPT_HANDLERS } from "./core/scripting/scriptRuntime";
 export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
+export { Game, setGameHost } from "./core/game";
+export type { GameHost } from "./core/game";
 export * as Vec from "gl-matrix";
 
 // This is what a user script's `import { ... } from 'cleo'` resolves to: the barrel's own namespace,

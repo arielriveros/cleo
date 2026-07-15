@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin, setGameHost } from "cleo";
 import type { AnimationCompatibility, HullQuality } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
@@ -82,14 +82,19 @@ export type PendingAnimationImportView = {
 // The user's decision from the animation-import modal: which clips to add (by index).
 export type AnimationImportDecision = { include: boolean[] };
 import { buildGameData } from "./publish/buildGameData";
-import { applyGameData, ProjectPrefs } from "../utils/projectStorage";
+import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
 import {
-  ProjectMeta, SceneMeta, loadProjectMeta, saveProjectMeta, loadSceneData, saveSceneData,
+  ProjectMeta, SceneMeta, SceneRefs, loadProjectMeta, saveProjectMeta, loadSceneData, saveSceneData,
   deleteSceneData, migrateLegacyProject, createFreshProjectMeta,
 } from "../utils/sceneStorage";
+import { resyncScene } from "../utils/sceneResync";
+import { buildAssetHashes, AssetLibs } from "../utils/assetHash";
+import {
+  collectReferencedMaterialIds, collectReferencedMeshIds, collectReferencedTemplateIds,
+  collectReferencedTerrainMaterialIds, collectReferencedTextureIds,
+} from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf } from "../utils/textureStore";
-import { collectReferencedMaterialIds, collectReferencedMeshIds, collectReferencedTemplateIds, collectReferencedTerrainMaterialIds } from "../utils/references";
 import { saveToStorage } from "../workers/workerClient";
 import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
@@ -755,6 +760,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const animationSourceScene = activeTab.kind === 'animation' ? (activeRuntime?.sourceScene ?? null) : null;
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
+  // Snapshot of the four hashable asset libraries, as the resync/hash utilities consume them.
+  const currentLibs = (): AssetLibs => ({ materials, meshes, templates, terrainMaterials });
 
   // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
   const enterTemplateEditor = (templateId?: string) => {
@@ -1861,7 +1868,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Arm dirty-tracking only after the editor-helper reconciler's initial pass settles (it emits
     // SCENE_CHANGED as it adds light/gizmo helpers to the freshly-shown template scene).
     dirtyArmedRef.current = false;
-    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'terrainMaterial' || tab.kind === 'mesh'); }));
+    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'terrainMaterial' || tab.kind === 'mesh' || tab.kind === 'main'); }));
     // Template scenes are authored in 3D; the Main tab restores its own remembered dimension. (Terrain-)
     // material tabs are skipped: their preview camera uses a self-contained orbit rig
     // (createMaterialPreviewScene) that the free-fly CHANGE_DIMENSION handler must not overwrite.
@@ -1873,10 +1880,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('SELECT_NODE', (runtime && tab.kind !== 'animation') ? runtime.rootId : null);
   }, [activeTabId]);
 
-  // Mark the active template tab dirty on scene edits (after the open-settle window).
+  // Mark the active tab dirty on scene edits (after the open-settle window). The Main tab drives the
+  // multi-scene `mainDirty` flag (used to prompt Save/Discard/Cancel on scene switch); library tabs
+  // drive their own per-tab dirtyTabs entry. Play mode never marks dirty — it runs a separate play
+  // scene, so its edits must not make the editor scene look unsaved.
   useEffect(() => {
     const mark = () => {
-      if (!dirtyArmedRef.current || (activeTabKindRef.current !== 'template' && activeTabKindRef.current !== 'material' && activeTabKindRef.current !== 'terrainMaterial' && activeTabKindRef.current !== 'mesh')) return;
+      if (!dirtyArmedRef.current || isPlayModeRef.current) return;
+      const kind = activeTabKindRef.current;
+      if (kind === 'main') {
+        if (!mainDirtyRef.current) { mainDirtyRef.current = true; setMainDirty(true); }
+        return;
+      }
+      if (kind !== 'template' && kind !== 'material' && kind !== 'terrainMaterial' && kind !== 'mesh') return;
       const id = activeTabIdRef.current;
       setDirtyTabs(prev => prev[id] ? prev : { ...prev, [id]: true });
     };
@@ -1930,14 +1946,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         useCache: true,
       });
       const now = Date.now();
-      const refs = {
-        materialIds: Array.from(collectReferencedMaterialIds(editorSceneRef.current, meshes)),
-        meshIds: Array.from(collectReferencedMeshIds(editorSceneRef.current)),
-        templateIds: Array.from(collectReferencedTemplateIds(editorSceneRef.current)),
-        terrainMaterialIds: Array.from(collectReferencedTerrainMaterialIds(editorSceneRef.current)),
+      const scene = editorSceneRef.current;
+      const matSet = collectReferencedMaterialIds(scene, meshes);
+      const meshSet = collectReferencedMeshIds(scene);
+      const tplSet = collectReferencedTemplateIds(scene);
+      const tmSet = collectReferencedTerrainMaterialIds(scene);
+      const refs: SceneRefs = {
+        materialIds: Array.from(matSet),
+        meshIds: Array.from(meshSet),
+        templateIds: Array.from(tplSet),
+        terrainMaterialIds: Array.from(tmSet),
         textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, meshes)),
       };
-      await saveSceneData(sceneId, { ...gameData, savedAt: now });
+      // Per-asset content hashes let a *closed* scene tell, when reopened, which referenced assets
+      // changed while it was closed — so unchanged meshes/templates aren't needlessly re-instantiated.
+      const assetHashes = buildAssetHashes(
+        { materialIds: matSet, meshIds: meshSet, templateIds: tplSet, terrainMaterialIds: tmSet },
+        { materials, meshes, templates, terrainMaterials },
+      );
+      await saveSceneData(sceneId, { ...gameData, assetHashes, savedAt: now });
       await updateProjectMeta(m => ({
         ...m,
         prefs: { dimension: dimensionRef.current, selectedNode },
@@ -2096,12 +2123,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (decision === 'save' && !(await saveProjectToStorage())) return false;
     }
 
-    // Load the target before tearing anything down, so a failed read aborts cleanly.
-    let data = await loadSceneData(sceneId);
-    if (!data) {
-      // A scene whose blob was never written (e.g. fresh "Main" before its first save): open it empty.
-      data = { ...(await buildEmptySceneData()), savedAt: Date.now() };
-    }
+    // Load the target before tearing anything down, so a failed read aborts cleanly. A scene whose blob
+    // was never written (e.g. a fresh "Main" before its first save) opens empty.
+    const data = (await loadSceneData(sceneId)) ?? { ...(await buildEmptySceneData()), savedAt: Date.now() };
 
     setActiveTabId('main');
     // Animation tabs cloned their model out of the outgoing scene; their write-back target is about
@@ -2135,6 +2159,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     scene.environmentMap = null; // parse only sets it when the JSON has one — don't leak the old scene's
     applyGameData(data, { ...engineMaps(), scene, setUI: setUiState, renderer: instanceRef.current?.renderer });
     ensureEditorCamera(scene);
+    // Cross-scene propagation: re-resolve the freshly-parsed scene's asset links against the current
+    // libraries, so edits/deletes made to assets while this scene was closed take effect on open. Gated
+    // by the hashes captured at the scene's last save (data.assetHashes) — unchanged assets are skipped.
+    resyncScene(scene, engineMaps(), currentLibs(), data.assetHashes);
     showBindPoseForSkinnedModels(scene);
 
     await updateProjectMeta(m => ({ ...m, openSceneId: sceneId }));
@@ -2537,6 +2565,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // --- Play lifecycle (builds the play scene, drives the UI runtime) ---------------------------
+  // The scene the play session started on (what Reset returns to) and the one currently running, plus
+  // the running scene's UI elements — a runtime Game.loadScene switch updates the latter two.
+  const playEntrySceneIdRef = useRef<string>('');
+  const currentPlaySceneIdRef = useRef<string>('');
+  const playSceneUiRef = useRef<any[]>([]);
+
   const buildPlayScene = async (): Promise<Scene> => {
     // useCache: true — textures already live in TextureManager for in-editor play, so skip re-embedding.
     const json = await buildGameData({
@@ -2551,21 +2585,71 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     newScene.parse(json, true);
     return newScene;
   };
+
+  // Build a runnable play Scene for any scene id. The play-session entry (the scene open when Play was
+  // pressed) uses the live editor scene so unsaved edits play; every other scene is loaded from its blob,
+  // re-resolved against the current libraries, then parsed with its scripts compiled.
+  const buildPlaySceneById = async (id: string): Promise<{ scene: Scene; ui: any[] }> => {
+    if (id === playEntrySceneIdRef.current) return { scene: await buildPlayScene(), ui: uiStateRef.current.elements };
+    const data = await loadSceneData(id);
+    if (!data) return { scene: new Scene(), ui: [] };
+    const clone = JSON.parse(JSON.stringify({ scene: data.scene, ui: data.ui }));
+    const maps = { scripts: new Map<string, string>(), bodies: new Map<string, any>(), triggers: new Map<string, any>() };
+    extractNodeState(clone.scene, maps);
+    const tmp = new Scene();
+    tmp.parse({ scene: clone.scene, textures: [] }, true);
+    resyncScene(tmp, maps, currentLibs(), data.assetHashes);
+    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, ui: clone.ui ?? { version: 1, elements: [] }, useCache: true });
+    const scene = new Scene();
+    scene.parse(gd, true); // gd injects scripts into nodes → compiled here
+    return { scene, ui: gd.ui?.elements ?? [] };
+  };
+
   const startUIRuntime = () => {
-    UIRuntime.start(uiStateRef.current.elements, {
+    UIRuntime.start(playSceneUiRef.current, {
       emit: (n) => eventEmitter.current.emit(n),
       getScene: () => instanceRef.current?.scene,
       game,
     });
   };
+
+  // Runtime scene switch (Game.loadScene from a script). Swaps the engine's scene, resetting UI/physics/
+  // input for the new scene — the editor-play counterpart of the player's loadScene.
+  const playLoadScene = async (nameOrId: string): Promise<void> => {
+    const instance = instanceRef.current;
+    if (!instance || !startedRef.current) return;
+    const meta = projectMetaRef.current;
+    const target = meta?.scenes.find(s => s.id === nameOrId) ?? meta?.scenes.find(s => s.name === nameOrId);
+    if (!target) { Logger.warn(`loadScene: no scene "${nameOrId}"`, 'Editor'); return; }
+    const { scene, ui } = await buildPlaySceneById(target.id);
+    UIRuntime.stop();
+    instance.input.clear();
+    instance.physics.clear();
+    instance.setScene(scene);
+    currentPlaySceneIdRef.current = target.id;
+    playSceneUiRef.current = ui;
+    instance.isPaused = false;
+    setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 50);
+  };
+
+  const installGameHost = () => setGameHost({
+    loadScene: (nameOrId: string) => { void playLoadScene(nameOrId); },
+    currentSceneName: () => projectMetaRef.current?.scenes.find(s => s.id === currentPlaySceneIdRef.current)?.name ?? '',
+    sceneNames: () => (projectMetaRef.current?.scenes ?? []).map(s => s.name),
+  });
+
   const startPlay = async () => {
     const instance = instanceRef.current;
     if (!instance) return;
     instance.input.preventDefault();
     if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', 'play'); return; }
+    playEntrySceneIdRef.current = openSceneIdRef.current;
+    currentPlaySceneIdRef.current = openSceneIdRef.current;
+    playSceneUiRef.current = uiStateRef.current.elements;
     const newScene = await buildPlayScene();
     instance.setScene(newScene);
     instance.isPaused = false;
+    installGameHost();
     setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 100);
     eventEmitter.current.emit('SET_PLAY_STATE', 'play');
     startedRef.current = true;
@@ -2574,6 +2658,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     startedRef.current = false;
     const instance = instanceRef.current;
     UIRuntime.stop();
+    setGameHost(null);
     if (!instance) return;
     instance.setScene(editorSceneRef.current);
     instance.input.clear();
@@ -2589,7 +2674,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Clear input/physics so key bindings and bodies from the previous run don't stack.
     instance.input.clear();
     instance.physics.clear();
+    // Reset returns to the play-session entry scene (where Play was pressed), not the last-loaded one.
+    currentPlaySceneIdRef.current = playEntrySceneIdRef.current;
     const newScene = await buildPlayScene();
+    playSceneUiRef.current = uiStateRef.current.elements;
     instance.setScene(newScene);
     instance.isPaused = false;
     setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 50);

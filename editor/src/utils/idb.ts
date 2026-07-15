@@ -56,6 +56,17 @@ export async function idbSet(key: string, value: any): Promise<void> {
   });
 }
 
+/** Every key in the kv store that starts with `prefix` (e.g. all `cleo_scene:` blobs). */
+export async function idbKeysByPrefix(prefix: string): Promise<string[]> {
+  const db = await openDB();
+  return new Promise<string[]>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAllKeys();
+    req.onsuccess = () => resolve((req.result as string[]).filter(k => typeof k === 'string' && k.startsWith(prefix)));
+    req.onerror = () => reject(req.error);
+  });
+}
+
 /** Delete a value by key. */
 export async function idbDelete(key: string): Promise<void> {
   const db = await openDB();

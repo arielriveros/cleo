@@ -18,7 +18,8 @@ export function reinflate(data: any): any {
       for (const child of (node.children ?? [])) visit(child);
     }
   };
-  if (data.scene) visit(data.scene);
+  if (data.scene) visit(data.scene);                                                  // v1
+  if (data.scenes) for (const s of Object.values<any>(data.scenes)) visit(s?.scene);  // v2: reinflate each
 
   // Scene.parse reads data.textures (unless useCache); restore it from the assets table.
   if (assets && Array.isArray(assets.textures)) data.textures = assets.textures;

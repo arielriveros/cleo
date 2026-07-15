@@ -44,7 +44,9 @@ function packGeometries(scene: any, geometries: Record<string, any>): void {
 // and moves `data.textures` under the assets table.
 export function packAssets(data: any): any {
   const geometries: Record<string, any> = {};
-  if (data?.scene) packGeometries(data.scene, geometries);
+  // One shared geometry table across every scene — identical meshes dedupe across scenes for free.
+  if (data?.scene) packGeometries(data.scene, geometries);                                 // v1
+  if (data?.scenes) for (const s of Object.values<any>(data.scenes)) packGeometries(s?.scene, geometries); // v2
 
   const textures = Array.isArray(data?.textures) ? data.textures : [];
   data.assets = { geometries, textures } as PackedAssets;

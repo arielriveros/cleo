@@ -4,6 +4,7 @@ import DockLayout from "./layout/DockLayout";
 import MeshImportModal from "./meshes/MeshImportModal";
 import ProgressWindow from "./progress/ProgressWindow";
 import AnimationImportModal from "./animation/AnimationImportModal";
+import UnsavedSceneModal from "./dialogs/UnsavedSceneModal";
 import { StateMachineProvider } from "./animation/StateMachineContext";
 
 // Editor shell: a plain flex column of MenuBar (30px), the document TabBar (30px) and the Dockview
@@ -24,6 +25,8 @@ export default function Editor() {
       <ProgressWindow />
       {/* Global animation-import review modal (compatibility vs the skeleton). */}
       <AnimationImportModal />
+      {/* Save/Discard/Cancel prompt when opening a scene with unsaved edits. */}
+      <UnsavedSceneModal />
     </div>
   );
 }

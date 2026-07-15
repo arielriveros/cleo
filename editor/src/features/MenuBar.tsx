@@ -3,10 +3,15 @@ import { Logger } from "cleo";
 import { useCleoEngine } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildGameData } from "./publish/buildGameData";
+import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
 import { applyGameData } from "../utils/projectStorage";
 import { buildProjectConfig, parseProjectConfig } from "../utils/projectConfig";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
-import { parseJsonFile, stringifyJson } from "../workers/workerClient";
+import { parseJsonFile, stringifyJson, importBundleJob } from "../workers/workerClient";
+import { exportBundle } from "../utils/bundleExport";
+import { applyBundleReplace, applyBundleMerge } from "../utils/bundleImport";
+import type { BundleData } from "../utils/bundle";
+import ImportBundleModal from "./dialogs/ImportBundleModal";
 import { startTask } from "./progress/progressStore";
 import Topbar from "../components/Topbar";
 import ModeSelector from "./ModeSelector";
@@ -45,8 +50,10 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, saveActiveMesh, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta } = useCleoEngine();
+  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, saveActiveMesh, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta, materials, terrainMaterials, templates, meshes } = useCleoEngine();
   const { vfs, setVfs } = useVfs();
+  // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
+  const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
   // Current renderer look (post/SSAO/motion-blur/clear color) — embedded in exports/publishes so the
   // standalone game reproduces what the editor is showing instead of falling back to renderer defaults.
   const renderSettings = () => instance?.renderer.getRenderSettings();
@@ -144,6 +151,45 @@ export default function MenuBar() {
     }
   };
 
+  // Full portable bundle (scenes + assets + textures + folders, or just assets for a pack) as a .zip.
+  const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
+  const libraries = () => ({ materials, terrainMaterials, templates, meshes });
+
+  const onExportProject = async () => {
+    const task = startTask({ title: 'Exporting project', steps: ['Gathering & zipping'] });
+    try {
+      task.setStep(0, { status: 'running', detail: 'Bundling scenes, assets and textures' });
+      await exportBundle({ kind: 'project', meta: projectMeta(), libraries: libraries(), vfs });
+      task.setStep(0, { status: 'done', detail: 'Downloaded project.cleoproj.zip' });
+    } catch (e: any) {
+      task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });
+      Logger.error(`Project export failed: ${e?.message ?? e}`, 'Editor');
+    } finally { task.finish(); }
+  };
+
+  const onExportAssetPack = async () => {
+    const task = startTask({ title: 'Exporting asset pack', steps: ['Gathering & zipping'] });
+    try {
+      task.setStep(0, { status: 'running', detail: 'Bundling assets and textures' });
+      await exportBundle({ kind: 'assetpack', meta: projectMeta(), libraries: libraries(), vfs });
+      task.setStep(0, { status: 'done', detail: 'Downloaded assets.cleopack.zip' });
+    } catch (e: any) {
+      task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });
+      Logger.error(`Asset pack export failed: ${e?.message ?? e}`, 'Editor');
+    } finally { task.finish(); }
+  };
+
+  // Import a .zip bundle: parse it (off-thread), then park the Replace/Merge decision on the user.
+  const onImportBundle = async (filelist: FileList | null) => {
+    if (!filelist || !filelist.length) return;
+    try {
+      const bundle = await importBundleJob(filelist[0]);
+      setPendingBundle(bundle);
+    } catch (err) {
+      Logger.error('Failed to read bundle: ' + err, 'Editor');
+    }
+  };
+
   // Export the scene as a downloadable .json file (the former Save behavior).
   // The stringify runs in the worker and comes back as transferable bytes we wrap straight into a Blob.
   const onExport = async () => {
@@ -201,7 +247,15 @@ export default function MenuBar() {
       task.setStep(0, { status: 'running', detail: 'Embedding textures' });
       let data: any;
       try {
-        data = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
+        // Multi-scene game data: the open scene from the live editor (unsaved edits included), every other
+        // scene loaded + re-resolved against the current libraries, textures embedded once. Scripts can
+        // switch scenes at runtime via Game.loadScene.
+        data = await buildMultiSceneGameData({
+          mainSceneId, openSceneId, scenes: sceneList,
+          liveScene: editorScene, liveScripts: scripts, liveBodies: bodies, liveTriggers: triggers, liveUi: ui,
+          libs: { materials, meshes, templates, terrainMaterials },
+          settings: renderSettings(),
+        });
       } catch (e: any) {
         task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });
         throw e;
@@ -292,6 +346,28 @@ export default function MenuBar() {
           <ImportIcon /> Config
         </label>
         <input className="hidden" type='file' accept='.json' id='load-config-file' name='file' ref={configImportRef} onChange={(e) => { onImportConfig(e.target.files); e.currentTarget.value = ''; }} />
+        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the whole project (scenes + assets) to a .zip' onClick={onExportProject}>
+          <ExportIcon /> Project
+        </Button>
+        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the assets + folders (no scenes) as a shareable pack' onClick={onExportAssetPack}>
+          <ExportIcon /> Pack
+        </Button>
+        <label
+          htmlFor='load-bundle-file'
+          title='Import a project or asset-pack .zip'
+          className={cn(buttonVariants({ variant: 'subtle', size: 'sm' }), 'h-[25px] cursor-pointer', libEdit && 'opacity-60 pointer-events-none')}
+        >
+          <ImportIcon /> Bundle
+        </label>
+        <input className="hidden" type='file' accept='.zip' id='load-bundle-file' name='file' onChange={(e) => { onImportBundle(e.target.files); e.currentTarget.value = ''; }} />
+        {pendingBundle && (
+          <ImportBundleModal
+            bundle={pendingBundle}
+            onCancel={() => setPendingBundle(null)}
+            onReplace={() => { const b = pendingBundle; setPendingBundle(null); void applyBundleReplace(b); }}
+            onMerge={() => { const b = pendingBundle; setPendingBundle(null); void applyBundleMerge(b); }}
+          />
+        )}
         <div className='relative inline-block' ref={publishRef}>
           <Button
             variant='primary' size='sm' className='h-[25px]'

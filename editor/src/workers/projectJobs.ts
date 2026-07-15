@@ -15,6 +15,7 @@ import { externalizeAssets, ExternalAsset } from '../features/publish/externaliz
 import { packAssets } from '../features/publish/packAssets';
 import { obfuscateScripts } from '../features/publish/obfuscate';
 import { idbSet } from '../utils/idb';
+import { BundleData, BundleManifest, BundleTexture, BundleTextureIndexRow, BUNDLE_PATHS } from '../utils/bundle';
 
 // The files that make up a published game.
 export interface PublishFiles {
@@ -47,7 +48,9 @@ export type ProjectJob =
       options?: PublishOptions;
       /** When true the job also zips the result and returns only the archive bytes. */
       zip: boolean;
-    };
+    }
+  | { kind: 'exportBundle'; bundle: BundleData }
+  | { kind: 'importBundle'; buffer: ArrayBuffer };
 
 // Byte payloads cross back as raw ArrayBuffers: they transfer instead of copying, and a Blob accepts
 // one directly (a Uint8Array view is not a valid BlobPart under current lib.dom typings).
@@ -57,7 +60,9 @@ export type ProjectJobResult =
   | { kind: 'parse'; data: any }
   // `files` is omitted when zipping (the archive already contains them — no point cloning the whole
   // game.json string back across the thread boundary just to throw it away).
-  | { kind: 'publish'; files?: PublishFiles; zip?: ArrayBuffer; warnings: string[] };
+  | { kind: 'publish'; files?: PublishFiles; zip?: ArrayBuffer; warnings: string[] }
+  | { kind: 'exportBundle'; zip: ArrayBuffer }
+  | { kind: 'importBundle'; bundle: BundleData };
 
 /** Result plus anything in it that should be transferred rather than cloned. */
 export interface JobOutcome {
@@ -104,6 +109,72 @@ async function runPublish(job: Extract<ProjectJob, { kind: 'publish' }>): Promis
   return { result: { kind: 'publish', zip: zipped, warnings }, transfer: [zipped] };
 }
 
+// Zip up a fully-gathered bundle. Scenes/libraries/vfs/manifest are JSON; texture payloads are written
+// as one binary file each, indexed by textures/index.json.
+async function runExportBundle(job: Extract<ProjectJob, { kind: 'exportBundle' }>): Promise<JobOutcome> {
+  const { manifest, scenes, libraries, vfs, textures } = job.bundle;
+  const archive = new JSZip();
+  archive.file(BUNDLE_PATHS.manifest, JSON.stringify(manifest));
+  archive.file(BUNDLE_PATHS.vfs, JSON.stringify(vfs));
+  archive.file(`${BUNDLE_PATHS.librariesDir}materials.json`, JSON.stringify(libraries.materials));
+  archive.file(`${BUNDLE_PATHS.librariesDir}terrainMaterials.json`, JSON.stringify(libraries.terrainMaterials));
+  archive.file(`${BUNDLE_PATHS.librariesDir}templates.json`, JSON.stringify(libraries.templates));
+  archive.file(`${BUNDLE_PATHS.librariesDir}meshes.json`, JSON.stringify(libraries.meshes));
+  for (const [id, data] of Object.entries(scenes)) archive.file(`${BUNDLE_PATHS.scenesDir}${id}.json`, JSON.stringify(data));
+
+  const index: BundleTextureIndexRow[] = [];
+  textures.forEach((t, i) => {
+    const file = `${BUNDLE_PATHS.texturesDir}${i}.bin`;
+    archive.file(file, t.bytes);
+    index.push({ id: t.id, mime: t.mime, config: t.config, file });
+  });
+  archive.file(BUNDLE_PATHS.texturesIndex, JSON.stringify(index));
+
+  const zip = await archive.generateAsync({ type: 'arraybuffer' });
+  return { result: { kind: 'exportBundle', zip }, transfer: [zip] };
+}
+
+// Unzip a bundle back into its structured data. Texture bytes come back as ArrayBuffers (transferred).
+async function runImportBundle(job: Extract<ProjectJob, { kind: 'importBundle' }>): Promise<JobOutcome> {
+  const archive = await JSZip.loadAsync(job.buffer);
+  const readJson = async (path: string, fallback: any): Promise<any> => {
+    const f = archive.file(path);
+    if (!f) return fallback;
+    return JSON.parse(await f.async('string'));
+  };
+
+  const manifest = await readJson(BUNDLE_PATHS.manifest, null) as BundleManifest | null;
+  if (!manifest || manifest.formatVersion !== 1) throw new Error('Unrecognized or unsupported bundle');
+
+  const libraries = {
+    materials: await readJson(`${BUNDLE_PATHS.librariesDir}materials.json`, []),
+    terrainMaterials: await readJson(`${BUNDLE_PATHS.librariesDir}terrainMaterials.json`, []),
+    templates: await readJson(`${BUNDLE_PATHS.librariesDir}templates.json`, []),
+    meshes: await readJson(`${BUNDLE_PATHS.librariesDir}meshes.json`, []),
+  };
+  const vfs = await readJson(BUNDLE_PATHS.vfs, { version: 1, folders: [], entries: [] });
+
+  const scenes: Record<string, any> = {};
+  const sceneFiles = archive.file(new RegExp(`^${BUNDLE_PATHS.scenesDir}.+\\.json$`));
+  for (const f of sceneFiles) {
+    const id = f.name.slice(BUNDLE_PATHS.scenesDir.length, -'.json'.length);
+    scenes[id] = JSON.parse(await f.async('string'));
+  }
+
+  const index = await readJson(BUNDLE_PATHS.texturesIndex, []) as BundleTextureIndexRow[];
+  const transfer: Transferable[] = [];
+  const textures: BundleTexture[] = [];
+  for (const row of index) {
+    const f = archive.file(row.file);
+    if (!f) continue;
+    const bytes = await f.async('arraybuffer');
+    transfer.push(bytes);
+    textures.push({ id: row.id, mime: row.mime, config: row.config, bytes });
+  }
+
+  return { result: { kind: 'importBundle', bundle: { manifest, scenes, libraries, vfs, textures } }, transfer };
+}
+
 /** Execute one job. Safe to call on either thread. */
 export async function runJob(job: ProjectJob): Promise<JobOutcome> {
   switch (job.kind) {
@@ -128,5 +199,11 @@ export async function runJob(job: ProjectJob): Promise<JobOutcome> {
 
     case 'publish':
       return runPublish(job);
+
+    case 'exportBundle':
+      return runExportBundle(job);
+
+    case 'importBundle':
+      return runImportBundle(job);
   }
 }

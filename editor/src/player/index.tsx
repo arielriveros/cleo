@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import EventEmitter from 'events';
-import { CleoEngine, Scene } from 'cleo';
+import { CleoEngine, Scene, TextureManager, setGameHost } from 'cleo';
 import { UIRuntime } from '../features/uiInspector/uiRuntime';
 import PlayerUI from './PlayerUI';
 import { reinflate } from './reinflate';
@@ -62,22 +62,6 @@ async function boot(): Promise<void> {
   engine.setViewport(viewport);
   engine.input.preventDefault();
 
-  // Rebuild the scene from the serialized data (useCache=false -> textures rebuilt from base64/paths).
-  const scene = new Scene();
-  scene.parse(data, false);
-  // Attach published scripts (real functions from game.scripts.js) before the scene starts.
-  const attached = attachScripts(scene);
-
-  // Startup summary — helps diagnose a published game (open the console to see it).
-  const scriptCount = Object.keys((window as any).CLEO_GAME_SCRIPTS || {}).length;
-  const texCount = data?.assets?.textures?.length ?? data?.textures?.length ?? 0;
-  const geoCount = Object.keys(data?.assets?.geometries || {}).length;
-  console.info(`[Cleo] nodes=${[...scene.nodes].length} scriptsInFile=${scriptCount} scriptsAttached=${attached} textures=${texCount} geometries=${geoCount}`);
-
-  engine.setScene(scene);
-  engine.isPaused = false;
-  engine.run();
-
   // UI overlay + runtime, bridged by a local event emitter for re-renders.
   const emitter = new EventEmitter();
   const uiRoot = document.getElementById('ui-root');
@@ -88,19 +72,69 @@ async function boot(): Promise<void> {
     exit: () => { try { window.close(); } catch { /* ignore */ } },
     pause: () => { engine.isPaused = !engine.isPaused; },
   };
+  const startUI = (elements: any) => {
+    if (Array.isArray(elements) && elements.length > 0)
+      UIRuntime.start(elements, { emit: (name: string) => emitter.emit(name), getScene: () => engine.scene, game });
+  };
 
-  // Let the engine finish initializing (canvas/input) before starting scripts, as the editor does.
-  setTimeout(() => {
-    scene.start();
-    const elements = data?.ui?.elements;
-    if (Array.isArray(elements) && elements.length > 0) {
-      UIRuntime.start(elements, {
-        emit: (name: string) => emitter.emit(name),
-        getScene: () => engine.scene,
-        game,
-      });
+  engine.isPaused = false;
+  engine.run();
+
+  // v2: a multi-scene game. Register textures once, then run the entry scene; scripts can switch scenes
+  // at runtime via Game.loadScene, driven through the game host installed below.
+  if (data?.version === 2 && data?.scenes) {
+    for (const t of (data.textures ?? [])) {
+      try { if (!TextureManager.Instance.getTexture(t.id)) TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id); } catch { /* skip a bad texture */ }
     }
-  }, 100);
+    const table: Record<string, { name: string; scene: any; ui: any }> = data.scenes;
+    let currentId = data.entry in table ? data.entry : Object.keys(table)[0];
+
+    const resolve = (nameOrId: string): string | undefined => {
+      if (table[nameOrId]) return nameOrId;
+      return Object.keys(table).find(id => table[id].name === nameOrId);
+    };
+
+    const startScene = (id: string) => {
+      const entry = table[id];
+      if (!entry) { console.warn(`[Cleo] loadScene: no scene "${id}"`); return; }
+      currentId = id;
+      const scene = new Scene();
+      scene.parse({ scene: entry.scene, textures: [] }, true); // textures already registered
+      const attached = attachScripts(scene);
+      console.info(`[Cleo] scene "${entry.name}" nodes=${[...scene.nodes].length} scriptsAttached=${attached}`);
+      engine.setScene(scene);
+      setTimeout(() => { scene.start(); startUI(entry.ui?.elements); }, 100);
+    };
+
+    setGameHost({
+      loadScene: (nameOrId: string) => {
+        const id = resolve(nameOrId);
+        if (!id) { console.warn(`[Cleo] loadScene: unknown scene "${nameOrId}"`); return; }
+        UIRuntime.stop();
+        engine.physics.clear();
+        engine.input.clear();
+        startScene(id);
+      },
+      currentSceneName: () => table[currentId]?.name ?? '',
+      sceneNames: () => Object.values(table).map(s => s.name),
+    });
+
+    startScene(currentId);
+    return;
+  }
+
+  // v1: single scene. Rebuild it from the serialized data (useCache=false -> textures from base64/paths).
+  const scene = new Scene();
+  scene.parse(data, false);
+  const attached = attachScripts(scene); // real functions from game.scripts.js, before scene.start
+
+  const scriptCount = Object.keys((window as any).CLEO_GAME_SCRIPTS || {}).length;
+  const texCount = data?.assets?.textures?.length ?? data?.textures?.length ?? 0;
+  const geoCount = Object.keys(data?.assets?.geometries || {}).length;
+  console.info(`[Cleo] nodes=${[...scene.nodes].length} scriptsInFile=${scriptCount} scriptsAttached=${attached} textures=${texCount} geometries=${geoCount}`);
+
+  engine.setScene(scene);
+  setTimeout(() => { scene.start(); startUI(data?.ui?.elements); }, 100);
 }
 
 boot().catch(showError);

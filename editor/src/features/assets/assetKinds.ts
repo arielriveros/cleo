@@ -49,7 +49,7 @@ export type AssetDeps = {
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | MeshAsset
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | MeshAsset | SceneMeta
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value))

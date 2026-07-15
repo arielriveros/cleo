@@ -30,7 +30,8 @@ export function extractScripts(data: any): { data: any; scripts: ScriptMap } {
     }
   };
 
-  if (data?.scene) visit(data.scene);
+  if (data?.scene) visit(data.scene);                       // v1: single scene
+  if (data?.scenes) for (const s of Object.values<any>(data.scenes)) visit(s?.scene); // v2: every scene
   return { data, scripts };
 }
 
