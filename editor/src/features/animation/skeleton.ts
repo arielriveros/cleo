@@ -1,5 +1,6 @@
 import { Scene, Node, ModelNode, AnimatedModel, Animator, Vec, canAccessVariable } from 'cleo'
 import type { Skin } from 'cleo'
+import { getScriptIdOf, type ScriptAsset } from '../../utils/scripts'
 
 // Shared helpers for the Animation Editor: resolving the target skinned model, building the joint
 // hierarchy from a Skin, and computing per-joint world transforms for the viewport overlay.
@@ -104,19 +105,49 @@ export interface AccessibleVariable {
   varType: 'number' | 'boolean'
 }
 
+/** Whether `requester` may bind to a class-script field of `access` declared on `owner`. Mirrors the legacy
+ *  canAccessVariable rules — a script field's access modifier is only declared in the script, not on the node. */
+function canAccessScriptField(access: string, owner: Node, requester: Node): boolean {
+  if (access === 'public') return true
+  if (requester === owner) return true
+  if (access === 'protected') return requester.isDescendantOf(owner)
+  return false // private, non-owner
+}
+
 /**
  * Enumerate the node variables the given source node may bind an animation parameter to, per the
  * access model: its own vars (Self), its parent's protected/public vars (Parent), and any other
  * scene node's public vars (Scene). Only number/boolean variables are usable as transition inputs.
  * Runs against the SOURCE node's real scene (the animation-editor clone is isolated).
+ *
+ * Two kinds of variable are offered: a class script's declared FIELDS (resolved from the node's linked
+ * script asset — these are native properties on the node, not entries in the legacy `variables` Map), and
+ * any remaining legacy inline-script variables. Underscore-prefixed script fields are internal and skipped.
  */
-export function accessibleNodeVariables(sourceNode: Node | null, sourceScene: Scene | null): AccessibleVariable[] {
+export function accessibleNodeVariables(
+  sourceNode: Node | null,
+  sourceScene: Scene | null,
+  scriptAssets: ScriptAsset[] = [],
+): AccessibleVariable[] {
   const out: AccessibleVariable[] = []
   if (!sourceNode) return out
   const usable = (t: string) => t === 'number' || t === 'boolean'
+  const assetOf = (owner: Node): ScriptAsset | undefined => {
+    const id = getScriptIdOf(owner)
+    return id ? scriptAssets.find(a => a.id === id) : undefined
+  }
   const collect = (owner: Node, requester: Node, nodeRef: string, group: AccessGroup, label: string) => {
+    const seen = new Set<string>()
+    // Class-script fields first — the current model.
+    for (const v of assetOf(owner)?.variables ?? []) {
+      if (v.hidden || !usable(v.type)) continue
+      if (owner !== requester && !canAccessScriptField(v.access, owner, requester)) continue
+      seen.add(v.name)
+      out.push({ nodeRef, group, nodeLabel: label, varName: v.name, varType: v.type as 'number' | 'boolean' })
+    }
+    // Legacy inline-script variables (the old editor-created Map).
     for (const [name, v] of owner.variables) {
-      if (name.startsWith('__') || !usable(v.type)) continue
+      if (name.startsWith('__') || seen.has(name) || !usable(v.type)) continue
       if (owner !== requester && !canAccessVariable(owner, requester, name)) continue
       out.push({ nodeRef, group, nodeLabel: label, varName: name, varType: v.type as 'number' | 'boolean' })
     }

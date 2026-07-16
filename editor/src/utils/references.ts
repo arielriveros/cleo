@@ -4,6 +4,7 @@ import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
 import { MeshAsset, MESH_ID_VAR } from './meshes'
 import { Template, TEMPLATE_ID_VAR } from './templates'
+import { SCRIPT_ID_VAR } from './scripts'
 import { TerrainMaterialAsset } from './terrainMaterials'
 
 // Which texture / material asset ids are actually used anywhere — the main scene plus the asset libraries.
@@ -95,6 +96,18 @@ export function collectReferencedMeshIds(scene: Scene | null | undefined): Set<s
   if (scene) {
     for (const node of scene.nodes) {
       const id = node.getVariable(MESH_ID_VAR)
+      if (id) set.add(id)
+    }
+  }
+  return set
+}
+
+/** Script asset ids referenced by any node (__scriptId). */
+export function collectReferencedScriptIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  if (scene) {
+    for (const node of scene.nodes) {
+      const id = node.getVariable(SCRIPT_ID_VAR)
       if (id) set.add(id)
     }
   }

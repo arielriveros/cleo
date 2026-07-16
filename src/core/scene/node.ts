@@ -310,19 +310,31 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
     // reaching a raw node through `this.scene.physics`). Handing a script the real function would let it
     // strip the proxy off `this` or any node it holds and read/write variables straight past the
     // public/private/protected checks below, so it is shadowed to identity for the script-facing 'cleo'.
-    factory.call(context, createScriptImporter({ ...bindDataAccessors(node), unwrapScriptNode: (value: any) => value }));
+    const result = factory.call(context, createScriptImporter({ ...bindDataAccessors(node), unwrapScriptNode: (value: any) => value }));
 
-    // The engine calls handlers with raw nodes; scripts must only ever see proxied ones. A throwing
-    // handler must not take the frame down with it either, and the node's name is the only thing that
-    // makes the error findable in a scene of hundreds.
+    // A class-based script returns its class constructor. It runs NATIVELY on the real node: its own
+    // prototype methods (onUpdate/onCollision/… and any author-defined helper like this.canJump) are copied
+    // onto the node as own properties, and their `this` is the raw node — so `this.speed` is a direct
+    // property read/write, not a Map lookup, and this.parent/this.findNode(...) hand back real nodes.
+    // Access levels (public/private/protected) are enforced by the editor's type-checker at author time; the
+    // runtime is native, with no per-variable proxy. Field values live as own properties on the node,
+    // restored from `json.scriptVars` in _commonParse before this runs.
+    if (typeof result === 'function' && !!(result as any).prototype) {
+        attachClassScript(node, result as any);
+        return;
+    }
+
+    // Legacy path: a `this.onX = (node, ...) => ...` factory whose handlers were collected on the proxy.
+    // The engine now calls handlers WITHOUT the leading node (onUpdate(delta, time)), so the proxied self is
+    // prepended here to preserve the legacy `(node, ...)` calling convention. Scripts must only ever see
+    // proxied nodes; a throwing handler must not take the frame down; the node's name makes the error findable.
     const guard = (name: string) => {
         const fn = handlers[name];
         if (typeof fn !== 'function') return () => {};
         return (...args: any[]) => {
             try {
-                const result = fn.apply(context, args.map(arg => (arg instanceof Node ? wrapNode(unwrapScriptNode(arg), node) : arg)));
-                // An `async` handler's body runs synchronously up to its first `await` — a throw before
-                // that point is already caught below. A rejection after it only ever surfaces here.
+                const mapped = args.map(arg => (arg instanceof Node ? wrapNode(unwrapScriptNode(arg), node) : arg));
+                const result = fn.apply(context, [context, ...mapped]);
                 if (result && typeof result.then === 'function')
                     result.catch((e: any) => Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'));
             }
@@ -336,6 +348,69 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
     node.onCollision = guard('onCollision');
     node.onTrigger = guard('onTrigger');
     node.onDespawn = guard('onDespawn');
+}
+
+/**
+ * Bind a compiled script class onto a node, natively. The class's own prototype methods become own
+ * properties on the node with `this` = the node itself:
+ *  - handler slots (onStart/onSpawn/onUpdate/onCollision/onTrigger/onDespawn) are wrapped so a throw or a
+ *    rejected async body is caught and logged; the engine calls them with the handler's own args
+ *    (`onUpdate(delta, time)`, `onCollision(other)`), self reached through `this`;
+ *  - every other method (a helper like `this.canJump()`) is copied through verbatim, so it runs on the node.
+ * Declared fields get their class DEFAULTS here (see applyFieldDefaults); per-node values restored from
+ * `json.scriptVars` in _commonParse always win, because only still-undefined fields are filled in.
+ */
+function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void {
+    const proto = Ctor.prototype;
+    const n = node as any;
+
+    const guard = (name: string, fn: Function) => (...args: any[]) => {
+        try {
+            const result = fn.apply(node, args); // engine calls with the handler's own args; self is `this`
+            if (result && typeof result.then === 'function')
+                result.catch((e: any) => Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'));
+        }
+        catch (e) { Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'); }
+    };
+
+    applyFieldDefaults(node, proto);
+
+    // Only the class's OWN prototype — inherited Node/ModelNode methods are the engine's, already on the node.
+    // `__`-prefixed names are Sucrase's field-initializer helpers (handled above), not author methods.
+    for (const name of Object.getOwnPropertyNames(proto)) {
+        if (name === 'constructor' || name.startsWith('__')) continue;
+        const desc = Object.getOwnPropertyDescriptor(proto, name);
+        if (!desc || typeof desc.value !== 'function') continue;
+        if ((SCRIPT_HANDLERS as readonly string[]).includes(name)) n[name] = guard(name, desc.value);
+        else n[name] = desc.value; // helper method, runs on the node
+    }
+}
+
+/**
+ * Give a class script's declared fields (`speed = 1`) their DEFAULT values on the node.
+ *
+ * The node already exists, so the script's class is never constructed — which means its field initializers
+ * never run on their own. Sucrase lowers each field into an `__init`/`__init2`/… prototype method that the
+ * constructor would have called; run those against a bare object to harvest the declared defaults, then fill
+ * in only the fields the node does not already have. That ordering is what makes per-node values win: the
+ * editor restores them into `json.scriptVars` (applied in _commonParse, before the script binds), and a field
+ * that already has a value is left alone.
+ *
+ * Without this a field whose per-node value never made it into scriptVars would read `undefined`, and the
+ * first bit of arithmetic on it (`this.speed * delta`) would silently poison the node's transform with NaN.
+ * An initializer that reads `this` can't be evaluated this way; it is skipped rather than allowed to throw.
+ */
+function applyFieldDefaults(node: Node, proto: any): void {
+    const n = node as any;
+    const defaults: Record<string, any> = {};
+    for (const name of Object.getOwnPropertyNames(proto)) {
+        if (!/^__init\d*$/.test(name)) continue;
+        const fn = proto[name];
+        if (typeof fn !== 'function') continue;
+        try { fn.call(defaults); } catch { /* initializer depends on `this`: leave that field to scriptVars */ }
+    }
+    for (const key of Object.keys(defaults))
+        if (n[key] === undefined) n[key] = defaults[key];
 }
 
 export class Node {
@@ -389,13 +464,15 @@ export class Node {
   // readable from scripts via getData(node) and writable via setData(node, name, value).
   protected _variables: Map<string, NodeVariable> = new Map();
 
-  // Script handlers. The node is always the first argument; everything else a script needs it imports.
-  public onStart: (node: Node) => void = () => {};
-  public onSpawn: (node: Node) => void = () => {};
-  public onUpdate: (node: Node, delta: number, time: number) => void = () => {};
-  public onCollision: (node: Node, other: Node) => void = () => {};
-  public onTrigger: (node: Node, other: Node) => void = () => {};
-  public onDespawn: (node: Node) => void = () => {};
+  // Script handlers, declared as overridable methods so a class-based script (`class X extends Node`) can
+  // override them with matching signatures. `this` IS the node, so there is no `node` self-parameter.
+  // attachScriptFactory/attachClassScript install a script's handlers as own-properties shadowing these.
+  public onStart(): void {}
+  public onSpawn(): void {}
+  public onUpdate(delta: number, time: number): void {}
+  public onCollision(other: Node): void {}
+  public onTrigger(other: Node): void {}
+  public onDespawn(): void {}
 
   constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
     this._name = name;
@@ -433,13 +510,13 @@ export class Node {
     
     node.parent = this;
     this._children.push(node);
-    node.onSpawn(node);
+    node.onSpawn();
     if (this._hasStarted)
       node.start();
     if (this.scene) {
       node.scene = this.scene;
       for (const child of node.children) {
-        child.onSpawn(child);
+        child.onSpawn();
         child.scene = this.scene;
       }
     }
@@ -451,7 +528,7 @@ export class Node {
       // Before onDespawn, and before `scene` is cleared below: a pending this.after/this.every must not
       // fire against a node no longer in the tree.
       node.scene?.cancelTimers(node);
-      try { node.onDespawn(node); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
+      try { node.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
     }
     node.parent = null;
     node.scene = null;
@@ -524,7 +601,7 @@ export class Node {
   public remove(): void {
     this._markForRemoval = true;
     this.scene?.cancelTimers(this);
-    try { this.onDespawn(this); } catch (e) { Logger.error(`Error in onDespawn function for node ${this._name}: ${e}`); }
+    try { this.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn function for node ${this._name}: ${e}`); }
     for (const child of this._children)
       child.remove();
   }
@@ -548,7 +625,7 @@ export class Node {
   public start(): void {
     try {
       this._hasStarted = true;
-      this.onStart(this);
+      this.onStart();
       for (const child of this._children)
         child.start();
     } catch (error) {
@@ -558,7 +635,7 @@ export class Node {
 
   public update(delta: number, time: number): void {
     try {
-      this.onUpdate(this, delta, time);
+      this.onUpdate(delta, time);
     } catch (error) {
       Logger.error(`Error in onUpdate function for node ${this._name}: ${error}`);
     }
@@ -608,6 +685,11 @@ export class Node {
     // Restore custom variables before scripts so onStart can read them.
     Node._parseVariables(node, json.variables);
 
+    // Restore a class-script's native fields as own properties before the script binds, so its methods
+    // read them directly (`this.speed`). The editor injects `scriptVars` at serialize time (like it injects
+    // `script`), reading each schema field off the node — the engine never has to know the field schema.
+    Node._parseScriptVars(node, json.scriptVars);
+
     if (json.script)
       Node._parseScript(node, json.script);
 
@@ -637,6 +719,20 @@ export class Node {
           case 'cylinder':
             target.attachShape(Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments, scale), offset, rotation);
             break;
+          case 'capsule': {
+            // The only descriptor that expands into several cannon shapes: a capsule is a cylinder plus two
+            // sphere caps. `attachShape` places a shape at bodyPos + bodyQuat * offset — the shape's OWN
+            // rotation never moves it (body.ts) — and the caps are offset along the capsule's local Y, so
+            // their offsets have to be rotated here. Skip this and a tilted capsule keeps its caps upright
+            // while the cylinder leans out from between them.
+            const q = quat.create();
+            quat.fromEuler(q, rotation[0], rotation[1], rotation[2]);
+            for (const part of Shape.Capsule(shape.radius, shape.height, shape.numSegments, scale)) {
+              const capOffset = vec3.transformQuat(vec3.create(), part.offset, q);
+              target.attachShape(part.shape, vec3.add(capOffset, capOffset, offset), rotation);
+            }
+            break;
+          }
           case 'convex': {
             // A degenerate hull would feed NaN axes to cannon's SAT, so fall back to its bounding box.
             const hull = Shape.ConvexHull(shape.vertices, shape.faces, scale);
@@ -666,7 +762,10 @@ export class Node {
         json.body.linearDamping,
         json.body.angularDamping,
         json.body.linearConstraints,
-        json.body.angularConstraints
+        json.body.angularConstraints,
+        // Absent in scenes saved before surfaces existed; RigidBody defaults them to the old behavior.
+        json.body.friction,
+        json.body.restitution
       );
       setShapes(json.body.shapes, node._body);
     }
@@ -769,6 +868,17 @@ export class Node {
       else
         node.setVariable(name, entry);
     }
+  }
+
+  /**
+   * Restore a class-script's native fields (`{ name: value }`) as own properties on the node, so the
+   * script's methods read/write them directly (`this.speed`). Deliberately native — script variables are
+   * real instance properties, not entries in the {@link _variables} Map (which stays for the legacy,
+   * editor-created variable system). The editor serializes these from the linked script's field schema.
+   */
+  protected static _parseScriptVars(node: Node, json: any): void {
+    if (!json || typeof json !== 'object') return;
+    for (const name of Object.keys(json)) (node as any)[name] = json[name];
   }
 
   public get scene(): Scene | null { return this._scene; }
@@ -993,12 +1103,74 @@ export class Node {
   }
 
   public get body(): RigidBody | null { return this._body; }
+
+  /**
+   * True when this node's rigid body is resting on something solid — terrain or another body — in the
+   * CURRENT gravity direction. Works under any gravity configuration: "down" is the world's gravity vector,
+   * not -Y, so inverted or sideways gravity behaves correctly (and under zero gravity nothing is grounded).
+   *
+   *   if (this.isGrounded) this.velocity = [v[0], JUMP_SPEED, v[2]];
+   *
+   * Answered from the physics contacts, so it costs no raycast and needs no per-scene wiring. Always false
+   * for a node with no body, so a caller never has to check for one.
+   *
+   * Allows a short grace (~0.1s) after the last real ground contact, because cannon drops the contact of a
+   * perfectly resting body for the odd frame and the body plainly has not left the ground — see
+   * PhysicsSystem's GROUND_GRACE. Two consequences worth knowing: you get coyote-time jumping for free, and
+   * this stays true for that grace after you genuinely walk off a ledge, so it is not the way to ask "am I
+   * falling right now" — `velocity[1]` is.
+   */
+  public get isGrounded(): boolean {
+    if (!this._body) return false;
+    return this._scene?.physics?.isGrounded(this._body) ?? false;
+  }
+
+  /**
+   * Surface normal of the ground this node is standing on, pointing up out of it: `[0, 1, 0]` on level ground
+   * under normal gravity, tilted on a slope. Use it to move ALONG the ground rather than through it:
+   *
+   *   const n = this.groundNormal;
+   *   const d = dir[0]*n[0] + dir[1]*n[1] + dir[2]*n[2];
+   *   dir = normalize([dir[0]-n[0]*d, dir[1]-n[1]*d, dir[2]-n[2]*d]);  // now parallel to the surface
+   *
+   * Falls back to up (gravity reversed) when airborne, bodyless, or under zero gravity — so the projection
+   * above is a no-op in those cases and callers need no special case. Returns a fresh vec3.
+   */
+  public get groundNormal(): vec3 {
+    const up = vec3.fromValues(0, 1, 0);
+    if (!this._body) return up;
+    return this._scene?.physics?.groundNormal(this._body) ?? up;
+  }
+
+  /**
+   * This node's world-space velocity, in units per second: `[0, 0, 0]` when it is still (or has no body),
+   * `[0, 0, 5]` when it is moving along +Z at 5. Assigning drives the body — the component along gravity is
+   * yours to preserve, which is what keeps falling and jumping intact while steering horizontally:
+   *
+   *   const v = this.velocity;
+   *   this.velocity = [dirX * speed, v[1], dirZ * speed];
+   *
+   * A fresh vector each read (like `forward`), so it is safe to hold on to. Assigning to a node with no body
+   * does nothing.
+   */
+  public get velocity(): vec3 {
+    if (!this._body) return vec3.create();
+    const v = this._body.velocity;
+    return vec3.fromValues(v.x, v.y, v.z);
+  }
+  public set velocity(value: vec3) {
+    // cannon owns the Vec3 and reads it in place every step, so it is mutated rather than replaced.
+    this._body?.velocity.set(value[0], value[1], value[2]);
+  }
+
   public setBody(
     mass: number,
     linearDamping?: number,
     angularDamping?: number,
     linearConstraints?: [number, number, number],
-    angularConstraints?: [number, number, number]
+    angularConstraints?: [number, number, number],
+    friction?: number,
+    restitution?: number
   ): RigidBody {
     // TODO: Handle the case where the node is a child of another node
     this._body = new RigidBody({
@@ -1008,13 +1180,14 @@ export class Node {
       // Valid during parse: _commonParse applies the JSON transform before creating the body.
       position: this.worldPosition,
       quaternion: this.worldQuaternion,
-      linearConstraints, angularConstraints
+      linearConstraints, angularConstraints,
+      friction, restitution
     }, this);
 
     // handle onCollision event
     this._body.addEventListener('collide', (event: any) => {
       if (event.body instanceof RigidBody || event.body instanceof Trigger)
-        this.onCollision(this, event.body.owner);
+        this.onCollision(event.body.owner);
     });
 
     return this._body;
@@ -1030,7 +1203,7 @@ export class Node {
     // handle onTrigger event
     this._trigger.addEventListener('collide', (event: any) => {
       if (event.body instanceof RigidBody || event.body instanceof Trigger)
-        this.onTrigger(this, event.body.owner);
+        this.onTrigger(event.body.owner);
     });
 
   }

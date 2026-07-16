@@ -5,9 +5,8 @@
 //
 // The preference is persisted; the theme itself defaults to dark, like the rest of the editor.
 import { useSyncExternalStore } from 'react';
-import type { CodeThemeName } from './codeMirrorTheme';
 
-export type { CodeThemeName };
+export type CodeThemeName = 'light' | 'dark';
 
 const KEY = 'cleo.codeEditor.theme'; // 'cleo.<feature>.<key>', as in Collapsable
 

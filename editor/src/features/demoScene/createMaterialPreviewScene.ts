@@ -42,7 +42,7 @@ export function createMaterialPreviewScene(scene: Scene, opts?: { skybox?: boole
   // from the node transform). It rotates the pivot (orbit) and dollies the camera (zoom); the target is
   // always the origin, so the sphere never leaves the centre of the frame.
   let pitch = INIT_PITCH, yaw = INIT_YAW, radius = RADIUS;
-  cam.onUpdate = (node, delta) => {
+  cam.onUpdate = (delta) => {
     const mouse = InputManager.instance.mouse;
     if (mouse.buttons.Left) {
       yaw -= mouse.velocity[0] * delta * ROT_SPEED;
@@ -52,7 +52,7 @@ export function createMaterialPreviewScene(scene: Scene, opts?: { skybox?: boole
     }
     if (Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
       radius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, radius + mouse.wheel.deltaY * ZOOM_SPEED));
-      node.setPosition([0, 0, -radius]);
+      cam.setPosition([0, 0, -radius]);
     }
   };
 

@@ -50,7 +50,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, saveActiveMesh, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta, materials, terrainMaterials, templates, meshes } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, saveActiveMesh, saveActiveScript, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta, materials, terrainMaterials, templates, meshes } = useCleoEngine();
   const { vfs, setVfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -61,8 +61,9 @@ export default function MenuBar() {
   const materialMode = editorMode === 'material';
   const terrainMaterialMode = editorMode === 'terrainMaterial';
   const meshMode = editorMode === 'mesh';
-  // Template, (terrain-)material and mesh tabs all hide the project/scene-level actions (they edit a library asset).
-  const libEdit = templateMode || materialMode || terrainMaterialMode || meshMode;
+  const scriptMode = editorMode === 'script';
+  // Template, (terrain-)material, mesh and script tabs all hide the project/scene-level actions (they edit a library asset).
+  const libEdit = templateMode || materialMode || terrainMaterialMode || meshMode || scriptMode;
   const saving = savingState === 'saving';
   // Save carries its own status: the icon and the color say what happened, the label says it in words.
   const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved' : savingState === 'error' ? 'Failed' : 'Save';
@@ -153,7 +154,7 @@ export default function MenuBar() {
 
   // Full portable bundle (scenes + assets + textures + folders, or just assets for a pack) as a .zip.
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
-  const libraries = () => ({ materials, terrainMaterials, templates, meshes });
+  const libraries = () => ({ materials, terrainMaterials, templates, meshes, scripts: scriptAssets });
 
   const onExportProject = async () => {
     const task = startTask({ title: 'Exporting project', steps: ['Gathering & zipping'] });
@@ -197,7 +198,7 @@ export default function MenuBar() {
     const task = startTask({ title: 'Exporting scene', steps: ['Serializing scene', 'Writing file'] });
     try {
       task.setStep(0, { status: 'running', detail: 'Embedding textures' });
-      const json = await buildGameData({ scene: editorScene, scripts, bodies, triggers, ui, settings: renderSettings() });
+      const json = await buildGameData({ scene: editorScene, scripts, scriptAssets, bodies, triggers, ui, settings: renderSettings() });
       task.setStep(0, { status: 'done' });
 
       task.setStep(1, { status: 'running', detail: 'Encoding scene.json' });
@@ -253,7 +254,8 @@ export default function MenuBar() {
         data = await buildMultiSceneGameData({
           mainSceneId, openSceneId, scenes: sceneList,
           liveScene: editorScene, liveScripts: scripts, liveBodies: bodies, liveTriggers: triggers, liveUi: ui,
-          libs: { materials, meshes, templates, terrainMaterials },
+          libs: { materials, meshes, templates, terrainMaterials, scripts: scriptAssets },
+          scriptAssets,
           settings: renderSettings(),
         });
       } catch (e: any) {
@@ -313,6 +315,11 @@ export default function MenuBar() {
         {meshMode && (
           <Button variant='primary' size='sm' className='h-[25px]' title='Save this mesh (with its LOD levels) and update its placed copies' onClick={() => saveActiveMesh()}>
             <SaveIcon /> Save Mesh
+          </Button>
+        )}
+        {scriptMode && (
+          <Button variant='primary' size='sm' className='h-[25px]' title='Save this script and apply it to every node that uses it' onClick={() => saveActiveScript()}>
+            <SaveIcon /> Save Script
           </Button>
         )}
         <Button

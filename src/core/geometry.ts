@@ -563,6 +563,67 @@ export class Geometry {
     }
 
     /**
+     * Y-aligned capsule centred on the origin — a cylinder capped by two hemispheres.
+     *
+     * `cylinderHeight` is the STRAIGHT SECTION ONLY: total height is `cylinderHeight + 2 * radius`. This
+     * mirrors `Shape.Capsule`, which derives the straight section from the collider's total height.
+     * A `cylinderHeight` of 0 degenerates to a sphere, which is exactly right.
+     *
+     * Built as one lathed surface: both hemispheres are swept as ring stacks, and their equator rings are
+     * displaced to +/-cylinderHeight/2. The wall between those two coincident-radius rings IS the straight
+     * section, so no separate cylinder pass is needed and the surface stays closed.
+     */
+    public static Capsule(segments: number = 32, radius: number = 1, cylinderHeight: number = 1): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const halfCyl = Math.max(0, cylinderHeight) / 2;
+        // Stacks per hemisphere. Quartering `segments` keeps a capsule's silhouette about as smooth as a
+        // Sphere() of the same segment count, which uses `segments` stacks over the whole 180 degrees.
+        const capStacks = Math.max(2, Math.round(segments / 4));
+
+        // Ring profile from the top pole to the bottom pole. `y`/`r` are the ring's position and radius;
+        // `ny`/`nr` are its normal's vertical and radial parts — taken from the un-displaced hemisphere, so
+        // the straight section's normals come out perfectly horizontal.
+        const rings: { y: number, r: number, ny: number, nr: number }[] = [];
+        for (let half = 0; half <= 1; ++half) {
+            const offset = half === 0 ? halfCyl : -halfCyl;
+            for (let i = 0; i <= capStacks; ++i) {
+                const phi = (half + i / capStacks) * (Math.PI / 2);
+                rings.push({
+                    y: Math.cos(phi) * radius + offset, r: Math.sin(phi) * radius,
+                    ny: Math.cos(phi), nr: Math.sin(phi),
+                });
+            }
+        }
+
+        for (let i = 0; i < rings.length; ++i) {
+            const ring = rings[i];
+            for (let j = 0; j <= segments; ++j) {
+                const theta = (j / segments) * 2 * Math.PI;
+                const cosTheta = Math.cos(theta), sinTheta = Math.sin(theta);
+
+                positions.push([cosTheta * ring.r, ring.y, sinTheta * ring.r]);
+                normals.push([cosTheta * ring.nr, ring.ny, sinTheta * ring.nr]);
+                uvs.push([(segments - j) / segments, i / (rings.length - 1)]);
+            }
+        }
+
+        for (let i = 0; i < rings.length - 1; ++i)
+            for (let j = 0; j < segments; ++j) {
+                const k1 = i * (segments + 1) + j;
+                const k2 = k1 + segments + 1;
+
+                indices.push(k1, k1 + 1, k2);
+                indices.push(k2, k1 + 1, k2 + 1);
+            }
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
      * Flat horizontal grid on the XZ plane (Y up), centred on the origin. `cols`/`rows` are the number of
      * quads along X/Z, producing (cols+1)*(rows+1) vertices. Intended as the base mesh for terrain that is
      * then sculpted by mutating the Y of each vertex. UVs span 0..1 across the whole plane.

@@ -8,6 +8,7 @@ import type { SceneMeta } from '../../utils/sceneStorage'
 import type { AssetLibs } from '../../utils/assetHash'
 import type { BodyDescription, ShapeDescription } from '../EngineContext'
 import type { UIState } from '../../utils/UIModel'
+import type { ScriptAsset } from '../../utils/scripts'
 
 // game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts can call
 // Game.loadScene(name|id) to switch at runtime. Textures are serialized ONCE at the top level (they are
@@ -29,6 +30,7 @@ export interface MultiSceneSources {
   liveTriggers: Map<string, { shapes: ShapeDescription[] }>
   liveUi: UIState
   libs: AssetLibs
+  scriptAssets?: ScriptAsset[]
   settings?: RenderSettings
 }
 
@@ -41,6 +43,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
       const gd = await buildGameData({
         scene: src.liveScene,
         scripts: src.liveScripts,
+        scriptAssets: src.scriptAssets,
         bodies: src.liveBodies,
         triggers: src.liveTriggers,
         ui: src.liveUi,
@@ -63,6 +66,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     const gd = await buildGameData({
       scene: tmp,
       scripts: maps.scripts,
+      scriptAssets: src.scriptAssets,
       bodies: maps.bodies,
       triggers: maps.triggers,
       ui: clone.ui ?? { version: 1, elements: [] },

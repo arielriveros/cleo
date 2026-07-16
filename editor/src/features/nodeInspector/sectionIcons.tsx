@@ -21,3 +21,4 @@ export const CloudsIcon = () => (<S><path d='M6 16a4 4 0 0 1 .6-7.9A5 5 0 0 1 16
 export const ProbeIcon = () => (<S><circle cx='12' cy='12' r='4' /><circle cx='12' cy='12' r='9' strokeDasharray='2 3' /></S>);
 export const SkyboxIcon = () => (<S><rect x='4' y='4' width='16' height='16' rx='1.5' /><path d='M4 9h16M9 4v16' /></S>);
 export const AnimationIcon = () => (<S><path d='M5 12a7 7 0 1 1 2 5' /><path d='M5 21v-4h4' /></S>);
+export const ScriptIcon = () => (<S><path d='M8 6 3 12l5 6' /><path d='M16 6l5 6-5 6' /></S>);

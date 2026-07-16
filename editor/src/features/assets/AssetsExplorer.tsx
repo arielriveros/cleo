@@ -15,6 +15,7 @@ import MissingAssetsPopover from './MissingAssetsPopover'
 import { buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
+import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
 
 // The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries (textures,
 // materials, terrain materials, templates, meshes), with real folders.
@@ -39,7 +40,7 @@ export default function AssetsExplorer() {
 
 function AssetsExplorerHost() {
   const {
-    enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor,
+    enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor,
     importMeshFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, landingFolderRef, depsRef } = useVfs()
@@ -225,6 +226,26 @@ function AssetsExplorerHost() {
     }
   }, [runImport, editorScene, scripts, bodies, triggers, addTemplate])
 
+  // Hovering a script card highlights every node icon in the scene tree that references that script (the
+  // same light-blue tint the tree's own script-icon hover uses). Delegated over the SVAR DOM — its cards are
+  // `.wx-item[data-id]` / `.wx-row[data-id]`, the data-id is the VFS path (setID prefixes ':').
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+    const resolveScriptId = (target: EventTarget | null): string | null => {
+      const card = (target as HTMLElement | null)?.closest?.('.wx-item[data-id], .wx-row[data-id]')
+      const raw = card?.getAttribute('data-id')
+      const path = raw ? (raw.startsWith(':') ? raw.slice(1) : raw) : null
+      const entry = path ? pathIndexRef.current.get(path) : undefined
+      return entry?.kind === 'script' ? entry.assetId : null
+    }
+    const onOver = (e: Event) => { const id = resolveScriptId(e.target); if (id) hoveredScriptStore.set(id) }
+    const onOut = (e: Event) => { if (resolveScriptId(e.target)) hoveredScriptStore.set(null) }
+    el.addEventListener('mouseover', onOver)
+    el.addEventListener('mouseout', onOut)
+    return () => { el.removeEventListener('mouseover', onOver); el.removeEventListener('mouseout', onOut); hoveredScriptStore.set(null) }
+  }, [pathIndexRef])
+
   // --- file-manager rendering hooks -------------------------------------------------------------------
   // Stable identities: SVAR memoizes its `templates` (preview/icon) object, and a changing `data`/config
   // prop re-inits the store. Everything these need is read through refs.
@@ -270,6 +291,7 @@ function AssetsExplorerHost() {
     { label: 'Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterMaterialEditor(), title: 'Create a new material asset' },
     { label: 'Terrain Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new terrain material asset' },
     { label: 'Template', icon: <img src={iconFor('template')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTemplateEditor(), title: 'Author a new template in a dedicated empty scene' },
+    { label: 'Script', icon: <img src={iconFor('script')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterScriptEditor(), title: 'Create a new class-based script asset' },
     { label: 'Scene', icon: <img src={iconFor('scene')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => { void createScene() }, title: 'Create a new scene asset' },
     { label: 'Folder', icon: <img src={iconFor('folder')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: newFolder, title: 'Create a folder in the current directory' },
     {

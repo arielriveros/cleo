@@ -1,6 +1,7 @@
 import type { Scene, Renderer, RenderSettings } from 'cleo';
 import { Logger } from 'cleo';
 import { buildGameData } from '../features/publish/buildGameData';
+import type { ScriptAsset } from './scripts';
 import { idbGet, idbSet, idbDelete } from './idb';
 import { saveToStorage } from '../workers/workerClient';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
@@ -46,6 +47,7 @@ type EngineMaps = {
 export async function saveProject(params: {
   scene: Scene;
   scripts: Map<string, string>;
+  scriptAssets?: ScriptAsset[];
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[] }>;
   ui: { version: number; elements: any[] };
@@ -56,6 +58,7 @@ export async function saveProject(params: {
     const gameData = await buildGameData({
       scene: params.scene,
       scripts: params.scripts,
+      scriptAssets: params.scriptAssets,
       bodies: params.bodies,
       triggers: params.triggers,
       ui: params.ui,

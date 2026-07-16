@@ -112,6 +112,8 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   if (mode === 'template') return ['ui']; // the UI layer is irrelevant while authoring a template
   // A mesh tab is a read-only preview: keep Scene + Properties to inspect the subtree, drop the rest.
   if (mode === 'mesh') return ['ui', 'scripts', 'physics'];
+  // A script tab is a pure code editor (rendered over the viewport): drop every node/scene chrome panel.
+  if (mode === 'script') return ['scene', 'ui', 'properties', 'scripts', 'physics'];
   return [];
 }
 

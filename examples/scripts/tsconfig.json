@@ -1,0 +1,22 @@
+{
+  // Type-checks the example scripts exactly the way the in-editor Monaco worker does, so what passes here is
+  // what the Script editor will show. The options mirror editor/src/features/nodeInspector/scriptEditor/
+  // monacoSetup.ts; `cleo` maps to the built engine types, which is what the editor resolves too.
+  //
+  // Nothing here reaches the engine build: the root tsconfig compiles from "files": ["src/cleo.ts"] only.
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "lib": ["ES2020", "DOM"],
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "noImplicitThis": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": { "cleo": ["../../dist/cleo"] }
+  },
+  "include": ["*.ts"]
+}

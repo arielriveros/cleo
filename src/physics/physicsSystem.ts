@@ -1,7 +1,9 @@
 import { Logger } from "../cleo";
 import { Scene } from "../core/scene/scene";
 import { ModelNode, unwrapScriptNode } from "../core/scene/node";
-import { World, Body, Constraint } from 'cannon-es';
+import { World, Body, Constraint, Material, ContactMaterial } from 'cannon-es';
+import { vec3 } from "gl-matrix";
+import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
 
 interface PhysicsSystemConfig {
@@ -9,12 +11,34 @@ interface PhysicsSystemConfig {
   killZHeight?: number;
 }
 
+/**
+ * Seconds {@link PhysicsSystem.isGrounded} keeps reporting true after the last real ground contact.
+ *
+ * This is not a game-feel knob bolted on for fun — it is load-bearing. cannon drops the contact of a body
+ * resting perfectly still: `sphereConvex` only emits one while `penetration < 0` (strictly), so the solver
+ * pushes the body out until penetration reaches ~0, the contact vanishes on the next step, gravity presses
+ * it back, and the contact returns. `sphereHeightfield` compounds this by abandoning the remaining cells
+ * whenever one yields more than 2 contacts, which a sphere on a terrain seam does. Measured: a capsule
+ * walking a PERFECTLY FLAT heightfield loses its contact on ~2 frames in 240. The body never left the
+ * ground, so answering "false" on those frames is the wrong answer, not a truthful one.
+ *
+ * The side effect is coyote time — a brief window to still jump after running off a ledge — which is what
+ * platformers deliberately implement anyway.
+ */
+const GROUND_GRACE = 0.1;
+
 export class PhysicsSystem {
   private _scene!: Scene;
   private _world!: World;
   private _gravity: number[];
   private _killZHeight: number;
   private _ragdolls: Ragdoll[] = [];
+  /** Unpaused seconds of simulated time; the clock GROUND_GRACE is measured against. */
+  private _time = 0;
+  /** Per body: the most ground-like contact seen recently, its surface normal, and when. See _record. */
+  private _ground = new WeakMap<Body, { time: number; dot: number; normal: [number, number, number] }>();
+  /** Cannon materials by `friction|restitution`, with a ContactMaterial for every pair. See _materialFor. */
+  private _materials = new Map<string, Material>();
 
   constructor(config?: PhysicsSystemConfig) {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up 
@@ -41,14 +65,22 @@ export class PhysicsSystem {
       // Fixed internal timestep with catch-up substeps: keeps stiff constraints (e.g. ragdoll
       // cone-twist joints) stable and deterministic even when frame delta spikes.
       this._world?.step(1 / 60, deltaTime, 5);
+
+      // The engine only calls update() while unpaused, so this clock does not tick during a pause and the
+      // grace window can't quietly expire behind a paused game.
+      this._time += deltaTime;
+      this._stampGroundContacts();
+
       const nodes = this._scene.nodes;
       for (const node of nodes) {
         if (!(node.body || node.trigger) || !node.hasStarted) continue;
         const bodyToAdd = node.body || node.trigger;
 
         // If body is not in the world, add it
-        if (this._world.bodies.indexOf(bodyToAdd) === -1)
+        if (this._world.bodies.indexOf(bodyToAdd) === -1) {
+          this._assignMaterial(bodyToAdd!);
           this._world.addBody(bodyToAdd);
+        }
 
         // If node is marked for removal, remove it from the world
         if (node.markForRemoval) {
@@ -79,7 +111,10 @@ export class PhysicsSystem {
       for (const landscape of this._scene.landscapes) {
         if (landscape.markForRemoval) { landscape.terrain.dispose(this._world); continue; }
         landscape.terrain.setOrigin(landscape.worldPosition);
-        landscape.terrain.ensureRegistered(this._world);
+        // The terrain body needs a material like everything else — without one, cannon ignores the character's
+        // and walks it back to the world default, so a frictionless character would still have friction on the
+        // one surface it spends all its time on.
+        landscape.terrain.ensureRegistered(this._world, this._defaultMaterial);
       }
     } catch (e) {
       Logger.error(e.toString());
@@ -88,11 +123,13 @@ export class PhysicsSystem {
 
   // ---- Low-level world access (for bodies/constraints not owned by a scene node, e.g. ragdolls) ----
 
-  /** Add a standalone body to the world (deduplicated). */
+  /** Add a standalone body to the world (deduplicated). Takes the default surface if it has no material. */
   public addBody(body: Body): void {
     if (!this._world) return;
-    if (this._world.bodies.indexOf(body) === -1)
+    if (this._world.bodies.indexOf(body) === -1) {
+      this._assignMaterial(body);
       this._world.addBody(body);
+    }
   }
 
   /** Remove a standalone body from the world if present. */
@@ -108,6 +145,158 @@ export class PhysicsSystem {
 
   public removeConstraint(constraint: Constraint): void {
     this._world?.removeConstraint(constraint);
+  }
+
+  /**
+   * Record how ground-like each body's best contact is this frame. Runs once per step, right after it, while
+   * `world.contacts` still describes the step that just ran — the equations are pooled and rewritten in place
+   * by the next one, so nothing here may be retained.
+   *
+   * One pass for the whole world rather than a scan per isGrounded() call: a character script asks several
+   * times a frame, and the old per-call scan repeated the same walk of every contact in the scene each time.
+   */
+  /**
+   * The cannon Material for a surface, created on first use and paired with every other known material.
+   *
+   * cannon has no material *combination* rule — it only looks up a registered ContactMaterial, and ONLY when
+   * both bodies carry a material (`if (bi.material && bj.material)`), otherwise it silently falls back to the
+   * world default. So every body must get one of these, and every pair must be pre-registered.
+   *
+   * Combine rule: friction takes the MIN, so a frictionless character stays frictionless whatever it walks
+   * on; restitution takes the MAX, so a bouncy ball bounces off a dead wall. In both cases the value someone
+   * deliberately set wins, which is what they meant by setting it. With one distinct surface in play (the
+   * 0.3/0 default) this registers exactly one ContactMaterial identical to cannon's own default.
+   */
+  private _materialFor(friction: number, restitution: number): Material {
+    const key = `${friction}|${restitution}`;
+    const cached = this._materials.get(key);
+    if (cached) return cached;
+
+    const material = new Material(key);
+    for (const [otherKey, other] of this._materials) {
+      const [otherFriction, otherRestitution] = otherKey.split('|').map(Number);
+      this._world.addContactMaterial(new ContactMaterial(material, other, {
+        friction: Math.min(friction, otherFriction),
+        restitution: Math.max(restitution, otherRestitution),
+      }));
+    }
+    this._world.addContactMaterial(new ContactMaterial(material, material, { friction, restitution }));
+
+    this._materials.set(key, material);
+    return material;
+  }
+
+  /** The surface every body without its own settings uses — matches cannon's own defaults. */
+  private get _defaultMaterial(): Material {
+    return this._materialFor(DEFAULT_FRICTION, DEFAULT_RESTITUTION);
+  }
+
+  /**
+   * Give a body its surface, just before it enters the world. Must happen for EVERY body: cannon only reads a
+   * ContactMaterial when both sides have a material, so a single one left null quietly drags the whole pair
+   * back to the world default — a frictionless character on a material-less floor still has friction.
+   * Anything that is not a RigidBody (triggers, ragdoll bones) has no settings to honor and takes the default.
+   */
+  private _assignMaterial(body: Body): void {
+    if (body.material) return;
+    body.material = body instanceof RigidBody
+      ? this._materialFor(body.friction, body.restitution)
+      : this._defaultMaterial;
+  }
+
+  private _stampGroundContacts(): void {
+    const world = this._world;
+    if (!world) return;
+
+    // With no gravity there is no meaningful "down", so nothing can be ground. Leaving the stamps untouched
+    // also means they expire on their own rather than freezing whatever was true when gravity was cut.
+    const g = world.gravity;
+    const gLength = Math.hypot(g.x, g.y, g.z);
+    if (gLength === 0) return;
+    const downX = g.x / gLength, downY = g.y / gLength, downZ = g.z / gLength;
+
+    for (const contact of world.contacts) {
+      // `ni` is the contact normal pointing OUT of body i, i.e. from bi towards bj. Negating it for bj turns
+      // it into "the direction from me towards whatever I am touching" for both bodies. We are standing on
+      // it when that direction agrees with gravity, so the dot IS the measure of ground-likeness.
+      const dot = contact.ni.x * downX + contact.ni.y * downY + contact.ni.z * downZ;
+      const n = contact.ni;
+
+      // Trigger volumes reach this list: cannon only discards them later, when the solver builds equations
+      // (Narrowphase fills world.contacts first). Walking through one must not let you jump again.
+      //
+      // The surface normal points the opposite way to "towards the thing I am touching" — it comes back OUT
+      // of the ground towards us, as everyone expects a ground normal to. Hence the negation against each
+      // body's own view of `ni`.
+      if (!contact.bj.isTrigger) this._record(contact.bi, dot, [-n.x, -n.y, -n.z]);
+      if (!contact.bi.isTrigger) this._record(contact.bj, -dot, [n.x, n.y, n.z]);
+    }
+  }
+
+  private _record(body: Body, dot: number, normal: [number, number, number]): void {
+    if (body.isTrigger) return;
+    const prev = this._ground.get(body);
+
+    // A WORSE (less ground-like) contact may not overwrite a better one that is still inside the grace window.
+    // Someone walking along a wall has two contacts; on a frame where the floor's blinks out but the wall's
+    // survives, letting the wall (dot ~0) replace the floor (dot ~1) would reinstate exactly the flicker this
+    // exists to remove. Once the stamp is older than the window it protects nothing, so anything may take over.
+    //
+    // Anything else refreshes the stamp — including an EQUAL dot, which is the common case: a body resting
+    // still reports the same dot every frame, and skipping those would leave the timestamp to go stale and
+    // expire the grace out from under a body that never moved.
+    if (prev && this._time - prev.time <= GROUND_GRACE && dot < prev.dot) return;
+
+    this._ground.set(body, { time: this._time, dot, normal });
+  }
+
+  /**
+   * True when `body` is resting on something solid in the CURRENT gravity direction — terrain (which registers
+   * its own static heightfield body, see Terrain.ensureRegistered) or any other non-trigger body. Backs
+   * {@link Node.isGrounded}; the query lives here because this class owns the world and the gravity vector.
+   *
+   * Gravity-agnostic on purpose: "down" is the world's gravity vector, not -Y, so inverted or sideways gravity
+   * works. With zero gravity there is no meaningful "down" and nothing can be grounded, so it reports false.
+   *
+   * `maxSlopeDegrees` is how far a surface may tilt away from level and still hold you up — past it you are
+   * touching a wall, not standing on a floor. Comparing it against the frame's single most ground-like contact
+   * is equivalent to scanning for any contact that clears the threshold: both ask whether the best one does.
+   *
+   * `graceSeconds` is how long a body keeps counting as grounded after its last real ground contact — see
+   * GROUND_GRACE for why answering strictly per-frame is wrong. Passing a value LARGER than GROUND_GRACE is
+   * allowed but weaker than it looks: past that window a worse contact may already have replaced the stamp.
+   */
+  public isGrounded(body: Body, maxSlopeDegrees: number = 60, graceSeconds: number = GROUND_GRACE): boolean {
+    const world = this._world;
+    // A trigger passes through everything, so it never rests on anything.
+    if (!world || !body || body.isTrigger) return false;
+
+    const g = world.gravity;
+    if (Math.hypot(g.x, g.y, g.z) === 0) return false;
+
+    const stamp = this._ground.get(body);
+    if (!stamp || this._time - stamp.time > graceSeconds) return false;
+    return stamp.dot >= Math.cos(maxSlopeDegrees * Math.PI / 180);
+  }
+
+  /**
+   * Surface normal of the ground `body` is standing on — pointing up out of that surface, so it is [0,1,0] on
+   * level ground under normal gravity and tilts with a slope. Backs {@link Node.groundNormal}.
+   *
+   * Falls back to UP (gravity reversed) when the body is not grounded, has no ground stamp, or gravity is
+   * zero. That is deliberate: the point of this is projecting movement onto the ground plane, and projecting
+   * a horizontal direction against "up" is a no-op — so a caller can use it unconditionally and gets sensible
+   * airborne behavior for free instead of having to branch or guard against a zero vector.
+   */
+  public groundNormal(body: Body, maxSlopeDegrees: number = 60, graceSeconds: number = GROUND_GRACE): vec3 {
+    const world = this._world;
+    const g = world?.gravity;
+    const gLength = g ? Math.hypot(g.x, g.y, g.z) : 0;
+    const up: vec3 = gLength === 0 ? vec3.fromValues(0, 1, 0) : vec3.fromValues(-g.x / gLength, -g.y / gLength, -g.z / gLength);
+
+    if (!this.isGrounded(body, maxSlopeDegrees, graceSeconds)) return up;
+    const stamp = this._ground.get(body);
+    return stamp ? vec3.fromValues(stamp.normal[0], stamp.normal[1], stamp.normal[2]) : up;
   }
 
   /**

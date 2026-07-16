@@ -46,6 +46,39 @@ export class Shape {
         return new Shape(new Cylinder(radiusTop * radial, radiusBottom * radial, height * sy, numSegments));
     }
 
+    /**
+     * Capsule collider — the right shape for a character. cannon has no capsule primitive (its SHAPE_TYPES
+     * stop at cylinder), so one is compounded from a cylinder and two spheres; this returns the parts and
+     * the caller attaches each at its offset. That matters beyond convenience: cannon's Cylinder is a
+     * faceted ConvexPolyhedron, but Sphere is analytic — a character rests on the bottom sphere cap and so
+     * rolls over heightfield triangle edges instead of catching on them, which a box does.
+     *
+     * `height` is the TOTAL tip-to-tip height (Unity/Godot convention), so the straight section is
+     * `height - 2 * radius`. At or below `2 * radius` there is no straight section and the capsule is just
+     * a sphere — reachable by authoring, but also by a non-uniform scale, since the radius grows radially
+     * while the height follows Y.
+     *
+     * Offsets are in scaled body space and lie along the capsule's local Y, BEFORE the shape's own
+     * rotation — `attachShape` does not rotate offsets, so a caller applying a rotation must rotate these
+     * to match.
+     */
+    public static Capsule(radius: number, height: number, numSegments: number, scale: vec3 = NO_SCALE): { shape: Shape; offset: vec3 }[] {
+        const [sx, sy, sz] = absScale(scale);
+        const r = radius * Math.max(sx, sz);
+        const cyl = Math.max(0, height * sy - 2 * r);
+
+        if (cyl <= EPSILON)
+            return [{ shape: new Shape(new Sphere(r), Geometry.Sphere(16, r + EPSILON)), offset: [0, 0, 0] }];
+
+        // Only the cylinder carries debug geometry, and it carries the WHOLE capsule's — otherwise the
+        // three parts would draw three overlapping wireframes for one collider.
+        return [
+            { shape: new Shape(new Cylinder(r, r, cyl, numSegments), Geometry.Capsule(numSegments, r + EPSILON, cyl)), offset: [0, 0, 0] },
+            { shape: new Shape(new Sphere(r)), offset: [0, cyl / 2, 0] },
+            { shape: new Shape(new Sphere(r)), offset: [0, -cyl / 2, 0] },
+        ];
+    }
+
     public static Plane(): Shape {
         return new Shape(new Plane());
     }

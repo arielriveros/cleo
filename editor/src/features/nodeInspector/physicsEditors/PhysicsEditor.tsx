@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, hullFromPositions } from 'cleo'
+import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, hullFromPositions, Logger } from 'cleo'
 import type { RagdollOptions, HullQuality } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import ShapeEditor from './ShapeEditor';
 import { HULL_QUALITIES } from './hullQuality';
-import { collectHullPositions } from '../../../utils/editorHelpers';
+import { collectHullPositions, meshBounds } from '../../../utils/editorHelpers';
 import { Field, Slider, Toggle, Select, NumberInput, Button, Section, Hint, SegmentedControl, cn, labelClass } from '../../../components/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 
@@ -49,7 +49,7 @@ const ShapeTools = ({ shapes, canHull, addShape, addHull, regenerateHull, setSha
     <Section title='Shapes'>
       <div className='flex items-center gap-1.5 flex-wrap mb-2'>
         <span className={cn(labelClass, 'mr-1')}>Add:</span>
-        {['box', 'sphere', 'cylinder', 'plane'].map((t) => (
+        {['box', 'sphere', 'capsule', 'cylinder', 'plane'].map((t) => (
           <Button key={t} size='sm' onClick={() => addShape(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</Button>
         ))}
       </div>
@@ -109,6 +109,9 @@ export default function PhysicsEditor(props: {node: Node}) {
         angularDamping: body.angularDamping,
         linearConstraints: body.linearConstraints,
         angularConstraints: body.angularConstraints,
+        // Scenes saved before surfaces existed have neither; these are the values they behaved as.
+        friction: body.friction ?? 0.3,
+        restitution: body.restitution ?? 0,
         shapes: body.shapes
       })
     else setBodyProperties(null)
@@ -123,6 +126,8 @@ export default function PhysicsEditor(props: {node: Node}) {
         angularDamping: bodyProperties.angularDamping,
         linearConstraints: bodyProperties.linearConstraints,
         angularConstraints: bodyProperties.angularConstraints,
+        friction: bodyProperties.friction,
+        restitution: bodyProperties.restitution,
         shapes: bodyProperties.shapes
       });
       eventEmitter.emit('PHYSICS_CHANGED');
@@ -168,12 +173,50 @@ export default function PhysicsEditor(props: {node: Node}) {
   const shapesOf = (target: 'body' | 'trigger') =>
     (target === 'body' ? bodyProperties!.shapes : triggerProperties!.shapes);
 
+  /**
+   * A new shape is fitted to the node's mesh (and its descendants') rather than dropped in at size 1,
+   * which was never the right answer for anything and is useless on a character. `meshBounds` works in
+   * node-local units — the space descriptors are authored in — and includes skinned meshes, so a
+   * character gets a fit here even though it can't have a hull. A mesh-less node has nothing to fit to
+   * and keeps the unit defaults.
+   *
+   * Note `plane` is an explicit branch: as the trailing `else` it silently swallowed every unknown type.
+   */
   const addShape = (type: string, target: 'body' | 'trigger') => {
-    const shape: any =
-      type === 'box' ? { type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } :
-      type === 'sphere' ? { type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } :
-      type === 'cylinder' ? { type: 'cylinder', radius: 1, height: 1, numSegments: 16, offset: [0, 0, 0], rotation: [0, 0, 0] } :
-      { type: 'plane', offset: [0, 0, 0], rotation: [0, 0, 0] };
+    const b = meshBounds(props.node);
+    const offset = b ? [b.center[0], b.center[1], b.center[2]] : [0, 0, 0];
+    const rotation = [0, 0, 0];
+
+    let shape: any;
+    switch (type) {
+      case 'box':
+        shape = b
+          ? { type: 'box', width: b.half[0] * 2, height: b.half[1] * 2, depth: b.half[2] * 2, offset, rotation }
+          : { type: 'box', width: 1, height: 1, depth: 1, offset, rotation };
+        break;
+      case 'sphere':
+        shape = { type: 'sphere', radius: b ? Math.max(b.half[0], b.half[1], b.half[2]) : 1, offset, rotation };
+        break;
+      case 'cylinder':
+        shape = b
+          ? { type: 'cylinder', radius: Math.max(b.half[0], b.half[2]), height: b.half[1] * 2, numSegments: 16, offset, rotation }
+          : { type: 'cylinder', radius: 1, height: 1, numSegments: 16, offset, rotation };
+        break;
+      case 'capsule':
+        // Torso-percentile radius, not the X/Z extent — a T-pose's arm span would otherwise swallow the
+        // height and leave a sphere as wide as the character. See boundsFromPoints. The floor guards a
+        // mesh thin enough to fit a zero radius, which would reach cannon as a zero-size sphere.
+        shape = b
+          ? { type: 'capsule', radius: Math.max(b.radius, 0.01), height: b.half[1] * 2, numSegments: 16, offset, rotation }
+          : { type: 'capsule', radius: 0.5, height: 2, numSegments: 16, offset, rotation };
+        break;
+      case 'plane':
+        shape = { type: 'plane', offset: [0, 0, 0], rotation };
+        break;
+      default:
+        Logger.error(`Unknown collider shape type '${type}'`);
+        return;
+    }
     writeShapes(target, [...shapesOf(target), shape]);
   }
 
@@ -241,7 +284,7 @@ export default function PhysicsEditor(props: {node: Node}) {
               ? <Hint>Can only add rigid bodies to nodes at root level.</Hint>
               : <>
                   <Hint className='mb-2'>Node does not have a rigid body.</Hint>
-                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], shapes: [] })}>Add Rigid Body</Button>
+                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, shapes: [] })}>Add Rigid Body</Button>
                 </>)
           : <>
               <Field label='Mass' labelClassName={LABEL}>
@@ -250,6 +293,9 @@ export default function PhysicsEditor(props: {node: Node}) {
               {bodyProperties.mass === 0 && <Hint className='mb-1'>Mass of 0 will make the object static.</Hint>}
               <Slider label='Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.linearDamping} onChange={(v) => setBodyProperties({ ...bodyProperties, linearDamping: v })} />
               <Slider label='Angular Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.angularDamping} onChange={(v) => setBodyProperties({ ...bodyProperties, angularDamping: v })} />
+              <Slider label='Friction' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.friction ?? 0.3} onChange={(v) => setBodyProperties({ ...bodyProperties, friction: v })} />
+              {bodyProperties.friction === 0 && <Hint className='mb-1'>Frictionless — nothing will slow this down but damping. What a character wants, since its script sets its own speed.</Hint>}
+              <Slider label='Restitution' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.restitution ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, restitution: v })} />
               <AxisToggles label='Linear Constraints' value={bodyProperties.linearConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, linearConstraints: v as [number, number, number] })} />
               <AxisToggles label='Angular Constraints' value={bodyProperties.angularConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, angularConstraints: v as [number, number, number] })} />
               <Button variant='danger' size='sm' className='mt-2' onClick={removeBody}>Remove Rigid Body</Button>

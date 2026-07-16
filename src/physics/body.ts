@@ -26,11 +26,17 @@ class CBody extends CannonBody {
         mass: config?.mass || 0,
         position: new Vec3(config.position[0], config.position[1], config.position[2]),
         quaternion: new Quaternion(config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]),
-        linearDamping: config.linearDamping || 0.25,
-        angularDamping: config.angularDamping || 0.25,
+        // `??`, not `||`: an explicit 0 is a real value here. With `||` a body asking for no damping at all
+        // silently got 0.25 and coasted to a stop, and no API could reach zero.
+        linearDamping: config.linearDamping ?? 0.25,
+        angularDamping: config.angularDamping ?? 0.25,
         linearFactor: config?.linearFactor ? new Vec3(config.linearFactor[0], config.linearFactor[1], config.linearFactor[2]) : new Vec3(1, 1, 1),
         angularFactor: config?.angularFactor ? new Vec3(config.angularFactor[0], config.angularFactor[1], config.angularFactor[2]) : new Vec3(1, 1, 1),
-        allowSleep: config.allowSleep || true,
+        // Same trap, worse: `false || true` is `true`, so this flag could only ever say yes.
+        allowSleep: config.allowSleep ?? true,
+        // Left null on purpose. PhysicsSystem assigns the material when the body enters the world, because
+        // a ContactMaterial can only be registered against a live World. Note cannon only consults one when
+        // BOTH bodies carry a material, so a body that never gets here falls back to the world default.
         material: undefined,
         isTrigger: config.isTrigger || false,
       });
@@ -64,6 +70,11 @@ class CBody extends CannonBody {
     public get owner(): Node | null { return this._owner; }
 }
 
+/** Grip against other surfaces. 0 = frictionless — what a character wants, since its script owns its speed. */
+export const DEFAULT_FRICTION = 0.3;
+/** Bounciness. 0 = dead stop, 1 = rebounds at the speed it landed. */
+export const DEFAULT_RESTITUTION = 0;
+
 interface RigidBodyConfig {
     mass?: number;
     position?: vec3;
@@ -73,9 +84,19 @@ interface RigidBodyConfig {
     linearConstraints?: vec3;
     angularConstraints?: vec3;
     allowSleep?: boolean;
+    friction?: number;
+    restitution?: number;
 }
 
 export class RigidBody extends CBody {
+  /**
+   * Surface properties, read by PhysicsSystem when this body enters the world and turned into a cannon
+   * Material there (a ContactMaterial needs a live World, so it cannot happen in this constructor).
+   * Plain fields rather than accessors: cannon's Body has neither name, only `material`.
+   */
+  public readonly friction: number;
+  public readonly restitution: number;
+
   constructor(config?: RigidBodyConfig, owner?: Node) {
     super({
       name: owner?.name || 'rigidBody',
@@ -83,13 +104,16 @@ export class RigidBody extends CBody {
       mass: config?.mass || 0,
       position: config?.position ? [config.position[0], config.position[1], config.position[2]] : [0, 0, 0],
       quaternion: config?.quaternion ? [config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]] : [0, 0, 0, 1],
-      linearDamping: config?.linearDamping || 0.25,
-      angularDamping: config?.angularDamping || 0.25,
+      // `??`, not `||` — see CBody: an explicit 0 must survive.
+      linearDamping: config?.linearDamping ?? 0.25,
+      angularDamping: config?.angularDamping ?? 0.25,
       linearFactor: config?.linearConstraints || [1, 1, 1],
       angularFactor: config?.angularConstraints || [1, 1, 1],
-      allowSleep: config?.allowSleep || true,
+      allowSleep: config?.allowSleep ?? true,
       isTrigger: false
     });
+    this.friction = config?.friction ?? DEFAULT_FRICTION;
+    this.restitution = config?.restitution ?? DEFAULT_RESTITUTION;
   }
 
   public reset(): void {

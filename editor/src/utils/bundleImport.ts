@@ -15,6 +15,7 @@ const LIB_KEYS = {
   terrainMaterials: 'cleo_terrain_materials',
   templates: 'cleo_templates',
   meshes: 'cleo_meshes',
+  scripts: 'cleo_scripts',
 } as const
 
 function texturesToRecords(textures: BundleData['textures']): StoredTexture[] {
@@ -39,6 +40,7 @@ export async function applyBundleReplace(bundle: BundleData): Promise<void> {
   await idbSet(LIB_KEYS.terrainMaterials, bundle.libraries.terrainMaterials)
   await idbSet(LIB_KEYS.templates, bundle.libraries.templates)
   await idbSet(LIB_KEYS.meshes, bundle.libraries.meshes)
+  await idbSet(LIB_KEYS.scripts, bundle.libraries.scripts ?? [])
 
   if (isProject) {
     // Drop every existing scene blob, then write the bundle's.
@@ -77,11 +79,12 @@ export async function applyBundleReplace(bundle: BundleData): Promise<void> {
 
 /** Read the local state a merge needs to detect id/path/name collisions. */
 async function readLocalState(): Promise<LocalState> {
-  const [materials, terrainMaterials, templates, meshes, vfs, meta, storedTex] = await Promise.all([
+  const [materials, terrainMaterials, templates, meshes, scripts, vfs, meta, storedTex] = await Promise.all([
     idbGet<any[]>(LIB_KEYS.materials),
     idbGet<any[]>(LIB_KEYS.terrainMaterials),
     idbGet<any[]>(LIB_KEYS.templates),
     idbGet<any[]>(LIB_KEYS.meshes),
+    idbGet<any[]>(LIB_KEYS.scripts),
     idbGet<VfsIndex>(VFS_KEY),
     idbGet<ProjectMeta>(PROJECT_META_KEY),
     getAllTextures(),
@@ -93,6 +96,7 @@ async function readLocalState(): Promise<LocalState> {
     terrainMaterialIds: new Set((terrainMaterials ?? []).map(m => m.id)),
     templateIds: new Set((templates ?? []).map(t => t.id)),
     meshIds: new Set((meshes ?? []).map(m => m.id)),
+    scriptIds: new Set((scripts ?? []).map(s => s.id)),
     sceneIds: new Set((meta?.scenes ?? []).map(s => s.id)),
     sceneNames: new Set((meta?.scenes ?? []).map(s => s.name)),
     textures,
@@ -117,6 +121,7 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
   await append(LIB_KEYS.terrainMaterials, plan.terrainMaterials)
   await append(LIB_KEYS.templates, plan.templates)
   await append(LIB_KEYS.meshes, plan.meshes)
+  await append(LIB_KEYS.scripts, plan.scripts)
 
   // Scenes (project bundles): write each blob, append its meta.
   if (plan.scenes.length) {

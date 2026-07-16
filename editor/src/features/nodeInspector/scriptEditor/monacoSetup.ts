@@ -9,6 +9,7 @@
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { loadCleoTypes } from './cleoTypes';
 import { defineCleoThemes } from './monacoTheme';
+import { registerGlsl } from './glslMonaco';
 
 let ready = false;
 
@@ -27,16 +28,13 @@ export function ensureMonaco(): typeof monaco {
     lib: ['es2020', 'dom'],
     // Node scripts are casual game logic, not a strict codebase: `strict` turned the default template into
     // a sea of red (implicit-any on handler params, "possibly undefined" on ordinary reads). Keep the
-    // useful structural checks TS does by default, but drop the two that only produce noise here. The real
-    // errors worth surfacing -- undeclared/mis-typed node Variables -- come from scriptMarkers.ts, not TS.
+    // useful structural checks TS does by default, but drop the two that only produce noise here. A class
+    // script's declared fields ARE type-checked (they're real members of the class).
     strict: false,
     noImplicitAny: false,
     strictNullChecks: false,
-    // A script's `this` is typed per selected node by thisType.ts (a generated interface applied through a
-    // shadow model, see MonacoCodeEditor.tsx); where that isn't available `this` falls back to untyped, and
-    // scriptMarkers.ts / nodeHoverProvider.ts still give `this.<Variable>` real types, hover text and
-    // errors from the node's own declared Variables. noImplicitThis would otherwise flag every
-    // `this.<anything>` as an implicit-any error before those layers get a say.
+    // A class script's `this` is the instance, typed through `extends Node`/`ModelNode`; noImplicitThis off
+    // keeps any non-class fallback from flagging `this.<anything>` as implicit-any.
     noImplicitThis: false,
     // The engine's .d.ts tree references cannon-es/gl-matrix sub-paths; a transitive type this loader
     // doesn't resolve should not blank out hovers/completions on the rest of the public API.
@@ -52,17 +50,15 @@ export function ensureMonaco(): typeof monaco {
     // undefined-narrowing codes (2532/2531 and their TS5 equivalents 18047/18048) so `this.` stays clean.
     diagnosticCodesToIgnore: [2531, 2532, 18047, 18048],
   });
-  // Keep every open model's worker in sync as the author types, same as CodeMirror's linter already did.
+  // Keep every open model's worker in sync as the author types.
   ts.typescriptDefaults.setEagerModelSync(true);
 
-  // Turn OFF Monaco's built-in TS hover. It runs against the visible model, where `this` is typed
-  // `undefined` (top-level `this` in an ES module), so `this.<member>` hovers as `any` with no docs. Hover
-  // is instead served from the typed-`this` shadow model (thisTypeProvider.ts), which reports the real
-  // member type and the engine's JSDoc. Everything else (completions, diagnostics, …) stays built-in.
-  ts.typescriptDefaults.setModeConfiguration({ ...ts.typescriptDefaults.modeConfiguration, hovers: false });
+  // Built-in TS hover stays ON: a class-based script (`class X extends Node`) types `this` structurally
+  // through its heritage, so `this.<member>` hovers report the real member type + the engine's JSDoc.
 
   loadCleoTypes(monaco);
   defineCleoThemes(monaco);
+  registerGlsl(monaco); // GLSL language for the shader editor (shares this one-time Monaco bootstrap)
 
   return monaco;
 }

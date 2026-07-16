@@ -249,9 +249,31 @@ export function transformScript(source: string): string {
                 continue;
             }
 
-            // A script has no exports: it declares its handlers by assigning them to `this`.
-            if (word === 'export' && depth === 0)
-                throw new Error("`export` is not used in scripts — assign handlers to `this` instead, e.g. this.onUpdate = (node, delta, time) => { ... }");
+            // A class-based script exports its class (`export default class X extends Node {...}`); the
+            // factory body returns that class so attachScriptFactory can harvest its methods. Rewrite the
+            // `export [default]` prefix to `return` and let the `class` keyword emit normally. Same line, so
+            // line numbers stay aligned. Any other top-level `export` is still an error (legacy `this.onX =`
+            // scripts have no exports at all).
+            if (word === 'export' && depth === 0) {
+                const afterExport = skipTrivia(source, j);
+                let k = afterExport;
+                while (k < source.length && IDENT_PART.test(source[k])) k++;
+                let keywordStart = afterExport;
+                if (source.slice(afterExport, k) === 'default') {
+                    keywordStart = skipTrivia(source, k);
+                    let m = keywordStart;
+                    while (m < source.length && IDENT_PART.test(source[m])) m++;
+                    k = m;
+                }
+                const keyword = source.slice(keywordStart, k);
+                if (keyword === 'class' || keyword === 'abstract') {
+                    out += 'return ';
+                    prevToken = 'return';
+                    i = keywordStart;   // resume at `class`/`abstract`, emitted as a normal identifier
+                    continue;
+                }
+                throw new Error("`export` is only used to export a script's class, e.g. `export default class MyNode extends Node { ... }`");
+            }
 
             out += word;
             prevToken = word;
@@ -287,8 +309,13 @@ export function buildFactoryBody(source: string): string {
     return `"use strict";\n${transformScript(js)}`;
 }
 
-/** Called with `this` bound to the script's node proxy; handlers are collected from there, not returned. */
-export type ScriptFactory = (this: any, importer: (specifier: string) => ScriptModule) => void;
+/**
+ * Called with `this` bound to the script's node proxy. A class-based script RETURNS its class constructor
+ * (attachScriptFactory harvests the prototype's methods); a legacy `this.onX = ...` script returns nothing
+ * and its handlers are collected off the proxy instead. Both shapes are accepted so the two eras coexist
+ * during migration.
+ */
+export type ScriptFactory = (this: any, importer: (specifier: string) => ScriptModule) => (new (...args: any[]) => any) | void;
 
 /** Compiles a script to its factory. Throws on a syntax error or on unsupported module syntax. */
 export function compileScript(source: string): ScriptFactory {

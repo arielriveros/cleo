@@ -3,6 +3,7 @@ import type { MaterialAsset } from '../../utils/materials'
 import type { TerrainMaterialAsset } from '../../utils/terrainMaterials'
 import type { Template } from '../../utils/templates'
 import type { MeshAsset } from '../../utils/meshes'
+import type { ScriptAsset } from '../../utils/scripts'
 import type { SceneMeta } from '../../utils/sceneStorage'
 import {
   renderMaterialAssetThumbnail, renderMeshAssetThumbnail, renderTerrainMaterialAssetThumbnail,
@@ -20,6 +21,7 @@ export type AssetDeps = {
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
   meshes: MeshAsset[]
+  scripts: ScriptAsset[]
   scenes: SceneMeta[]
 
   addMaterial: (m: MaterialAsset) => void
@@ -34,6 +36,9 @@ export type AssetDeps = {
   addMesh: (m: MeshAsset) => void
   updateMesh: (id: string, m: MeshAsset) => void
   removeMesh: (id: string) => void
+  addScriptAsset: (s: ScriptAsset) => void
+  updateScriptAsset: (id: string, s: ScriptAsset) => void
+  removeScriptAsset: (id: string) => void
   createScene: (name?: string) => Promise<string>
   renameScene: (sceneId: string, name: string) => void
   deleteScene: (sceneId: string) => Promise<string | null>
@@ -45,11 +50,12 @@ export type AssetDeps = {
   enterTerrainMaterialEditor: (id?: string) => void
   enterTemplateEditor: (id?: string) => void
   enterMeshEditor: (id?: string) => void
+  enterScriptEditor: (id?: string) => void
 
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | MeshAsset | SceneMeta
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | MeshAsset | ScriptAsset | SceneMeta
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value))
@@ -62,6 +68,7 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'terrainMaterial': return deps.terrainMaterials.find(m => m.id === id)
     case 'template': return deps.templates.find(t => t.id === id)
     case 'mesh': return deps.meshes.find(m => m.id === id)
+    case 'script': return deps.scripts.find(s => s.id === id)
     case 'scene': return deps.scenes.find(s => s.id === id)
     case 'texture': return undefined
   }
@@ -125,6 +132,11 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateMesh(id, { ...a, name: stem })
       break
     }
+    case 'script': {
+      const a = deps.scripts.find(s => s.id === id)
+      if (a) deps.updateScriptAsset(id, { ...a, name: stem })
+      break
+    }
     case 'scene': {
       const a = deps.scenes.find(s => s.id === id)
       if (a) deps.renameScene(id, stem)
@@ -142,6 +154,7 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'terrainMaterial': deps.removeTerrainMaterial(id); break
     case 'template': deps.removeTemplate(id); break
     case 'mesh': deps.removeMesh(id); break
+    case 'script': deps.removeScriptAsset(id); break
     case 'scene': {
       void deps.deleteScene(id)
       break
@@ -185,6 +198,12 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       const a = deps.meshes.find(m => m.id === id)
       if (!a) return null
       deps.addMesh({ ...deepClone(a), id: newId, name: stem, materialIds: [...(a.materialIds ?? [])] })
+      return newId
+    }
+    case 'script': {
+      const a = deps.scripts.find(s => s.id === id)
+      if (!a) return null
+      deps.addScriptAsset({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
     case 'scene': {
@@ -245,6 +264,7 @@ export async function regenerateThumbnail(
     case 'scene':
       return false
     case 'template':
+    case 'script':
     case 'texture':
       return false
   }
@@ -262,6 +282,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'terrainMaterial': deps.enterTerrainMaterialEditor(id); return true
     case 'template': deps.enterTemplateEditor(id); return true
     case 'mesh': deps.enterMeshEditor(id); return true
+    case 'script': deps.enterScriptEditor(id); return true
     case 'scene': void deps.openScene(id); return true
     default: return false
   }
@@ -274,6 +295,7 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'terrainMaterial': return 'terrain layers painted with it are cleared'
     case 'template': return 'placed instances are unlinked and become normal nodes'
     case 'mesh': return 'placed copies stay in the scene'
+    case 'script': return 'nodes using it lose their script and its variables'
     case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials using it show no texture'
   }
@@ -286,6 +308,7 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
     case 'template': return [['text/cleo-template', assetId]]
     case 'material': return [['text/cleo-material', assetId]]
     case 'terrainMaterial': return [['text/cleo-terrain-material', assetId]]
+    case 'script': return [['text/cleo-script', assetId]]
     case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
     case 'texture': return [
       ['text/cleo-asset', JSON.stringify({ type: 'texture', id: assetId })],
@@ -329,6 +352,9 @@ const ICONS: Record<AssetKind | 'folder', string> = {
   ),
   scene: svg('#f2b84b',
     `<path d="M4 19V5h16v14z" fill="#7f5a10" fill-opacity=".18"/><path d="M7 15l3-3 2 2 3-4 2 2"/>`,
+  ),
+  script: svg('#e0794b',
+    `<rect x="4" y="3" width="16" height="18" rx="2" fill="#8f4a26" fill-opacity=".18"/><path d="M10 9 8 12l2 3M14 9l2 3-2 3"/>`,
   ),
   texture: svg('#9aa4b2',
     `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>`,

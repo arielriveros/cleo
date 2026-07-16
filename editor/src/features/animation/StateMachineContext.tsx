@@ -98,6 +98,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     editorScene, animationTargetId, animationSourceScene, animationSourceId,
     commitAnimationStateMachine, importAnimationFiles, importSkeletonNames,
     renameAnimationClip, removeAnimationClip, closeTab, activeTabId, eventEmitter,
+    scriptAssets,
   } = useCleoEngine()
 
   const target = getAnimationTarget(editorScene, animationTargetId)
@@ -110,8 +111,9 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
 
   const clips = target ? target.model.animations.map(a => a.name) : []
   const accessVars = useMemo<AccessibleVariable[]>(
-    () => accessibleNodeVariables(animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null, animationSourceScene),
-    [animationSourceScene, animationSourceId, animationTargetId])
+    () => accessibleNodeVariables(
+      animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null, animationSourceScene, scriptAssets),
+    [animationSourceScene, animationSourceId, animationTargetId, scriptAssets])
 
   // Load the machine from the target on entry; select the entry state.
   useEffect(() => {

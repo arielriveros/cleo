@@ -13,7 +13,7 @@ import {
 } from './assetKinds'
 import {
   collectReferencedMaterialIds, collectReferencedMeshIds, collectReferencedTemplateIds,
-  collectReferencedTerrainMaterialIds, collectReferencedTextureIds,
+  collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
 } from '../../utils/references'
 
 export const FM_MODE_KEY = 'cleo_assets_view_mode'
@@ -105,9 +105,11 @@ export function useFileManagerBridge() {
       case 'terrainMaterial': return collectReferencedTerrainMaterialIds(scene).has(entry.assetId)
       case 'template': return collectReferencedTemplateIds(scene).has(entry.assetId)
       case 'mesh': return collectReferencedMeshIds(scene).has(entry.assetId)
+      case 'script': return collectReferencedScriptIds(scene).has(entry.assetId)
       case 'texture':
         return collectReferencedTextureIds(scene, l.materials, l.meshes, l.templates, l.terrainMaterials)
           .has(entry.assetId)
+      default: return false
     }
   }, [])
 

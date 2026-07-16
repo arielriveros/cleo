@@ -13,6 +13,7 @@ import MeshInspector from '../meshes/MeshInspector';
 import PropertyEditor from '../nodeInspector/propertyEditors/PropertyEditor';
 import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor';
 import ScriptEditor from '../nodeInspector/scriptEditor/ScriptEditor';
+import ScriptTabView from '../nodeInspector/scriptEditor/ScriptTabView';
 import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
@@ -24,7 +25,7 @@ import { useCleoEngine } from '../EngineContext';
 // LoadingScreen (absolute inset-0) and the data-cleo-overlay HUD keep anchoring to the viewport,
 // not the dock. Its group is locked and headerless (see DockLayout) — the immovable center anchor.
 function ViewportPanel(_: IDockviewPanelProps) {
-  const { isSceneReady, loadingProgress } = useCleoEngine();
+  const { isSceneReady, loadingProgress, editorMode } = useCleoEngine();
   return (
     <div className="relative h-full w-full overflow-hidden">
       <EngineViewport />
@@ -32,6 +33,8 @@ function ViewportPanel(_: IDockviewPanelProps) {
       <UIOverlay />
       {/* Animation-mode node graph overlays the viewport when Graph view is active */}
       <StateGraph />
+      {/* Script mode: the dedicated code editor fills the main area (no 3D preview) */}
+      {editorMode === 'script' && <ScriptTabView />}
       {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
       {!isSceneReady && <LoadingScreen progress={loadingProgress} />}
     </div>

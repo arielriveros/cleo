@@ -2,6 +2,7 @@ import type { MaterialAsset } from './materials'
 import type { MeshAsset } from './meshes'
 import type { Template } from './templates'
 import type { TerrainMaterialAsset } from './terrainMaterials'
+import type { ScriptAsset } from './scripts'
 
 // Content hashes let a closed scene decide, when it is next opened, whether each asset it references
 // actually changed since the scene was saved — so unchanged meshes/templates aren't needlessly
@@ -31,10 +32,11 @@ export interface AssetLibs {
   meshes: MeshAsset[]
   templates: Template[]
   terrainMaterials: TerrainMaterialAsset[]
+  scripts: ScriptAsset[]
 }
 
 /** The hash-map key for an asset of a given kind. Kept in one place so save and resync agree. */
-export function assetHashKey(kind: 'material' | 'mesh' | 'template' | 'terrainMaterial', id: string): string {
+export function assetHashKey(kind: 'material' | 'mesh' | 'template' | 'terrainMaterial' | 'script', id: string): string {
   return `${kind}:${id}`
 }
 
@@ -44,7 +46,7 @@ export function assetHashKey(kind: 'material' | 'mesh' | 'template' | 'terrainMa
  * scene actually uses are hashed and stored.
  */
 export function buildAssetHashes(
-  refs: { materialIds: Set<string>; meshIds: Set<string>; templateIds: Set<string>; terrainMaterialIds: Set<string> },
+  refs: { materialIds: Set<string>; meshIds: Set<string>; templateIds: Set<string>; terrainMaterialIds: Set<string>; scriptIds?: Set<string> },
   libs: AssetLibs,
 ): Record<string, string> {
   const out: Record<string, string> = {}
@@ -52,5 +54,6 @@ export function buildAssetHashes(
   for (const m of libs.meshes) if (refs.meshIds.has(m.id)) out[assetHashKey('mesh', m.id)] = hashAsset(m)
   for (const t of libs.templates) if (refs.templateIds.has(t.id)) out[assetHashKey('template', t.id)] = hashAsset(t)
   for (const t of libs.terrainMaterials) if (refs.terrainMaterialIds.has(t.id)) out[assetHashKey('terrainMaterial', t.id)] = hashAsset(t)
+  for (const s of libs.scripts) if (refs.scriptIds?.has(s.id)) out[assetHashKey('script', s.id)] = hashAsset(s)
   return out
 }

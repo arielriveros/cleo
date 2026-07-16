@@ -891,6 +891,11 @@ export class Animator {
      * Pull the live value of every 'variable' parameter into _paramValues, honoring the variable's
      * public/private/protected access (requester = this model node). Falls back to the parameter's
      * default when the source node is missing or access is denied.
+     *
+     * Two storage shapes are read. A class script's declared fields are NATIVE own properties on the node
+     * (`this.speed`), which the legacy `variables` Map knows nothing about; legacy inline-script variables
+     * still live in that Map. Map first, then the native own property — `hasOwnProperty` keeps this from
+     * ever reading a real Node member (`name`, `position`, …) just because a parameter shares its name.
      */
     private _refreshVariableParams(): void {
         const sm = this._stateMachine;
@@ -900,7 +905,9 @@ export class Animator {
             const src = this._resolveVarNode(p.variable.nodeRef);
             let val: number | boolean = p.default;
             if (src && canAccessVariable(src, this._node, p.variable.varName)) {
-                const v = src.getVariable(p.variable.varName);
+                const name = p.variable.varName;
+                let v: any = src.getVariable(name);
+                if (v === undefined && Object.prototype.hasOwnProperty.call(src, name)) v = (src as any)[name];
                 // Coerce to the binding's declared type so conditions compare correctly even if the
                 // variable holds a numeric string / truthy value (otherwise the number ops, which
                 // require `typeof === 'number'`, silently never match).

@@ -2,6 +2,7 @@ import type { MaterialAsset } from './materials'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
 import type { MeshAsset } from './meshes'
+import type { ScriptAsset } from './scripts'
 
 // The editor's virtual filesystem: the folder layout the unified Assets explorer shows.
 //
@@ -15,7 +16,7 @@ import type { MeshAsset } from './meshes'
 // a virtual extension (.mat/.tmat/.tpl/.mesh); textures keep their real image extension. Path rules match
 // SVAR's own FileTree.normalizeFile: the extension is everything after the LAST dot.
 
-export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'mesh' | 'scene'
+export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'mesh' | 'scene' | 'script'
 
 export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
   material: '.mat',
@@ -23,6 +24,7 @@ export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
   template: '.tpl',
   mesh: '.mesh',
   scene: '.scene',
+  script: '.script',
 }
 
 export const KIND_LABEL: Record<AssetKind, string> = {
@@ -32,6 +34,7 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   template: 'template',
   mesh: 'mesh',
   scene: 'scene',
+  script: 'script',
 }
 
 export type VfsEntry = {
@@ -57,6 +60,7 @@ export type LibSnapshot = {
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
   meshes: MeshAsset[]
+  scripts: ScriptAsset[]
   scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
   textureIds: string[]
 }
@@ -102,6 +106,7 @@ export function kindOfExt(ext: string): AssetKind {
     case '.tmat': return 'terrainMaterial'
     case '.tpl': return 'template'
     case '.mesh': return 'mesh'
+    case '.script': return 'script'
     default: return 'texture'
   }
 }
@@ -335,6 +340,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const m of libs.terrainMaterials) visit('terrainMaterial', m.id, m.name)
   for (const t of libs.templates) visit('template', t.id, t.name)
   for (const m of libs.meshes) visit('mesh', m.id, m.name)
+  for (const s of libs.scripts) visit('script', s.id, s.name)
   for (const s of libs.scenes) visit('scene', s.id, s.name)
   for (const id of libs.textureIds) visit('texture', id, id)
 
@@ -398,6 +404,7 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const m of libs.terrainMaterials) check('terrainMaterial', m.id, m.name)
   for (const t of libs.templates) check('template', t.id, t.name)
   for (const m of libs.meshes) check('mesh', m.id, m.name)
+  for (const s of libs.scripts) check('script', s.id, s.name)
   for (const s of libs.scenes) check('scene', s.id, s.name)
   for (const id of libs.textureIds) check('texture', id, id)
 
@@ -431,6 +438,7 @@ export function buildFileManagerData(vfs: VfsIndex, libs: LibSnapshot): FmEntity
     terrainMaterial: new Set(libs.terrainMaterials.map(m => m.id)),
     template: new Set(libs.templates.map(t => t.id)),
     mesh: new Set(libs.meshes.map(m => m.id)),
+    script: new Set(libs.scripts.map(s => s.id)),
     scene: new Set(libs.scenes.map(s => s.id)),
     texture: new Set(libs.textureIds),
   }

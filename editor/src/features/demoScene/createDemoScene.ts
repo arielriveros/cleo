@@ -106,9 +106,9 @@ export async function createDemoScene(params: {
 
       // Debug body visualization
       const debugHelmetNode = new Node(`__debug__body_${helmetNode.id}`);
-      debugHelmetNode.onUpdate = (node) => {
-        node.setPosition(helmetNode.position);
-        node.setRotation(helmetNode.rotation);
+      debugHelmetNode.onUpdate = () => {
+        debugHelmetNode.setPosition(helmetNode.position);
+        debugHelmetNode.setRotation(helmetNode.rotation);
       };
       const debugHelmetModel = new Model(Geometry.Sphere(8), Material.Basic({ color: [1, 0, 0] }, { wireframe: true }));
       const helmetModelNode = new ModelNode(`__debug__shape_0`, debugHelmetModel);
@@ -133,9 +133,9 @@ export async function createDemoScene(params: {
     undefined, undefined, CameraGeometry.indices, false
   ), Material.Basic({ color: [0.2, 0.2, 0.75] }, { castShadow: false }));
   const debugCameraModel = new ModelNode('__debug__CameraModel', cameraModel);
-  debugCameraModel.onUpdate = (node) => {
+  debugCameraModel.onUpdate = () => {
     // Ignore scaling
-    Vec.mat4.scale(node.worldTransform, node.worldTransform, Vec.vec3.inverse(Vec.vec3.create(), Vec.mat4.getScaling(Vec.vec3.create(), node.worldTransform)));
+    Vec.mat4.scale(debugCameraModel.worldTransform, debugCameraModel.worldTransform, Vec.vec3.inverse(Vec.vec3.create(), Vec.mat4.getScaling(Vec.vec3.create(), debugCameraModel.worldTransform)));
   };
   cameraNode.addChild(debugCameraModel);
   // Camera local offset; rotation will be inherited from pivot
@@ -326,9 +326,9 @@ export async function createDemoScene(params: {
   });
 
   const debugNode = new Node(`__debug__body_${physicalBox.id}`);
-  debugNode.onUpdate = (node) => {
-    node.setPosition(physicalBox.position);
-    node.setRotation(physicalBox.rotation);
+  debugNode.onUpdate = () => {
+    debugNode.setPosition(physicalBox.position);
+    debugNode.setRotation(physicalBox.rotation);
   };
   const debugModel = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({ color: [1, 0, 0] }, { wireframe: true }));
   const modelNode = new ModelNode(`__debug__shape_0`, debugModel);
@@ -343,9 +343,9 @@ export async function createDemoScene(params: {
   });
 
   const debugPlayableNode = new Node(`__debug__playable_${playable.id}`);
-  debugPlayableNode.onUpdate = (node) => {
-    node.setPosition(playable.position);
-    node.setRotation(playable.rotation);
+  debugPlayableNode.onUpdate = () => {
+    debugPlayableNode.setPosition(playable.position);
+    debugPlayableNode.setRotation(playable.rotation);
   };
   const debugPlayableModel = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({ color: [1, 0, 0] }, { wireframe: true }));
   const playableModelNode = new ModelNode(`__debug__shape_0`, debugPlayableModel);

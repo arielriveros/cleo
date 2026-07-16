@@ -1,4 +1,5 @@
-import { Body, Heightfield, World } from 'cannon-es';
+// Aliased: `Material` in this file already means the graphics material imported below.
+import { Body, Heightfield, World, Material as PhysicsMaterial } from 'cannon-es';
 import { vec3 } from 'gl-matrix';
 import { v4 as uuidv4 } from 'uuid';
 import { Geometry } from '../core/geometry';
@@ -124,6 +125,8 @@ export class Terrain {
 
     private _world: World | null = null;
     private _body: Body | null = null;
+    /** Surface the heightfield collides as; supplied by PhysicsSystem. See ensureRegistered. */
+    private _physicsMaterial: PhysicsMaterial | null = null;
     private _bodyDirty = false;
     private _lastBodyBuild = 0;       // throttles heightfield rebuilds during a sculpt drag
     private _origin = vec3.create();  // node world position, terrain centre
@@ -930,12 +933,20 @@ export class Terrain {
         return data;
     }
 
-    /** Create/refresh the static Heightfield body and register it with the world (self-heals). */
-    public ensureRegistered(world: World): void {
+    /**
+     * Create/refresh the static Heightfield body and register it with the world (self-heals).
+     *
+     * `material` is the surface the terrain collides as. It matters even though terrain has no friction
+     * settings of its own: cannon only honors a ContactMaterial when BOTH bodies carry a material, so a
+     * terrain left material-less would silently force every character back to the world default friction.
+     * Kept on the instance so a sculpt rebuild re-applies it.
+     */
+    public ensureRegistered(world: World, material?: PhysicsMaterial): void {
         this._world = world;
+        if (material) this._physicsMaterial = material;
         if (!this._body) {
             const shape = new Heightfield(this._heightfieldData(), { elementSize: this._element });
-            const body = new Body({ mass: 0 });
+            const body = new Body({ mass: 0, material: this._physicsMaterial ?? undefined });
             body.addShape(shape);
             body.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // field XY (Z up) -> world XZ (Y up)
             const half = this._cfg.size / 2;
@@ -946,6 +957,7 @@ export class Terrain {
             this._lastBodyBuild = Date.now();
             return;
         }
+        if (this._physicsMaterial && this._body.material !== this._physicsMaterial) this._body.material = this._physicsMaterial;
         if (world.bodies.indexOf(this._body) === -1) world.addBody(this._body);
         // Rebuild at most a few times per second so a continuous sculpt drag doesn't rebuild every frame.
         if (this._bodyDirty && Date.now() - this._lastBodyBuild > 200) this._rebuildBody();
@@ -956,7 +968,7 @@ export class Terrain {
         try {
             this._world.removeBody(this._body);
             const shape = new Heightfield(this._heightfieldData(), { elementSize: this._element });
-            const body = new Body({ mass: 0 });
+            const body = new Body({ mass: 0, material: this._physicsMaterial ?? undefined });
             body.addShape(shape);
             body.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
             const half = this._cfg.size / 2;

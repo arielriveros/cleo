@@ -41,6 +41,9 @@ export type {
 export { Sprite } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
+// Scene.physics is a public field of this type and scripts already reach through it (startRagdoll,
+// isGrounded), so the class belongs in the public surface too.
+export { PhysicsSystem } from "./physics/physicsSystem";
 export { convexHull, hullFromPositions, HULL_BUDGETS } from "./physics/convexHull";
 export type { Hull, HullQuality } from "./physics/convexHull";
 export { Terrain } from "./terrain/terrain";

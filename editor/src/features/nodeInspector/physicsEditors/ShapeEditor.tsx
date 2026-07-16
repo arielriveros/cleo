@@ -31,6 +31,17 @@ export default function ShapeEditor(props: {
             <PropertyRow label='Height'><NumberInput value={s.height} step={0.01} onChange={(v) => patch({ height: v })} /></PropertyRow>
             <PropertyRow label='Segments'><NumberInput value={s.numSegments} step={1} onChange={(v) => patch({ numSegments: Math.round(v) })} /></PropertyRow>
           </>}
+          {s.type === 'capsule' && <>
+            <PropertyRow label='Radius'><NumberInput value={s.radius} step={0.01} onChange={(v) => patch({ radius: Math.max(0.001, v) })} /></PropertyRow>
+            {/* Labelled "Total" because it spans the caps too (as in Unity/Godot): the straight section is
+                height - 2*radius, and there is no way to read that off a bare "Height". */}
+            <PropertyRow label='Total Height'><NumberInput value={s.height} step={0.01} onChange={(v) => patch({ height: Math.max(0, v) })} /></PropertyRow>
+            <PropertyRow label='Segments'><NumberInput value={s.numSegments} step={1} onChange={(v) => patch({ numSegments: Math.max(3, Math.round(v)) })} /></PropertyRow>
+            { s.height <= 2 * s.radius &&
+              <PropertyRow label=''>
+                <Hint>Total height is at or below 2 × radius, so this is a sphere. Raise the height to get a capsule.</Hint>
+              </PropertyRow> }
+          </>}
           {s.type === 'convex' && <>
             <PropertyRow label='Definition'>
               { props.regenerateHull

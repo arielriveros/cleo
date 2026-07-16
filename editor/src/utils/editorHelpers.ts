@@ -47,20 +47,23 @@ const isHelperName = (name: string) => name.startsWith('__editor__') || name.sta
  * Every mesh vertex of `root` *and its descendants*, expressed in root-local space — the space
  * collider shapes are authored in. A prop imported as several child meshes must contribute all of
  * them, or the hull only wraps the parent's own geometry and visibly cuts through the rest.
- * Editor helpers, gizmos and skinned meshes (whose bind pose doesn't follow animation) are skipped.
- * Returns null when there is nothing usable to hull.
+ * Editor helpers and gizmos are always skipped.
+ *
+ * `includeSkinned` is the only thing that varies between callers: a hull must exclude skinned meshes
+ * (their bind pose doesn't follow the animation, so the hull would be wrong the moment the character
+ * moves), while fitting a primitive's starting size to the bind pose is perfectly reasonable.
  */
-export function collectHullPositions(root: Node): number[][] | null {
-  const rootInv = Vec.mat4.invert(Vec.mat4.create(), root.worldTransform);
-  if (!rootInv) return null;
-
+function collectMeshPositions(root: Node, includeSkinned: boolean): number[][] {
   const out: number[][] = [];
+  const rootInv = Vec.mat4.invert(Vec.mat4.create(), root.worldTransform);
+  if (!rootInv) return out;
+
   const visit = (node: Node) => {
     if (isHelperName(node.name) || (node as any).isGizmo) return;
     if (node instanceof ModelNode) {
       const model = node.model;
       const skinned = model instanceof AnimatedModel && model.hasSkin;
-      const positions = skinned ? null : model.geometry?.positions;
+      const positions = skinned && !includeSkinned ? null : model.geometry?.positions;
       if (positions && positions.length) {
         if (node === root) {
           for (const p of positions) out.push([p[0], p[1], p[2]]);
@@ -77,15 +80,69 @@ export function collectHullPositions(root: Node): number[][] | null {
     for (const child of node.children) visit(child);
   };
   visit(root);
+  return out;
+}
+
+/** Vertices to hull, or null when there is nothing usable. Skinned meshes are excluded — see above. */
+export function collectHullPositions(root: Node): number[][] | null {
+  const out = collectMeshPositions(root, false);
   return out.length >= 4 ? out : null;
+}
+
+/**
+ * Fraction of vertices a fitted capsule's radius must cover. See `boundsFromPoints`.
+ */
+const RADIUS_PERCENTILE = 0.8;
+
+/**
+ * AABB of a point cloud, plus the radius a capsule around its Y axis should use.
+ *
+ * `radius` is deliberately NOT `max(halfX, halfZ)`. Characters are authored in a T- or A-pose, so the
+ * X extent is the ARM SPAN (~0.9) rather than the torso (~0.2); a capsule fitted that way would have
+ * `height <= 2 * radius` and collapse into a sphere — exactly the case this is meant to serve. So it
+ * is the RADIUS_PERCENTILEth percentile of each vertex's distance from the vertical axis, which the
+ * torso dominates and outstretched limbs cannot inflate.
+ *
+ * Split out from `meshBounds` so it can be exercised without a GL context (Model allocates buffers on
+ * construction, so a real ModelNode can't be built headless).
+ */
+export function boundsFromPoints(points: number[][]): { center: Vec.vec3; half: Vec.vec3; radius: number } | null {
+  if (!points.length) return null;
+
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (const p of points)
+    for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], p[i]); max[i] = Math.max(max[i], p[i]); }
+
+  const center = Vec.vec3.fromValues((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+  const half = Vec.vec3.fromValues((max[0] - min[0]) / 2, (max[1] - min[1]) / 2, (max[2] - min[2]) / 2);
+
+  const radial = points.map(p => Math.hypot(p[0] - center[0], p[2] - center[2])).sort((a, b) => a - b);
+  const radius = radial[Math.min(radial.length - 1, Math.floor(radial.length * RADIUS_PERCENTILE))];
+
+  return { center, half, radius };
+}
+
+/**
+ * The size a new collider should start at, fitted to `root` and its descendants. All values are in
+ * root-local (pre-scale) units, which is what shape descriptors are authored in — `setShapes` applies
+ * the owner's world scale on top. Null when the subtree has no mesh, so the caller keeps its default.
+ */
+export function meshBounds(root: Node): { center: Vec.vec3; half: Vec.vec3; radius: number } | null {
+  return boundsFromPoints(collectMeshPositions(root, true));
 }
 
 /**
  * Build a single wireframe mesh visualizing one physics shape, at unit size (planes get no
  * wireframe). `color` is red for bodies, green for triggers. The transform is applied separately by
  * `applyShapeTransform`, which has to run every frame to track the owner's scale.
+ *
+ * A capsule is the exception and is baked at FINAL size from `scale`: its caps stay spherical under a
+ * non-uniform owner scale while only the straight section stretches, which a scaled unit mesh cannot
+ * express — it would shear the caps into ellipsoids. `shapesSignature` therefore folds the owner's
+ * scale into a capsule's entry, so the mesh is rebuilt whenever that scale changes.
  */
-export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, number, number]): ModelNode | null {
+export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, number, number], scale: Vec.vec3): ModelNode | null {
   let model: Model | null;
   switch (shape.type) {
     case 'box':
@@ -97,6 +154,11 @@ export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, num
     case 'cylinder':
       model = new Model(Geometry.Cylinder(12, 1, 1), Material.Basic({ color }, { wireframe: true }));
       break;
+    case 'capsule': {
+      const { radius, cylinder } = capsuleDims(shape, scale);
+      model = new Model(Geometry.Capsule(shape.numSegments, radius, cylinder), Material.Basic({ color }, { wireframe: true }));
+      break;
+    }
     case 'convex':
       // Geometry.ConvexHull emits each hull edge once as a gl.LINES pair AND fills normals/uvs —
       // both are required: wireframe materials consume the index buffer as line pairs, and the VAO
@@ -111,6 +173,17 @@ export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, num
       model = null;
   }
   return model ? new ModelNode(SHAPE_PREFIX, model) : null;
+}
+
+/**
+ * A capsule's final scaled dimensions, mirroring `Shape.Capsule` exactly: the radius grows radially
+ * by max(X, Z) while the total height follows Y, and the straight section is whatever is left over
+ * once the two caps are accounted for — which a lopsided scale can drive to zero, leaving a sphere.
+ */
+function capsuleDims(shape: { radius: number, height: number }, scale: Vec.vec3): { radius: number, cylinder: number } {
+  const sx = Math.abs(scale[0]), sy = Math.abs(scale[1]), sz = Math.abs(scale[2]);
+  const radius = shape.radius * Math.max(sx, sz);
+  return { radius, cylinder: Math.max(0, shape.height * sy - 2 * radius) };
 }
 
 /**
@@ -140,6 +213,10 @@ function applyShapeTransform(node: ModelNode, shape: ShapeDescription, scale: Ve
       node.setScale(Vec.vec3.fromValues(shape.radius * radial, shape.height * sy, shape.radius * radial));
       break;
     }
+    case 'capsule':
+      // Already baked at final size by buildShapeDebugMesh — scaling it again would double-apply.
+      node.setUniformScale(1);
+      break;
     case 'convex':
       node.setScale(Vec.vec3.fromValues(sx, sy, sz));
       break;
@@ -150,14 +227,22 @@ function applyShapeTransform(node: ModelNode, shape: ShapeDescription, scale: Ve
  * Cheap identity of a shape list. A baked convex hull carries hundreds of numbers, so hashing the
  * whole descriptor on every scene change would be wasteful — its vertex count and transform are
  * enough to notice a regenerate.
+ *
+ * Only a capsule folds in the owner's `scale`, because it is the only mesh baked at final size; every
+ * other type is a unit mesh that `applyShapeTransform` rescales per frame, and including scale for
+ * those would rebuild their geometry on every drag of the scale gizmo for no gain.
  */
-function shapesSignature(shapes: ShapeDescription[]): string {
+function shapesSignature(shapes: ShapeDescription[], scale: Vec.vec3): string {
   return shapes.map((s) => {
     const common = `${s.type}|${s.offset.join(',')}|${s.rotation.join(',')}`;
     switch (s.type) {
       case 'box': return `${common}|${s.width},${s.height},${s.depth}`;
       case 'sphere': return `${common}|${s.radius}`;
       case 'cylinder': return `${common}|${s.radius},${s.height},${s.numSegments}`;
+      case 'capsule': {
+        const { radius, cylinder } = capsuleDims(s, scale);
+        return `${common}|${s.numSegments}|${radius},${cylinder}`;
+      }
       case 'convex': return `${common}|${s.quality},${s.vertices.length},${s.faces.length},v${s.v ?? 1}`;
       default: return common;
     }
@@ -185,11 +270,11 @@ function ensureCameraGizmo(camera: CameraNode) {
     Material.Basic({ color: [0.2, 0.2, 0.75] }, { castShadow: false })
   );
   const gizmo = new ModelNode(CAMERA_GIZMO, model);
-  gizmo.onUpdate = (node) => {
-    if (!node.parent) return;
-    const scale = Vec.mat4.getScaling(Vec.vec3.create(), node.parent.worldTransform);
+  gizmo.onUpdate = () => {
+    if (!gizmo.parent) return;
+    const scale = Vec.mat4.getScaling(Vec.vec3.create(), gizmo.parent.worldTransform);
     Vec.vec3.inverse(scale, scale);
-    node.setScale(scale);
+    gizmo.setScale(scale);
   };
   camera.addChild(gizmo);
 }
@@ -217,7 +302,7 @@ function ensureShapeGroup(
   color: [number, number, number],
   follow: (debug: Node) => void,
 ) {
-  const sig = shapesSignature(shapes);
+  const sig = shapesSignature(shapes, target.worldScale);
   const cache = sigMapFor(scene);
 
   let group = scene.getNodesByName(debugName)[0];
@@ -245,7 +330,7 @@ function ensureShapeGroup(
   // (Re)build shape children from scratch so type/size/count changes and shrinks are all handled.
   for (const child of Array.from(debug.children)) debug.removeChild(child);
   shapes.forEach((shape, i) => {
-    const mesh = buildShapeDebugMesh(shape, color);
+    const mesh = buildShapeDebugMesh(shape, color, target.worldScale);
     if (mesh) { mesh.name = `${SHAPE_PREFIX}${i}`; debug.addChild(mesh); }
   });
   cache.set(debugName, sig);

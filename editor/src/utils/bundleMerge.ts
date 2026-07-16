@@ -3,6 +3,7 @@ import { regenerateIds } from './nodeSubtree'
 import { VfsEntry, VfsIndex, withAncestors, uniquePath, dirOf, stemOf, extOf } from './vfs'
 import type { SceneMeta, SceneAssetData } from './sceneStorage'
 import type { BundleData, BundleTexture } from './bundle'
+import type { ScriptAsset } from './scripts'
 import type { MaterialAsset } from './materials'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
@@ -21,6 +22,7 @@ export interface LocalState {
   terrainMaterialIds: Set<string>
   templateIds: Set<string>
   meshIds: Set<string>
+  scriptIds: Set<string>
   sceneIds: Set<string>
   sceneNames: Set<string>
   /** Local stored textures, id -> {size,mime}, for reuse-vs-remint decisions. */
@@ -34,6 +36,7 @@ export interface MergeResult {
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
   meshes: MeshAsset[]
+  scripts: ScriptAsset[]
   /** New scene entries + their blobs (project bundles only). */
   scenes: { meta: SceneMeta; data: SceneAssetData }[]
   /** Imported textures to add (ids possibly re-minted); reused-identical textures are omitted. */
@@ -49,6 +52,7 @@ type Remaps = {
   tmat: Map<string, string>
   tpl: Map<string, string>
   mesh: Map<string, string>
+  script: Map<string, string>
 }
 
 const sub = (m: Map<string, string>, v: any): any => (typeof v === 'string' && m.has(v) ? m.get(v)! : v)
@@ -90,6 +94,7 @@ function remapVariables(vars: any, r: Remaps): void {
   one('__materialId', r.mat)
   one('__meshId', r.mesh)
   one('__templateId', r.tpl)
+  one('__scriptId', r.script)
   const sm = vars['__screenMaterialIds']
   if (sm && Array.isArray(sm.value)) sm.value = sm.value.map((x: any) => sub(r.mat, x))
 }
@@ -119,7 +124,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }))
   // Textures carry ArrayBuffers (not JSON-cloneable that way) — keep the originals, remap ids separately.
-  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), mesh: new Map() }
+  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), mesh: new Map(), script: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
   const textures: BundleTexture[] = []
@@ -133,12 +138,14 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const m of data.libraries.terrainMaterials) if (local.terrainMaterialIds.has(m.id)) r.tmat.set(m.id, cryptoRandomId())
   for (const t of data.libraries.templates) if (local.templateIds.has(t.id)) r.tpl.set(t.id, cryptoRandomId())
   for (const m of data.libraries.meshes) if (local.meshIds.has(m.id)) r.mesh.set(m.id, cryptoRandomId())
+  for (const s of data.libraries.scripts ?? []) if (local.scriptIds.has(s.id)) r.script.set(s.id, cryptoRandomId())
 
   // 3) Apply the id re-mints to the asset records' own ids, then rewrite all references within them.
   const materials = data.libraries.materials.map(m => ({ ...m, id: sub(r.mat, m.id) }))
   const terrainMaterials = data.libraries.terrainMaterials.map(m => ({ ...m, id: sub(r.tmat, m.id) }))
   const templates = data.libraries.templates.map(t => ({ ...t, id: sub(r.tpl, t.id) }))
   const meshes = data.libraries.meshes.map(m => ({ ...m, id: sub(r.mesh, m.id) }))
+  const scripts = (data.libraries.scripts ?? []).map(s => ({ ...s, id: sub(r.script, s.id) }))
   for (const m of materials) remapDeep(m, r)
   for (const m of terrainMaterials) remapDeep(m, r)
   for (const t of templates) remapDeep(t, r)
@@ -178,6 +185,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
       : e.kind === 'terrainMaterial' ? r.tmat
       : e.kind === 'template' ? r.tpl
       : e.kind === 'mesh' ? r.mesh
+      : e.kind === 'script' ? r.script
       : r.tex
     const assetId = sub(remap, e.assetId)
     let path = e.path
@@ -186,5 +194,5 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     vfsEntries.push({ ...e, path, assetId })
   }
 
-  return { materials, terrainMaterials, templates, meshes, scenes, textures, vfsFolders, vfsEntries }
+  return { materials, terrainMaterials, templates, meshes, scripts, scenes, textures, vfsFolders, vfsEntries }
 }

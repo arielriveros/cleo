@@ -3,8 +3,7 @@
 // code editor on screen.
 import React from 'react';
 import { SegmentedControl } from '../../../components/ui';
-import { codeThemeStore, useCodeTheme } from './codeThemeStore';
-import type { CodeThemeName } from './codeMirrorTheme';
+import { codeThemeStore, useCodeTheme, type CodeThemeName } from './codeThemeStore';
 
 const THEME_OPTIONS: { value: CodeThemeName; label: string }[] = [
   { value: 'dark', label: 'Dark' },
@@ -17,7 +16,7 @@ export default function CodeEditorHeader(props: { title?: string; right?: React.
   return (
     <div className='flex items-center gap-2 px-2 py-1 bg-surface-sunken border-b border-border-subtle'>
       {props.title && <span className='text-[11px] font-semibold text-muted'>{props.title}</span>}
-      <span className='text-[10px] text-dim'>Tab indents · Esc then Tab to leave</span>
+      <span className='text-[10px] text-dim'>Ctrl+Space for suggestions</span>
       <span className='flex-1' />
       {props.right}
       <SegmentedControl<CodeThemeName>

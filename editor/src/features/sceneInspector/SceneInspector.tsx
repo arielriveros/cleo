@@ -14,6 +14,8 @@ import Collapsable from '../../components/Collapsable';
 import AddNew from './AddNew';
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
+import { SCRIPT_ID_VAR, getScriptIdOf } from '../../utils/scripts';
+import { hoveredScriptStore, useHoveredScript } from './hoveredScriptStore';
 
 interface NodeDescription {
   id: string;
@@ -21,6 +23,7 @@ interface NodeDescription {
   type: string;
   visible: boolean;
   templateId?: string;
+  scriptId?: string;
   children: any[];
 }
 
@@ -30,6 +33,7 @@ interface SceneNodeItemProps {
   nodeType?: string;
   children?: string[];
   templateId?: string;
+  scriptId?: string;
   onSelect: (nodeId: string) => void;
   expanded?: boolean;
   visible?: boolean;
@@ -44,9 +48,22 @@ const PenIcon = () => (
   </svg>
 );
 
+// A code-brackets glyph marking a node that carries a script. `</>` reads as "script/code" at 14px.
+const ScriptIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 6 3 12l5 6" />
+    <path d="M16 6l5 6-5 6" />
+  </svg>
+);
+
 function SceneNodeItem(props: SceneNodeItemProps) {
-  const { selectedNode, enterTemplateEditor } = useCleoEngine();
+  const { selectedNode, enterTemplateEditor, enterScriptEditor } = useCleoEngine();
   const selected = selectedNode === props.nodeId;
+  const hoveredScript = useHoveredScript();
+  // A script glyph on a template-instance node is greyed (its script is authored in the template, not here)
+  // but stays clickable. Highlight this node's glyph when its script is the one being hovered anywhere.
+  const scriptGrey = !!props.templateId;
+  const scriptHot = !!props.scriptId && props.scriptId === hoveredScript;
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     // Dedicated MIME so drop targets can tell a scene node from other text/plain drags (dock tabs,
@@ -75,6 +92,17 @@ function SceneNodeItem(props: SceneNodeItemProps) {
         { props.nodeName }
       </div>
       <div className='flex flex-row items-center'>
+        { props.scriptId &&
+          <button
+            title={scriptGrey ? 'Edit script (authored in the template)' : 'Edit script'}
+            onClick={(e) => { e.stopPropagation(); enterScriptEditor(props.scriptId); }}
+            onMouseEnter={() => hoveredScriptStore.set(props.scriptId ?? null)}
+            onMouseLeave={() => hoveredScriptStore.set(null)}
+            className={`inline-flex items-center justify-center w-4 h-4 mr-1 ${
+              scriptHot ? 'text-highlight' : scriptGrey ? 'text-white/40 hover:text-white/70' : 'text-white hover:text-highlight'}`}>
+            <ScriptIcon />
+          </button>
+        }
         { props.templateId &&
           <button
             title='Edit template'
@@ -120,6 +148,7 @@ function SceneListRecursive(props: SceneListRecursiveProps) {
         onSetVisibility={props.handleSetVisibility}
         children={props.node.children}
         templateId={props.node.templateId}
+        scriptId={props.node.scriptId}
         />
       { expanded ? 
         props.node.children.map( child => { return <SceneListRecursive key={child.id} node={child} setSelectedNode={props.setSelectedNode} handleSetVisibility={props.handleSetVisibility} /> })
@@ -131,7 +160,7 @@ function SceneListRecursive(props: SceneListRecursiveProps) {
 
 
 export default function SceneInspector() {
-  const { editorScene, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId } = useCleoEngine()
+  const { editorScene, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId, attachScriptToNode } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
 
   // In template mode the inspector is rooted at the template node itself, so the editor camera/light
@@ -152,6 +181,7 @@ export default function SceneInspector() {
       type: node.nodeType,
       visible: node.visible,
       templateId,
+      scriptId: getScriptIdOf(node),
       children: templateId ? [] : node.children
         .filter((child: Node) => !(child.name.includes('__debug__') || child.name.includes('__editor__') || child.nodeType === 'landscape'))
         .map((child: Node) => generateNodeList(child))
@@ -159,9 +189,9 @@ export default function SceneInspector() {
   }
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    // Only the two kinds the tree actually accepts, so unrelated drags don't read as droppable here.
+    // Only the kinds the tree actually accepts, so unrelated drags don't read as droppable here.
     const types = Array.from(event.dataTransfer.types);
-    if (types.includes('text/cleo-node') || types.includes(NEW_NODE_MIME)) event.preventDefault();
+    if (types.includes('text/cleo-node') || types.includes(NEW_NODE_MIME) || types.includes('text/cleo-script')) event.preventDefault();
   };
 
   const handleDrop: React.DragEventHandler<HTMLDivElement> = (event) => {
@@ -169,6 +199,20 @@ export default function SceneInspector() {
 
     // Find the closest parent div with the class 'sceneItem'
     const targetElement = (event.target as HTMLDivElement).closest('.scene-item');
+
+    // A script asset dragged from the Assets explorer: attach it to the node it was dropped on (base-type
+    // enforced by attachScriptToNode). Read-only template-instance nodes are skipped.
+    const scriptId = event.dataTransfer.getData('text/cleo-script');
+    if (scriptId) {
+      const node = targetElement ? editorScene?.getNodeById(targetElement.id) : null;
+      if (!node) { Logger.warn('Drop the script onto a node to attach it', 'Editor'); return; }
+      if (editorMode === 'scene' && isWithinTemplateInstance(node)) {
+        Logger.warn('Cannot attach a script to a template instance', 'Editor');
+        return;
+      }
+      attachScriptToNode(node, scriptId);
+      return;
+    }
 
     // A new node dragged out of the Add section: parent it under the row it was dropped on, or under the
     // tree root when dropped on the empty space below the tree.

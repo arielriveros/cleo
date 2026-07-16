@@ -1,5 +1,21 @@
 import { useState } from 'react';
-import { useCleoEngine } from './EngineContext';
+import { useCleoEngine, type TabKind } from './EngineContext';
+import { iconFor } from './assets/assetKinds';
+import type { AssetKind } from '../utils/vfs';
+
+// The asset-type icon shown on a tab. Most tab kinds map 1:1 to an AssetKind; the Main tab reads as a scene,
+// and an animation tab (a skinned mesh) reuses the mesh glyph.
+function tabAssetKind(kind: TabKind): AssetKind {
+  switch (kind) {
+    case 'material': return 'material';
+    case 'terrainMaterial': return 'terrainMaterial';
+    case 'template': return 'template';
+    case 'mesh': return 'mesh';
+    case 'script': return 'script';
+    case 'animation': return 'mesh';
+    default: return 'scene'; // main
+  }
+}
 
 // Browser-style tab strip below the top bar: the Main tab (real scene) plus open template tabs.
 // Tabs are reorderable by drag (HTML5 DnD, same idiom as the scene tree) and template tabs are
@@ -26,11 +42,12 @@ export default function TabBar() {
             title={tab.title}
             className={`group flex items-center gap-1 h-[26px] my-[2px] px-2 rounded-t-[6px] cursor-pointer select-none max-w-[180px] border border-b-0 ${active ? 'bg-selected border-white text-white' : 'bg-control border-surface-raised text-muted hover:bg-control-hover'} ${isPlayMode ? 'opacity-60 pointer-events-none' : ''}`}
           >
-            {dirty && <span className='text-[10px] leading-none text-warning' title='Unsaved changes'>●</span>}
+            <img src={iconFor(tabAssetKind(tab.kind))} className='w-3.5 h-3.5 shrink-0' alt='' draggable={false} />
             <span className='truncate text-xs'>{tab.title}</span>
+            {dirty && <span className='ml-auto text-[10px] leading-none text-warning' title='Unsaved changes'>●</span>}
             {tab.kind !== 'main' && (
               <button
-                className='ml-1 w-[14px] h-[14px] flex items-center justify-center rounded text-[11px] leading-none text-muted hover:bg-white/20 hover:text-white'
+                className='w-[14px] h-[14px] flex items-center justify-center rounded text-[11px] leading-none text-muted hover:bg-white/20 hover:text-white'
                 title='Close tab'
                 onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
               >✕</button>

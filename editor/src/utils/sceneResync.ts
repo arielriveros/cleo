@@ -4,6 +4,7 @@ import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from
 import { MESH_ID_VAR, instantiateMeshAsset } from './meshes'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
+import { getScriptIdOf, seedScriptFields, unlinkScript } from './scripts'
 import { hashAsset, assetHashKey, AssetLibs } from './assetHash'
 
 // Pull-based cross-scene propagation. When a scene is opened, its stored node tree still carries the
@@ -61,13 +62,34 @@ export function resyncScene(
   savedHashes: Record<string, string> | undefined,
 ): boolean {
   let changed = false
-  const changedSince = (kind: 'material' | 'mesh' | 'template' | 'terrainMaterial', id: string, current: string): boolean =>
+  const changedSince = (kind: 'material' | 'mesh' | 'template' | 'terrainMaterial' | 'script', id: string, current: string): boolean =>
     !savedHashes || savedHashes[assetHashKey(kind, id)] !== current
 
   const materialById = new Map(libs.materials.map(m => [m.id, m]))
   const meshById = new Map(libs.meshes.map(m => [m.id, m]))
   const templateById = new Map(libs.templates.map(t => [t.id, t]))
   const terrainMatById = new Map(libs.terrainMaterials.map(t => [t.id, t]))
+  const scriptById = new Map(libs.scripts.map(s => [s.id, s]))
+
+  // --- Class scripts on placed nodes ---
+  // Re-cache the (possibly edited) source into the per-node scripts map and reconcile native fields to the
+  // current schema. A deleted script unlinks the node. Not gated by reinstantiate — scripts are patched in
+  // place, so node ids never churn.
+  for (const node of Array.from(scene.nodes)) {
+    const scriptId = getScriptIdOf(node)
+    if (!scriptId) continue
+    const asset = scriptById.get(scriptId)
+    if (!asset) { unlinkScript(node, undefined, maps.scripts); changed = true; continue }
+    if (changedSince('script', scriptId, hashAsset(asset))) {
+      maps.scripts.set(node.id, asset.source)
+      seedScriptFields(node, asset, false)
+      changed = true
+    } else if (!maps.scripts.has(node.id)) {
+      // Even when unchanged, the per-node source cache is empty on a fresh open — populate it so the scene
+      // serializes/plays with the correct source.
+      maps.scripts.set(node.id, asset.source)
+    }
+  }
 
   // --- Materials on placed nodes + camera screen-material passes ---
   for (const node of Array.from(scene.nodes)) {

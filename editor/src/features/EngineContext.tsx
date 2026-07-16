@@ -17,6 +17,7 @@ import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMater
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromMeshAsset } from "../utils/foliageRules";
 import { MeshAsset, MeshLodDef, MESH_ID_VAR, buildMeshAsset, instantiateMeshAsset, separateSubMeshes, nodeJsonHasSkinnedModel } from "../utils/meshes";
+import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
@@ -91,7 +92,7 @@ import { resyncScene } from "../utils/sceneResync";
 import { buildAssetHashes, AssetLibs } from "../utils/assetHash";
 import {
   collectReferencedMaterialIds, collectReferencedMeshIds, collectReferencedTemplateIds,
-  collectReferencedTerrainMaterialIds, collectReferencedTextureIds,
+  collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
 } from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf } from "../utils/textureStore";
@@ -119,6 +120,24 @@ type SphereShapeDescription = {
 
 type CylinderShapeDescription = {
   type: 'cylinder';
+  offset: number[];
+  rotation: number[];
+
+  radius: number;
+  height: number;
+  numSegments: number;
+};
+
+/**
+ * Capsule — the right collider for a character: it rests on an analytic sphere cap, so it rolls over
+ * heightfield triangle edges instead of catching on them the way a box does.
+ *
+ * `height` is the TOTAL tip-to-tip height (as in Unity/Godot), so the straight section is
+ * `height - 2 * radius` and a height at or below `2 * radius` is simply a sphere. cannon has no capsule
+ * primitive, so `Shape.Capsule` compounds one from a cylinder and two spheres at load.
+ */
+type CapsuleShapeDescription = {
+  type: 'capsule';
   offset: number[];
   rotation: number[];
 
@@ -160,9 +179,18 @@ export type BodyDescription = {
   angularDamping: number;
   linearConstraints: [number, number, number];
   angularConstraints: [number, number, number];
+  /**
+   * Surface properties. Optional because scenes saved before they existed have neither — the engine
+   * defaults them to 0.3 / 0, which is exactly how those scenes already behaved.
+   *
+   * Two bodies combine with min(friction) and max(restitution), so the deliberately-set value wins:
+   * a character at friction 0 stays frictionless on any ground, and a bouncy ball bounces off a dead wall.
+   */
+  friction?: number;
+  restitution?: number;
   shapes: ShapeDescription[];
 }
-export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | PlaneShapeDescription | ConvexShapeDescription;
+export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | CapsuleShapeDescription | PlaneShapeDescription | ConvexShapeDescription;
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
@@ -190,7 +218,7 @@ function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefO
   }, [key, value, loaded]);
 }
 
-export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'mesh';
+export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'mesh' | 'script';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -202,7 +230,9 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // scene (materials/transforms/sub-meshes edited via the normal Scene + Properties panels, LOD/cull via
 // the Mesh inspector), saved back to the library with Save Mesh and propagated to placed copies.
 // Opening one also renders the asset's thumbnail (imports don't — that used to stall the main thread).
-export type TabKind = 'main' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'mesh';
+// A 'script' tab is a dedicated code editor for a Script asset (no 3D scene): the full-panel editor renders
+// over the viewport, with a Save Script action. Its working source buffers per-tab until saved.
+export type TabKind = 'main' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'mesh' | 'script';
 
 // Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
 // node id of LOD level i's root inside the tab scene; distances[i] is the camera distance where level i
@@ -224,6 +254,7 @@ export interface EditorTab {
   terrainMaterialId?: string | null; // terrain-material tabs: source terrain-material asset id
   animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
   meshId?: string | null; // mesh tabs: the previewed mesh asset id
+  scriptId?: string | null; // script tabs: the edited script asset id
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage' | 'move';
@@ -318,6 +349,29 @@ const EngineContext = createContext<{
   addTerrainMaterial: (m: TerrainMaterialAsset) => void;
   removeTerrainMaterial: (id: string) => void;
   updateTerrainMaterial: (id: string, m: TerrainMaterialAsset) => void;
+  // Script assets (shared, class-based scripts referenced by nodes via __scriptId)
+  scriptAssets: ScriptAsset[];
+  addScriptAsset: (s: ScriptAsset) => void;
+  removeScriptAsset: (id: string) => void;
+  updateScriptAsset: (id: string, s: ScriptAsset) => void;
+  /** The script asset a node currently references, if any. */
+  scriptAssetOf: (node: Node | null) => ScriptAsset | undefined;
+  /** Create a new script asset for a node (base type from the node) and attach it. Returns the new asset, or null. */
+  createScriptForNode: (node: Node, name?: string) => ScriptAsset | null;
+  /** Attach an existing script asset to a node (base-type checked). Returns false if incompatible. */
+  attachScriptToNode: (node: Node, scriptId: string) => boolean;
+  /** Detach a node's script asset and drop its script-owned fields. */
+  detachScriptFromNode: (node: Node) => void;
+  /** Persist an edited script asset's source and propagate the change to every linked node. */
+  saveScriptSource: (id: string, source: string) => void;
+  /** Open a script asset in its dedicated Script editor tab (creates a new 'node' script when no id is given). */
+  enterScriptEditor: (scriptId?: string) => void;
+  /** Save the active Script tab's buffered source to its asset and clear the tab's dirty flag. */
+  saveActiveScript: () => void;
+  /** Buffer a Script tab's working source and mark the tab dirty (called by the tab editor on each edit). */
+  setScriptTabSource: (tabId: string, scriptId: string, source: string) => void;
+  /** The buffered working source for a script tab, or undefined. */
+  getScriptTabSource: (scriptId: string) => string | undefined;
   // Mesh assets (imported models)
   meshes: MeshAsset[];
   addMesh: (m: MeshAsset) => void;
@@ -435,6 +489,19 @@ const EngineContext = createContext<{
     addTerrainMaterial: () => {},
     removeTerrainMaterial: () => {},
     updateTerrainMaterial: () => {},
+    scriptAssets: [],
+    addScriptAsset: () => {},
+    removeScriptAsset: () => {},
+    updateScriptAsset: () => {},
+    scriptAssetOf: () => undefined,
+    createScriptForNode: () => null,
+    attachScriptToNode: () => false,
+    detachScriptFromNode: () => {},
+    saveScriptSource: () => {},
+    enterScriptEditor: () => {},
+    saveActiveScript: () => {},
+    setScriptTabSource: () => {},
+    getScriptTabSource: () => undefined,
     meshes: [],
     addMesh: () => {},
     removeMesh: () => {},
@@ -641,6 +708,126 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const updateMesh = (id: string, m: MeshAsset) => setMeshes(prev => prev.map(x => x.id === id ? m : x));
 
+  // Reusable, class-based script assets (global library like materials): a node references one via the
+  // SCRIPT_ID_VAR node variable. Persisted to IndexedDB. Editing the asset propagates to every linked node.
+  const [scriptAssets, setScriptAssets] = useState<ScriptAsset[]>([]);
+  const scriptAssetsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<ScriptAsset[]>('cleo_scripts');
+        if (list && list.length) setScriptAssets(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load scripts:', e); }
+      finally { scriptAssetsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary('cleo_scripts', scriptAssets, scriptAssetsLoadedRef);
+
+  // Mirror for async flows (play/save serialize scripts off-render): buildGameData reads the current list.
+  const scriptAssetsRef = useRef<ScriptAsset[]>([]);
+  useEffect(() => { scriptAssetsRef.current = scriptAssets; }, [scriptAssets]);
+
+  const addScriptAsset = (s: ScriptAsset) => setScriptAssets(prev => [...prev, s]);
+  const updateScriptAsset = (id: string, s: ScriptAsset) => setScriptAssets(prev => prev.map(x => x.id === id ? s : x));
+  const removeScriptAsset = (id: string) => {
+    // Unlink every node that referenced it (drops __scriptId, its script-owned native fields, and the
+    // per-node source cache) so those nodes become plain, script-less nodes instead of dangling links.
+    const scene = editorSceneRef.current;
+    const gone = scriptAssets.find(x => x.id === id);
+    let changed = false;
+    for (const n of Array.from(scene.nodes)) {
+      if (getScriptIdOf(n) === id) { unlinkScript(n, gone, scriptsRef.current); changed = true; }
+    }
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+    setScriptAssets(prev => prev.filter(x => x.id !== id));
+  };
+
+  const scriptAssetOf = (node: Node | null): ScriptAsset | undefined => {
+    const id = getScriptIdOf(node ?? undefined);
+    return id ? scriptAssets.find(a => a.id === id) : undefined;
+  };
+
+  const createScriptForNode = (node: Node, name?: string): ScriptAsset | null => {
+    const baseType = node.nodeType as ScriptBaseType;
+    const assetName = name?.trim() || `${node.name} Script`;
+    const asset = buildScriptAsset(assetName, baseType, defaultScriptClass(assetName, baseType));
+    addScriptAsset(asset);
+    if (!applyScriptAsset(node, asset, scriptsRef.current)) return null;
+    eventEmitter.current.emit('SCENE_CHANGED');
+    return asset;
+  };
+
+  const attachScriptToNode = (node: Node, scriptId: string): boolean => {
+    const asset = scriptAssets.find(a => a.id === scriptId);
+    if (!asset) return false;
+    if (!applyScriptAsset(node, asset, scriptsRef.current)) {
+      Logger.warn(`Script "${asset.name}" extends ${asset.baseType}; it cannot attach to a ${node.nodeType} node`, 'Editor');
+      return false;
+    }
+    eventEmitter.current.emit('SCENE_CHANGED');
+    return true;
+  };
+
+  const detachScriptFromNode = (node: Node) => {
+    unlinkScript(node, scriptAssetOf(node), scriptsRef.current);
+    eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
+  // Persist an edited script's source and propagate to every linked node: re-cache the source, and add
+  // any new fields / prune removed ones while keeping each node's authored values.
+  const saveScriptSource = (id: string, source: string) => {
+    const existing = scriptAssets.find(a => a.id === id);
+    if (!existing) return;
+    const next = buildScriptAsset(existing.name, existing.baseType, source, id);
+    updateScriptAsset(id, next);
+    const scene = editorSceneRef.current;
+    for (const n of Array.from(scene.nodes)) {
+      if (getScriptIdOf(n) !== id) continue;
+      scriptsRef.current.set(n.id, source);
+      seedScriptFields(n, next, false);
+    }
+    eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
+  // Dedicated Script editor tab: opens a script asset in a full-panel code editor (its own mode + Save Script
+  // button), mirroring the mesh/material tabs. Working source buffers per-tab (scriptTabSourceRef) until Save.
+  const scriptTabSourceRef = useRef(new Map<string, string>());
+  const enterScriptEditor = (scriptId?: string) => {
+    let id = scriptId;
+    if (!id) {
+      // No id: mint a new 'node'-based script and open it.
+      const asset = buildScriptAsset('New Script', 'node', defaultScriptClass('New Script', 'node'));
+      addScriptAsset(asset);
+      id = asset.id;
+      scriptTabSourceRef.current.set(id, asset.source);
+    }
+    // Focus an already-open tab for this script instead of duplicating it.
+    const existing = tabs.find(t => t.kind === 'script' && t.scriptId === id);
+    if (existing) { setActiveTabId(existing.id); return; }
+    const asset = scriptAssetsRef.current.find(a => a.id === id);
+    const tabId = cryptoRandomId();
+    scriptTabSourceRef.current.set(id, asset?.source ?? scriptTabSourceRef.current.get(id) ?? '');
+    setTabs(prev => [...prev, { id: tabId, kind: 'script', title: asset?.name ?? 'Script', scriptId: id }]);
+    setActiveTabId(tabId);
+  };
+
+  // Save the active script tab: commit its buffered source to the asset (persists + propagates to linked
+  // nodes) and clear the tab's dirty flag. Mirrors saveActiveMaterial/saveActiveMesh.
+  const saveActiveScript = () => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'script' || !tab.scriptId) return;
+    const source = scriptTabSourceRef.current.get(tab.scriptId);
+    if (source !== undefined) saveScriptSource(tab.scriptId, source);
+    // Adopt the (possibly renamed-in-source) class name into the tab title? Keep the asset name.
+    setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+  };
+  // Called by the script tab's editor on every edit: buffer the source and mark the tab dirty.
+  const setScriptTabSource = (tabId: string, scriptId: string, source: string) => {
+    scriptTabSourceRef.current.set(scriptId, source);
+    setDirtyTabs(prev => (prev[tabId] ? prev : { ...prev, [tabId]: true }));
+  };
+  const getScriptTabSource = (scriptId: string): string | undefined => scriptTabSourceRef.current.get(scriptId);
+
   // True once all IndexedDB-backed libraries (and the project's scene list) have finished their initial
   // read. The asset explorer's path index must not prune entries before this — the arrays start empty,
   // and a pruning pass against an empty library would drop every folder assignment the user has made.
@@ -648,7 +835,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && meshesLoadedRef.current && scenesLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && meshesLoadedRef.current && scriptAssetsLoadedRef.current && scenesLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -744,6 +931,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     : activeTab.kind === 'terrainMaterial' ? 'terrainMaterial'
     : activeTab.kind === 'animation' ? 'animation'
     : activeTab.kind === 'mesh' ? 'mesh'
+    : activeTab.kind === 'script' ? 'script'
     : 'template';
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
@@ -761,7 +949,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
   // Snapshot of the four hashable asset libraries, as the resync/hash utilities consume them.
-  const currentLibs = (): AssetLibs => ({ materials, meshes, templates, terrainMaterials });
+  const currentLibs = (): AssetLibs => ({ materials, meshes, templates, terrainMaterials, scripts: scriptAssets });
 
   // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
   const enterTemplateEditor = (templateId?: string) => {
@@ -1938,6 +2126,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const gameData = await buildGameData({
         scene: editorSceneRef.current,
         scripts: scriptsRef.current,
+        scriptAssets: scriptAssetsRef.current,
         bodies: bodiesRef.current,
         triggers: triggersRef.current,
         ui: uiStateRef.current,
@@ -1951,6 +2140,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const meshSet = collectReferencedMeshIds(scene);
       const tplSet = collectReferencedTemplateIds(scene);
       const tmSet = collectReferencedTerrainMaterialIds(scene);
+      const scriptSet = collectReferencedScriptIds(scene);
       const refs: SceneRefs = {
         materialIds: Array.from(matSet),
         meshIds: Array.from(meshSet),
@@ -1961,8 +2151,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // Per-asset content hashes let a *closed* scene tell, when reopened, which referenced assets
       // changed while it was closed — so unchanged meshes/templates aren't needlessly re-instantiated.
       const assetHashes = buildAssetHashes(
-        { materialIds: matSet, meshIds: meshSet, templateIds: tplSet, terrainMaterialIds: tmSet },
-        { materials, meshes, templates, terrainMaterials },
+        { materialIds: matSet, meshIds: meshSet, templateIds: tplSet, terrainMaterialIds: tmSet, scriptIds: scriptSet },
+        currentLibs(),
       );
       await saveSceneData(sceneId, { ...gameData, assetHashes, savedAt: now });
       await updateProjectMeta(m => ({
@@ -2352,7 +2542,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         cameraNode.camera.left = -4;
         cameraNode.camera.right = 4;
         cameraNode.setZ(10).setRotation([0, 180, 0]);
-        cameraNode.onUpdate = (node, delta, time) => {
+        cameraNode.onUpdate = (delta) => {
+            const node = cameraNode;
             const mouse = InputManager.instance.mouse;
             const movement = delta;
             // Pan with left OR right button when not dragging gizmo
@@ -2400,7 +2591,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
       else {
         cameraNode.camera.type = 'perspective';
-        cameraNode.onUpdate = (node, delta, time) => {
+        cameraNode.onUpdate = (delta) => {
+          const node = cameraNode;
           const mouse = InputManager.instance.mouse;
           const movement = delta * 2;
           // Rotate and move with left button when not dragging gizmo
@@ -2576,6 +2768,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const json = await buildGameData({
       scene: editorSceneRef.current,
       scripts: scriptsRef.current,
+      scriptAssets: scriptAssetsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
       ui: uiStateRef.current,
@@ -2760,6 +2953,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addTerrainMaterial,
       removeTerrainMaterial,
       updateTerrainMaterial,
+      scriptAssets,
+      addScriptAsset,
+      removeScriptAsset,
+      updateScriptAsset,
+      scriptAssetOf,
+      createScriptForNode,
+      attachScriptToNode,
+      detachScriptFromNode,
+      saveScriptSource,
+      enterScriptEditor,
+      saveActiveScript,
+      setScriptTabSource,
+      getScriptTabSource,
       meshes,
       addMesh,
       removeMesh,

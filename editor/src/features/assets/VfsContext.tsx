@@ -48,7 +48,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   const engine = useCleoEngine()
   const {
     eventEmitter, assetsLoaded, isSceneReady,
-    materials, terrainMaterials, templates, meshes,
+    materials, terrainMaterials, templates, meshes, scriptAssets,
     sceneList,
   } = engine
 
@@ -71,13 +71,13 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [eventEmitter])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, meshes, scenes: sceneList, textureIds }),
-    [materials, terrainMaterials, templates, meshes, sceneList, textureIds],
+    () => ({ materials, terrainMaterials, templates, meshes, scripts: scriptAssets, scenes: sceneList, textureIds }),
+    [materials, terrainMaterials, templates, meshes, scriptAssets, sceneList, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
-    materials, terrainMaterials, templates, meshes,
+    materials, terrainMaterials, templates, meshes, scripts: scriptAssets,
     scenes: sceneList,
     addMaterial: engine.addMaterial,
     updateMaterial: engine.updateMaterial,
@@ -91,6 +91,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addMesh: engine.addMesh,
     updateMesh: engine.updateMesh,
     removeMesh: engine.removeMesh,
+    addScriptAsset: engine.addScriptAsset,
+    updateScriptAsset: engine.updateScriptAsset,
+    removeScriptAsset: engine.removeScriptAsset,
     createScene: engine.createScene,
     renameScene: engine.renameScene,
     deleteScene: engine.deleteScene,
@@ -100,6 +103,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     enterMaterialEditor: engine.enterMaterialEditor,
     enterTerrainMaterialEditor: engine.enterTerrainMaterialEditor,
     enterTemplateEditor: engine.enterTemplateEditor,
+    enterScriptEditor: engine.enterScriptEditor,
     enterMeshEditor: engine.enterMeshEditor,
     emit: (event, payload) => eventEmitter.emit(event as any, payload),
   }
