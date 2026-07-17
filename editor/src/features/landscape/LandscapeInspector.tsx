@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Terrain, LandscapeNode } from "cleo";
 import { useCleoEngine, TerrainTool, TerrainBrushMode } from "../EngineContext";
 import TerrainLayerSlot from "./TerrainLayerSlot";
+import { Toggle } from "../../components/ui";
 
 const TOOLS: { id: TerrainTool; label: string }[] = [
     { id: 'raise', label: 'Raise' },
@@ -160,10 +161,10 @@ export default function LandscapeInspector() {
 
             {mode === 'foliage' && (
                 <div className="mb-2 space-y-2">
-                    <label className="flex items-center justify-between cursor-pointer">
+                    <div className="flex items-center justify-between">
                         <span className={label}>Erase mode</span>
-                        <input type="checkbox" checked={foliageErase} onChange={e => setFoliageErase(e.target.checked)} />
-                    </label>
+                        <Toggle checked={foliageErase} onChange={setFoliageErase} />
+                    </div>
                     <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={generateFoliage}>Generate Foliage (whole terrain)</button>
                     <p className="text-[10px] text-gray-400">
                         The brush scatters each painted material’s foliage (and skips excluded types).

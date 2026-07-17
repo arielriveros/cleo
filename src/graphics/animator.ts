@@ -65,6 +65,17 @@ export interface AnimationState {
     clipName: string;
     loop: boolean;
     speed: number;
+    /**
+     * How many times to play the clip when `loop` is set. 0 or undefined = forever. After the last pass the
+     * clip holds on its final frame, exactly as a non-looping clip does — which is what an exit-time
+     * transition waits on.
+     */
+    loopCount?: number;
+    /**
+     * Parameter to read the playback rate from, instead of `speed`. Re-read every frame, so a variable-bound
+     * parameter can drive the rate live (e.g. run faster the faster the character moves). Overrides `speed`.
+     */
+    speedParam?: string;
     /** The state the machine starts in. Exactly one state should be the entry. */
     isEntry?: boolean;
     /** Graph-editor layout coordinates (authoring only — ignored at runtime). */
@@ -82,15 +93,42 @@ export interface AnimationCondition {
     value?: number;
 }
 
+/** An AND/OR gate over conditions and nested gates. See {@link AnimationTransition.condition}. */
+export interface AnimationConditionGroup {
+    op: 'and' | 'or';
+    children: AnimationConditionNode[];
+}
+
+export type AnimationConditionNode = AnimationCondition | AnimationConditionGroup;
+
+/**
+ * A group carries `children`; a leaf carries `param`. Both have an `op`, so `op` cannot discriminate them —
+ * the group's is 'and'/'or' while the leaf's is a comparison.
+ */
+export function isConditionGroup(node: AnimationConditionNode): node is AnimationConditionGroup {
+    return 'children' in node;
+}
+
 export interface AnimationTransition {
     /** Source state name, or '*' to match any state. */
     from: string;
     to: string;
+    /**
+     * Flat, implicitly-ANDed conditions. Superseded by `condition` — kept so machines authored before gates
+     * existed keep running untouched. Ignored entirely whenever `condition` is present.
+     */
     conditions: AnimationCondition[];
+    /** Compound condition tree. When present it is the only thing consulted; `conditions` is ignored. */
+    condition?: AnimationConditionGroup;
     /** When true, the transition only fires once the clip reaches exitTime. */
     hasExitTime?: boolean;
     /** Normalized clip time (0..1) the transition waits for when hasExitTime is set. */
     exitTime?: number;
+    /**
+     * Seconds to cross-fade over when this transition fires. Undefined uses the animator-wide
+     * {@link Animator.blendTime}. Per-edge because one machine wants a snappy landing and a lazy gait change.
+     */
+    blendTime?: number;
 }
 
 export interface AnimationEventMarker {
@@ -360,6 +398,16 @@ export class Animator {
     private _playing: boolean = false;
     private _loop: boolean = true;
     private _speed: number = 1.0;
+    /** Whether the outgoing clip of the current blend was still running when the blend started. */
+    private _previousAdvancing: boolean = false;
+    /** Whether the outgoing clip of the current blend was looping. */
+    private _previousLoop: boolean = false;
+    /** Duration of the blend in flight. Normally _blendTime, but a transition may override it per-edge. */
+    private _activeBlendTime: number = 0.3;
+    /** Passes the clip has completed since it started; counts toward _loopLimit. */
+    private _loopsPlayed: number = 0;
+    /** Times to play the clip before holding the last frame. 0 = forever. From AnimationState.loopCount. */
+    private _loopLimit: number = 0;
     private _nodeIndexToJointIndex: Map<number, number> = new Map();
     private _animationMappings: AnimationMapping[] = [];
     private _node: Node | null = null;
@@ -441,14 +489,23 @@ export class Animator {
         
         const animation = this._animatedModel.animations[animationIndex];
         
-        // If we're switching to a different animation and blending is enabled
-        if (blend && this._currentAnimation && this._currentAnimation !== animation && this._playing) {
+        // Blend out of whatever is currently posed, whether or not it is still running. It deliberately does
+        // NOT test `_playing`: a non-looping clip that reached its end has already set _playing = false while
+        // holding its last frame, and that is exactly when a state machine wants to cross-fade away from it
+        // (a Jump landing). `_currentAnimation` being null already covers the only case that must not blend —
+        // the very first play. Callers that must not blend out of a bind pose pass blend = false.
+        if (blend && this._currentAnimation && this._currentAnimation !== animation) {
             // Store current animation state for blending
             this._previousAnimation = this._currentAnimation;
             this._previousBones = new Map(this._bones);
             this._previousTime = this._currentTime;
+            // Read BEFORE _playing/_loop are overwritten below: a clip that already ran to its end must hold
+            // its final pose under the cross-fade, not restart.
+            this._previousAdvancing = this._playing;
+            this._previousLoop = this._loop;
             this._isBlending = true;
             this._currentBlendTime = 0;
+            this._activeBlendTime = this._blendTime; // a transition may override this right after
         } else {
             // No blending - instant switch
             this._isBlending = false;
@@ -459,7 +516,11 @@ export class Animator {
         this._currentTime = 0;
         this._loop = loop;
         this._playing = true;
-        
+        // Fresh clip, fresh budget. _enterState re-applies the state's limit right after this; every other
+        // caller means "loop forever" and must not inherit a limit left behind by a previous state.
+        this._loopsPlayed = 0;
+        this._loopLimit = 0;
+
         // Build bone map from animation channels
         this._buildBoneMap(animation);
     }
@@ -560,7 +621,7 @@ export class Animator {
         // Update blend time if blending
         if (this._isBlending) {
             this._currentBlendTime += this._deltaTime;
-            if (this._currentBlendTime >= this._blendTime) {
+            if (this._currentBlendTime >= this._activeBlendTime) {
                 // Blend complete
                 this._isBlending = false;
                 this._previousAnimation = null;
@@ -578,12 +639,24 @@ export class Animator {
 
         // Handle looping or stopping
         if (this._currentTime >= duration) {
-            if (this._loop) {
+            this._loopsPlayed++;
+            // _loopLimit is a count of PLAYS, so the pass just finished counts: a limit of 1 stops here, and 0
+            // means forever. Once the budget is spent the clip holds its last frame, same as a non-looping one,
+            // which is what an exit-time transition is waiting on.
+            if (this._loop && (this._loopLimit === 0 || this._loopsPlayed < this._loopLimit)) {
                 this._currentTime = this._currentTime % duration;
                 looped = true;
             } else {
                 this._currentTime = duration;
                 this._playing = false;
+                // Finish any blend still in flight. From here on the guard at the top of update() returns
+                // early, so _currentBlendTime would never reach _activeBlendTime and the pose would be stuck
+                // at a partial mix forever — reachable whenever a clip is shorter than the blend.
+                if (this._isBlending) {
+                    this._isBlending = false;
+                    this._previousAnimation = null;
+                    this._previousBones.clear();
+                }
             }
         }
 
@@ -595,18 +668,22 @@ export class Animator {
             bone.update(this._currentTime);
         }
         
-        // If blending, also update previous animation bones
+        // If blending, also update previous animation bones. The outgoing clip keeps playing under the
+        // cross-fade — freezing it leaves the fading-out legs stopped mid-stride for the whole blend.
         if (this._isBlending && this._previousAnimation) {
-            const previousDuration = this._getPreviousAnimationDuration();
-            let previousTime = this._previousTime + this._deltaTime;
-
-            // Handle looping for previous animation
-            if (previousTime >= previousDuration) {
-                previousTime = previousTime % previousDuration;
+            if (this._previousAdvancing) {
+                const previousDuration = this._getPreviousAnimationDuration();
+                this._previousTime += this._deltaTime;
+                if (this._previousTime >= previousDuration) {
+                    // Only a looping clip wraps. A non-looping one holds its end — wrapping it would restart
+                    // the outgoing clip underneath the blend.
+                    this._previousTime = this._previousLoop ? this._previousTime % previousDuration : previousDuration;
+                }
             }
-
+            // Not advancing = the clip had already finished before the blend began; it holds its last pose,
+            // which is what a Jump landing cross-fades away from.
             for (const bone of this._previousBones.values()) {
-                bone.update(previousTime);
+                bone.update(this._previousTime);
             }
         }
 
@@ -634,7 +711,12 @@ export class Animator {
                 if (this._isBlending && this._previousBones.has(boneName)) {
                     // Blend between previous and current animation
                     const previousBone = this._previousBones.get(boneName)!;
-                    const blendFactor = Math.min(this._currentBlendTime / this._blendTime, 1.0);
+                    // A zero blend duration is legal (the setter clamps to >= 0, not > 0) and would divide to
+                    // NaN here, which slerps into NaN quaternions and collapses the skeleton. It means
+                    // "instant", so read it as fully blended.
+                    const blendFactor = this._activeBlendTime > 0
+                        ? Math.min(this._currentBlendTime / this._activeBlendTime, 1.0)
+                        : 1.0;
                     const blendedTransform = this._blendTransforms(previousBone.localTransform, bone.localTransform, blendFactor);
                     localTransforms.set(nodeIndex, blendedTransform);
                 } else {
@@ -865,8 +947,11 @@ export class Animator {
         return () => { this._eventCallbacks = this._eventCallbacks.filter(c => c !== cb); };
     }
 
-    /** Enter a state by name: make it current and play its bound clip. */
-    private _enterState(name: string): void {
+    /**
+     * Enter a state by name: make it current and play its bound clip. `blendOverride` is the firing
+     * transition's own cross-fade duration, if it set one.
+     */
+    private _enterState(name: string, blendOverride?: number): void {
         if (!this._stateMachine) return;
         const state = this._stateMachine.states.find(s => s.name === name);
         this._currentStateName = name;
@@ -877,7 +962,27 @@ export class Animator {
             return;
         }
         this.playAnimationByName(state.clipName, state.loop, true);
+        // playAnimation just armed the blend with the animator-wide default; the transition gets the last word.
+        if (blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
+        this._loopLimit = Math.max(0, Math.floor(state.loopCount ?? 0));
+        this._loopsPlayed = 0;
         this._speed = state.speed ?? 1.0;
+        this._applyStateSpeed(state);
+    }
+
+    /**
+     * Drive the playback rate from a parameter when the state names one. Called on entry AND every frame, since
+     * a variable-bound parameter moves while the state is held. Falls back to the state's fixed `speed`.
+     */
+    private _applyStateSpeed(state: AnimationState | undefined): void {
+        if (!state?.speedParam) return;
+        const v = this._paramValues.get(state.speedParam);
+        // Parameter gone (renamed or deleted): keep the state's fixed speed. Reading the absent value as 0
+        // would freeze the clip mid-pose, which looks like a broken rig rather than a dangling reference.
+        if (v === undefined) return;
+        // A bool reads as 1/0 so a flag can halt motion outright. The public setter's clamp is mirrored here
+        // because this bypasses it; there is no reverse playback.
+        this._speed = Math.max(0, typeof v === 'number' ? v : (v ? 1 : 0));
     }
 
     /** Resolve the node a 'variable' parameter reads from, relative to this animator's model node. */
@@ -924,6 +1029,9 @@ export class Animator {
         this._refreshVariableParams(); // variable-bound params track their node variable each frame
         if (!this._currentStateName) { this.resetStateMachine(); return; }
 
+        // Re-read a parameter-driven playback rate: the state is already entered, so nothing else would.
+        this._applyStateSpeed(sm.states.find(s => s.name === this._currentStateName));
+
         const duration = this._getAnimationDuration();
         for (const t of sm.transitions) {
             if (t.from !== '*' && t.from !== this._currentStateName) continue;
@@ -935,15 +1043,42 @@ export class Animator {
                 if (this._currentTime < exit) continue;
             }
 
-            if (!t.conditions.every(c => this._conditionMet(c))) continue;
+            if (!this._transitionMet(t)) continue;
 
-            // Consume any triggers this transition used, then switch.
-            for (const c of t.conditions) {
-                if (c.op === 'trigger') this._paramValues.set(c.param, false);
-            }
-            this._enterState(t.to);
+            // Consume any triggers this transition used, then switch. Every trigger in the tree is consumed,
+            // including under an OR branch that did not contribute — the transition still "used" it, and
+            // leaving it raised would fire some other transition next frame.
+            this._forEachCondition(t, c => { if (c.op === 'trigger') this._paramValues.set(c.param, false); });
+            this._enterState(t.to, t.blendTime);
             return;
         }
+    }
+
+    /** A transition's gate: the compound tree when present, else the legacy flat (implicitly ANDed) list. */
+    private _transitionMet(t: AnimationTransition): boolean {
+        if (t.condition) return this._nodeMet(t.condition);
+        return t.conditions.every(c => this._conditionMet(c));
+    }
+
+    private _nodeMet(node: AnimationConditionNode): boolean {
+        if (!isConditionGroup(node)) return this._conditionMet(node);
+        // An EMPTY group is no constraint at all, for OR as much as AND. Strictly `[].some()` is false, but a
+        // group you just added in the editor and have not filled in yet must not silently block the transition
+        // forever — and an empty `conditions` list has always meant "always fires".
+        if (node.children.length === 0) return true;
+        return node.op === 'or'
+            ? node.children.some(c => this._nodeMet(c))
+            : node.children.every(c => this._nodeMet(c));
+    }
+
+    /** Visit every condition leaf of a transition, whichever shape it is stored in. */
+    private _forEachCondition(t: AnimationTransition, visit: (c: AnimationCondition) => void): void {
+        const walk = (node: AnimationConditionNode) => {
+            if (isConditionGroup(node)) node.children.forEach(walk);
+            else visit(node);
+        };
+        if (t.condition) walk(t.condition);
+        else t.conditions.forEach(visit);
     }
 
     private _conditionMet(c: AnimationCondition): boolean {
@@ -1163,7 +1298,11 @@ export class Animator {
         if (triggerFound && targetAnimation) {
             // Play the animation if not already playing it
             if (!this._currentAnimation || this._currentAnimation.name !== targetAnimation || !this._playing) {
-                this.playAnimationByName(targetAnimation, true);
+                // Blend only when something was actually running. This path re-plays after _setTPose() stopped
+                // it, and a bind pose is not a legitimate blend source: _bones still hold the last ANIMATED
+                // pose, so a cross-fade would start from a pose the viewer is not looking at. (playAnimation
+                // itself no longer checks _playing — the state machine needs to blend out of a finished clip.)
+                this.playAnimationByName(targetAnimation, true, this._playing);
             }
         } else {
             // No trigger active - set T-pose if currently playing
@@ -1178,10 +1317,15 @@ export class Animator {
      */
     private _setTPose(): void {
         if (!this._skin) return;
-        
+
         // Stop any playing animation
         this._playing = false;
-        
+        // Abandon any blend too: the bind pose written below replaces the mix outright, and a surviving
+        // _isBlending would have _recomputePose keep mixing the old clips back in on the next frame.
+        this._isBlending = false;
+        this._previousAnimation = null;
+        this._previousBones.clear();
+
         // Calculate bind pose transforms for all joints
         const globalTransforms = new Map<number, mat4>();
         

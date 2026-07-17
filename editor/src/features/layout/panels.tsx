@@ -7,7 +7,7 @@ import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import UIInspector from '../uiInspector/UIInspector';
 import SkeletonTree from '../animation/SkeletonTree';
-import StateMachineEditor from '../animation/StateMachineEditor';
+import { ClipsPanel as AnimClips, VariablesPanel as AnimVariables, StateMachinePanel as AnimStateMachine } from '../animation/StateMachineEditor';
 import TerrainMaterialInspector from '../terrainMaterials/TerrainMaterialInspector';
 import MeshInspector from '../meshes/MeshInspector';
 import PropertyEditor from '../nodeInspector/propertyEditors/PropertyEditor';
@@ -78,13 +78,13 @@ function MaterialPanel() {
   );
 }
 
-// The Properties panel hosts the mode-specific inspectors too (animation state machine, material and
-// terrain-material authoring), which is why DockLayout retitles its tab per mode.
+// The Properties panel hosts the mode-specific inspectors too (material and terrain-material authoring),
+// which is why DockLayout retitles its tab per mode. Animation is the exception: it has its own three
+// panels (below) and hides Properties entirely.
 function PropertiesPanel(_: IDockviewPanelProps) {
   const { editorMode, editingTerrainMaterialNode } = useCleoEngine();
   const { node, readOnly } = useSelectedNode();
 
-  if (editorMode === 'animation') return <SidePanel><StateMachineEditor /></SidePanel>;
   // Terrain-material mode edits the dedicated (unrendered) edit node — the visible preview node
   // carries the composite terrain material.
   if (editorMode === 'terrainMaterial') return <SidePanel><TerrainMaterialInspector node={editingTerrainMaterialNode} /></SidePanel>;
@@ -139,6 +139,13 @@ function AssetsPanel(_: IDockviewPanelProps) {
   );
 }
 
+// The animation editor's three panels. They share one StateMachineProvider session (it wraps the whole
+// dock, see Editor.tsx), so each is free to be dragged anywhere without losing the working copy. Shown
+// only in animation mode — see hiddenPanelIds. Each already fills and scrolls itself, so no SidePanel.
+function AnimClipsPanel(_: IDockviewPanelProps) { return <AnimClips />; }
+function AnimVariablesPanel(_: IDockviewPanelProps) { return <AnimVariables />; }
+function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachine />; }
+
 // Panels are movable but not closable — a lost panel would need Reset Layout, so the tab renders
 // the title only (dockview's tab wrapper still owns drag behavior and colors).
 export function PanelTab(props: IDockviewPanelHeaderProps) {
@@ -158,4 +165,7 @@ export const dockComponents = {
   physics: PhysicsPanel,
   logger: LoggerPanel,
   assets: AssetsPanel,
+  animClips: AnimClipsPanel,
+  animVariables: AnimVariablesPanel,
+  animStateMachine: AnimStateMachinePanel,
 };

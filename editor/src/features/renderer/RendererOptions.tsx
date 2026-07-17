@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useCleoEngine } from '../EngineContext';
-import { OverlayPanel, Section, Slider, Checkbox, Field, NumberInput, SegmentedControl, Hint } from '../../components/ui';
+import { OverlayPanel, Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Hint } from '../../components/ui';
 
 // Debug channels map 1:1 to the renderer's `debugView` setter (see renderer.ts). Grouped only for
 // display; clicking one blits that internal buffer to the viewport instead of the composited image.
@@ -111,7 +111,7 @@ export default function RendererOptions() {
       </Section>
 
       <Section title='Optimizations'>
-        <Checkbox label='Frustum Culling' checked={frustumCulling} labelClassName='my-1'
+        <Toggle label='Frustum Culling' checked={frustumCulling} className='my-1'
           onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); }} />
         <Field label='Foliage Dist'>
           <NumberInput value={foliageCullDistance} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
@@ -123,7 +123,7 @@ export default function RendererOptions() {
         </Field>
         <Hint>Foliage cull distance &amp; grid cell size in world units (distance 0 = off).</Hint>
 
-        <Checkbox label='Terrain LOD' checked={terrainLod} labelClassName='my-1'
+        <Toggle label='Terrain LOD' checked={terrainLod} className='my-1'
           onChange={(c) => { renderer.terrainLodEnabled = c; setTerrainLod(c); }} />
         <Field label='LOD1 Dist'>
           <NumberInput value={terrainLodDist1} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
@@ -171,7 +171,7 @@ export default function RendererOptions() {
       </Section>
 
       <Section title='Motion Blur'>
-        <Checkbox label='Enabled' checked={motionBlur} labelClassName='my-1'
+        <Toggle label='Enabled' checked={motionBlur} className='my-1'
           onChange={(c) => { renderer.motionBlurEnabled = c; setMotionBlur(c); }} />
         <Slider label='Amount' value={motionBlurIntensity} min={0} max={4} step={0.05}
           onChange={(v) => { renderer.motionBlurIntensity = v; setMotionBlurIntensity(v); }} />
@@ -187,7 +187,7 @@ export default function RendererOptions() {
       </Section>
 
       <Section title='SSAO'>
-        <Checkbox label='Enabled' checked={ssaoEnabled} labelClassName='my-1'
+        <Toggle label='Enabled' checked={ssaoEnabled} className='my-1'
           onChange={(c) => { renderer.ssaoEnabled = c; setSsaoEnabled(c); }} />
         <Slider label='Radius' value={ssaoRadius} min={0} max={2} step={0.05}
           onChange={(v) => { renderer.ssaoRadius = v; setSsaoRadius(v); }} />
@@ -198,7 +198,7 @@ export default function RendererOptions() {
       </Section>
 
       <Section title='Grid'>
-        <Checkbox label='Visible' checked={gridVisible} labelClassName='my-1'
+        <Toggle label='Visible' checked={gridVisible} className='my-1'
           onChange={(c) => { renderer.setGridVisible(c); setGridVisible(c); }} />
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>Plane</span>

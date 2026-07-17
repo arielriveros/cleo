@@ -25,6 +25,13 @@ export default class ThirdPersonPlayableNode extends Node {
    *  invalidate the animator's thresholds. */
   public moveSpeed: number = 0
 
+  /**
+   * Animator input: true from take-off until the feet are back down. Bind an animator parameter to it
+   * (variable → Parent → isJumping) and the Jump state lasts exactly as long as the character is airborne,
+   * rather than as long as the clip happens to be. See the README for the state machine.
+   */
+  public isJumping: boolean = false
+
   public walkSpeed: number = 3
   public runSpeed: number = 7
   /** Upward speed applied on jump. Height is speed²/(2·gravity) — mass-independent, unlike an impulse. */
@@ -61,6 +68,7 @@ export default class ThirdPersonPlayableNode extends Node {
       const v = this.velocity
       this.velocity = [v[0], this.jumpSpeed, v[2]]
       this._jumpCooldown = 0.2
+      this.isJumping = true
     })
   }
 
@@ -71,6 +79,10 @@ export default class ThirdPersonPlayableNode extends Node {
   onUpdate(delta: number, time: number) {
     const input = InputManager.instance
     if (this._jumpCooldown > 0) this._jumpCooldown -= delta
+
+    // Land only once the cooldown has run out. isGrounded allows ~0.1s of grace, so it is still true on the
+    // frames right after take-off and would otherwise end the jump before the character had left the floor.
+    if (this.isJumping && this._jumpCooldown <= 0 && this.isGrounded) this.isJumping = false
 
     // Move relative to where the camera looks. Take the pivot's yaw ANGLE rather than its worldForward:
     // forward must stay flat on XZ, or looking down would walk the character into the floor.

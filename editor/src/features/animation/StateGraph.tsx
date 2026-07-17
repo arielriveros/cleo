@@ -6,9 +6,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCleoEngine } from '../EngineContext'
-import { useStateMachine, OP_LABEL, effectiveType } from './StateMachineContext'
+import { useStateMachine, OP_LABEL, effectiveType, sameLink } from './StateMachineContext'
 import { SegmentedControl } from '../../components/ui'
-import type { AnimationTransition } from 'cleo'
+import FloatingEdge from './FloatingEdge'
+import { isConditionGroup } from 'cleo'
+import type { AnimationTransition, AnimationCondition, AnimationConditionNode } from 'cleo'
 
 // Center-canvas node-graph for the animation state machine. States are draggable nodes, transitions
 // are arrowed edges; both edit the shared machine from StateMachineContext. Rendered as an absolute
@@ -49,24 +51,32 @@ function StateNode({ data, selected }: NodeProps) {
 }
 
 const nodeTypes = { state: StateNode }
+const edgeTypes = { transition: FloatingEdge }
 
-// Short human summary of a transition's conditions for the edge label.
+// Short human summary of a transition's gate for the edge label. Flattens the condition tree to its first
+// couple of leaves — the sidebar is where the real structure is read, this is just an at-a-glance hint.
 function transitionLabel(t: AnimationTransition, paramOf: (n: string) => any): string {
-  if (t.conditions.length === 0) return t.hasExitTime ? 'exit' : ''
-  const parts = t.conditions.slice(0, 2).map(c => {
+  const leaves: AnimationCondition[] = []
+  const walk = (n: AnimationConditionNode) => { isConditionGroup(n) ? n.children.forEach(walk) : leaves.push(n) }
+  if (t.condition) walk(t.condition)
+  else t.conditions.forEach(c => leaves.push(c))
+
+  if (leaves.length === 0) return t.hasExitTime ? 'exit' : ''
+  const parts = leaves.slice(0, 2).map(c => {
     const type = effectiveType(paramOf(c.param))
     if (type === 'float') return `${c.param} ${OP_LABEL[c.op]} ${c.value ?? 0}`
     if (type === 'bool') return `${c.param} ${OP_LABEL[c.op]}`
     return `${c.param}`
   })
-  const extra = t.conditions.length > 2 ? ` +${t.conditions.length - 2}` : ''
+  // The join is a hint only: an OR gate reads as ', ' here, same as an AND.
+  const extra = leaves.length > 2 ? ` +${leaves.length - 2}` : ''
   return parts.join(', ') + extra
 }
 
 function Flow() {
   const { editorMode } = useCleoEngine()
   const {
-    target, sm, selection, setSelection, graphView, setGraphView,
+    target, sm, links, selection, setSelection, graphView, setGraphView,
     addState, setState, addTransition, apply, stateIndex, commitLayout, deleteElements, paramOf,
   } = useStateMachine()
   const { screenToFlowPosition } = useReactFlow()
@@ -74,6 +84,8 @@ function Flow() {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([])
   const [activeState, setActiveState] = useState<string | null>(null)
+  /** Open node context menu, in client coordinates. */
+  const [menu, setMenu] = useState<{ name: string; x: number; y: number } | null>(null)
 
   // Position for a state: stored x/y, else deterministic auto-grid by list order.
   const posOf = useCallback((name: string, idx: number): { x: number; y: number } => {
@@ -108,23 +120,36 @@ function Flow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sm.states, selection, posOf])
 
-  // Rebuild edges from transitions.
+  // Rebuild edges from LINKS, not transitions: A→B and B→A are ONE edge. FloatingEdge draws it as a single
+  // line for one direction and two parallel lines for both, and picks the borders to attach to itself.
   useEffect(() => {
-    setEdges(sm.transitions.map((t, i) => ({
-      id: `t${i}`,
-      source: t.from,
-      target: t.to,
-      label: transitionLabel(t, paramOf),
-      selected: selection?.kind === 'transition' && selection.index === i,
-      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-      data: { index: i },
-      animated: t.from === activeState,
-      style: { stroke: selection?.kind === 'transition' && selection.index === i ? 'var(--color-selected, #6b8afd)' : undefined },
-      labelStyle: { fontSize: 10, fill: '#cbd5e1' },
-      labelBgStyle: { fill: 'rgba(20,22,28,0.85)' },
-      labelBgPadding: [4, 2] as [number, number],
-      labelBgBorderRadius: 3,
-    })))
+    // Markers stay on the edge: xyflow resolves them into `url(#…)` strings and hands those to the custom
+    // edge, which then puts each on the right one of its two lines.
+    const arrow = { type: MarkerType.ArrowClosed, width: 14, height: 14 }
+    setEdges(links.map(l => {
+      const isSelected = sameLink(selection, l.a, l.b)
+      const fwd = l.forward ? transitionLabel(l.forward, paramOf) : ''
+      const bwd = l.backward ? transitionLabel(l.backward, paramOf) : ''
+      const both = !!l.forward && !!l.backward
+      return {
+        id: `${l.a}|${l.b}`,
+        type: 'transition',
+        source: l.a,
+        target: l.b,
+        label: both ? [fwd, bwd].filter(Boolean).join(' ⇄ ') || '⇄' : (fwd || bwd),
+        selected: isSelected,
+        markerEnd: l.forward ? arrow : undefined,
+        markerStart: l.backward ? arrow : undefined,
+        data: { a: l.a, b: l.b, forward: !!l.forward, backward: !!l.backward },
+        // Light up whichever direction could actually fire from where the machine currently is.
+        animated: activeState === l.a ? !!l.forward : activeState === l.b ? !!l.backward : false,
+        style: { stroke: isSelected ? 'var(--color-selected, #6b8afd)' : undefined },
+        labelStyle: { fontSize: 10, fill: '#cbd5e1' },
+        labelBgStyle: { fill: 'rgba(20,22,28,0.85)' },
+        labelBgPadding: [4, 2] as [number, number],
+        labelBgBorderRadius: 3,
+      }
+    }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sm.transitions, sm.parameters, selection, activeState])
 
@@ -155,22 +180,40 @@ function Flow() {
   }, [stateIndex, setState])
 
   const onConnect = useCallback((c: Connection) => {
-    if (c.source && c.target) addTransition(c.source, c.target)
+    // A self-transition can never fire (_evaluateStateMachine skips t.to === current) and draws as an
+    // invisible stub behind the node, so refuse it rather than leave dead data around.
+    if (!c.source || !c.target || c.source === c.target) return
+    addTransition(c.source, c.target) // a duplicate is a no-op there
   }, [addTransition])
 
   // One combined callback so deleting a node (which cascades its edges) is a single atomic update.
   const onDelete = useCallback(({ nodes: dn, edges: de }: { nodes: RFNode[]; edges: RFEdge[] }) => {
     const stateNames = dn.map(n => n.id)
-    const transitionIndices = de.map(e => (e.data as any)?.index as number).filter(i => typeof i === 'number')
-    if (stateNames.length || transitionIndices.length) deleteElements(stateNames, transitionIndices)
+    // Deleting an edge removes the link, i.e. BOTH directions — the sidebar is where you drop just one.
+    const removed = de
+      .map(e => [(e.data as any)?.a, (e.data as any)?.b] as [string, string])
+      .filter(([a, b]) => typeof a === 'string' && typeof b === 'string')
+    if (stateNames.length || removed.length) deleteElements(stateNames, removed)
   }, [deleteElements])
 
-  const onNodeClick = useCallback((_: any, node: RFNode) => setSelection({ kind: 'state', name: node.id }), [setSelection])
-  const onEdgeClick = useCallback((_: any, edge: RFEdge) => {
-    const i = (edge.data as any)?.index
-    if (typeof i === 'number') setSelection({ kind: 'transition', index: i })
+  const onNodeClick = useCallback((_: any, node: RFNode) => {
+    setSelection({ kind: 'state', name: node.id })
+    setMenu(null)
   }, [setSelection])
-  const onPaneClick = useCallback(() => setSelection(null), [setSelection])
+  const onEdgeClick = useCallback((_: any, edge: RFEdge) => {
+    const { a, b } = (edge.data ?? {}) as { a?: string; b?: string }
+    if (a && b) setSelection({ kind: 'transition', a, b })
+    setMenu(null)
+  }, [setSelection])
+  const onPaneClick = useCallback(() => { setSelection(null); setMenu(null) }, [setSelection])
+
+  // Right-click a node for the things that have no room on it: entry is set here now rather than by a radio
+  // in the sidebar, since the node itself already shows entry (green border + ▶).
+  const onNodeContextMenu = useCallback((e: React.MouseEvent, node: RFNode) => {
+    e.preventDefault()
+    setSelection({ kind: 'state', name: node.id })
+    setMenu({ name: node.id, x: e.clientX, y: e.clientY })
+  }, [setSelection])
 
   const addAtCenter = useCallback(() => {
     // Spread new states so they don't stack; offset by current count.
@@ -191,6 +234,7 @@ function Flow() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDragStop={onNodeDragStop}
@@ -198,6 +242,7 @@ function Flow() {
         onDelete={onDelete}
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onPaneClick={onPaneClick}
         deleteKeyCode={['Delete', 'Backspace']}
         fitView
@@ -212,16 +257,46 @@ function Flow() {
       <div data-cleo-overlay className='absolute top-2 left-2 z-20 flex items-center gap-2'
            onMouseDown={e => e.stopPropagation()}>
         <SegmentedControl<'3d' | 'graph'>
-          options={[{ value: '3d', label: '3D' }, { value: 'graph', label: 'Graph' }]}
+          options={[{ value: '3d', label: 'Animations' }, { value: 'graph', label: 'Graph' }]}
           value='graph'
           onChange={v => setGraphView(v === 'graph')} />
         <button className='px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
                 onClick={addAtCenter} title='Add a new state (or double-click the canvas)'>+ State</button>
         <button className='px-2 py-1 rounded bg-success hover:bg-success-hover text-white text-xs'
                 onClick={apply} title='Save the machine onto the model (used at runtime and by Simulate)'>Apply</button>
-        <span className='text-[10px] text-dim ml-1'>drag handle → handle to connect · Del to remove</span>
+        <span className='text-[10px] text-dim ml-1'>drag handle → handle to connect · right-click a state · Del to remove</span>
       </div>
+
+      {menu && <NodeMenu menu={menu} onClose={() => setMenu(null)} />}
     </div>
+  )
+}
+
+/** Right-click menu on a state. Positioned in client space, so it is a sibling of the graph, not a child. */
+function NodeMenu({ menu, onClose }: { menu: { name: string; x: number; y: number }; onClose: () => void }) {
+  const { sm, stateIndex, setState, removeState } = useStateMachine()
+  const i = stateIndex(menu.name)
+  const state = i >= 0 ? sm.states[i] : null
+  if (!state) return null
+
+  const item = 'w-full text-left px-2 py-1 text-xs hover:bg-control disabled:opacity-40 disabled:hover:bg-transparent'
+  return (
+    <>
+      {/* Catch the next click anywhere so the menu behaves like a menu. */}
+      <div className='fixed inset-0 z-30' onMouseDown={onClose} onContextMenu={e => { e.preventDefault(); onClose() }} />
+      <div data-cleo-overlay
+        className='fixed z-40 min-w-[132px] rounded border border-border bg-surface-raised shadow-panel py-0.5'
+        style={{ left: menu.x, top: menu.y }}
+        onMouseDown={e => e.stopPropagation()}>
+        <div className='px-2 py-1 text-[10px] uppercase tracking-wide text-dim truncate'>{state.name}</div>
+        <button className={item} disabled={!!state.isEntry}
+          title={state.isEntry ? 'Already the entry state' : 'The machine starts here'}
+          onClick={() => { setState(i, { isEntry: true }); onClose() }}>
+          {state.isEntry ? '▶ Entry state' : 'Set as entry'}
+        </button>
+        <button className={item + ' text-red-400'} onClick={() => { removeState(i); onClose() }}>Delete state</button>
+      </div>
+    </>
   )
 }
 

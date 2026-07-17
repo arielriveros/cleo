@@ -4,7 +4,7 @@ import React, { useDeferredValue, useMemo, useRef, useState, useCallback, useLay
 import { Console } from 'console-feed';
 import type { ComponentOverrides } from 'console-feed';
 import type { LogMethod } from 'cleo';
-import { Button, Checkbox, Popover, TextInput, cn } from '../../components/ui';
+import { Button, Toggle, Popover, TextInput, cn } from '../../components/ui';
 import { logStore, MAX_LOGS, ConsoleEntry } from './logStore';
 import { getConsoleStyles } from './consoleTheme';
 
@@ -159,12 +159,12 @@ export default function ConsolePanel() {
           {scopes.length === 0
             ? <div className='px-2 py-1 text-xs text-dim'>Nothing logged yet</div>
             : scopes.map((scope) => (
-                <Checkbox
+                <Toggle
                   key={scope}
                   label={scope}
                   checked={!hiddenScopes.has(scope)}
                   onChange={(checked) => toggleScope(scope, checked)}
-                  labelClassName='px-2 py-1 rounded hover:bg-control'
+                  className='px-2 py-1 rounded hover:bg-control'
                 />
               ))}
         </Popover>

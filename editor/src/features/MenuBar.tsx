@@ -15,7 +15,7 @@ import ImportBundleModal from "./dialogs/ImportBundleModal";
 import { startTask } from "./progress/progressStore";
 import Topbar from "../components/Topbar";
 import ModeSelector from "./ModeSelector";
-import { Button, buttonVariants, cn } from "../components/ui";
+import { Button, buttonVariants, cn, Toggle } from "../components/ui";
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon,
@@ -388,13 +388,13 @@ export default function MenuBar() {
           </Button>
           {showPublish && (
             <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-surface-raised border border-control-hover rounded shadow-lg py-1 text-white text-sm'>
-              <label className='flex items-start gap-2 px-3 py-2 border-b border-control-hover cursor-pointer select-none' onClick={(e) => e.stopPropagation()}>
-                <input type='checkbox' className='mt-[3px]' checked={embedAssets} onChange={(e) => setEmbedAssets(e.target.checked)} />
+              <div className='flex items-start gap-2 px-3 py-2 border-b border-control-hover select-none' onClick={(e) => e.stopPropagation()}>
+                <Toggle className='mt-[3px]' checked={embedAssets} onChange={setEmbedAssets} />
                 <span>
                   <span className='font-semibold'>Embed assets in data</span>
                   <span className='block text-[11px] text-muted'>{embedAssets ? 'One self-contained game.json (larger)' : 'Loose assets/ files + small game.json'}</span>
                 </span>
-              </label>
+              </div>
               <div className='px-3 py-2 hover:bg-control cursor-pointer' onClick={onPublishWeb}>
                 <div className='font-semibold'>Web (HTML)</div>
                 <div className='text-[11px] text-muted'>{desktop ? 'Write index.html + game.js + game.json to a folder' : 'Download a .zip of the game'}</div>

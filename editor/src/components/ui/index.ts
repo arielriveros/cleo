@@ -14,8 +14,6 @@ export type { SegmentedControlProps, SegmentedOption } from './SegmentedControl'
 export { NumberInput, TextInput, Select, controlClass } from './inputs';
 export type { NumberInputProps, TextInputProps, SelectProps } from './inputs';
 
-export { Checkbox } from './Checkbox';
-export type { CheckboxProps } from './Checkbox';
 
 export { Toggle } from './Toggle';
 export type { ToggleProps } from './Toggle';

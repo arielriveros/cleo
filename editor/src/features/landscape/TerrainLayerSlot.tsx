@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { LandscapeNode } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { applyTerrainMaterialToLayer } from '../../utils/terrainMaterials'
+import { Toggle } from '../../components/ui'
 
 // The active-paint-layer control in the Landscape inspector: a terrain-material slot (drop / link /
 // edit / clear) plus per-layer blend overrides (tiling + automatic height/slope masking). Assigning a
@@ -67,10 +68,10 @@ export default function TerrainLayerSlot(props: { landscape: LandscapeNode | nul
         <span className={label}>Tiling</span>
         <input type='number' className={num} value={layer?.tiling ?? 20} onChange={e => setBlend({ tiling: Number(e.target.value) })} />
       </div>
-      <label className='flex items-center justify-between cursor-pointer'>
+      <div className='flex items-center justify-between'>
         <span className={label}>Auto (height/slope)</span>
-        <input type='checkbox' checked={!!layer?.auto} onChange={e => setBlend({ auto: e.target.checked })} />
-      </label>
+        <Toggle checked={!!layer?.auto} onChange={c => setBlend({ auto: c })} />
+      </div>
       {layer?.auto && <>
         <div className='flex items-center justify-between'>
           <span className={label}>Height min/max</span>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 
 // Centered review modal for importing animation clips. For each clip parsed from the file it shows a
 // compatibility report vs the model's skeleton — matched/total bones, target coverage, and (when
@@ -45,8 +45,9 @@ export default function AnimationImportModal() {
             return (
               <div key={i} className={`rounded border p-2 ${r.compatible ? 'border-control' : 'border-red-700 bg-danger/10'}`}>
                 <div className='flex items-center gap-2'>
-                  <input type='checkbox' checked={!!include[i]} disabled={!r.compatible}
-                         onChange={() => toggle(i)} title={r.compatible ? 'Include this clip' : 'No matching bones — cannot import'} />
+                  <span title={r.compatible ? 'Include this clip' : 'No matching bones — cannot import'}>
+                    <Toggle checked={!!include[i]} disabled={!r.compatible} onChange={() => toggle(i)} />
+                  </span>
                   <span className='font-semibold flex-1 truncate' title={c.name}>{c.name}</span>
                   <span className={`text-[11px] px-1.5 py-0.5 rounded ${r.compatible ? 'bg-success/15 text-green-300' : 'bg-red-900 text-red-300'}`}>
                     {r.compatible ? '✓ compatible' : '✗ incompatible'}

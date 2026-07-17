@@ -5,6 +5,7 @@ import Collapsable from '../../components/Collapsable'
 import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor'
 import TextureInspector from '../nodeInspector/propertyEditors/TextureInspector'
 import { buildFoliageRuleFromMeshAsset } from '../../utils/foliageRules'
+import { Toggle } from '../../components/ui'
 
 // The right-sidebar inspector shown while a terrain-material tab is active. Edits the preview sphere's
 // TerrainMaterial in place: the base surface (via the shared MaterialEditor), the terrain blend fields,
@@ -122,10 +123,10 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
             <span className={label}>Tiling</span>
             <input type='number' className={num} value={mat.tiling} onChange={e => { mat.tiling = Number(e.target.value); changed() }} />
           </div>
-          <label className='flex items-center justify-between cursor-pointer'>
+          <div className='flex items-center justify-between'>
             <span className={label}>Auto height/slope</span>
-            <input type='checkbox' checked={mat.auto} onChange={e => { mat.auto = e.target.checked; changed() }} />
-          </label>
+            <Toggle checked={mat.auto} onChange={c => { mat.auto = c; changed() }} />
+          </div>
           {mat.auto && <>
             <div className='flex items-center justify-between'>
               <span className={label}>Height min/max</span>
@@ -247,10 +248,10 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
           <p className='text-[11px] text-gray-400'>Foliage kept off this material even where a neighbouring material would place it.</p>
           {knownFoliageNames.length === 0 && <p className='text-[11px] text-gray-500'>No foliage defined in the library yet.</p>}
           {knownFoliageNames.map(name => (
-            <label key={name} className='flex items-center justify-between cursor-pointer'>
+            <div key={name} className='flex items-center justify-between'>
               <span className={label}>{name}</span>
-              <input type='checkbox' checked={mat.foliageExclude.includes(name)} onChange={e => toggleExclude(name, e.target.checked)} />
-            </label>
+              <Toggle checked={mat.foliageExclude.includes(name)} onChange={c => toggleExclude(name, c)} />
+            </div>
           ))}
         </div>
       </Collapsable>

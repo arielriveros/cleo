@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget } from './skeleton'
+import { useStateMachine } from './StateMachineContext'
+import { Toggle } from '../../components/ui'
 
 // Floating bottom transport for the Animation Editor. The editor scene is paused (animators don't
 // tick), so this component drives the target animator itself via requestAnimationFrame: it advances
-// the clip while playing, scrubs on the progress bar, and can simulate the state machine (evaluating
-// transitions from live parameter values) when one is authored.
+// the clip while playing, scrubs on the timeline, and hosts the event markers for the selected clip.
+//
+// The timeline is a hand-rolled track rather than an <input type='range'>: markers have to sit at exact
+// times along it and be dragged, and a native range gives no way to map pixels to time (its thumb inset
+// means an overlay drawn at time/duration would not line up with the thumb).
 
 export default function AnimationPlayer() {
   const { editorScene, animationTargetId, closeTab, activeTabId, eventEmitter } = useCleoEngine()
+  const { sm, simulate, setSimulate, addEvent, setEvent } = useStateMachine()
 
   const [clip, setClip] = useState<string>('')
   const [playing, setPlaying] = useState(false)
@@ -16,12 +22,14 @@ export default function AnimationPlayer() {
   const [duration, setDuration] = useState(0)
   const [loop, setLoop] = useState(true)
   const [speed, setSpeed] = useState(1)
-  const [simulate, setSimulate] = useState(false)
 
   const playingRef = useRef(false)
   const simulateRef = useRef(false)
   const lastRef = useRef(0)
   const scrubbingRef = useRef(false)
+  const trackRef = useRef<HTMLDivElement | null>(null)
+  /** Index into sm.events of the marker being dragged, or -1. */
+  const dragRef = useRef(-1)
   const [, force] = useState(0)
 
   const target = getAnimationTarget(editorScene, animationTargetId)
@@ -31,8 +39,7 @@ export default function AnimationPlayer() {
   useEffect(() => { playingRef.current = playing }, [playing])
   useEffect(() => { simulateRef.current = simulate }, [simulate])
 
-  // Reflect a state machine applied in the right sidebar (Simulate toggle) and imported clips (so the
-  // transport's clip dropdown refreshes).
+  // Reflect a state machine applied in the right sidebar and imported clips (so the clip dropdown refreshes).
   useEffect(() => {
     const onChanged = () => force(x => x + 1)
     eventEmitter.on('ANIM_SM_CHANGED', onChanged)
@@ -90,6 +97,8 @@ export default function AnimationPlayer() {
   }
 
   const animator = target.animator
+  /** Markers for the clip on screen, carrying their index so a drag can write straight back to sm.events. */
+  const markers = sm.events.map((e, i) => ({ e, i })).filter(({ e }) => e.clipName === clip)
 
   const selectClip = (name: string) => {
     setClip(name)
@@ -132,8 +141,40 @@ export default function AnimationPlayer() {
     requestAnimationFrame(() => { scrubbingRef.current = false })
   }
 
+  /** Clientspace X → clip time, clamped to the track. */
+  const timeAt = (clientX: number) => {
+    const r = trackRef.current?.getBoundingClientRect()
+    if (!r || r.width === 0 || duration <= 0) return 0
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * duration
+  }
+
+  const onTrackDown = (e: React.PointerEvent) => {
+    if (dragRef.current >= 0) return // a marker grabbed it first
+    onScrub(timeAt(e.clientX))
+    const move = (ev: PointerEvent) => onScrub(timeAt(ev.clientX))
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  // Marker drag. The listeners go on `window`, not the panel: the panel's onMouseDown stopPropagation only
+  // guards the viewport from clicks, and a pointer that leaves the track mid-drag must keep being tracked.
+  const onMarkerDown = (e: React.PointerEvent, index: number) => {
+    e.stopPropagation() // otherwise the track underneath seeks to wherever the marker was grabbed
+    dragRef.current = index
+    const move = (ev: PointerEvent) => setEvent(index, { time: timeAt(ev.clientX) })
+    const up = () => {
+      dragRef.current = -1
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
   const btn = 'px-2 py-1 rounded bg-control hover:bg-control-hover border border-control-hover text-white'
   const fmt = (s: number) => `${s.toFixed(2)}s`
+  const pct = (t: number) => `${duration > 0 ? Math.max(0, Math.min(1, t / duration)) * 100 : 0}%`
 
   return (
     <div
@@ -155,10 +196,8 @@ export default function AnimationPlayer() {
         <button className={btn} title='Pause' onClick={onPause} disabled={!playing}>❚❚</button>
         <button className={btn} title='Stop (T-pose)' onClick={onStop}>■</button>
 
-        <label className='flex items-center gap-1 ml-1' title='Loop'>
-          <input type='checkbox' checked={loop} onChange={(e) => { setLoop(e.target.checked); animator.loop = e.target.checked }} />
-          loop
-        </label>
+        <Toggle label='loop' className='ml-1' checked={loop}
+          onChange={(c) => { setLoop(c); animator.loop = c }} />
         <label className='flex items-center gap-1' title='Playback speed'>
           speed
           <input
@@ -167,23 +206,37 @@ export default function AnimationPlayer() {
             onChange={(e) => { const v = Math.max(0, parseFloat(e.target.value) || 0); setSpeed(v); animator.speed = v }} />
         </label>
 
-        {hasStateMachine && (
-          <label className='flex items-center gap-1 ml-1 text-highlight' title='Play the state machine (evaluate transitions from parameters) instead of the raw clip'>
-            <input type='checkbox' checked={simulate} onChange={(e) => setSimulate(e.target.checked)} />
-            simulate
-          </label>
-        )}
+        <button
+          className={btn + ' ml-1 border-red-700'}
+          disabled={!clip}
+          title={clip ? `Drop an event marker on "${clip}" at the playhead — drag it to move it` : 'Pick a clip first'}
+          onClick={() => addEvent({ clipName: clip, time, eventName: 'event' })}>
+          + Event
+        </button>
 
         <button className={btn + ' ml-auto'} title='Close the Animation Editor tab' onClick={() => closeTab(activeTabId)}>Close</button>
       </div>
 
       <div className='flex items-center gap-2 text-[11px] text-gray-300'>
         <span className='tabular-nums w-[46px] text-right'>{fmt(time)}</span>
-        <input
-          className='flex-1'
-          type='range' min={0} max={Math.max(duration, 0.0001)} step={0.001}
-          value={Math.min(time, duration)}
-          onChange={(e) => onScrub(parseFloat(e.target.value))} />
+
+        {/* Track: click/drag anywhere to seek; red circles are this clip's event markers. */}
+        <div ref={trackRef} className='relative flex-1 h-4 cursor-pointer select-none' onPointerDown={onTrackDown}>
+          <div className='absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded bg-control-hover' />
+          <div className='absolute left-0 top-1/2 -translate-y-1/2 h-1 rounded bg-primary' style={{ width: pct(time) }} />
+          {/* Playhead */}
+          <div className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white pointer-events-none'
+            style={{ left: pct(time) }} />
+          {markers.map(({ e, i }) => (
+            <div
+              key={i}
+              className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-red-500 border border-red-300 cursor-grab active:cursor-grabbing hover:scale-125 transition-transform'
+              style={{ left: pct(e.time) }}
+              title={`${e.eventName} @ ${e.time.toFixed(2)}s — drag to move`}
+              onPointerDown={ev => onMarkerDown(ev, i)} />
+          ))}
+        </div>
+
         <span className='tabular-nums w-[46px]'>{fmt(duration)}</span>
         {simulate && hasStateMachine && <span className='text-highlight'>state: {animator.currentStateName ?? '—'}</span>}
       </div>

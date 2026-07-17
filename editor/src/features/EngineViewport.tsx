@@ -52,6 +52,8 @@ export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
             gizmoMode, setGizmoMode, templateRootId, meshEditTargetId, templates, meshes, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
     const { graphView, setGraphView } = useStateMachine();
+    // The node graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D) has nothing to act on.
+    const hideForGraph = editorMode === 'animation' && graphView;
     const viewportRef = useRef<HTMLDivElement>(null);
     // The landscape brush mode is a ref (not reactive); mirror it so the terrain move-gizmo mounts on demand.
     const [terrainMode, setTerrainMode] = useState(terrainBrush.current.mode);
@@ -382,14 +384,14 @@ export default function EngineViewport() {
             {/* Floating top-right overlays: the gizmo-mode toggle (where the gizmo is active) sits to the
                 left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead. */}
             <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
-                {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && (
+                {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && !hideForGraph && (
                     <div className='flex items-center rounded overflow-hidden border border-control-hover'>
                         <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'rotation'} title='Rotate' onClick={() => setGizmoMode('rotation')}><RotateIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'scale'} title='Scale' onClick={() => setGizmoMode('scale')}><ScaleIcon /></GizmoSeg>
                     </div>
                 )}
-                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'renderer' && !isPlayMode && (
+                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'renderer' && !isPlayMode && !hideForGraph && (
                     <select
                         data-cleo-overlay
                         value={dimension}
@@ -419,16 +421,17 @@ export default function EngineViewport() {
             </>}
             {editorMode === 'renderer' && <RendererOptions />}
             {editorMode === 'renderer' && <RendererStats />}
-            {editorMode === 'animation' && <>
-                {/* 3D|Graph switch — shown while in 3D view (the graph has its own toolbar toggle). */}
-                {!graphView && (
-                    <div data-cleo-overlay className='absolute top-2 left-2 z-20' onMouseDown={e => e.stopPropagation()}>
-                        <SegmentedControl<'3d' | 'graph'>
-                            options={[{ value: '3d', label: '3D' }, { value: 'graph', label: 'Graph' }]}
-                            value='3d'
-                            onChange={v => setGraphView(v === 'graph')} />
-                    </div>
-                )}
+            {/* The graph is a full-canvas view, so everything that belongs to the 3D preview steps aside for
+                it — including the transport, which sits at z-20 against the graph's z-10 and would otherwise
+                float on top of it. The Animations|Graph switch is the way back and lives on the graph's own
+                toolbar while it is up. */}
+            {editorMode === 'animation' && !graphView && <>
+                <div data-cleo-overlay className='absolute top-2 left-2 z-20' onMouseDown={e => e.stopPropagation()}>
+                    <SegmentedControl<'3d' | 'graph'>
+                        options={[{ value: '3d', label: 'Animations' }, { value: 'graph', label: 'Graph' }]}
+                        value='3d'
+                        onChange={v => setGraphView(v === 'graph')} />
+                </div>
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
             </>}

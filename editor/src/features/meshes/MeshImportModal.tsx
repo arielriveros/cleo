@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 
 // Centered review modal shown once per imported model, between parsing and committing to the library.
 // Surfaces import state, lets the user upload textures the model references but that were missing from
@@ -117,10 +117,7 @@ export default function MeshImportModal() {
           {info.subMeshCount > 1 && (
             <div>
               <div className='text-xs font-semibold mb-1'>Contents</div>
-              <label className='flex items-center gap-2 text-xs cursor-pointer'>
-                <input type='checkbox' checked={separate} onChange={(e) => setSeparate(e.target.checked)} />
-                Separate sub-meshes into individual assets
-              </label>
+              <Toggle label='Separate sub-meshes into individual assets' checked={separate} onChange={setSeparate} />
               <p className='text-[11px] text-gray-400 mt-1'>
                 {separate
                   ? `Creates ${info.subMeshCount} separate mesh assets, each centred on its own origin.`
@@ -138,10 +135,7 @@ export default function MeshImportModal() {
           {/* Scale normalization */}
           <div>
             <div className='text-xs font-semibold mb-1'>Size</div>
-            <label className='flex items-center gap-2 text-xs cursor-pointer'>
-              <input type='checkbox' checked={normalize} onChange={(e) => setNormalize(e.target.checked)} />
-              Normalize size
-            </label>
+            <Toggle label='Normalize size' checked={normalize} onChange={setNormalize} />
             <div className={`flex items-center gap-2 mt-2 text-xs ${normalize ? '' : 'opacity-40 pointer-events-none'}`}>
               <span className='text-gray-300'>Fit to</span>
               <input type='number' min={0.01} step={0.1} value={targetSize}

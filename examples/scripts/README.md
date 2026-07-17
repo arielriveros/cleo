@@ -115,20 +115,73 @@ a locked linear axis, and no camera pivot child. Beyond those:
 
 ## Animator setup (Model → Animation editor → State Machine)
 
-`ThirdPersonPlayable` publishes `moveSpeed`: **0 = idle, 0.5 = walking, 1 = running**. It's normalized on
-purpose, so retuning `walkSpeed`/`runSpeed` can never invalidate the thresholds below.
+The script publishes two fields for the animator to read:
 
-1. **Parameter** — add one of type **Variable**, bound to **Parent → `moveSpeed`**, type `number`, default `0`.
-   (It shows up under *Parent* because `moveSpeed` is `public`.) Call it e.g. `Speed`.
-2. **States** — `Idle` (entry), `Walk`, `Run`, each looping its clip.
-3. **Transitions**
+| field | meaning |
+|---|---|
+| `moveSpeed` | **0 = idle, 0.5 = walking, 1 = running**. Normalized on purpose, so retuning `walkSpeed`/`runSpeed` can never invalidate the thresholds below. |
+| `isJumping` | true from take-off until the feet are back down. |
 
-   | from → to | condition |
-   |---|---|
-   | Idle → Walk | `Speed` **greater than** `0.1` |
-   | Walk → Run | `Speed` **greater than** `0.6` |
-   | Run → Walk | `Speed` **less than** `0.6` |
-   | Walk → Idle | `Speed` **less than** `0.1` |
+**1. Parameters** (Variables tab) — both of type **Variable**, bound to **Parent**. They appear under *Parent*
+because the fields are `public`.
+
+| name | binds to | type |
+|---|---|---|
+| `Speed` | Parent → `moveSpeed` | number |
+| `Jumping` | Parent → `isJumping` | boolean |
+
+**2. States** (drag on the graph canvas, or double-click it)
+
+| state | clip | loop |
+|---|---|---|
+| `Idle` *(entry)* | idle | yes |
+| `Walk` | walk | yes |
+| `Run` | run | yes |
+| `Jump` | jump | **no** |
+
+**3. Links** — drag handle → handle in the graph. Idle↔Walk and Walk↔Run each want **both** directions, so
+draw one, then drag the other way: the same edge grows a second arrowhead. Select an edge and the sidebar
+shows both directions at once.
+
+`moveSpeed` is only ever **0, 0.5 or 1**, so the speed bands below cannot overlap — every transition out of
+`Jump` is mutually exclusive and the list order can never matter.
+
+| link | direction | conditions | blend |
+|---|---|---|---|
+| Idle ⇄ Walk | Idle → Walk | `Speed > 0.1` **AND** `Jumping is false` | |
+| | Walk → Idle | `Speed < 0.1` | |
+| Walk ⇄ Run | Walk → Run | `Speed > 0.6` **AND** `Jumping is false` | |
+| | Run → Walk | `Speed < 0.6` | |
+| Idle → Jump | | `Jumping is true` | `0.1` |
+| Walk → Jump | | `Jumping is true` | `0.1` |
+| Run → Jump | | `Jumping is true` | `0.1` |
+| Jump → Idle | | `Jumping is false` **AND** `Speed < 0.1` | `0.1` |
+| Jump → Walk | | `Jumping is false` **AND** `Speed > 0.1` **AND** `Speed < 0.6` | `0.1` |
+| Jump → Run | | `Jumping is false` **AND** `Speed > 0.6` | `0.1` |
+
+### Why this never walks or runs while jumping
+
+**A state machine only ever evaluates the transitions leaving the state it is currently in.** While the
+machine sits in `Jump`, `Idle → Walk` and `Walk → Run` are not merely failing their conditions — they are
+never looked at. And every way *out* of `Jump` requires `Jumping is false`, so mid-air nothing matches at all
+and the machine stays put until you land. That is the whole mechanism.
+
+Because the exits wait on `Jumping is false` rather than an exit time, the jump lasts exactly as long as the
+character is airborne. If the clip is shorter than the airtime it simply holds its last frame — expected, and
+it cross-fades out cleanly on landing.
+
+**Land straight into the gait you're in — do not route through `Idle`.** That's why there are three exits from
+`Jump` instead of one. A single `Jump → Idle` looks simpler, but landing at a run then fires `Jump → Idle` on
+one frame and `Idle → Run` on the *next*, which re-arms the cross-fade from a pose that had barely started —
+a visible pop. The speed-banded exits land in the right state with one clean blend.
+
+**The one gotcha** — jumping *while moving* makes `Speed > 0.1` and `Jumping is true` both true on the same
+frame, so `Idle`/`Walk` have two matching transitions at once. The machine takes **the first one in the
+list**, and the editor gives you no way to see or reorder it. Don't rely on that: the `AND Jumping is false`
+on the ground transitions (the **AND/OR gates** in the transition inspector) removes the ambiguity outright.
+
+The `0.1` blends on the jump edges are the per-transition **blend** field. Landings want to be crisp; leave
+the gait changes empty so they use the animator's lazier default.
 
 ## Controls
 
