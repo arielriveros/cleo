@@ -1,0 +1,41 @@
+# Correctness gate for the engine: typecheck + unit tests.
+#
+# Separate from the two firebase-hosting-* workflows on purpose. Those deploy, consume Firebase secrets
+# and are therefore restricted to same-repo PRs — which means fork PRs currently run no checks at all.
+# This job touches no secrets, so it runs for forks too and closes that hole.
+#
+# Deliberately does NOT build. Both steps are independent of dist/: typecheck is `tsc --noEmit`, and the
+# test suite is pure (node env, no DOM, no GL). Keeping the gate fast is what keeps it from being ignored.
+#
+# Engine only for now — the editor is never typechecked (its webpack uses babel, which strips types
+# without checking them) despite being `strict: true`. Adding `tsc --noEmit -p editor/tsconfig.json` here
+# is a one-line follow-up once the in-flight editor work lands.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  engine:
+    name: Typecheck & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both deploy workflows ride whatever Node ubuntu-latest happens to ship — a silently moving
+      # target. Pin it here and read the major from .nvmrc so there is one source of truth.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test

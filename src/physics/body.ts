@@ -4,12 +4,17 @@ import { Shape } from './shape';
 import { Node } from '../core/scene/node';
 
 
+// Internal — the shape RigidBody/Trigger pass down to CBody, not the public config. Unlike
+// RigidBodyConfig/TriggerConfig (whose fields are genuinely optional to callers), position and quaternion
+// are REQUIRED here: both subclasses already default them via a ternary before calling super(), and the
+// CBody constructor dereferences them unconditionally. Declaring them optional only made the checker
+// disbelieve code that was always correct.
 interface BodyConfig {
     owner?: Node;
     name?: string;
     mass?: number;
-    position?: vec3;
-    quaternion?: quat;
+    position: vec3;
+    quaternion: quat;
     linearDamping?: number;
     angularDamping?: number;
     linearFactor?: vec3;

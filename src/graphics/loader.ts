@@ -26,7 +26,9 @@ export class Loader {
 
         // Fall back to Assimp loader for other formats
         return new Promise(async (resolve, reject) => {
-            const output: {name: string, geometry: Geometry, material?: Material }[] = [];
+            // `material` is required, not optional: the only push into this array supplies a real
+            // Material.Default(...). The vestigial `?` made the copy into `models` below unassignable.
+            const output: {name: string, geometry: Geometry, material: Material }[] = [];
     
             const res = await loadAssimpModel(filePaths);
 
@@ -173,7 +175,9 @@ export class Loader {
 
         // Fall back to Assimp loader for other formats
         return new Promise(async (resolve, reject) => {
-            const output: {name: string, geometry: Geometry, material?: Material }[] = [];
+            // `material` is required, not optional: the only push into this array supplies a real
+            // Material.Default(...). The vestigial `?` made the copy into `models` below unassignable.
+            const output: {name: string, geometry: Geometry, material: Material }[] = [];
     
             const res = await loadAssimpModelFromFiles(files);
 

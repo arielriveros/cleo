@@ -16,6 +16,10 @@ type UIHandlers = {
 
 export type GameActions = { reset: () => void, exit: () => void, pause: () => void }
 
+/** Frame-delta ceiling for UI scripts, in seconds. Mirrors MAX_DELTA in the engine's core/engine.ts —
+ *  this loop is independent of the engine's, so it needs its own clamp. */
+const MAX_UI_DELTA = 0.333
+
 export type UIContext = {
   ui: {
     get: (nameOrId: string) => RuntimeElement | undefined
@@ -137,7 +141,9 @@ class UIRuntimeClass {
   private _loop = () => {
     if (!this._running) return
     const now = performance.now()
-    const delta = (now - this._lastTime) / 1000
+    // Clamped like the engine's own loop (see MAX_DELTA in core/engine.ts): rAF halts in a backgrounded
+    // tab, so an unclamped delta hands a UI script's onUpdate the entire away duration in one step.
+    const delta = Math.min((now - this._lastTime) / 1000, MAX_UI_DELTA)
     this._lastTime = now
     const before = this._version
     this._forEach(this._tree, el => {

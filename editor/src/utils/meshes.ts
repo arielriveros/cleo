@@ -1,6 +1,7 @@
 import { Node, ModelNode, TextureManager } from 'cleo'
 import { cryptoRandomId } from './UIModel'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
+import { resolveMaterialRefs, MaterialAsset } from './materials'
 
 // Node variable linking a placed instance back to its source mesh asset (mirrors TEMPLATE_ID_VAR /
 // MATERIAL_ID_VAR). Saving a mesh asset re-instantiates every scene node carrying it
@@ -138,8 +139,9 @@ export async function separateSubMeshes(
 
 /** Instantiate a mesh asset under `parent`, regenerating ids and restoring embedded textures. Returns the new root id.
  *  Assets with LOD levels or a cull distance instantiate as a LodGroupNode wrapping one child subtree
- *  per level (level 0 = the base nodeJson); plain assets keep the original single-subtree shape. */
-export function instantiateMeshAsset(asset: MeshAsset, parent: Node): string {
+ *  per level (level 0 = the base nodeJson); plain assets keep the original single-subtree shape.
+ *  `materials` re-resolves the subtree's __materialId links against the library — see resolveMaterialRefs. */
+export function instantiateMeshAsset(asset: MeshAsset, parent: Node, materials?: MaterialAsset[]): string {
   const clone = meshAssetHasLodBehavior(asset)
     ? {
         id: cryptoRandomId(),
@@ -154,6 +156,7 @@ export function instantiateMeshAsset(asset: MeshAsset, parent: Node): string {
       } as any
     : JSON.parse(JSON.stringify(asset.nodeJson))
 
+  if (materials) resolveMaterialRefs(clone, materials)
   const idMap = new Map<string, string>()
   regenerateIds(clone, idMap)
 

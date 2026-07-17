@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Logger } from "cleo";
-import { useCleoEngine } from "./EngineContext";
+import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildGameData } from "./publish/buildGameData";
 import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
@@ -50,25 +50,29 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveProject, saveActiveTemplate, saveActiveMaterial, saveActiveTerrainMaterial, saveActiveMesh, saveActiveScript, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta, materials, terrainMaterials, templates, meshes } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta, materials, terrainMaterials, templates, meshes } = useCleoEngine();
   const { vfs, setVfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
   // Current renderer look (post/SSAO/motion-blur/clear color) — embedded in exports/publishes so the
   // standalone game reproduces what the editor is showing instead of falling back to renderer defaults.
   const renderSettings = () => instance?.renderer.getRenderSettings();
-  const templateMode = editorMode === 'template';
-  const materialMode = editorMode === 'material';
-  const terrainMaterialMode = editorMode === 'terrainMaterial';
-  const meshMode = editorMode === 'mesh';
-  const scriptMode = editorMode === 'script';
-  // Template, (terrain-)material, mesh and script tabs all hide the project/scene-level actions (they edit a library asset).
-  const libEdit = templateMode || materialMode || terrainMaterialMode || meshMode || scriptMode;
+  // Import/export/publish are project-level and stay tied to the scene: they act on the whole project, so a
+  // library tab (template, (terrain-)material, mesh, script) has nothing for them to operate on.
+  const libEdit = editorMode === 'template' || editorMode === 'material' || editorMode === 'terrainMaterial'
+    || editorMode === 'mesh' || editorMode === 'script';
   const saving = savingState === 'saving';
   // Save carries its own status: the icon and the color say what happened, the label says it in words.
   const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved' : savingState === 'error' ? 'Failed' : 'Save';
   const saveIcon = savingState === 'saving' ? <SpinnerIcon /> : savingState === 'saved' ? <CheckIcon /> : savingState === 'error' ? <AlertIcon /> : <SaveIcon />;
   const saveVariant = savingState === 'saved' ? 'success' : savingState === 'error' ? 'danger' : 'default';
+  // Save targets whatever the active tab edits; Save All sweeps the rest. An animation tab has no asset —
+  // "saving" it applies the machine onto the source model, which is what its own Apply to Model button does.
+  const activeDirty = !!dirtyTabs[activeTab.id];
+  const dirtyCount = Object.values(dirtyTabs).filter(Boolean).length;
+  const saveTitle = activeTab.kind === 'animation'
+    ? 'Apply the state machine to the source model (Ctrl+S)'
+    : `Save this ${KIND_LABEL[activeTab.kind].toLowerCase()} (Ctrl+S)`;
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
   const [showPublish, setShowPublish] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -103,9 +107,6 @@ export default function MenuBar() {
       Logger.error('Failed to import scene: ' + err, 'Editor');
     }
   };
-
-  // Save the whole project (scene + scripts/bodies/triggers + UI + editor prefs) to local storage.
-  const onSave = () => saveProject();
 
   const onExportConfig = async () => {
     const task = startTask({ title: 'Exporting config', steps: ['Serializing configuration', 'Writing file'] });
@@ -297,38 +298,21 @@ export default function MenuBar() {
   return (
     <Topbar>
       <div className='flex items-center gap-1.5 h-full px-1.5'>
-        {templateMode && (
-          <Button variant='primary' size='sm' className='h-[25px]' title='Save this template and update its placed instances' onClick={() => saveActiveTemplate()}>
-            <SaveIcon /> Save Template
-          </Button>
-        )}
-        {materialMode && (
-          <Button variant='primary' size='sm' className='h-[25px]' title='Save this material (captures a thumbnail) and update nodes that use it' onClick={() => saveActiveMaterial()}>
-            <SaveIcon /> Save Material
-          </Button>
-        )}
-        {terrainMaterialMode && (
-          <Button variant='primary' size='sm' className='h-[25px]' title='Save this terrain material (captures a thumbnail) and update layers that use it' onClick={() => saveActiveTerrainMaterial()}>
-            <SaveIcon /> Save Terrain Material
-          </Button>
-        )}
-        {meshMode && (
-          <Button variant='primary' size='sm' className='h-[25px]' title='Save this mesh (with its LOD levels) and update its placed copies' onClick={() => saveActiveMesh()}>
-            <SaveIcon /> Save Mesh
-          </Button>
-        )}
-        {scriptMode && (
-          <Button variant='primary' size='sm' className='h-[25px]' title='Save this script and apply it to every node that uses it' onClick={() => saveActiveScript()}>
-            <SaveIcon /> Save Script
-          </Button>
-        )}
         <Button
           variant={saveVariant} size='sm' className='h-[25px] w-[86px]'
-          disabled={libEdit || saving}
-          title='Save the project to local storage'
-          onClick={() => onSave()}
+          disabled={saving || !activeDirty}
+          title={saveTitle}
+          onClick={() => void saveActiveTab()}
         >
           {saveIcon} {saveLabel}
+        </Button>
+        <Button
+          variant='subtle' size='sm' className='h-[25px]'
+          disabled={saving || dirtyCount === 0}
+          title='Save every asset with unsaved changes'
+          onClick={() => void saveAll()}
+        >
+          <SaveIcon /> Save All{dirtyCount > 0 && ` (${dirtyCount})`}
         </Button>
         {/* A file input needs a <label> to trigger it, so it borrows the Button styles rather than being one. */}
         <label

@@ -92,3 +92,36 @@ export function unlinkToFallback(node: Node): void {
   setNodeMaterial(node, fallbackMaterial())
   node.removeVariable(MATERIAL_ID_VAR)
 }
+
+/** Read a node variable's value out of SERIALIZED json (the `{ type, value, access }` shape, or a bare value). */
+function serializedVar(json: any, name: string): string | undefined {
+  const v = json?.variables?.[name]
+  if (v && typeof v === 'object') return v.value
+  return typeof v === 'string' ? v : undefined
+}
+
+/**
+ * Re-resolve the embedded material copies in a SERIALIZED node subtree against the current library, in
+ * place, before it is parsed into a scene.
+ *
+ * This is what makes __materialId the reference and the embedded copy a mere fallback. Templates and mesh
+ * assets each store a whole serialized subtree with its materials baked in, so a material edited after the
+ * template was saved leaves that copy stale. Rather than rewriting every stored template/mesh record on
+ * each material save — which would churn their content hashes and make resyncScene needlessly
+ * re-instantiate every placed instance, besides rewriting megabytes of embedded geometry — we resolve the
+ * link at the moment of instantiation, which is the only moment the copy is actually read.
+ *
+ * A node with no link, or one whose asset is gone, keeps whatever was embedded.
+ */
+export function resolveMaterialRefs(json: any, materials: MaterialAsset[]): void {
+  if (!json || typeof json !== 'object') return
+  const id = serializedVar(json, MATERIAL_ID_VAR)
+  if (id) {
+    const asset = materials.find(m => m.id === id)
+    // Deep-copy: the asset's serialized material is shared library state, and Material.parse must not be
+    // handed something a later edit could mutate under it.
+    if (asset && json.model) json.model.material = JSON.parse(JSON.stringify(asset.material))
+    else if (asset && json.sprite) json.sprite.material = JSON.parse(JSON.stringify(asset.material))
+  }
+  for (const child of json.children ?? []) resolveMaterialRefs(child, materials)
+}

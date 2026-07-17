@@ -1,6 +1,7 @@
 import { gl } from './renderer';
 import { GLState } from './systems/glState';
 import { frameStats } from './renderStats';
+import { createIndexArray, glTypeFor } from './indexFormat';
 
 export class Mesh {
     private _vertexArray: WebGLVertexArrayObject;
@@ -10,10 +11,18 @@ export class Mesh {
     private _boneWeightsBuffer: WebGLBuffer | null;
     private _vertexCount: number;
     private _indexCount: number;
+    // GL element type of _indexBuffer — UNSIGNED_SHORT or UNSIGNED_INT, chosen per upload by index range.
+    // Meshes over 65535 vertices need the wider type; narrowing them was silently scrambling geometry.
+    private _indexType: number;
     private _isAnimated: boolean;
     // Alternate index buffers over the SAME vertex buffer (level 0 = the base one). Terrain LOD only.
     private _lodBuffers: WebGLBuffer[] = [];
     private _lodCounts: number[] = [];
+    // Element type per LOD level, parallel to _lodCounts. Levels index the same vertex buffer as the base,
+    // so they can never need a wider type than it — but create() does not keep the base index array, so a
+    // single per-mesh type could never be widened after the fact if that assumption ever broke. Per-level
+    // costs a 3-entry array and mirrors the _lodBuffers/_lodCounts level-0 aliasing exactly.
+    private _lodTypes: number[] = [];
     private _lod: number = 0;
 
     constructor() {
@@ -24,6 +33,7 @@ export class Mesh {
         this._boneWeightsBuffer = null;
         this._vertexCount = 0;
         this._indexCount = 0;
+        this._indexType = gl.UNSIGNED_SHORT;
         this._isAnimated = false;
     }
 
@@ -35,9 +45,11 @@ export class Mesh {
         this._vertexCount = vertex_count;
 
         if (indices) {
+            const data = createIndexArray(indices);
+            this._indexType = glTypeFor(data);
             this._indexBuffer = gl.createBuffer() as WebGLBuffer;
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._indexBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data, gl.STATIC_DRAW);
             this._indexCount = indices.length;
         }
 
@@ -81,9 +93,11 @@ export class Mesh {
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(boneWeights), gl.STATIC_DRAW);
 
         if (indices) {
+            const data = createIndexArray(indices);
+            this._indexType = glTypeFor(data);
             this._indexBuffer = gl.createBuffer() as WebGLBuffer;
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._indexBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data, gl.STATIC_DRAW);
             this._indexCount = indices.length;
         }
 
@@ -107,12 +121,15 @@ export class Mesh {
         for (let i = 1; i < this._lodBuffers.length; i++) gl.deleteBuffer(this._lodBuffers[i]);
         this._lodBuffers = [this._indexBuffer];
         this._lodCounts = [this._indexCount];
+        this._lodTypes = [this._indexType];
         for (const indices of levels) {
+            const data = createIndexArray(indices);
             const buffer = gl.createBuffer() as WebGLBuffer;
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data, gl.STATIC_DRAW);
             this._lodBuffers.push(buffer);
             this._lodCounts.push(indices.length);
+            this._lodTypes.push(glTypeFor(data));
         }
         this._lod = Math.min(this._lod, this._lodBuffers.length - 1);
 
@@ -135,7 +152,7 @@ export class Mesh {
         if (this.hasLods) {
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod]);
             const lodCount = this._lodCounts[this._lod];
-            gl.drawElements(mode, lodCount, gl.UNSIGNED_SHORT, 0);
+            gl.drawElements(mode, lodCount, this._lodTypes[this._lod], 0);
             frameStats.drawCalls++;
             frameStats.vertices += lodCount;
             if (mode === gl.TRIANGLES) frameStats.triangles += lodCount / 3;
@@ -143,7 +160,7 @@ export class Mesh {
         }
         const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
         if (this._indexBuffer && this._indexCount > 0)
-            gl.drawElements(mode, this._indexCount, gl.UNSIGNED_SHORT, 0);
+            gl.drawElements(mode, this._indexCount, this._indexType, 0);
         else
             gl.drawArrays(mode, 0, this._vertexCount);
         // Perf stats: every GL draw funnels through here (incl. fullscreen post-process quads).
@@ -154,9 +171,11 @@ export class Mesh {
 
     public drawInstanced(instanceCount: number, mode: number = gl.TRIANGLES): void {
         GLState.bindVAO(this._vertexArray);
+        // Note this path ignores LODs entirely — it always draws the base index buffer, so _indexType
+        // (level 0's type) is the right one to read. Pre-existing behaviour; foliage never sets LODs.
         const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
         if (this._indexBuffer && this._indexCount > 0)
-            gl.drawElementsInstanced(mode, this._indexCount, gl.UNSIGNED_SHORT, 0, instanceCount);
+            gl.drawElementsInstanced(mode, this._indexCount, this._indexType, 0, instanceCount);
         else
             gl.drawArraysInstanced(mode, 0, this._vertexCount, instanceCount);
         // Perf stats: instanced draws (PBR batches + foliage).

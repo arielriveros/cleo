@@ -2,6 +2,12 @@
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
     "noImplicitAny": true,
+    // Not full `strict`: these two are the null-safety half, and they are the pair that finds real bugs
+    // here (a Scene set the constructor forgot, a TextureManager id that was returned as undefined). The
+    // remaining strict flags — strictFunctionTypes, useUnknownInCatchVariables, ... — are a separate
+    // argument and add errors unrelated to null handling.
+    "strictNullChecks": true,
+    "strictPropertyInitialization": true,
     // false (not the previous true) so JSDoc survives into dist/**/*.d.ts — Monaco's TypeScript worker
     // reads it verbatim for hover/signature help on the whole `cleo` API (editor/.../scriptEditor/
     // cleoTypes.ts loads that same declaration tree). The cost is a few KB of comment text left in the
@@ -11,6 +17,11 @@
     "moduleResolution": "node",
     "module": "es6",
     "target": "es6",
+    // `target: es6` alone implies lib es2015, which does not know Array.prototype.includes, Object.entries
+    // or String.padStart — all of which the engine already calls and all of which exist in every browser
+    // that can supply a WebGL2 context. Declaring the lib separately from the emit target tells the
+    // checker the truth about the runtime without changing a single byte of emitted output.
+    "lib": ["es2020", "dom"],
     "allowJs": true,
     "declaration": true,
     "sourceMap": true,

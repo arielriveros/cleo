@@ -153,7 +153,9 @@ export type ImportTransform = {
 };
 
 export class GLTFLoader {
-    private gltf: GLTF;
+    // Definite-assignment: every load entry point (loadFromJson/loadFromUrl/loadFromFiles/...) assigns this
+    // before anything reads it; the constructor has no data to assign from.
+    private gltf!: GLTF;
     private buffers: ArrayBuffer[] = [];
     private basePath: string = '';
     private files: File[] = [];

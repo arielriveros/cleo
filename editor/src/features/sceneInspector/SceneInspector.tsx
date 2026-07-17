@@ -160,8 +160,14 @@ function SceneListRecursive(props: SceneListRecursiveProps) {
 
 
 export default function SceneInspector() {
-  const { editorScene, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId, attachScriptToNode } = useCleoEngine()
+  const { editorScene, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId, attachScriptToNode,
+          activeTab, sceneList, openSceneId } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
+
+  // The scene tab's root row is labelled with the scene asset, not the engine node's name. The node itself
+  // stays named 'root' — Scene.parse re-finds the root by that literal name, so renaming it would make the
+  // scene fail to load. The name lives on SceneMeta; this is display only.
+  const sceneName = activeTab.kind === 'scene' ? sceneList.find(s => s.id === openSceneId)?.name : undefined;
 
   // In template mode the inspector is rooted at the template node itself, so the editor camera/light
   // (siblings under the real scene root) fall outside the rendered subtree and stay hidden.
@@ -260,11 +266,17 @@ export default function SceneInspector() {
   };
 
   useEffect(() => {
-    const rebuild = () => { const r = treeRoot(); if (r) setNodes(generateNodeList(r)); };
-    rebuild(); // also rebuild immediately when the mode / template root changes
+    const rebuild = () => {
+      const r = treeRoot();
+      if (!r) return;
+      const list = generateNodeList(r);
+      if (sceneName) list.name = sceneName;
+      setNodes(list);
+    };
+    rebuild(); // also rebuild immediately when the mode / template root / scene name changes
     eventEmitter.on('SCENE_CHANGED', rebuild);
     return () => { eventEmitter.off("SCENE_CHANGED", rebuild) }; // Remove the listener on component unmount
-  }, [eventEmitter, editorScene, editorMode, templateRootId]);
+  }, [eventEmitter, editorScene, editorMode, templateRootId, sceneName]);
 
   const handleSelectNode = (nodeId: string | null) => {
     // Don't allow node selection during play mode

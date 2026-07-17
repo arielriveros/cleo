@@ -157,9 +157,11 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
       const jpos = jointPosRef.current, jrad = jointRadiusRef.current
       const n = jrad.length
       if (!n) return
+      const activeCamera = instance.scene.activeCamera
+      if (!activeCamera) return
       const rect = viewport.getBoundingClientRect()
       const x = event.clientX - rect.left, y = event.clientY - rect.top
-      const ray = Raycaster.screenToRay(x, y, rect.width, rect.height, instance.scene.activeCamera.camera)
+      const ray = Raycaster.screenToRay(x, y, rect.width, rect.height, activeCamera.camera)
       const ro = ray.origin
       const rd = Vec.vec3.normalize(Vec.vec3.create(), ray.direction as any)
 

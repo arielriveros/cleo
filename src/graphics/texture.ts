@@ -11,13 +11,20 @@ export interface TextureConfig {
     target?: 'texture2D' | 'cubemap';
 }
 
+/**
+ * The six images of a cubemap, in GL face order.
+ *
+ * Every face is required. The `| null` these once carried was unsourced — no producer in the engine ever
+ * yields a null face, because they all resolve through `Loader.loadImage`, which rejects on error rather
+ * than resolving null. It only forced null checks on code that could never see one.
+ */
 export interface CubemapFaces {
-    posX: HTMLImageElement | null,
-    negX: HTMLImageElement | null,
-    posY: HTMLImageElement | null,
-    negY: HTMLImageElement | null,
-    posZ: HTMLImageElement | null,
-    negZ: HTMLImageElement | null
+    posX: HTMLImageElement,
+    negX: HTMLImageElement,
+    posY: HTMLImageElement,
+    negY: HTMLImageElement,
+    posZ: HTMLImageElement,
+    negZ: HTMLImageElement
 }
 
 export class Texture {
@@ -126,13 +133,25 @@ export class Texture {
                 gl.texImage2D(this._target, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, null);
             }
         } else {
-            const faces = this._data as CubemapFaces;
-            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, this._internalFormat, this._format, this._type, faces.posX);
-            gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, this._internalFormat, this._format, this._type, faces.negX);
-            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, this._internalFormat, this._format, this._type, faces.posY);
-            gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, this._internalFormat, this._format, this._type, faces.negY);
-            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, this._internalFormat, this._format, this._type, faces.posZ);
-            gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, this._internalFormat, this._format, this._type, faces.negZ);
+            const CUBE_FACES = [
+                gl.TEXTURE_CUBE_MAP_POSITIVE_X, gl.TEXTURE_CUBE_MAP_NEGATIVE_X,
+                gl.TEXTURE_CUBE_MAP_POSITIVE_Y, gl.TEXTURE_CUBE_MAP_NEGATIVE_Y,
+                gl.TEXTURE_CUBE_MAP_POSITIVE_Z, gl.TEXTURE_CUBE_MAP_NEGATIVE_Z,
+            ];
+            if (data) {
+                const faces = data as CubemapFaces;
+                const images = [faces.posX, faces.negX, faces.posY, faces.negY, faces.posZ, faces.negZ];
+                for (let i = 0; i < CUBE_FACES.length; i++)
+                    gl.texImage2D(CUBE_FACES[i], 0, this._internalFormat, this._format, this._type, images[i]);
+            } else {
+                // Null data on a cubemap used to walk straight into `faces.posX` and throw a TypeError —
+                // the null path existed only on the TEXTURE_2D side above, even though `new Skybox(null)`
+                // reaches exactly here and the public signature openly accepts null. Allocate six empty
+                // faces instead, mirroring what the 2D branch does for render targets: a no-op would leave
+                // the texture incomplete, which is a subtler failure than the crash it replaced.
+                for (const face of CUBE_FACES)
+                    gl.texImage2D(face, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, null);
+            }
         }
 
         const textureParams = this._usage === 'depth' ? 

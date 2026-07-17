@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import type {
   AnimationStateMachine, AnimationParameter, AnimationState,
@@ -188,7 +188,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     editorScene, animationTargetId, animationSourceScene, animationSourceId,
     commitAnimationStateMachine, importAnimationFiles, importSkeletonNames,
     renameAnimationClip, removeAnimationClip, closeTab, activeTabId, eventEmitter,
-    scriptAssets,
+    scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply,
   } = useCleoEngine()
 
   const target = getAnimationTarget(editorScene, animationTargetId)
@@ -206,12 +206,20 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null, animationSourceScene, scriptAssets),
     [animationSourceScene, animationSourceId, animationTargetId, scriptAssets])
 
-  // Load the machine from the target on entry; select the entry state.
+  // Un-applied working copies, per animation tab. There is only ever ONE live session (this provider keys
+  // off the active tab), so without a cache, switching away from an animation tab and back would reload the
+  // machine from the model and silently drop whatever had not been applied — while the tab's unsaved dot
+  // went on claiming those edits still existed.
+  const smCacheRef = useRef(new Map<string, AnimationStateMachine>())
+
+  // Load the machine on entry — the tab's un-applied working copy if it has one, else the model's; then
+  // select the entry state.
   useEffect(() => {
     if (!target) { setSm(EMPTY); setSelection(null); return }
-    const existing = target.animator.getStateMachine()
+    const existing: AnimationStateMachine | null =
+      smCacheRef.current.get(activeTabId) ?? target.animator.getStateMachine() ?? null
     setSm(existing ? migrateConditions(clone(existing)) : clone(EMPTY))
-    const entry = existing?.states.find(s => s.isEntry)?.name ?? existing?.states[0]?.name ?? null
+    const entry = existing?.states.find((s: AnimationState) => s.isEntry)?.name ?? existing?.states[0]?.name ?? null
     setSelection(entry ? { kind: 'state', name: entry } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animationTargetId])
@@ -225,14 +233,36 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
 
   // Functional: two mutators firing in one tick (e.g. a graph cascade) must not each derive from the same
   // stale render-scoped `sm` and clobber one another.
-  const update = (fn: (prev: AnimationStateMachine) => AnimationStateMachine) => setSm(prev => ({ ...fn(prev) }))
+  //
+  // Every mutation also marks the animation tab dirty. It has to happen here rather than through the usual
+  // SCENE_CHANGED listener: the working copy is React state in this provider, so editing it touches no Scene
+  // and emits nothing the listener could see. `silent` is for machine changes the user did not make — see
+  // commitLayout.
+  const update = (fn: (prev: AnimationStateMachine) => AnimationStateMachine, opts?: { silent?: boolean }) => {
+    setSm(prev => {
+      const next = { ...fn(prev) }
+      smCacheRef.current.set(activeTabId, next) // survive a switch away from this tab
+      return next
+    })
+    if (!opts?.silent) markTabDirty(activeTabId)
+  }
   const apply = () => {
     if (!target) return
     target.animator.setStateMachine(clone(sm))
-    commitAnimationStateMachine(clone(sm))
+    commitAnimationStateMachine(clone(sm)) // marks the SOURCE model's tab dirty — that's where the edit landed
+    smCacheRef.current.delete(activeTabId) // in sync with the model again; nothing un-applied to preserve
+    clearTabDirty(activeTabId)
     eventEmitter.emit('ANIM_SM_CHANGED')
     force(x => x + 1)
   }
+
+  // Publish Apply so Save All / Ctrl+S can reach it: an animation tab has no asset, so "saving" it is
+  // applying the machine onto the source model, and the working copy only exists here.
+  useEffect(() => {
+    if (!target) return
+    registerAnimationApply({ tabId: activeTabId, apply })
+    return () => registerAnimationApply(null)
+  })
 
   const paramOf = (name: string) => sm.parameters.find(p => p.name === name)
   const stateIndex = (name: string) => sm.states.findIndex(s => s.name === name)
@@ -310,8 +340,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     if (selection?.kind === 'state' && selection.name === name) setSelection(null)
     if (selection?.kind === 'transition' && (selection.a === name || selection.b === name)) setSelection(null)
   }
+  // Silent: this is the graph's one-time auto-layout for legacy machines with no coordinates, which runs
+  // from an effect on open. Marking dirty here would make merely LOOKING at such a machine claim unsaved
+  // edits. The coordinates ride along on the next real edit's save.
   const commitLayout = (coords: Record<string, { x: number; y: number }>) =>
-    update(prev => ({ ...prev, states: prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s) }))
+    update(prev => ({ ...prev, states: prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s) }), { silent: true })
   const deleteElements = (stateNames: string[], removedLinks: [string, string][]) => {
     const names = new Set(stateNames)
     const keys = new Set(removedLinks.map(([a, b]) => linkKey(a, b).join('|')))

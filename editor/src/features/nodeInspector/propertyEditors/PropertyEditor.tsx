@@ -11,17 +11,25 @@ import SpriteEditor from './SpriteEditor'
 import AnimatedSpriteEditor from './SpriteSheetEditor'
 import VolumetricCloudsEditor from './VolumetricCloudsEditor'
 import SkyAtmosphereEditor from './SkyAtmosphereEditor'
+import SceneSettings from './SceneSettings'
+import { isRootNode } from '../useSelectedNode'
+import { useCleoEngine } from '../../EngineContext'
 
 export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) {
-  // Check if the node is the root node
-  const isRootNode = props.node.id === 'root' || props.node.name === 'root';
+  const { activeTab } = useCleoEngine();
+  const root = isRootNode(props.node);
   const ro = !!props.readOnly;
+
+  // Selecting the scene tab's root means "the scene itself" — show its settings rather than an all-but-empty
+  // node inspector. Gated on the tab kind: a template/mesh tab's throwaway scene has a root named 'root'
+  // too, and that one is not a scene asset.
+  if (root && activeTab.kind === 'scene') return <SceneSettings />;
 
   return (
     <>
         {/* NodeInfo (name locked, Delete kept) and Transform stay editable for instances. */}
         <NodeInfo node={props.node} readOnly={ro} />
-        {!isRootNode && <TransformEditor node={props.node} />}
+        {!root && <TransformEditor node={props.node} />}
 
         {/* Everything else is disabled in one shot for a template instance. */}
         <fieldset disabled={ro} className={`${ro ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>

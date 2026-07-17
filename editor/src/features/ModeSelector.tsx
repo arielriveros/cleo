@@ -53,8 +53,8 @@ export default function ModeSelector() {
 
   const select = (mode: EditorMode) => { if (mode !== editorMode) setEditorMode(mode); };
 
-  // The scene/landscape/renderer switch belongs to the Main tab; template (and future) tabs hide it.
-  if (activeTab.kind !== 'main') return null;
+  // The scene/landscape/renderer switch belongs to the scene tab; asset tabs hide it.
+  if (activeTab.kind !== 'scene') return null;
 
   return (
     <div className='flex items-center h-full mx-[5px]'>

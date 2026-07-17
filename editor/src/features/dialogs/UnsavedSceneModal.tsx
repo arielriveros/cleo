@@ -2,14 +2,15 @@ import React from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 
-// Shown when the user opens another scene while the current one has unsaved edits. `openScene` parks a
-// promise (confirmUnsavedScene) and this modal resolves it: Save writes the current scene then proceeds,
-// Discard drops the edits and proceeds, Cancel aborts the switch. Mounted globally in Editor.
+// Shown when unsaved edits are about to be lost: `openScene` parks a promise (confirmUnsavedScene) when
+// switching away from a dirty scene, and `closeTab` parks the same one when closing a dirty asset tab.
+// This modal resolves it: Save writes the asset then proceeds, Discard drops the edits and proceeds,
+// Cancel aborts. Mounted globally in Editor.
 export default function UnsavedSceneModal() {
   const { pendingSceneConfirm, resolveSceneConfirm } = useCleoEngine()
 
   if (!pendingSceneConfirm) return null
-  const { sceneName } = pendingSceneConfirm
+  const { sceneName, action } = pendingSceneConfirm
 
   return (
     <Modal onClose={() => resolveSceneConfirm('cancel')} className='w-[400px]'>
@@ -20,7 +21,7 @@ export default function UnsavedSceneModal() {
       <div className='px-4 py-3 text-sm text-gray-300'>
         <p>
           <span className='font-semibold text-white'>{sceneName}</span> has unsaved changes. Save them
-          before switching scenes?
+          before {action === 'close' ? 'closing it' : 'switching scenes'}?
         </p>
       </div>
 

@@ -4,6 +4,10 @@
   "description": "WebGL2 Game Engine",
   "main": "cleo.js",
   "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "jsdoc:gaps": "node tools/jsdoc-gaps.mjs",
     "watch": "webpack --watch",
     "build": "webpack --mode=production --node-env=production",
     "editor": "cd editor && npm run start",
@@ -27,6 +31,7 @@
     "ts-loader": "^9.5.1",
     "ts-shader-loader": "^2.0.2",
     "typescript": "^5.3.2",
+    "vitest": "^3.2.7",
     "webpack": "^5.89.0",
     "webpack-cli": "^5.1.4"
   },
@@ -35,5 +40,8 @@
     "gl-matrix": "^3.4.3",
     "sucrase": "^3.35.1",
     "uuid": "^14.0.1"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

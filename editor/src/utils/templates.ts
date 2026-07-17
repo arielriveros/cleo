@@ -1,6 +1,7 @@
 import { Node, TextureManager } from 'cleo'
 import { cryptoRandomId } from './UIModel'
 import { parseByType, stripDebug, collectIds, collectTextureIds, regenerateIds } from './nodeSubtree'
+import { resolveMaterialRefs, MaterialAsset } from './materials'
 
 // A reusable node template: a serialized node subtree plus every asset/script it depends on.
 export type Template = {
@@ -66,9 +67,17 @@ export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promi
   return { id: cryptoRandomId(), name: node.name, nodeJson, textureIds: [...texIds], scripts, bodies, triggers }
 }
 
-/** Instantiate a template under `parent`, regenerating ids and restoring assets/scripts. Returns the new root id. */
-export function instantiateTemplate(template: Template, parent: Node, maps: EngineMaps): string {
+/**
+ * Instantiate a template under `parent`, regenerating ids and restoring assets/scripts. Returns the new
+ * root id.
+ *
+ * `materials` re-resolves the subtree's __materialId links against the library, so an instance placed after
+ * one of its materials was edited gets the current material rather than the copy frozen into the template
+ * when it was saved. Optional: callers with no library at hand (and legacy paths) get the embedded copies.
+ */
+export function instantiateTemplate(template: Template, parent: Node, maps: EngineMaps, materials?: MaterialAsset[]): string {
   const clone = JSON.parse(JSON.stringify(template.nodeJson))
+  if (materials) resolveMaterialRefs(clone, materials)
   const idMap = new Map<string, string>()
   regenerateIds(clone, idMap)
 

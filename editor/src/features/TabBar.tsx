@@ -3,8 +3,8 @@ import { useCleoEngine, type TabKind } from './EngineContext';
 import { iconFor } from './assets/assetKinds';
 import type { AssetKind } from '../utils/vfs';
 
-// The asset-type icon shown on a tab. Most tab kinds map 1:1 to an AssetKind; the Main tab reads as a scene,
-// and an animation tab (a skinned mesh) reuses the mesh glyph.
+// The asset-type icon shown on a tab. Most tab kinds map 1:1 to an AssetKind; an animation tab (a skinned
+// mesh) reuses the mesh glyph.
 function tabAssetKind(kind: TabKind): AssetKind {
   switch (kind) {
     case 'material': return 'material';
@@ -13,14 +13,14 @@ function tabAssetKind(kind: TabKind): AssetKind {
     case 'mesh': return 'mesh';
     case 'script': return 'script';
     case 'animation': return 'mesh';
-    default: return 'scene'; // main
+    default: return 'scene';
   }
 }
 
-// Browser-style tab strip below the top bar: the Main tab (real scene) plus open template tabs.
-// Tabs are reorderable by drag (HTML5 DnD, same idiom as the scene tree) and template tabs are
-// closable; the Main tab is unclosable but movable. Template tabs show a dot when they have
-// unsaved edits.
+// Browser-style tab strip below the top bar: the scene tab (titled with the open scene asset) plus one tab
+// per open asset. Tabs are reorderable by drag (HTML5 DnD, same idiom as the scene tree) and asset tabs are
+// closable; the scene tab is unclosable but movable — closing it would leave nothing to show, since the
+// engine always has a scene loaded. Every tab shows a dot when it has unsaved edits.
 export default function TabBar() {
   const { tabs, activeTabId, dirtyTabs, setActiveTab, closeTab, reorderTabs, isPlayMode } = useCleoEngine();
   const [dragId, setDragId] = useState<string | null>(null);
@@ -45,7 +45,7 @@ export default function TabBar() {
             <img src={iconFor(tabAssetKind(tab.kind))} className='w-3.5 h-3.5 shrink-0' alt='' draggable={false} />
             <span className='truncate text-xs'>{tab.title}</span>
             {dirty && <span className='ml-auto text-[10px] leading-none text-warning' title='Unsaved changes'>●</span>}
-            {tab.kind !== 'main' && (
+            {tab.kind !== 'scene' && (
               <button
                 className='w-[14px] h-[14px] flex items-center justify-center rounded text-[11px] leading-none text-muted hover:bg-white/20 hover:text-white'
                 title='Close tab'

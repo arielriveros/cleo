@@ -15,7 +15,7 @@ type GizmoAxis = 'x' | 'y' | 'z' | null;
 type Transform = { pos: [number, number, number]; rot: [number, number, number]; scale: [number, number, number]; rotQuat: number[] };
 
 export default function PositionGizmo({ selectedNodeId, onTransformChange, viewportRef }: TransformGizmoProps) {
-    const { instance, editorScene, eventEmitter, gizmoMode } = useCleoEngine();
+    const { instance, editorScene, eventEmitter, gizmoMode, withoutDirty } = useCleoEngine();
     const [isDragging, setIsDragging] = useState(false);
     const [draggedAxis, setDraggedAxis] = useState<GizmoAxis>(null);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -158,13 +158,16 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;
 
+        const activeCamera = instance.scene.activeCamera;
+        if (!activeCamera) return;
+
         // Create ray from mouse position
         const ray = Raycaster.screenToRay(
             x,
             y,
             rect.width,
             rect.height,
-            instance.scene.activeCamera.camera
+            activeCamera.camera
         );
 
         // Check for gizmo handle hits. Include the shaft lines and use AABB-only picking (precise=false)
@@ -313,11 +316,17 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
     };
 
     // Build (and rebuild on mode change) the gizmo node set; remove the previous set on cleanup.
+    //
+    // Both halves run with dirty-marking suppressed. The gizmo's nodes live in the scene, so adding and
+    // removing them emits SCENE_CHANGED exactly like a real node edit. That matters most on a tab switch:
+    // `editorScene` changes, so this cleanup fires — and React runs a child's effects before its parent's,
+    // meaning EngineContext has not yet re-pointed activeTabIdRef at the incoming tab. The OUTGOING tab
+    // would be marked dirty for chrome the user never touched.
     useEffect(() => {
         if (!instance || !editorScene) return;
-        const created = createGizmoNodes(gizmoMode);
+        const created = withoutDirty(() => createGizmoNodes(gizmoMode));
         return () => {
-            for (const n of created) editorScene.removeNode(n);
+            withoutDirty(() => { for (const n of created) editorScene.removeNode(n); });
             setGizmoNodes({ xAxis: null, yAxis: null, zAxis: null, xLine: null, yLine: null, zLine: null });
         };
     }, [instance, editorScene, gizmoMode]);
@@ -330,9 +339,14 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         const isRootNode = selectedNodeId === 'root' || selectedNodeId === editorScene?.root?.id;
         const show = !!selectedNodeId && !isPlayMode && !isRootNode;
 
-        const setVisible = (node: ModelNode | null) => { if (node) node.visible = show; };
-        setVisible(gizmoNodes.xAxis); setVisible(gizmoNodes.yAxis); setVisible(gizmoNodes.zAxis);
-        setVisible(gizmoNodes.xLine); setVisible(gizmoNodes.yLine); setVisible(gizmoNodes.zLine);
+        // The gizmo's nodes live in the editor scene, so `visible` emits SCENE_CHANGED exactly like a real
+        // node edit — and merely SELECTING something would then mark the scene unsaved. It is chrome, not
+        // the user's work, so the toggle runs with dirty-marking suppressed.
+        withoutDirty(() => {
+            const setVisible = (node: ModelNode | null) => { if (node) node.visible = show; };
+            setVisible(gizmoNodes.xAxis); setVisible(gizmoNodes.yAxis); setVisible(gizmoNodes.zAxis);
+            setVisible(gizmoNodes.xLine); setVisible(gizmoNodes.yLine); setVisible(gizmoNodes.zLine);
+        });
 
         if (show) updateGizmoPosition();
     }, [selectedNodeId, gizmoNodes, isPlayMode, editorScene]);

@@ -73,12 +73,14 @@ export class PhysicsSystem {
 
       const nodes = this._scene.nodes;
       for (const node of nodes) {
-        if (!(node.body || node.trigger) || !node.hasStarted) continue;
+        // Bound once and tested once: the old form tested `node.body || node.trigger` and then recomputed
+        // it on the next line, and since both are getters the checker could not carry the narrowing across.
         const bodyToAdd = node.body || node.trigger;
+        if (!bodyToAdd || !node.hasStarted) continue;
 
         // If body is not in the world, add it
         if (this._world.bodies.indexOf(bodyToAdd) === -1) {
-          this._assignMaterial(bodyToAdd!);
+          this._assignMaterial(bodyToAdd);
           this._world.addBody(bodyToAdd);
         }
 

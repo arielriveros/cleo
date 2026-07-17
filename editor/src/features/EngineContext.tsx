@@ -222,8 +222,8 @@ export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'mate
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
-// Browser-style editor tabs. The 'main' tab hosts the real game scene and its scene/landscape/
-// renderer sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
+// Browser-style editor tabs. The scene tab hosts the open scene asset and its scene/landscape/renderer
+// sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef). `editorMode` is derived from the active tab (see EngineProvider).
 //
 // A 'mesh' tab is an edit session for an imported mesh asset: one subtree per LOD level in a throwaway
@@ -232,7 +232,28 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // Opening one also renders the asset's thumbnail (imports don't — that used to stall the main thread).
 // A 'script' tab is a dedicated code editor for a Script asset (no 3D scene): the full-panel editor renders
 // over the viewport, with a Save Script action. Its working source buffers per-tab until saved.
-export type TabKind = 'main' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'mesh' | 'script';
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'mesh' | 'script';
+
+/**
+ * The scene tab's id — a fixed sentinel, unlike the library tabs' random ids.
+ *
+ * It is deliberately NOT the open scene's id: only one scene is ever open (openScene parses the target
+ * blob into the one live Scene), so the tab is a stable slot that different scene assets pass through.
+ * Keying it by scene id would leak a dirtyTabs entry per scene switch and buy nothing. What the tab
+ * SHOWS — its title — follows the open scene's name; see the tabs/openSceneId sync in EngineProvider.
+ */
+export const SCENE_TAB_ID = 'main';
+
+/** What each tab kind edits, for save progress detail and the Save button's tooltip. */
+export const KIND_LABEL: Record<TabKind, string> = {
+  scene: 'Scene',
+  template: 'Template',
+  material: 'Material',
+  terrainMaterial: 'Terrain material',
+  animation: 'Animation',
+  mesh: 'Mesh',
+  script: 'Script',
+};
 
 // Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
 // node id of LOD level i's root inside the tab scene; distances[i] is the camera distance where level i
@@ -295,9 +316,12 @@ const EngineContext = createContext<{
   setActiveTab: (id: string) => void;
   closeTab: (id: string) => void;
   reorderTabs: (fromId: string, toId: string) => void;
-  saveActiveTemplate: () => void;
-  saveActiveMaterial: () => void;
-  saveActiveTerrainMaterial: () => void;
+  /** Save whatever the active tab edits (the scene, or the asset). Resolves to whether it came out clean. */
+  saveActiveTab: () => Promise<boolean>;
+  /** Save every tab with unsaved edits, in dependency order, reporting one progress step each. */
+  saveAll: () => Promise<void>;
+  /** StateMachineProvider publishes the live animation session's Apply here (see saveTabById). */
+  registerAnimationApply: (reg: { tabId: string; apply: () => void } | null) => void;
   // Template editor
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
@@ -367,7 +391,6 @@ const EngineContext = createContext<{
   /** Open a script asset in its dedicated Script editor tab (creates a new 'node' script when no id is given). */
   enterScriptEditor: (scriptId?: string) => void;
   /** Save the active Script tab's buffered source to its asset and clear the tab's dirty flag. */
-  saveActiveScript: () => void;
   /** Buffer a Script tab's working source and mark the tab dirty (called by the tab editor on each edit). */
   setScriptTabSource: (tabId: string, scriptId: string, source: string) => void;
   /** The buffered working source for a script tab, or undefined. */
@@ -380,7 +403,6 @@ const EngineContext = createContext<{
   /** Open (or focus) a mesh asset's edit tab, rendering its thumbnail on the way in. */
   enterMeshEditor: (meshId?: string) => void;
   // Mesh editor (active mesh tab): LOD/cull authoring + save-and-propagate
-  saveActiveMesh: () => void;
   meshSession: MeshEditSession | null;
   /** Node id of the active LOD level's root in the mesh tab scene (viewport drop parent), or null. */
   meshEditTargetId: string | null;
@@ -405,13 +427,13 @@ const EngineContext = createContext<{
   pendingAnimationImport: PendingAnimationImportView | null;
   resolveAnimationImport: (decision: AnimationImportDecision | null) => void;
   // Project persistence
-  saveProject: () => void;
   savingState: SavingState;
   replaceProjectMeta: (meta: ProjectMeta) => Promise<void>;
   // Multi-scene project
   sceneList: SceneMeta[];
   mainSceneId: string;
   openSceneId: string;
+  /** The open scene asset has unsaved edits — dirtyTabs[SCENE_TAB_ID] under a name that reads at call sites. */
   mainDirty: boolean;
   /** Open a scene asset in the Main tab (prompts Save/Discard/Cancel when the current scene is dirty). */
   openScene: (sceneId: string) => Promise<boolean>;
@@ -421,9 +443,19 @@ const EngineContext = createContext<{
   deleteScene: (sceneId: string) => Promise<string | null>;
   duplicateScene: (sceneId: string) => Promise<string | null>;
   setMainScene: (sceneId: string) => void;
-  // Unsaved-scene confirm dialog (promise parked by openScene, resolved by UnsavedSceneModal)
-  pendingSceneConfirm: { sceneName: string } | null;
+  /** The open scene's camera rig ('2D' ortho pan/zoom vs '3D' free-fly). Per scene, not per project. */
+  sceneDimension: '2D' | '3D';
+  setSceneDimension: (sceneId: string, dimension: '2D' | '3D') => void;
+  // Unsaved-changes confirm dialog (promise parked by openScene/closeTab, resolved by UnsavedSceneModal)
+  pendingSceneConfirm: { sceneName: string; action: 'switch' | 'close' } | null;
   resolveSceneConfirm: (decision: 'save' | 'discard' | 'cancel') => void;
+  /** Mark a tab as having unsaved edits. For edits the SCENE_CHANGED listener cannot see (e.g. animation
+   *  state-machine edits, which live in StateMachineContext's own React state). */
+  markTabDirty: (tabId: string) => void;
+  clearTabDirty: (tabId: string) => void;
+  /** Run `fn` without its scene edits marking any tab dirty — for editor chrome (gizmos, helper icons)
+   *  whose nodes live in the scene and emit SCENE_CHANGED like any other, but are not the user's work. */
+  withoutDirty: <T>(fn: () => T) => T;
   }>({
     instance: null,
     editorScene: new Scene(),
@@ -437,16 +469,16 @@ const EngineContext = createContext<{
     setEditorMode: () => {},
     gizmoMode: 'position',
     setGizmoMode: () => {},
-    tabs: [{ id: 'main', kind: 'main', title: 'Main' }],
-    activeTabId: 'main',
-    activeTab: { id: 'main', kind: 'main', title: 'Main' },
+    tabs: [{ id: SCENE_TAB_ID, kind: 'scene', title: 'Scene' }],
+    activeTabId: SCENE_TAB_ID,
+    activeTab: { id: SCENE_TAB_ID, kind: 'scene', title: 'Scene' },
     dirtyTabs: {},
     setActiveTab: () => {},
     closeTab: () => {},
     reorderTabs: () => {},
-    saveActiveTemplate: () => {},
-    saveActiveMaterial: () => {},
-    saveActiveTerrainMaterial: () => {},
+    saveActiveTab: async () => false,
+    saveAll: async () => {},
+    registerAnimationApply: () => {},
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -499,7 +531,6 @@ const EngineContext = createContext<{
     detachScriptFromNode: () => {},
     saveScriptSource: () => {},
     enterScriptEditor: () => {},
-    saveActiveScript: () => {},
     setScriptTabSource: () => {},
     getScriptTabSource: () => undefined,
     meshes: [],
@@ -507,7 +538,6 @@ const EngineContext = createContext<{
     removeMesh: () => {},
     updateMesh: () => {},
     enterMeshEditor: () => {},
-    saveActiveMesh: () => {},
     meshSession: null,
     meshEditTargetId: null,
     setActiveMeshName: () => {},
@@ -526,7 +556,6 @@ const EngineContext = createContext<{
     removeAnimationClip: () => {},
     pendingAnimationImport: null,
     resolveAnimationImport: () => {},
-    saveProject: () => {},
     savingState: 'idle',
     replaceProjectMeta: async () => {},
     sceneList: [],
@@ -539,8 +568,13 @@ const EngineContext = createContext<{
     deleteScene: async () => null,
     duplicateScene: async () => null,
     setMainScene: () => {},
+    sceneDimension: '3D',
+    setSceneDimension: () => {},
     pendingSceneConfirm: null,
     resolveSceneConfirm: () => {},
+    markTabDirty: () => {},
+    clearTabDirty: () => {},
+    withoutDirty: (fn) => fn(),
   });
   
   // Create a custom hook to access the engine and scene from anywhere
@@ -563,15 +597,40 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('position');
   // Editor tabs: the Main tab (real game scene) plus any open template tabs. Each template tab's live
   // scene + root live in tabRuntimeRef (not React state — Scene objects shouldn't be serialized).
-  const [tabs, setTabs] = useState<EditorTab[]>([{ id: 'main', kind: 'main', title: 'Main' }]);
-  const [activeTabId, setActiveTabId] = useState<string>('main');
-  const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({}); // tab id -> has unsaved edits
+  const [tabs, setTabs] = useState<EditorTab[]>([{ id: SCENE_TAB_ID, kind: 'scene', title: 'Scene' }]);
+  const [activeTabId, setActiveTabId] = useState<string>(SCENE_TAB_ID);
+  // The one unsaved-changes store, keyed by tab id — 'main' is the open scene asset, the rest are library
+  // tabs. The ref is written in the same tick as the state so async flows (openScene, saveAll) never read a
+  // stale value; go through markTabDirty/clearTabDirty rather than setDirtyTabs so the two stay in step.
+  const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
+  const dirtyTabsRef = useRef<Record<string, boolean>>({});
+  const markTabDirty = (id: string) => {
+    if (dirtyTabsRef.current[id]) return;
+    dirtyTabsRef.current = { ...dirtyTabsRef.current, [id]: true };
+    setDirtyTabs(dirtyTabsRef.current);
+  };
+  const clearTabDirty = (id: string) => {
+    if (!dirtyTabsRef.current[id]) return;
+    const next = { ...dirtyTabsRef.current };
+    delete next[id];
+    dirtyTabsRef.current = next;
+    setDirtyTabs(next);
+  };
   // Per-tab runtime scene + root. Animation tabs also record where the SOURCE node lives (its scene may
   // be the main scene OR a template tab's scene) so authored state machines are written back correctly.
   const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; editNode?: ModelNode }>>(new Map());
-  const activeTabIdRef = useRef<string>('main');
-  const activeTabKindRef = useRef<TabKind>('main');
+  const activeTabIdRef = useRef<string>(SCENE_TAB_ID);
+  const activeTabKindRef = useRef<TabKind>('scene');
   const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
+  // Propagation (the sync*Instances family) edits live scenes and so emits SCENE_CHANGED, which mark()
+  // would blame on the ACTIVE tab — including the tab that just saved. Hold this while propagating.
+  const dirtySuppressRef = useRef(false);
+  /** Run `fn` (synchronous — the sync*Instances family all are) without its edits marking any tab dirty. */
+  const withoutDirty = <T,>(fn: () => T): T => {
+    const prev = dirtySuppressRef.current;
+    dirtySuppressRef.current = true;
+    try { return fn(); } finally { dirtySuppressRef.current = prev; }
+  };
   const [savingState, setSavingState] = useState<SavingState>('idle');
   const dimensionRef = useRef<'2D' | '3D'>('3D'); // the Main tab's dimension (template tabs are always 3D)
   const pendingPrefsRef = useRef<ProjectPrefs | null>(null);
@@ -585,11 +644,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [openSceneId, setOpenSceneIdState] = useState<string>('');
   const openSceneIdRef = useRef<string>('');
   const scenesLoadedRef = useRef(false);
-  // Unsaved-changes tracking for the Main (game) scene — the per-tab dirtyTabs mechanism only covers
-  // library tabs. Ref mirror lets async flows (openScene) read the current value without a re-render.
-  const [mainDirty, setMainDirty] = useState(false);
-  const mainDirtyRef = useRef(false);
-  useEffect(() => { mainDirtyRef.current = mainDirty; }, [mainDirty]);
   const isPlayModeRef = useRef(false);
   useEffect(() => { isPlayModeRef.current = isPlayMode; }, [isPlayMode]);
   const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null });
@@ -776,17 +830,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Persist an edited script's source and propagate to every linked node: re-cache the source, and add
   // any new fields / prune removed ones while keeping each node's authored values.
   const saveScriptSource = (id: string, source: string) => {
-    const existing = scriptAssets.find(a => a.id === id);
+    const existing = scriptAssetsRef.current.find(a => a.id === id);
     if (!existing) return;
     const next = buildScriptAsset(existing.name, existing.baseType, source, id);
     updateScriptAsset(id, next);
-    const scene = editorSceneRef.current;
-    for (const n of Array.from(scene.nodes)) {
-      if (getScriptIdOf(n) !== id) continue;
-      scriptsRef.current.set(n.id, source);
-      seedScriptFields(n, next, false);
-    }
-    eventEmitter.current.emit('SCENE_CHANGED');
+    // Propagation only — the nodes store __scriptId and the source is fanned out at serialize time, so
+    // this must not mark the scene dirty (see the note in saveMaterialTab).
+    withoutDirty(() => {
+      for (const scene of liveScenes()) {
+        for (const n of Array.from(scene.nodes)) {
+          if (getScriptIdOf(n) !== id) continue;
+          scriptsRef.current.set(n.id, source);
+          seedScriptFields(n, next, false);
+        }
+      }
+      eventEmitter.current.emit('SCENE_CHANGED');
+    });
   };
 
   // Dedicated Script editor tab: opens a script asset in a full-panel code editor (its own mode + Save Script
@@ -811,20 +870,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setActiveTabId(tabId);
   };
 
-  // Save the active script tab: commit its buffered source to the asset (persists + propagates to linked
-  // nodes) and clear the tab's dirty flag. Mirrors saveActiveMaterial/saveActiveMesh.
-  const saveActiveScript = () => {
-    const tab = tabs.find(t => t.id === activeTabId);
+  // Save a script tab: commit its buffered source to the asset (persists + propagates to linked nodes) and
+  // clear the tab's dirty flag. Takes a tab id rather than reading the active tab so Save All can reach a
+  // tab that is not on screen; mirrors saveMaterialTab/saveMeshTab.
+  const saveScriptTab = (tabId: string) => {
+    const tab = tabsRef.current.find(t => t.id === tabId);
     if (!tab || tab.kind !== 'script' || !tab.scriptId) return;
     const source = scriptTabSourceRef.current.get(tab.scriptId);
     if (source !== undefined) saveScriptSource(tab.scriptId, source);
     // Adopt the (possibly renamed-in-source) class name into the tab title? Keep the asset name.
-    setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+    clearTabDirty(tab.id);
   };
   // Called by the script tab's editor on every edit: buffer the source and mark the tab dirty.
   const setScriptTabSource = (tabId: string, scriptId: string, source: string) => {
     scriptTabSourceRef.current.set(scriptId, source);
-    setDirtyTabs(prev => (prev[tabId] ? prev : { ...prev, [tabId]: true }));
+    markTabDirty(tabId);
   };
   const getScriptTabSource = (scriptId: string): string | undefined => scriptTabSourceRef.current.get(scriptId);
 
@@ -842,6 +902,37 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }, 50);
     return () => window.clearInterval(timer);
   }, [assetsLoaded]);
+
+  /**
+   * Re-resolve the STARTUP scene's asset links, once the libraries are actually there.
+   *
+   * openScene resyncs inline, but the boot path cannot: setupInitialScene parses the scene blob before the
+   * five libraries have finished their own async IndexedDB reads, and resyncing against empty libraries
+   * would unlink every material in the scene to the Basic+Null fallback. So the blob's saved hashes are
+   * stashed at parse time and the pass runs here, the moment `assetsLoaded` says the libraries are real.
+   *
+   * Without this, an asset edited and saved WITHOUT also saving the scene renders correctly for the rest of
+   * the session and then comes back stale on reload: the scene blob embeds the material it had at the
+   * scene's last save, and __materialId is only a back-link until something re-resolves it.
+   */
+  const initialAssetHashesRef = useRef<{ hashes: Record<string, string> | undefined } | null>(null);
+  const initialResyncDoneRef = useRef(false);
+  useEffect(() => {
+    if (initialResyncDoneRef.current || !assetsLoaded || !isSceneReady) return;
+    const stashed = initialAssetHashesRef.current;
+    if (!stashed) return; // no blob was parsed (fresh/empty project) — nothing to re-resolve
+    initialResyncDoneRef.current = true;
+    // Propagation, not the user's work — resyncing must not make a freshly-opened scene look unsaved.
+    withoutDirty(() => {
+      const changed = resyncScene(editorSceneRef.current, engineMaps(), currentLibs(), stashed.hashes);
+      if (changed) {
+        showBindPoseForSkinnedModels(editorSceneRef.current);
+        eventEmitter.current.emit('TEXTURES_CHANGED');
+        eventEmitter.current.emit('SCENE_CHANGED');
+        eventEmitter.current.emit('SELECT_NODE', null); // a reinstantiated subtree invalidates the selection
+      }
+    });
+  }, [assetsLoaded, isSceneReady]);
 
   // Keep the texture store in step with the libraries.
   //
@@ -903,14 +994,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (r) r(decision);
   };
 
-  // Unsaved-scene confirm dialog — same "park then resolve a promise" pattern as the import modals.
-  // openScene parks here when the current scene has unsaved edits; UnsavedSceneModal resolves.
-  const [pendingSceneConfirm, setPendingSceneConfirm] = useState<{ sceneName: string } | null>(null);
+  // Unsaved-changes confirm dialog — same "park then resolve a promise" pattern as the import modals.
+  // Two callers park here: openScene (switching away from a scene with unsaved edits) and closeTab
+  // (closing a dirty asset tab). `action` only changes the wording; both resolve the same three ways.
+  const [pendingSceneConfirm, setPendingSceneConfirm] = useState<{ sceneName: string; action: 'switch' | 'close' } | null>(null);
   const sceneConfirmResolverRef = useRef<((d: 'save' | 'discard' | 'cancel') => void) | null>(null);
-  const confirmUnsavedScene = (sceneName: string): Promise<'save' | 'discard' | 'cancel'> =>
+  const confirmUnsavedScene = (sceneName: string, action: 'switch' | 'close' = 'switch'): Promise<'save' | 'discard' | 'cancel'> =>
     new Promise(resolve => {
       sceneConfirmResolverRef.current = resolve;
-      setPendingSceneConfirm({ sceneName });
+      setPendingSceneConfirm({ sceneName, action });
     });
   const resolveSceneConfirm = (decision: 'save' | 'discard' | 'cancel') => {
     const r = sceneConfirmResolverRef.current;
@@ -921,12 +1013,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
-  const activeRuntime = activeTab.kind !== 'main' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
+  const activeRuntime = activeTab.kind !== 'scene' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
   // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material/animation scene.
   const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
   // Legacy single mode value, now derived from the active tab kind. Keeps every existing
   // `editorMode === ...` consumer working unchanged.
-  const editorMode: EditorMode = activeTab.kind === 'main' ? mainMode
+  const editorMode: EditorMode = activeTab.kind === 'scene' ? mainMode
     : activeTab.kind === 'material' ? 'material'
     : activeTab.kind === 'terrainMaterial' ? 'terrainMaterial'
     : activeTab.kind === 'animation' ? 'animation'
@@ -947,9 +1039,48 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // node variables for the state machine's Variable parameters (the clone's scene is isolated).
   const animationSourceScene = activeTab.kind === 'animation' ? (activeRuntime?.sourceScene ?? null) : null;
 
+  // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries (the scripts library
+  // already has scriptAssetsRef). The save + propagation paths read these rather than the render-scoped
+  // state: Save All walks tabs sequentially with an await per asset, where a value captured at the top of
+  // the loop is stale by the second iteration.
+  const tabsRef = useRef<EditorTab[]>(tabs);
+  const meshSessionsRef = useRef<Record<string, MeshEditSession>>(meshSessions);
+  const materialsRef = useRef<MaterialAsset[]>(materials);
+  const terrainMaterialsRef = useRef<TerrainMaterialAsset[]>(terrainMaterials);
+  const meshesRef = useRef<MeshAsset[]>(meshes);
+  const templatesRef = useRef<Template[]>(templates);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  useEffect(() => { meshSessionsRef.current = meshSessions; }, [meshSessions]);
+  useEffect(() => { materialsRef.current = materials; }, [materials]);
+  useEffect(() => { terrainMaterialsRef.current = terrainMaterials; }, [terrainMaterials]);
+  useEffect(() => { meshesRef.current = meshes; }, [meshes]);
+  useEffect(() => { templatesRef.current = templates; }, [templates]);
+
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
+
+  /**
+   * Every Scene alive in the editor: the open scene, plus each asset tab's throwaway edit scene.
+   *
+   * Propagation on save has to reach all of them, not just the open scene — a template tab showing a
+   * material must update the moment that material is saved, exactly as the scene does. Scenes that are
+   * NOT live (other scene assets, on disk) are handled pull-side by resyncScene when they are opened.
+   *
+   * `exceptTabId` skips the tab doing the saving, and is essential for the re-instantiating kinds: a
+   * template tab's root carries __templateId (instantiateTemplate stamps it), so propagating a template
+   * save into its own tab would rebuild the very subtree being edited — invalidating runtime.rootId and
+   * leaving the session pointing at a detached node.
+   */
+  const liveScenes = (exceptTabId?: string): Scene[] => [
+    editorSceneRef.current,
+    ...Array.from(tabRuntimeRef.current.entries())
+      .filter(([id]) => id !== exceptTabId)
+      .map(([, rt]) => rt.scene),
+  ];
   // Snapshot of the four hashable asset libraries, as the resync/hash utilities consume them.
-  const currentLibs = (): AssetLibs => ({ materials, meshes, templates, terrainMaterials, scripts: scriptAssets });
+  const currentLibs = (): AssetLibs => ({
+    materials: materialsRef.current, meshes: meshesRef.current, templates: templatesRef.current,
+    terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
+  });
 
   // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
   const enterTemplateEditor = (templateId?: string) => {
@@ -962,6 +1093,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (existing) { setActiveTabId(existing.id); return; }
     }
 
+    // Disarm before constructing — see openMaterialTab. Deliberately after the focus-only early return
+    // above: that path does not build a scene, and if the tab were already active it would not re-run the
+    // activate effect that re-arms.
+    dirtyArmedRef.current = false;
     const scene = new Scene();
     scene.animationsEnabled = false; // editing scene: skinned meshes hold bind pose (no playback)
     createEmptyScene(scene); // editor camera + a light so the template content is lit
@@ -974,7 +1109,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (templateId) {
       const t = templates.find(x => x.id === templateId);
       if (!t) { Logger.error('Template not found', 'Editor'); return; }
-      rootId = instantiateTemplate(t, scene.root, engineMaps());
+      rootId = instantiateTemplate(t, scene.root, engineMaps(), materialsRef.current);
       name = t.name;
     } else {
       const node = new Node('New Template');
@@ -997,31 +1132,34 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Rebuild every placed instance of a template after it was edited, preserving each instance's own
-  // transform. Runs on the game scene (editorSceneRef.current), never the template scene.
-  const syncTemplateInstances = (templateId: string, template: Template) => {
-    const scene = editorSceneRef.current;
+  // transform. Runs across every live scene except the editing tab's own — see liveScenes.
+  const syncTemplateInstances = (templateId: string, template: Template, exceptTabId?: string) => {
     const maps = engineMaps();
-    const instances = Array.from(scene.nodes).filter(n => n.getVariable(TEMPLATE_ID_VAR) === templateId);
+    let count = 0;
     let reselectId: string | null = null;
-    for (const inst of instances) {
-      const parent = inst.parent;
-      if (!parent) continue;
-      const pos = Array.from(inst.position) as [number, number, number];
-      const rot = Array.from(inst.rotation) as [number, number, number];
-      const scl = Array.from(inst.scale) as [number, number, number];
-      const wasSelected = inst.id === selectedNode;
-      // Drop the old subtree's out-of-band data so map entries don't leak.
-      for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
-      // Detach synchronously: Node.remove() only marks for removal, and the deferred sweep calls
-      // root.removeChild on each marked descendant, which mis-splices and deletes unrelated root
-      // children (including the node we're about to re-instantiate). removeChild cleanly drops the subtree.
-      parent.removeChild(inst);
-      const newId = instantiateTemplate(template, parent, maps); // re-tags __templateId
-      const newNode = scene.getNodeById(newId);
-      if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
-      if (wasSelected) reselectId = newId;
+    for (const scene of liveScenes(exceptTabId)) {
+      const instances = Array.from(scene.nodes).filter(n => n.getVariable(TEMPLATE_ID_VAR) === templateId);
+      for (const inst of instances) {
+        const parent = inst.parent;
+        if (!parent) continue;
+        const pos = Array.from(inst.position) as [number, number, number];
+        const rot = Array.from(inst.rotation) as [number, number, number];
+        const scl = Array.from(inst.scale) as [number, number, number];
+        const wasSelected = inst.id === selectedNode;
+        // Drop the old subtree's out-of-band data so map entries don't leak.
+        for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
+        // Detach synchronously: Node.remove() only marks for removal, and the deferred sweep calls
+        // root.removeChild on each marked descendant, which mis-splices and deletes unrelated root
+        // children (including the node we're about to re-instantiate). removeChild cleanly drops the subtree.
+        parent.removeChild(inst);
+        const newId = instantiateTemplate(template, parent, maps, materialsRef.current); // re-tags __templateId
+        const newNode = scene.getNodeById(newId);
+        if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
+        if (wasSelected) reselectId = newId;
+        count++;
+      }
     }
-    if (instances.length) {
+    if (count) {
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
       if (reselectId) eventEmitter.current.emit('SELECT_NODE', reselectId);
@@ -1065,6 +1203,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       return;
     }
 
+    // Disarm before constructing the clone's scene — see openMaterialTab.
+    dirtyArmedRef.current = false;
     // Clone the source node (with its skin, animations, mappings and state machine) into a fresh scene.
     const scene = new Scene();
     scene.animationsEnabled = false; // the AnimationPlayer drives the clone directly, not scene.update
@@ -1100,7 +1240,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       src.animator.setStateMachine(sm);
       src.animator.showBindPose(); // its scene is paused; keep the source at its rest pose
     }
-    if (rt.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+    // The edit landed on the source node, so its owner has unsaved changes — the scene tab when the model
+    // lives in the open scene, the template tab when it came from a template.
+    if (rt.sourceTabId) markTabDirty(rt.sourceTabId);
   };
 
   // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation
@@ -1141,7 +1283,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       added++;
     });
     if (added > 0) {
-      if (rt?.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+      if (rt?.sourceTabId) markTabDirty(rt.sourceTabId);
       eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
       Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName}`, 'Editor');
     }
@@ -1184,7 +1326,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       Logger.warn('No matching bones — load the SAME file this character was imported from (same format/export)', 'Editor');
       return;
     }
-    if (rt?.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     Logger.info(`Added bone names to ${matched} joints — animation import now matches by name. Save the project to keep them.`, 'Editor');
   };
@@ -1198,7 +1340,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const finalName = cloneNode.model.renameAnimation(oldName, newName) ?? oldName;
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
     if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.renameAnimation(oldName, finalName);
-    if (rt?.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     return finalName;
   };
@@ -1210,15 +1352,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) cloneNode.model.removeAnimation(name);
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
     if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.removeAnimation(name);
-    if (rt?.sourceTabId && rt.sourceTabId !== 'main') setDirtyTabs(prev => ({ ...prev, [rt.sourceTabId!]: true }));
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
 
   const setActiveTab = (id: string) => setActiveTabId(id);
 
-  // Save the active template tab back to the library and propagate the change to placed instances.
-  const saveActiveTemplate = async () => {
-    const tab = tabs.find(t => t.id === activeTabId);
+  // Save a template tab back to the library and propagate the change to placed instances.
+  const saveTemplateTab = async (tabId: string) => {
+    const tab = tabsRef.current.find(t => t.id === tabId);
     if (!tab || tab.kind !== 'template') return;
     const runtime = tabRuntimeRef.current.get(tab.id);
     if (!runtime) return;
@@ -1229,13 +1371,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (tab.templateId) {
         const updated = { ...t, id: tab.templateId };
         updateTemplate(tab.templateId, updated);
-        syncTemplateInstances(tab.templateId, updated); // propagate to placed instances
+        withoutDirty(() => syncTemplateInstances(tab.templateId!, updated, tab.id)); // propagate to placed instances
       } else {
         addTemplate(t); // t carries a fresh id
       }
       // Adopt the saved name/id so later saves update (not re-add) and the tab label stays in sync.
       setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, title: t.name, templateId: tab.templateId ?? t.id } : x));
-      setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+      clearTabDirty(tab.id);
       Logger.info(`Template "${t.name}" saved`, 'Editor');
     } catch (e) {
       Logger.error('Failed to save template: ' + e, 'Editor');
@@ -1247,26 +1389,31 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Low-level tab removal (no confirm). Shared by closeTab and removeMaterial (force-closing a deleted
   // material's tab). Main is unclosable.
   const removeTabById = (id: string) => {
-    if (id === 'main') return;
+    if (id === SCENE_TAB_ID) return;
     const idx = tabs.findIndex(t => t.id === id);
     if (idx < 0) return;
     const remaining = tabs.filter(t => t.id !== id);
     tabRuntimeRef.current.get(id)?.helperTerrain?.dispose(); // free the preview terrain's splat/body
     tabRuntimeRef.current.delete(id);
     setMeshSessions(prev => { if (!(id in prev)) return prev; const next = { ...prev }; delete next[id]; return next; });
-    setDirtyTabs(prev => { const next = { ...prev }; delete next[id]; return next; });
+    clearTabDirty(id);
     setTabs(remaining);
     if (id === activeTabId) {
       const fallback = remaining[Math.max(0, idx - 1)] ?? remaining[0];
-      setActiveTabId(fallback ? fallback.id : 'main');
+      setActiveTabId(fallback ? fallback.id : SCENE_TAB_ID);
     }
   };
 
-  const closeTab = (id: string) => {
-    if (id === 'main') return;
-    const tab = tabs.find(t => t.id === id);
+  const closeTab = async (id: string) => {
+    if (id === SCENE_TAB_ID) return;
+    const tab = tabsRef.current.find(t => t.id === id);
     if (!tab) return;
-    if (dirtyTabs[id] && !window.confirm(`Discard unsaved changes to "${tab.title}"?`)) return;
+    if (dirtyTabsRef.current[id]) {
+      const decision = await confirmUnsavedScene(tab.title, 'close');
+      if (decision === 'cancel') return;
+      // A failed save must not close the tab — that would discard the very edits the user asked to keep.
+      if (decision === 'save' && !(await runSave([id], `Saving ${tab.title}`))) return;
+    }
     removeTabById(id);
   };
 
@@ -1284,26 +1431,27 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     });
   };
 
-  // Re-apply a saved/edited material to every node in the game scene that references it (keeps the link).
-  const syncMaterialInstances = (materialId: string, asset: MaterialAsset) => {
-    const scene = editorSceneRef.current;
-    const instances = Array.from(scene.nodes).filter(n => getMaterialIdOf(n) === materialId);
-    for (const inst of instances) applyMaterialAsset(inst, asset);
-    // Cameras referencing it in their ordered screen-space pass list: rebuild the list, substituting
-    // the freshly saved asset for its id (other slots resolve from the current library).
-    let cameraChanged = false;
-    for (const n of Array.from(scene.nodes)) {
-      if (n.nodeType !== 'camera') continue;
-      const cam = n as CameraNode;
-      const ids = getScreenMaterialIds(cam);
-      if (!ids.includes(materialId)) continue;
-      const assets = ids
-        .map(id => (id === materialId ? asset : materials.find(m => m.id === id)))
-        .filter((a): a is MaterialAsset => !!a);
-      applyScreenMaterials(cam, assets);
-      cameraChanged = true;
+  // Re-apply a saved/edited material to every node that references it, in every live scene, at any depth
+  // (scene.nodes is the flattened tree). The link is kept — only the material is swapped.
+  const syncMaterialInstances = (materialId: string, asset: MaterialAsset, exceptTabId?: string) => {
+    let changed = false;
+    for (const scene of liveScenes(exceptTabId)) {
+      for (const n of Array.from(scene.nodes)) {
+        if (getMaterialIdOf(n) === materialId) { applyMaterialAsset(n, asset); changed = true; }
+        // Cameras referencing it in their ordered screen-space pass list: rebuild the list, substituting
+        // the freshly saved asset for its id (other slots resolve from the current library).
+        if (n.nodeType !== 'camera') continue;
+        const cam = n as CameraNode;
+        const ids = getScreenMaterialIds(cam);
+        if (!ids.includes(materialId)) continue;
+        const assets = ids
+          .map(id => (id === materialId ? asset : materialsRef.current.find(m => m.id === id)))
+          .filter((a): a is MaterialAsset => !!a);
+        applyScreenMaterials(cam, assets);
+        changed = true;
+      }
     }
-    if (instances.length || cameraChanged) {
+    if (changed) {
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
     }
@@ -1338,6 +1486,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // (from `asset`, else a fresh PBR material for a brand-new one). Taking the asset object directly (not
   // an id) lets callers open a just-created asset without waiting for the `materials` state to commit.
   const openMaterialTab = (asset: MaterialAsset | null) => {
+    // Disarm dirty-tracking before building the preview scene. SCENE_CHANGED is global and names no
+    // scene, so mark() can only blame the ACTIVE tab — and every node this construction splices into the
+    // new throwaway scene would otherwise land on the scene tab as if the user had edited it. The
+    // tab-activate effect re-arms once the new tab is showing.
+    dirtyArmedRef.current = false;
     const scene = new Scene();
     void createMaterialPreviewScene(scene); // env map + skybox attach once the cubemap images load
 
@@ -1455,6 +1608,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // panels; LOD levels, distances and the cull threshold through the Mesh inspector. Opening the tab
   // also triggers the asset's thumbnail render.
   const openMeshTab = (asset: MeshAsset) => {
+    // Disarm dirty-tracking before building the preview scene. SCENE_CHANGED is global and names no
+    // scene, so mark() can only blame the ACTIVE tab — and every node this construction splices into the
+    // new throwaway scene would otherwise land on the scene tab as if the user had edited it. The
+    // tab-activate effect re-arms once the new tab is showing.
+    dirtyArmedRef.current = false;
     const scene = new Scene();
     scene.animationsEnabled = false; // skinned meshes hold their bind pose while editing
     createEmptyScene(scene);
@@ -1499,29 +1657,32 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Rebuild every placed instance of a mesh asset after it was saved, preserving each instance's own
   // transform (the template propagation pattern — a mesh instance is a whole copied subtree, so it is
-  // re-instantiated rather than patched in place). Runs on the game scene only.
-  const syncMeshInstances = (meshId: string, asset: MeshAsset) => {
-    const scene = editorSceneRef.current;
+  // re-instantiated rather than patched in place). Runs across every live scene (see liveScenes).
+  const syncMeshInstances = (meshId: string, asset: MeshAsset, exceptTabId?: string) => {
     const maps = engineMaps();
-    const instances = Array.from(scene.nodes).filter(n => n.getVariable(MESH_ID_VAR) === meshId);
+    let count = 0;
     let reselectId: string | null = null;
-    for (const inst of instances) {
-      const parent = inst.parent;
-      if (!parent) continue;
-      const pos = Array.from(inst.position) as [number, number, number];
-      const rot = Array.from(inst.rotation) as [number, number, number];
-      const scl = Array.from(inst.scale) as [number, number, number];
-      const wasSelected = inst.id === selectedNode;
-      // Drop the old subtree's out-of-band data so map entries don't leak.
-      for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
-      // Detach synchronously with removeChild, not remove() — see syncTemplateInstances for why.
-      parent.removeChild(inst);
-      const newId = instantiateMeshAsset(asset, parent);
-      const newNode = scene.getNodeById(newId);
-      if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
-      if (wasSelected) reselectId = newId;
+    for (const scene of liveScenes(exceptTabId)) {
+      const instances = Array.from(scene.nodes).filter(n => n.getVariable(MESH_ID_VAR) === meshId);
+      for (const inst of instances) {
+        const parent = inst.parent;
+        if (!parent) continue;
+        const pos = Array.from(inst.position) as [number, number, number];
+        const rot = Array.from(inst.rotation) as [number, number, number];
+        const scl = Array.from(inst.scale) as [number, number, number];
+        const wasSelected = inst.id === selectedNode;
+        // Drop the old subtree's out-of-band data so map entries don't leak.
+        for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
+        // Detach synchronously with removeChild, not remove() — see syncTemplateInstances for why.
+        parent.removeChild(inst);
+        const newId = instantiateMeshAsset(asset, parent, materialsRef.current);
+        const newNode = scene.getNodeById(newId);
+        if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
+        if (wasSelected) reselectId = newId;
+        count++;
+      }
     }
-    if (instances.length) {
+    if (count) {
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
       if (reselectId) eventEmitter.current.emit('SELECT_NODE', reselectId);
@@ -1561,13 +1722,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('SCENE_CHANGED');
   };
 
-  // Save the active mesh tab back to the library and propagate to placed instances.
-  const saveActiveMesh = async () => {
+  // Save a mesh tab back to the library and propagate to placed instances.
+  const saveMeshTab = async (tabId: string) => {
     const engine = instanceRef.current;
-    const tab = tabs.find(t => t.id === activeTabId);
+    const tab = tabsRef.current.find(t => t.id === tabId);
     if (!engine || !tab || tab.kind !== 'mesh' || !tab.meshId) return;
     const runtime = tabRuntimeRef.current.get(tab.id);
-    const session = meshSessions[tab.id];
+    const session = meshSessionsRef.current[tab.id];
     if (!runtime || !session) return;
     try {
       const levelRoots = session.levelIds.map(id => runtime.scene.getNodeById(id));
@@ -1584,7 +1745,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const collectMats = (n: Node) => { const id = getMaterialIdOf(n); if (id) materialIdSet.add(id); n.children.forEach(collectMats); };
       for (const root of levelRoots) collectMats(root!);
 
-      const prev = meshes.find(m => m.id === tab.meshId);
+      const prev = meshesRef.current.find(m => m.id === tab.meshId);
       const asset = await buildMeshAsset(
         levelRoots[0]!, [...materialIdSet], prev?.thumbnail ?? '', tab.meshId,
         lodDefs, session.cullDistance,
@@ -1592,9 +1753,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       asset.name = tab.title; // the tab title is the asset name (renames edit the title)
 
       updateMesh(tab.meshId, asset);
-      syncMeshInstances(tab.meshId, asset);
-      syncFoliageRulesForMesh(asset);
-      setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+      withoutDirty(() => { syncMeshInstances(tab.meshId!, asset, tab.id); syncFoliageRulesForMesh(asset); });
+      clearTabDirty(tab.id);
 
       // Refresh the thumbnail from the SAVED asset, never the live tab subtree (renderMeshThumbnail
       // reparents the node it is given). Async: the card updates whenever the render lands.
@@ -1612,7 +1772,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const tab = tabs.find(t => t.id === activeTabId);
     if (!tab || tab.kind !== 'mesh') return;
     setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, title: name } : x));
-    setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+    markTabDirty(tab.id);
   };
 
   // Import a model file as a new LOD level of the active mesh tab. The level is scaled so its bounds
@@ -1672,7 +1832,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       };
       setMeshSessions(prev => ({ ...prev, [tab.id]: next }));
       applyActiveMeshLevel(runtime.scene, levelIds, next.activeLevel);
-      setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+      markTabDirty(tab.id);
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
     } catch (e) {
@@ -1696,7 +1856,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const activeLevel = Math.min(session.activeLevel >= level ? session.activeLevel - 1 : session.activeLevel, levelIds.length - 1);
     setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, levelIds, distances, activeLevel: Math.max(0, activeLevel) } }));
     applyActiveMeshLevel(runtime.scene, levelIds, Math.max(0, activeLevel));
-    setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+    markTabDirty(tab.id);
   };
 
   const setMeshLodDistance = (level: number, distance: number) => {
@@ -1706,7 +1866,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!session || level >= session.distances.length) return;
     const distances = session.distances.map((d, i) => i === level ? Math.max(0, distance) : d);
     setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, distances } }));
-    setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+    markTabDirty(tab.id);
   };
 
   const setMeshCullDistance = (distance: number) => {
@@ -1715,7 +1875,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const session = meshSessions[tab.id];
     if (!session) return;
     setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, cullDistance: Math.max(0, distance) } }));
-    setDirtyTabs(prev => ({ ...prev, [tab.id]: true }));
+    markTabDirty(tab.id);
   };
 
   const setActiveMeshLevel = (level: number) => {
@@ -1898,10 +2058,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     task.finish();
   };
 
-  // Save the active material tab to the library (capturing a sphere thumbnail) and propagate to references.
-  const saveActiveMaterial = () => {
+  // Save a material tab to the library (capturing a sphere thumbnail) and propagate to references.
+  // captureMaterialSphere renders the tab's own scene offscreen, so this works for a tab that is not on
+  // screen — which is what lets Save All reach every dirty material.
+  const saveMaterialTab = (tabId: string) => {
     const instance = instanceRef.current;
-    const tab = tabs.find(t => t.id === activeTabId);
+    const tab = tabsRef.current.find(t => t.id === tabId);
     if (!instance || !tab || tab.kind !== 'material') return;
     const runtime = tabRuntimeRef.current.get(tab.id);
     if (!runtime) return;
@@ -1912,13 +2074,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (tab.materialId) {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail, tab.materialId);
         updateMaterial(tab.materialId, asset);
-        syncMaterialInstances(tab.materialId, asset); // push edits to placed references
+        // Propagation edits other scenes, so it must not mark them dirty: the link (__materialId) is what
+        // they store, and resyncScene re-resolves it on open. Dirtying here would mean saving any material
+        // left every open scene claiming unsaved edits — and Save All could never reach all-clean.
+        withoutDirty(() => syncMaterialInstances(tab.materialId!, asset, tab.id)); // push edits to placed references
       } else {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail);
         addMaterial(asset); // asset carries a fresh id
         setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, materialId: asset.id } : x));
       }
-      setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+      clearTabDirty(tab.id);
       Logger.info(`Material "${tab.title}" saved`, 'Editor');
     } catch (e) {
       Logger.error('Failed to save material: ' + e, 'Editor');
@@ -1928,20 +2093,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Rename the active material tab (bound to the name field in the material-mode inspector).
   const setActiveMaterialName = (name: string) => {
     setTabs(prev => prev.map(t => (t.id === activeTabId && t.kind === 'material') ? { ...t, title: name } : t));
-    setDirtyTabs(prev => ({ ...prev, [activeTabId]: true }));
+    markTabDirty(activeTabId);
   };
 
   // --- Terrain materials (mirror the material asset flow above, but assigned to terrain paint layers) ---
 
-  // Re-apply a saved/edited terrain material to every terrain paint layer that references it (by materialId).
-  const syncTerrainMaterialInstances = (id: string, asset: TerrainMaterialAsset) => {
-    const scene = editorSceneRef.current;
+  // Re-apply a saved/edited terrain material to every terrain paint layer that references it (by
+  // materialId), across every live scene except the editing tab's own preview terrain.
+  const syncTerrainMaterialInstances = (id: string, asset: TerrainMaterialAsset, exceptTabId?: string) => {
     let changed = false;
-    for (const ln of Array.from(scene.landscapes) as any[]) {
-      const terrain = ln.terrain;
-      const layers = terrain.layers;
-      for (let i = 0; i < layers.length; i++) {
-        if (layers[i]?.materialId === id) { applyTerrainMaterialToLayer(terrain, i, asset); changed = true; }
+    for (const scene of liveScenes(exceptTabId)) {
+      for (const ln of Array.from(scene.landscapes) as any[]) {
+        const terrain = ln.terrain;
+        const layers = terrain?.layers ?? [];
+        for (let i = 0; i < layers.length; i++) {
+          if (layers[i]?.materialId === id) { applyTerrainMaterialToLayer(terrain, i, asset); changed = true; }
+        }
       }
     }
     if (changed) { eventEmitter.current.emit('TEXTURES_CHANGED'); eventEmitter.current.emit('SCENE_CHANGED'); }
@@ -1967,6 +2134,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Build a terrain-material editor tab: a preview sphere carrying the TerrainMaterial to edit (its base
   // surface previews as a normal Basic/Blinn/PBR sphere; blend + foliage are edited in the inspector).
   const openTerrainMaterialTab = (asset: TerrainMaterialAsset | null) => {
+    // Disarm dirty-tracking before building the preview scene. SCENE_CHANGED is global and names no
+    // scene, so mark() can only blame the ACTIVE tab — and every node this construction splices into the
+    // new throwaway scene would otherwise land on the scene tab as if the user had edited it. The
+    // tab-activate effect re-arms once the new tab is showing.
+    dirtyArmedRef.current = false;
     const scene = new Scene();
     void createMaterialPreviewScene(scene); // env map + skybox attach once the cubemap images load
     const tm = asset ? parseTerrainMaterialAsset(asset) : TerrainMaterial.Create('pbr', { baseColor: [0.38, 0.5, 0.28] });
@@ -2008,10 +2180,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
 
-  // Save the active terrain-material tab to the library (capturing a sphere thumbnail) + propagate to layers.
-  const saveActiveTerrainMaterial = () => {
+  // Save a terrain-material tab to the library (capturing a sphere thumbnail) + propagate to layers.
+  const saveTerrainMaterialTab = (tabId: string) => {
     const instance = instanceRef.current;
-    const tab = tabs.find(t => t.id === activeTabId);
+    const tab = tabsRef.current.find(t => t.id === tabId);
     if (!instance || !tab || tab.kind !== 'terrainMaterial') return;
     const runtime = tabRuntimeRef.current.get(tab.id);
     if (!runtime) return;
@@ -2022,13 +2194,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (tab.terrainMaterialId) {
         const asset = buildTerrainMaterialAsset(material, tab.title, thumbnail, tab.terrainMaterialId);
         updateTerrainMaterial(tab.terrainMaterialId, asset);
-        syncTerrainMaterialInstances(tab.terrainMaterialId, asset);
+        withoutDirty(() => syncTerrainMaterialInstances(tab.terrainMaterialId!, asset, tab.id));
       } else {
         const asset = buildTerrainMaterialAsset(material, tab.title, thumbnail);
         addTerrainMaterial(asset);
         setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, terrainMaterialId: asset.id } : x));
       }
-      setDirtyTabs(prev => ({ ...prev, [tab.id]: false }));
+      clearTabDirty(tab.id);
       Logger.info(`Terrain material "${tab.title}" saved`, 'Editor');
     } catch (e) {
       Logger.error('Failed to save terrain material: ' + e, 'Editor');
@@ -2037,52 +2209,67 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const setActiveTerrainMaterialName = (name: string) => {
     setTabs(prev => prev.map(t => (t.id === activeTabId && t.kind === 'terrainMaterial') ? { ...t, title: name } : t));
-    setDirtyTabs(prev => ({ ...prev, [activeTabId]: true }));
+    markTabDirty(activeTabId);
   };
 
   // Keep non-reactive mirrors of the active tab (read by the once-registered SCENE_CHANGED/dimension listeners).
   useEffect(() => { activeTabIdRef.current = activeTabId; activeTabKindRef.current = activeTab.kind; }, [activeTabId, activeTab.kind]);
 
+  // Arm dirty-tracking for the scene tab on a cold start.
+  //
+  // The tab-activate effect below arms on every switch, but it bails while instanceRef is still null — and
+  // on startup that is always the case, because the engine initializes in its own async effect. The scene
+  // tab is active from the first render and never "switches", so nothing would ever arm it and the first
+  // session would silently register no edits at all. Wait for the same settle window the switch path uses,
+  // so the editor-helper reconciler's opening SCENE_CHANGED burst doesn't read as an edit.
+  useEffect(() => {
+    if (!isSceneReady) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
+  }, [isSceneReady]);
+
   // Switch the engine to the active tab's scene whenever the active tab changes.
   useEffect(() => {
     const instance = instanceRef.current;
     if (!instance) return;
+    // Disarm FIRST: everything below touches the scene (setScene, the helper reconcile it triggers, the
+    // emits at the end), and any of it reaching mark() would land on the tab we are switching to. Re-armed
+    // two frames later, once the editor-helper reconciler's opening pass has settled.
+    dirtyArmedRef.current = false;
     const tab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
     activeTabKindRef.current = tab.kind;
-    const runtime = tab.kind !== 'main' ? tabRuntimeRef.current.get(tab.id) : undefined;
+    const runtime = tab.kind !== 'scene' ? tabRuntimeRef.current.get(tab.id) : undefined;
     instance.setScene(runtime ? runtime.scene : editorSceneRef.current);
     // Hide the editor ground grid in (terrain-)material tabs so the preview sphere + its thumbnail stay clean.
     instance.renderer.setGridVisible(tab.kind !== 'material' && tab.kind !== 'terrainMaterial');
-    // Arm dirty-tracking only after the editor-helper reconciler's initial pass settles (it emits
-    // SCENE_CHANGED as it adds light/gizmo helpers to the freshly-shown template scene).
-    dirtyArmedRef.current = false;
-    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = (tab.kind === 'template' || tab.kind === 'material' || tab.kind === 'terrainMaterial' || tab.kind === 'mesh' || tab.kind === 'main'); }));
+    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
     // Template scenes are authored in 3D; the Main tab restores its own remembered dimension. (Terrain-)
     // material tabs are skipped: their preview camera uses a self-contained orbit rig
     // (createMaterialPreviewScene) that the free-fly CHANGE_DIMENSION handler must not overwrite.
     if (tab.kind !== 'material' && tab.kind !== 'terrainMaterial')
-      eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'main' ? dimensionRef.current : '3D');
+      eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'scene' ? dimensionRef.current : '3D');
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     // Animation tabs select via the skeleton tree (SELECT_JOINT), not the mesh, so start with none.
     eventEmitter.current.emit('SELECT_NODE', (runtime && tab.kind !== 'animation') ? runtime.rootId : null);
   }, [activeTabId]);
 
-  // Mark the active tab dirty on scene edits (after the open-settle window). The Main tab drives the
-  // multi-scene `mainDirty` flag (used to prompt Save/Discard/Cancel on scene switch); library tabs
-  // drive their own per-tab dirtyTabs entry. Play mode never marks dirty — it runs a separate play
-  // scene, so its edits must not make the editor scene look unsaved.
+  // The scene tab is titled with the scene asset it is showing, not a fixed label — it is the open scene's
+  // document, and the tab is where the user reads which scene that is. Follows both a scene switch
+  // (openSceneId) and a rename (sceneList).
+  useEffect(() => {
+    const name = sceneList.find(s => s.id === openSceneId)?.name;
+    if (!name) return;
+    setTabs(prev => prev.map(t => (t.id === SCENE_TAB_ID && t.title !== name ? { ...t, title: name } : t)));
+  }, [sceneList, openSceneId]);
+
+  // Mark the active tab dirty on scene edits (after the open-settle window). Every tab kind goes through
+  // the same dirtyTabs entry — the scene tab included, where it means the open scene asset has unsaved
+  // edits. Play mode never marks dirty (it runs a separate play scene, so its edits must not make the
+  // editor scene look unsaved), and neither does propagation (see dirtySuppressRef).
   useEffect(() => {
     const mark = () => {
-      if (!dirtyArmedRef.current || isPlayModeRef.current) return;
-      const kind = activeTabKindRef.current;
-      if (kind === 'main') {
-        if (!mainDirtyRef.current) { mainDirtyRef.current = true; setMainDirty(true); }
-        return;
-      }
-      if (kind !== 'template' && kind !== 'material' && kind !== 'terrainMaterial' && kind !== 'mesh') return;
-      const id = activeTabIdRef.current;
-      setDirtyTabs(prev => prev[id] ? prev : { ...prev, [id]: true });
+      if (!dirtyArmedRef.current || isPlayModeRef.current || dirtySuppressRef.current) return;
+      markTabDirty(activeTabIdRef.current);
     };
     const emitter = eventEmitter.current;
     emitter.on('SCENE_CHANGED', mark);
@@ -2157,11 +2344,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       await saveSceneData(sceneId, { ...gameData, assetHashes, savedAt: now });
       await updateProjectMeta(m => ({
         ...m,
+        // prefs.dimension is legacy (it was project-wide); the rig now belongs to the scene. Kept written
+        // so rolling back to a build that reads it still lands on something sensible.
         prefs: { dimension: dimensionRef.current, selectedNode },
-        scenes: m.scenes.map(s => s.id === sceneId ? { ...s, updatedAt: now, refs } : s),
+        scenes: m.scenes.map(s => s.id === sceneId
+          ? { ...s, updatedAt: now, refs, dimension: dimensionRef.current }
+          : s),
       }));
-      setMainDirty(false);
-      mainDirtyRef.current = false;
+      clearTabDirty(SCENE_TAB_ID);
       return true;
     } catch (e: any) {
       Logger.error(`Failed to save scene: ${e?.message || e}`, 'Editor');
@@ -2169,40 +2359,123 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
 
-  const saveProjectToStorage = async (): Promise<boolean> => {
-    setSavingState('saving');
-    // Indeterminate: serialize + IndexedDB write is one opaque operation, with no honest fraction to show.
-    // The Save button keeps its own inline state; this puts it in the shared place alongside everything else.
-    const task = startTask({
-      title: 'Saving project',
-      steps: [{ name: 'Saving project', status: 'running', detail: 'Serializing the scene' }],
-      indeterminate: true,
-    });
-    try {
-      // Race against a timeout as a defensive backstop so the UI never gets stuck "saving".
-      const ok = await Promise.race<boolean>([
-        saveCurrentScene(),
-        new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('Save timed out')), 15000)),
-      ]);
-      if (ok) {
-        Logger.info('Scene saved', 'Editor');
-        setSavingState('saved');
-        task.setStep(0, { status: 'done', detail: 'Saved' });
-      } else {
-        setSavingState('error');
-        task.setStep(0, { status: 'failed', error: 'Save failed' });
+  // ---- Saving: one action per tab, plus Save All ------------------------------------------------
+
+  // The live animation session's Apply, registered by StateMachineProvider. An animation tab has no asset
+  // of its own, so "saving" it means applying the machine onto the source model — and the working copy is
+  // React state over in that provider, out of reach from here. Only the active tab ever has a session.
+  const animationApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
+  const registerAnimationApply = (reg: { tabId: string; apply: () => void } | null) => { animationApplyRef.current = reg; };
+
+  /**
+   * Save one tab, whichever kind it is. Returns whether the tab came out clean — each save path clears the
+   * tab's dirty flag on success and logs + returns early on failure, so the flag is the honest signal.
+   */
+  const saveTabById = async (tabId: string): Promise<boolean> => {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    if (!tab) return false;
+    switch (tab.kind) {
+      case 'scene': return await saveCurrentScene();
+      case 'template': await saveTemplateTab(tabId); break;
+      case 'mesh': await saveMeshTab(tabId); break;
+      case 'material': saveMaterialTab(tabId); break;
+      case 'terrainMaterial': saveTerrainMaterialTab(tabId); break;
+      case 'script': saveScriptTab(tabId); break;
+      case 'animation': {
+        const reg = animationApplyRef.current;
+        if (!reg || reg.tabId !== tabId) return false;
+        reg.apply(); // writes the machine onto the source model, dirtying ITS tab
+        break;
       }
-      return ok;
-    } catch (e: any) {
-      Logger.error('Save failed: ' + (e?.message || e), 'Editor');
-      setSavingState('error');
-      task.setStep(0, { status: 'failed', error: String(e?.message || e) });
-      return false;
+    }
+    return !dirtyTabsRef.current[tabId];
+  };
+
+  const savingRef = useRef(false);
+
+  /**
+   * The one save runner: drives `tabIds` sequentially, one progress step each, and owns `savingState` (the
+   * Save button's label/icon). Every save entry point goes through here — a single asset, Save All, and the
+   * scene save that openScene runs — so they cannot drift or nest tasks inside one another.
+   *
+   * Each step races a 15s timeout as a defensive backstop, so a wedged serialize can never leave the UI
+   * stuck on "Saving…".
+   */
+  const runSave = async (tabIds: string[], title: string): Promise<boolean> => {
+    if (savingRef.current || !tabIds.length) return false;
+    const named = tabIds.map(id => ({ id, tab: tabsRef.current.find(t => t.id === id) }));
+    savingRef.current = true;
+    setSavingState('saving');
+    const task = startTask({
+      title,
+      steps: named.map(n => ({ name: n.tab?.title ?? 'Asset', status: 'pending' as const })),
+      cancellable: tabIds.length > 1,
+    });
+    let failed = 0;
+    try {
+      for (let i = 0; i < named.length; i++) {
+        if (task.cancelled) {
+          for (let j = i; j < named.length; j++) task.setStep(j, { status: 'skipped' });
+          failed++;
+          break;
+        }
+        task.setStep(i, { status: 'running', detail: named[i].tab ? KIND_LABEL[named[i].tab!.kind] : undefined });
+        try {
+          const ok = await Promise.race<boolean>([
+            saveTabById(named[i].id),
+            new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('Save timed out')), 15000)),
+          ]);
+          task.setStep(i, ok ? { status: 'done', detail: 'Saved' } : { status: 'failed', error: 'Save failed' });
+          if (!ok) failed++;
+        } catch (e: any) {
+          Logger.error(`Failed to save "${named[i].tab?.title}": ${e?.message || e}`, 'Editor');
+          task.setStep(i, { status: 'failed', error: String(e?.message || e) });
+          failed++;
+        }
+      }
+      setSavingState(failed ? 'error' : 'saved');
+      return failed === 0;
     } finally {
       task.finish();
+      savingRef.current = false;
       setTimeout(() => setSavingState('idle'), 2000);
     }
   };
+
+  const saveActiveTab = async (): Promise<boolean> => {
+    const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+    if (!tab) return false;
+    return runSave([tab.id], `Saving ${tab.title}`);
+  };
+
+  /**
+   * Save every tab with unsaved edits.
+   *
+   * Order is load-bearing. Animation applies run first — applying is what makes the source model's tab
+   * dirty, so it has to happen before we decide what to save. Then the leaf assets, then the meshes and
+   * templates that embed them, and the scene last: saveCurrentScene captures a content hash per referenced
+   * asset, and hashing a material we are about to rewrite would store a stale hash and cause a pointless
+   * resync on next open.
+   */
+  const saveAll = async (): Promise<void> => {
+    if (savingRef.current) return;
+
+    const live = animationApplyRef.current;
+    if (live && dirtyTabsRef.current[live.tabId]) live.apply();
+
+    const ORDER: Record<TabKind, number> = {
+      material: 0, terrainMaterial: 0, script: 0, animation: 0, mesh: 1, template: 2, scene: 3,
+    };
+    // Snapshot: propagation is suppressed and so cannot extend this set, but taking it up front also makes
+    // the loop finite by construction rather than by argument.
+    const targets = tabsRef.current
+      .filter(t => dirtyTabsRef.current[t.id])
+      .sort((a, b) => ORDER[a.kind] - ORDER[b.kind]);
+    if (!targets.length) return;
+    await runSave(targets.map(t => t.id), `Saving ${targets.length} asset${targets.length === 1 ? '' : 's'}`);
+  };
+
+  const saveProjectToStorage = (): Promise<boolean> => runSave([SCENE_TAB_ID], 'Saving scene');
 
   // ---- Scene assets (multi-scene project) ------------------------------------------------------
 
@@ -2257,6 +2530,28 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     void updateProjectMeta(m => ({ ...m, mainSceneId: sceneId }));
   };
 
+  /**
+   * A scene's camera rig, migrating on read: scenes authored before this was per-scene have no `dimension`,
+   * so they fall back to the old project-wide preference, then to 3D. The resolved value is persisted onto
+   * the scene by the next save (see saveCurrentScene).
+   */
+  const dimensionOfScene = (sceneId: string): '2D' | '3D' => {
+    const meta = projectMetaRef.current;
+    const scene = meta?.scenes.find(s => s.id === sceneId);
+    return scene?.dimension ?? meta?.prefs?.dimension ?? '3D';
+  };
+
+  const setSceneDimension = (sceneId: string, dimension: '2D' | '3D') => {
+    void updateProjectMeta(m => ({
+      ...m,
+      scenes: m.scenes.map(s => s.id === sceneId ? { ...s, dimension } : s),
+    }));
+    // Swap the live rig only when it's the scene on screen; the CHANGE_DIMENSION handler mirrors the value
+    // into dimensionRef, and the scene tab is the only one whose dimension is its own.
+    if (sceneId === openSceneIdRef.current) eventEmitter.current.emit('CHANGE_DIMENSION', dimension);
+    markTabDirty(SCENE_TAB_ID);
+  };
+
   /** Delete a scene asset. Returns null on success, or the reason it is not allowed. */
   const deleteScene = async (sceneId: string): Promise<string | null> => {
     const meta = projectMetaRef.current;
@@ -2300,13 +2595,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!meta) return false;
     const entry = meta.scenes.find(s => s.id === sceneId);
     if (!entry) return false;
-    if (sceneId === openSceneIdRef.current) { setActiveTabId('main'); return true; }
+    if (sceneId === openSceneIdRef.current) { setActiveTabId(SCENE_TAB_ID); return true; }
 
     // Leave play mode first — play snapshots the open scene, and swapping it mid-run would leave the
     // engine driving a scene the editor no longer shows.
     if (startedRef.current) stopPlay();
 
-    if (mainDirtyRef.current) {
+    if (dirtyTabsRef.current[SCENE_TAB_ID]) {
       const current = meta.scenes.find(s => s.id === openSceneIdRef.current);
       const decision = await confirmUnsavedScene(current?.name ?? 'current scene');
       if (decision === 'cancel') return false;
@@ -2317,7 +2612,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // was never written (e.g. a fresh "Main" before its first save) opens empty.
     const data = (await loadSceneData(sceneId)) ?? { ...(await buildEmptySceneData()), savedAt: Date.now() };
 
-    setActiveTabId('main');
+    setActiveTabId(SCENE_TAB_ID);
     // Animation tabs cloned their model out of the outgoing scene; their write-back target is about
     // to disappear, so close them (batched — repeated removeTabById calls would each see stale tabs).
     const staleTabs = tabs.filter(t => t.kind === 'animation' && tabRuntimeRef.current.get(t.id)?.sourceScene === editorSceneRef.current);
@@ -2328,11 +2623,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
       const staleIds = new Set(staleTabs.map(t => t.id));
       setTabs(prev => prev.filter(t => !staleIds.has(t.id)));
-      setDirtyTabs(prev => {
-        const next = { ...prev };
-        for (const id of staleIds) delete next[id];
-        return next;
-      });
+      for (const id of staleIds) clearTabDirty(id);
     }
 
     // Tear down per-scene editor state.
@@ -2356,12 +2647,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     showBindPoseForSkinnedModels(scene);
 
     await updateProjectMeta(m => ({ ...m, openSceneId: sceneId }));
-    setMainDirty(false);
-    mainDirtyRef.current = false;
+    clearTabDirty(SCENE_TAB_ID);
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
-    // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls.
-    eventEmitter.current.emit('CHANGE_DIMENSION', dimensionRef.current);
+    // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls — with
+    // the INCOMING scene's rig, not the outgoing one's, now that each scene carries its own.
+    eventEmitter.current.emit('CHANGE_DIMENSION', dimensionOfScene(sceneId));
     requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
     Logger.info(`Opened scene "${entry.name}"`, 'Editor');
     return true;
@@ -2407,6 +2698,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (data) {
         applyGameData(data, { ...engineMaps(), scene: editorSceneRef.current, setUI: setUiState, renderer: instanceRef.current?.renderer });
         ensureEditorCamera(editorSceneRef.current);
+        // Stash the hashes for the deferred initial resync — the libraries have not been read yet, so it
+        // cannot happen here. See the initial-resync effect.
+        initialAssetHashesRef.current = { hashes: data.assetHashes };
       } else {
         // No scene has a saved blob yet (fresh meta, or blobs lost) — open the target empty.
         createEmptyScene(editorSceneRef.current);
@@ -2473,8 +2767,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
           eventEmitter.current.emit('TEXTURES_CHANGED');
           eventEmitter.current.emit('SCENE_CHANGED');
-          // Drive the initial camera dimension now that the scene is live (restored pref, else 3D).
-          eventEmitter.current.emit('CHANGE_DIMENSION', prefs?.dimension ?? '3D');
+          // Drive the initial camera dimension now that the scene is live (the open scene's own rig,
+          // falling back to the legacy project-wide pref, else 3D).
+          eventEmitter.current.emit('CHANGE_DIMENSION', dimensionOfScene(openSceneIdRef.current));
 
           setLoadingProgress({ loaded: 6, total: 6, label: 'Ready' });
         } finally {
@@ -2499,7 +2794,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // (Terrain-)material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
       if (isPlayMode || !activeScene || editorMode === 'material' || editorMode === 'terrainMaterial') return;
       suppressReconcileRef.current = true;
-      try { reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current); }
+      // withoutDirty as well as suppressReconcileRef: the latter only stops the reconciler re-triggering
+      // ITSELF, while the light icons and gizmo helpers it splices in emit SCENE_CHANGED like any other
+      // node edit and would otherwise read as unsaved work. They are editor bookkeeping, never the user's
+      // change, so they must not dirty the tab at any time — not merely inside an opening settle window.
+      try { withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current)); }
       finally { suppressReconcileRef.current = false; }
     };
     const schedule = () => {
@@ -2522,7 +2821,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
       if (!instanceRef.current) return;
       // Only the Main tab's dimension is persisted; template tabs render transiently in 3D.
-      if (activeTabKindRef.current === 'main') dimensionRef.current = dimension;
+      if (activeTabKindRef.current === 'scene') dimensionRef.current = dimension;
 
       // Wait for scene to be ready
       if (!instanceRef.current.scene) {
@@ -2534,7 +2833,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
 
       // change camera to 2D
-      let cameraNode = instanceRef.current.scene.activeCamera;
+      // `const`, not `let`: it is never reassigned, and const is what lets the null-guard below narrow
+      // it inside the onUpdate closures too (a captured `let` could be reassigned, so TS re-widens it).
+      const cameraNode = instanceRef.current.scene.activeCamera;
+      // Scene.activeCamera is undefined when no camera is active — nothing to reconfigure.
+      if (!cameraNode) return;
       if (dimension === '2D') {
         cameraNode.camera.type = 'orthographic';
         cameraNode.camera.top = 4;
@@ -2908,9 +3211,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setActiveTab,
       closeTab,
       reorderTabs,
-      saveActiveTemplate,
-      saveActiveMaterial,
-      saveActiveTerrainMaterial,
+      saveActiveTab,
+      saveAll,
+      registerAnimationApply,
       enterTemplateEditor,
       editingTemplateName,
       templateRootId,
@@ -2963,7 +3266,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       detachScriptFromNode,
       saveScriptSource,
       enterScriptEditor,
-      saveActiveScript,
       setScriptTabSource,
       getScriptTabSource,
       meshes,
@@ -2971,7 +3273,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       removeMesh,
       updateMesh,
       enterMeshEditor,
-      saveActiveMesh,
       meshSession: activeTab.kind === 'mesh' ? (meshSessions[activeTab.id] ?? null) : null,
       meshEditTargetId: activeTab.kind === 'mesh' && meshSessions[activeTab.id]
         ? meshSessions[activeTab.id].levelIds[meshSessions[activeTab.id].activeLevel] ?? null
@@ -2993,20 +3294,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       pendingAnimationImport,
       resolveAnimationImport,
       replaceProjectMeta,
-      saveProject: saveProjectToStorage,
       savingState,
       sceneList,
       mainSceneId,
       openSceneId,
-      mainDirty,
+      mainDirty: !!dirtyTabs[SCENE_TAB_ID],
       openScene,
       createScene,
       renameScene,
       deleteScene,
       duplicateScene,
       setMainScene,
+      // Reads sceneList so the control re-renders on change; dimensionOfScene reads the meta ref.
+      sceneDimension: sceneList.find(s => s.id === openSceneId)?.dimension ?? projectMetaRef.current?.prefs?.dimension ?? '3D',
+      setSceneDimension,
       pendingSceneConfirm,
       resolveSceneConfirm,
+      markTabDirty,
+      clearTabDirty,
+      withoutDirty,
     }}>
     {props.children}
   </EngineContext.Provider>

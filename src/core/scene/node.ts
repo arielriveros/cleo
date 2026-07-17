@@ -467,11 +467,54 @@ export class Node {
   // Script handlers, declared as overridable methods so a class-based script (`class X extends Node`) can
   // override them with matching signatures. `this` IS the node, so there is no `node` self-parameter.
   // attachScriptFactory/attachClassScript install a script's handlers as own-properties shadowing these.
+
+  /**
+   * Called once when the scene starts, or immediately on `addChild` if the scene is already running.
+   * Runs after {@link onSpawn} and after node variables and script fields are restored, so it is the
+   * first place both are safe to read.
+   *
+   * May be `async` — use {@link wait} to sequence over game time. Throwing is contained: the error is
+   * logged and the rest of the scene still starts.
+   */
   public onStart(): void {}
+
+  /**
+   * Called the moment this node is attached to a parent, before {@link onStart}. Fires on re-parenting
+   * as well as on first spawn, so it may run more than once in a node's lifetime — put one-time setup
+   * in {@link onStart} instead.
+   */
   public onSpawn(): void {}
+
+  /**
+   * Called every frame while the scene is running and unpaused.
+   *
+   * @param delta Seconds since the previous frame. Multiply per-second rates by this — never assume a
+   *              fixed frame time.
+   * @param time  Seconds of unpaused game time since the scene started.
+   */
   public onUpdate(delta: number, time: number): void {}
+
+  /**
+   * Called when this node's rigid body begins touching another body. Requires a {@link body} on both
+   * nodes — two nodes without bodies never collide.
+   *
+   * @param other The node owning the other body in the contact.
+   */
   public onCollision(other: Node): void {}
+
+  /**
+   * Called while another node's body overlaps this node's {@link trigger} volume. Unlike
+   * {@link onCollision} this fires for a non-solid region and does not impart forces.
+   *
+   * @param other The node that entered the trigger volume.
+   */
   public onTrigger(other: Node): void {}
+
+  /**
+   * Called when this node is removed from the scene, via {@link remove} or a parent's removal.
+   * Pending {@link after}/{@link every} timers are cancelled around this call, so it is a safe place
+   * to release anything the node owns. Re-parenting does NOT fire this.
+   */
   public onDespawn(): void {}
 
   constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
@@ -501,6 +544,15 @@ export class Node {
     this._visible = true;
   }
 
+  /**
+   * Attaches `node` as a child of this one, detaching it from its previous parent first. Re-parenting
+   * this way fires {@link onSpawn} but not {@link onDespawn}.
+   *
+   * Fires the child's {@link onStart} immediately if this node has already started, so a node spawned
+   * mid-game is initialized on attach rather than waiting for the next scene start.
+   *
+   * The child keeps its *local* transform, so its world position moves with the new parent.
+   */
   public addChild(node: Node): void {
     // if the node already has a parent, remove it from the parent's children
     if (node.parent) {
@@ -523,6 +575,14 @@ export class Node {
     CleoEngine.eventEmitter.emit('SCENE_CHANGED');
   }
 
+  /**
+   * Detaches `node` from this node's children.
+   *
+   * @param node     The child to detach. Must actually be a child of this node.
+   * @param reparent Pass `true` only when moving the node elsewhere in the tree: it suppresses
+   *                 {@link onDespawn} and keeps the node's pending timers alive. The default `false`
+   *                 treats the detach as a despawn.
+   */
   public removeChild(node: Node, reparent: boolean = false): void {
     if (!reparent) {
       // Before onDespawn, and before `scene` is cleared below: a pending this.after/this.every must not
@@ -536,6 +596,11 @@ export class Node {
     CleoEngine.eventEmitter.emit('SCENE_CHANGED');
   }
 
+  /**
+   * Finds this node's *direct* children with the given name. Does not search grandchildren.
+   *
+   * @returns Every matching child — names are not unique. Empty if none match.
+   */
   public getChildByName(name: string): Node[] {
     const nodes: Node[] = [];
     for (const child of this._children)
@@ -544,6 +609,11 @@ export class Node {
     return nodes;
   }
 
+  /**
+   * Finds a *direct* child by its unique id. Does not search grandchildren.
+   *
+   * @returns The child, or `null` if this node has no direct child with that id.
+   */
   public getChildById = (id: string): Node | null => {
     for (const child of this._children)
       if (child.id === id)
@@ -551,6 +621,18 @@ export class Node {
     return null;
   }
 
+  /**
+   * Recomposes this node's local transform from its position/rotation/scale, concatenates it with
+   * the parent's world transform, and recurses into every descendant.
+   *
+   * The scene drives this each frame; call it directly only when you have moved a node and must read a
+   * world-space value (`worldPosition`, `worldQuaternion`, `getBoundingSphere`) before the next frame.
+   * It walks the whole subtree, so it is not free on deep hierarchies.
+   *
+   * @param parentWorldTransform The parent's world matrix, or `null` to treat this node as a root.
+   *                             Passing `null` for a node that *does* have a parent silently detaches
+   *                             it from that parent's transform.
+   */
   public updateTransforms(parentWorldTransform: mat4 | null = null): void {
     // Update local transform
     mat4.fromRotationTranslationScale(this._localTransform, this._quaternion, this._position, this._scale);
@@ -757,7 +839,10 @@ export class Node {
     }
 
     if (json.body) {
-      node.setBody(
+      // setBody/setTrigger return the body they just created, so the shapes go straight onto that rather
+      // than re-reading node._body — which is typed nullable and which the checker cannot know was just
+      // assigned by the call above.
+      setShapes(json.body.shapes, node.setBody(
         json.body.mass,
         json.body.linearDamping,
         json.body.angularDamping,
@@ -766,14 +851,11 @@ export class Node {
         // Absent in scenes saved before surfaces existed; RigidBody defaults them to the old behavior.
         json.body.friction,
         json.body.restitution
-      );
-      setShapes(json.body.shapes, node._body);
+      ));
     }
 
-    if (json.trigger) {
-      node.setTrigger();
-      setShapes(json.trigger.shapes, node._trigger);
-    }
+    if (json.trigger)
+      setShapes(json.trigger.shapes, node.setTrigger());
 
     if (json.children) {
       for (const child of json.children) {
@@ -811,7 +893,9 @@ export class Node {
     Node._commonParse(node, parent, json);
   }
 
+  /** This node's unique id. Stable across serialization; assigned once at construction. */
   public get id(): string { return this._id; }
+  /** This node's display name. Not unique — several nodes may share one. */
   public get name(): string { return this._name; }
   public set name(name: string) {
     this._name = name;
@@ -819,8 +903,20 @@ export class Node {
     // exactly like the visible setter already invalidates scene-derived state below.
     CleoEngine.eventEmitter.emit('SCENE_CHANGED');
   }
+  /**
+   * Sets the parent pointer *only* — it does not move the node in the tree. Use {@link addChild} to
+   * actually re-parent; assigning this directly will desynchronize the parent's child list.
+   */
   public set parent(node: Node | null) { this._parent = node; }
+  /** This node's parent, or `null` if it is a scene root or detached. */
   public get parent(): Node | null { return this._parent; }
+  /**
+   * This node's direct children.
+   *
+   * Returns the **live internal array**, not a copy — mutating it bypasses {@link addChild} /
+   * {@link removeChild} and their lifecycle and scene bookkeeping. Treat it as read-only, and copy it
+   * before iterating if the loop body may add or remove children.
+   */
   public get children(): Node[] { return this._children; }
   // --- Custom variables -------------------------------------------------------------------------
   public get variables(): Map<string, NodeVariable> { return this._variables; }
@@ -890,9 +986,23 @@ export class Node {
   public get hasStarted(): boolean { return this._hasStarted; }
   public get markForRemoval(): boolean { return this._markForRemoval; }
 
+  /**
+   * This node's transform relative to its parent. Live reference — read-only in practice; it is
+   * recomposed from position/rotation/scale on every {@link updateTransforms}, so writes are lost.
+   */
   public get localTransform(): mat4 { return this._localTransform; }
+  /**
+   * This node's transform in world space. Live reference, recomputed by {@link updateTransforms} —
+   * stale until then if you have just moved the node.
+   */
   public get worldTransform(): mat4 { return this._worldTransform; }
 
+  /**
+   * Unit +Z axis of this node's **local** rotation, ignoring any parent. For the direction the node
+   * actually faces in the world, use {@link worldForward}.
+   *
+   * Allocates a new vector on every read — hoist it out of hot loops.
+   */
   public get forward(): vec3 {
     let forward = vec3.fromValues(0, 0, 1);
     vec3.transformMat4(forward, forward, this._rotationMatrix);
@@ -900,21 +1010,49 @@ export class Node {
     return forward;
   }
 
+  // The four world-space getters below share one contract: each returns the LIVE cached vector, filled
+  // lazily on first read after a transform change. Never mutate what they return, and never hold the
+  // reference across a frame — the cache is rewritten in place, so a stored reference silently changes
+  // value underneath you. Copy (`vec3.clone`) if you need either.
+
+  /**
+   * This node's position in world space, with every ancestor transform applied.
+   *
+   * Live cached reference — do not mutate, and copy it if you need to keep it. To *move* the node, set
+   * {@link position} (local space); there is no world-space position setter.
+   */
   public get worldPosition(): vec3 {
     if (this._worldCacheDirty) this._updateWorldCache();
     return this._worldPosition;
   }
 
+  /**
+   * This node's orientation in world space, normalized and correct under non-uniform ancestor scale
+   * (the scale is divided out of the basis before extraction — see `_updateWorldCache`).
+   *
+   * Live cached reference — do not mutate, and copy it if you need to keep it.
+   */
   public get worldQuaternion(): quat {
     if (this._worldCacheDirty) this._updateWorldCache();
     return this._worldQuaternion;
   }
 
+  /**
+   * This node's accumulated scale in world space (its own scale times every ancestor's).
+   *
+   * Live cached reference — do not mutate, and copy it if you need to keep it.
+   */
   public get worldScale(): vec3 {
     if (this._worldCacheDirty) this._updateWorldCache();
     return this._worldScale;
   }
 
+  /**
+   * Unit +Z axis of this node's world orientation — the direction it actually faces in the scene.
+   * Prefer this over {@link forward}, which ignores parent transforms.
+   *
+   * Live cached reference — do not mutate, and copy it if you need to keep it.
+   */
   public get worldForward(): vec3 {
     if (this._worldCacheDirty) this._updateWorldCache();
     return this._worldForward;
@@ -1102,6 +1240,7 @@ export class Node {
     mat4.fromScaling(this._scaleMatrix, this._scale);
   }
 
+  /** This node's rigid body, or `null` if it has none. See {@link setBody}. */
   public get body(): RigidBody | null { return this._body; }
 
   /**
@@ -1163,6 +1302,28 @@ export class Node {
     this._body?.velocity.set(value[0], value[1], value[2]);
   }
 
+  /**
+   * Gives this node a rigid body, created at its current world position and orientation, and wires
+   * {@link onCollision}. The body drives the node's transform from here on.
+   *
+   * Note the body is built from the node's world transform at call time, so set the node's transform
+   * *before* calling this. Only meaningful on root-level nodes today — a body on a child node does not
+   * track its parent's transform.
+   *
+   * @param mass              Kilograms. `0` makes the body static: immovable, but still collidable.
+   * @param linearDamping     Fraction of linear velocity bled off per second (0 = none, 1 = frozen).
+   * @param angularDamping    Fraction of angular velocity bled off per second.
+   * @param linearConstraints Per-axis `[x, y, z]` multipliers on linear motion; `0` locks the axis,
+   *                          `1` leaves it free. `[1, 1, 0]` confines the body to the XY plane.
+   * @param angularConstraints Per-axis multipliers on rotation; `[0, 1, 0]` yaw-only, the usual
+   *                          setup for an upright character that must not topple.
+   * @param friction          Surface grip, default `0.3`. On contact the pair combines with `min`, so
+   *                          the *slipperier* surface wins — a 0.3 body still slides on a 1.0 floor.
+   *                          Use `0` for a character whose script owns its own speed.
+   * @param restitution       Bounciness, default `0`. Combines with `max`, so the *bouncier* surface
+   *                          wins: `0` absorbs the impact, `1` rebounds at the speed it landed.
+   * @returns The new body, also available afterwards as {@link body}.
+   */
   public setBody(
     mass: number,
     linearDamping?: number,
@@ -1193,8 +1354,16 @@ export class Node {
     return this._body;
   }
 
+  /** This node's trigger volume, or `null` if it has none. See {@link setTrigger}. */
   public get trigger(): Trigger | null { return this._trigger; }
-  public setTrigger(): void {
+  /**
+   * Turns this node into a non-solid trigger volume, created at its current world transform and wired
+   * to {@link onTrigger}. Bodies pass straight through it — nothing is pushed — which is what makes it
+   * the tool for checkpoints, pickups and detection zones rather than {@link setBody}.
+   *
+   * @returns The new trigger, also available afterwards as {@link trigger}.
+   */
+  public setTrigger(): Trigger {
     this._trigger = new Trigger({
       position: this.worldPosition,
       quaternion: this.worldQuaternion
@@ -1206,15 +1375,38 @@ export class Node {
         this.onTrigger(event.body.owner);
     });
 
+    return this._trigger;
   }
 
+  // These four return the node's LIVE internal vectors, so writing through them —
+  // `node.position[0] += 1` — skips the bookkeeping the setters do: the translation/rotation/scale
+  // matrix is not recomposed and the change is never pushed into the physics body, leaving the node
+  // and its collider disagreeing about where it is. Read through them; write with setPosition/
+  // setRotation/setQuaternion/setScale (or setX/addX/rotateY/...).
+
+  /** Local-space position, relative to the parent. Live reference — write with {@link setPosition}. */
   public get position(): vec3 { return this._position; }
+  /**
+   * Local-space rotation as Euler angles in radians `[pitch, yaw, roll]`.
+   * Live reference — write with {@link setRotation}.
+   */
   public get rotation(): vec3 { return this._euler; }
 
+  /**
+   * Local-space rotation as a quaternion — the gimbal-lock-free form of {@link rotation}.
+   * Live reference — write with {@link setQuaternion}.
+   */
   public get quaternion(): quat { return this._quaternion; }
+  /** Local-space scale. Live reference — write with {@link setScale}. */
   public get scale(): vec3 { return this._scale; }
+  /** This node's kind (`'node'`, `'model'`, `'light'`, ...). Fixed at construction. */
   public get nodeType(): string { return this._nodeType; }
+  /**
+   * Whether this node renders. Reflects both the authored flag and renderer-driven LOD/distance
+   * culling, so it can read `false` on a node you never hid — see {@link setLodVisible}.
+   */
   public get visible(): boolean { return this._visible && this._lodVisible; }
+  /** Sets authored visibility, recursively for every descendant. */
   public set visible(value: boolean) {
     this._visible = value;
     for (const child of this._children)

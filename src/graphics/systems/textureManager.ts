@@ -17,10 +17,18 @@ export class TextureManager {
         return TextureManager._instance;
     }
 
+    /**
+     * Registers a texture and returns the id it is stored under.
+     *
+     * @param id Optional id to store under. Omit to have one generated — in which case the returned id is
+     *           the ONLY handle to the texture, since nothing else knows the generated value.
+     */
     public addTexture(texture: Texture, id?: string): string {
         const identifier = id || uuidv4();
         this._textures.set(identifier, texture);
-        return id;
+        // `identifier`, not `id`: called without an id this used to return undefined, storing the texture
+        // under a generated uuid that the caller could then never look up.
+        return identifier;
     }
 
     public addTextureFromPath(path: string, config?: TextureConfig, id?: string): string {
@@ -190,10 +198,14 @@ export class TextureManager {
         return identifier;
     }
 
-    public getTexture(id: string): Texture {
-        const texture = this._textures.get(id);
-        if (!texture) return undefined;
-        return texture;
+    /**
+     * The texture registered under `id`, or undefined if there is none.
+     *
+     * Genuinely absent ids are routine, not exceptional: entries are dropped on every failure path (a
+     * 404ing source, a decode failure, `removeTexture`), so an id held elsewhere can go stale at any time.
+     */
+    public getTexture(id: string): Texture | undefined {
+        return this._textures.get(id);
     }
 
     /**
@@ -205,7 +217,7 @@ export class TextureManager {
      * (tens to hundreds of ms per texture) and inflated JPEGs several-fold by re-encoding them as PNG.
      * The canvas path remains only for path-loaded images, whose `src` is an http/relative URL.
      */
-    public serializeTexture(id: string): string {
+    public serializeTexture(id: string): string | undefined {
         const texture = this._textures.get(id);
         if (!texture) return undefined;
 
@@ -228,6 +240,10 @@ export class TextureManager {
         canvas.width = texture.width;
         canvas.height = texture.height;
         const ctx = canvas.getContext('2d');
+        // Only null under context loss / OOM, but that is exactly when a thrown TypeError would be least
+        // welcome. Bailing matches createFallbackTexture's handling of the same call, and every caller
+        // already treats an absent result as "nothing to embed".
+        if (!ctx) return undefined;
         ctx.drawImage(image, 0, 0);
 
         return canvas.toDataURL('image/png', 1.0);
@@ -263,6 +279,7 @@ export class TextureManager {
         return textures;
     }
 
+    /** The six faces as data URLs, or undefined if a 2D canvas context cannot be obtained. */
     public serializeCubeMap(texture: Texture): {
         positiveX: string,
         negativeX: string,
@@ -270,12 +287,15 @@ export class TextureManager {
         negativeY: string,
         positiveZ: string,
         negativeZ: string
-    } {
-        if (!texture) return undefined;
-
+    } | undefined {
         const base64Images = [];
 
         const canvas = document.createElement('canvas');
+        // Hoisted: it is the same canvas every iteration, so this was six identical getContext calls.
+        // Null only under context loss / OOM — bail rather than throw, as serializeTexture does.
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return undefined;
+
         const data = texture.data as CubemapFaces;
         const images = [
             data.posX,
@@ -289,7 +309,6 @@ export class TextureManager {
         for (let i = 0; i < images.length; i++) {
             canvas.width = images[i].width;
             canvas.height = images[i].height;
-            const ctx = canvas.getContext('2d');
             ctx.drawImage(images[i], 0, 0);
             base64Images.push(canvas.toDataURL('image/png', 1.0));
         }

@@ -158,7 +158,7 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
 }
 
 export default function DockLayout() {
-  const { eventEmitter, editorMode, isPlayMode } = useCleoEngine();
+  const { eventEmitter, editorMode, isPlayMode, withoutDirty } = useCleoEngine();
   const [api, setApi] = useState<DockviewApi | null>(null);
   // While a mode/play restriction hides panels, the full layout is stashed here and restored when
   // the restriction lifts; restricted layouts are never persisted (rearrangements made in a
@@ -244,7 +244,10 @@ export default function DockLayout() {
       if (tab === last) return;
       last = tab;
       eventEmitter.emit('EXPLORER_TAB', tab);
-      eventEmitter.emit(tab === 'UI' ? 'UI_CHANGED' : 'SCENE_CHANGED');
+      // A re-render nudge so the newly-visible inspector rebuilds — nothing in the scene actually changed.
+      // withoutDirty because SCENE_CHANGED doubles as the unsaved-edits signal: switching to an asset tab
+      // rearranges panels, which fires this, which would otherwise mark the tab being LEFT as dirty.
+      withoutDirty(() => eventEmitter.emit(tab === 'UI' ? 'UI_CHANGED' : 'SCENE_CHANGED'));
     };
     sync();
     const disposables = [api.onDidLayoutChange(sync), api.onDidActivePanelChange(sync)];

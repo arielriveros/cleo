@@ -16,7 +16,10 @@ interface ScheduledTimer {
 export class Scene {
     private _root: Node = new Node('root');
     private _nodes: Set<Node>;
-    private _cameras: Set<CameraNode>;
+    // Initialized here, not in the constructor — which assigns every other node set but happened to omit
+    // this one. Harmless only by accident: _dirty starts true, so the sole reader (activeCamera) always
+    // runs _breadthFirstTraversal -> _filterByType, which assigns it, first. Matches _lodGroups below.
+    private _cameras: Set<CameraNode> = new Set();
     private _lights: Set<LightNode>;
     private _models: Set<ModelNode>;
     private _sprites: Set<SpriteNode>;
@@ -375,12 +378,18 @@ export class Scene {
         return this._nodes;
     }
 
-    public get activeCamera(): CameraNode {
+    /**
+     * The first camera in the scene marked active, or `undefined` if there is none — an empty scene, or
+     * one whose cameras are all inactive. Callers must handle the absence; this signature previously
+     * claimed a `CameraNode` while falling through to `undefined`.
+     */
+    public get activeCamera(): CameraNode | undefined {
         if (this._dirty)
             this._breadthFirstTraversal();
         for (const camera of this._cameras)
             if (camera.active)
                 return camera;
+        return undefined;
     }
 
     public get lights(): Set<LightNode> {

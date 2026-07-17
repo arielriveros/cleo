@@ -21,6 +21,9 @@ import { hashAsset, assetHashKey, AssetLibs } from './assetHash'
 //
 // The same pass runs at publish time on each non-open scene (M4), so published closed scenes get the
 // propagation too.
+//
+// Pass ORDER matters: template/mesh instances are rebuilt wholesale from their stored subtree, so they run
+// first — anything rebuilt after the material/script passes would never be visited by them.
 
 export type ResyncMaps = {
   scripts: Map<string, string>
@@ -71,6 +74,36 @@ export function resyncScene(
   const terrainMatById = new Map(libs.terrainMaterials.map(t => [t.id, t]))
   const scriptById = new Map(libs.scripts.map(s => [s.id, s]))
 
+  // Template/mesh instances are rebuilt from their stored subtree, so they must run BEFORE the material and
+  // script passes: a subtree re-instantiated afterwards would never be visited by them and would keep
+  // whatever those passes were meant to replace. (instantiate* also resolves __materialId against the
+  // library as it builds, so a rebuilt subtree is already current — the ordering is what keeps the
+  // script/body/trigger passes honest for the nodes inside it.)
+
+  // --- Template instances ---
+  for (const node of Array.from(scene.nodes)) {
+    const tplId = node.getVariable(TEMPLATE_ID_VAR)
+    if (!tplId) continue
+    const asset = templateById.get(tplId)
+    if (!asset) { node.removeVariable(TEMPLATE_ID_VAR); changed = true; continue }
+    if (changedSince('template', tplId, hashAsset(asset))) {
+      reinstantiate(scene, node, maps, parent => instantiateTemplate(asset, parent, maps, libs.materials))
+      changed = true
+    }
+  }
+
+  // --- Mesh instances ---
+  for (const node of Array.from(scene.nodes)) {
+    const meshId = node.getVariable(MESH_ID_VAR)
+    if (!meshId) continue
+    const asset = meshById.get(meshId)
+    if (!asset) continue // a placed mesh with no source asset stays as-is (matches delete consequence)
+    if (changedSince('mesh', meshId, hashAsset(asset))) {
+      reinstantiate(scene, node, maps, parent => instantiateMeshAsset(asset, parent, libs.materials))
+      changed = true
+    }
+  }
+
   // --- Class scripts on placed nodes ---
   // Re-cache the (possibly edited) source into the per-node scripts map and reconcile native fields to the
   // current schema. A deleted script unlinks the node. Not gated by reinstantiate — scripts are patched in
@@ -112,30 +145,6 @@ export function resyncScene(
           changed = true
         }
       }
-    }
-  }
-
-  // --- Template instances ---
-  for (const node of Array.from(scene.nodes)) {
-    const tplId = node.getVariable(TEMPLATE_ID_VAR)
-    if (!tplId) continue
-    const asset = templateById.get(tplId)
-    if (!asset) { node.removeVariable(TEMPLATE_ID_VAR); changed = true; continue }
-    if (changedSince('template', tplId, hashAsset(asset))) {
-      reinstantiate(scene, node, maps, parent => instantiateTemplate(asset, parent, maps))
-      changed = true
-    }
-  }
-
-  // --- Mesh instances ---
-  for (const node of Array.from(scene.nodes)) {
-    const meshId = node.getVariable(MESH_ID_VAR)
-    if (!meshId) continue
-    const asset = meshById.get(meshId)
-    if (!asset) continue // a placed mesh with no source asset stays as-is (matches delete consequence)
-    if (changedSince('mesh', meshId, hashAsset(asset))) {
-      reinstantiate(scene, node, maps, parent => instantiateMeshAsset(asset, parent))
-      changed = true
     }
   }
 

@@ -50,7 +50,7 @@ const ScaleIcon = () => (
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            gizmoMode, setGizmoMode, templateRootId, meshEditTargetId, templates, meshes, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
+            gizmoMode, setGizmoMode, templateRootId, meshEditTargetId, templates, meshes, materials, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
     const { graphView, setGraphView } = useStateMachine();
     // The node graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D) has nothing to act on.
     const hideForGraph = editorMode === 'animation' && graphView;
@@ -349,7 +349,7 @@ export default function EngineViewport() {
                 return;
             }
             try {
-                const newId = instantiateMeshAsset(mesh, dropParent);
+                const newId = instantiateMeshAsset(mesh, dropParent, materials);
                 const node = editorScene.getNodeById(newId);
                 if (node && point) placeAt(node, point, dropParent);
                 eventEmitter.emit('TEXTURES_CHANGED');
@@ -367,7 +367,7 @@ export default function EngineViewport() {
         const template = templates.find(t => t.id === templateId);
         if (!template) return;
         try {
-            const newId = instantiateTemplate(template, dropParent, { scripts, bodies, triggers });
+            const newId = instantiateTemplate(template, dropParent, { scripts, bodies, triggers }, materials);
             const node = editorScene.getNodeById(newId);
             if (node && point) placeAt(node, point, dropParent);
             eventEmitter.emit('TEXTURES_CHANGED');

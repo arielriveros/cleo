@@ -151,9 +151,11 @@ export interface SkeletonOverlay {
 export class Renderer {
     private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
-    private _viewport: HTMLElement;
+    // Definite-assignment: set by the `viewport` setter during engine initialization, before any render.
+    private _viewport!: HTMLElement;
 
-    private _activeCamera: Camera;
+    // Definite-assignment: reassigned at the top of every render() from the scene's active camera.
+    private _activeCamera!: Camera;
 
     // Camera exposure, applied as a linear scale before the ACES tonemap in the final present. Default
     // ~2 compensates for the physically-correct Lambertian (albedo/PI) diffuse: it makes a white light
