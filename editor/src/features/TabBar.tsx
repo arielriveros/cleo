@@ -10,9 +10,9 @@ function tabAssetKind(kind: TabKind): AssetKind {
     case 'material': return 'material';
     case 'terrainMaterial': return 'terrainMaterial';
     case 'template': return 'template';
-    case 'mesh': return 'mesh';
+    case 'model': return 'model';
     case 'script': return 'script';
-    case 'animation': return 'mesh';
+    case 'animation': return 'model';
     default: return 'scene';
   }
 }

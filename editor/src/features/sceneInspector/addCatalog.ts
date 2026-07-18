@@ -43,14 +43,14 @@ import SkyAtmosphereIcon from '../../icons/sky-atmosphere.png'
 // drop into the viewport — the latter two only receive the item's `id` through a DataTransfer.
 export const NEW_NODE_MIME = 'text/cleo-new-node';
 
-export type AddCategory = 'common' | 'cameras' | 'lights' | 'sprites' | 'meshes' | 'environment';
+export type AddCategory = 'common' | 'cameras' | 'lights' | 'sprites' | 'primitives' | 'environment';
 
 export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
   { value: 'common', label: 'Common' },
   { value: 'cameras', label: 'Cameras' },
   { value: 'lights', label: 'Lights' },
   { value: 'sprites', label: 'Sprites' },
-  { value: 'meshes', label: 'Meshes' },
+  { value: 'primitives', label: 'Primitives' },
   { value: 'environment', label: 'Environ.' },
 ];
 
@@ -141,11 +141,11 @@ export const ADD_ITEMS: AddItem[] = [
   },
 
   {
-    id: 'cube', label: 'Cube', icon: CubeIcon, category: 'meshes',
+    id: 'cube', label: 'Cube', icon: CubeIcon, category: 'primitives',
     create: async () => new ModelNode('cube', new Model(Geometry.Cube(), Material.Default({}))),
   },
   {
-    id: 'sphere', label: 'Sphere', icon: SphereIcon, category: 'meshes',
+    id: 'sphere', label: 'Sphere', icon: SphereIcon, category: 'primitives',
     create: async () => {
       const sphereNode = new ModelNode('sphere', new Model(Geometry.Sphere(), Material.Default({})));
       sphereNode.setUniformScale(0.5);
@@ -153,7 +153,7 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
   {
-    id: 'cylinder', label: 'Cylinder', icon: CylinderIcon, category: 'meshes',
+    id: 'cylinder', label: 'Cylinder', icon: CylinderIcon, category: 'primitives',
     create: async () => {
       const cylinderNode = new ModelNode('cylinder', new Model(Geometry.Cylinder(16), Material.Default({})));
       cylinderNode.setScale([0.5, 1, 0.5]);
@@ -161,7 +161,7 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
   {
-    id: 'plane', label: 'Plane', icon: PlaneIcon, category: 'meshes',
+    id: 'plane', label: 'Plane', icon: PlaneIcon, category: 'primitives',
     create: async () => new ModelNode('plane', new Model(Geometry.Quad(), Material.Default({}, { side: 'double' }))),
   },
 

@@ -25,6 +25,9 @@ class GLStateCache {
     }
 
     public get currentProgram(): WebGLProgram | null { return this._program; }
+    /** The VAO this cache believes is bound. Needed so an owner deleting one can invalidate the cache —
+     *  a deleted VAO left here would make the next bind of that same handle a silent no-op. */
+    public get currentVAO(): WebGLVertexArrayObject | null { return this._vao; }
 
     public bindVAO(vao: WebGLVertexArrayObject | null): void {
         if (this._vao !== vao) {

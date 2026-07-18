@@ -4,12 +4,18 @@
 # and are therefore restricted to same-repo PRs — which means fork PRs currently run no checks at all.
 # This job touches no secrets, so it runs for forks too and closes that hole.
 #
-# Deliberately does NOT build. Both steps are independent of dist/: typecheck is `tsc --noEmit`, and the
-# test suite is pure (node env, no DOM, no GL). Keeping the gate fast is what keeps it from being ignored.
+# The engine job deliberately does NOT build: typecheck is `tsc --noEmit` and the test suite is pure
+# (node env, no DOM, no GL), so neither needs dist/. Keeping it fast is what keeps it from being ignored.
 #
-# Engine only for now — the editor is never typechecked (its webpack uses babel, which strips types
-# without checking them) despite being `strict: true`. Adding `tsc --noEmit -p editor/tsconfig.json` here
-# is a one-line follow-up once the in-flight editor work lands.
+# The editor job is the one that has to build, because `dist/` is gitignored and the editor consumes the
+# engine through it (`"cleo": "file:../dist"`). Without that build there is nothing for it to typecheck
+# against. It is a separate job so a broken editor cannot mask a broken engine, and so the fast engine
+# feedback is not held behind the slow build.
+#
+# Why the editor job matters at all: its webpack goes through babel-loader, which STRIPS TypeScript types
+# without checking them — so despite `"strict": true`, nothing verified the editor until this ran. It is
+# also the only automated thing that can catch a regression in the engine's emitted .d.ts, which the
+# editor compiles against in strict mode.
 name: CI
 
 on:
@@ -39,3 +45,29 @@ jobs:
 
       - name: Test
         run: npm test
+
+  editor:
+    name: Typecheck editor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # dist/ is untracked, and editor/node_modules/cleo symlinks to it — so the engine must be built
+      # before the editor can resolve, let alone typecheck against, it.
+      - name: Build engine (editor resolves cleo -> ../dist)
+        run: npm run build:dev
+
+      - name: Install editor deps
+        run: npm ci
+        working-directory: editor
+
+      - name: Typecheck editor
+        run: npm run typecheck
+        working-directory: editor

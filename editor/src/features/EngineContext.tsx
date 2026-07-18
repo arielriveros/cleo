@@ -7,27 +7,28 @@ import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
 import { createAnimationEditorScene } from './demoScene/createAnimationEditorScene';
-import { applyPreviewEnvironment } from './demoScene/previewEnvironment';
+import { createAssetEditScene } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
 import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
-import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback } from "../utils/materials";
+import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback, resolveMaterialRefs } from "../utils/materials";
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
-import { buildFoliageRuleFromMeshAsset } from "../utils/foliageRules";
-import { MeshAsset, MeshLodDef, MESH_ID_VAR, buildMeshAsset, instantiateMeshAsset, separateSubMeshes, nodeJsonHasSkinnedModel } from "../utils/meshes";
+import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
-  renderMeshAssetThumbnail, renderMaterialAssetThumbnail, renderTerrainMaterialAssetThumbnail,
-} from "../utils/meshThumbnails";
-import { parseBundleToRoot } from "../utils/meshImport";
+  renderModelAssetThumbnail, renderMaterialAssetThumbnail, renderTerrainMaterialAssetThumbnail,
+  setThumbnailDirtySuppressor,
+} from "../utils/modelThumbnails";
+import { parseBundleToRoot } from "../utils/modelImport";
 import { detectMissingTextures } from "../utils/textureRefs";
 
 // A mesh awaiting user review in the import modal (parsed but not yet committed to the library).
-export type PendingMeshImportView = {
+export type PendingModelImportView = {
   bundleName: string;
   subMeshCount: number;
   materialCount: number;
@@ -35,27 +36,27 @@ export type PendingMeshImportView = {
   sizeRadius: number;     // combined bounding radius at scale 1 (diameter = 2*radius)
 };
 // The user's decision from the import modal.
-export type MeshImportDecision = {
+export type ModelImportDecision = {
   extraFiles: File[];     // textures uploaded to fill missing references (aliased to expected names)
   normalize: boolean;
   targetSize: number;     // desired bounding diameter in world units
-  /** Split the file's sub-meshes into one MeshAsset each, instead of a single asset for the whole file. */
+  /** Split the file's sub-models into one ModelAsset each, instead of a single asset for the whole file. */
   separate: boolean;
 };
 
 // ---- Import progress -------------------------------------------------------------------------------
-// Every step importMeshFiles walks a bundle through, in order. These map onto the shared progress store's
+// Every step importModelFiles walks a bundle through, in order. These map onto the shared progress store's
 // generic steps (features/progress) — the stage a bundle is in IS what the user is told, so the window
 // cannot drift from what the importer is actually doing.
 type ImportStage =
   | 'queued'       // not started
   | 'parsing'      // Loader: assimp/GLTF parse of the model files
-  | 'review'       // parked on the user in MeshImportModal (indefinite — the bar deliberately stalls)
+  | 'review'       // parked on the user in ModelImportModal (indefinite — the bar deliberately stalls)
   | 'reparsing'    // user supplied missing textures; parse again so they wire into the materials
   | 'scaling'      // normalizeRootScale bakes the fit-to-size factor into the vertices
   | 'textures'     // waiting on async image decode before anything can be serialized
   | 'materials'    // registering a MaterialAsset per unique material
-  | 'saving'       // buildMeshAsset: serialize the subtree(s) into the mesh library
+  | 'saving'       // buildModelAsset: serialize the subtree(s) into the model library
   | 'done'
   | 'failed'
   | 'skipped';     // cancelled before it ran
@@ -91,7 +92,7 @@ import {
 import { resyncScene } from "../utils/sceneResync";
 import { buildAssetHashes, AssetLibs } from "../utils/assetHash";
 import {
-  collectReferencedMaterialIds, collectReferencedMeshIds, collectReferencedTemplateIds,
+  collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
 } from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
@@ -218,7 +219,7 @@ function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefO
   }, [key, value, loaded]);
 }
 
-export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'mesh' | 'script';
+export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'model' | 'script';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -226,13 +227,14 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef). `editorMode` is derived from the active tab (see EngineProvider).
 //
-// A 'mesh' tab is an edit session for an imported mesh asset: one subtree per LOD level in a throwaway
-// scene (materials/transforms/sub-meshes edited via the normal Scene + Properties panels, LOD/cull via
-// the Mesh inspector), saved back to the library with Save Mesh and propagated to placed copies.
+// A 'model' tab is an edit session for an imported model asset: one subtree per LOD level in a throwaway
+// scene (the model's parts, transforms and material edited via the normal Scene + Properties panels,
+// LOD/cull via the Model inspector), saved back to the library and propagated to placed copies. Parts
+// added here adopt the model's material — see adoptModelMaterial (models.ts) for why.
 // Opening one also renders the asset's thumbnail (imports don't — that used to stall the main thread).
 // A 'script' tab is a dedicated code editor for a Script asset (no 3D scene): the full-panel editor renders
 // over the viewport, with a Save Script action. Its working source buffers per-tab until saved.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'mesh' | 'script';
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'model' | 'script';
 
 /**
  * The scene tab's id — a fixed sentinel, unlike the library tabs' random ids.
@@ -251,15 +253,20 @@ export const KIND_LABEL: Record<TabKind, string> = {
   material: 'Material',
   terrainMaterial: 'Terrain material',
   animation: 'Animation',
-  mesh: 'Mesh',
+  model: 'Model',
   script: 'Script',
 };
 
 // Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
 // node id of LOD level i's root inside the tab scene; distances[i] is the camera distance where level i
 // takes over (distances[0] is always 0).
-export type MeshEditSession = {
+export type ModelEditSession = {
+  /** Root node id per level in the edit scene. Index 0 is the mesh itself; 1..n are previews of the
+   *  referenced LOD assets, shown so the user can compare them but not authored here. */
   levelIds: string[];
+  /** The LOD definition behind each extra level, aligned to `levelIds[i + 1]`. Normally a `modelId`
+   *  reference; a legacy embedded level is carried through unchanged so saving cannot drop it. */
+  lodRefs: ModelLodDef[];
   distances: number[];
   cullDistance: number;
   activeLevel: number;
@@ -274,7 +281,7 @@ export interface EditorTab {
   materialId?: string | null; // material tabs: source material asset id, null = unsaved new material
   terrainMaterialId?: string | null; // terrain-material tabs: source terrain-material asset id
   animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
-  meshId?: string | null; // mesh tabs: the previewed mesh asset id
+  modelId?: string | null; // mesh tabs: the previewed mesh asset id
   scriptId?: string | null; // script tabs: the edited script asset id
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
@@ -396,28 +403,29 @@ const EngineContext = createContext<{
   /** The buffered working source for a script tab, or undefined. */
   getScriptTabSource: (scriptId: string) => string | undefined;
   // Mesh assets (imported models)
-  meshes: MeshAsset[];
-  addMesh: (m: MeshAsset) => void;
-  removeMesh: (id: string) => void;
-  updateMesh: (id: string, m: MeshAsset) => void;
-  /** Open (or focus) a mesh asset's edit tab, rendering its thumbnail on the way in. */
-  enterMeshEditor: (meshId?: string) => void;
+  models: ModelAsset[];
+  addModel: (m: ModelAsset) => void;
+  removeModel: (id: string) => void;
+  updateModel: (id: string, m: ModelAsset) => void;
+  /** Open (or focus) a model asset's edit tab, rendering its thumbnail on the way in. */
+  enterModelEditor: (modelId?: string) => void;
   // Mesh editor (active mesh tab): LOD/cull authoring + save-and-propagate
-  meshSession: MeshEditSession | null;
-  /** Node id of the active LOD level's root in the mesh tab scene (viewport drop parent), or null. */
-  meshEditTargetId: string | null;
-  setActiveMeshName: (name: string) => void;
-  addMeshLodFromFiles: (files: File[]) => Promise<void>;
-  removeMeshLod: (level: number) => void;
-  setMeshLodDistance: (level: number, distance: number) => void;
-  setMeshCullDistance: (distance: number) => void;
-  setActiveMeshLevel: (level: number) => void;
-  importMeshFiles: (files: File[]) => Promise<void>;
+  modelSession: ModelEditSession | null;
+  /** Node id of the active LOD level's root in the model tab scene (viewport drop parent), or null. */
+  modelEditTargetId: string | null;
+  setActiveModelName: (name: string) => void;
+  /** Add an existing mesh asset as the next LOD level (levels are references, not copies). */
+  addModelLodFromAsset: (modelId: string) => void;
+  removeModelLod: (level: number) => void;
+  setModelLodDistance: (level: number, distance: number) => void;
+  setModelCullDistance: (distance: number) => void;
+  setActiveModelLevel: (level: number) => void;
+  importModelFiles: (files: File[]) => Promise<void>;
   // True once every IndexedDB-backed asset library has finished its initial read.
   assetsLoaded: boolean;
   // Mesh import review modal
-  pendingMeshImport: PendingMeshImportView | null;
-  resolveMeshImport: (decision: MeshImportDecision | null) => void;
+  pendingModelImport: PendingModelImportView | null;
+  resolveModelImport: (decision: ModelImportDecision | null) => void;
   // Live model-import progress (null when there is no run and nothing left to report)
   // Animation import (into the Animation Editor's model)
   importAnimationFiles: (files: File[]) => Promise<void>;
@@ -533,23 +541,23 @@ const EngineContext = createContext<{
     enterScriptEditor: () => {},
     setScriptTabSource: () => {},
     getScriptTabSource: () => undefined,
-    meshes: [],
-    addMesh: () => {},
-    removeMesh: () => {},
-    updateMesh: () => {},
-    enterMeshEditor: () => {},
-    meshSession: null,
-    meshEditTargetId: null,
-    setActiveMeshName: () => {},
-    addMeshLodFromFiles: async () => {},
-    removeMeshLod: () => {},
-    setMeshLodDistance: () => {},
-    setMeshCullDistance: () => {},
-    setActiveMeshLevel: () => {},
-    importMeshFiles: async () => {},
+    models: [],
+    addModel: () => {},
+    removeModel: () => {},
+    updateModel: () => {},
+    enterModelEditor: () => {},
+    modelSession: null,
+    modelEditTargetId: null,
+    setActiveModelName: () => {},
+    addModelLodFromAsset: () => {},
+    removeModelLod: () => {},
+    setModelLodDistance: () => {},
+    setModelCullDistance: () => {},
+    setActiveModelLevel: () => {},
+    importModelFiles: async () => {},
     assetsLoaded: false,
-    pendingMeshImport: null,
-    resolveMeshImport: () => {},
+    pendingModelImport: null,
+    resolveModelImport: () => {},
     importAnimationFiles: async () => {},
     importSkeletonNames: async () => {},
     renameAnimationClip: (o) => o,
@@ -631,6 +639,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     dirtySuppressRef.current = true;
     try { return fn(); } finally { dirtySuppressRef.current = prev; }
   };
+  // Thumbnail rendering builds throwaway scenes whose node inserts emit SCENE_CHANGED, which would
+  // otherwise mark the active tab unsaved — including right after a save cleared it. Installed once here
+  // rather than threaded through every render call, because nothing that module does is ever a user edit.
+  setThumbnailDirtySuppressor(withoutDirty);
   const [savingState, setSavingState] = useState<SavingState>('idle');
   const dimensionRef = useRef<'2D' | '3D'>('3D'); // the Main tab's dimension (template tabs are always 3D)
   const pendingPrefsRef = useRef<ProjectPrefs | null>(null);
@@ -734,33 +746,33 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Reusable mesh assets (imported models): persisted to IndexedDB (they embed base64 textures + a
   // thumbnail). Mirrors the materials library above. Drag a mesh into the viewport to instantiate a copy.
-  const [meshes, setMeshes] = useState<MeshAsset[]>([]);
-  const meshesLoadedRef = useRef(false);
+  const [models, setModels] = useState<ModelAsset[]>([]);
+  const modelsLoadedRef = useRef(false);
   useEffect(() => {
     (async () => {
       try {
-        const list = await idbGet<MeshAsset[]>('cleo_meshes');
-        if (list && list.length) setMeshes(prev => prev.length ? prev : list);
-      } catch (e) { console.warn('Failed to load meshes:', e); }
-      finally { meshesLoadedRef.current = true; }
+        const list = await idbGet<ModelAsset[]>('cleo_models');
+        if (list && list.length) setModels(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load models:', e); }
+      finally { modelsLoadedRef.current = true; }
     })();
   }, []);
-  usePersistedLibrary('cleo_meshes', meshes, meshesLoadedRef);
+  usePersistedLibrary('cleo_models', models, modelsLoadedRef);
 
   // Reactive edit state for open mesh tabs (tab id -> session). The tab's Scene stays in tabRuntimeRef;
   // this holds what the Mesh inspector renders (LOD level ids/distances, cull distance, active level).
-  const [meshSessions, setMeshSessions] = useState<Record<string, MeshEditSession>>({});
+  const [modelSessions, setModelSessions] = useState<Record<string, ModelEditSession>>({});
 
-  const addMesh = (m: MeshAsset) => setMeshes(prev => [...prev, m]);
-  const removeMesh = (id: string) => {
+  const addModel = (m: ModelAsset) => setModels(prev => [...prev, m]);
+  const removeModel = (id: string) => {
     // A preview tab for a deleted mesh would render a subtree whose asset no longer exists — close it
     // first (mirrors removeMaterial). Safe to reference the later-declared tab helpers: this only ever
     // runs from a click, long after the component body has evaluated.
-    const openTab = tabs.find(t => t.kind === 'mesh' && t.meshId === id);
+    const openTab = tabs.find(t => t.kind === 'model' && t.modelId === id);
     if (openTab) removeTabById(openTab.id);
-    setMeshes(prev => prev.filter(x => x.id !== id));
+    setModels(prev => prev.filter(x => x.id !== id));
   };
-  const updateMesh = (id: string, m: MeshAsset) => setMeshes(prev => prev.map(x => x.id === id ? m : x));
+  const updateModel = (id: string, m: ModelAsset) => setModels(prev => prev.map(x => x.id === id ? m : x));
 
   // Reusable, class-based script assets (global library like materials): a node references one via the
   // SCRIPT_ID_VAR node variable. Persisted to IndexedDB. Editing the asset propagates to every linked node.
@@ -779,7 +791,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Mirror for async flows (play/save serialize scripts off-render): buildGameData reads the current list.
   const scriptAssetsRef = useRef<ScriptAsset[]>([]);
-  useEffect(() => { scriptAssetsRef.current = scriptAssets; }, [scriptAssets]);
+  // Mirrored during RENDER, not in an effect — see the library-mirror block below for why.
+  scriptAssetsRef.current = scriptAssets;
 
   const addScriptAsset = (s: ScriptAsset) => setScriptAssets(prev => [...prev, s]);
   const updateScriptAsset = (id: string, s: ScriptAsset) => setScriptAssets(prev => prev.map(x => x.id === id ? s : x));
@@ -872,7 +885,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Save a script tab: commit its buffered source to the asset (persists + propagates to linked nodes) and
   // clear the tab's dirty flag. Takes a tab id rather than reading the active tab so Save All can reach a
-  // tab that is not on screen; mirrors saveMaterialTab/saveMeshTab.
+  // tab that is not on screen; mirrors saveMaterialTab/saveModelTab.
   const saveScriptTab = (tabId: string) => {
     const tab = tabsRef.current.find(t => t.id === tabId);
     if (!tab || tab.kind !== 'script' || !tab.scriptId) return;
@@ -895,7 +908,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && meshesLoadedRef.current && scriptAssetsLoadedRef.current && scenesLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && scenesLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -921,10 +934,32 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (initialResyncDoneRef.current || !assetsLoaded || !isSceneReady) return;
     const stashed = initialAssetHashesRef.current;
     if (!stashed) return; // no blob was parsed (fresh/empty project) — nothing to re-resolve
+    // Refuse to resync against libraries that are entirely empty.
+    //
+    // resyncScene reads "asset not in library" as "asset was deleted" and unlinks the node — so running it
+    // with empty libraries does not just fail to refresh the scene, it strips every template link, class
+    // script and material from it. There is no legitimate case where a scene needs resyncing against
+    // nothing: with no assets there are no links to re-resolve, so skipping is always the safe branch.
+    //
+    // Leave initialResyncDoneRef false so a later commit, once the libraries are actually there, still
+    // gets its pass.
+    const libs = currentLibs();
+    const empty = !libs.materials.length && !libs.models.length && !libs.templates.length
+      && !libs.terrainMaterials.length && !libs.scripts.length;
+    if (empty) {
+      // Deferred, not cancelled: the libraries are effect deps, so the commit that delivers them runs
+      // this again. Only worth a debug line — it is the normal path when the IndexedDB reads are fast.
+      Logger.debug('Startup asset resync deferred: libraries not populated yet, will retry.', 'Editor');
+      return;
+    }
     initialResyncDoneRef.current = true;
+    console.info('[DIAG] startup resync running for real:', {
+      materials: libs.materials.length, models: libs.models.length, templates: libs.templates.length,
+      terrainMaterials: libs.terrainMaterials.length, scripts: libs.scripts.length,
+    });
     // Propagation, not the user's work — resyncing must not make a freshly-opened scene look unsaved.
     withoutDirty(() => {
-      const changed = resyncScene(editorSceneRef.current, engineMaps(), currentLibs(), stashed.hashes);
+      const changed = resyncScene(editorSceneRef.current, engineMaps(), libs, stashed.hashes);
       if (changed) {
         showBindPoseForSkinnedModels(editorSceneRef.current);
         eventEmitter.current.emit('TEXTURES_CHANGED');
@@ -932,7 +967,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         eventEmitter.current.emit('SELECT_NODE', null); // a reinstantiated subtree invalidates the selection
       }
     });
-  }, [assetsLoaded, isSceneReady]);
+    // The libraries are deps so the skip-when-empty branch above is recoverable: if this fires before they
+    // arrive, the commit that delivers them runs it again. initialResyncDoneRef keeps it to one real pass.
+  }, [assetsLoaded, isSceneReady, materials, models, templates, terrainMaterials, scriptAssets]);
 
   // Keep the texture store in step with the libraries.
   //
@@ -957,7 +994,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const legacy = legacyTexturesOf(materials, terrainMaterials, templates, meshes);
+          const legacy = legacyTexturesOf(materials, terrainMaterials, templates, models);
           if (legacy.length) await adoptLegacyTextures(legacy);
 
           // No id list: persist every live texture with source bytes. A texture can belong to the scene
@@ -970,17 +1007,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       })();
     }, 500); // debounced: an import registers textures and adds assets in a burst
     return () => window.clearTimeout(timer);
-  }, [assetsLoaded, textureEpoch, materials, terrainMaterials, templates, meshes]);
+  }, [assetsLoaded, textureEpoch, materials, terrainMaterials, templates, models]);
 
-  // Mesh import review modal: importMeshFiles parks each parsed mesh here and awaits the user's decision
-  // (resolved by MeshImportModal via resolveMeshImport). The resolver lives in a ref so the promise in
-  // importMeshFiles can be settled from the modal without re-rendering churn.
-  const [pendingMeshImport, setPendingMeshImport] = useState<PendingMeshImportView | null>(null);
-  const pendingResolverRef = useRef<((d: MeshImportDecision | null) => void) | null>(null);
-  const resolveMeshImport = (decision: MeshImportDecision | null) => {
+  // Mesh import review modal: importModelFiles parks each parsed mesh here and awaits the user's decision
+  // (resolved by ModelImportModal via resolveModelImport). The resolver lives in a ref so the promise in
+  // importModelFiles can be settled from the modal without re-rendering churn.
+  const [pendingModelImport, setPendingModelImport] = useState<PendingModelImportView | null>(null);
+  const pendingResolverRef = useRef<((d: ModelImportDecision | null) => void) | null>(null);
+  const resolveModelImport = (decision: ModelImportDecision | null) => {
     const r = pendingResolverRef.current;
     pendingResolverRef.current = null;
-    setPendingMeshImport(null);
+    setPendingModelImport(null);
     if (r) r(decision);
   };
 
@@ -1022,7 +1059,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     : activeTab.kind === 'material' ? 'material'
     : activeTab.kind === 'terrainMaterial' ? 'terrainMaterial'
     : activeTab.kind === 'animation' ? 'animation'
-    : activeTab.kind === 'mesh' ? 'mesh'
+    : activeTab.kind === 'model' ? 'model'
     : activeTab.kind === 'script' ? 'script'
     : 'template';
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
@@ -1044,17 +1081,28 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // state: Save All walks tabs sequentially with an await per asset, where a value captured at the top of
   // the loop is stale by the second iteration.
   const tabsRef = useRef<EditorTab[]>(tabs);
-  const meshSessionsRef = useRef<Record<string, MeshEditSession>>(meshSessions);
+  const modelSessionsRef = useRef<Record<string, ModelEditSession>>(modelSessions);
   const materialsRef = useRef<MaterialAsset[]>(materials);
   const terrainMaterialsRef = useRef<TerrainMaterialAsset[]>(terrainMaterials);
-  const meshesRef = useRef<MeshAsset[]>(meshes);
+  const modelsRef = useRef<ModelAsset[]>(models);
   const templatesRef = useRef<Template[]>(templates);
-  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
-  useEffect(() => { meshSessionsRef.current = meshSessions; }, [meshSessions]);
-  useEffect(() => { materialsRef.current = materials; }, [materials]);
-  useEffect(() => { terrainMaterialsRef.current = terrainMaterials; }, [terrainMaterials]);
-  useEffect(() => { meshesRef.current = meshes; }, [meshes]);
-  useEffect(() => { templatesRef.current = templates; }, [templates]);
+  // Mirrored during RENDER, not in a useEffect.
+  //
+  // These are plain "latest value" mirrors, so assigning them here is idempotent and safe. Doing it in an
+  // effect is not: effects run in DECLARATION order within a commit, and these are declared far below the
+  // boot resync effect. Any commit that both delivered a library and flipped `assetsLoaded` therefore ran
+  // the resync FIRST, against mirrors still holding []. resyncScene treats "asset not in library" as
+  // "asset deleted" and unlinks — dropping every __templateId, unlinking every class script and resetting
+  // every material to the Basic+Null fallback, i.e. wiping the scene it was meant to refresh.
+  //
+  // That window was previously hidden by slow IndexedDB reads landing in their own commits; it is a real
+  // race either way, and assigning during render closes it for every currentLibs() consumer at once.
+  tabsRef.current = tabs;
+  modelSessionsRef.current = modelSessions;
+  materialsRef.current = materials;
+  terrainMaterialsRef.current = terrainMaterials;
+  modelsRef.current = models;
+  templatesRef.current = templates;
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
@@ -1078,7 +1126,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   ];
   // Snapshot of the four hashable asset libraries, as the resync/hash utilities consume them.
   const currentLibs = (): AssetLibs => ({
-    materials: materialsRef.current, meshes: meshesRef.current, templates: templatesRef.current,
+    materials: materialsRef.current, models: modelsRef.current, templates: templatesRef.current,
     terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
   });
 
@@ -1098,17 +1146,29 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // activate effect that re-arms.
     dirtyArmedRef.current = false;
     const scene = new Scene();
-    scene.animationsEnabled = false; // editing scene: skinned meshes hold bind pose (no playback)
-    createEmptyScene(scene); // editor camera + a light so the template content is lit
-    // Same cubemap background + reflections as the other editor tabs. The '__editor__' skybox node sits
-    // at the scene root, outside the template subtree, so Save Template never serializes it.
-    void applyPreviewEnvironment(scene);
+    scene.animationsEnabled = false; // editing scene: skinned models hold bind pose (no playback)
+    // Shared with mesh tabs: editor camera, an __editor__ viewing light (hidden from the tree — it lights
+    // the template, it is not part of it) and the cubemap background + reflections. Every node it adds
+    // sits at the scene root, outside the template subtree, so Save Template never serializes any of it.
+    void createAssetEditScene(scene, withoutDirty);
 
     let rootId: string;
     let name: string;
     if (templateId) {
       const t = templates.find(x => x.id === templateId);
-      if (!t) { Logger.error('Template not found', 'Editor'); return; }
+      if (!t) {
+        // ---- TEMPORARY DIAGNOSTIC ----
+        console.warn('[DIAG] Template not found', {
+          wanted: templateId,
+          stateIds: templates.map(x => x.id),
+          refIds: templatesRef.current.map(x => x.id),
+          stateCount: templates.length,
+          refCount: templatesRef.current.length,
+        });
+        // ------------------------------
+        Logger.error(`Template not found (id ${templateId})`, 'Editor');
+        return;
+      }
       rootId = instantiateTemplate(t, scene.root, engineMaps(), materialsRef.current);
       name = t.name;
     } else {
@@ -1395,7 +1455,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const remaining = tabs.filter(t => t.id !== id);
     tabRuntimeRef.current.get(id)?.helperTerrain?.dispose(); // free the preview terrain's splat/body
     tabRuntimeRef.current.delete(id);
-    setMeshSessions(prev => { if (!(id in prev)) return prev; const next = { ...prev }; delete next[id]; return next; });
+    setModelSessions(prev => { if (!(id in prev)) return prev; const next = { ...prev }; delete next[id]; return next; });
     clearTabDirty(id);
     setTabs(remaining);
     if (id === activeTabId) {
@@ -1504,7 +1564,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     scene.addNode(sphere);
     // Screen-mode custom materials are camera post passes, not mesh surfaces: run the SAME instance on
     // the preview camera so it previews live (the sphere still carries it for the inspector; the
-    // renderer skips drawing meshes with a screen material). CustomMaterialEditor keeps the camera
+    // renderer skips drawing models with a screen material). CustomMaterialEditor keeps the camera
     // list in step when the mode is switched inside the tab.
     if (material instanceof CustomMaterial && material.renderMode === 'screen' && scene.activeCamera)
       scene.activeCamera.screenMaterials = [material];
@@ -1551,11 +1611,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // plus one per mesh froze the editor mid-import. Instead an asset is stored with an empty thumbnail
   // (the explorer shows the kind's icon) and its preview is rendered the first time it is opened.
   //
-  // Renders from the asset's *saved* data, not from a live tab scene — renderMeshThumbnail reparents the
+  // Renders from the asset's *saved* data, not from a live tab scene — renderModelThumbnail reparents the
   // node it is given, which would rip the subtree out of the preview tab we just built.
   const thumbnailPendingRef = useRef(new Set<string>());
 
-  const captureAssetThumbnail = (kind: 'material' | 'terrainMaterial' | 'mesh', id: string) => {
+  const captureAssetThumbnail = (kind: 'material' | 'terrainMaterial' | 'model', id: string) => {
     const engine = instanceRef.current;
     if (!engine) return;
     // One capture per asset in flight; a re-open while one is running must not queue a second GL render.
@@ -1578,10 +1638,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           const thumbnail = await renderTerrainMaterialAssetThumbnail(engine, asset);
           if (thumbnail) setTerrainMaterials(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
         } else {
-          const asset = meshes.find(m => m.id === id);
+          const asset = models.find(m => m.id === id);
           if (!asset) return;
-          const thumbnail = await renderMeshAssetThumbnail(engine, asset);
-          if (thumbnail) setMeshes(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
+          const thumbnail = await renderModelAssetThumbnail(engine, asset);
+          if (thumbnail) setModels(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
         }
       } catch (e) {
         Logger.warn(`Could not render the thumbnail for this asset: ${e}`, 'Editor');
@@ -1595,7 +1655,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Show exactly one LOD level's subtree in a mesh tab. Plain `visible` writes are fine here: this is a
   // user-facing edit-session toggle, not the renderer's per-frame LOD switch.
-  const applyActiveMeshLevel = (scene: Scene, levelIds: string[], active: number) => {
+  const applyActiveModelLevel = (scene: Scene, levelIds: string[], active: number) => {
     for (let i = 0; i < levelIds.length; i++) {
       const root = scene.getNodeById(levelIds[i]);
       if (root) root.visible = i === active;
@@ -1604,30 +1664,47 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Build an edit session for a mesh asset: a throwaway scene holding one subtree per LOD level,
   // instantiated directly (NOT via the LodGroup wrapper — the renderer must not auto-swap levels while
-  // the user edits). Materials/transforms/sub-meshes are edited through the normal Scene + Properties
+  // the user edits). Materials/transforms/sub-models are edited through the normal Scene + Properties
   // panels; LOD levels, distances and the cull threshold through the Mesh inspector. Opening the tab
   // also triggers the asset's thumbnail render.
-  const openMeshTab = (asset: MeshAsset) => {
+  const openMeshTab = (asset: ModelAsset) => {
     // Disarm dirty-tracking before building the preview scene. SCENE_CHANGED is global and names no
     // scene, so mark() can only blame the ACTIVE tab — and every node this construction splices into the
     // new throwaway scene would otherwise land on the scene tab as if the user had edited it. The
     // tab-activate effect re-arms once the new tab is showing.
     dirtyArmedRef.current = false;
     const scene = new Scene();
-    scene.animationsEnabled = false; // skinned meshes hold their bind pose while editing
-    createEmptyScene(scene);
-    void applyPreviewEnvironment(scene);
+    scene.animationsEnabled = false; // skinned models hold their bind pose while editing
+    // Same asset-edit environment as template tabs — see createAssetEditScene. The viewing light is
+    // __editor__ named, so it neither appears in the mesh's tree nor gets saved into the asset.
+    void createAssetEditScene(scene, withoutDirty);
 
     const holder = new Node(asset.name);
     scene.addNode(holder);
 
-    // Restore legacy embedded textures (instantiateMeshAsset used to do this).
+    // Restore legacy embedded textures (instantiateModelAsset used to do this).
     for (const t of asset.textures || []) {
       if (t?.id && !TextureManager.Instance.getTexture(t.id))
         TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id);
     }
 
-    const levelJsons = [asset.nodeJson, ...(asset.lods ?? []).map(l => l.nodeJson)];
+    // Level 0 is the mesh being edited. Extra levels are resolved from the library every time the tab
+    // opens — that is the point of referencing: the level always shows the current state of its source
+    // mesh. A reference whose asset has been deleted is dropped with a warning rather than opening a tab
+    // that cannot be saved.
+    const lodRefs: ModelLodDef[] = [];
+    const lodJsons: any[] = [];
+    for (const lod of asset.lods ?? []) {
+      const levelJson = lodLevelJson(lod, modelsRef.current);
+      if (!levelJson) {
+        Logger.warn(`LOD level of "${asset.name}" references a model that no longer exists — dropped`, 'Editor');
+        continue;
+      }
+      lodRefs.push(lod);
+      lodJsons.push(levelJson);
+    }
+
+    const levelJsons = [asset.nodeJson, ...lodJsons];
     const levelIds: string[] = [];
     for (const json of levelJsons) {
       const clone = JSON.parse(JSON.stringify(json));
@@ -1639,18 +1716,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     const tabId = cryptoRandomId();
     tabRuntimeRef.current.set(tabId, { scene, rootId: holder.id });
-    setMeshSessions(prev => ({
+    setModelSessions(prev => ({
       ...prev,
       [tabId]: {
         levelIds,
-        distances: [0, ...(asset.lods ?? []).map(l => l.distance)],
+        lodRefs,
+        distances: [0, ...lodRefs.map(l => l.distance)],
         cullDistance: asset.cullDistance ?? 0,
         activeLevel: 0,
         skinned: levelJsons.some(nodeJsonHasSkinnedModel),
       },
     }));
-    applyActiveMeshLevel(scene, levelIds, 0);
-    setTabs(prev => [...prev, { id: tabId, kind: 'mesh', title: asset.name, meshId: asset.id }]);
+    applyActiveModelLevel(scene, levelIds, 0);
+    setTabs(prev => [...prev, { id: tabId, kind: 'model', title: asset.name, modelId: asset.id }]);
     setActiveTabId(tabId);
     eventEmitter.current.emit('TEXTURES_CHANGED');
   };
@@ -1658,12 +1736,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Rebuild every placed instance of a mesh asset after it was saved, preserving each instance's own
   // transform (the template propagation pattern — a mesh instance is a whole copied subtree, so it is
   // re-instantiated rather than patched in place). Runs across every live scene (see liveScenes).
-  const syncMeshInstances = (meshId: string, asset: MeshAsset, exceptTabId?: string) => {
+  const syncModelInstances = (modelId: string, asset: ModelAsset, exceptTabId?: string) => {
     const maps = engineMaps();
     let count = 0;
     let reselectId: string | null = null;
     for (const scene of liveScenes(exceptTabId)) {
-      const instances = Array.from(scene.nodes).filter(n => n.getVariable(MESH_ID_VAR) === meshId);
+      const instances = Array.from(scene.nodes).filter(n => n.getVariable(MODEL_ID_VAR) === modelId);
       for (const inst of instances) {
         const parent = inst.parent;
         if (!parent) continue;
@@ -1675,7 +1753,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
         // Detach synchronously with removeChild, not remove() — see syncTemplateInstances for why.
         parent.removeChild(inst);
-        const newId = instantiateMeshAsset(asset, parent, materialsRef.current);
+        const newId = instantiateModelAsset(asset, parent, materialsRef.current, modelsRef.current);
         const newNode = scene.getNodeById(newId);
         if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
         if (wasSelected) reselectId = newId;
@@ -1690,21 +1768,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // After a mesh asset is saved, refresh every terrain-material foliage rule that references it
-  // (rule.meshId): rebuild the embedded flattened LOD payload in the library asset, then swap
+  // (rule.modelId): rebuild the embedded flattened LOD payload in the library asset, then swap
   // prototypes on live terrain layers using those materials — WITHOUT re-scattering instances.
-  const syncFoliageRulesForMesh = (meshAsset: MeshAsset) => {
+  const syncFoliageRulesForModel = (modelAsset: ModelAsset) => {
     const updated: TerrainMaterialAsset[] = [];
     for (const tmAsset of terrainMaterials) {
       const rules = tmAsset.material?.foliageInclude;
-      if (!Array.isArray(rules) || !rules.some((r: any) => r?.meshId === meshAsset.id)) continue;
+      if (!Array.isArray(rules) || !rules.some((r: any) => r?.modelId === modelAsset.id)) continue;
       try {
-        const nextRules = rules.map((r: any) => r?.meshId === meshAsset.id ? buildFoliageRuleFromMeshAsset(meshAsset, r) : r);
+        const nextRules = rules.map((r: any) => r?.modelId === modelAsset.id ? buildFoliageRuleFromModelAsset(modelAsset, r, modelsRef.current) : r);
         const material = { ...tmAsset.material, foliageInclude: nextRules };
         const patched: TerrainMaterialAsset = { ...tmAsset, material, textureIds: [...collectTerrainMaterialTextureIds(material)] };
         updateTerrainMaterial(tmAsset.id, patched);
         updated.push(patched);
       } catch (e) {
-        Logger.warn(`Foliage rule for mesh "${meshAsset.name}" in terrain material "${tmAsset.name}" was not updated: ${e}`, 'Editor');
+        Logger.warn(`Foliage rule for model "${modelAsset.name}" in terrain material "${tmAsset.name}" was not updated: ${e}`, 'Editor');
       }
     }
     if (updated.length === 0) return;
@@ -1723,115 +1801,211 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Save a mesh tab back to the library and propagate to placed instances.
-  const saveMeshTab = async (tabId: string) => {
+  const saveModelTab = async (tabId: string) => {
     const engine = instanceRef.current;
     const tab = tabsRef.current.find(t => t.id === tabId);
-    if (!engine || !tab || tab.kind !== 'mesh' || !tab.meshId) return;
+    if (!engine || !tab || tab.kind !== 'model' || !tab.modelId) return;
     const runtime = tabRuntimeRef.current.get(tab.id);
-    const session = meshSessionsRef.current[tab.id];
+    const session = modelSessionsRef.current[tab.id];
     if (!runtime || !session) return;
     try {
-      const levelRoots = session.levelIds.map(id => runtime.scene.getNodeById(id));
-      if (levelRoots.some(r => !r)) { Logger.error('Mesh edit session lost a LOD level node', 'Editor'); return; }
+      // Only level 0 is authored here, so only it has to resolve to a live node. Extra levels are
+      // references — they are saved as `{ modelId, distance }` and their geometry belongs to the mesh they
+      // point at, which is why they no longer need to be found in this scene and serialized back out.
+      //
+      // The recorded id is a hint, not a contract. Restructuring the mesh — parenting it under a new root
+      // node and deleting the old one — is ordinary authoring, and it retires the node this session was
+      // opened with. Rather than refusing to save, fall back to reading the mesh out of its holder: the
+      // holder is the container this tab created, so whatever sits under it (minus the read-only LOD
+      // previews) IS the mesh.
+      // A node the user deleted can still be in the tree: Node.remove() only marks it, and the sweep runs
+      // on a later Scene.update. Serializing one writes content the user already removed — and, when the
+      // deleted node is an emptied parent, writes it INSTEAD of what they moved out. Treat marked nodes
+      // as gone everywhere this resolves a root. (The Delete button now removes synchronously, so this is
+      // the net for any other deferred path — including a node left marked after being moved out of a
+      // deleted subtree, since markForRemoval is never cleared.)
+      const alive = (n: Node | null | undefined): n is Node => !!n && !n.markForRemoval;
 
-      // Extra levels serialize into the asset's `lods`; buildMeshAsset strips debug helpers and the
-      // instance back-link from every level.
-      const lodDefs: MeshLodDef[] = [];
-      for (let i = 1; i < levelRoots.length; i++)
-        lodDefs.push({ nodeJson: await levelRoots[i]!.serialize(), distance: session.distances[i] ?? 0 });
+      const holder = runtime.scene.getNodeById(runtime.rootId);
+      let baseRoot: Node | null = null;
+      const recorded = runtime.scene.getNodeById(session.levelIds[0]);
+      if (alive(recorded)) baseRoot = recorded;
+      // Set when the content had to be wrapped: the nodes moved under a scratch root for serialization,
+      // and where each came from so the live tree can be put back exactly as the user left it.
+      let restore: { node: Node; parent: Node }[] = [];
 
-      // materialIds is the informational list of library materials the subtrees reference.
+      if (!baseRoot) {
+        const previewIds = new Set(session.levelIds.slice(1));
+        const isContent = (n: Node) =>
+          alive(n) && !previewIds.has(n.id) && !n.name.includes('__editor__') && !n.name.includes('__debug__');
+        // Inside the holder first (the usual case), then at the scene root — a new root node added while
+        // the scene row was selected lands there rather than inside the holder.
+        let candidates = (holder?.children ?? []).filter(isContent);
+        if (candidates.length === 0)
+          candidates = runtime.scene.root.children.filter(n => n.id !== runtime.rootId && isContent(n));
+
+        if (candidates.length === 0) {
+          Logger.error(`Model "${tab.title}" has no content to save — its root node was deleted.`, 'Editor');
+          return;
+        }
+        if (candidates.length === 1) {
+          baseRoot = candidates[0];
+          // Re-pin the session so later saves (and the level radio buttons) track the new root.
+          const levelIds = [baseRoot.id, ...session.levelIds.slice(1)];
+          setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, levelIds } }));
+          modelSessionsRef.current = { ...modelSessionsRef.current, [tab.id]: { ...session, levelIds } };
+        } else {
+          // Several content roots — the normal result of merging models into one mesh: drop a second mesh
+          // in, move both model nodes up to the root, delete the two original roots. A mesh asset
+          // serializes from ONE subtree, so they are wrapped in a single root named after the asset.
+          //
+          // Done by reparenting into a scratch node rather than assembling JSON by hand, because
+          // serialize() reads the live tree. The finally below always puts the nodes back, so a failure
+          // part-way cannot leave the user's scene dismantled.
+          const scratch = new Node(tab.title);
+          for (const c of candidates) {
+            const parent = c.parent;
+            if (!parent) continue;
+            restore.push({ node: c, parent });
+            scratch.addChild(c);
+          }
+          baseRoot = scratch;
+          Logger.info(`Model "${tab.title}": ${candidates.length} root nodes wrapped under a single root.`, 'Editor');
+        }
+      }
+
+      // Distances live on the session (the inspector edits them); the reference itself is carried through
+      // untouched, which is what preserves a legacy embedded level that has no mesh to point at.
+      const lodDefs: ModelLodDef[] = session.lodRefs.map((ref, i) => ({
+        ...ref,
+        distance: session.distances[i + 1] ?? ref.distance ?? 0,
+      }));
+
+      // materialIds is the informational list of library materials this mesh's own subtree references.
+      // Referenced LOD levels are not included — their materials belong to their own asset.
       const materialIdSet = new Set<string>();
       const collectMats = (n: Node) => { const id = getMaterialIdOf(n); if (id) materialIdSet.add(id); n.children.forEach(collectMats); };
-      for (const root of levelRoots) collectMats(root!);
+      collectMats(baseRoot);
 
-      const prev = meshesRef.current.find(m => m.id === tab.meshId);
-      const asset = await buildMeshAsset(
-        levelRoots[0]!, [...materialIdSet], prev?.thumbnail ?? '', tab.meshId,
-        lodDefs, session.cullDistance,
-      );
+      const prev = modelsRef.current.find(m => m.id === tab.modelId);
+      let asset: ModelAsset;
+      try {
+        asset = await buildModelAsset(
+          baseRoot, [...materialIdSet], prev?.thumbnail ?? '', tab.modelId,
+          lodDefs, session.cullDistance,
+        );
+      } finally {
+        // Put any wrapped nodes back where the user had them. The wrapper existed only to give
+        // serialize() a single root; the live scene must look exactly as it did, saved or not.
+        // withoutDirty: reparenting emits SCENE_CHANGED, which would re-dirty the tab we just saved.
+        if (restore.length) withoutDirty(() => { for (const r of restore) r.parent.addChild(r.node); });
+      }
       asset.name = tab.title; // the tab title is the asset name (renames edit the title)
 
-      updateMesh(tab.meshId, asset);
-      withoutDirty(() => { syncMeshInstances(tab.meshId!, asset, tab.id); syncFoliageRulesForMesh(asset); });
+      // Refuse to persist a mesh with nothing in it. An empty asset renders as nothing and overwrites
+      // whatever was saved before, so a save that produced one has read the wrong subtree — exactly how
+      // a moved model was silently replaced by the emptied parent it came out of. Returning here leaves
+      // the stored asset untouched and the tab dirty, so the work is still on screen to recover.
+      if (!nodeJsonHasModel(asset.nodeJson)) {
+        Logger.error(
+          `Model "${tab.title}" has no geometry in it — refusing to save, the stored model is unchanged. ` +
+          'Check the Scene panel still shows the model you expect.', 'Editor');
+        return;
+      }
+
+      updateModel(tab.modelId, asset);
+      withoutDirty(() => {
+        syncModelInstances(tab.modelId!, asset, tab.id);
+        syncFoliageRulesForModel(asset);
+        // Levels are references, so this mesh may be a LOD of others — their placed instances embed a
+        // copy of what was just edited and would otherwise keep rendering the previous geometry until
+        // something else happened to re-instantiate them. Refresh those too. Only one hop is needed: a
+        // level renders the referenced mesh's own subtree, never its levels, so this cannot cascade.
+        for (const dependent of modelsRef.current) {
+          if (dependent.id === tab.modelId) continue;
+          if (!dependent.lods?.some(l => l.modelId === tab.modelId)) continue;
+          syncModelInstances(dependent.id, dependent, tab.id);
+          syncFoliageRulesForModel(dependent);
+        }
+      });
       clearTabDirty(tab.id);
 
-      // Refresh the thumbnail from the SAVED asset, never the live tab subtree (renderMeshThumbnail
+      // Refresh the thumbnail from the SAVED asset, never the live tab subtree (renderModelThumbnail
       // reparents the node it is given). Async: the card updates whenever the render lands.
-      renderMeshAssetThumbnail(engine, asset)
-        .then(thumbnail => { if (thumbnail) setMeshes(p => p.map(x => x.id === asset.id ? { ...x, thumbnail } : x)); })
+      renderModelAssetThumbnail(engine, asset)
+        .then(thumbnail => { if (thumbnail) setModels(p => p.map(x => x.id === asset.id ? { ...x, thumbnail } : x)); })
         .catch(() => {});
-      Logger.info(`Mesh "${asset.name}" saved`, 'Editor');
+      Logger.info(`Model "${asset.name}" saved`, 'Editor');
     } catch (e) {
-      Logger.error('Failed to save mesh: ' + e, 'Editor');
+      Logger.error('Failed to save model: ' + e, 'Editor');
     }
   };
 
   // Rename the active mesh tab (the title becomes the asset name on save).
-  const setActiveMeshName = (name: string) => {
+  const setActiveModelName = (name: string) => {
     const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.kind !== 'mesh') return;
+    if (!tab || tab.kind !== 'model') return;
     setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, title: name } : x));
     markTabDirty(tab.id);
   };
 
-  // Import a model file as a new LOD level of the active mesh tab. The level is scaled so its bounds
-  // match LOD0's, and its materials are registered as library assets exactly like a normal import.
-  const addMeshLodFromFiles = async (files: File[]) => {
+  /**
+   * Add an existing mesh asset as the next LOD level of the active mesh tab.
+   *
+   * The level stores only a reference; its geometry keeps living in the mesh it points at, so editing
+   * that low-poly asset later updates every mesh using it as a level. A preview of it is spliced into the
+   * edit scene so the user can compare levels, but that preview is never serialized back — it is rebuilt
+   * from the library each time the tab opens.
+   */
+  const addModelLodFromAsset = (modelId: string) => {
     const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.kind !== 'mesh') return;
+    if (!tab || tab.kind !== 'model') return;
     const runtime = tabRuntimeRef.current.get(tab.id);
-    const session = meshSessions[tab.id];
+    const session = modelSessions[tab.id];
     if (!runtime || !session) return;
-    if (session.skinned) { Logger.warn('LOD levels are not supported on skinned meshes yet', 'Editor'); return; }
+    if (session.skinned) { Logger.warn('LOD levels are not supported on skinned models yet', 'Editor'); return; }
+    if (modelId === tab.modelId) { Logger.warn('A model cannot be its own LOD level', 'Editor'); return; }
+    if (session.lodRefs.some(l => l.modelId === modelId)) { Logger.warn('That model is already a LOD level', 'Editor'); return; }
 
-    const bundles = groupImportFiles(files);
-    if (!bundles.length) { Logger.warn('No model files (.gltf/.glb/.obj/.fbx) found in the selection', 'Editor'); return; }
+    const source = modelsRef.current.find(m => m.id === modelId);
+    if (!source) { Logger.error('Model asset not found', 'Editor'); return; }
+    if (nodeJsonHasSkinnedModel(source.nodeJson)) {
+      Logger.warn('Skinned models cannot be LOD levels (static models only)', 'Editor');
+      return;
+    }
+
     try {
-      const { root, children } = await parseBundleToRoot(bundles[0].files, bundles[0].name);
-      if (children.some(c => c.model instanceof AnimatedModel)) {
-        Logger.warn('Skinned models cannot be LOD levels (static meshes only)', 'Editor');
-        return;
-      }
-      await awaitSubtreeTexturesReady(root);
-
-      // Register a MaterialAsset per unique material and link each sub-mesh (same as importMeshFiles).
-      const assetByKey = new Map<string, MaterialAsset>();
-      for (const child of children) {
-        const mat = (child.model as any).material as Material;
-        if (!mat) continue;
-        const key = JSON.stringify(mat.serialize());
-        let matAsset = assetByKey.get(key);
-        if (!matAsset) {
-          matAsset = buildMaterialAsset(mat, `${bundles[0].name} ${mat.type}`, '');
-          assetByKey.set(key, matAsset);
-          addMaterial(matAsset);
-        }
-        applyMaterialAsset(child, matAsset);
-      }
-
-      // Match LOD0's size so far levels line up with the near model.
-      const lod0 = runtime.scene.getNodeById(session.levelIds[0]);
-      if (lod0) {
-        const targetDiameter = 2 * meshBoundsRadius(lod0);
-        if (targetDiameter > 0) normalizeRootScale(root, targetDiameter);
-      }
-
       const holder = runtime.scene.getNodeById(runtime.rootId);
       if (!holder) return;
-      root.name = `${tab.title}_LOD${session.levelIds.length}`;
-      holder.addChild(root);
+
+      // Splice in a preview of the referenced mesh. Ids are regenerated so it cannot collide with the
+      // level it was cloned from — the same asset may legitimately be open in its own tab.
+      const clone = JSON.parse(JSON.stringify(source.nodeJson));
+      regenerateIds(clone, new Map());
+      resolveMaterialRefs(clone, materialsRef.current);
+      clone.name = source.name;
+      parseByType(holder, clone);
+
+      // Match LOD0's size so the levels line up with the near model.
+      const preview = runtime.scene.getNodeById(clone.id);
+      const lod0 = runtime.scene.getNodeById(session.levelIds[0]);
+      if (preview && lod0) {
+        const targetDiameter = 2 * meshBoundsRadius(lod0);
+        if (targetDiameter > 0) normalizeRootScale(preview, targetDiameter);
+      }
 
       const lastDistance = session.distances[session.distances.length - 1] ?? 0;
-      const levelIds = [...session.levelIds, root.id];
-      const next: MeshEditSession = {
+      const distance = lastDistance + 30;
+      const levelIds = [...session.levelIds, clone.id];
+      const next: ModelEditSession = {
         ...session,
         levelIds,
-        distances: [...session.distances, lastDistance + 30],
-        activeLevel: levelIds.length - 1, // show what was just imported
+        lodRefs: [...session.lodRefs, { modelId, distance }],
+        distances: [...session.distances, distance],
+        activeLevel: levelIds.length - 1, // show what was just added
       };
-      setMeshSessions(prev => ({ ...prev, [tab.id]: next }));
-      applyActiveMeshLevel(runtime.scene, levelIds, next.activeLevel);
+      setModelSessions(prev => ({ ...prev, [tab.id]: next }));
+      applyActiveModelLevel(runtime.scene, levelIds, next.activeLevel);
       markTabDirty(tab.id);
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
@@ -1841,11 +2015,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Remove an extra LOD level (level 0 is the asset itself and cannot be removed).
-  const removeMeshLod = (level: number) => {
+  const removeModelLod = (level: number) => {
     const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.kind !== 'mesh' || level < 1) return;
+    if (!tab || tab.kind !== 'model' || level < 1) return;
     const runtime = tabRuntimeRef.current.get(tab.id);
-    const session = meshSessions[tab.id];
+    const session = modelSessions[tab.id];
     if (!runtime || !session || level >= session.levelIds.length) return;
 
     const root = runtime.scene.getNodeById(session.levelIds[level]);
@@ -1853,51 +2027,53 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     const levelIds = session.levelIds.filter((_, i) => i !== level);
     const distances = session.distances.filter((_, i) => i !== level);
+    // lodRefs is offset by one (it has no entry for level 0), so drop index level-1.
+    const lodRefs = session.lodRefs.filter((_, i) => i !== level - 1);
     const activeLevel = Math.min(session.activeLevel >= level ? session.activeLevel - 1 : session.activeLevel, levelIds.length - 1);
-    setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, levelIds, distances, activeLevel: Math.max(0, activeLevel) } }));
-    applyActiveMeshLevel(runtime.scene, levelIds, Math.max(0, activeLevel));
+    setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, levelIds, lodRefs, distances, activeLevel: Math.max(0, activeLevel) } }));
+    applyActiveModelLevel(runtime.scene, levelIds, Math.max(0, activeLevel));
     markTabDirty(tab.id);
   };
 
-  const setMeshLodDistance = (level: number, distance: number) => {
+  const setModelLodDistance = (level: number, distance: number) => {
     const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.kind !== 'mesh' || level < 1) return;
-    const session = meshSessions[tab.id];
+    if (!tab || tab.kind !== 'model' || level < 1) return;
+    const session = modelSessions[tab.id];
     if (!session || level >= session.distances.length) return;
     const distances = session.distances.map((d, i) => i === level ? Math.max(0, distance) : d);
-    setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, distances } }));
+    setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, distances } }));
     markTabDirty(tab.id);
   };
 
-  const setMeshCullDistance = (distance: number) => {
+  const setModelCullDistance = (distance: number) => {
     const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.kind !== 'mesh') return;
-    const session = meshSessions[tab.id];
+    if (!tab || tab.kind !== 'model') return;
+    const session = modelSessions[tab.id];
     if (!session) return;
-    setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, cullDistance: Math.max(0, distance) } }));
+    setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, cullDistance: Math.max(0, distance) } }));
     markTabDirty(tab.id);
   };
 
-  const setActiveMeshLevel = (level: number) => {
+  const setActiveModelLevel = (level: number) => {
     const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.kind !== 'mesh') return;
+    if (!tab || tab.kind !== 'model') return;
     const runtime = tabRuntimeRef.current.get(tab.id);
-    const session = meshSessions[tab.id];
+    const session = modelSessions[tab.id];
     if (!runtime || !session || level < 0 || level >= session.levelIds.length) return;
-    setMeshSessions(prev => ({ ...prev, [tab.id]: { ...session, activeLevel: level } }));
-    applyActiveMeshLevel(runtime.scene, session.levelIds, level);
+    setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, activeLevel: level } }));
+    applyActiveModelLevel(runtime.scene, session.levelIds, level);
     eventEmitter.current.emit('SELECT_NODE', session.levelIds[level]);
   };
 
   // Open (or focus) the edit tab for a library mesh, rendering its thumbnail on the way in.
-  const enterMeshEditor = (meshId?: string) => {
-    if (!instanceRef.current || !meshId) return;
-    const asset = meshes.find(m => m.id === meshId);
-    if (!asset) { Logger.error('Mesh not found', 'Editor'); return; }
+  const enterModelEditor = (modelId?: string) => {
+    if (!instanceRef.current || !modelId) return;
+    const asset = models.find(m => m.id === modelId);
+    if (!asset) { Logger.error('Model not found', 'Editor'); return; }
 
-    captureAssetThumbnail('mesh', meshId);
+    captureAssetThumbnail('model', modelId);
 
-    const existing = tabs.find(t => t.kind === 'mesh' && t.meshId === meshId);
+    const existing = tabs.find(t => t.kind === 'model' && t.modelId === modelId);
     if (existing) { setActiveTabId(existing.id); return; }
     openMeshTab(asset);
   };
@@ -1906,11 +2082,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // bundle per model file; for each: parses, then opens the review modal (missing textures + scale
   // normalization) and awaits the user. On accept, applies any uploaded textures (re-parse), normalizes
   // scale, registers each material as a reusable MaterialAsset linked via __materialId, and stores the
-  // mesh asset. Meshes land in the library only — drag a card to place it.
+  // model asset. Models land in the library only — drag a card to place it.
   //
   // Every stage transition is published to the shared progress store, so what the window says is what the
   // code is actually doing.
-  const importMeshFiles = async (files: File[]) => {
+  const importModelFiles = async (files: File[]) => {
     const engine = instanceRef.current;
     if (!engine) { Logger.error('Engine not ready for import', 'Editor'); return; }
     const bundles = groupImportFiles(files);
@@ -1921,7 +2097,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       steps: bundles.map(b => ({ name: b.name, status: 'pending' as StepStatus, detail: 'Queued' })),
       cancellable: true,
       // Settling the review modal lets a loop parked on it reach the cancel check below.
-      onCancel: () => { if (pendingResolverRef.current) resolveMeshImport(null); },
+      onCancel: () => { if (pendingResolverRef.current) resolveModelImport(null); },
     });
 
     // Map an import stage onto the store's generic step. One place, so the labels and the bar can't drift.
@@ -1962,13 +2138,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const matKeys = new Set<string>();
         for (const c of children) { const m = (c.model as any).material; if (m) matKeys.add(JSON.stringify(m.serialize())); }
 
-        // Park the parsed mesh and await the user's decision from MeshImportModal.
+        // Park the parsed mesh and await the user's decision from ModelImportModal.
         setStage(i, 'review', missing.length
           ? `${missing.length} texture${missing.length === 1 ? '' : 's'} missing — awaiting review`
           : 'Awaiting review');
-        const decision = await new Promise<MeshImportDecision | null>(resolve => {
+        const decision = await new Promise<ModelImportDecision | null>(resolve => {
           pendingResolverRef.current = resolve;
-          setPendingMeshImport({
+          setPendingModelImport({
             bundleName: bundle.name,
             subMeshCount: children.length,
             materialCount: matKeys.size,
@@ -2028,30 +2204,30 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const separate = decision.separate && children.length > 1;
         setStage(i, 'saving', separate
           ? `Creating ${children.length} separate assets`
-          : 'Serializing to the mesh library');
+          : 'Serializing to the model library');
 
         if (separate) {
-          const assets = await separateSubMeshes(root, children, bundle.name, materialIdOfChild);
-          for (const asset of assets) addMesh(asset);
+          const assets = await separateSubModels(root, children, bundle.name, materialIdOfChild);
+          for (const asset of assets) addModel(asset);
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
-          const summary = `${assets.length} separate mesh${assets.length === 1 ? '' : 'es'}`;
+          const summary = `${assets.length} separate model${assets.length === 1 ? '' : 's'}`;
           setStage(i, 'done', summary);
           Logger.info(`Imported "${bundle.name}" as ${summary}`, 'Editor');
         } else {
-          const meshAsset = await buildMeshAsset(root, materialIds, '');
-          addMesh(meshAsset);
+          const modelAsset = await buildModelAsset(root, materialIds, '');
+          addModel(modelAsset);
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
           const summary = `${children.length} sub-mesh${children.length === 1 ? '' : 'es'}, ${materialIds.length} material${materialIds.length === 1 ? '' : 's'}`;
           setStage(i, 'done', summary);
-          Logger.info(`Imported mesh "${bundle.name}" (${summary})`, 'Editor');
+          Logger.info(`Imported model "${bundle.name}" (${summary})`, 'Editor');
         }
       } catch (err) {
         Logger.error(`Failed to import "${bundle.name}": ${err}`, 'Editor');
         setStage(i, 'failed', undefined, `${err}`);
         // Make sure a stuck modal is cleared if we errored mid-review.
-        if (pendingResolverRef.current) { pendingResolverRef.current = null; setPendingMeshImport(null); }
+        if (pendingResolverRef.current) { pendingResolverRef.current = null; setPendingModelImport(null); }
       }
     }
 
@@ -2323,22 +2499,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       });
       const now = Date.now();
       const scene = editorSceneRef.current;
-      const matSet = collectReferencedMaterialIds(scene, meshes);
-      const meshSet = collectReferencedMeshIds(scene);
+      const matSet = collectReferencedMaterialIds(scene, models);
+      const modelSet = collectReferencedModelIds(scene);
       const tplSet = collectReferencedTemplateIds(scene);
       const tmSet = collectReferencedTerrainMaterialIds(scene);
       const scriptSet = collectReferencedScriptIds(scene);
       const refs: SceneRefs = {
         materialIds: Array.from(matSet),
-        meshIds: Array.from(meshSet),
+        modelIds: Array.from(modelSet),
         templateIds: Array.from(tplSet),
         terrainMaterialIds: Array.from(tmSet),
-        textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, meshes)),
+        textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, models)),
       };
       // Per-asset content hashes let a *closed* scene tell, when reopened, which referenced assets
-      // changed while it was closed — so unchanged meshes/templates aren't needlessly re-instantiated.
+      // changed while it was closed — so unchanged models/templates aren't needlessly re-instantiated.
       const assetHashes = buildAssetHashes(
-        { materialIds: matSet, meshIds: meshSet, templateIds: tplSet, terrainMaterialIds: tmSet, scriptIds: scriptSet },
+        { materialIds: matSet, modelIds: modelSet, templateIds: tplSet, terrainMaterialIds: tmSet, scriptIds: scriptSet },
         currentLibs(),
       );
       await saveSceneData(sceneId, { ...gameData, assetHashes, savedAt: now });
@@ -2377,7 +2553,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     switch (tab.kind) {
       case 'scene': return await saveCurrentScene();
       case 'template': await saveTemplateTab(tabId); break;
-      case 'mesh': await saveMeshTab(tabId); break;
+      case 'model': await saveModelTab(tabId); break;
       case 'material': saveMaterialTab(tabId); break;
       case 'terrainMaterial': saveTerrainMaterialTab(tabId); break;
       case 'script': saveScriptTab(tabId); break;
@@ -2452,7 +2628,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * Save every tab with unsaved edits.
    *
    * Order is load-bearing. Animation applies run first — applying is what makes the source model's tab
-   * dirty, so it has to happen before we decide what to save. Then the leaf assets, then the meshes and
+   * dirty, so it has to happen before we decide what to save. Then the leaf assets, then the models and
    * templates that embed them, and the scene last: saveCurrentScene captures a content hash per referenced
    * asset, and hashing a material we are about to rewrite would store a stale hash and cause a pointless
    * resync on next open.
@@ -2464,7 +2640,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (live && dirtyTabsRef.current[live.tabId]) live.apply();
 
     const ORDER: Record<TabKind, number> = {
-      material: 0, terrainMaterial: 0, script: 0, animation: 0, mesh: 1, template: 2, scene: 3,
+      material: 0, terrainMaterial: 0, script: 0, animation: 0, model: 1, template: 2, scene: 3,
     };
     // Snapshot: propagation is suppressed and so cannot extend this set, but taking it up front also makes
     // the loop finite by construction rather than by argument.
@@ -3268,25 +3444,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       enterScriptEditor,
       setScriptTabSource,
       getScriptTabSource,
-      meshes,
-      addMesh,
-      removeMesh,
-      updateMesh,
-      enterMeshEditor,
-      meshSession: activeTab.kind === 'mesh' ? (meshSessions[activeTab.id] ?? null) : null,
-      meshEditTargetId: activeTab.kind === 'mesh' && meshSessions[activeTab.id]
-        ? meshSessions[activeTab.id].levelIds[meshSessions[activeTab.id].activeLevel] ?? null
+      models,
+      addModel,
+      removeModel,
+      updateModel,
+      enterModelEditor,
+      modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
+      modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
+        ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
         : null,
-      setActiveMeshName,
-      addMeshLodFromFiles,
-      removeMeshLod,
-      setMeshLodDistance,
-      setMeshCullDistance,
-      setActiveMeshLevel,
-      importMeshFiles,
+      setActiveModelName,
+      addModelLodFromAsset,
+      removeModelLod,
+      setModelLodDistance,
+      setModelCullDistance,
+      setActiveModelLevel,
+      importModelFiles,
       assetsLoaded,
-      pendingMeshImport,
-      resolveMeshImport,
+      pendingModelImport,
+      resolveModelImport,
       importAnimationFiles,
       importSkeletonNames,
       renameAnimationClip,

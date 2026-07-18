@@ -3,7 +3,7 @@ import { applyPreviewEnvironment } from './previewEnvironment';
 
 // Dedicated scene for the Animation Editor tab: an editor camera auto-framed to the skinned model
 // (which the caller has already added), a shadow-casting key light + fill, and a ground plane so the
-// ANIMATED-pose shadow is visible while previewing. Mirrors createMeshPreviewScene's framing but keeps
+// ANIMATED-pose shadow is visible while previewing. Mirrors createModelPreviewScene's framing but keeps
 // shadows on. The '__editor__' names keep these helpers out of selection/serialization (the scene is
 // throwaway anyway). Free-fly navigation is wired by the CHANGE_DIMENSION '3D' handler onto the camera.
 

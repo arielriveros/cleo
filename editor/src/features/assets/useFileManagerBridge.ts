@@ -12,7 +12,7 @@ import {
   deleteAsset, deleteConsequence, duplicateAsset, openAsset, regenerateThumbnail, renameAsset, thumbnailOf,
 } from './assetKinds'
 import {
-  collectReferencedMaterialIds, collectReferencedMeshIds, collectReferencedTemplateIds,
+  collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
 } from '../../utils/references'
 
@@ -57,7 +57,7 @@ export function useFileManagerBridge() {
     if (!engine || !folder || refreshingRef.current) return
 
     const targets = vfsRef.current.entries.filter(e =>
-      dirOf(e.path) === folder && (e.kind === 'material' || e.kind === 'terrainMaterial' || e.kind === 'mesh'))
+      dirOf(e.path) === folder && (e.kind === 'material' || e.kind === 'terrainMaterial' || e.kind === 'model'))
     if (!targets.length) return
 
     refreshingRef.current = true
@@ -101,13 +101,13 @@ export function useFileManagerBridge() {
     const scene = sceneRef.current
     const l = libsRef.current
     switch (entry.kind) {
-      case 'material': return collectReferencedMaterialIds(scene, l.meshes).has(entry.assetId)
+      case 'material': return collectReferencedMaterialIds(scene, l.models).has(entry.assetId)
       case 'terrainMaterial': return collectReferencedTerrainMaterialIds(scene).has(entry.assetId)
       case 'template': return collectReferencedTemplateIds(scene).has(entry.assetId)
-      case 'mesh': return collectReferencedMeshIds(scene).has(entry.assetId)
+      case 'model': return collectReferencedModelIds(scene).has(entry.assetId)
       case 'script': return collectReferencedScriptIds(scene).has(entry.assetId)
       case 'texture':
-        return collectReferencedTextureIds(scene, l.materials, l.meshes, l.templates, l.terrainMaterials)
+        return collectReferencedTextureIds(scene, l.materials, l.models, l.templates, l.terrainMaterials)
           .has(entry.assetId)
       default: return false
     }
@@ -249,7 +249,7 @@ export function useFileManagerBridge() {
     api.on('open-file', (cfg: any) => {
       const entry = pathIndexRef.current.get(cfg.id)
       if (!entry) return
-      // Meshes and textures have no editor of their own — show the preview pane instead.
+      // Models and textures have no editor of their own — show the preview pane instead.
       if (!openAsset(entry.kind, entry.assetId, depsRef.current)) api.exec('show-preview', { mode: true })
     })
 

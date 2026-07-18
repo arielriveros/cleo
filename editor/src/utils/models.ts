@@ -1,0 +1,327 @@
+import { Node, ModelNode, TextureManager } from 'cleo'
+import { cryptoRandomId } from './UIModel'
+import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
+import { resolveMaterialRefs, applyMaterialAsset, serializedVar, MATERIAL_ID_VAR, MaterialAsset } from './materials'
+
+// A note on vocabulary, because the editor used to get this wrong:
+//
+//   Mesh  — the GPU-side structure (VAO/VBO/index buffers holding vertices, indices, UVs). Internal to
+//           the engine. This is not a modelling tool, so a mesh is never something the user authors.
+//   Model — one Geometry + one Material (src/graphics/model.ts). This is the reusable, placeable thing.
+//
+// What this module defines is therefore a MODEL asset: a named, thumbnailed subtree of ModelNodes that
+// share a material, with optional LOD levels and a cull distance. An imported .gltf/.glb/.obj/.fbx is a
+// model (geometry *and* material), not a mesh.
+
+// Node variable linking a placed instance back to its source model asset (mirrors TEMPLATE_ID_VAR /
+// MATERIAL_ID_VAR). Saving a model asset re-instantiates every scene node carrying it
+// (syncModelInstances in EngineContext), the same way template edits propagate.
+//
+// NOTE: this string is serialized into every placed instance. It was '__meshId' before the model
+// rename; readers still accept the old spelling (see LEGACY_MODEL_ID_VAR) so older data keeps resolving.
+export const MODEL_ID_VAR = '__modelId'
+
+/** The pre-rename spelling of MODEL_ID_VAR, still read so unmigrated data keeps resolving. */
+export const LEGACY_MODEL_ID_VAR = '__meshId'
+
+/**
+ * One extra LOD level of a model asset: a **reference** to another model asset, plus the camera distance
+ * at which it takes over.
+ *
+ * Levels used to embed a copy of their subtree (`nodeJson`). Referencing instead means a level is authored
+ * and re-authored like any other model — edit the low-poly asset once and every model using it as a LOD
+ * follows — rather than being a frozen copy that could only be replaced by re-importing a file.
+ */
+export type ModelLodDef = {
+  distance: number
+  /** The model asset rendered at this level. */
+  modelId?: string
+  /** Legacy: an embedded copy of the level's subtree, written before levels became references. Still
+   *  read so existing assets keep working; never written. */
+  nodeJson?: any
+}
+
+/**
+ * The subtree a LOD level renders, or null if it cannot be resolved — a reference whose model asset was
+ * deleted, or a legacy level with no embedded copy.
+ *
+ * Only the referenced asset's OWN subtree is used, never its LOD levels, so a chain of references cannot
+ * recurse (and a model referencing itself degrades to a duplicate level rather than hanging).
+ */
+export function lodLevelJson(lod: ModelLodDef, models?: ModelAsset[]): any | null {
+  if (lod.modelId) return models?.find(m => m.id === lod.modelId)?.nodeJson ?? null
+  return lod.nodeJson ?? null
+}
+
+/** Resolved LOD levels, dangling references dropped (with their distances) so indices stay aligned. */
+export function resolvedLods(asset: ModelAsset, models?: ModelAsset[]): { nodeJson: any; distance: number }[] {
+  const out: { nodeJson: any; distance: number }[] = []
+  for (const lod of asset.lods ?? []) {
+    const nodeJson = lodLevelJson(lod, models)
+    if (nodeJson) out.push({ nodeJson, distance: lod.distance })
+  }
+  return out
+}
+
+// A reusable, named model imported from file(s): a serialized node subtree (the parent Node with its
+// child ModelNodes) plus every texture it embeds and a rendered thumbnail. Materials are embedded in
+// the subtree (self-contained) and additionally linked to Material library assets via __materialId.
+export type ModelAsset = {
+  id: string
+  name: string
+  nodeJson: any          // serialized parent Node subtree (child ModelNodes; materials embedded + __materialId)
+  /** TextureManager ids this subtree references. The payloads live in the texture store (textureStore.ts). */
+  textureIds?: string[]
+  /** Legacy: textures embedded as base64 ([{ id, data, config }]). Still read; never written. */
+  textures?: any[]
+  materialIds: string[]  // MaterialAsset ids this model references (informational)
+  thumbnail: string      // base64 PNG data URL
+  /** Extra LOD levels (ascending distance). Absent/empty = single-level model. */
+  lods?: ModelLodDef[]
+  /** Hide placed instances beyond this camera distance; 0/absent = never cull. */
+  cullDistance?: number
+}
+
+/**
+ * Snapshot a live node subtree into a saveable model asset.
+ *
+ * Records only the texture IDS the subtree uses; the payloads live once in the texture store. Embedding
+ * them here duplicated every map the model's materials had already embedded themselves.
+ */
+export async function buildModelAsset(
+  root: Node,
+  materialIds: string[],
+  thumbnail: string,
+  id?: string,
+  lods?: ModelLodDef[],
+  cullDistance?: number,
+): Promise<ModelAsset> {
+  const nodeJson = await root.serialize()
+  stripDebug(nodeJson)
+  // A definition must never carry an instance back-link; strip it so it isn't baked in.
+  if (nodeJson.variables) {
+    delete nodeJson.variables[MODEL_ID_VAR]
+    delete nodeJson.variables[LEGACY_MODEL_ID_VAR]
+  }
+
+  const texIds = new Set<string>()
+  collectTextureIds(nodeJson, texIds)
+
+  const asset: ModelAsset = { id: id ?? cryptoRandomId(), name: root.name, nodeJson, textureIds: [...texIds], materialIds, thumbnail }
+
+  if (lods?.length) {
+    // Reference levels carry no subtree of their own — the model they point at owns it, and owns its
+    // textures, so there is nothing here to strip or collect. Only legacy embedded levels need cleaning.
+    for (const lod of lods) {
+      if (!lod.nodeJson) continue
+      stripDebug(lod.nodeJson)
+      if (lod.nodeJson.variables) {
+        delete lod.nodeJson.variables[MODEL_ID_VAR]
+        delete lod.nodeJson.variables[LEGACY_MODEL_ID_VAR]
+      }
+      collectTextureIds(lod.nodeJson, texIds)
+    }
+    asset.lods = lods
+    asset.textureIds = [...texIds]
+  }
+  if (cullDistance && cullDistance > 0) asset.cullDistance = cullDistance
+
+  return asset
+}
+
+/** True if a serialized subtree contains a skinned/animated model (LOD + foliage baking are static-only). */
+export function nodeJsonHasSkinnedModel(nodeJson: any): boolean {
+  if (!nodeJson || typeof nodeJson !== 'object') return false
+  const m = nodeJson.model
+  if (m && (m.skin || m.animations || m.jointIndices)) return true
+  return Array.isArray(nodeJson.children) && nodeJson.children.some(nodeJsonHasSkinnedModel)
+}
+
+/**
+ * True if a serialized subtree contains at least one model — i.e. there is actually geometry in it.
+ *
+ * A model asset with no ModelNodes renders as nothing. Saving one is nearly always the result of the save
+ * reading the wrong subtree (an emptied parent, a node pending deletion) rather than something the user
+ * meant, and persisting it silently destroys the previous content.
+ */
+export function nodeJsonHasModel(nodeJson: any): boolean {
+  if (!nodeJson || typeof nodeJson !== 'object') return false
+  if (nodeJson.model) return true
+  return Array.isArray(nodeJson.children) && nodeJson.children.some(nodeJsonHasModel)
+}
+
+/** True if the asset carries LOD levels or a cull distance (i.e. it instantiates as a LodGroupNode). */
+export function modelAssetHasLodBehavior(asset: ModelAsset): boolean {
+  return !!asset.lods?.length || (asset.cullDistance ?? 0) > 0
+}
+
+/** Every texture id a model asset references, whichever format it was saved in. */
+export function modelAssetTextureIds(asset: ModelAsset): string[] {
+  if (asset.textureIds?.length) return asset.textureIds
+  return (asset.textures ?? []).map((t: any) => t?.id).filter(Boolean)
+}
+
+/**
+ * The material every ModelNode in a subtree shares, or null when they disagree (or there are none).
+ *
+ * A model is one Geometry + one Material, so a model asset composed of several ModelNodes is only
+ * coherent while they all carry the same material — that is also what lets the renderer draw the whole
+ * asset in a single material batch. The model editor uses this to decide which material to hand a newly
+ * added part, and to warn when an asset has drifted.
+ */
+export function sharedMaterialIdOf(nodeJson: any): string | null {
+  // The link lives in the node's serialized `variables`, not inside model.material — the embedded
+  // material is only the fallback copy (see resolveMaterialRefs).
+  const ids: (string | undefined)[] = []
+  const walk = (n: any) => {
+    if (!n || typeof n !== 'object') return
+    if (n.model) ids.push(serializedVar(n, MATERIAL_ID_VAR))
+    if (Array.isArray(n.children)) n.children.forEach(walk)
+  }
+  walk(nodeJson)
+  if (!ids.length) return null
+  return ids.every(id => id && id === ids[0]) ? (ids[0] as string) : null
+}
+
+/** Every ModelNode at or beneath `node`, in tree order. */
+function modelNodesOf(node: Node): Node[] {
+  const out: Node[] = []
+  const walk = (n: Node) => {
+    if (n instanceof ModelNode) out.push(n)
+    for (const child of n.children) walk(child)
+  }
+  walk(node)
+  return out
+}
+
+/**
+ * The material asset shared by the ModelNodes already under `host`, ignoring anything inside `added`.
+ *
+ * Used by the model editor to decide what a newly dropped part should adopt. Returns null when the host
+ * has no linked material to adopt (an empty model, or one whose parts are on ad-hoc materials rather than
+ * a library asset) — in which case the part keeps whatever it arrived with.
+ */
+function hostMaterialId(host: Node, added: Node): string | null {
+  const ignore = new Set(modelNodesOf(added))
+  let found: string | null = null
+  for (const n of modelNodesOf(host)) {
+    if (ignore.has(n)) continue
+    const id = n.getVariable(MATERIAL_ID_VAR)
+    if (typeof id !== 'string') continue
+    if (found && found !== id) return null // host is already mixed; adopting would be arbitrary
+    found = id
+  }
+  return found
+}
+
+/**
+ * Make every ModelNode in `added` use the material the rest of `host` already shares.
+ *
+ * This is what keeps a model asset to ONE material: the renderer batches by material, so a model whose
+ * parts disagree cannot be drawn as a single batch. Returns the adopted material's NAME when it changed
+ * something (for the caller's notice), else null.
+ */
+export function adoptModelMaterial(added: Node, host: Node, materials: MaterialAsset[]): string | null {
+  const wanted = hostMaterialId(host, added)
+  if (!wanted) return null
+  const asset = materials.find(m => m.id === wanted)
+  if (!asset) return null
+
+  let changed = false
+  for (const n of modelNodesOf(added)) {
+    if (n.getVariable(MATERIAL_ID_VAR) === wanted) continue
+    applyMaterialAsset(n, asset)
+    changed = true
+  }
+  return changed ? asset.name : null
+}
+
+/**
+ * Turn one imported subtree into a separate ModelAsset per sub-mesh (the import modal's "Separate parts"
+ * option). Each asset is re-centred on its own bounds, so dragging it into the scene drops it where you
+ * point instead of wherever it happened to sit in the source file.
+ *
+ * The re-centring is done with the NODE TRANSFORM, never by translating vertices: a skinned model's
+ * vertices are bound to its skeleton and moving them would break the binding (the same reason
+ * normalizeRootScale falls back to transform-space scaling for skinned subtrees).
+ *
+ * Rotation and scale are deliberately KEPT — those are the part's authored size and orientation. Only
+ * its position (the file's layout) is dropped.
+ */
+export async function separateSubModels(
+  root: Node,
+  children: ModelNode[],
+  bundleName: string,
+  materialIdOfChild: Map<ModelNode, string>,
+): Promise<ModelAsset[]> {
+  const assets: ModelAsset[] = []
+  const rootScale = root.scale
+
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    const name = child.name?.trim() || `${bundleName}_${i + 1}`
+
+    const holder = new Node(name)
+    // normalizeRootScale scales a SKINNED subtree through the root's transform (it cannot bake into the
+    // vertices), so a separated skinned child would silently lose its normalization without this.
+    holder.setScale([rootScale[0], rootScale[1], rootScale[2]])
+
+    child.setPosition([0, 0, 0]) // drop the file's authored layout; keep rotation + scale
+    holder.addChild(child)
+    holder.updateTransforms()
+
+    // Shift the child so its bounds land on the origin. getBoundingSphere is WORLD space, and the holder
+    // sits at the origin with only a scale, so dividing that scale back out converts it to the child's
+    // local space.
+    const center = child.getBoundingSphere().center
+    const sx = rootScale[0] || 1, sy = rootScale[1] || 1, sz = rootScale[2] || 1
+    child.setPosition([-center[0] / sx, -center[1] / sy, -center[2] / sz])
+    holder.updateTransforms()
+
+    const materialId = materialIdOfChild.get(child)
+    assets.push(await buildModelAsset(holder, materialId ? [materialId] : [], ''))
+  }
+
+  return assets
+}
+
+/** Instantiate a model asset under `parent`, regenerating ids and restoring embedded textures. Returns the new root id.
+ *  Assets with LOD levels or a cull distance instantiate as a LodGroupNode wrapping one child subtree
+ *  per level (level 0 = the base nodeJson); plain assets keep the original single-subtree shape.
+ *  `materials` re-resolves the subtree's __materialId links against the library — see resolveMaterialRefs. */
+export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials?: MaterialAsset[], models?: ModelAsset[]): string {
+  // LOD levels are references, so the library is needed to resolve them. A level whose model has been
+  // deleted is dropped rather than instantiated as a hole — the instance simply keeps the levels that
+  // still resolve, and `resolvedLods` drops the matching distance so the two arrays stay aligned.
+  const lods = resolvedLods(asset, models)
+  const clone = (lods.length || (asset.cullDistance ?? 0) > 0)
+    ? {
+        id: cryptoRandomId(),
+        name: asset.name,
+        type: 'lodGroup',
+        distances: [0, ...lods.map(l => l.distance)],
+        cullDistance: asset.cullDistance ?? 0,
+        children: [
+          JSON.parse(JSON.stringify(asset.nodeJson)),
+          ...lods.map(l => JSON.parse(JSON.stringify(l.nodeJson))),
+        ],
+      } as any
+    : JSON.parse(JSON.stringify(asset.nodeJson))
+
+  if (materials) resolveMaterialRefs(clone, materials)
+  const idMap = new Map<string, string>()
+  regenerateIds(clone, idMap)
+
+  // Tag the instance root so it can be recognized as a placed model instance. Persists via the node's
+  // serialized `variables`.
+  clone.variables = { ...(clone.variables || {}), [MODEL_ID_VAR]: { type: 'string', value: asset.id } }
+
+  // Restore any embedded textures not already present.
+  for (const t of asset.textures || []) {
+    if (t?.id && !TextureManager.Instance.getTexture(t.id))
+      TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id)
+  }
+
+  parseByType(parent, clone)
+  return clone.id
+}

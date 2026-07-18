@@ -61,7 +61,7 @@ export async function exportBundle(opts: {
   const stored = await getAllTextures()
   const wanted = kind === 'project'
     ? null
-    : referencedTextureIds(libraries.materials, libraries.terrainMaterials, libraries.templates, libraries.meshes)
+    : referencedTextureIds(libraries.materials, libraries.terrainMaterials, libraries.templates, libraries.models)
   const textures: BundleTexture[] = []
   for (const t of stored) {
     if (wanted && !wanted.has(t.id)) continue

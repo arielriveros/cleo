@@ -7,11 +7,11 @@ import type { ScriptAsset } from './scripts'
 import type { MaterialAsset } from './materials'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
-import type { MeshAsset } from './meshes'
+import type { ModelAsset } from './models'
 
 // Pure merge logic for importing a bundle alongside an existing project (the "Merge", not "Replace",
 // path). Any imported id that collides with a local one is re-minted, and every cross-reference to it —
-// texture ids, __materialId/__meshId/__templateId links, terrain layer materialId, foliage meshId,
+// texture ids, __materialId/__modelId/__templateId links, terrain layer materialId, foliage modelId,
 // camera screen-material lists, VFS assetIds — is rewritten to the new id. Imported scene node ids are
 // regenerated wholesale so they can never collide with local scenes (the published script registry keys
 // on node id). Everything here is deterministic and engine-free, so it is unit-testable in isolation.
@@ -21,7 +21,7 @@ export interface LocalState {
   materialIds: Set<string>
   terrainMaterialIds: Set<string>
   templateIds: Set<string>
-  meshIds: Set<string>
+  modelIds: Set<string>
   scriptIds: Set<string>
   sceneIds: Set<string>
   sceneNames: Set<string>
@@ -35,7 +35,7 @@ export interface MergeResult {
   materials: MaterialAsset[]
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
-  meshes: MeshAsset[]
+  models: ModelAsset[]
   scripts: ScriptAsset[]
   /** New scene entries + their blobs (project bundles only). */
   scenes: { meta: SceneMeta; data: SceneAssetData }[]
@@ -51,7 +51,7 @@ type Remaps = {
   mat: Map<string, string>
   tmat: Map<string, string>
   tpl: Map<string, string>
-  mesh: Map<string, string>
+  model: Map<string, string>
   script: Map<string, string>
 }
 
@@ -60,8 +60,8 @@ const sub = (m: Map<string, string>, v: any): any => (typeof v === 'string' && m
 /**
  * Recursively rewrite every id reference inside a serialized object (asset record or scene tree) using
  * the remap tables. Handles: texture maps (`textures` slot→id), top-level `textureId`/`displacementMap`,
- * `materialId` (terrain layer → terrain-material), `materialIds[]` (mesh → materials), `meshId` (foliage),
- * and node `variables` links (__materialId/__meshId/__templateId/__screenMaterialIds).
+ * `materialId` (terrain layer → terrain-material), `materialIds[]` (model → materials), `modelId` (foliage),
+ * and node `variables` links (__materialId/__modelId/__templateId/__screenMaterialIds).
  */
 function remapDeep(obj: any, r: Remaps): void {
   if (!obj || typeof obj !== 'object') return
@@ -76,7 +76,8 @@ function remapDeep(obj: any, r: Remaps): void {
     if (key === 'textureId' || key === 'displacementMap') { obj[key] = sub(r.tex, val); continue }
     if (key === 'materialId') { obj[key] = sub(r.tmat, val); continue } // terrain layer → terrain material
     if (key === 'materialIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.mat, x)); continue }
-    if (key === 'meshId') { obj[key] = sub(r.mesh, val); continue } // foliage rule → mesh asset
+    // 'meshId' is the pre-rename spelling; both point at a model asset (foliage rule → model asset).
+    if (key === 'modelId' || key === 'meshId') { obj[key] = sub(r.model, val); continue }
     if (key === 'variables' && val && typeof val === 'object') {
       remapVariables(val, r)
       continue
@@ -92,7 +93,8 @@ function remapVariables(vars: any, r: Remaps): void {
     if (entry && typeof entry.value === 'string') entry.value = sub(m, entry.value)
   }
   one('__materialId', r.mat)
-  one('__meshId', r.mesh)
+  one('__modelId', r.model)
+  one('__meshId', r.model) // pre-rename spelling, still present in unmigrated bundles
   one('__templateId', r.tpl)
   one('__scriptId', r.script)
   const sm = vars['__screenMaterialIds']
@@ -124,7 +126,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }))
   // Textures carry ArrayBuffers (not JSON-cloneable that way) — keep the originals, remap ids separately.
-  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), mesh: new Map(), script: new Map() }
+  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
   const textures: BundleTexture[] = []
@@ -137,19 +139,19 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const m of data.libraries.materials) if (local.materialIds.has(m.id)) r.mat.set(m.id, cryptoRandomId())
   for (const m of data.libraries.terrainMaterials) if (local.terrainMaterialIds.has(m.id)) r.tmat.set(m.id, cryptoRandomId())
   for (const t of data.libraries.templates) if (local.templateIds.has(t.id)) r.tpl.set(t.id, cryptoRandomId())
-  for (const m of data.libraries.meshes) if (local.meshIds.has(m.id)) r.mesh.set(m.id, cryptoRandomId())
+  for (const m of data.libraries.models) if (local.modelIds.has(m.id)) r.model.set(m.id, cryptoRandomId())
   for (const s of data.libraries.scripts ?? []) if (local.scriptIds.has(s.id)) r.script.set(s.id, cryptoRandomId())
 
   // 3) Apply the id re-mints to the asset records' own ids, then rewrite all references within them.
   const materials = data.libraries.materials.map(m => ({ ...m, id: sub(r.mat, m.id) }))
   const terrainMaterials = data.libraries.terrainMaterials.map(m => ({ ...m, id: sub(r.tmat, m.id) }))
   const templates = data.libraries.templates.map(t => ({ ...t, id: sub(r.tpl, t.id) }))
-  const meshes = data.libraries.meshes.map(m => ({ ...m, id: sub(r.mesh, m.id) }))
+  const models = data.libraries.models.map(m => ({ ...m, id: sub(r.model, m.id) }))
   const scripts = (data.libraries.scripts ?? []).map(s => ({ ...s, id: sub(r.script, s.id) }))
   for (const m of materials) remapDeep(m, r)
   for (const m of terrainMaterials) remapDeep(m, r)
   for (const t of templates) remapDeep(t, r)
-  for (const m of meshes) remapDeep(m, r)
+  for (const m of models) remapDeep(m, r)
 
   // 4) Scenes (project bundles): remap references, regenerate node ids, mint a fresh scene id + unique name.
   const takenNames = new Set(local.sceneNames)
@@ -184,7 +186,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     const remap = e.kind === 'material' ? r.mat
       : e.kind === 'terrainMaterial' ? r.tmat
       : e.kind === 'template' ? r.tpl
-      : e.kind === 'mesh' ? r.mesh
+      : e.kind === 'model' ? r.model
       : e.kind === 'script' ? r.script
       : r.tex
     const assetId = sub(remap, e.assetId)
@@ -194,5 +196,5 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     vfsEntries.push({ ...e, path, assetId })
   }
 
-  return { materials, terrainMaterials, templates, meshes, scripts, scenes, textures, vfsFolders, vfsEntries }
+  return { materials, terrainMaterials, templates, models, scripts, scenes, textures, vfsFolders, vfsEntries }
 }

@@ -94,7 +94,7 @@ export function unlinkToFallback(node: Node): void {
 }
 
 /** Read a node variable's value out of SERIALIZED json (the `{ type, value, access }` shape, or a bare value). */
-function serializedVar(json: any, name: string): string | undefined {
+export function serializedVar(json: any, name: string): string | undefined {
   const v = json?.variables?.[name]
   if (v && typeof v === 'object') return v.value
   return typeof v === 'string' ? v : undefined

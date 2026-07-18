@@ -7,7 +7,18 @@ import CodeEditorHeader from './CodeEditorHeader'
 // A Monaco editor for GLSL fragment-shader source (language registered in glslMonaco.ts via ensureMonaco).
 // The parent owns the value; edits are pushed out via `onChange`, and a compile-error banner is rendered
 // from the `error` prop.
-export default function GlslCodeEditor(props: { value: string, onChange: (src: string) => void, error?: string | null, readOnly?: boolean }) {
+//
+// `onSubmit` is bound to Ctrl/Cmd+Enter — the parent uses it to compile, which is a deliberate user action
+// rather than something that happens while typing (see CustomMaterialEditor). `headerRight` puts controls
+// in the header strip alongside the theme picker.
+export default function GlslCodeEditor(props: {
+  value: string,
+  onChange: (src: string) => void,
+  error?: string | null,
+  readOnly?: boolean,
+  onSubmit?: () => void,
+  headerRight?: React.ReactNode,
+}) {
   const theme = useCodeTheme()
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -17,6 +28,10 @@ export default function GlslCodeEditor(props: { value: string, onChange: (src: s
   onChangeRef.current = props.onChange
   const readOnlyRef = useRef(!!props.readOnly)
   readOnlyRef.current = !!props.readOnly
+  // Same ref indirection as onChange: the editor is created once, so the command handler installed below
+  // must read the current prop rather than close over the one from first render.
+  const onSubmitRef = useRef(props.onSubmit)
+  onSubmitRef.current = props.onSubmit
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -38,6 +53,9 @@ export default function GlslCodeEditor(props: { value: string, onChange: (src: s
       tabSize: 2,
     })
     editorRef.current = editor
+    // Ctrl/Cmd+Enter compiles. Monaco swallows the keystroke itself, so this does not also insert a
+    // newline. Registered unconditionally — the handler no-ops when the parent passes no onSubmit.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => { onSubmitRef.current?.() })
     const sub = model.onDidChangeContent(() => {
       if (!readOnlyRef.current) onChangeRef.current(model.getValue())
     })
@@ -58,7 +76,7 @@ export default function GlslCodeEditor(props: { value: string, onChange: (src: s
   return (
     <div className='p-1'>
       <div className='border border-border rounded overflow-hidden'>
-        <CodeEditorHeader />
+        <CodeEditorHeader right={props.headerRight} />
         <div ref={containerRef} className='w-full h-[320px]' aria-label='Shader source editor' />
       </div>
       {props.error && (

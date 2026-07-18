@@ -2,7 +2,7 @@ import { Scene, CameraNode } from 'cleo'
 import { getNodeMaterial, getMaterialIdOf, MaterialAsset } from './materials'
 import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
-import { MeshAsset, MESH_ID_VAR } from './meshes'
+import { ModelAsset, MODEL_ID_VAR, LEGACY_MODEL_ID_VAR } from './models'
 import { Template, TEMPLATE_ID_VAR } from './templates'
 import { SCRIPT_ID_VAR } from './scripts'
 import { TerrainMaterialAsset } from './terrainMaterials'
@@ -25,7 +25,7 @@ function collectFoliageRuleTextures(foliageInclude: any, set: Set<string>): void
 export function collectReferencedTextureIds(
   scene: Scene | null | undefined,
   materials: MaterialAsset[],
-  meshes: MeshAsset[],
+  models: ModelAsset[],
   templates: Template[],
   terrainMaterials: TerrainMaterialAsset[] = [],
 ): Set<string> {
@@ -52,7 +52,7 @@ export function collectReferencedTextureIds(
     }
   }
   for (const m of materials) collectTextureIds(m.material, set)
-  for (const m of meshes) collectTextureIds(m.nodeJson, set)
+  for (const m of models) collectTextureIds(m.nodeJson, set)
   for (const t of templates) collectTextureIds(t.nodeJson, set)
   for (const t of terrainMaterials) {
     collectTextureIds(t.material, set)              // base-surface + mesh-foliage model textures
@@ -64,7 +64,7 @@ export function collectReferencedTextureIds(
 
 /** Material asset ids referenced by any placed node (__materialId), a camera's screen-space pass
  *  list (__screenMaterialIds), or listed by a mesh asset. */
-export function collectReferencedMaterialIds(scene: Scene | null | undefined, meshes: MeshAsset[]): Set<string> {
+export function collectReferencedMaterialIds(scene: Scene | null | undefined, models: ModelAsset[]): Set<string> {
   const set = new Set<string>()
   if (scene) {
     for (const node of scene.nodes) {
@@ -74,7 +74,7 @@ export function collectReferencedMaterialIds(scene: Scene | null | undefined, me
         for (const sid of getScreenMaterialIds(node as CameraNode)) set.add(sid)
     }
   }
-  for (const m of meshes) for (const id of (m.materialIds || [])) set.add(id)
+  for (const m of models) for (const id of (m.materialIds || [])) set.add(id)
   return set
 }
 
@@ -90,12 +90,15 @@ export function collectReferencedTemplateIds(scene: Scene | null | undefined): S
   return set
 }
 
-/** Mesh asset ids referenced by any placed instance (__meshId). */
-export function collectReferencedMeshIds(scene: Scene | null | undefined): Set<string> {
+/** Model asset ids referenced by any placed instance (__modelId). */
+export function collectReferencedModelIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()
   if (scene) {
     for (const node of scene.nodes) {
-      const id = node.getVariable(MESH_ID_VAR)
+      // The legacy spelling is read too: a scene that predates the model rename (or one imported from an
+      // old bundle) would otherwise look unreferenced here — and "unreferenced" is what the explorer uses
+      // to flag an asset as safe to delete.
+      const id = node.getVariable(MODEL_ID_VAR) ?? node.getVariable(LEGACY_MODEL_ID_VAR)
       if (id) set.add(id)
     }
   }

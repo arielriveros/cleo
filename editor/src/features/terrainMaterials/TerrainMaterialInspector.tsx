@@ -4,17 +4,17 @@ import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor'
 import TextureInspector from '../nodeInspector/propertyEditors/TextureInspector'
-import { buildFoliageRuleFromMeshAsset } from '../../utils/foliageRules'
+import { buildFoliageRuleFromModelAsset } from '../../utils/foliageRules'
 import { Toggle } from '../../components/ui'
 
 // The right-sidebar inspector shown while a terrain-material tab is active. Edits the preview sphere's
 // TerrainMaterial in place: the base surface (via the shared MaterialEditor), the terrain blend fields,
 // and the foliage include/exclude lists. All edits emit SCENE_CHANGED so the tab tracks unsaved state.
 export default function TerrainMaterialInspector(props: { node: Node | null }) {
-  const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials, meshes, refreshTerrainMaterialPreview } = useCleoEngine()
+  const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials, models, refreshTerrainMaterialPreview } = useCleoEngine()
   const [, force] = useState(0)
   const [newFoliageTex, setNewFoliageTex] = useState('')
-  const [newFoliageMesh, setNewFoliageMesh] = useState('')
+  const [newFoliageModel, setNewFoliageModel] = useState('')
   const rerender = () => force(x => x + 1)
 
   const node = props.node
@@ -52,25 +52,26 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     mat.foliageInclude.push({ kind: 'billboard', name, textureId: newFoliageTex, density: 8, minScale: 0.8, maxScale: 1.4 })
     changed()
   }
-  const addMesh = (files: FileList | null) => {
+  const addModel = (files: FileList | null) => {
     if (!files || files.length === 0) return
     Model.fromFile({ files: Array.from(files) }).then(models => {
       if (!models.length) return
       const rule: TerrainFoliageRule = {
-        kind: 'mesh', name: `${models[0].name}_${mat.foliageInclude.length}`,
+        kind: 'mesh', // rendering mode (real geometry vs 'billboard'), not the old asset-type name
+        name: `${models[0].name}_${mat.foliageInclude.length}`,
         model: models[0].model.serialize(), density: 4, minScale: 0.8, maxScale: 1.4,
       }
       mat.foliageInclude.push(rule)
       changed()
     }).catch(err => console.error(err))
   }
-  // Mesh-library prop: carries the asset's LOD levels + cull distance and stays linked (rule.meshId) —
-  // saving the mesh asset refreshes the rule (and live foliage) automatically.
-  const addMeshFromLibrary = () => {
-    const asset = meshes.find(m => m.id === newFoliageMesh)
-    if (!asset) { alert('Pick a mesh from the library.'); return }
+  // Model-library prop: carries the asset's LOD levels + cull distance and stays linked (rule.modelId) —
+  // saving the model asset refreshes the rule (and live foliage) automatically.
+  const addModelFromLibrary = () => {
+    const asset = models.find(m => m.id === newFoliageModel)
+    if (!asset) { alert('Pick a model from the library.'); return }
     try {
-      const rule = buildFoliageRuleFromMeshAsset(asset)
+      const rule = buildFoliageRuleFromModelAsset(asset)
       rule.name = `${rule.name}_${mat.foliageInclude.length}`
       mat.foliageInclude.push(rule)
       changed()
@@ -78,13 +79,13 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
       Logger.warn(`${e}`, 'Editor')
     }
   }
-  // Rebuild a library-linked rule's payload from its current mesh asset (keeps name/density/impostor).
+  // Rebuild a library-linked rule's payload from its current model asset (keeps name/density/impostor).
   const resyncRule = (i: number) => {
     const r = mat.foliageInclude[i]
-    const asset = r.meshId ? meshes.find(m => m.id === r.meshId) : undefined
-    if (!asset) { Logger.warn('The source mesh asset no longer exists', 'Editor'); return }
+    const asset = r.modelId ? models.find(m => m.id === r.modelId) : undefined
+    if (!asset) { Logger.warn('The source model asset no longer exists', 'Editor'); return }
     try {
-      mat.foliageInclude[i] = buildFoliageRuleFromMeshAsset(asset, r)
+      mat.foliageInclude[i] = buildFoliageRuleFromModelAsset(asset, r)
       changed()
     } catch (e) {
       Logger.warn(`${e}`, 'Editor')
@@ -175,16 +176,16 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
               <button className='bg-success hover:bg-success-hover rounded px-2 text-xs' onClick={addBillboard}>+</button>
             </div>
             <label className='block bg-control hover:bg-control-hover rounded px-2 py-1 text-xs text-center cursor-pointer'>
-              Add mesh prop (import)
-              <input type='file' className='hidden' accept='.obj,.gltf,.glb' multiple onChange={e => addMesh(e.target.files)} />
+              Add model prop (import)
+              <input type='file' className='hidden' accept='.obj,.gltf,.glb' multiple onChange={e => addModel(e.target.files)} />
             </label>
-            <div className={label}>Add mesh prop from library (uses its LOD levels)</div>
+            <div className={label}>Add model prop from library (uses its LOD levels)</div>
             <div className='flex gap-1'>
-              <select className={`${num} flex-1`} value={newFoliageMesh} onChange={e => setNewFoliageMesh(e.target.value)}>
-                <option value=''>(mesh asset)</option>
-                {meshes.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              <select className={`${num} flex-1`} value={newFoliageModel} onChange={e => setNewFoliageModel(e.target.value)}>
+                <option value=''>(model asset)</option>
+                {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
-              <button className='bg-success hover:bg-success-hover rounded px-2 text-xs' onClick={addMeshFromLibrary}>+</button>
+              <button className='bg-success hover:bg-success-hover rounded px-2 text-xs' onClick={addModelFromLibrary}>+</button>
             </div>
           </div>
 
@@ -208,14 +209,14 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
               </div>
 
               {r.kind === 'mesh' && <>
-                {/* LOD/cull come from the mesh asset (edited in the mesh editor) — shown, not edited. */}
-                {r.meshId && (
+                {/* LOD/cull come from the model asset (edited in the model editor) — shown, not edited. */}
+                {r.modelId && (
                   <div className='flex items-center justify-between'>
                     <span className='text-[10px] text-gray-400'>
                       {1 + (r.lods?.length ?? 0)} LOD level{r.lods?.length ? 's' : ''}
-                      {(r.cullDistance ?? 0) > 0 ? `, culls at ${r.cullDistance}` : ''} (from the mesh asset)
+                      {(r.cullDistance ?? 0) > 0 ? `, culls at ${r.cullDistance}` : ''} (from the model asset)
                     </span>
-                    <button className='text-[10px] text-slate-300 underline px-1' title='Rebuild from the current mesh asset' onClick={() => resyncRule(i)}>re-sync</button>
+                    <button className='text-[10px] text-slate-300 underline px-1' title='Rebuild from the current model asset' onClick={() => resyncRule(i)}>re-sync</button>
                   </div>
                 )}
                 {/* Billboard impostor: the farthest LOD — past its distance instances draw as cross-quads. */}

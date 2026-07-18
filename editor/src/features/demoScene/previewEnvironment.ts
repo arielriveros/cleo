@@ -36,19 +36,32 @@ let envmap: Texture | null = null;
  * scenes pass `skybox: false` to also skip the per-scene Skybox upload the renderer would never draw.
  * Resolves once the environment is applied; never rejects (a failed load just leaves the scene as-is).
  */
-export async function applyPreviewEnvironment(scene: Scene, opts?: { skybox?: boolean }): Promise<void> {
+export async function applyPreviewEnvironment(
+  scene: Scene,
+  opts?: { skybox?: boolean; silently?: <T>(fn: () => T) => T },
+): Promise<void> {
   try {
     const faces = await loadFaces();
     if (!envmap) {
       envmap = new Texture({ target: 'cubemap', flipY: true });
       envmap.create(faces, faces.posX.width, faces.posX.height);
     }
-    scene.environmentMap = envmap;
-    if (opts?.skybox !== false) {
-      // Each scene gets its own Skybox: SkyboxNode.initializeSkybox() is per-node lazy VAO setup, so
-      // sharing one Skybox instance across scenes would re-initialize the same mesh.
-      scene.addNode(new SkyboxNode('__editor__skybox', new Skybox(faces)));
-    }
+    // The scene mutation is wrapped rather than the whole function on purpose. Adding the SkyboxNode
+    // emits SCENE_CHANGED, which the editor reads as "the user edited something" — and because the faces
+    // load asynchronously, that lands long after the opening settle window has re-armed dirty-tracking,
+    // marking a tab the user has not touched as unsaved. Callers pass `silently` (EngineContext's
+    // withoutDirty) to suppress it. Wrapping only this synchronous block, rather than holding the
+    // suppression across the await, keeps the window at zero: a genuine edit made while the cubemap is
+    // still loading still marks the tab dirty.
+    const run = opts?.silently ?? (<T,>(fn: () => T): T => fn());
+    run(() => {
+      scene.environmentMap = envmap;
+      if (opts?.skybox !== false) {
+        // Each scene gets its own Skybox: SkyboxNode.initializeSkybox() is per-node lazy VAO setup, so
+        // sharing one Skybox instance across scenes would re-initialize the same mesh.
+        scene.addNode(new SkyboxNode('__editor__skybox', new Skybox(faces)));
+      }
+    });
   } catch (e) {
     console.error('Failed to load preview environment:', e);
   }

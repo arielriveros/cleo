@@ -12,7 +12,7 @@ const DIAG = 1 / Math.sqrt(3);
  * createMaterialPreviewScene but distances the camera by the bounds so any model size fits the thumbnail.
  * No light icons are created (the editor-helper reconciler never touches this throwaway scene).
  */
-export function createMeshPreviewScene(scene: Scene, center: [number, number, number], radius: number): void {
+export function createModelPreviewScene(scene: Scene, center: [number, number, number], radius: number): void {
   const r = Math.max(radius, 0.001);
   // Distance so the sphere of radius r fits within the vertical FOV, with a margin for breathing room.
   // Clip planes track the bounds too — the camera defaults would clip very small or very large meshes.

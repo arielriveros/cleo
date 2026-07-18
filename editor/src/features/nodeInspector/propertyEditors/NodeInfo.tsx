@@ -6,7 +6,7 @@ import { PropertyTable, PropertyRow, TextInput, ButtonWithConfirm } from '../../
 import { InfoIcon } from '../sectionIcons'
 
 export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
-  const { eventEmitter: eventEmitter } = useCleoEngine();
+  const { eventEmitter: eventEmitter, editorScene } = useCleoEngine();
   const [nodeName, setNodeName] = useState(props.node.name);
 
   useEffect(() => {
@@ -57,7 +57,12 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
         </PropertyTable>
         {props.node.name !== 'root' &&
           <div className='mt-2'>
-            <ButtonWithConfirm onClick={() => props.node.remove()}>Delete</ButtonWithConfirm>
+            {/* Synchronous removal, not Node.remove(): that only sets markForRemoval and leaves the node
+                in the tree until a later Scene.update sweep. Anything reading the tree in between — the
+                mesh/template save paths do exactly this — sees a node the user has already deleted, and
+                serialized it. Every other removal site in the editor uses removeNode for this reason
+                (see sceneResync.ts, addCatalog.ts, PositionGizmo.tsx). */}
+            <ButtonWithConfirm onClick={() => editorScene.removeNode(props.node)}>Delete</ButtonWithConfirm>
           </div>
         }
       </div>

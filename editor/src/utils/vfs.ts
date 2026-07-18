@@ -1,28 +1,28 @@
 import type { MaterialAsset } from './materials'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
-import type { MeshAsset } from './meshes'
+import type { ModelAsset } from './models'
 import type { ScriptAsset } from './scripts'
 
 // The editor's virtual filesystem: the folder layout the unified Assets explorer shows.
 //
-// The five asset libraries (textures, materials, terrain materials, templates, meshes) are flat and know
+// The five asset libraries (textures, materials, terrain materials, templates, models) are flat and know
 // nothing about folders. This index is the *side table* that gives each of them a path. It is deliberately
 // NOT a field on the asset records: textures have no record type at all (they live only in TextureManager),
-// and buildMaterialAsset/buildTerrainMaterialAsset/buildMeshAsset each rebuild a fresh literal on every
+// and buildMaterialAsset/buildTerrainMaterialAsset/buildModelAsset each rebuild a fresh literal on every
 // save, which would silently drop any extra field.
 //
 // A path is also the SVAR file-manager id, so it must be unique across every kind. The kind is carried by
-// a virtual extension (.mat/.tmat/.tpl/.mesh); textures keep their real image extension. Path rules match
+// a virtual extension (.mat/.tmat/.tpl/.model); textures keep their real image extension. Path rules match
 // SVAR's own FileTree.normalizeFile: the extension is everything after the LAST dot.
 
-export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'mesh' | 'scene' | 'script'
+export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script'
 
 export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
   material: '.mat',
   terrainMaterial: '.tmat',
   template: '.tpl',
-  mesh: '.mesh',
+  model: '.model',
   scene: '.scene',
   script: '.script',
 }
@@ -32,15 +32,15 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   material: 'material',
   terrainMaterial: 'terrain material',
   template: 'template',
-  mesh: 'mesh',
+  model: 'model',
   scene: 'scene',
   script: 'script',
 }
 
 export type VfsEntry = {
-  path: string      // full path == the SVAR file id, e.g. "/Props/Rock.mesh". Unique, authoritative.
+  path: string      // full path == the SVAR file id, e.g. "/Props/Rock.model". Unique, authoritative.
   kind: AssetKind
-  assetId: string   // MaterialAsset.id | TerrainMaterialAsset.id | Template.id | MeshAsset.id | TextureManager id
+  assetId: string   // MaterialAsset.id | TerrainMaterialAsset.id | Template.id | ModelAsset.id | TextureManager id
   created?: number  // epoch ms, shown as the Date column
   size?: number     // rough byte size, shown as the Size column
 }
@@ -59,7 +59,7 @@ export type LibSnapshot = {
   materials: MaterialAsset[]
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
-  meshes: MeshAsset[]
+  models: ModelAsset[]
   scripts: ScriptAsset[]
   scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
   textureIds: string[]
@@ -105,7 +105,10 @@ export function kindOfExt(ext: string): AssetKind {
     case '.mat': return 'material'
     case '.tmat': return 'terrainMaterial'
     case '.tpl': return 'template'
-    case '.mesh': return 'mesh'
+    case '.model': return 'model'
+    // Pre-rename model assets were saved with a '.mesh' path. Still accepted so an older index (or one
+    // from an old bundle) keeps resolving.
+    case '.mesh': return 'model'
     case '.script': return 'script'
     default: return 'texture'
   }
@@ -339,7 +342,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const m of libs.materials) visit('material', m.id, m.name)
   for (const m of libs.terrainMaterials) visit('terrainMaterial', m.id, m.name)
   for (const t of libs.templates) visit('template', t.id, t.name)
-  for (const m of libs.meshes) visit('mesh', m.id, m.name)
+  for (const m of libs.models) visit('model', m.id, m.name)
   for (const s of libs.scripts) visit('script', s.id, s.name)
   for (const s of libs.scenes) visit('scene', s.id, s.name)
   for (const id of libs.textureIds) visit('texture', id, id)
@@ -403,7 +406,7 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const m of libs.materials) check('material', m.id, m.name)
   for (const m of libs.terrainMaterials) check('terrainMaterial', m.id, m.name)
   for (const t of libs.templates) check('template', t.id, t.name)
-  for (const m of libs.meshes) check('mesh', m.id, m.name)
+  for (const m of libs.models) check('model', m.id, m.name)
   for (const s of libs.scripts) check('script', s.id, s.name)
   for (const s of libs.scenes) check('scene', s.id, s.name)
   for (const id of libs.textureIds) check('texture', id, id)
@@ -437,7 +440,7 @@ export function buildFileManagerData(vfs: VfsIndex, libs: LibSnapshot): FmEntity
     material: new Set(libs.materials.map(m => m.id)),
     terrainMaterial: new Set(libs.terrainMaterials.map(m => m.id)),
     template: new Set(libs.templates.map(t => t.id)),
-    mesh: new Set(libs.meshes.map(m => m.id)),
+    model: new Set(libs.models.map(m => m.id)),
     script: new Set(libs.scripts.map(s => s.id)),
     scene: new Set(libs.scenes.map(s => s.id)),
     texture: new Set(libs.textureIds),

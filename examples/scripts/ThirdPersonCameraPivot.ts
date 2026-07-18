@@ -13,14 +13,14 @@ import { InputManager, Logger, Node } from 'cleo'
  */
 export default class ThirdPersonCameraPivotNode extends Node {
   /** Degrees of rotation per pixel of mouse movement. */
-  public lookSpeed: number = 0.15
+  protected lookSpeed: number = 0.15
   /** How far behind the pivot the camera sits. Mouse wheel zooms between min and max. */
-  public distance: number = 5
-  public minDistance: number = 2
-  public maxDistance: number = 12
-  public minPitch: number = -30
-  public maxPitch: number = 70
-  public zoomSpeed: number = 0.01
+  protected distance: number = 5
+  protected minDistance: number = 2
+  protected maxDistance: number = 12
+  protected minPitch: number = -30
+  protected maxPitch: number = 70
+  protected zoomSpeed: number = 0.01
 
   private _yaw: number = 0
   private _pitch: number = 20

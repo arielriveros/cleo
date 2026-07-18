@@ -26,7 +26,12 @@ const ZOOM_SPEED = 0.005; // wheel delta -> radius
  * asynchronously — the returned promise resolves once it has. Live tabs fire-and-forget; thumbnail
  * renders await it (with `skybox: false` — the background is skipped in thumbnail captures anyway).
  */
-export function createMaterialPreviewScene(scene: Scene, opts?: { skybox?: boolean }): Promise<void> {
+export function createMaterialPreviewScene(
+  scene: Scene,
+  // `silently` is forwarded to applyPreviewEnvironment: a thumbnail render must not register as a user
+  // edit (its async skybox insert would otherwise dirty whatever tab is active when it lands).
+  opts?: { skybox?: boolean; silently?: <T>(fn: () => T) => T },
+): Promise<void> {
   const pivot = new Node('__editor__orbitPivot');
   scene.addNode(pivot);
   pivot.setRotation([INIT_PITCH, INIT_YAW, 0]);

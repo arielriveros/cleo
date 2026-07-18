@@ -48,7 +48,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   const engine = useCleoEngine()
   const {
     eventEmitter, assetsLoaded, isSceneReady,
-    materials, terrainMaterials, templates, meshes, scriptAssets,
+    materials, terrainMaterials, templates, models, scriptAssets,
     sceneList,
   } = engine
 
@@ -71,13 +71,13 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [eventEmitter])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, meshes, scripts: scriptAssets, scenes: sceneList, textureIds }),
-    [materials, terrainMaterials, templates, meshes, scriptAssets, sceneList, textureIds],
+    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, scenes: sceneList, textureIds }),
+    [materials, terrainMaterials, templates, models, scriptAssets, sceneList, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
-    materials, terrainMaterials, templates, meshes, scripts: scriptAssets,
+    materials, terrainMaterials, templates, models, scripts: scriptAssets,
     scenes: sceneList,
     addMaterial: engine.addMaterial,
     updateMaterial: engine.updateMaterial,
@@ -88,9 +88,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addTemplate: engine.addTemplate,
     updateTemplate: engine.updateTemplate,
     removeTemplate: engine.removeTemplate,
-    addMesh: engine.addMesh,
-    updateMesh: engine.updateMesh,
-    removeMesh: engine.removeMesh,
+    addModel: engine.addModel,
+    updateModel: engine.updateModel,
+    removeModel: engine.removeModel,
     addScriptAsset: engine.addScriptAsset,
     updateScriptAsset: engine.updateScriptAsset,
     removeScriptAsset: engine.removeScriptAsset,
@@ -104,7 +104,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     enterTerrainMaterialEditor: engine.enterTerrainMaterialEditor,
     enterTemplateEditor: engine.enterTemplateEditor,
     enterScriptEditor: engine.enterScriptEditor,
-    enterMeshEditor: engine.enterMeshEditor,
+    enterModelEditor: engine.enterModelEditor,
     emit: (event, payload) => eventEmitter.emit(event as any, payload),
   }
 
@@ -124,17 +124,27 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
 
   // Index assets created outside the explorer, follow renames made in the material/template editors, and
   // (once the libraries have actually loaded) drop entries whose asset is gone.
+  // Pruning is destructive and irreversible once the debounced write below lands, so `assetsLoaded` is not
+  // trusted on its own. It flips from imperative refs set the moment each IndexedDB read resolves, which
+  // can be a commit BEFORE the library values themselves reach this component — and pruning against
+  // libraries that merely look empty deletes the user's entire folder layout for every non-texture kind.
+  // (Textures are exempt inside reconcileVfs and scenes come from their own list, which is why those two
+  // were the only survivors when this fired.) Requiring at least one asset to be present costs nothing:
+  // with every library empty there is, by definition, nothing that needs pruning.
+  const librariesPopulated = !!(materials.length || terrainMaterials.length || templates.length
+    || models.length || scriptAssets.length)
+
   useEffect(() => {
     if (!vfsLoaded) return
     setVfs(prev => {
       const { next, changed } = reconcileVfs(prev, libs, {
         landingFolder: landingFolderRef.current,
-        prune: assetsLoaded,
+        prune: assetsLoaded && librariesPopulated,
         sizeOf: (kind: AssetKind, assetId: string) => sizeOfAsset(kind, assetId, depsRef.current),
       })
       return changed ? next : prev
     })
-  }, [vfsLoaded, libs, assetsLoaded])
+  }, [vfsLoaded, libs, assetsLoaded, librariesPopulated])
 
   // Persist, debounced: texture registration is chatty while a project or a mesh import loads.
   useEffect(() => {

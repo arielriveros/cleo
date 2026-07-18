@@ -171,6 +171,10 @@ export default function SceneInspector() {
 
   // In template mode the inspector is rooted at the template node itself, so the editor camera/light
   // (siblings under the real scene root) fall outside the rendered subtree and stay hidden.
+  //
+  // Mesh mode deliberately keeps the real scene root: its root row is load-bearing there (it is the drop
+  // target and the parent for the LOD level nodes), so rooting at the mesh hides something needed. The
+  // viewing light is kept out of the tree by its `__editor__` name instead, not by the root choice.
   const treeRoot = (): Node | undefined =>
     (editorMode === 'template' && templateRootId) ? editorScene.getNodeById(templateRootId) : editorScene.root;
 

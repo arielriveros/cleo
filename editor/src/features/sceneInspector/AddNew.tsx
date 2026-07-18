@@ -34,7 +34,7 @@ function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAd
   );
 }
 
-// Import / Folder are file pickers, not node factories: they import into the Meshes library rather than
+// Import / Folder are file pickers, not node factories: they import into the Models library rather than
 // the scene, so they stay out of the catalog and aren't draggable.
 function ImportCell({ id, label, folder, onFiles }: { id: string, label: string, folder?: boolean, onFiles: (files: FileList | null) => void }) {
   return (
@@ -54,10 +54,13 @@ function ImportCell({ id, label, folder, onFiles }: { id: string, label: string,
 }
 
 export default function AddNew() {
-  const { editorScene, selectedNode, editorMode, eventEmitter, triggers, importMeshFiles } = useCleoEngine();
-  const [category, setCategory] = useState<AddCategory>(
-    () => (localStorage.getItem(CATEGORY_KEY) as AddCategory) || 'common'
-  );
+  const { editorScene, selectedNode, editorMode, eventEmitter, triggers, importModelFiles } = useCleoEngine();
+  // Validated against the current catalog, not trusted verbatim: a category renamed since the value was
+  // stored ('meshes' -> 'primitives') would otherwise restore a tab that matches no items and looks empty.
+  const [category, setCategory] = useState<AddCategory>(() => {
+    const stored = localStorage.getItem(CATEGORY_KEY) as AddCategory | null;
+    return stored && ADD_CATEGORIES.some(c => c.value === stored) ? stored : 'common';
+  });
 
   const selectCategory = (next: AddCategory) => {
     setCategory(next);
@@ -77,14 +80,14 @@ export default function AddNew() {
     addItemTo(item, selectedNodeObj, ctx).catch(err => console.error(err));
   };
 
-  // Imports land in the Meshes library (each model file becomes a reusable mesh asset with a thumbnail);
+  // Imports land in the Models library (each file becomes a reusable model asset with a thumbnail);
   // drag a card from the Assets panel into the viewport to place it. A folder pick (webkitdirectory) lets
   // a .gltf with an external textures/ folder resolve (the browser hands us every file with its
   // webkitRelativePath).
-  const importModelFiles = (files: FileList | null) => {
+  const onPickFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     eventEmitter.emit('FOCUS_BOTTOM_TAB', 'Assets'); // surface the library so the new cards are visible
-    importMeshFiles(Array.from(files)).catch(err => console.error(err));
+    importModelFiles(Array.from(files)).catch((err: unknown) => console.error(err));
   };
 
   const items = ADD_ITEMS.filter(item => item.category === category);
@@ -103,9 +106,9 @@ export default function AddNew() {
           />
           <div className='grid grid-cols-[repeat(auto-fill,minmax(64px,1fr))] gap-1'>
             {items.map(item => <AddCell key={item.id} item={item} locked={locked} onAdd={onAdd} />)}
-            {category === 'meshes' && <>
-              <ImportCell id='file' label='Import' onFiles={importModelFiles} />
-              <ImportCell id='folder' label='Folder' folder onFiles={importModelFiles} />
+            {category === 'primitives' && <>
+              <ImportCell id='file' label='Import' onFiles={onPickFiles} />
+              <ImportCell id='folder' label='Folder' folder onFiles={onPickFiles} />
             </>}
           </div>
         </div>

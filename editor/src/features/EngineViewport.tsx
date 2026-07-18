@@ -11,7 +11,7 @@ import AnimationPlayer from "./animation/AnimationPlayer";
 import { useStateMachine } from "./animation/StateMachineContext";
 import { SegmentedControl } from "../components/ui";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
-import { instantiateMeshAsset } from "../utils/meshes";
+import { instantiateModelAsset, adoptModelMaterial } from "../utils/models";
 import { NEW_NODE_MIME, addItemTo, findAddItem } from "./sceneInspector/addCatalog";
 import { captureViewport, releaseViewport } from "../utils/pointerCapture";
 import { GizmoMode } from "./EngineContext";
@@ -50,7 +50,7 @@ const ScaleIcon = () => (
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            gizmoMode, setGizmoMode, templateRootId, meshEditTargetId, templates, meshes, materials, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
+            gizmoMode, setGizmoMode, templateRootId, modelEditTargetId, templates, models, materials, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
     const { graphView, setGraphView } = useStateMachine();
     // The node graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D) has nothing to act on.
     const hideForGraph = editorMode === 'animation' && graphView;
@@ -303,23 +303,23 @@ export default function EngineViewport() {
         node.setPosition([local[0], local[1], local[2]]);
     };
 
-    // Drop a template (Templates panel), a mesh (Meshes panel) or a new node (the Scene panel's Add
+    // Drop a template (Templates panel), a model (Assets panel) or a new node (the Scene panel's Add
     // section) into the viewport; it is instantiated under the cursor.
     const onViewportDragOver = (e: React.DragEvent) => {
         const types = Array.from(e.dataTransfer.types);
-        if (types.includes('text/cleo-template') || types.includes('text/cleo-mesh') || types.includes(NEW_NODE_MIME))
+        if (types.includes('text/cleo-template') || types.includes('text/cleo-model') || types.includes(NEW_NODE_MIME))
             e.preventDefault();
     };
     const onViewportDrop = (e: React.DragEvent) => {
         if (!editorScene) return;
 
         // In a template tab the editable subtree is rooted at the template root (a child of the scene
-        // root); drops must parent there so they show in the hierarchy and save with the template. A mesh
-        // tab likewise parents drops under the ACTIVE LOD level's root, so they save with that level.
+        // root); drops must parent there so they show in the hierarchy and save with the template. A
+        // model tab likewise parents drops under the ACTIVE LOD level's root, so they save with that level.
         const dropParent = (editorMode === 'template' && templateRootId)
             ? (editorScene.getNodeById(templateRootId) ?? editorScene.root)
-            : (editorMode === 'mesh' && meshEditTargetId)
-                ? (editorScene.getNodeById(meshEditTargetId) ?? editorScene.root)
+            : (editorMode === 'model' && modelEditTargetId)
+                ? (editorScene.getNodeById(modelEditTargetId) ?? editorScene.root)
                 : editorScene.root;
         const point = dropPointAt(e.clientX, e.clientY);
 
@@ -337,26 +337,34 @@ export default function EngineViewport() {
             return;
         }
 
-        const meshId = e.dataTransfer.getData('text/cleo-mesh');
-        if (meshId) {
+        const modelId = e.dataTransfer.getData('text/cleo-model');
+        if (modelId) {
             e.preventDefault();
-            const mesh = meshes.find(m => m.id === meshId);
-            if (!mesh) return;
-            // A LOD-bearing asset instantiates as a LodGroupNode; nesting one inside a mesh being edited
-            // would bake a renderer-driven group into the asset. Keep mesh assets LodGroup-free inside.
-            if (editorMode === 'mesh' && (mesh.lods?.length || (mesh.cullDistance ?? 0) > 0)) {
-                Logger.warn('Meshes with LOD levels or a cull distance cannot be added as sub-meshes of another mesh', 'Editor');
+            const asset = models.find(m => m.id === modelId);
+            if (!asset) return;
+            // A LOD-bearing asset instantiates as a LodGroupNode; nesting one inside a model being edited
+            // would bake a renderer-driven group into the asset. Keep model assets LodGroup-free inside.
+            if (editorMode === 'model' && (asset.lods?.length || (asset.cullDistance ?? 0) > 0)) {
+                Logger.warn('Models with LOD levels or a cull distance cannot be added as parts of another model', 'Editor');
                 return;
             }
             try {
-                const newId = instantiateMeshAsset(mesh, dropParent, materials);
+                const newId = instantiateModelAsset(asset, dropParent, materials, models);
                 const node = editorScene.getNodeById(newId);
                 if (node && point) placeAt(node, point, dropParent);
+                // A model is one Geometry + one Material, and the renderer draws in material batches — so
+                // every part of a model must share its material for the whole asset to batch as one. In the
+                // model editor the edited model's material therefore wins: the dropped part adopts it.
+                if (editorMode === 'model' && node) {
+                    const adopted = adoptModelMaterial(node, dropParent, materials);
+                    if (adopted)
+                        Logger.info(`"${asset.name}" adopted the model's material ("${adopted}") so the model stays a single material batch`, 'Editor');
+                }
                 eventEmitter.emit('TEXTURES_CHANGED');
                 eventEmitter.emit('SCENE_CHANGED');
                 eventEmitter.emit('SELECT_NODE', newId);
             } catch (err) {
-                console.error('Failed to instantiate mesh:', err);
+                console.error('Failed to instantiate model:', err);
             }
             return;
         }

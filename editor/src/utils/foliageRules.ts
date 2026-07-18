@@ -1,5 +1,5 @@
 import { Node, ModelNode, AnimatedModel, TerrainFoliageRule, Vec } from 'cleo'
-import { MeshAsset } from './meshes'
+import { ModelAsset, resolvedLods } from './models'
 import { parseByType, regenerateIds } from './nodeSubtree'
 
 // Builds engine-consumable foliage rules from mesh library assets. A TerrainFoliageRule must stay plain
@@ -24,7 +24,7 @@ function flattenLevel(nodeJson: any): any[] {
   const visit = (node: Node) => {
     if (node instanceof ModelNode) {
       if (node.model instanceof AnimatedModel)
-        throw new Error(`"${node.name}" is skinned — foliage meshes must be static`)
+        throw new Error(`"${node.name}" is skinned — foliage models must be static`)
       models.push(bakeModel(node))
     }
     for (const child of node.children) visit(child)
@@ -66,22 +66,27 @@ function bakeModel(node: ModelNode): any {
 }
 
 /**
- * Build (or refresh) a terrain-material foliage rule from a mesh library asset: LOD0 + every extra LOD
- * level flattened, the asset's cull distance, and `meshId` as the sync key so saving the mesh asset
+ * Build (or refresh) a terrain-material foliage rule from a model library asset: LOD0 + every extra LOD
+ * level flattened, the asset's cull distance, and `modelId` as the sync key so saving the model asset
  * updates the rule. Scatter params and the billboard impostor are authored on the RULE, so an existing
  * rule's values are preserved on refresh.
+ *
+ * `kind: 'mesh'` below is NOT the old asset-type name — it is the rule's rendering mode (real geometry,
+ * as opposed to a camera-facing 'billboard' impostor) and is deliberately left alone.
  */
-export function buildFoliageRuleFromMeshAsset(asset: MeshAsset, existing?: TerrainFoliageRule): TerrainFoliageRule {
+export function buildFoliageRuleFromModelAsset(asset: ModelAsset, existing?: TerrainFoliageRule, library?: ModelAsset[]): TerrainFoliageRule {
   const models = flattenLevel(asset.nodeJson)
-  if (models.length === 0) throw new Error(`Mesh "${asset.name}" has no static sub-meshes`)
-  const lods = (asset.lods ?? [])
+  if (models.length === 0) throw new Error(`Model "${asset.name}" has no static geometry`)
+  // LOD levels are references into the model library, so the rule flattens the referenced asset's subtree.
+  // Levels whose model is gone resolve to null and are dropped by resolvedLods before we get here.
+  const lods = resolvedLods(asset, library)
     .map(l => ({ models: flattenLevel(l.nodeJson), distance: l.distance }))
     .filter(l => l.models.length > 0)
 
   return {
     kind: 'mesh',
     name: existing?.name ?? asset.name,
-    meshId: asset.id,
+    modelId: asset.id,
     models,
     lods: lods.length ? lods : undefined,
     cullDistance: asset.cullDistance ?? 0,

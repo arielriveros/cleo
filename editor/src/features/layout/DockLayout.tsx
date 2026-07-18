@@ -21,6 +21,43 @@ const OLD_DOCK_LAYOUT_KEY = 'cleo_dock_layout_v1';
 const OLD_DOCK_LAYOUT_KEY_V2 = 'cleo_dock_layout_v2';
 const LAYOUT_VERSION = 3;
 
+/**
+ * Which of the stacked bottom panels the user last chose, tracked outside the dockview layout blob.
+ *
+ * It cannot live in the blob alone. Almost every mode "restricts" the layout (all but animation mode hide
+ * the three animation panels), and while a restriction is applied layout changes are deliberately not
+ * persisted — the restricted arrangement is meant to be discarded. So a bottom-tab switch made in any
+ * normal mode was thrown away, and the next mode change restored the stash taken *before* it, snapping the
+ * user back to whichever tab was active then — usually Logger, the default. Keeping the choice here means
+ * it survives the stash/restore cycle, the buildDefaultLayout fallback, and a reload.
+ */
+const BOTTOM_TAB_KEY = 'cleo_dock_bottom_tab';
+const BOTTOM_PANELS = ['logger', 'assets'] as const;
+type BottomPanel = (typeof BOTTOM_PANELS)[number];
+
+function loadBottomTab(): BottomPanel {
+  try {
+    const v = localStorage.getItem(BOTTOM_TAB_KEY);
+    if (v && (BOTTOM_PANELS as readonly string[]).includes(v)) return v as BottomPanel;
+  } catch { /* ignore */ }
+  return 'logger';
+}
+
+/**
+ * Which bottom tab is currently selected, or null when the mode hides them both.
+ *
+ * Read from the group's own `activePanel` rather than `panel.api.isVisible`: both bottom panels are
+ * `renderer: 'always'` (so the hidden one stays mounted and keeps its state), which means visibility does
+ * not track tab selection for them the way it does for ordinary panels.
+ */
+function activeBottomTab(dock: DockviewApi): BottomPanel | null {
+  for (const id of BOTTOM_PANELS) {
+    const selected = dock.getPanel(id)?.group?.activePanel?.id;
+    if (selected && (BOTTOM_PANELS as readonly string[]).includes(selected)) return selected as BottomPanel;
+  }
+  return null;
+}
+
 /** Animation-editor panels. Present in every layout, shown only in animation mode — see hiddenPanelIds. */
 const ANIMATION_PANELS = ['animClips', 'animVariables', 'animStateMachine'] as const;
 
@@ -105,11 +142,13 @@ function buildDefaultLayout(api: DockviewApi) {
     position: { referencePanel: 'viewport', direction: 'below' },
     initialHeight: Math.round(height * 0.30),
   });
-  api.addPanel({
+  const assets = api.addPanel({
     id: 'assets', component: 'assets', title: 'Assets', renderer: 'always',
     position: { referencePanel: 'logger', direction: 'within' },
   });
-  logger.api.setActive();
+  // Honour the remembered bottom tab. This function is also the fallback whenever restoring a stashed
+  // layout fails, so hardcoding Logger here was one of the ways the user's choice got thrown away.
+  (loadBottomTab() === 'assets' ? assets : logger).api.setActive();
   assertViewportLock(api);
 }
 
@@ -151,7 +190,7 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   if (mode === 'animation') return ['ui', 'scripts', 'physics', 'properties'];
   if (mode === 'template') return [...anim, 'ui']; // the UI layer is irrelevant while authoring a template
   // A mesh tab is a read-only preview: keep Scene + Properties to inspect the subtree, drop the rest.
-  if (mode === 'mesh') return [...anim, 'ui', 'scripts', 'physics'];
+  if (mode === 'model') return [...anim, 'ui', 'scripts', 'physics'];
   // A script tab is a pure code editor (rendered over the viewport): drop every node/scene chrome panel.
   if (mode === 'script') return [...anim, 'scene', 'ui', 'properties', 'scripts', 'physics'];
   return anim;
@@ -165,6 +204,32 @@ export default function DockLayout() {
   // restricted mode are deliberately discarded, matching the old collapse-and-restore behavior).
   const fullLayoutRef = useRef<SerializedDockview | null>(null);
   const restrictedRef = useRef(false);
+  const bottomTabRef = useRef<BottomPanel>(loadBottomTab());
+  // Non-zero while a layout pass we initiated is in flight. Tearing the tree down and rebuilding it emits
+  // a burst of layout events in which the bottom group transiently reports whichever tab happens to be
+  // first — so without this the remembered choice is overwritten by the very churn it exists to survive,
+  // and the restore below then faithfully restores the wrong tab.
+  const programmaticLayoutRef = useRef(0);
+
+  /** Run a programmatic layout change with bottom-tab tracking muted until its events have settled. */
+  const withProgrammaticLayout = useCallback((fn: () => void) => {
+    programmaticLayoutRef.current++;
+    try { fn(); } finally {
+      // relayout() defers a frame, so the trailing events arrive after this call returns.
+      requestAnimationFrame(() => requestAnimationFrame(() => { programmaticLayoutRef.current--; }));
+    }
+  }, []);
+
+  /**
+   * Put the remembered bottom tab back if a layout pass moved it. Deliberately a no-op when it is already
+   * showing, or when the mode hides it entirely: `setActive` also takes global focus, and stealing that
+   * on every mode switch would be worse than the problem being fixed.
+   */
+  const restoreBottomTab = useCallback((dock: DockviewApi) => {
+    const want = bottomTabRef.current;
+    const panel = dock.getPanel(want);
+    if (panel && activeBottomTab(dock) !== want) panel.api.setActive();
+  }, []);
 
   const onReady = (event: DockviewReadyEvent) => {
     const dock = event.api;
@@ -219,19 +284,40 @@ export default function DockLayout() {
   // unrestricted), then hide the panels the new mode forbids.
   useEffect(() => {
     if (!api) return;
-    if (fullLayoutRef.current) {
-      const stash = fullLayoutRef.current;
-      fullLayoutRef.current = null;
-      try {
-        api.fromJSON(stash, { reuseExistingPanels: true });
-        if (!assertViewportLock(api)) throw new Error('stash missing viewport');
-      } catch {
-        buildDefaultLayout(api);
+    withProgrammaticLayout(() => {
+      if (fullLayoutRef.current) {
+        const stash = fullLayoutRef.current;
+        fullLayoutRef.current = null;
+        try {
+          api.fromJSON(stash, { reuseExistingPanels: true });
+          if (!assertViewportLock(api)) throw new Error('stash missing viewport');
+        } catch {
+          buildDefaultLayout(api);
+        }
       }
-    }
-    applyRestriction(api);
-    relayout(api); // opening/closing panels moves the always-rendered viewport and logger
-  }, [api, editorMode, isPlayMode, applyRestriction]);
+      applyRestriction(api);
+      // After the stash/restore above, the bottom tab reflects whenever the stash was taken rather than
+      // what the user last picked — put their choice back.
+      restoreBottomTab(api);
+      relayout(api); // opening/closing panels moves the always-rendered viewport and logger
+    });
+  }, [api, editorMode, isPlayMode, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
+
+  // Remember which bottom tab the user is on. When a mode hides both panels there is no selection to read,
+  // so the remembered value is left alone rather than being overwritten by a mode that shows neither.
+  useEffect(() => {
+    if (!api) return;
+    const sync = () => {
+      if (programmaticLayoutRef.current > 0) return; // mid-rebuild: the reported selection is transient
+      const current = activeBottomTab(api);
+      if (!current || current === bottomTabRef.current) return;
+      bottomTabRef.current = current;
+      try { localStorage.setItem(BOTTOM_TAB_KEY, current); } catch { /* ignore */ }
+    };
+    sync();
+    const disposables = [api.onDidLayoutChange(sync), api.onDidActivePanelChange(sync)];
+    return () => { disposables.forEach(d => d.dispose()); };
+  }, [api]);
 
   // The in-viewport UI overlay only draws while the user is editing UI. Now that Scene and UI are
   // separate panels, "the UI tab is active" becomes "the UI panel is visible" — which also covers the
@@ -258,7 +344,12 @@ export default function DockLayout() {
   useEffect(() => {
     if (!api) return;
     const onFocus = (tab: unknown) => {
-      api.getPanel(tab === 'Logger' ? 'logger' : 'assets')?.api.setActive();
+      // A programmatic focus is still the tab the user ends up on, so it becomes the remembered one —
+      // the layout listener would catch it anyway, this just avoids depending on that ordering.
+      const id: BottomPanel = tab === 'Logger' ? 'logger' : 'assets';
+      bottomTabRef.current = id;
+      try { localStorage.setItem(BOTTOM_TAB_KEY, id); } catch { /* ignore */ }
+      api.getPanel(id)?.api.setActive();
     };
     eventEmitter.on('FOCUS_BOTTOM_TAB', onFocus);
     return () => { eventEmitter.off('FOCUS_BOTTOM_TAB', onFocus); };
@@ -271,15 +362,18 @@ export default function DockLayout() {
       try { localStorage.removeItem(DOCK_LAYOUT_KEY); } catch { /* ignore */ }
       fullLayoutRef.current = null;
       restrictedRef.current = false;
-      buildDefaultLayout(api);
-      // buildDefaultLayout adds EVERY panel, and the mode has not changed, so the effect above will not
-      // fire — reset has to re-apply the restriction itself or the current mode gets other modes' panels.
-      applyRestriction(api);
-      relayout(api);
+      withProgrammaticLayout(() => {
+        buildDefaultLayout(api);
+        // buildDefaultLayout adds EVERY panel, and the mode has not changed, so the effect above will not
+        // fire — reset has to re-apply the restriction itself or the current mode gets other modes' panels.
+        applyRestriction(api);
+        restoreBottomTab(api);
+        relayout(api);
+      });
     };
     eventEmitter.on('RESET_DOCK_LAYOUT', onReset);
     return () => { eventEmitter.off('RESET_DOCK_LAYOUT', onReset); };
-  }, [api, eventEmitter, applyRestriction]);
+  }, [api, eventEmitter, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
 
   return (
     <div className="flex-1 min-h-0 relative">

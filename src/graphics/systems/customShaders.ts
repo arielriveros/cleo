@@ -255,6 +255,51 @@ const failed = new Set<string>();               // keys whose user source failed
 const errors = new Map<string, string>();       // last compile error per key
 const fallbackByMode = new Map<CustomRenderMode, Shader>();
 
+// --- key lifetime -------------------------------------------------------------------------------
+//
+// A custom shader's key is derived from its CONTENT, so every edit to a material's source mints a new
+// key and registers a new program. Without the two structures below the superseded key stayed in the
+// ShaderManager forever — referenced by nothing, freed by nothing — so tuning one shader in the editor
+// leaked a program per keystroke-pause, permanently.
+//
+// Refcounted by key rather than swept, because `ensureCustomShader` already runs every frame for every
+// live material (the renderer's _ensureCustomShaders), which is exactly the signal needed: when a
+// material shows up under a different key than last time, its old key has lost a user.
+
+/** How many live materials currently use each key. */
+const keyRefs = new Map<string, number>();
+/** The key each material was last seen using. Weak: a discarded material must not be kept alive here. */
+const lastKeyOf = new WeakMap<CustomMaterial, string>();
+
+/** True if `shader` is one of the shared magenta fallbacks — those are reused across every failing key
+ *  of a render mode, so they must never be disposed on behalf of one of them. */
+function isFallback(shader: Shader): boolean {
+    for (const s of fallbackByMode.values()) if (s === shader) return true;
+    return false;
+}
+
+/**
+ * Drop one material's claim on `key`, disposing the program once nobody is left using it.
+ *
+ * Safe to be wrong in the conservative direction: if a key is released and later needed again,
+ * `ensureCustomShader` simply recompiles it. The failure mode is a recompile, not a broken material.
+ */
+function releaseKey(key: string): void {
+    const remaining = (keyRefs.get(key) ?? 1) - 1;
+    if (remaining > 0) { keyRefs.set(key, remaining); return; }
+
+    keyRefs.delete(key);
+    const shader = ShaderManager.Instance.find(key);
+    ShaderManager.Instance.removeShader(key);
+    registered.delete(key);
+    failed.delete(key);
+    errors.delete(key);
+
+    // Only free the program if this key was its last registration and it is not a shared fallback.
+    if (shader && !isFallback(shader) && !ShaderManager.Instance.isRegistered(shader))
+        shader.dispose();
+}
+
 const FALLBACK_FORWARD_FS = `#version 300 es
 precision highp float;
 in vec3 fragPos; in vec2 fragTexCoord; in vec4 fragPosLightSpace; in mat3 TBN;
@@ -309,6 +354,16 @@ function fallbackShader(mode: CustomRenderMode): Shader {
  */
 export function ensureCustomShader(mat: CustomMaterial): boolean {
     const key = mat.type as string;
+
+    // Track which key this material is using. A change means its previous key lost a user — and since
+    // keys are content-derived, an edited shader lands here with a brand-new key every time.
+    const previous = lastKeyOf.get(mat);
+    if (previous !== key) {
+        lastKeyOf.set(mat, key);
+        keyRefs.set(key, (keyRefs.get(key) ?? 0) + 1);
+        if (previous !== undefined) releaseKey(previous);
+    }
+
     if (registered.has(key)) return !failed.has(key);
 
     try {
@@ -326,13 +381,24 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
     }
 }
 
-/** Compile-check user source WITHOUT registering — used by the editor to surface inline compile errors. */
+/**
+ * Compile-check user source WITHOUT registering — used by the editor to surface inline compile errors.
+ *
+ * The program exists only to answer "does this compile?" and is dead the moment it has, so it is disposed
+ * either way. It used to be dropped on the floor instead: the editor debounces this on every pause in
+ * typing, so tuning one shader leaked a GL program (plus its two shader objects) every few keystrokes,
+ * for the life of the tab. The `finally` matters as much as the dispose — a failing compile is the COMMON
+ * case while typing, and the constructor has already allocated both shader objects by the time it throws.
+ */
 export function tryCompileCustom(renderMode: CustomRenderMode, fragmentSource: string, uniforms: CustomUniform[]): { ok: boolean; error?: string } {
+    const probe = new Shader();
     try {
-        new Shader().create(vertexSource(renderMode), assembleCustomFragment(renderMode, fragmentSource, uniforms));
+        probe.create(vertexSource(renderMode), assembleCustomFragment(renderMode, fragmentSource, uniforms));
         return { ok: true };
     } catch (e: any) {
         return { ok: false, error: String(e?.message ?? e) };
+    } finally {
+        probe.dispose();
     }
 }
 

@@ -1,9 +1,9 @@
 import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain } from 'cleo';
-import { createMeshPreviewScene } from '../features/demoScene/createMeshPreviewScene';
+import { createModelPreviewScene } from '../features/demoScene/createModelPreviewScene';
 import { createMaterialPreviewScene } from '../features/demoScene/createMaterialPreviewScene';
 import { fitDistance, MATERIAL_SPHERE_RADIUS } from '../features/demoScene/previewFraming';
 import type { MaterialAsset } from './materials';
-import { MeshAsset } from './meshes';
+import { ModelAsset } from './models';
 import { parseByType, regenerateIds } from './nodeSubtree';
 import { TerrainMaterialAsset, parseTerrainMaterialAsset } from './terrainMaterials';
 
@@ -133,7 +133,7 @@ export function meshBoundsRadius(root: Node): number {
  * wildly different scales — many far too big for the scene). Returns the applied factor.
  *
  * Scaling is baked into the mesh **vertices** (`Geometry.scale`) so the asset keeps an identity node
- * transform. Skinned meshes are the exception: their vertices are bound to a skeleton, so vertex scaling
+ * transform. Skinned models are the exception: their vertices are bound to a skeleton, so vertex scaling
  * would break the skinning — those fall back to transform-space scaling on the root.
  */
 export function normalizeRootScale(root: Node, targetSize: number): number {
@@ -158,7 +158,7 @@ export function normalizeRootScale(root: Node, targetSize: number): number {
     scaled.add(geo);
     geo.scale(factor);
   }
-  // Sub-meshes can carry glTF node translations (multi-part layouts); scale those too, or the parts
+  // Sub-models can carry glTF node translations (multi-part layouts); scale those too, or the parts
   // shrink in place while their spacing stays at the original size.
   const scalePositions = (n: Node) => {
     for (const c of n.children) {
@@ -186,17 +186,38 @@ export async function awaitSubtreeTexturesReady(root: Node): Promise<void> {
 }
 
 /**
+ * Every render in this module builds a throwaway scene, and `Node.addChild` emits `SCENE_CHANGED`
+ * unconditionally — even for a node with no scene attached. The editor reads that event as "the user
+ * edited something", so rendering a thumbnail marked the active tab unsaved: a mesh save would clear the
+ * tab's dirty flag, then its own thumbnail render would set it straight back, and Save All (which reports
+ * failure purely on "is the tab still dirty") called the successful save a failure.
+ *
+ * Nothing offscreen here is ever a user edit, so EngineContext installs its `withoutDirty` once and every
+ * helper wraps its scene mutations in it. Defaults to a pass-through: thumbnails can be rendered before
+ * the editor mounts, when there is no tab to dirty.
+ */
+let silently: <T>(fn: () => T) => T = fn => fn();
+
+/** Install the editor's dirty-suppressor. Called once by EngineContext. */
+export function setThumbnailDirtySuppressor(fn: <T>(f: () => T) => T): void { silently = fn; }
+
+/**
  * Render a base64 PNG thumbnail of an imported mesh subtree: a throwaway scene auto-framed to the
  * model's bounds, lit by the mesh preview lights, captured after its textures finish loading.
  */
-export async function renderMeshThumbnail(engine: CleoEngine, root: Node): Promise<string> {
-  const scene = new Scene();
-  scene.addNode(root);
-  scene.root.updateTransforms(); // make world transforms current so bounding spheres are correct
+export async function renderModelThumbnail(engine: CleoEngine, root: Node): Promise<string> {
+  // Only the synchronous scene building is suppressed, never the awaits below — holding the suppression
+  // across the render would also swallow a genuine edit the user makes while it is in flight.
+  const scene = silently(() => {
+    const s = new Scene();
+    s.addNode(root);
+    s.root.updateTransforms(); // make world transforms current so bounding spheres are correct
 
-  const { center, radius } = combineBounds(root);
-  createMeshPreviewScene(scene, center, radius);
-  scene.start();
+    const { center, radius } = combineBounds(root);
+    createModelPreviewScene(s, center, radius);
+    s.start();
+    return s;
+  });
 
   await awaitSubtreeTexturesReady(root);
 
@@ -208,15 +229,18 @@ export async function renderMeshThumbnail(engine: CleoEngine, root: Node): Promi
  * preview), mirroring the material editor's preview sphere.
  */
 export async function renderMaterialThumbnail(engine: CleoEngine, material: Material): Promise<string> {
-  const scene = new Scene();
-  // No skybox: thumbnail captures skip background draws anyway, but the environment map must be applied
-  // (awaited below) so the sphere's reflections make it into the capture.
-  const envReady = createMaterialPreviewScene(scene, { skybox: false });
-  // Render an independent copy so we never share GPU/material state with the live node's material.
-  const preview = Material.parse(material.serialize());
-  const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), preview));
-  scene.addNode(sphere);
-  scene.start();
+  const { scene, envReady, preview } = silently(() => {
+    const s = new Scene();
+    // No skybox: thumbnail captures skip background draws anyway, but the environment map must be applied
+    // (awaited below) so the sphere's reflections make it into the capture.
+    const ready = createMaterialPreviewScene(s, { skybox: false, silently });
+    // Render an independent copy so we never share GPU/material state with the live node's material.
+    const mat = Material.parse(material.serialize());
+    const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), mat));
+    s.addNode(sphere);
+    s.start();
+    return { scene: s, envReady: ready, preview: mat };
+  });
 
   await awaitTexturesReady(materialTextureIds(preview));
   await envReady;
@@ -248,19 +272,21 @@ export async function renderMaterialAssetThumbnail(engine: CleoEngine, asset: Ma
 }
 
 /**
- * Re-render a saved MeshAsset's preview. Only the base level (LOD0) is instantiated — directly from its
- * nodeJson, never via instantiateMeshAsset, so no LodGroupNode ends up auto-swapping levels inside a
+ * Re-render a saved ModelAsset's preview. Only the base level (LOD0) is instantiated — directly from its
+ * nodeJson, never via instantiateModelAsset, so no LodGroupNode ends up auto-swapping levels inside a
  * throwaway thumbnail scene.
  */
-export async function renderMeshAssetThumbnail(engine: CleoEngine, asset: MeshAsset): Promise<string> {
+export async function renderModelAssetThumbnail(engine: CleoEngine, asset: ModelAsset): Promise<string> {
   restoreEmbeddedTextures(asset.textures); // legacy embedded-texture assets
-  const holder = new Node('__thumb');
-  const clone = JSON.parse(JSON.stringify(asset.nodeJson));
-  regenerateIds(clone, new Map());
-  parseByType(holder, clone);
-  const root = holder.children[0];
+  const root = silently(() => {
+    const holder = new Node('__thumb');
+    const clone = JSON.parse(JSON.stringify(asset.nodeJson));
+    regenerateIds(clone, new Map());
+    parseByType(holder, clone);
+    return holder.children[0];
+  });
   if (!root) return '';
-  return renderMeshThumbnail(engine, root); // reparents `root` into its own preview scene
+  return renderModelThumbnail(engine, root); // reparents `root` into its own preview scene
 }
 
 /**
@@ -272,13 +298,16 @@ export async function renderTerrainMaterialAssetThumbnail(engine: CleoEngine, as
   const texIds = restoreEmbeddedTextures(asset.textures);
   const tm = parseTerrainMaterialAsset(asset);
 
-  const scene = new Scene();
-  const envReady = createMaterialPreviewScene(scene, { skybox: false }); // see renderMaterialThumbnail
-  const helperTerrain = new Terrain({ size: 2, resolution: 2 });
-  helperTerrain.setLayer(0, tm, { auto: false, tiling: 1 }); // always show the surface, without terrain-space tiling
-  const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), helperTerrain.material));
-  scene.addNode(sphere);
-  scene.start();
+  const { scene, envReady } = silently(() => {
+    const s = new Scene();
+    const ready = createMaterialPreviewScene(s, { skybox: false, silently }); // see renderMaterialThumbnail
+    const helperTerrain = new Terrain({ size: 2, resolution: 2 });
+    helperTerrain.setLayer(0, tm, { auto: false, tiling: 1 }); // always show the surface, without terrain-space tiling
+    const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), helperTerrain.material));
+    s.addNode(sphere);
+    s.start();
+    return { scene: s, envReady: ready };
+  });
 
   await awaitTexturesReady(texIds);
   await envReady;

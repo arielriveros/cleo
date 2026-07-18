@@ -18,7 +18,7 @@ import { buildTemplateFromNode } from '../../utils/templates'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
 
 // The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries (textures,
-// materials, terrain materials, templates, meshes), with real folders.
+// materials, terrain materials, templates, models), with real folders.
 //
 // The folder layout lives in VfsContext; SVAR's own store owns what's on screen; useFileManagerBridge
 // stitches the two together. Creation and import stay in our own toolbar because SVAR's context menu can't
@@ -41,7 +41,7 @@ export default function AssetsExplorer() {
 function AssetsExplorerHost() {
   const {
     enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor,
-    importMeshFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter,
+    importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, landingFolderRef, depsRef } = useVfs()
 
@@ -127,7 +127,7 @@ function AssetsExplorerHost() {
     setImporting(true)
     try {
       await runUpload(files, {
-        importMeshFiles,
+        importModelFiles,
         emit: (event: string) => eventEmitter.emit(event as any),
       })
     } catch (err) {
@@ -136,7 +136,7 @@ function AssetsExplorerHost() {
       importingRef.current = false
       setImporting(false)
     }
-  }, [importMeshFiles, eventEmitter])
+  }, [importModelFiles, eventEmitter])
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : []

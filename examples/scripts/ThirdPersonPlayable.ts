@@ -23,24 +23,24 @@ import { InputManager, Logger, Node } from 'cleo'
 export default class ThirdPersonPlayableNode extends Node {
   /** Animator input: 0 idle, 0.5 walking, 1 running. Normalized so retuning the speeds below can't
    *  invalidate the animator's thresholds. */
-  public moveSpeed: number = 0
+  protected moveSpeed: number = 0
 
   /**
    * Animator input: true from take-off until the feet are back down. Bind an animator parameter to it
    * (variable → Parent → isJumping) and the Jump state lasts exactly as long as the character is airborne,
    * rather than as long as the clip happens to be. See the README for the state machine.
    */
-  public isJumping: boolean = false
+  protected isJumping: boolean = false
 
-  public walkSpeed: number = 3
-  public runSpeed: number = 7
+  private walkSpeed: number = 1.5
+  private runSpeed: number = 4
   /** Upward speed applied on jump. Height is speed²/(2·gravity) — mass-independent, unlike an impulse. */
-  public jumpSpeed: number = 7
+  private jumpSpeed: number = 4
   /** How fast the mesh swings round to face the way it is moving, in degrees per second. */
-  public turnSpeed: number = 540
+  private turnSpeed: number = 540
   /** Name of the child that holds the camera; its yaw is what "forward" means for the player. Optional —
    *  if nothing matches, the child that contains the Camera is used instead. */
-  public pivotName: string = 'Camera Pivot'
+  protected pivotName: string = 'Camera Pivot'
 
   /** Seconds left in which the slope-follow must not touch Y, so it can't eat a jump. See onUpdate. */
   private _jumpCooldown: number = 0

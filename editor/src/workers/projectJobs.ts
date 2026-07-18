@@ -119,7 +119,7 @@ async function runExportBundle(job: Extract<ProjectJob, { kind: 'exportBundle' }
   archive.file(`${BUNDLE_PATHS.librariesDir}materials.json`, JSON.stringify(libraries.materials));
   archive.file(`${BUNDLE_PATHS.librariesDir}terrainMaterials.json`, JSON.stringify(libraries.terrainMaterials));
   archive.file(`${BUNDLE_PATHS.librariesDir}templates.json`, JSON.stringify(libraries.templates));
-  archive.file(`${BUNDLE_PATHS.librariesDir}meshes.json`, JSON.stringify(libraries.meshes));
+  archive.file(`${BUNDLE_PATHS.librariesDir}models.json`, JSON.stringify(libraries.models));
   archive.file(`${BUNDLE_PATHS.librariesDir}scripts.json`, JSON.stringify(libraries.scripts ?? []));
   for (const [id, data] of Object.entries(scenes)) archive.file(`${BUNDLE_PATHS.scenesDir}${id}.json`, JSON.stringify(data));
 
@@ -151,7 +151,12 @@ async function runImportBundle(job: Extract<ProjectJob, { kind: 'importBundle' }
     materials: await readJson(`${BUNDLE_PATHS.librariesDir}materials.json`, []),
     terrainMaterials: await readJson(`${BUNDLE_PATHS.librariesDir}terrainMaterials.json`, []),
     templates: await readJson(`${BUNDLE_PATHS.librariesDir}templates.json`, []),
-    meshes: await readJson(`${BUNDLE_PATHS.librariesDir}meshes.json`, []),
+    // Bundles exported before the mesh->model rename wrote this library as 'meshes.json'. The records
+    // themselves are unchanged, so falling back to the old filename is all that is needed to import them.
+    models: await readJson(
+      `${BUNDLE_PATHS.librariesDir}models.json`,
+      await readJson(`${BUNDLE_PATHS.librariesDir}meshes.json`, []),
+    ),
     scripts: await readJson(`${BUNDLE_PATHS.librariesDir}scripts.json`, []),
   };
   const vfs = await readJson(BUNDLE_PATHS.vfs, { version: 1, folders: [], entries: [] });

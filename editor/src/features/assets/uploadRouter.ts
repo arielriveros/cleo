@@ -2,7 +2,7 @@ import { TextureManager } from 'cleo'
 import { groupImportFiles, isModelFile } from '../../utils/importGrouping'
 
 // Routes a batch of OS files dropped on (or picked from) the asset explorer to the right ingestion path.
-// This replaces the two separate uploaders the old Textures and Meshes tabs each had.
+// This replaces the two separate uploaders the old Textures and Models tabs each had.
 //
 // We deliberately do NOT use SVAR's built-in <Uploader>: it walks dropped directories with
 // entry.createReader() but never records the resulting relative path on the File, so a .gltf + .bin +
@@ -35,14 +35,14 @@ function addTexture(file: File): Promise<void> {
 }
 
 export type UploadDeps = {
-  importMeshFiles: (files: File[]) => Promise<void>
+  importModelFiles: (files: File[]) => Promise<void>
   emit: (event: string) => void
 }
 
 /**
  * Ingest a mixed batch of files.
  *
- * When the batch contains any model file the WHOLE batch goes to importMeshFiles — it runs groupImportFiles
+ * When the batch contains any model file the WHOLE batch goes to importModelFiles — it runs groupImportFiles
  * itself, which is what decides that `rock.bin` belongs to `rock.gltf` and not to `tree.gltf`. Pre-splitting
  * here would throw that disambiguation away. Images that no bundle claimed (plus batches with no model at
  * all) are registered as standalone textures.
@@ -69,5 +69,5 @@ export async function runUpload(files: File[], deps: UploadDeps): Promise<void> 
     deps.emit('TEXTURES_CHANGED')
   }
 
-  await deps.importMeshFiles(files)
+  await deps.importModelFiles(files)
 }

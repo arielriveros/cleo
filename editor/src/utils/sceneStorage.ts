@@ -23,7 +23,9 @@ export function sceneKey(id: string): string {
 /** Asset ids a scene references, captured at save time so delete warnings can see closed scenes. */
 export interface SceneRefs {
   materialIds: string[];
-  meshIds: string[];
+  modelIds: string[];
+  /** Pre-rename spelling of `modelIds`, present in metas written before the mesh->model rename. */
+  meshIds?: string[];
   templateIds: string[];
   terrainMaterialIds: string[];
   textureIds: string[];

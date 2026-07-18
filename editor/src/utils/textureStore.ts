@@ -3,7 +3,7 @@
 // WHY THIS EXISTS
 //
 // Textures used to be embedded as base64 in every asset that referenced them: a MaterialAsset carried a
-// copy of each of its maps, and the MeshAsset for the same model carried a copy of ALL of them again. A
+// copy of each of its maps, and the ModelAsset for the same model carried a copy of ALL of them again. A
 // model with 8 materials sharing 3 textures therefore stored those textures many times over — in memory,
 // in IndexedDB, and in every save. On top of that, base64 inflates bytes by 33% and costs an encode on
 // save and a decode on load.

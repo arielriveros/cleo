@@ -50,7 +50,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta, materials, terrainMaterials, templates, meshes } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta, materials, terrainMaterials, templates, models } = useCleoEngine();
   const { vfs, setVfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -60,7 +60,7 @@ export default function MenuBar() {
   // Import/export/publish are project-level and stay tied to the scene: they act on the whole project, so a
   // library tab (template, (terrain-)material, mesh, script) has nothing for them to operate on.
   const libEdit = editorMode === 'template' || editorMode === 'material' || editorMode === 'terrainMaterial'
-    || editorMode === 'mesh' || editorMode === 'script';
+    || editorMode === 'model' || editorMode === 'script';
   const saving = savingState === 'saving';
   // Save carries its own status: the icon and the color say what happened, the label says it in words.
   const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved' : savingState === 'error' ? 'Failed' : 'Save';
@@ -155,7 +155,7 @@ export default function MenuBar() {
 
   // Full portable bundle (scenes + assets + textures + folders, or just assets for a pack) as a .zip.
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
-  const libraries = () => ({ materials, terrainMaterials, templates, meshes, scripts: scriptAssets });
+  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets });
 
   const onExportProject = async () => {
     const task = startTask({ title: 'Exporting project', steps: ['Gathering & zipping'] });
@@ -255,7 +255,7 @@ export default function MenuBar() {
         data = await buildMultiSceneGameData({
           mainSceneId, openSceneId, scenes: sceneList,
           liveScene: editorScene, liveScripts: scripts, liveBodies: bodies, liveTriggers: triggers, liveUi: ui,
-          libs: { materials, meshes, templates, terrainMaterials, scripts: scriptAssets },
+          libs: { materials, models, templates, terrainMaterials, scripts: scriptAssets },
           scriptAssets,
           settings: renderSettings(),
         });

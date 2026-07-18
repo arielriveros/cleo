@@ -11,15 +11,32 @@ ordered by expected payoff, not by area.
 
 ## P0 — Correctness bugs
 
-### 1. Meshes over 65,535 vertices render as scrambled geometry, silently **[verified — FIXED, pending manual check]**
+### 1. Meshes over 65,535 vertices render as broken geometry, silently **[FIXED — verified end-to-end]**
 
-> **Fixed.** `src/graphics/indexFormat.ts` (new, pure) picks the index width from `max(indices)`;
-> `mesh.ts` stores the chosen GL type (`_indexType`, plus `_lodTypes` per LOD level) and reads it at all
-> three draw sites. 14 tests in `tests/indexFormat.test.ts`. Two traps found while fixing it, both
-> recorded there: the threshold is `>= 65535` (65535 is WebGL2's primitive-restart index, so a
-> 65536-vertex mesh would drop triangles touching its last vertex — the same silent symptom), and
-> `maxIndex` must not use `Math.max(...indices)`, which throws `RangeError` at ~125k args, i.e. on
-> exactly the meshes this targets. **Still needs the manual repro:** import a >65,535-vertex glTF.
+> **Fixed and proven in the running editor.** `src/graphics/indexFormat.ts` (new, pure) picks the index
+> width from `max(indices)`; `mesh.ts` stores the chosen GL type (`_indexType`, plus `_lodTypes` per LOD
+> level) and reads it at all three draw sites. 14 tests in `tests/indexFormat.test.ts`.
+>
+> **A/B under headless Chromium + SwiftShader** (see `editor/.claude/skills/verify`): a generated
+> 90,601-vertex glTF sphere imported through the real UI, confirmed reaching `Mesh.create` with
+> `maxIndex=90600`. With the bug re-introduced it renders as a **crescent with a bite missing** — only
+> **64.3%** of the correct surface (~65,535 of 90,601 vertices survive). With the fix restored, the same
+> flow renders a **complete sphere**. Same file, same path, only the index width differs.
+>
+> **Correct the symptom description:** this was originally written up as "scrambled triangles". It is not
+> — it is a clean bite out of the silhouette, which reads as a modelling error rather than an engine bug.
+> That makes it *more* insidious, not less.
+>
+> Two traps found while fixing, both recorded in the module: the threshold is `>= 65535` (65535 is
+> WebGL2's primitive-restart index, so a 65536-vertex mesh would drop triangles touching its last vertex —
+> the same silent symptom), and `maxIndex` must not use `Math.max(...indices)`, which throws `RangeError`
+> at ~125k args, i.e. on exactly the meshes this targets.
+>
+> **A verification trap worth keeping:** a sphere is a poor probe. Every vertex lies on one surface, so
+> wrong connectivity still spans that surface and the silhouette can survive. A first attempt rendered
+> pixel-identical (0/548,240 differing pixels) with and without the fix — because the object under test was
+> accidentally the editor's built-in 32-segment Sphere primitive, not the import. Always confirm the scene
+> tree names the *imported* mesh, and always run the disable-and-watch-it-break half.
 
 The single highest-severity finding. `Mesh` always narrows indices to 16-bit and always draws with
 `UNSIGNED_SHORT`:
@@ -48,15 +65,29 @@ in WebGL1 and is core in WebGL2), so the fix is cheap:
 This deserves a regression test at the `Mesh` level; the truncation itself is already covered by a
 plain-JS assertion and needs no GL context.
 
-### 2. No delta clamping — a backgrounded tab teleports the game **[verified — FIXED, pending manual check]**
+### 2. No delta clamping — a backgrounded tab teleports the game **[FIXED — verified end-to-end]**
 
-> **Fixed.** `MAX_DELTA = 0.333` (Unity's `maximumDeltaTime` default) clamps the delta at source in
-> `engine.ts`, and `run()` now resets `_lastTimestamp` so the construct→run gap is no longer charged to
-> frame one. `editor/.../uiRuntime.ts` had the same bug in its own rAF loop and got the same clamp;
-> `AnimationPlayer.tsx:76` already clamped and was left alone. No `visibilitychange` listener — see the
-> reasoning at `MAX_DELTA`. Known interaction, documented at the constant: physics absorbs at most
-> `5 × 1/60 = 0.083s` per frame, so a recovery frame advances scripts ~4× further than the simulation for
-> one frame. **Still needs the manual repro:** `this.every(1, ...)`, tab out 30s, expect one tick.
+> **Fixed and proven in the running engine.** `MAX_DELTA = 0.333` (Unity's `maximumDeltaTime` default)
+> clamps the delta at source in `engine.ts`, and `run()` now resets `_lastTimestamp` so the construct→run
+> gap is no longer charged to frame one. `editor/.../uiRuntime.ts` had the same bug in its own rAF loop and
+> got the same clamp; `AnimationPlayer.tsx:76` already clamped and was left alone. No `visibilitychange`
+> listener — see the reasoning at `MAX_DELTA`.
+>
+> **Verified** by busy-waiting the main thread, which halts `requestAnimationFrame` by the same mechanism
+> a backgrounded tab does — a real reproduction, not a simulation:
+>
+> | stall | raw delta (what the old code reported) | reported delta |
+> |---|---|---|
+> | 3s | 3.222s | **0.333s** |
+> | 10s | 10.091s | **0.333s** |
+>
+> One recovery frame each, clamped. The raw value is its own control.
+>
+> Incidental finding: **boot alone produces ~4 frames with a raw delta over 0.5s** (async init and texture
+> decoding block the main thread), so the clamp is load-bearing at startup too — not just on tab-return.
+>
+> Known interaction, documented at the constant: physics absorbs at most `5 × 1/60 = 0.083s` per frame, so
+> a recovery frame advances scripts ~4× further than the simulation for one frame.
 
 [engine.ts:108-127](../src/core/engine.ts#L108-L127) feeds the raw wall-clock delta into the frame:
 
@@ -86,7 +117,89 @@ Worth noting what is already *right* here: the fixed-timestep-physics/variable-r
 Timestep!" prescribes and that Unity/Unreal/Godot use. The `1/60` internal step with catch-up substeps is
 correct and deliberate. Only the clamp is missing.
 
-### 3. GPU resources are allocated and never released **[verified]**
+### 3. GPU resources are allocated and never released **[verified — first leak FIXED, rest open]**
+
+> **Partly fixed.** `Shader.dispose()` now exists (`deleteProgram` + `deleteShader`), `Shader.create()`
+> releases its two shader objects once the program has linked (the linked program keeps its own
+> reference), and **`tryCompileCustom` now disposes the program it only ever wanted a yes/no from**.
+>
+> That last one was a live, high-frequency leak, not a theoretical one: `CustomMaterialEditor` *used to*
+> debounce `recompile()` on every pause in typing, so tuning one shader leaked a GL program plus two shader
+> objects every few keystrokes, for the life of the tab. The `finally` matters as much as the dispose — a
+> *failing* compile is the common case while typing, and the constructor allocates both shader objects
+> before `create()` can throw.
+>
+> **That debounce is gone entirely now** — see #3d. The dispose still matters (compile-on-open and
+> compile-on-uniform-change remain), but the leak's frequency had already dropped from
+> per-keystroke-pause to per-explicit-compile.
+>
+> **Measured in the running editor** by counting `createProgram`/`deleteProgram`: boot compiles **44**
+> programs (all permanent, correctly retained). Every `tryCompileCustom` now shows a matched
+> `+prog`/`-prog` pair. Before the fix each of those was a permanent `+prog`.
+
+#### 3b. Custom-shader registry never evicts superseded keys **[FIXED — verified]**
+
+The other half of the same user-visible leak. `ensureCustomShader` keys programs by *content*, so every
+clean compile of an edited shader registered a **new** key while the superseded one stayed in the
+`ShaderManager` map forever — reachable by nothing, freed by nothing.
+
+**Fixed by refcounting keys, not by sweeping.** `ensureCustomShader` already runs every frame for every
+live material (the renderer's `_ensureCustomShaders`), which is exactly the signal needed: a material
+turning up under a different key than last time means its old key has lost a user. `customShaders.ts` now
+keeps `keyRefs` (users per key) and `lastKeyOf` (a `WeakMap`, so a discarded material is not kept alive),
+and `releaseKey` disposes the program once the count reaches zero.
+
+Three hazards that had to be handled, each of which would have been a silent wrong-render:
+- **The shared magenta fallback.** One `Shader` instance is registered under *every* failing key of a
+  render mode, so disposing on behalf of one key would break all the others. `isFallback` + a check that
+  no other name still maps to the instance (`ShaderManager.isRegistered`) guard this.
+- **`GLState` dedupes by identity.** Deleting the cached program would make the next `useProgram` for that
+  handle a silent no-op, leaving a deleted program bound. `Shader.dispose` now calls `GLState.reset()` if
+  it is freeing the cached one. Same trap, same fix, for the VAO in `Mesh.dispose`.
+- **Being wrong in the safe direction.** A key released too eagerly is simply recompiled by the next
+  `ensureCustomShader`; the failure mode is a recompile, not a broken material. A material *deleted*
+  outright never releases its key, so it over-retains — the conservative error, deliberately.
+
+**Verified in the running editor.** Live-program count across 4 source edits: **45 → 45, flat** (it was
+45 → 49). The per-edit trace is a clean cycle — probe compiled, probe disposed, old key evicted, new key
+registered:
+```
++prog live=46   tryCompileCustom probe
+-prog live=45   probe disposed        (#3)
+-prog live=44   old key evicted       (#3b)
++prog live=45   new key registered
+```
+And the render still works: after 3 forced evictions the custom material's preview renders normally with
+**0 magenta (fallback) pixels and 0 GL errors** — the specific failure this design risked.
+
+#### 3d. Shader compiling froze the editor while typing **[FIXED — verified]**
+
+Found by the repo owner, and the same code path as #3/#3b. `glCompileShader`/`glLinkProgram` are
+**synchronous main-thread calls with no async variant**, so the debounced compile-on-every-typing-pause
+stalled the entire editor — viewport, input, everything — repeatedly, mid-edit. The bigger the shader, the
+longer the freeze.
+
+**Compiling is now an explicit action**: a `Compile` button in the GLSL editor header, plus Ctrl/Cmd+Enter.
+Typing only stores the text (so an edit still saves and survives a tab switch) and marks the tab dirty; it
+never touches GL. An `unapplied edits` badge and the button's enabled state show when the preview is behind
+the source, so "nothing happened when I typed" is never ambiguous.
+
+Left on automatic deliberately, because each is one discrete click rather than a keystroke: opening a
+material (surfaces an error the stored source already had), changing the base/mode scaffold (replaces the
+source with a known-good template), and a structural uniform change (the declaration set is part of the
+assembled source, so the preview is wrong until it recompiles).
+
+**Verified in the running editor** by counting `gl.createProgram`: four typing passes with 1.5s pauses —
+well past the old 300ms debounce — produced **zero** compiles, where each pause previously cost one.
+Clicking `Compile` and pressing Ctrl+Enter each produced compiles and cleared the badge; no console errors.
+
+One thing this measurement exposed: **an apply costs two compiles, not one** — `tryCompileCustom`
+validates and discards, then the renderer's `ensureCustomShader` compiles the real registered program on
+the next frame. Now that this only happens on explicit action it is affordable, but it is halvable: have
+`ensureCustomShader` report its compile error back (the `errors` map already holds it, it is just not
+exported) and drop the separate validation pass.
+
+### 3c. The rest of the resource audit **[verified]**
 
 17 `gl.create*` call sites against 3 `gl.delete*` call sites:
 
@@ -100,20 +213,39 @@ correct and deliberate. Only the clamp is missing.
 | Renderbuffer | 1 | **0** |
 | Program | 1 | **0** |
 
-The only releases are [mesh.ts:107](../src/graphics/mesh.ts#L107) (stale LOD buffers),
-[renderer.ts:872](../src/graphics/renderer.ts#L872) (foliage buffers) and
-[texture.ts:290](../src/graphics/texture.ts#L290). Shader programs, framebuffers, VAOs and renderbuffers
-are never freed at all, and only 2 of 9 buffer allocations have a matching free.
+**That table overstates the problem, and the correction matters** — a raw create/delete count is not a leak
+count. What closer reading showed:
 
-This matters far more for the **editor** than for a shipped game: a game allocates once and exits, but the
-editor loads and unloads scenes, rebuilds terrain chunks, recompiles custom shaders and re-imports meshes
-in a single long-lived context. Every one of those leaks GPU memory until the tab dies or the context is
-lost. It also explains any "editor gets slower the longer it runs" behaviour.
+- **Framebuffers do NOT leak on resize.** `Framebuffer.create` already deletes the previous colour and
+  depth textures before reallocating ([framebuffer.ts:37-40](../src/graphics/framebuffer.ts#L37-L40), with a
+  comment saying exactly why), and the FBO handle itself is created once per renderer and reused by
+  `resize()`. The `deleted: 0` for Framebuffer is real but harmless: they live as long as the context.
+- **The VAO and most buffers are per-`Mesh` and live as long as the mesh.** They only leak when a mesh is
+  discarded — i.e. on scene switch and re-import, not per frame.
+- **The genuinely damaging one was Program**, because it was the only resource being allocated on a
+  *user-driven, unbounded* schedule (every pause while editing a shader). That is now half-fixed — see #3
+  and #3b above.
 
-The engine has no disposal protocol at all: only `Ragdoll.destroy()` and `Terrain.dispose()` exist
-across the whole codebase. **[proposal]** Introduce a `dispose()` convention on every GL-owning class
-(`Mesh`, `Shader`, `Framebuffer`, `Texture`, `Material`), have `Scene` cascade it on unload, and treat
-"allocates a GL object without a matching delete" as a review error.
+So the shape of the leak is narrower than "17 vs 3" suggests: it is **scene-switch teardown** plus the
+**custom-shader registry churn**, not a broad haemorrhage. The engine still has no disposal protocol —
+only `Ragdoll.destroy()`, `Terrain.dispose()` (physics-only, despite the name) and now `Shader.dispose()`
+exist.
+
+> **Also done:** `Mesh.dispose()` now exists — VAO, vertex buffer, index buffer, bone buffers and LOD
+> index buffers, idempotent, with the same `GLState` invalidation as `Shader.dispose`. Ownership is
+> exclusive (nothing shares a Mesh's buffers), so there is no sharing hazard here. **It has no caller
+> yet** — wiring it up is scene-teardown work, below.
+
+**[proposal]** Remaining work:
+1. **Call `Mesh.dispose()`** from scene teardown and on re-import. The method is ready; what is missing is
+   a policy for when a mesh is dead.
+2. **Scene-switch teardown.** `CleoEngine.setScene` is the seam all five swap paths funnel through. Two
+   hazards, both real: `TextureManager` is a singleton cache shared across scenes *and* tabs, so a naive
+   sweep frees assets still in use; and the editor deliberately reuses one `Scene` object across
+   `openScene`, so `Scene.dispose()` must be re-entrant and leave the object usable. Note the shader work
+   above suggests the pattern: refcount against a signal the engine already produces every frame, and
+   prefer over-retention to premature free.
+3. Treat "allocates a GL object without a matching delete" as a review error.
 
 ---
 
@@ -217,13 +349,20 @@ hosting deploys — nothing runs `tsc`, and until this pass there was nothing to
 > replacing the deploy workflows' reliance on whatever `ubuntu-latest` ships. No fork gate — this job uses
 > no secrets, which closes the hole where fork PRs ran no checks at all. `npm ci` verified via dry-run.
 
-**[proposal]** Two follow-ups. **Editor typecheck** is the significant one: the editor is *never*
-typechecked (webpack uses babel, which strips types without checking) despite `strict: true`. It currently
-has exactly one error — `TS1501` in `publish/externalizeAssets.ts:29`, a dotAll regex needing
-`target >= es2018` while `editor/tsconfig.json` says `ES6`; bumping the editor target to `ES2020` fixes it
-(`lib` is already `ESNext`, and `noEmit: true` means babel ignores `target`). Deferred only to avoid
-gating in-flight editor work. A formatter is a bigger cultural call (it will produce one enormous diff),
-so it is worth deciding deliberately rather than drifting into it.
+> **Editor gate now DONE too.** `ci.yml` gained an `editor` job: `npm ci` → build the engine (required —
+> `dist/` is untracked and `editor/node_modules/cleo` symlinks to it) → `npm ci` in `editor/` →
+> `npm run typecheck`. Bumping `editor/tsconfig.json` from `ES6` to `ES2020` cleared the lone `TS1501`
+> (a dotAll regex in `publish/externalizeAssets.ts`), so **the editor now typechecks clean at 0 errors**.
+> `typescript` is now a declared editor devDependency rather than resolved by accidental hoist from the
+> root. Kept a separate job so a broken editor cannot mask a broken engine, and so fast engine feedback
+> is not held behind the slow build.
+>
+> This matters more than it sounds: babel-loader strips the editor's types **without checking them**, so
+> despite `"strict": true` nothing verified the editor until now — and it is the only automated thing that
+> can catch a regression in the engine's emitted `.d.ts`, which the editor compiles against in strict mode.
+
+**[proposal]** A formatter is a bigger cultural call (it will produce one enormous diff), so it is worth
+deciding deliberately rather than drifting into it.
 
 ---
 
@@ -433,28 +572,30 @@ throughout.
 
 ## Suggested order
 
-Tranche 1 — **done**, pending the two manual repros:
+Tranche 1 — **done and verified end-to-end**:
 
-1. ~~Fix the index-width bug (#1)~~ — done. Needs the manual >65k-vertex glTF import check.
-2. ~~Clamp delta (#2)~~ — done, in both the engine loop and `uiRuntime`. Needs the manual tab-out check.
-3. ~~Add the CI gate (#6)~~ — done, engine-only.
+1. ~~Fix the index-width bug (#1)~~ — done; proven in the running editor with a disable-and-rebreak A/B.
+2. ~~Clamp delta (#2)~~ — done in both the engine loop and `uiRuntime`; proven by stalling the main thread.
+3. ~~Add the CI gate (#6)~~ — done, engine **and** editor.
 
 Tranche 2 — **done**, pending manual checks:
 
 4. ~~`strictNullChecks` + `strictPropertyInitialization` (#5)~~ — done. 36 errors fixed by narrowing, no
    null-suppressing `!`. Found 2 real bugs (see above). `.d.ts` delta measured, not assumed.
 
-Tranche 3 — next, in this order:
+5. ~~Editor typecheck in CI (#6 follow-up)~~ — **done**; editor now typechecks clean at 0 errors and is
+   gated on every push and PR.
 
-5. **Editor typecheck in CI (#6 follow-up)** — one line plus an `ES6`→`ES2020` target bump. Still deferred
-   only because it would gate in-flight editor work; babel never typechecks the editor, so this gate is the
-   only automated thing that can catch a `.d.ts` regression. Tranche 2 ran it manually instead.
+Tranche 3 — next:
+
 6. **Establish the `dispose()` protocol (#3)** — start with `Shader`/`Framebuffer`/`VAO`, which have no
    releases at all. `CleoEngine.setScene` is the seam all five scene-swap paths funnel through.
 7. **Then** refactor: `renderer.ts` to a pass list (#11), `EngineContext.tsx` by concern (#12).
 
-Steps 1-4 were all small, and together they turn "43k lines with no net" into something a large refactor
-can actually be attempted against.
+Steps 1-5 were all small, and together they turn "43k lines with no net" into a codebase with a type
+checker, a test suite, two CI gates, and a working way to observe GL behaviour end-to-end — which is what
+makes a large refactor attemptable. The engine and editor are both gated now; the leak work (#3) is the
+last correctness item before the structural work.
 
 ---
 
@@ -466,9 +607,16 @@ can actually be attempted against.
   hid it. **Fixed** in tranche 2 by allocating six empty faces, mirroring what the 2D branch already does
   for render targets — a no-op would have left the texture incomplete, a subtler failure than the crash.
   Behavioural, and unverifiable by any automated check here (no GL context in tests).
-- **`Geometry.vertexCount` returns `positions.length * 3`** — the float count, not the vertex count.
-  Latent: currently unreachable because every geometry is indexed, so the `drawArrays` fallback that
-  consumes it never runs. Worth its own small fix, and a live trap for anyone sizing anything from it.
+- ~~**`Geometry.vertexCount` returns `positions.length * 3`**~~ — **FIXED.** `_positions` is
+  `[number,number,number][]`, so its `length` already *is* the vertex count and the `* 3` made it the float
+  count. Every caller feeds it straight to `Mesh.create(data, vertexCount, indices)`, where it becomes the
+  count for the unindexed `drawArrays` path — so an unindexed geometry asked the driver for three times the
+  vertices it has. Reachable, not merely latent: `Geometry`'s `indices` parameter **defaults to `[]`**, and
+  `if (indices)` is *truthy for an empty array*, so such a geometry allocated a zero-length index buffer
+  (never freed), then fell through to `drawArrays` with the 3× count. Both halves fixed — the getter, and
+  the `indices && indices.length > 0` gate in `Mesh.create`/`createAnimated`. Masked until now only because
+  every geometry the engine currently builds carries indices. Verified no regression: the 90,601-vertex
+  import still renders correctly.
 - **`CleoEngine.shutdown()` does not cancel its `requestAnimationFrame` and is never called anywhere.**
   Combined with `_initialize()` leaking a `resize` listener, this is why tranche 1 preferred a delta clamp
   over a `visibilitychange` listener — the engine has no working teardown to hang one on.

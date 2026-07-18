@@ -1,11 +1,11 @@
 import type { MaterialAsset } from './materials'
-import type { MeshAsset } from './meshes'
+import type { ModelAsset } from './models'
 import type { Template } from './templates'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { ScriptAsset } from './scripts'
 
 // Content hashes let a closed scene decide, when it is next opened, whether each asset it references
-// actually changed since the scene was saved — so unchanged meshes/templates aren't needlessly
+// actually changed since the scene was saved — so unchanged models/templates aren't needlessly
 // re-instantiated (which would churn node ids and drop per-instance state). The hash is stable across
 // reloads: it is computed purely from the asset's serialized content, minus its thumbnail (a thumbnail
 // re-render must not read as a content change).
@@ -29,14 +29,14 @@ export function hashAsset(obj: any): string {
 
 export interface AssetLibs {
   materials: MaterialAsset[]
-  meshes: MeshAsset[]
+  models: ModelAsset[]
   templates: Template[]
   terrainMaterials: TerrainMaterialAsset[]
   scripts: ScriptAsset[]
 }
 
 /** The hash-map key for an asset of a given kind. Kept in one place so save and resync agree. */
-export function assetHashKey(kind: 'material' | 'mesh' | 'template' | 'terrainMaterial' | 'script', id: string): string {
+export function assetHashKey(kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script', id: string): string {
   return `${kind}:${id}`
 }
 
@@ -46,12 +46,12 @@ export function assetHashKey(kind: 'material' | 'mesh' | 'template' | 'terrainMa
  * scene actually uses are hashed and stored.
  */
 export function buildAssetHashes(
-  refs: { materialIds: Set<string>; meshIds: Set<string>; templateIds: Set<string>; terrainMaterialIds: Set<string>; scriptIds?: Set<string> },
+  refs: { materialIds: Set<string>; modelIds: Set<string>; templateIds: Set<string>; terrainMaterialIds: Set<string>; scriptIds?: Set<string> },
   libs: AssetLibs,
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const m of libs.materials) if (refs.materialIds.has(m.id)) out[assetHashKey('material', m.id)] = hashAsset(m)
-  for (const m of libs.meshes) if (refs.meshIds.has(m.id)) out[assetHashKey('mesh', m.id)] = hashAsset(m)
+  for (const m of libs.models) if (refs.modelIds.has(m.id)) out[assetHashKey('model', m.id)] = hashAsset(m)
   for (const t of libs.templates) if (refs.templateIds.has(t.id)) out[assetHashKey('template', t.id)] = hashAsset(t)
   for (const t of libs.terrainMaterials) if (refs.terrainMaterialIds.has(t.id)) out[assetHashKey('terrainMaterial', t.id)] = hashAsset(t)
   for (const s of libs.scripts) if (refs.scriptIds?.has(s.id)) out[assetHashKey('script', s.id)] = hashAsset(s)

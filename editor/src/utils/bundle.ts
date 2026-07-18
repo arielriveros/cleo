@@ -3,7 +3,7 @@ import type { SceneMeta, SceneAssetData } from './sceneStorage'
 import type { MaterialAsset } from './materials'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
-import type { MeshAsset } from './meshes'
+import type { ModelAsset } from './models'
 import type { ScriptAsset } from './scripts'
 
 // The portable project/asset-pack bundle format (a .zip). A "project" bundle carries everything needed to
@@ -31,7 +31,7 @@ export interface BundleLibraries {
   materials: MaterialAsset[]
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
-  meshes: MeshAsset[]
+  models: ModelAsset[]
   scripts: ScriptAsset[]
 }
 

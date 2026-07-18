@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import MenuBar from "./MenuBar";
 import TabBar from "./TabBar";
 import DockLayout from "./layout/DockLayout";
-import MeshImportModal from "./meshes/MeshImportModal";
+import ModelImportModal from "./models/ModelImportModal";
 import ProgressWindow from "./progress/ProgressWindow";
 import AnimationImportModal from "./animation/AnimationImportModal";
 import UnsavedSceneModal from "./dialogs/UnsavedSceneModal";
@@ -40,7 +40,7 @@ export default function Editor() {
         <DockLayout />
       </StateMachineProvider>
       {/* Global mesh-import review modal — overlays the whole editor while an import awaits the user. */}
-      <MeshImportModal />
+      <ModelImportModal />
       {/* The editor's one progress surface — import, publish, export, save, thumbnail refresh all report
           here. A floating card stack, not a modal, so it can stay up underneath the review modal. */}
       <ProgressWindow />

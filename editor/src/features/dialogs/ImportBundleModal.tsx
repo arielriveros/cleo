@@ -14,8 +14,8 @@ export default function ImportBundleModal(props: {
   const { bundle, onReplace, onMerge, onCancel } = props
   const isProject = bundle.manifest.kind === 'project'
   const sceneCount = Object.keys(bundle.scenes).length
-  const { materials, terrainMaterials, templates, meshes } = bundle.libraries
-  const assetCount = materials.length + terrainMaterials.length + templates.length + meshes.length
+  const { materials, terrainMaterials, templates, models } = bundle.libraries
+  const assetCount = materials.length + terrainMaterials.length + templates.length + models.length
 
   return (
     <Modal onClose={onCancel} className='w-[440px]'>

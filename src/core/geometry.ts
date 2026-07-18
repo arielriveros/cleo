@@ -38,7 +38,15 @@ export class Geometry {
     public get indices(): number[] { return this._indices; }
     public get tangents(): number[][] { return this._tangents; }
     public get bitangents(): number[][] { return this._bitangents; }
-    public get vertexCount(): number { return this._positions.length * 3; }
+    /**
+     * Number of vertices — `positions.length`, not the float count.
+     *
+     * This used to return `positions.length * 3`, i.e. three times the answer its name promises. Every
+     * caller feeds it straight to `Mesh.create(data, vertexCount, indices)`, where it becomes the count
+     * for the unindexed `drawArrays` path — so an unindexed geometry asked the driver for three times the
+     * vertices it has. Masked only because every geometry built today carries indices.
+     */
+    public get vertexCount(): number { return this._positions.length; }
     /**
      * Bounding Volume Hierarchy over this geometry's triangles, built lazily in object space and
      * memoized. Used for exact ray/triangle picking (see `Raycaster`); shared across every node

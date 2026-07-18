@@ -343,7 +343,9 @@ export interface TerrainFoliageRule {
     textureId?: string | null;
     /** Legacy single Model.serialize() JSON for 'mesh' (still honored). Superseded by `models`. */
     model?: any;
-    /** Editor-side link to the source mesh library asset (sync key). The engine ignores it. */
+    /** Editor-side link to the source model library asset (sync key). The engine ignores it. */
+    modelId?: string;
+    /** Pre-rename spelling of `modelId`, still read so unmigrated terrain materials keep their link. */
     meshId?: string;
     /** LOD0 as a flattened list of Model.serialize() JSON (one entry per sub-mesh, transforms baked). */
     models?: any[];

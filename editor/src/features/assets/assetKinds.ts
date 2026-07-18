@@ -2,12 +2,12 @@ import { TextureManager, CleoEngine } from 'cleo'
 import type { MaterialAsset } from '../../utils/materials'
 import type { TerrainMaterialAsset } from '../../utils/terrainMaterials'
 import type { Template } from '../../utils/templates'
-import type { MeshAsset } from '../../utils/meshes'
+import type { ModelAsset } from '../../utils/models'
 import type { ScriptAsset } from '../../utils/scripts'
 import type { SceneMeta } from '../../utils/sceneStorage'
 import {
-  renderMaterialAssetThumbnail, renderMeshAssetThumbnail, renderTerrainMaterialAssetThumbnail,
-} from '../../utils/meshThumbnails'
+  renderMaterialAssetThumbnail, renderModelAssetThumbnail, renderTerrainMaterialAssetThumbnail,
+} from '../../utils/modelThumbnails'
 import { cryptoRandomId } from '../../utils/UIModel'
 import { deleteTextures } from '../../utils/textureStore'
 import { AssetKind, KIND_LABEL } from '../../utils/vfs'
@@ -20,7 +20,7 @@ export type AssetDeps = {
   materials: MaterialAsset[]
   terrainMaterials: TerrainMaterialAsset[]
   templates: Template[]
-  meshes: MeshAsset[]
+  models: ModelAsset[]
   scripts: ScriptAsset[]
   scenes: SceneMeta[]
 
@@ -33,9 +33,9 @@ export type AssetDeps = {
   addTemplate: (t: Template) => void
   updateTemplate: (id: string, t: Template) => void
   removeTemplate: (id: string) => void
-  addMesh: (m: MeshAsset) => void
-  updateMesh: (id: string, m: MeshAsset) => void
-  removeMesh: (id: string) => void
+  addModel: (m: ModelAsset) => void
+  updateModel: (id: string, m: ModelAsset) => void
+  removeModel: (id: string) => void
   addScriptAsset: (s: ScriptAsset) => void
   updateScriptAsset: (id: string, s: ScriptAsset) => void
   removeScriptAsset: (id: string) => void
@@ -49,13 +49,13 @@ export type AssetDeps = {
   enterMaterialEditor: (id?: string) => void
   enterTerrainMaterialEditor: (id?: string) => void
   enterTemplateEditor: (id?: string) => void
-  enterMeshEditor: (id?: string) => void
+  enterModelEditor: (id?: string) => void
   enterScriptEditor: (id?: string) => void
 
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | MeshAsset | ScriptAsset | SceneMeta
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | SceneMeta
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value))
@@ -67,7 +67,7 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'material': return deps.materials.find(m => m.id === id)
     case 'terrainMaterial': return deps.terrainMaterials.find(m => m.id === id)
     case 'template': return deps.templates.find(t => t.id === id)
-    case 'mesh': return deps.meshes.find(m => m.id === id)
+    case 'model': return deps.models.find(m => m.id === id)
     case 'script': return deps.scripts.find(s => s.id === id)
     case 'scene': return deps.scenes.find(s => s.id === id)
     case 'texture': return undefined
@@ -127,9 +127,9 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateTemplate(id, { ...a, name: stem })
       break
     }
-    case 'mesh': {
-      const a = deps.meshes.find(m => m.id === id)
-      if (a) deps.updateMesh(id, { ...a, name: stem })
+    case 'model': {
+      const a = deps.models.find(m => m.id === id)
+      if (a) deps.updateModel(id, { ...a, name: stem })
       break
     }
     case 'script': {
@@ -153,7 +153,7 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'material': deps.removeMaterial(id); break
     case 'terrainMaterial': deps.removeTerrainMaterial(id); break
     case 'template': deps.removeTemplate(id); break
-    case 'mesh': deps.removeMesh(id); break
+    case 'model': deps.removeModel(id); break
     case 'script': deps.removeScriptAsset(id); break
     case 'scene': {
       void deps.deleteScene(id)
@@ -194,10 +194,10 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       deps.addTemplate({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
-    case 'mesh': {
-      const a = deps.meshes.find(m => m.id === id)
+    case 'model': {
+      const a = deps.models.find(m => m.id === id)
       if (!a) return null
-      deps.addMesh({ ...deepClone(a), id: newId, name: stem, materialIds: [...(a.materialIds ?? [])] })
+      deps.addModel({ ...deepClone(a), id: newId, name: stem, materialIds: [...(a.materialIds ?? [])] })
       return newId
     }
     case 'script': {
@@ -253,12 +253,12 @@ export async function regenerateThumbnail(
       deps.updateTerrainMaterial(id, { ...a, thumbnail })
       return true
     }
-    case 'mesh': {
-      const a = deps.meshes.find(m => m.id === id)
+    case 'model': {
+      const a = deps.models.find(m => m.id === id)
       if (!a) return false
-      const thumbnail = await renderMeshAssetThumbnail(engine, a)
+      const thumbnail = await renderModelAssetThumbnail(engine, a)
       if (!thumbnail) return false
-      deps.updateMesh(id, { ...a, thumbnail })
+      deps.updateModel(id, { ...a, thumbnail })
       return true
     }
     case 'scene':
@@ -281,7 +281,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'material': deps.enterMaterialEditor(id); return true
     case 'terrainMaterial': deps.enterTerrainMaterialEditor(id); return true
     case 'template': deps.enterTemplateEditor(id); return true
-    case 'mesh': deps.enterMeshEditor(id); return true
+    case 'model': deps.enterModelEditor(id); return true
     case 'script': deps.enterScriptEditor(id); return true
     case 'scene': void deps.openScene(id); return true
     default: return false
@@ -294,7 +294,7 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'material': return 'nodes using it fall back to a basic material'
     case 'terrainMaterial': return 'terrain layers painted with it are cleared'
     case 'template': return 'placed instances are unlinked and become normal nodes'
-    case 'mesh': return 'placed copies stay in the scene'
+    case 'model': return 'placed copies stay in the scene'
     case 'script': return 'nodes using it lose their script and its variables'
     case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials using it show no texture'
@@ -304,7 +304,7 @@ export function deleteConsequence(kind: AssetKind): string {
 /** The DataTransfer entries a drag of this asset must carry, so every existing drop target keeps working. */
 export function dragPayload(kind: AssetKind, assetId: string): [string, string][] {
   switch (kind) {
-    case 'mesh': return [['text/cleo-mesh', assetId]]
+    case 'model': return [['text/cleo-model', assetId]]
     case 'template': return [['text/cleo-template', assetId]]
     case 'material': return [['text/cleo-material', assetId]]
     case 'terrainMaterial': return [['text/cleo-terrain-material', assetId]]
@@ -347,7 +347,7 @@ const ICONS: Record<AssetKind | 'folder', string> = {
   template: svg('#b08fef',
     `<rect x="4" y="4" width="16" height="16" rx="2.5" fill="#7a4fd4" fill-opacity=".18"/><path d="M8 10.5h8M8 14.5h5"/>`,
   ),
-  mesh: svg('#4fc3d5',
+  model: svg('#4fc3d5',
     `<path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" fill="#1f7f8f" fill-opacity=".18"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/>`,
   ),
   scene: svg('#f2b84b',

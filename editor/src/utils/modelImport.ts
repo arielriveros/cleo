@@ -24,7 +24,7 @@ function quatToEulerDeg([x, y, z, w]: [number, number, number, number]): [number
 }
 
 // Parse a bundle's files into an in-memory subtree: a parent Node holding one ModelNode per sub-mesh.
-// Animated-first for GLTF (skinned meshes keep their skeleton/animations), static otherwise. Textures
+// Animated-first for GLTF (skinned models keep their skeleton/animations), static otherwise. Textures
 // referenced by the files land in TextureManager during parse. Reused for the initial import parse and
 // the on-Accept re-parse (after the user uploads previously-missing textures).
 export async function parseBundleToRoot(files: File[], name: string): Promise<{ root: Node; children: ModelNode[] }> {
@@ -36,7 +36,7 @@ export async function parseBundleToRoot(files: File[], name: string): Promise<{ 
       // The animated loader wraps EVERY primitive in an AnimatedModel, even non-skinned ones. The
       // renderer picks the skinned shader for any AnimatedModel, so a jointless mesh drawn with it throws
       // GL_INVALID_OPERATION (vertex attribute type mismatch). Unwrap non-skinned results back to a plain
-      // Model so they use the static shader; keep genuinely skinned meshes as AnimatedModel.
+      // Model so they use the static shader; keep genuinely skinned models as AnimatedModel.
       parsed = animated.map(p => {
         const m = p.model as AnimatedModel
         const transform = (p as any).transform as ImportedTransform | undefined
@@ -45,14 +45,14 @@ export async function parseBundleToRoot(files: File[], name: string): Promise<{ 
     } catch { parsed = [] }
   }
   if (!parsed.length) parsed = await Model.fromFile({ files })
-  if (!parsed.length) throw new Error(`No meshes parsed from "${name}"`)
+  if (!parsed.length) throw new Error(`No models parsed from "${name}"`)
 
   const root = new Node(name)
   const children: ModelNode[] = []
   for (const p of parsed) {
     const modelNode = new ModelNode(p.name || name, p.model)
     // Place the sub-mesh where its glTF scene node put it (multi-part files author real layouts);
-    // entries without a transform (assimp path, meshes outside the scene graph) stay at the origin.
+    // entries without a transform (assimp path, models outside the scene graph) stay at the origin.
     const t = (p as any).transform as ImportedTransform | undefined
     if (t) {
       modelNode.setPosition(t.translation)

@@ -6,8 +6,8 @@ import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 // Surfaces import state, lets the user upload textures the model references but that were missing from
 // the upload, and offers scale normalization. Accept commits (thumbnail + material assets + add); Cancel
 // discards. Mounted globally in Editor so it overlays the whole editor.
-export default function MeshImportModal() {
-  const { pendingMeshImport, resolveMeshImport } = useCleoEngine()
+export default function ModelImportModal() {
+  const { pendingModelImport, resolveModelImport } = useCleoEngine()
 
   const [extraFiles, setExtraFiles] = useState<File[]>([])
   const [resolved, setResolved] = useState<Set<string>>(new Set())
@@ -24,10 +24,10 @@ export default function MeshImportModal() {
     setNormalize(true)
     setTargetSize(2)
     setSeparate(false)
-  }, [pendingMeshImport])
+  }, [pendingModelImport])
 
-  if (!pendingMeshImport) return null
-  const info = pendingMeshImport
+  if (!pendingModelImport) return null
+  const info = pendingModelImport
 
   const currentSize = info.sizeRadius * 2
   const factor = normalize && info.sizeRadius > 0 ? targetSize / (info.sizeRadius * 2) : 1
@@ -56,13 +56,13 @@ export default function MeshImportModal() {
     if (ignored) setIgnoredCount(c => c + ignored)
   }
 
-  const accept = () => resolveMeshImport({
+  const accept = () => resolveModelImport({
     extraFiles,
     normalize,
     targetSize: targetSize > 0 ? targetSize : 2,
     separate: separate && info.subMeshCount > 1,
   })
-  const cancel = () => resolveMeshImport(null)
+  const cancel = () => resolveModelImport(null)
 
   return (
     <Modal onClose={cancel} className='w-[420px]'>
@@ -74,7 +74,7 @@ export default function MeshImportModal() {
         <div className='px-4 py-3 space-y-4 text-sm'>
           {/* Summary */}
           <div className='flex gap-4 text-xs text-gray-300'>
-            <span>{info.subMeshCount} sub-mesh{info.subMeshCount === 1 ? '' : 'es'}</span>
+            <span>{info.subMeshCount} part{info.subMeshCount === 1 ? '' : 's'}</span>
             <span>{info.materialCount} material{info.materialCount === 1 ? '' : 's'}</span>
           </div>
 
@@ -117,11 +117,11 @@ export default function MeshImportModal() {
           {info.subMeshCount > 1 && (
             <div>
               <div className='text-xs font-semibold mb-1'>Contents</div>
-              <Toggle label='Separate sub-meshes into individual assets' checked={separate} onChange={setSeparate} />
+              <Toggle label='Separate sub-models into individual assets' checked={separate} onChange={setSeparate} />
               <p className='text-[11px] text-gray-400 mt-1'>
                 {separate
-                  ? `Creates ${info.subMeshCount} separate mesh assets, each centred on its own origin.`
-                  : `Creates 1 mesh asset containing all ${info.subMeshCount} sub-meshes.`}
+                  ? `Creates ${info.subMeshCount} separate model assets, each centred on its own origin.`
+                  : `Creates 1 model asset containing all ${info.subMeshCount} parts.`}
               </p>
               {separate && (
                 <p className='text-[11px] text-warning mt-1'>

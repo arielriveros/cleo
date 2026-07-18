@@ -1,21 +1,21 @@
 import { Scene, Node, CameraNode } from 'cleo'
 import { getMaterialIdOf, applyMaterialAsset, unlinkToFallback, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
-import { MESH_ID_VAR, instantiateMeshAsset } from './meshes'
+import { MODEL_ID_VAR, instantiateModelAsset } from './models'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
 import { getScriptIdOf, seedScriptFields, unlinkScript } from './scripts'
 import { hashAsset, assetHashKey, AssetLibs } from './assetHash'
 
 // Pull-based cross-scene propagation. When a scene is opened, its stored node tree still carries the
-// asset links (__materialId / __meshId / __templateId, terrain layer.materialId, foliage rule.meshId)
+// asset links (__materialId / __modelId / __templateId, terrain layer.materialId, foliage rule.modelId)
 // but the linked assets in the global libraries may have been edited, added to, or deleted while this
 // scene was closed. resyncScene re-resolves every link against the *current* libraries so a scene the
 // user never had open still reflects the latest assets — the requirement that asset edits propagate to
 // all scenes, including terrain foliage.
 //
 // It is gated by the per-asset content hashes captured when the scene was last saved: an asset whose
-// hash is unchanged is left alone, so meshes/templates (which are re-instantiated, not patched) don't
+// hash is unchanged is left alone, so models/templates (which are re-instantiated, not patched) don't
 // needlessly churn node ids on every open. A missing saved-hash map (legacy scene blob) means "resync
 // everything".
 //
@@ -44,7 +44,7 @@ function reinstantiate(scene: Scene, inst: Node, maps: ResyncMaps, make: (parent
   const pos = Array.from(inst.position) as [number, number, number]
   const rot = Array.from(inst.rotation) as [number, number, number]
   const scl = Array.from(inst.scale) as [number, number, number]
-  // Drop the old subtree's out-of-band data so map entries don't leak (mirrors syncMeshInstances).
+  // Drop the old subtree's out-of-band data so map entries don't leak (mirrors syncModelInstances).
   for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id) }
   // removeChild detaches synchronously; Node.remove() only marks and its deferred sweep mis-splices.
   parent.removeChild(inst)
@@ -65,11 +65,11 @@ export function resyncScene(
   savedHashes: Record<string, string> | undefined,
 ): boolean {
   let changed = false
-  const changedSince = (kind: 'material' | 'mesh' | 'template' | 'terrainMaterial' | 'script', id: string, current: string): boolean =>
+  const changedSince = (kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script', id: string, current: string): boolean =>
     !savedHashes || savedHashes[assetHashKey(kind, id)] !== current
 
   const materialById = new Map(libs.materials.map(m => [m.id, m]))
-  const meshById = new Map(libs.meshes.map(m => [m.id, m]))
+  const modelById = new Map(libs.models.map(m => [m.id, m]))
   const templateById = new Map(libs.templates.map(t => [t.id, t]))
   const terrainMatById = new Map(libs.terrainMaterials.map(t => [t.id, t]))
   const scriptById = new Map(libs.scripts.map(s => [s.id, s]))
@@ -94,12 +94,12 @@ export function resyncScene(
 
   // --- Mesh instances ---
   for (const node of Array.from(scene.nodes)) {
-    const meshId = node.getVariable(MESH_ID_VAR)
-    if (!meshId) continue
-    const asset = meshById.get(meshId)
+    const modelId = node.getVariable(MODEL_ID_VAR)
+    if (!modelId) continue
+    const asset = modelById.get(modelId)
     if (!asset) continue // a placed mesh with no source asset stays as-is (matches delete consequence)
-    if (changedSince('mesh', meshId, hashAsset(asset))) {
-      reinstantiate(scene, node, maps, parent => instantiateMeshAsset(asset, parent, libs.materials))
+    if (changedSince('model', modelId, hashAsset(asset))) {
+      reinstantiate(scene, node, maps, parent => instantiateModelAsset(asset, parent, libs.materials, libs.models))
       changed = true
     }
   }

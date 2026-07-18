@@ -65,10 +65,43 @@ export class Shader {
         if (!gl.getProgramParameter(this._shaderProgram, gl.LINK_STATUS))
             throw new Error(gl.getProgramInfoLog(this._shaderProgram) || 'Unknown error creating program');
 
+        // The linked program keeps its own reference to both shader objects, so dropping ours here frees
+        // them as soon as the program is deleted (or immediately, for a program that never links). Nothing
+        // reads these fields after this point — they exist only to carry source between the constructor
+        // and the link above.
+        gl.deleteShader(this._vertexShader);
+        gl.deleteShader(this._fragmentShader);
+        this._vertexShader = null!;
+        this._fragmentShader = null!;
+
         this.storeAttributes();
         this.storeUniforms();
 
         return this;
+    }
+
+    /**
+     * Releases this shader's GL objects. Idempotent, and safe on a shader whose `create()` threw — the
+     * constructor allocates the two shader objects before any source is compiled, so a shader that failed
+     * to compile still owns GL memory.
+     *
+     * There is no finalizer for GL objects: dropping the last JS reference to a Shader frees nothing, the
+     * program simply leaks for the lifetime of the context. Anything that compiles a program it does not
+     * intend to keep must call this.
+     */
+    public dispose(): void {
+        if (this._shaderProgram) {
+            // GLState dedupes useProgram by identity, so if this program is the cached one the next
+            // useProgram() for it would be SKIPPED and a deleted program left bound. Invalidate first.
+            if (GLState.currentProgram === this._shaderProgram) GLState.reset();
+            gl.deleteProgram(this._shaderProgram);
+            this._shaderProgram = null!;
+        }
+        // Normally already released at the end of create(); still set if create() never ran or threw.
+        if (this._vertexShader) { gl.deleteShader(this._vertexShader); this._vertexShader = null!; }
+        if (this._fragmentShader) { gl.deleteShader(this._fragmentShader); this._fragmentShader = null!; }
+        this._attributes = [];
+        this._uniforms = {};
     }
 
     public use(): void {

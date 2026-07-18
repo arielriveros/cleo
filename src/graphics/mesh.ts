@@ -44,7 +44,10 @@ export class Mesh {
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
         this._vertexCount = vertex_count;
 
-        if (indices) {
+        // `indices.length`, not just `indices`: an empty array is truthy, so a geometry with no indices
+        // used to allocate a zero-length index buffer that no draw could ever use — and that nothing frees.
+        // The draw paths already gate on `_indexCount > 0`, so this only skips the pointless allocation.
+        if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
             this._indexType = glTypeFor(data);
             this._indexBuffer = gl.createBuffer() as WebGLBuffer;
@@ -92,7 +95,10 @@ export class Mesh {
         gl.bindBuffer(gl.ARRAY_BUFFER, this._boneWeightsBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(boneWeights), gl.STATIC_DRAW);
 
-        if (indices) {
+        // `indices.length`, not just `indices`: an empty array is truthy, so a geometry with no indices
+        // used to allocate a zero-length index buffer that no draw could ever use — and that nothing frees.
+        // The draw paths already gate on `_indexCount > 0`, so this only skips the pointless allocation.
+        if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
             this._indexType = glTypeFor(data);
             this._indexBuffer = gl.createBuffer() as WebGLBuffer;
@@ -137,6 +143,44 @@ export class Mesh {
         // subsequent draw re-binds the selected level anyway, since `hasLods` is now true.
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod]);
         GLState.bindVAO(null);
+    }
+
+    /**
+     * Releases every GL object this mesh owns: its VAO, vertex buffer, index buffer, bone buffers and any
+     * LOD index buffers. Idempotent.
+     *
+     * Ownership is exclusive — nothing shares a Mesh's buffers — so unlike textures or shader programs
+     * there is no question of whether it is safe to free. It is only ever unsafe to free a mesh something
+     * still draws, which is the caller's business.
+     *
+     * Dropping the last JS reference to a Mesh frees nothing on its own: GL objects have no finalizer, so
+     * a mesh discarded without this call leaks for the life of the context.
+     */
+    public dispose(): void {
+        // Level 0 aliases _indexBuffer, so start at 1 — deleting it here and again below is harmless
+        // (deleteBuffer on an already-deleted buffer is a no-op) but the aliasing is worth being explicit
+        // about, since _lodBuffers[0] === _indexBuffer is load-bearing elsewhere.
+        for (let i = 1; i < this._lodBuffers.length; i++) gl.deleteBuffer(this._lodBuffers[i]);
+        this._lodBuffers = [];
+        this._lodCounts = [];
+        this._lodTypes = [];
+        this._lod = 0;
+
+        if (this._indexBuffer) { gl.deleteBuffer(this._indexBuffer); this._indexBuffer = null; }
+        if (this._boneIndicesBuffer) { gl.deleteBuffer(this._boneIndicesBuffer); this._boneIndicesBuffer = null; }
+        if (this._boneWeightsBuffer) { gl.deleteBuffer(this._boneWeightsBuffer); this._boneWeightsBuffer = null; }
+        if (this._vertexBuffer) { gl.deleteBuffer(this._vertexBuffer); this._vertexBuffer = null!; }
+
+        if (this._vertexArray) {
+            // Same trap as the shader program: GLState dedupes bindVertexArray by identity, so a deleted
+            // VAO left in the cache would make the next bind of it a no-op.
+            if (GLState.currentVAO === this._vertexArray) GLState.reset();
+            gl.deleteVertexArray(this._vertexArray);
+            this._vertexArray = null!;
+        }
+
+        this._vertexCount = 0;
+        this._indexCount = 0;
     }
 
     public get hasLods(): boolean { return this._lodBuffers.length > 1; }
