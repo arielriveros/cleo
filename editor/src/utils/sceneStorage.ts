@@ -43,8 +43,8 @@ export interface SceneMeta {
    * Optional on purpose, and NOT a ProjectMeta.version bump: this used to be one project-wide preference
    * (ProjectPrefs.dimension), so old metas simply don't have it. An optional field is compatible in both
    * directions — old readers ignore it, new readers fall back to the project pref then '3D' — whereas
-   * bumping the version would make parseProjectConfig (which asserts version === 2) reject every config
-   * this editor exports. Migration is therefore a read-time fallback, persisted on the next scene save.
+   * bumping ProjectMeta.version would be a needless breaking change for a purely additive field.
+   * Migration is therefore a read-time fallback, persisted on the next scene save.
    */
   dimension?: '2D' | '3D';
 }

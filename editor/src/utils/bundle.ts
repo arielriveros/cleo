@@ -1,5 +1,6 @@
 import type { VfsIndex } from './vfs'
 import type { SceneMeta, SceneAssetData } from './sceneStorage'
+import type { ProjectPrefs } from './projectStorage'
 import type { MaterialAsset } from './materials'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
@@ -25,6 +26,8 @@ export interface BundleManifest {
   mainSceneId?: string
   openSceneId?: string
   sceneMetas?: SceneMeta[]
+  /** Project bundles only: project-wide prefs, so the whole ProjectMeta round-trips faithfully. */
+  prefs?: ProjectPrefs
 }
 
 export interface BundleLibraries {

@@ -54,6 +54,7 @@ export async function applyBundleReplace(bundle: BundleData): Promise<void> {
       mainSceneId: bundle.manifest.mainSceneId ?? metas[0]?.id ?? '',
       openSceneId: bundle.manifest.openSceneId ?? bundle.manifest.mainSceneId ?? metas[0]?.id ?? '',
       scenes: metas,
+      prefs: bundle.manifest.prefs,
     }
     await idbSet(PROJECT_META_KEY, meta)
     await idbSet(VFS_KEY, bundle.vfs)

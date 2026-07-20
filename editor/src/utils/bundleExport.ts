@@ -39,7 +39,7 @@ export async function exportBundle(opts: {
     kind,
     createdAt: Date.now(),
     ...(kind === 'project'
-      ? { mainSceneId: meta.mainSceneId, openSceneId: meta.openSceneId, sceneMetas: meta.scenes }
+      ? { mainSceneId: meta.mainSceneId, openSceneId: meta.openSceneId, sceneMetas: meta.scenes, prefs: meta.prefs }
       : {}),
   }
 

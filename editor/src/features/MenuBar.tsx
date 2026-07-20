@@ -2,12 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Logger } from "cleo";
 import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
-import { buildGameData } from "./publish/buildGameData";
 import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
-import { applyGameData } from "../utils/projectStorage";
-import { buildProjectConfig, parseProjectConfig } from "../utils/projectConfig";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
-import { parseJsonFile, stringifyJson, importBundleJob } from "../workers/workerClient";
+import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
 import { applyBundleReplace, applyBundleMerge } from "../utils/bundleImport";
 import type { BundleData } from "../utils/bundle";
@@ -50,8 +47,8 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, setUI, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, replaceProjectMeta, materials, terrainMaterials, templates, models } = useCleoEngine();
-  const { vfs, setVfs } = useVfs();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models } = useCleoEngine();
+  const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
   // Current renderer look (post/SSAO/motion-blur/clear color) — embedded in exports/publishes so the
@@ -77,7 +74,6 @@ export default function MenuBar() {
   const [showPublish, setShowPublish] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const publishRef = useRef<HTMLDivElement>(null);
-  const configImportRef = useRef<HTMLInputElement>(null);
   const desktop = isDesktop();
 
   useEffect(() => {
@@ -90,73 +86,13 @@ export default function MenuBar() {
     return () => { eventEmitter.off('SET_PLAY_STATE', handlePlayState) };
   }, [eventEmitter]);
   
-  // Import a .json scene file into the editor (delegates to the shared restore routine).
-  // Reading and parsing the file happen in the project worker — a scene with embedded textures is many
-  // MB of JSON, and JSON.parse on it visibly stalls the editor. Only applyGameData (which parses into
-  // the live engine scene) has to run here.
-  const onImport = async (filelist: FileList | null) => {
-    if (!filelist || !filelist.length) return;
-    try {
-      const json = await parseJsonFile(filelist[0]);
-      applyGameData(json, { scene: editorScene, scripts, bodies, triggers, setUI, renderer: instance?.renderer });
-      eventEmitter.emit('TEXTURES_CHANGED');
-      eventEmitter.emit('SCENE_CHANGED');
-      eventEmitter.emit('SELECT_NODE', null);
-    } catch (err) {
-      Logger.error('Failed to import scene: ' + err, 'Editor');
-    }
-  };
-
-  const onExportConfig = async () => {
-    const task = startTask({ title: 'Exporting config', steps: ['Serializing configuration', 'Writing file'] });
-    try {
-      task.setStep(0, { status: 'running', detail: 'Building project config' });
-      const json = buildProjectConfig(vfs, {
-        version: 2,
-        mainSceneId,
-        openSceneId,
-        scenes: sceneList,
-      });
-      task.setStep(0, { status: 'done' });
-
-      task.setStep(1, { status: 'running', detail: 'Encoding project-config.json' });
-      const bytes = await stringifyJson(json);
-      const blob = new Blob([bytes], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'project-config.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      task.setStep(1, { status: 'done', detail: 'Downloaded project-config.json' });
-    } catch (e: any) {
-      const message = String(e?.message ?? e);
-      Logger.error(`Config export failed: ${message}`, 'Editor');
-      task.setStep(1, { status: 'failed', error: message });
-    } finally {
-      task.finish();
-    }
-  };
-
-  const onImportConfig = async (filelist: FileList | null) => {
-    if (!filelist || !filelist.length) return;
-    try {
-      const raw = await parseJsonFile(filelist[0]);
-      const cfg = parseProjectConfig(raw);
-      if (!cfg) throw new Error('Invalid project config');
-      setVfs(cfg.vfs);
-      await replaceProjectMeta(cfg.project);
-      Logger.info('Imported project config', 'Editor');
-    } catch (err) {
-      Logger.error('Failed to import project config: ' + err, 'Editor');
-    }
-  };
-
-  // Full portable bundle (scenes + assets + textures + folders, or just assets for a pack) as a .zip.
+  // The two project-I/O buttons both operate on the whole workspace as one portable .zip.
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
   const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets });
 
-  const onExportProject = async () => {
+  // Export the entire project — every scene, all asset libraries, the folder layout (VFS) and texture
+  // payloads — as project.cleoproj.zip: a full, portable replica of the workspace. Assembled off-thread.
+  const onExport = async () => {
     const task = startTask({ title: 'Exporting project', steps: ['Gathering & zipping'] });
     try {
       task.setStep(0, { status: 'running', detail: 'Bundling scenes, assets and textures' });
@@ -168,55 +104,15 @@ export default function MenuBar() {
     } finally { task.finish(); }
   };
 
-  const onExportAssetPack = async () => {
-    const task = startTask({ title: 'Exporting asset pack', steps: ['Gathering & zipping'] });
-    try {
-      task.setStep(0, { status: 'running', detail: 'Bundling assets and textures' });
-      await exportBundle({ kind: 'assetpack', meta: projectMeta(), libraries: libraries(), vfs });
-      task.setStep(0, { status: 'done', detail: 'Downloaded assets.cleopack.zip' });
-    } catch (e: any) {
-      task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });
-      Logger.error(`Asset pack export failed: ${e?.message ?? e}`, 'Editor');
-    } finally { task.finish(); }
-  };
-
-  // Import a .zip bundle: parse it (off-thread), then park the Replace/Merge decision on the user.
-  const onImportBundle = async (filelist: FileList | null) => {
+  // Import a project .zip: parse it (off-thread), then park the Replace/Merge decision on the user
+  // (ImportBundleModal). Reads both project bundles and legacy asset packs.
+  const onImport = async (filelist: FileList | null) => {
     if (!filelist || !filelist.length) return;
     try {
       const bundle = await importBundleJob(filelist[0]);
       setPendingBundle(bundle);
     } catch (err) {
-      Logger.error('Failed to read bundle: ' + err, 'Editor');
-    }
-  };
-
-  // Export the scene as a downloadable .json file (the former Save behavior).
-  // The stringify runs in the worker and comes back as transferable bytes we wrap straight into a Blob.
-  const onExport = async () => {
-    if (!editorScene) return;
-    const task = startTask({ title: 'Exporting scene', steps: ['Serializing scene', 'Writing file'] });
-    try {
-      task.setStep(0, { status: 'running', detail: 'Embedding textures' });
-      const json = await buildGameData({ scene: editorScene, scripts, scriptAssets, bodies, triggers, ui, settings: renderSettings() });
-      task.setStep(0, { status: 'done' });
-
-      task.setStep(1, { status: 'running', detail: 'Encoding scene.json' });
-      const bytes = await stringifyJson(json);
-      const blob = new Blob([bytes], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'scene.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      task.setStep(1, { status: 'done', detail: 'Downloaded scene.json' });
-    } catch (e: any) {
-      const message = String(e?.message ?? e);
-      Logger.error(`Export failed: ${message}`, 'Editor');
-      task.setStep(1, { status: 'failed', error: message });
-    } finally {
-      task.finish();
+      Logger.error('Failed to read project bundle: ' + err, 'Editor');
     }
   };
 
@@ -315,41 +211,16 @@ export default function MenuBar() {
         </Button>
         {/* A file input needs a <label> to trigger it, so it borrows the Button styles rather than being one. */}
         <label
-          htmlFor='load-scene-file'
-          title='Import a .json scene file'
+          htmlFor='load-project-file'
+          title='Import a project .zip — replace or merge the whole workspace'
           className={cn(buttonVariants({ variant: 'subtle', size: 'sm' }), 'h-[25px] cursor-pointer', libEdit && 'opacity-60 pointer-events-none')}
         >
           <ImportIcon /> Import
         </label>
-        <input className="hidden" type='file' accept='.json' id='load-scene-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
-        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the scene to a .json file' onClick={() => onExport()}>
+        <input className="hidden" type='file' accept='.zip' id='load-project-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
+        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the whole project (scenes + assets + textures) to a .zip' onClick={onExport}>
           <ExportIcon /> Export
         </Button>
-        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the project configuration' onClick={onExportConfig}>
-          <ExportIcon /> Config
-        </Button>
-        <label
-          htmlFor='load-config-file'
-          title='Import a project configuration file'
-          className={cn(buttonVariants({ variant: 'subtle', size: 'sm' }), 'h-[25px] cursor-pointer', libEdit && 'opacity-60 pointer-events-none')}
-        >
-          <ImportIcon /> Config
-        </label>
-        <input className="hidden" type='file' accept='.json' id='load-config-file' name='file' ref={configImportRef} onChange={(e) => { onImportConfig(e.target.files); e.currentTarget.value = ''; }} />
-        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the whole project (scenes + assets) to a .zip' onClick={onExportProject}>
-          <ExportIcon /> Project
-        </Button>
-        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the assets + folders (no scenes) as a shareable pack' onClick={onExportAssetPack}>
-          <ExportIcon /> Pack
-        </Button>
-        <label
-          htmlFor='load-bundle-file'
-          title='Import a project or asset-pack .zip'
-          className={cn(buttonVariants({ variant: 'subtle', size: 'sm' }), 'h-[25px] cursor-pointer', libEdit && 'opacity-60 pointer-events-none')}
-        >
-          <ImportIcon /> Bundle
-        </label>
-        <input className="hidden" type='file' accept='.zip' id='load-bundle-file' name='file' onChange={(e) => { onImportBundle(e.target.files); e.currentTarget.value = ''; }} />
         {pendingBundle && (
           <ImportBundleModal
             bundle={pendingBundle}
