@@ -6,7 +6,7 @@ camera, Left Shift to sprint, Space to jump, mouse to look.
 | File | Attach to |
 |---|---|
 | `ThirdPersonPlayable.ts` | the **Playable** root (the node with the RigidBody) |
-| `ThirdPersonCameraPivot.ts` | the **Camera Pivot** child |
+| `ThirdPersonCameraPivot.ts` | the **Camera Pivot** child — must be a **Camera Rig** node |
 
 Script assets live in the editor's own storage, so these are source files to copy in: **Assets → + Add →
 Script** (or select the node → Scripts panel → **+ Create Script**), paste the file's contents over the
@@ -18,13 +18,33 @@ way the in-editor Monaco does — it is not part of the engine build.
 ```
 Playable            ← ThirdPersonPlayable.ts   (RigidBody; must sit at the scene root)
 ├── Model           ← the animated mesh; no script. Its Animator reads `moveSpeed` from its parent
-└── Camera Pivot    ← ThirdPersonCameraPivot.ts (raise to head height — the camera orbits this point)
-    └── Camera      ← position it in the editor; only its Z is driven by the script
+└── Camera Pivot    ← ThirdPersonCameraPivot.ts on a Camera Rig node (Add ▸ Cameras ▸ Camera Rig).
+    └── Camera         Raise the rig to head height — the camera orbits that point.
 ```
 
 The pivot is found by name (`pivotName`), falling back to whichever child contains the Camera — so renaming it
-is fine. The **Camera child's X and Y are yours**: set a shoulder offset or a raised eye line in the editor and
-the script leaves them alone, driving only Z (the orbit distance, which the mouse wheel controls).
+is fine.
+
+`ThirdPersonCameraPivot.ts` extends **CameraRigNode**, so the pivot node itself has to be a Camera Rig — a
+plain Empty will not do. The rig owns the camera's placement, and most of what used to be script fields is now
+in the **Camera Rig** inspector:
+
+| Was (script field) | Now (Camera Rig inspector) |
+|---|---|
+| `distance` | **Arm Length** |
+| `lookSpeed` | **Yaw / Pitch Sensitivity** |
+| `minPitch` / `maxPitch` | **Pitch Min / Max** (set `-30` / `70` for third person) |
+| the Camera child's X/Y | **Socket Offset** |
+| — | **Collision** — new: the camera now pulls in at walls and terrain instead of clipping through |
+
+Only the mouse-wheel zoom range (`minDistance`/`maxDistance`/`zoomSpeed`) stays on the script.
+
+**Set the shoulder offset on the rig's Socket Offset, not on the Camera.** The rig rewrites the Camera child's
+whole local position every frame, so an offset dragged onto the Camera itself would be overwritten. Existing
+scenes are rescued automatically: the script adopts a stray X/Y offset into Socket Offset once at startup.
+
+The rig also runs in the scene's late pass, *after* every `onUpdate`, so the camera can no longer trail the
+character by a frame the way a script-driven pivot did.
 
 The Playable **must be at the scene root**: `setBody` places the body at the node's world position, but
 `setPosition` writes its *local* position into the body, so a parented body ends up in the wrong place.

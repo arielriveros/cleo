@@ -17,7 +17,7 @@ export const SCRIPT_ID_VAR = '__scriptId'
 
 // The node types a script may extend from (`class X extends <Base>Node`). Matches the engine's NodeType.
 export type ScriptBaseType =
-  | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera'
+  | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'cameraRig'
   | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup'
 
 /** The exported base class name for each script base type (what the generated class extends). */
@@ -28,6 +28,7 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
   lightProbe: 'LightProbeNode',
   skybox: 'SkyboxNode',
   camera: 'CameraNode',
+  cameraRig: 'CameraRigNode',
   sprite: 'SpriteNode',
   animatedSprite: 'AnimatedSpriteNode',
   landscape: 'LandscapeNode',
@@ -38,7 +39,7 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
 
 export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   node: 'Node', model: 'Model', light: 'Light', lightProbe: 'Light Probe', skybox: 'Skybox',
-  camera: 'Camera', sprite: 'Sprite', animatedSprite: 'Animated Sprite', landscape: 'Landscape',
+  camera: 'Camera', cameraRig: 'Camera Rig', sprite: 'Sprite', animatedSprite: 'Animated Sprite', landscape: 'Landscape',
   volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', lodGroup: 'LOD Group',
 }
 

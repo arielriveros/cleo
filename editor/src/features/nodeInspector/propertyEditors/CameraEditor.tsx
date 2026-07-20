@@ -1,12 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { CameraNode } from 'cleo';
+import { CameraNode, CameraRigNode, Node } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Hint, cn, valueClass } from '../../../components/ui';
 import { CameraIcon, MaterialIcon } from '../sectionIcons';
 import { useCleoEngine } from '../../EngineContext';
 import { getScreenMaterialIds, applyScreenMaterials, isScreenMaterialAsset } from '../../../utils/screenMaterials';
 
+/** The nearest CameraRigNode above this camera, if any — the rig drives its transform. */
+function findRig(node: CameraNode): CameraRigNode | null {
+  let current: Node | null = node.parent;
+  while (current) {
+    if (current instanceof CameraRigNode) return current;
+    current = current.parent;
+  }
+  return null;
+}
+
 export default function CameraEditor(props: { node: CameraNode }) {
+  const rig = findRig(props.node);
+  // The rig writes camera.fov every frame while it owns FOV; leaving this slider live would let the
+  // two fight, with the rig winning and the slider looking broken.
+  const fovDrivenByRig = !!rig?.fovEnabled;
+
   const [cameraState, setCameraState] = useState({
     type: props.node.camera.type,
     fov: props.node.camera.fov,
@@ -33,7 +48,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
 
   useEffect(() => {
     props.node.camera.type = cameraState.type;
-    props.node.camera.fov = cameraState.fov;
+    if (!fovDrivenByRig) props.node.camera.fov = cameraState.fov;
     props.node.camera.near = cameraState.near;
     props.node.camera.far = cameraState.far;
     props.node.camera.left = cameraState.left;
@@ -57,7 +72,16 @@ export default function CameraEditor(props: { node: CameraNode }) {
             </PropertyRow>
             {cameraState.type === 'perspective' && (
               <PropertyRow label='Field of View'>
-                <Slider min={1} max={179} step={1} value={cameraState.fov} onChange={(v) => set({ fov: v })} />
+                {/* A disabled-looking-but-draggable slider that silently did nothing would read as a
+                    bug, and Slider has no disabled state — so show the rig's value as plain text. */}
+                {fovDrivenByRig ? (
+                  <>
+                    <span className={cn(valueClass, 'tabular-nums')}>{rig!.fov.toFixed(1)}</span>
+                    <Hint>Driven by the Camera Rig.</Hint>
+                  </>
+                ) : (
+                  <Slider min={1} max={179} step={1} value={cameraState.fov} onChange={(v) => set({ fov: v })} />
+                )}
               </PropertyRow>
             )}
             <PropertyRow label='Near'>

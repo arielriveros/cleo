@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { Logger, ModelNode, Node } from 'cleo';
 import CameraIcon from '../../icons/camera.png'
+import CameraRigIcon from '../../icons/camera-rig.png'
 import ModelIcon from '../../icons/model.png'
 import LightIcon from '../../icons/light.png'
 import SkyboxIcon from '../../icons/skybox.png'
@@ -81,6 +82,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
       onDragStart={handleDragStart} >
       <div>
         { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='inline-block w-4 h-4 mr-1 align-middle' /> }
+        { props.nodeType === 'cameraRig' && <img src={CameraRigIcon} alt='camera rig' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'animatedSprite' && <img src={SpriteIcon} alt='animated sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }

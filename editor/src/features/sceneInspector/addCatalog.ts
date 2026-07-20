@@ -11,6 +11,7 @@ import {
   SkyboxNode,
   Skybox,
   CameraNode,
+  CameraRigNode,
   Camera,
   Spotlight,
   SpriteNode,
@@ -23,6 +24,7 @@ import {
 import type EventEmitter from 'events'
 import type { ShapeDescription } from '../EngineContext'
 import CameraIcon from '../../icons/camera.png'
+import CameraRigIcon from '../../icons/camera-rig.png'
 import SkyboxIcon from '../../icons/skybox.png'
 import CubeIcon from '../../icons/cube.png'
 import PlaneIcon from '../../icons/plane.png'
@@ -112,6 +114,18 @@ export const ADD_ITEMS: AddItem[] = [
       const cameraNode = new CameraNode('camera', new Camera({ type: 'orthographic' }));
       cameraNode.active = true;
       return cameraNode;
+    },
+  },
+  // Shipped with its camera child already attached: a rig with no camera does nothing, and making
+  // the user assemble the pair by hand is the first thing they would get wrong.
+  {
+    id: 'cameraRig', label: 'Camera Rig', icon: CameraRigIcon, category: 'cameras',
+    create: async () => {
+      const rig = new CameraRigNode('camera rig');
+      const cameraNode = new CameraNode('camera', new Camera({ type: 'perspective' }));
+      cameraNode.active = true;
+      rig.addChild(cameraNode);
+      return rig;
     },
   },
 

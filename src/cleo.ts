@@ -2,8 +2,8 @@ export { CleoEngine } from "./core/engine";
 export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";
 export { Scene } from "./core/scene/scene";
-export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, LodGroupNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
-export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions } from "./core/scene/node";
+export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, CameraRigNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, LodGroupNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
+export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions, FollowSpace, AimMode } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { Mesh } from "./graphics/mesh";
@@ -63,6 +63,11 @@ export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime
 export { Game, setGameHost } from "./core/game";
 export type { GameHost } from "./core/game";
 export * as Vec from "gl-matrix";
+// The namespace keeps the surface tidy; clamp/lerp/damp/dampTime are also named because they are
+// what gameplay scripts reach for constantly and `MathUtils.clamp` is pure friction.
+export * as MathUtils from "./core/math";
+export { clamp, lerp, damp, dampTime } from "./core/math";
+export { aimFromDirection } from "./core/cameraRigMath";
 
 // This is what a user script's `import { ... } from 'cleo'` resolves to: the barrel's own namespace,
 // so everything exported above is importable from a script with no injection list to maintain. The

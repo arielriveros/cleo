@@ -1,5 +1,5 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode } from "./node";
+import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode } from "./node";
 import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
@@ -25,6 +25,7 @@ export class Scene {
     private _sprites: Set<SpriteNode>;
     private _landscapes: Set<LandscapeNode>;
     private _lodGroups: Set<LodGroupNode> = new Set();
+    private _cameraRigs: Set<CameraRigNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     // Built alongside _nodes so getNodesByName/getNodeById (called from scripts, sometimes per-frame)
     // are an O(1) map lookup instead of a scan over every node in the scene.
@@ -139,6 +140,22 @@ export class Scene {
                 if (this._hasStarted && !paused)
                     node.update(delta, time);
             }
+
+            // Camera rigs run LAST, after every onUpdate. A rig cannot do this work from its own
+            // update(): a follow target that sorts later in the traversal would not have moved yet,
+            // so the rig would trail it by a frame (visible as shimmer during fast movement). The
+            // extra full-tree transform pass is what makes the targets' world positions -- and, on
+            // the way back down, each rig's own camera child -- current; it is paid only when the
+            // scene actually contains a rig.
+            const rigs = this.cameraRigs;
+            if (rigs.size > 0) {
+                this._root.updateTransforms();
+                // Deliberately not gated on _hasStarted/!paused: passing snap instead lets a stopped
+                // editor scene still preview the rig's resting pose (instantly, with no collision or
+                // shake) while its properties are being edited.
+                const snap = !this._hasStarted || paused;
+                for (const rig of rigs) rig.lateUpdate(delta, snap);
+            }
         } catch (e) {
             Logger.error(e);
         }
@@ -223,6 +240,7 @@ export class Scene {
         this._sprites = new Set();
         this._landscapes = new Set();
         this._lodGroups = new Set();
+        this._cameraRigs = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
         this._volumetricClouds = null;
@@ -240,6 +258,8 @@ export class Scene {
                 this._landscapes.add(node);
             if (node instanceof LodGroupNode)
                 this._lodGroups.add(node);
+            if (node instanceof CameraRigNode)
+                this._cameraRigs.add(node);
             if (node instanceof LightProbeNode)
                 this._lightProbes.add(node);
             if (node instanceof SkyboxNode)
@@ -408,6 +428,12 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._lodGroups;
+    }
+
+    public get cameraRigs(): Set<CameraRigNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._cameraRigs;
     }
 
     public get sprites(): Set<SpriteNode> {

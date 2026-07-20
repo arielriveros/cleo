@@ -87,7 +87,7 @@ export default class ThirdPersonPlayableNode extends Node {
     // Move relative to where the camera looks. Take the pivot's yaw ANGLE rather than its worldForward:
     // forward must stay flat on XZ, or looking down would walk the character into the floor.
     const pivot = this._findPivot()
-    const yaw = (pivot ? pivot.rotation[1] : 0) * Math.PI / 180
+    const yaw = this._pivotYaw(pivot) * Math.PI / 180
     const forward = [Math.sin(yaw), 0, Math.cos(yaw)]
     const right = [Math.cos(yaw), 0, -Math.sin(yaw)]
 
@@ -151,6 +151,23 @@ export default class ThirdPersonPlayableNode extends Node {
     const named = this.children.find(child => child.name === this.pivotName)
     if (named) return named
     return this.children.find(child => this._holdsCamera(child)) || null
+  }
+
+  /**
+   * The pivot's heading in DEGREES.
+   *
+   * A Camera Rig pivot exposes `yaw` directly, and that is the value to use. Reading `rotation[1]`
+   * off a rig would break past a quarter turn: the rig orients itself with a quaternion, and the
+   * engine's euler decomposition (Rz·Ry·Rx) can only express |yaw| <= 90 — beyond that the excess
+   * folds into pitch and roll, so a pivot turned 179° reads as 1° and the character walks backwards.
+   *
+   * Plain-Node pivots (the pre-rig version of ThirdPersonCameraPivot) set their euler directly, so
+   * for those `rotation[1]` is still both correct and full-range.
+   */
+  private _pivotYaw(pivot: Node | null): number {
+    if (!pivot) return 0
+    const rigYaw = (pivot as any).yaw
+    return typeof rigYaw === 'number' && isFinite(rigYaw) ? rigYaw : pivot.rotation[1]
   }
 
   private _holdsCamera(node: Node): boolean {
