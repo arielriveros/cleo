@@ -18,7 +18,6 @@ import { Logger } from "../logger";
 import { compileScript, createScriptImporter, ScriptFactory, SCRIPT_HANDLERS } from "../scripting/scriptRuntime";
 import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
 import type { BVH } from "../bvh";
-import { Raycaster } from "../raycaster";
 import { clamp, dampAngleDeg, dampTime, dampVec3Time, eulerFromQuatDeg, wrapDegrees, RAD2DEG } from "../math";
 import { aimFromDirection, boomOffset, collisionRatio, shakeOffsets } from "../cameraRigMath";
 
@@ -440,6 +439,13 @@ export class Node {
   protected _worldSphere: { center: vec3; radius: number } = { center: vec3.create(), radius: 0 };
   protected _worldSphereDirty: boolean = true;
 
+  // Same deal for the world-space AABB used by picking and camera collision — see getBoundingBox().
+  // Without this the raycaster recomputed a mesh's box from every one of its vertices, once per node
+  // *per ray*, allocating two vec3s per vertex; a 5-ray camera probe over a handful of meshes was
+  // enough to cost more than the rest of the frame combined.
+  protected _worldBox: { min: vec3; max: vec3 } = { min: vec3.create(), max: vec3.create() };
+  protected _worldBoxDirty: boolean = true;
+
   protected readonly _position: vec3;
   protected readonly _translationMatrix: mat4;
 
@@ -649,6 +655,7 @@ export class Node {
     // World transform changed: invalidate the derived world-space cache.
     this._worldCacheDirty = true;
     this._worldSphereDirty = true;
+    this._worldBoxDirty = true;
 
     for (const child of this._children) {
       child.updateTransforms(this._worldTransform);
@@ -853,7 +860,11 @@ export class Node {
         json.body.angularConstraints,
         // Absent in scenes saved before surfaces existed; RigidBody defaults them to the old behavior.
         json.body.friction,
-        json.body.restitution
+        json.body.restitution,
+        // Likewise for the two channels — absent means true, so every pre-existing scene keeps
+        // simulating and keeps blocking the camera exactly as it did.
+        json.body.simulatePhysics,
+        json.body.cameraCollision
       ));
     }
 
@@ -1344,6 +1355,12 @@ export class Node {
    *                          Use `0` for a character whose script owns its own speed.
    * @param restitution       Bounciness, default `0`. Combines with `max`, so the *bouncier* surface
    *                          wins: `0` absorbs the impact, `1` rebounds at the speed it landed.
+   * @param simulatePhysics   Take part in physical simulation (collide, push, be pushed). Default
+   *                          `true`; `false` leaves the body in the world as a ghost the solver
+   *                          ignores, which a camera probe can still see.
+   * @param cameraCollision   Block a camera rig's collision probe. Default `true`. Independent of
+   *                          `simulatePhysics`, so an object can be solid to the camera but not the
+   *                          character, or the reverse.
    * @returns The new body, also available afterwards as {@link body}.
    */
   public setBody(
@@ -1353,7 +1370,9 @@ export class Node {
     linearConstraints?: [number, number, number],
     angularConstraints?: [number, number, number],
     friction?: number,
-    restitution?: number
+    restitution?: number,
+    simulatePhysics?: boolean,
+    cameraCollision?: boolean
   ): RigidBody {
     // TODO: Handle the case where the node is a child of another node
     this._body = new RigidBody({
@@ -1364,7 +1383,8 @@ export class Node {
       position: this.worldPosition,
       quaternion: this.worldQuaternion,
       linearConstraints, angularConstraints,
-      friction, restitution
+      friction, restitution,
+      simulatePhysics, cameraCollision
     }, this);
 
     // handle onCollision event
@@ -1444,25 +1464,25 @@ export class Node {
   }
 
   /**
-   * Get the bounding box for this node
-   * Default implementation returns a unit cube
-   * Should be overridden by subclasses for more accurate bounding boxes
+   * World-space axis-aligned bounding box. The default is a unit cube scaled by the world scale;
+   * {@link ModelNode} overrides it with the geometry's actual bounds.
+   *
+   * Cached and invalidated with the transform (`_worldBoxDirty`), so the returned object is a **live
+   * reference rewritten in place** — exactly like {@link worldPosition} and {@link getBoundingSphere}.
+   * Clone it if you need to keep a box across frames or compare two nodes' boxes.
    */
   public getBoundingBox(): { min: vec3, max: vec3 } {
+    if (!this._worldBoxDirty) return this._worldBox;
+
     const position = this.worldPosition;
     const scale = this.worldScale;
-    
-    // Default to unit cube
-    const halfSize = vec3.create();
-    vec3.scale(halfSize, vec3.fromValues(0.5, 0.5, 0.5), 1);
-    vec3.multiply(halfSize, halfSize, scale);
-    
-    const min = vec3.create();
-    const max = vec3.create();
-    vec3.subtract(min, position, halfSize);
-    vec3.add(max, position, halfSize);
+    const hx = Math.abs(scale[0]) * 0.5, hy = Math.abs(scale[1]) * 0.5, hz = Math.abs(scale[2]) * 0.5;
 
-    return { min, max };
+    vec3.set(this._worldBox.min, position[0] - hx, position[1] - hy, position[2] - hz);
+    vec3.set(this._worldBox.max, position[0] + hx, position[1] + hy, position[2] + hz);
+
+    this._worldBoxDirty = false;
+    return this._worldBox;
   }
 
   /**
@@ -1633,57 +1653,65 @@ export class ModelNode extends Node {
     }
 
     /**
-     * Get bounding box for ModelNode based on the model's geometry
+     * World-space AABB of the model's geometry: the geometry's cached object-space box transformed by
+     * the world matrix. Cached against `_worldBoxDirty`, so it costs 8 corner transforms at most once
+     * per frame, and the returned object is a live reference (see {@link Node.getBoundingBox}).
+     *
+     * This used to transform *every vertex of the mesh on every call*, allocating two vec3s each, with
+     * no cache — and the raycaster calls it once per node per ray. A 5-ray camera-collision probe over
+     * 40 mid-poly meshes meant ~1M transforms and ~2M allocations per frame (~18ms, most of it GC).
+     *
+     * Transforming the local box's corners gives a bound that is correct but looser than the exact
+     * vertex hull for a rotated mesh — the standard trade (Unity/Unreal both do this). Precise picking
+     * is unaffected: the raycaster refines AABB hits against the triangle BVH.
      */
     public getBoundingBox(): { min: vec3, max: vec3 } {
-        const position = this.worldPosition;
-        const scale = this.worldScale;
+        if (!this._worldBoxDirty) return this._worldBox;
 
-        // Get the model's geometry bounds
         const geometry = this._model.geometry;
-        const positions = geometry.positions;
-        
-        if (!positions || positions.length === 0) {
-            // Fallback to unit cube if no geometry
-            const halfSize = vec3.create();
-            vec3.scale(halfSize, vec3.fromValues(0.5, 0.5, 0.5), 1);
-            vec3.multiply(halfSize, halfSize, scale);
-            const min = vec3.create();
-            const max = vec3.create();
-            vec3.subtract(min, position, halfSize);
-            vec3.add(max, position, halfSize);
-            return { min, max };
-        }
-        
-        // Calculate bounding box from geometry vertices with proper transformation
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        
-        // Use the world transform matrix directly (already includes position, rotation, scale)
+        // No geometry → fall back to the base unit cube (which fills and un-dirties the same cache).
+        if (geometry.positions.length === 0) return super.getBoundingBox();
+
+        const local = geometry.boundingBox;
         const transform = this.worldTransform;
-        
-        for (let i = 0; i < positions.length; i++) {
-            const vertex = positions[i];
-            
-            // Transform vertex using the world transform matrix
-            const transformedVertex = vec3.create();
-            // Ensure vertex is a Float32Array for gl-matrix compatibility
-            const vertexVec = (vertex instanceof Float32Array) ? vertex : vec3.fromValues(vertex[0], vertex[1], vertex[2]);
-            vec3.transformMat4(transformedVertex, vertexVec, transform);
+        const corner = ModelNode._boxScratch;
 
-            minX = Math.min(minX, transformedVertex[0]);
-            minY = Math.min(minY, transformedVertex[1]);
-            minZ = Math.min(minZ, transformedVertex[2]);
-            maxX = Math.max(maxX, transformedVertex[0]);
-            maxY = Math.max(maxY, transformedVertex[1]);
-            maxZ = Math.max(maxZ, transformedVertex[2]);
+        const min = this._worldBox.min;
+        const max = this._worldBox.max;
+        vec3.set(min, Infinity, Infinity, Infinity);
+        vec3.set(max, -Infinity, -Infinity, -Infinity);
+
+        for (let i = 0; i < 8; i++) {
+            vec3.set(corner,
+                (i & 1) ? local.max[0] : local.min[0],
+                (i & 2) ? local.max[1] : local.min[1],
+                (i & 4) ? local.max[2] : local.min[2]);
+            vec3.transformMat4(corner, corner, transform);
+
+            for (let a = 0; a < 3; a++) {
+                if (corner[a] < min[a]) min[a] = corner[a];
+                if (corner[a] > max[a]) max[a] = corner[a];
+            }
         }
-        
-        const min = vec3.fromValues(minX, minY, minZ);
-        const max = vec3.fromValues(maxX, maxY, maxZ);
 
-        return { min, max };
+        // Skinned meshes deform on the GPU, so the bind-pose bound understates the animated extent.
+        // Inflate about the centre by the same factor getBoundingSphere uses, to avoid a limb sticking
+        // out of the box (which would make it unpickable and invisible to camera collision).
+        if (this._model instanceof AnimatedModel) {
+            for (let a = 0; a < 3; a++) {
+                const centre = (min[a] + max[a]) * 0.5;
+                const half = (max[a] - min[a]) * 0.5 * 1.75;
+                min[a] = centre - half;
+                max[a] = centre + half;
+            }
+        }
+
+        this._worldBoxDirty = false;
+        return this._worldBox;
     }
+
+    // Reused across the 8 corners so the whole path stays allocation-free.
+    private static readonly _boxScratch: vec3 = vec3.create();
 
     /**
      * Static meshes expose their geometry's cached BVH for exact picking. Skinned/animated meshes
@@ -1926,8 +1954,7 @@ export class CameraRigNode extends Node {
     /** 0 snaps the camera in instantly, which is correct: easing in leaves it inside the wall. */
     public collisionPullTime: number = 0;
     public collisionReturnTime: number = 0.35;
-    /** Refine hits against triangle BVHs. Off by default — AABBs are enough for a camera boom. */
-    public collisionPrecise: boolean = false;
+    /** Nodes (by id) whose bodies the probe ignores, alongside the follow/lookAt targets. */
     public collisionIgnoreIds: string[] = [];
 
     // --- shake -----------------------------------------------------------------------------------
@@ -1970,10 +1997,9 @@ export class CameraRigNode extends Node {
     private static readonly _probeDir: vec3 = vec3.create();
     private static readonly _probeRight: vec3 = vec3.create();
     private static readonly _probeUp: vec3 = vec3.create();
+    private static readonly _rayFrom: vec3 = vec3.create();
+    private static readonly _rayTo: vec3 = vec3.create();
     private static readonly _shake = { position: vec3.create(), rotation: vec3.create() };
-    private static readonly _ray = { origin: vec3.create(), direction: vec3.create() };
-    private static readonly _candidates: Node[] = [];
-    private static readonly _ignores: Node[] = [];
 
     constructor(name: string, id: string = uuidv4()) {
         super(name, 'cameraRig', id);
@@ -2307,6 +2333,14 @@ export class CameraRigNode extends Node {
     /**
      * Nearest obstruction between the pivot and the camera, or null.
      *
+     * Probes the PHYSICS world, not render geometry. Raycasting the meshes meant testing their
+     * axis-aligned bounding boxes, which is hopeless for an imported asset carrying a rotation: a
+     * 0.2-thick wall rotated 45 degrees measures 7.2 deep as an AABB, so the boom stopped ~3.6 units
+     * short of the surface and registered phantom hits against empty corners. Collider shapes are
+     * convex and exact, they are what the character already collides with, and cannon brings a
+     * broadphase the engine otherwise lacks for rays. It also subsumes terrain, whose heightfield
+     * body lives in the same world — hence no separate analytic terrain march here any more.
+     *
      * Takes `worldRotation` rather than reading `this.worldQuaternion`: the rig's world cache is not
      * refreshed until step 8 of `lateUpdate`, so reading it here would offset the probe rays by the
      * PREVIOUS frame's orientation.
@@ -2315,76 +2349,61 @@ export class CameraRigNode extends Node {
      * after this returns.
      */
     private _probe(direction: vec3, distance: number, worldRotation: quat): number | null {
-        const scene = this._scene;
-        if (!scene) return null;
+        const physics = this._scene?.physics;
+        if (!physics) return null;
+
+        // cannon has no sphere-cast, so approximate the probe sphere with four rays offset around
+        // the centre one.
+        const right = vec3.transformQuat(CameraRigNode._probeRight, vec3.set(CameraRigNode._probeRight, 1, 0, 0), worldRotation);
+        const up = vec3.transformQuat(CameraRigNode._probeUp, vec3.set(CameraRigNode._probeUp, 0, 1, 0), worldRotation);
+        const from = CameraRigNode._rayFrom;
+        const to = CameraRigNode._rayTo;
 
         let nearest: number | null = null;
+        for (let i = 0; i < 5; i++) {
+            vec3.copy(from, this._pivot);
+            if (i === 1) vec3.scaleAndAdd(from, from, right, this.collisionRadius);
+            else if (i === 2) vec3.scaleAndAdd(from, from, right, -this.collisionRadius);
+            else if (i === 3) vec3.scaleAndAdd(from, from, up, this.collisionRadius);
+            else if (i === 4) vec3.scaleAndAdd(from, from, up, -this.collisionRadius);
 
-        const candidates = this._collisionCandidates(scene);
-        if (candidates.length > 0) {
-            // Raycaster is ray-only, so approximate a sphere with four parallel rays offset around
-            // the centre one. Cheap at AABB granularity, and enough for a camera boom.
-            const right = vec3.transformQuat(CameraRigNode._probeRight, vec3.set(CameraRigNode._probeRight, 1, 0, 0), worldRotation);
-            const up = vec3.transformQuat(CameraRigNode._probeUp, vec3.set(CameraRigNode._probeUp, 0, 1, 0), worldRotation);
-            const ray = CameraRigNode._ray;
-            vec3.copy(ray.direction, direction);
+            // A cannon ray is a segment, so the boom length goes into the endpoint.
+            vec3.scaleAndAdd(to, from, direction, distance);
 
-            for (let i = 0; i < 5; i++) {
-                vec3.copy(ray.origin, this._pivot);
-                if (i === 1) vec3.scaleAndAdd(ray.origin, ray.origin, right, this.collisionRadius);
-                else if (i === 2) vec3.scaleAndAdd(ray.origin, ray.origin, right, -this.collisionRadius);
-                else if (i === 3) vec3.scaleAndAdd(ray.origin, ray.origin, up, this.collisionRadius);
-                else if (i === 4) vec3.scaleAndAdd(ray.origin, ray.origin, up, -this.collisionRadius);
-
-                const hits = Raycaster.raycast(ray, candidates, distance, this.collisionPrecise);
-                if (hits.length > 0 && (nearest === null || hits[0].distance < nearest))
-                    nearest = hits[0].distance;
-            }
+            const hit = physics.raycastCamera(from, to, this._rejectHit);
+            if (hit !== null && (nearest === null || hit < nearest)) nearest = hit;
         }
-
-        // Terrain is invisible to the Raycaster (it skips landscape nodes and terrain chunks), so it
-        // needs its own analytic march — without this the camera pushes straight through hillsides.
-        for (const landscape of scene.landscapes) {
-            const point = landscape.terrain.raycast(this._pivot, direction, distance);
-            if (!point) continue;
-            const d = vec3.distance(this._pivot, point);
-            if (nearest === null || d < nearest) nearest = d;
-        }
-
         return nearest;
     }
 
     /**
-     * Models the boom may collide with. Restricted to models because a plain Node's default bounding
-     * box is a unit cube around its position, so testing every scene node would have the camera
-     * colliding with empties, lights and its own gizmos.
+     * Which bodies the probe must ignore, by owning node. Bound once (not per ray) so handing it to
+     * the physics system allocates nothing per frame.
+     *
+     * The ancestor check is the load-bearing one: a rig is typically a CHILD of the character, and the
+     * character is what carries the body, so the pivot sits inside its own capsule. Excluding only
+     * descendants — which is all the old mesh-based path needed — would leave the probe hitting the
+     * character on frame one and pinning the camera to its head.
+     *
+     * `owner` is null for bodies the engine did not create, notably the terrain heightfield; those are
+     * kept, which is what lets terrain collide through this same path.
      */
-    private _collisionCandidates(scene: Scene): Node[] {
-        const out = CameraRigNode._candidates;
-        out.length = 0;
+    private readonly _rejectHit = (owner: Node | null): boolean => {
+        if (!owner) return false;
+        if (owner === this || owner.isDescendantOf(this) || this.isDescendantOf(owner)) return true;
 
-        const ignores = CameraRigNode._ignores;
-        ignores.length = 0;
-        // Excluding the follow subtree is what prevents the self-hit: the pivot normally sits inside
-        // the followed character's own mesh.
-        if (this._followNode) ignores.push(this._followNode);
-        if (this._lookAtNode) ignores.push(this._lookAtNode);
+        const follow = this._followNode;
+        if (follow && (owner === follow || owner.isDescendantOf(follow))) return true;
+        const lookAt = this._lookAtNode;
+        if (lookAt && (owner === lookAt || owner.isDescendantOf(lookAt))) return true;
+
         for (const id of this.collisionIgnoreIds) {
-            const node = scene.getNodeById(id);
-            if (node) ignores.push(node);
+            if (owner.id === id) return true;
+            const ignored = this._scene?.getNodeById(id);
+            if (ignored && owner.isDescendantOf(ignored)) return true;
         }
-
-        for (const model of scene.models) {
-            if (!model.visible) continue;
-            if (model.isDescendantOf(this)) continue;
-            let ignored = false;
-            for (const ignore of ignores) {
-                if (model === ignore || model.isDescendantOf(ignore)) { ignored = true; break; }
-            }
-            if (!ignored) out.push(model);
-        }
-        return out;
-    }
+        return false;
+    };
 
     private _updateFov(cam: CameraNode, dt: number, rigid: boolean): void {
         if (!this.fovEnabled || cam.camera.type !== 'perspective') return;
@@ -2483,7 +2502,6 @@ export class CameraRigNode extends Node {
                     collisionMinRatio: this.collisionMinRatio,
                     collisionPullTime: this.collisionPullTime,
                     collisionReturnTime: this.collisionReturnTime,
-                    collisionPrecise: this.collisionPrecise,
                     collisionIgnoreIds: [...this.collisionIgnoreIds],
 
                     shakePositionAmplitude: [...this.shakePositionAmplitude],
@@ -2542,7 +2560,6 @@ export class CameraRigNode extends Node {
         node.collisionMinRatio = num(json.collisionMinRatio, node.collisionMinRatio);
         node.collisionPullTime = num(json.collisionPullTime, node.collisionPullTime);
         node.collisionReturnTime = num(json.collisionReturnTime, node.collisionReturnTime);
-        node.collisionPrecise = bool(json.collisionPrecise, node.collisionPrecise);
         node.collisionIgnoreIds = Array.isArray(json.collisionIgnoreIds)
             ? json.collisionIgnoreIds.filter((id: any) => typeof id === 'string') : [];
 

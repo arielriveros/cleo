@@ -1,10 +1,11 @@
 import { Logger } from "../cleo";
 import { Scene } from "../core/scene/scene";
-import { ModelNode, unwrapScriptNode } from "../core/scene/node";
-import { World, Body, Constraint, Material, ContactMaterial } from 'cannon-es';
+import { ModelNode, Node, unwrapScriptNode } from "../core/scene/node";
+import { World, Body, Constraint, Material, ContactMaterial, Vec3 } from 'cannon-es';
 import { vec3 } from "gl-matrix";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
+import { skipCameraHit, CameraProbeBody } from "./cameraRayFilter";
 
 interface PhysicsSystemConfig {
   gravity?: number[];
@@ -300,6 +301,48 @@ export class PhysicsSystem {
     const stamp = this._ground.get(body);
     return stamp ? vec3.fromValues(stamp.normal[0], stamp.normal[1], stamp.normal[2]) : up;
   }
+
+  /**
+   * Distance from `from` to the nearest solid surface along the segment `from -> to`, or null when
+   * nothing blocks it. Backs camera-rig collision, which is why it filters the way it does.
+   *
+   * `raycastAll` rather than `raycastClosest`, deliberately: cannon's `isTrigger` is consulted only by
+   * the solver, and `Ray.intersectBody` filters on `collisionResponse` and collision groups alone — so
+   * `raycastClosest` happily returns a trigger volume and there is no way to reject it and continue.
+   * Verified: with a trigger 2 units in front of a wall at 4, raycastClosest reports the trigger.
+   * Collecting every hit and choosing the nearest survivor is what makes trigger volumes, the
+   * per-body camera channel, and the caller's ignore list all expressible in one pass.
+   *
+   * `checkCollisionResponse: false` so that bodies with `simulatePhysics = false` — ghosts to the
+   * solver — are still solid to the camera. That is the whole point of the two channels being
+   * independent.
+   *
+   * Note the ray is a SEGMENT: the boom length must be baked into `to`, not passed as a max distance.
+   *
+   * @param reject Called with the owning Node of each candidate hit (null for bodies with no owner,
+   *               e.g. the terrain heightfield — those should normally be kept). Return true to skip.
+   */
+  public raycastCamera(from: vec3, to: vec3, reject?: (owner: Node | null) => boolean): number | null {
+    const world = this._world;
+    if (!world) return null;
+
+    PhysicsSystem._rayFrom.set(from[0], from[1], from[2]);
+    PhysicsSystem._rayTo.set(to[0], to[1], to[2]);
+
+    let nearest: number | null = null;
+    world.raycastAll(PhysicsSystem._rayFrom, PhysicsSystem._rayTo, { checkCollisionResponse: false }, (result) => {
+      if (skipCameraHit(result.body as CameraProbeBody | null, reject)) return;
+      // `distance` is only meaningful on a hit; it is -1 after a reset.
+      if (result.hasHit && (nearest === null || result.distance < nearest)) nearest = result.distance;
+    });
+
+    return nearest;
+  }
+
+  // Reused across the probe's rays so the per-frame path stays allocation-free on our side. (cannon's
+  // heightfield intersection still allocates an AABB internally per call.)
+  private static readonly _rayFrom = new Vec3();
+  private static readonly _rayTo = new Vec3();
 
   /**
    * Turn a skinned ModelNode into a ragdoll: spawn a rigid body per bone, link them

@@ -112,6 +112,9 @@ export default function PhysicsEditor(props: {node: Node}) {
         // Scenes saved before surfaces existed have neither; these are the values they behaved as.
         friction: body.friction ?? 0.3,
         restitution: body.restitution ?? 0,
+        // Likewise: absent means on, so an older scene behaves identically.
+        simulatePhysics: body.simulatePhysics ?? true,
+        cameraCollision: body.cameraCollision ?? true,
         shapes: body.shapes
       })
     else setBodyProperties(null)
@@ -128,6 +131,8 @@ export default function PhysicsEditor(props: {node: Node}) {
         angularConstraints: bodyProperties.angularConstraints,
         friction: bodyProperties.friction,
         restitution: bodyProperties.restitution,
+        simulatePhysics: bodyProperties.simulatePhysics,
+        cameraCollision: bodyProperties.cameraCollision,
         shapes: bodyProperties.shapes
       });
       eventEmitter.emit('PHYSICS_CHANGED');
@@ -284,9 +289,21 @@ export default function PhysicsEditor(props: {node: Node}) {
               ? <Hint>Can only add rigid bodies to nodes at root level.</Hint>
               : <>
                   <Hint className='mb-2'>Node does not have a rigid body.</Hint>
-                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, shapes: [] })}>Add Rigid Body</Button>
+                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, shapes: [] })}>Add Rigid Body</Button>
                 </>)
           : <>
+              {/* The two channels this body takes part in. Independent on purpose: scenery can block
+                  the camera without blocking the character, or the reverse. */}
+              <Toggle label='Simulate Physics' className='my-1'
+                checked={bodyProperties.simulatePhysics ?? true}
+                onChange={(c) => setBodyProperties({ ...bodyProperties, simulatePhysics: c })} />
+              <Toggle label='Camera Collision' className='my-1'
+                checked={bodyProperties.cameraCollision ?? true}
+                onChange={(c) => setBodyProperties({ ...bodyProperties, cameraCollision: c })} />
+              {bodyProperties.simulatePhysics === false &&
+                <Hint className='mb-1'>Ghost — nothing collides with it, but it can still block a camera rig.</Hint>}
+              {bodyProperties.cameraCollision === false &&
+                <Hint className='mb-1'>Camera rigs pass through this body.</Hint>}
               <Field label='Mass' labelClassName={LABEL}>
                 <NumberInput value={bodyProperties.mass} onChange={(v) => setBodyProperties({ ...bodyProperties, mass: v })} />
               </Field>

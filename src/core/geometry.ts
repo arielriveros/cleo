@@ -1,5 +1,4 @@
 import { vec2, vec3 } from "gl-matrix";
-import { Loader } from "../cleo";
 import { BVH } from "./bvh";
 
 export class Geometry {
@@ -11,6 +10,7 @@ export class Geometry {
     private readonly _indices: number[];
     private _bvh?: BVH;
     private _boundingSphere?: { center: vec3; radius: number };
+    private _boundingBox?: { min: vec3; max: vec3 };
 
     constructor(
         positions: [number, number, number][] = [],
@@ -90,8 +90,39 @@ export class Geometry {
         return this._boundingSphere;
     }
     /**
+     * Object-space axis-aligned bounding box, computed lazily and cached. Local-space, so like
+     * {@link boundingSphere} it only invalidates when the vertices themselves change ({@link scale}).
+     *
+     * Deliberately computed from a direct pass over the positions rather than from `this.bvh.bounds`
+     * (which is where {@link boundingSphere} gets its extents): touching `bvh` force-builds the whole
+     * hierarchy, an O(n log n) job heavy enough to hitch a frame on a dense mesh. Camera collision
+     * queries this every frame, so it must never be able to trigger that build.
+     *
+     * Returns a live cached reference — callers must not mutate it.
+     */
+    public get boundingBox(): { min: vec3; max: vec3 } {
+        if (this._boundingBox) return this._boundingBox;
+
+        const min = vec3.fromValues(Infinity, Infinity, Infinity);
+        const max = vec3.fromValues(-Infinity, -Infinity, -Infinity);
+
+        if (this._positions.length === 0) {
+            vec3.set(min, 0, 0, 0);
+            vec3.set(max, 0, 0, 0);
+        } else {
+            for (const p of this._positions)
+                for (let a = 0; a < 3; a++) {
+                    if (p[a] < min[a]) min[a] = p[a];
+                    if (p[a] > max[a]) max[a] = p[a];
+                }
+        }
+
+        this._boundingBox = { min, max };
+        return this._boundingBox;
+    }
+    /**
      * Uniformly scale the geometry in object (vertex) space, multiplying every position by `factor` and
-     * invalidating the cached BVH + bounding sphere. Normals/tangents are unaffected by uniform scaling.
+     * invalidating the cached BVH + bounding sphere/box. Normals/tangents are unaffected by uniform scaling.
      * Used to bake an import-normalization scale into the mesh so the asset keeps an identity transform.
      */
     public scale(factor: number): void {
@@ -103,6 +134,7 @@ export class Geometry {
         }
         this._bvh = undefined;
         this._boundingSphere = undefined;
+        this._boundingBox = undefined;
     }
 
     public getData(attributes: string[] = []): number[] {
@@ -676,6 +708,13 @@ export class Geometry {
     }
 
     public static async Terrain(heightmapPath: string): Promise<Geometry> {
+        // Imported lazily so this module stays a leaf. A top-level `import { Loader } from "../cleo"`
+        // dragged the entire engine barrel in — including a circular dependency back to this file, and
+        // every GLSL/WebGL module with it — purely for the one call below, which in turn made Geometry
+        // impossible to unit-test without a GL context. `webpackMode: "eager"` keeps the module in the
+        // single library bundle instead of emitting a lazily-fetched chunk.
+        const { Loader } = await import(/* webpackMode: "eager" */ "../graphics/loader");
+
         return new Promise<Geometry>((resolve, reject) => {
             const positions: [number, number, number][] = [];
             const normals: [number, number, number][] = [];

@@ -15,7 +15,10 @@
     "removeComments": false,
     "preserveConstEnums": true,
     "moduleResolution": "node",
-    "module": "es6",
+    // es2020 rather than es6 purely to permit `import()`. For static imports the emit is identical
+    // ESM; the only addition is dynamic import (used once, eagerly, in Geometry.Terrain to keep
+    // geometry.ts free of a circular dependency on the cleo barrel).
+    "module": "es2020",
     "target": "es6",
     // `target: es6` alone implies lib es2015, which does not know Array.prototype.includes, Object.entries
     // or String.padStart — all of which the engine already calls and all of which exist in every browser

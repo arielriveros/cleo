@@ -189,6 +189,16 @@ export type BodyDescription = {
    */
   friction?: number;
   restitution?: number;
+  /**
+   * The two independent channels a body participates in. Optional for the same reason as the surface
+   * properties above: scenes saved before they existed have neither, and absent must mean `true` —
+   * i.e. every such body keeps simulating and keeps blocking the camera exactly as it always did.
+   *
+   * `simulatePhysics: false` leaves the body in the world as a ghost the solver ignores but a camera
+   * probe still sees; `cameraCollision: false` is the reverse. Neither implies the other.
+   */
+  simulatePhysics?: boolean;
+  cameraCollision?: boolean;
   shapes: ShapeDescription[];
 }
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | CapsuleShapeDescription | PlaneShapeDescription | ConvexShapeDescription;

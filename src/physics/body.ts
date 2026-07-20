@@ -21,10 +21,23 @@ interface BodyConfig {
     angularFactor?: vec3;
     allowSleep?: boolean;
     isTrigger?: boolean;
+    cameraCollision?: boolean;
 }
 class CBody extends CannonBody {
     private readonly _name: string;
     private readonly _owner: Node | null = null;
+
+    /**
+     * Whether a camera rig's collision probe treats this body as solid — the "camera collision"
+     * channel, independent of whether the body simulates physically.
+     *
+     * A plain read in the probe's raycast callback rather than a cannon `collisionFilterGroup` bit:
+     * encoding two independent channels in the mask is subtly wrong (two camera-only bodies end up
+     * colliding with each other unless a spare bit is reserved just to keep their masks disjoint),
+     * and the probe already needs a per-hit callback to reject triggers. This way the channel cannot
+     * perturb body-body filtering, including the ragdoll's existing group usage.
+     */
+    public cameraCollision: boolean;
 
     constructor(config: BodyConfig) {
       super({
@@ -48,6 +61,7 @@ class CBody extends CannonBody {
       this.sleepTimeLimit = 0.1;
       this._owner = config.owner || null;
       this._name = config.name || 'body';
+      this.cameraCollision = config.cameraCollision ?? true;
     }
 
     /**
@@ -91,6 +105,10 @@ interface RigidBodyConfig {
     allowSleep?: boolean;
     friction?: number;
     restitution?: number;
+    /** Participate in physical simulation (collide, push, be pushed). Default true. */
+    simulatePhysics?: boolean;
+    /** Block a camera rig's collision probe. Default true. */
+    cameraCollision?: boolean;
 }
 
 export class RigidBody extends CBody {
@@ -115,11 +133,24 @@ export class RigidBody extends CBody {
       linearFactor: config?.linearConstraints || [1, 1, 1],
       angularFactor: config?.angularConstraints || [1, 1, 1],
       allowSleep: config?.allowSleep ?? true,
-      isTrigger: false
+      isTrigger: false,
+      cameraCollision: config?.cameraCollision ?? true
     });
     this.friction = config?.friction ?? DEFAULT_FRICTION;
     this.restitution = config?.restitution ?? DEFAULT_RESTITUTION;
+    this.simulatePhysics = config?.simulatePhysics ?? true;
   }
+
+  /**
+   * The "physical simulation" channel: false leaves the body in the world and still raycastable, but
+   * it exerts and receives no collision response — a ghost to the solver, still solid to a camera
+   * probe (which passes `checkCollisionResponse: false`).
+   *
+   * Backed directly by cannon's `collisionResponse` rather than a parallel field, so the two can
+   * never drift apart.
+   */
+  public get simulatePhysics(): boolean { return this.collisionResponse; }
+  public set simulatePhysics(value: boolean) { this.collisionResponse = value; }
 
   public reset(): void {
     this.velocity.set(0, 0, 0);

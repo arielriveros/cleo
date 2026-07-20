@@ -19,7 +19,7 @@ interface RigState {
   armLength: number; socketOffset: Vec3
   fovEnabled: boolean; fov: number; fovDamping: number
   collisionEnabled: boolean; collisionRadius: number; collisionMinRatio: number
-  collisionPullTime: number; collisionReturnTime: number; collisionPrecise: boolean
+  collisionPullTime: number; collisionReturnTime: number
   shakePositionAmplitude: Vec3; shakeRotationAmplitude: Vec3; shakeFrequency: number; shakeDecay: number
 }
 
@@ -42,7 +42,7 @@ function readNode(node: CameraRigNode): RigState {
     fovEnabled: node.fovEnabled, fov: node.fov, fovDamping: node.fovDamping,
     collisionEnabled: node.collisionEnabled, collisionRadius: node.collisionRadius,
     collisionMinRatio: node.collisionMinRatio, collisionPullTime: node.collisionPullTime,
-    collisionReturnTime: node.collisionReturnTime, collisionPrecise: node.collisionPrecise,
+    collisionReturnTime: node.collisionReturnTime,
     shakePositionAmplitude: toVec3(node.shakePositionAmplitude),
     shakeRotationAmplitude: toVec3(node.shakeRotationAmplitude),
     shakeFrequency: node.shakeFrequency, shakeDecay: node.shakeDecay,
@@ -189,10 +189,11 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
           {slider('Min Arm Ratio', 'collisionMinRatio', 0, 0.9, 0.01)}
           {slider('Pull In Time', 'collisionPullTime', 0, 1, 0.01)}
           {slider('Return Time', 'collisionReturnTime', 0, 2, 0.01)}
-          {check('Precise (per-triangle)', 'collisionPrecise')}
           <div className={hintClass}>
-            Tests scene models and terrain. The follow and look-at targets are ignored, so the camera
-            never collides with the character it is filming.
+            Tests physics collider shapes — the same solids the character collides with — including
+            terrain. A body only blocks the camera while its <b>Camera Collision</b> channel is on
+            (Physics panel). Trigger volumes, the follow and look-at targets, and the rig's own
+            character are always ignored.
           </div>
         </>}
 
