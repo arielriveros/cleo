@@ -17,7 +17,6 @@ interface CleoConfig {
   },
   physics?: {
     gravity?: number[];
-    killZHeight?: number;
   }
 }
 
@@ -77,8 +76,7 @@ export class CleoEngine {
                                     deferred: config?.graphics?.deferred,
                                     shadowDistance: config?.graphics?.shadowDistance });
     this._physicsSystem = new PhysicsSystem({
-      gravity: config?.physics?.gravity || [0, -9.81, 0],
-      killZHeight: config?.physics?.killZHeight || -100
+      gravity: config?.physics?.gravity || [0, -9.81, 0]
     });
 
     this.onUpdate = () => {};

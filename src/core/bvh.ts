@@ -109,29 +109,7 @@ export class BVH {
      * `positions` is an array of [x, y, z]; `indices` is a flat triangle index list. If `indices`
      * is empty the positions are treated as a non-indexed triangle soup.
      */
-    public static fromGeometry(positions: number[][], indices: number[]): BVH {
-        const vertexCount = positions.length;
-        const flatPositions = new Float32Array(vertexCount * 3);
-        for (let i = 0; i < vertexCount; i++) {
-            const p = positions[i];
-            flatPositions[i * 3] = p[0];
-            flatPositions[i * 3 + 1] = p[1];
-            flatPositions[i * 3 + 2] = p[2];
-        }
-
-        let flatIndices: Uint32Array;
-        if (indices && indices.length >= 3) {
-            flatIndices = Uint32Array.from(indices);
-        } else {
-            // Non-indexed geometry: consecutive triples form triangles.
-            flatIndices = new Uint32Array(vertexCount);
-            for (let i = 0; i < vertexCount; i++) flatIndices[i] = i;
-        }
-
-        return new BVH(flatPositions, flatIndices);
-    }
-
-    /** Build directly from flat buffers (the shape a worker/parser already has). Skips the tuple copy. */
+    /** Build directly from flat buffers — the shape `Geometry` now stores natively. */
     public static fromBuffers(positions: Float32Array, indices: Uint32Array): BVH {
         return new BVH(positions, indices);
     }

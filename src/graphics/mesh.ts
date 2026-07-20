@@ -3,6 +3,15 @@ import { GLState } from './systems/glState';
 import { frameStats } from './renderStats';
 import { createIndexArray, glTypeFor } from './indexFormat';
 
+/** Interleaved vertex data. `Float32Array` is the fast path — it is uploaded without a copy. */
+export type VertexData = Float32Array | number[];
+export type IndexData = Uint32Array | Uint16Array | number[];
+
+/** Avoids re-allocating when the caller already produced a Float32Array (Geometry.getData does). */
+function asF32(data: VertexData): Float32Array {
+    return data instanceof Float32Array ? data : new Float32Array(data);
+}
+
 export class Mesh {
     private _vertexArray: WebGLVertexArrayObject;
     private _vertexBuffer: WebGLBuffer;
@@ -37,11 +46,12 @@ export class Mesh {
         this._isAnimated = false;
     }
 
-    public create(vertices: number[], vertex_count: number, indices: number[] | null = null): Mesh {
+    public create(vertices: VertexData, vertex_count: number, indices: IndexData | null = null): Mesh {
         GLState.bindVAO(this._vertexArray);
-        
+
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        // No copy when the caller already has a Float32Array — which Geometry.getData now returns.
+        gl.bufferData(gl.ARRAY_BUFFER, asF32(vertices), gl.STATIC_DRAW);
         this._vertexCount = vertex_count;
 
         // `indices.length`, not just `indices`: an empty array is truthy, so a geometry with no indices
@@ -66,17 +76,17 @@ export class Mesh {
      * Expects the same layout and vertex count used in `create()` (position/normal/uv/tangent/bitangent),
      * so the buffer size is unchanged. Used for dynamically deforming meshes (e.g. terrain sculpting).
      */
-    public updateVertexData(vertices: number[]): void {
+    public updateVertexData(vertices: VertexData): void {
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(vertices));
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, asF32(vertices));
     }
 
     public createAnimated(
-        vertices: number[], 
-        vertex_count: number, 
-        boneIndices: number[], 
-        boneWeights: number[], 
-        indices: number[] | null = null
+        vertices: VertexData,
+        vertex_count: number,
+        boneIndices: VertexData,
+        boneWeights: VertexData,
+        indices: IndexData | null = null
     ): Mesh {
         GLState.bindVAO(this._vertexArray);
         

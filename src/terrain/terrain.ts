@@ -274,9 +274,10 @@ export class Terrain {
         let i = 0;
         for (let r = chunk.r0; r <= chunk.r1; r++) {
             for (let c = chunk.c0; c <= chunk.c1; c++) {
-                positions[i][1] = this._heights[r * R + c];
+                const i3 = i * 3;
+                positions[i3 + 1] = this._heights[r * R + c];
                 this._normalAt(c, r, n);
-                normals[i][0] = n[0]; normals[i][1] = n[1]; normals[i][2] = n[2];
+                normals[i3] = n[0]; normals[i3 + 1] = n[1]; normals[i3 + 2] = n[2];
                 i++;
             }
         }

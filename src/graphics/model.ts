@@ -78,13 +78,17 @@ export class Model {
     }
 
     public serialize(): any {
-        let geometry = {
-            positions: this._geometry.positions,
-            normals: this._geometry.normals,
-            tangents: this._geometry.tangents,
-            bitangents: this._geometry.bitangents,
-            texCoords: this._geometry.uvs,
-            indices: this._geometry.indices
+        // Array.from is not optional: Geometry stores typed arrays, and JSON.stringify turns a
+        // Float32Array into an OBJECT ({"0":x,"1":y,...}) rather than an array — which would silently
+        // corrupt every saved model. Emitted flat; Geometry's constructor reads both the flat and the
+        // legacy nested shape, so older projects keep loading.
+        const geometry = {
+            positions: Array.from(this._geometry.positions),
+            normals: Array.from(this._geometry.normals),
+            tangents: Array.from(this._geometry.tangents),
+            bitangents: Array.from(this._geometry.bitangents),
+            texCoords: Array.from(this._geometry.uvs),
+            indices: Array.from(this._geometry.indices)
         };
 
         // Material flattening lives on the Material class (shared with standalone material assets).

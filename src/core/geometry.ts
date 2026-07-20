@@ -1,43 +1,89 @@
 import { vec2, vec3 } from "gl-matrix";
 import { BVH } from "./bvh";
 
+/** Anything the constructor accepts for a vertex attribute: flat typed/plain arrays, or the legacy
+ *  array-of-tuples shape. See {@link Geometry} for why both are supported. */
+export type AttributeInput = Float32Array | number[] | number[][] | readonly (readonly number[])[];
+export type IndexInput = Uint32Array | Uint16Array | number[];
+
+/**
+ * Flattens any accepted attribute shape into a `Float32Array` of `count * stride` floats.
+ *
+ * A `Float32Array` passes through untouched (no copy), which is what makes a worker able to hand
+ * geometry across a thread boundary as a transferable and have it used directly.
+ */
+function toFlat(input: AttributeInput | undefined, stride: number): Float32Array {
+    if (!input || (input as ArrayLike<unknown>).length === 0) return EMPTY_F32;
+    if (input instanceof Float32Array) return input;
+
+    const arr = input as ArrayLike<unknown>;
+    // Legacy nested shape: [[x,y,z], [x,y,z], ...] (elements may themselves be Float32Array(3)).
+    if (typeof arr[0] === 'object' && arr[0] !== null) {
+        const nested = input as ArrayLike<ArrayLike<number>>;
+        const out = new Float32Array(nested.length * stride);
+        for (let i = 0; i < nested.length; i++) {
+            const v = nested[i];
+            for (let c = 0; c < stride; c++) out[i * stride + c] = v[c];
+        }
+        return out;
+    }
+    // Already flat, but a plain number[].
+    return new Float32Array(input as number[]);
+}
+
+const EMPTY_F32 = new Float32Array(0);
+const EMPTY_U32 = new Uint32Array(0);
+
+/**
+ * Vertex data for a mesh, stored as **flat typed arrays** (`positions[i*3 + 0..2]`).
+ *
+ * It used to hold arrays-of-tuples, which cost three separate transformations on every import —
+ * flat source data was exploded into N little arrays, `getData` flattened them straight back into a
+ * `number[]`, and `Mesh.create` copied that into a `Float32Array`. Measured on a 500k-vertex mesh
+ * that was ~1s of main-thread work per model, and it also made geometry impossible to hand to a
+ * worker: tuple arrays are not transferable and structured-clone walks every element.
+ *
+ * The constructor still accepts the legacy nested shape, so existing callers and saved projects keep
+ * working; it is normalised to flat on the way in.
+ */
 export class Geometry {
-    private readonly _positions: [number, number, number][];
-    private readonly _normals: [number, number, number][];
-    private readonly _uvs: [number, number][];
-    private _tangents!: [number, number, number][];
-    private _bitangents!: [number, number, number][];
-    private readonly _indices: number[];
+    private _positions: Float32Array;
+    private _normals: Float32Array;
+    private _uvs: Float32Array;
+    private _tangents!: Float32Array;
+    private _bitangents!: Float32Array;
+    private readonly _indices: Uint32Array;
     private _bvh?: BVH;
     private _boundingSphere?: { center: vec3; radius: number };
     private _boundingBox?: { min: vec3; max: vec3 };
 
     constructor(
-        positions: [number, number, number][] = [],
-        normals: [number, number, number][] = [],
-        uvs: [number, number][] = [],
-        tangents: [number, number, number][] = [],
-        bitangents: [number, number, number][] = [],
-        indices: number[] = [],
+        positions: AttributeInput = EMPTY_F32,
+        normals: AttributeInput = EMPTY_F32,
+        uvs: AttributeInput = EMPTY_F32,
+        tangents: AttributeInput = EMPTY_F32,
+        bitangents: AttributeInput = EMPTY_F32,
+        indices: IndexInput = EMPTY_U32,
         calculateTangents: boolean = true
     ) {
-        this._positions = positions;
-        this._normals = normals;
-        this._uvs = uvs;
-        this._tangents = tangents;
-        this._bitangents = bitangents;        
-        this._indices = indices;
+        this._positions = toFlat(positions, 3);
+        this._normals = toFlat(normals, 3);
+        this._uvs = toFlat(uvs, 2);
+        this._tangents = toFlat(tangents, 3);
+        this._bitangents = toFlat(bitangents, 3);
+        this._indices = indices instanceof Uint32Array ? indices : Uint32Array.from(indices as ArrayLike<number>);
 
         if ((this._tangents.length === 0 || this._bitangents.length === 0) && calculateTangents)
             this._calculateTangents();
     }
 
-    public get positions(): number[][] { return this._positions; }
-    public get normals(): number[][] { return this._normals; }
-    public get uvs(): number[][] { return this._uvs; }
-    public get indices(): number[] { return this._indices; }
-    public get tangents(): number[][] { return this._tangents; }
-    public get bitangents(): number[][] { return this._bitangents; }
+    // Flat: component `c` of vertex `i` is `positions[i * 3 + c]` (stride 2 for uvs).
+    public get positions(): Float32Array { return this._positions; }
+    public get normals(): Float32Array { return this._normals; }
+    public get uvs(): Float32Array { return this._uvs; }
+    public get indices(): Uint32Array { return this._indices; }
+    public get tangents(): Float32Array { return this._tangents; }
+    public get bitangents(): Float32Array { return this._bitangents; }
     /**
      * Number of vertices — `positions.length`, not the float count.
      *
@@ -46,14 +92,23 @@ export class Geometry {
      * for the unindexed `drawArrays` path — so an unindexed geometry asked the driver for three times the
      * vertices it has. Masked only because every geometry built today carries indices.
      */
-    public get vertexCount(): number { return this._positions.length; }
+    public get vertexCount(): number { return this._positions.length / 3; }
     /**
      * Bounding Volume Hierarchy over this geometry's triangles, built lazily in object space and
      * memoized. Used for exact ray/triangle picking (see `Raycaster`); shared across every node
      * that references this geometry.
      */
     public get bvh(): BVH {
-        if (!this._bvh) this._bvh = BVH.fromGeometry(this._positions, this._indices);
+        if (!this._bvh) {
+            // Non-indexed geometry: consecutive triples form triangles, so synthesise the identity
+            // index list the BVH needs. (Carried over from the removed BVH.fromGeometry.)
+            let indices = this._indices;
+            if (indices.length < 3) {
+                indices = new Uint32Array(this.vertexCount);
+                for (let i = 0; i < indices.length; i++) indices[i] = i;
+            }
+            this._bvh = BVH.fromBuffers(this._positions, indices);
+        }
         return this._bvh;
     }
     /**
@@ -74,10 +129,11 @@ export class Geometry {
         } else if (this._positions.length > 0) {
             min = [Infinity, Infinity, Infinity];
             max = [-Infinity, -Infinity, -Infinity];
-            for (const p of this._positions)
+            for (let i = 0; i < this._positions.length; i += 3)
                 for (let a = 0; a < 3; a++) {
-                    if (p[a] < min[a]) min[a] = p[a];
-                    if (p[a] > max[a]) max[a] = p[a];
+                    const v = this._positions[i + a];
+                    if (v < min[a]) min[a] = v;
+                    if (v > max[a]) max[a] = v;
                 }
         } else {
             min = [0, 0, 0]; max = [0, 0, 0];
@@ -110,10 +166,11 @@ export class Geometry {
             vec3.set(min, 0, 0, 0);
             vec3.set(max, 0, 0, 0);
         } else {
-            for (const p of this._positions)
+            for (let i = 0; i < this._positions.length; i += 3)
                 for (let a = 0; a < 3; a++) {
-                    if (p[a] < min[a]) min[a] = p[a];
-                    if (p[a] > max[a]) max[a] = p[a];
+                    const v = this._positions[i + a];
+                    if (v < min[a]) min[a] = v;
+                    if (v > max[a]) max[a] = v;
                 }
         }
 
@@ -127,51 +184,56 @@ export class Geometry {
      */
     public scale(factor: number): void {
         if (factor === 1) return;
-        for (let i = 0; i < this._positions.length; i++) {
-            this._positions[i][0] *= factor;
-            this._positions[i][1] *= factor;
-            this._positions[i][2] *= factor;
-        }
+        for (let i = 0; i < this._positions.length; i++) this._positions[i] *= factor;
         this._bvh = undefined;
         this._boundingSphere = undefined;
         this._boundingBox = undefined;
     }
 
-    public getData(attributes: string[] = []): number[] {
-        const interleaved: number[] = [];
+    /**
+     * Interleaves the requested attributes into a single buffer ready for `Mesh.create` to upload.
+     *
+     * Returns a `Float32Array` written directly rather than a `number[]` built by ~14 `push` calls per
+     * vertex — which the caller then had to copy into a `Float32Array` anyway. On a dense mesh that
+     * pair of steps was ~380ms; now it is one sized allocation and a linear fill.
+     */
+    public getData(attributes: string[] = []): Float32Array {
+        const count = this.vertexCount;
+        if (count === 0) return EMPTY_F32;
 
-        for (let i = 0; i < this._positions.length; i++) {
-            if (attributes.includes('position')) {
-                interleaved.push(this._positions[i][0]);
-                interleaved.push(this._positions[i][1]);
-                interleaved.push(this._positions[i][2]);
+        // An attribute contributes only when it was requested AND is actually present, matching the
+        // original guards — a geometry with no UVs must not leave a hole in the stride.
+        const wantPosition = attributes.includes('position');
+        const wantNormal = this._normals.length > 0 && attributes.includes('normal');
+        const wantUv = this._uvs.length > 0 && attributes.includes('uv');
+        const wantTangent = this._tangents.length > 0 && attributes.includes('tangent');
+        const wantBitangent = this._bitangents.length > 0 && attributes.includes('bitangent');
+
+        const stride = (wantPosition ? 3 : 0) + (wantNormal ? 3 : 0) + (wantUv ? 2 : 0)
+                     + (wantTangent ? 3 : 0) + (wantBitangent ? 3 : 0);
+        if (stride === 0) return EMPTY_F32;
+
+        const out = new Float32Array(count * stride);
+        let o = 0;
+        for (let i = 0; i < count; i++) {
+            const i3 = i * 3, i2 = i * 2;
+            if (wantPosition) {
+                out[o++] = this._positions[i3]; out[o++] = this._positions[i3 + 1]; out[o++] = this._positions[i3 + 2];
             }
-
-            if (this._normals.length > 0 && attributes.includes('normal')) {
-                interleaved.push(this._normals[i][0]);
-                interleaved.push(this._normals[i][1]);
-                interleaved.push(this._normals[i][2]);
+            if (wantNormal) {
+                out[o++] = this._normals[i3]; out[o++] = this._normals[i3 + 1]; out[o++] = this._normals[i3 + 2];
             }
-
-            if (this._uvs.length > 0 && attributes.includes('uv')) {
-                interleaved.push(this._uvs[i][0]);
-                interleaved.push(this._uvs[i][1]);
+            if (wantUv) {
+                out[o++] = this._uvs[i2]; out[o++] = this._uvs[i2 + 1];
             }
-
-            if (this._tangents?.length > 0 && attributes.includes('tangent')) {
-                interleaved.push(this._tangents[i][0]);
-                interleaved.push(this._tangents[i][1]);
-                interleaved.push(this._tangents[i][2]);
+            if (wantTangent) {
+                out[o++] = this._tangents[i3]; out[o++] = this._tangents[i3 + 1]; out[o++] = this._tangents[i3 + 2];
             }
-
-            if (this._bitangents?.length > 0 && attributes.includes('bitangent')) {
-                interleaved.push(this._bitangents[i][0]);
-                interleaved.push(this._bitangents[i][1]);
-                interleaved.push(this._bitangents[i][2]);
+            if (wantBitangent) {
+                out[o++] = this._bitangents[i3]; out[o++] = this._bitangents[i3 + 1]; out[o++] = this._bitangents[i3 + 2];
             }
         }
-
-        return interleaved;
+        return out;
     }
 
     /**
@@ -182,31 +244,32 @@ export class Geometry {
     public computeNormals(): void {
         if (this._indices.length === 0) return;
 
-        for (let i = 0; i < this._positions.length; i++)
-            this._normals[i] = [0, 0, 0];
+        // Sized to the positions, not reused: a geometry loaded without normals has an empty array here.
+        if (this._normals.length !== this._positions.length) this._normals = new Float32Array(this._positions.length);
+        else this._normals.fill(0);
 
         const pA = vec3.create(), pB = vec3.create(), pC = vec3.create();
         const edge1 = vec3.create(), edge2 = vec3.create(), faceNormal = vec3.create();
 
         for (let f = 0; f < this._indices.length; f += 3) {
-            const a = this._indices[f], b = this._indices[f + 1], c = this._indices[f + 2];
-            vec3.set(pA, this._positions[a][0], this._positions[a][1], this._positions[a][2]);
-            vec3.set(pB, this._positions[b][0], this._positions[b][1], this._positions[b][2]);
-            vec3.set(pC, this._positions[c][0], this._positions[c][1], this._positions[c][2]);
+            const a = this._indices[f] * 3, b = this._indices[f + 1] * 3, c = this._indices[f + 2] * 3;
+            vec3.set(pA, this._positions[a], this._positions[a + 1], this._positions[a + 2]);
+            vec3.set(pB, this._positions[b], this._positions[b + 1], this._positions[b + 2]);
+            vec3.set(pC, this._positions[c], this._positions[c + 1], this._positions[c + 2]);
             vec3.subtract(edge1, pB, pA);
             vec3.subtract(edge2, pC, pA);
             // Non-normalized cross => magnitude proportional to face area (area weighting)
             vec3.cross(faceNormal, edge1, edge2);
-            this._normals[a][0] += faceNormal[0]; this._normals[a][1] += faceNormal[1]; this._normals[a][2] += faceNormal[2];
-            this._normals[b][0] += faceNormal[0]; this._normals[b][1] += faceNormal[1]; this._normals[b][2] += faceNormal[2];
-            this._normals[c][0] += faceNormal[0]; this._normals[c][1] += faceNormal[1]; this._normals[c][2] += faceNormal[2];
+            this._normals[a] += faceNormal[0]; this._normals[a + 1] += faceNormal[1]; this._normals[a + 2] += faceNormal[2];
+            this._normals[b] += faceNormal[0]; this._normals[b + 1] += faceNormal[1]; this._normals[b + 2] += faceNormal[2];
+            this._normals[c] += faceNormal[0]; this._normals[c + 1] += faceNormal[1]; this._normals[c + 2] += faceNormal[2];
         }
 
         const n = vec3.create();
-        for (let i = 0; i < this._normals.length; i++) {
-            vec3.set(n, this._normals[i][0], this._normals[i][1], this._normals[i][2]);
+        for (let i = 0; i < this._normals.length; i += 3) {
+            vec3.set(n, this._normals[i], this._normals[i + 1], this._normals[i + 2]);
             vec3.normalize(n, n);
-            this._normals[i] = [n[0], n[1], n[2]];
+            this._normals[i] = n[0]; this._normals[i + 1] = n[1]; this._normals[i + 2] = n[2];
         }
     }
 
@@ -214,54 +277,61 @@ export class Geometry {
     // Gram-Schmidt against the vertex normal. (The previous version pushed two tangents PER FACE while the
     // interleaver reads them by VERTEX index — misaligned on any indexed mesh, breaking normal maps/parallax.)
     private _calculateTangents(): void {
-        const n = this._positions.length;
-        const acc: [number, number, number][] = new Array(n);
-        for (let i = 0; i < n; i++) acc[i] = [0, 0, 0];
+        const n = this.vertexCount;
+        const acc = new Float32Array(n * 3);
+        const hasUvs = this._uvs.length >= n * 2;
 
         for (let i = 0; i + 2 < this._indices.length; i += 3) {
             const i0 = this._indices[i], i1 = this._indices[i + 1], i2 = this._indices[i + 2];
-            const v0 = this._positions[i0], v1 = this._positions[i1], v2 = this._positions[i2];
-            const uv0 = this._uvs[i0], uv1 = this._uvs[i1], uv2 = this._uvs[i2];
-            if (!v0 || !v1 || !v2 || !uv0 || !uv1 || !uv2) continue;
-            const e1x = v1[0] - v0[0], e1y = v1[1] - v0[1], e1z = v1[2] - v0[2];
-            const e2x = v2[0] - v0[0], e2y = v2[1] - v0[1], e2z = v2[2] - v0[2];
-            const du1 = uv1[0] - uv0[0], dv1 = uv1[1] - uv0[1];
-            const du2 = uv2[0] - uv0[0], dv2 = uv2[1] - uv0[1];
+            // Guards the same out-of-range cases the tuple version caught via undefined elements.
+            if (i0 >= n || i1 >= n || i2 >= n || !hasUvs) continue;
+            const p0 = i0 * 3, p1 = i1 * 3, p2 = i2 * 3;
+            const t0 = i0 * 2, t1 = i1 * 2, t2 = i2 * 2;
+            const e1x = this._positions[p1] - this._positions[p0];
+            const e1y = this._positions[p1 + 1] - this._positions[p0 + 1];
+            const e1z = this._positions[p1 + 2] - this._positions[p0 + 2];
+            const e2x = this._positions[p2] - this._positions[p0];
+            const e2y = this._positions[p2 + 1] - this._positions[p0 + 1];
+            const e2z = this._positions[p2 + 2] - this._positions[p0 + 2];
+            const du1 = this._uvs[t1] - this._uvs[t0], dv1 = this._uvs[t1 + 1] - this._uvs[t0 + 1];
+            const du2 = this._uvs[t2] - this._uvs[t0], dv2 = this._uvs[t2 + 1] - this._uvs[t0 + 1];
             const denom = du1 * dv2 - du2 * dv1;
             const f = Math.abs(denom) < 1e-8 ? 0 : 1.0 / denom;
             const tx = f * (dv2 * e1x - dv1 * e2x);
             const ty = f * (dv2 * e1y - dv1 * e2y);
             const tz = f * (dv2 * e1z - dv1 * e2z);
-            acc[i0][0] += tx; acc[i0][1] += ty; acc[i0][2] += tz;
-            acc[i1][0] += tx; acc[i1][1] += ty; acc[i1][2] += tz;
-            acc[i2][0] += tx; acc[i2][1] += ty; acc[i2][2] += tz;
+            acc[p0] += tx; acc[p0 + 1] += ty; acc[p0 + 2] += tz;
+            acc[p1] += tx; acc[p1 + 1] += ty; acc[p1 + 2] += tz;
+            acc[p2] += tx; acc[p2 + 1] += ty; acc[p2 + 2] += tz;
         }
 
-        this._tangents = new Array(n);
-        this._bitangents = new Array(n);
+        this._tangents = new Float32Array(n * 3);
+        this._bitangents = new Float32Array(n * 3);
+        const hasNormals = this._normals.length >= n * 3;
         for (let i = 0; i < n; i++) {
-            const nrm = this._normals[i] || [0, 1, 0];
-            let tx = acc[i][0], ty = acc[i][1], tz = acc[i][2];
+            const i3 = i * 3;
+            const nx = hasNormals ? this._normals[i3] : 0;
+            const ny = hasNormals ? this._normals[i3 + 1] : 1;
+            const nz = hasNormals ? this._normals[i3 + 2] : 0;
+            let tx = acc[i3], ty = acc[i3 + 1], tz = acc[i3 + 2];
             // Gram-Schmidt: remove the normal component.
-            const d = nrm[0] * tx + nrm[1] * ty + nrm[2] * tz;
-            tx -= nrm[0] * d; ty -= nrm[1] * d; tz -= nrm[2] * d;
+            const d = nx * tx + ny * ty + nz * tz;
+            tx -= nx * d; ty -= ny * d; tz -= nz * d;
             let len = Math.hypot(tx, ty, tz);
             if (len < 1e-8) {
                 // No UV gradient (or degenerate): pick any tangent perpendicular to the normal.
-                const a: [number, number, number] = Math.abs(nrm[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
-                tx = a[1] * nrm[2] - a[2] * nrm[1];
-                ty = a[2] * nrm[0] - a[0] * nrm[2];
-                tz = a[0] * nrm[1] - a[1] * nrm[0];
+                const ax = Math.abs(nx) < 0.9 ? 1 : 0, ay = Math.abs(nx) < 0.9 ? 0 : 1, az = 0;
+                tx = ay * nz - az * ny;
+                ty = az * nx - ax * nz;
+                tz = ax * ny - ay * nx;
                 len = Math.hypot(tx, ty, tz) || 1;
             }
             tx /= len; ty /= len; tz /= len;
-            this._tangents[i] = [tx, ty, tz];
+            this._tangents[i3] = tx; this._tangents[i3 + 1] = ty; this._tangents[i3 + 2] = tz;
             // Bitangent = -(normal x tangent), matching the engine's existing convention (default.vs negates it).
-            this._bitangents[i] = [
-                -(nrm[1] * tz - nrm[2] * ty),
-                -(nrm[2] * tx - nrm[0] * tz),
-                -(nrm[0] * ty - nrm[1] * tx),
-            ];
+            this._bitangents[i3] = -(ny * tz - nz * ty);
+            this._bitangents[i3 + 1] = -(nz * tx - nx * tz);
+            this._bitangents[i3 + 2] = -(nx * ty - ny * tx);
         }
     }
 

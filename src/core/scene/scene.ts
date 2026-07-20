@@ -3,6 +3,7 @@ import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, Lo
 import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
+import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
 
 /** One scheduled `this.after`/`this.every` call. `interval === null` means one-shot. */
 interface ScheduledTimer {
@@ -124,11 +125,20 @@ export class Scene {
 
     public update(delta: number, time: number, paused: boolean): void {
         try {
+            const frameStart = performance.now();
+            resetSceneStats();
+
+            const transformStart = performance.now();
             this._root.updateTransforms();
+            sceneStats.transformMs = performance.now() - transformStart;
 
-            if (this._hasStarted && !paused)
+            if (this._hasStarted && !paused) {
+                const timerStart = performance.now();
                 this._updateTimers(delta);
+                sceneStats.timerMs = performance.now() - timerStart;
+            }
 
+            const loopStart = performance.now();
             for (const node of this._nodes) {
                 if (node instanceof LightNode) this._asignLightIndices();
 
@@ -140,6 +150,7 @@ export class Scene {
                 if (this._hasStarted && !paused)
                     node.update(delta, time);
             }
+            sceneStats.nodeLoopMs = performance.now() - loopStart;
 
             // Camera rigs run LAST, after every onUpdate. A rig cannot do this work from its own
             // update(): a follow target that sorts later in the traversal would not have moved yet,
@@ -149,17 +160,33 @@ export class Scene {
             // scene actually contains a rig.
             const rigs = this.cameraRigs;
             if (rigs.size > 0) {
+                // Counted as transform cost, not rig cost: it is a second full-tree pass, and knowing
+                // that rigs double the transform bill is the useful signal.
+                const rigTransformStart = performance.now();
                 this._root.updateTransforms();
+                sceneStats.transformMs += performance.now() - rigTransformStart;
+
                 // Deliberately not gated on _hasStarted/!paused: passing snap instead lets a stopped
                 // editor scene still preview the rig's resting pose (instantly, with no collision or
                 // shake) while its properties are being edited.
+                const rigStart = performance.now();
                 const snap = !this._hasStarted || paused;
                 for (const rig of rigs) rig.lateUpdate(delta, snap);
+                sceneStats.rigMs = performance.now() - rigStart;
             }
+
+            sceneStats.nodes = this._nodes.size;
+            sceneStats.frameMs = performance.now() - frameStart;
         } catch (e) {
             Logger.error(e);
         }
     }
+
+    /**
+     * Per-frame timings for the last completed update. Mirrors `renderer.stats` / `physics.stats`;
+     * read by the editor's performance HUD.
+     */
+    public get stats(): SceneStats { return sceneStats; }
 
     /** Backs `this.after(seconds, cb)`. Returns a function that cancels this one timer. */
     public scheduleAfter(node: Node, seconds: number, cb: () => void): () => void {

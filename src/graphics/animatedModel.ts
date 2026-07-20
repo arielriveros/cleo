@@ -258,13 +258,15 @@ export class AnimatedModel {
      * Serialize the animated model for saving
      */
     public serialize(): any {
-        let geometry = {
-            positions: this._geometry.positions,
-            normals: this._geometry.normals,
-            tangents: this._geometry.tangents,
-            bitangents: this._geometry.bitangents,
-            texCoords: this._geometry.uvs,
-            indices: this._geometry.indices
+        // Array.from for the same reason as Model.serialize: JSON.stringify would turn the typed
+        // arrays Geometry stores into objects and silently corrupt the save.
+        const geometry = {
+            positions: Array.from(this._geometry.positions),
+            normals: Array.from(this._geometry.normals),
+            tangents: Array.from(this._geometry.tangents),
+            bitangents: Array.from(this._geometry.bitangents),
+            texCoords: Array.from(this._geometry.uvs),
+            indices: Array.from(this._geometry.indices)
         };
         
         const cfg = {

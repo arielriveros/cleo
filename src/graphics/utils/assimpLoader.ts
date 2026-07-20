@@ -8,9 +8,22 @@ const MASK_TEXTURE = 8;
 
 const assimpjs = require('./assimpjs');
 
+/**
+ * The emscripten module, instantiated once and reused.
+ *
+ * Each `assimpjs()` call builds a fresh WASM instance, and the three entry points below used to do
+ * that independently — so importing a non-glTF file *with* animations paid full WASM startup twice
+ * (once to load the meshes, once for the FBX→glTF2 conversion that reads the animations).
+ */
+let assimpModule: Promise<any> | null = null;
+function getAssimp(): Promise<any> {
+    if (!assimpModule) assimpModule = assimpjs() as Promise<any>;
+    return assimpModule;
+}
+
 async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: any[], materials: any[], textures?: any[] }> {
     try {
-        const ajs = await assimpjs();
+        const ajs = await getAssimp();
 
         // Fetch the files to import
         let files = [...urls];
@@ -55,7 +68,7 @@ async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: 
 
 async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[], materials: any[], textures?: any[] }> {
     try {
-        const ajs = await assimpjs();
+        const ajs = await getAssimp();
 
         // Create a new file list object and add the files
         let fileList = new ajs.FileList();
@@ -103,7 +116,7 @@ async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[],
  * GLTFLoader resolves — so we preserve the assimp output paths as the File names.
  */
 async function convertToGltf2FromFiles(files: File[]): Promise<File[]> {
-    const ajs = await assimpjs();
+    const ajs = await getAssimp();
     let fileList = new ajs.FileList();
     for (let file of files) {
         const arrayBuffer = await file.arrayBuffer();
@@ -220,24 +233,12 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
                 const textureIndex = parseInt(texturePath.substring(1));
                 if (textureIndex >= 0 && textureIndex < textures.length) {
                     const textureData = textures[textureIndex];
-                    console.log(`Processing embedded texture ${textureIndex}:`, {
-                        format: textureData?.achFormatHint,
-                        hasData: !!textureData?.pcData,
-                        dataLength: textureData?.pcData?.length || 0,
-                        mWidth: textureData?.mWidth,
-                        mHeight: textureData?.mHeight,
-                        fullData: textureData
-                    });
-                    
                     // Return base64 data if available
                     if (textureData && textureData.achFormatHint && textureData.pcData) {
                         const formatHint = textureData.achFormatHint.toLowerCase().replace(/\0/g, ''); // Remove null characters
                         const mimeType = formatHint === 'jpg' ? 'jpeg' : formatHint;
                         const base64String = `data:image/${mimeType};base64,${textureData.pcData}`;
-                        
-                        console.log(`Generated base64 string (first 100 chars):`, base64String.substring(0, 100));
-                        console.log(`Base64 data length:`, textureData.pcData.length);
-                        
+
                         // Try to validate the base64 data
                         try {
                             // Test if it's valid base64
@@ -268,15 +269,6 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
         const maskMap = getTexture(properties, MASK_TEXTURE);
         const reflectivityMap = getTexture(properties, AMBIENT_TEXTURE);
 
-        console.log(`Material "${name}" texture paths:`, {
-            diffuse: diffuseMap,
-            specular: specularMap,
-            normal: normalMap,
-            emissive: emissiveMap,
-            mask: maskMap,
-            reflectivity: reflectivityMap
-        });
-
         const material: OutputMaterial = {
             name,
             diffuse, specular, ambient,
@@ -303,4 +295,79 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
     });
 }
 
-export { loadAssimpModel, loadAssimpModelFromFiles, parseMaterial, convertToGltf2FromFiles };
+/** One mesh, as flat typed arrays — the shape `Geometry` adopts without copying. */
+export interface ParsedMesh {
+    name: string;
+    positions: Float32Array;
+    normals: Float32Array;
+    uvs: Float32Array;
+    tangents: Float32Array;
+    bitangents: Float32Array;
+    indices: Uint32Array;
+    materialIndex: number;
+}
+
+/**
+ * Everything a model file yields that does NOT require a GL context: geometry as typed arrays plus
+ * material descriptors ({@link OutputMaterial} — colours, plus texture *paths* and base64 strings,
+ * never decoded pixels).
+ */
+export interface AssimpParseResult {
+    meshes: ParsedMesh[];
+    materials: { name: string; material: OutputMaterial }[];
+}
+
+/**
+ * Parse model files into plain data. **Pure: no DOM, no WebGL, no engine imports** — this module only
+ * pulls in assimpjs, which is a SINGLE_FILE emscripten build that already supports worker
+ * environments. That is what lets the editor run this inside a Web Worker (and fall back to running
+ * it inline, unchanged, when a worker is unavailable).
+ *
+ * Pair with `Loader.assembleAssimpModels`, which does the GL half on the main thread.
+ */
+async function parseAssimpFiles(files: File[]): Promise<AssimpParseResult> {
+    const res = await loadAssimpModelFromFiles(files);
+
+    const materials: { name: string; material: OutputMaterial }[] = [];
+    for (const mat of res.materials) materials.push(await parseMaterial(mat, res.textures));
+
+    const meshes: ParsedMesh[] = [];
+    for (const m of res.meshes) {
+        const name = m.name;
+        if (!m.normals) throw new Error(`Mesh ${name} has no normals`);
+        const uvs: number[] = m.texturecoords?.[0];
+        if (!uvs) throw new Error(`Mesh ${name} has no UVs`);
+
+        // assimp hands these over already flat, so this is a straight typed-array wrap. The loader
+        // used to explode each into an array of 3-element arrays here, only for Geometry to flatten
+        // it again on upload.
+        meshes.push({
+            name,
+            positions: new Float32Array(m.vertices),
+            normals: new Float32Array(m.normals),
+            uvs: new Float32Array(uvs),
+            tangents: m.tangents ? new Float32Array(m.tangents) : new Float32Array(0),
+            bitangents: m.bitangents ? new Float32Array(m.bitangents) : new Float32Array(0),
+            indices: Uint32Array.from(m.faces.flat()),
+            materialIndex: m.materialindex,
+        });
+    }
+
+    return { meshes, materials };
+}
+
+/**
+ * The buffers in `result` that can be transferred rather than copied across a worker boundary.
+ *
+ * Transferring detaches them in the sender, so only pass these when the sending side is done with the
+ * result — which is the case for a worker replying with its final answer.
+ */
+function parseResultTransferables(result: AssimpParseResult): ArrayBuffer[] {
+    const out: ArrayBuffer[] = [];
+    for (const m of result.meshes)
+        for (const a of [m.positions, m.normals, m.uvs, m.tangents, m.bitangents, m.indices])
+            if (a.byteLength > 0) out.push(a.buffer as ArrayBuffer);
+    return out;
+}
+
+export { loadAssimpModel, loadAssimpModelFromFiles, parseMaterial, convertToGltf2FromFiles, parseAssimpFiles, parseResultTransferables };

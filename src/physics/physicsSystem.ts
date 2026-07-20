@@ -6,10 +6,10 @@ import { vec3 } from "gl-matrix";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
 import { skipCameraHit, CameraProbeBody } from "./cameraRayFilter";
+import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
 
 interface PhysicsSystemConfig {
   gravity?: number[];
-  killZHeight?: number;
 }
 
 /**
@@ -32,7 +32,6 @@ export class PhysicsSystem {
   private _scene!: Scene;
   private _world!: World;
   private _gravity: number[];
-  private _killZHeight: number;
   private _ragdolls: Ragdoll[] = [];
   /** Unpaused seconds of simulated time; the clock GROUND_GRACE is measured against. */
   private _time = 0;
@@ -42,8 +41,7 @@ export class PhysicsSystem {
   private _materials = new Map<string, Material>();
 
   constructor(config?: PhysicsSystemConfig) {
-    this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up 
-    this._killZHeight = config?.killZHeight || -100;
+    this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
   }
 
   public initialize(): void {
@@ -63,15 +61,23 @@ export class PhysicsSystem {
   public update(deltaTime: number): void {
     try {
       if (!this._scene) return;
+      const frameStart = performance.now();
+      resetPhysicsStats();
+
       // Fixed internal timestep with catch-up substeps: keeps stiff constraints (e.g. ragdoll
       // cone-twist joints) stable and deterministic even when frame delta spikes.
+      const stepStart = performance.now();
       this._world?.step(1 / 60, deltaTime, 5);
+      physicsStats.stepMs = performance.now() - stepStart;
 
       // The engine only calls update() while unpaused, so this clock does not tick during a pause and the
       // grace window can't quietly expire behind a paused game.
       this._time += deltaTime;
       this._stampGroundContacts();
 
+      // Timed apart from the step on purpose: this pass is scene-graph work that would stay on the
+      // main thread even if cannon moved to a worker, so the two costs answer different questions.
+      const writeBackStart = performance.now();
       const nodes = this._scene.nodes;
       for (const node of nodes) {
         // Bound once and tested once: the old form tested `node.body || node.trigger` and then recomputed
@@ -87,8 +93,12 @@ export class PhysicsSystem {
 
         // If node is marked for removal, remove it from the world
         if (node.markForRemoval) {
+          // Removing the body is what actually stops the callbacks: the 'collide' listener registered
+          // in Node.setBody/setTrigger is an anonymous arrow, so it can never be matched by handing
+          // `node.onCollision` to removeEventListener — that call was always a no-op and left the
+          // listener attached. Dropping the body from the world is sufficient, and the body itself
+          // becomes garbage with the node.
           this._world.removeBody(bodyToAdd);
-          bodyToAdd.removeEventListener('collide', node.onCollision);
         }
 
         // If node contains a body, update the position and quaternion of itself
@@ -109,8 +119,10 @@ export class PhysicsSystem {
           node.trigger.quaternion.set(quat[0], quat[1], quat[2], quat[3]);
         }
       }
+      physicsStats.writeBackMs = performance.now() - writeBackStart;
 
       // Terrain: register/refresh the static heightfield collider(s) so any mesh walks over the landscape.
+      const terrainStart = performance.now();
       for (const landscape of this._scene.landscapes) {
         if (landscape.markForRemoval) { landscape.terrain.dispose(this._world); continue; }
         landscape.terrain.setOrigin(landscape.worldPosition);
@@ -119,10 +131,25 @@ export class PhysicsSystem {
         // one surface it spends all its time on.
         landscape.terrain.ensureRegistered(this._world, this._defaultMaterial);
       }
+      physicsStats.terrainMs = performance.now() - terrainStart;
+
+      physicsStats.bodies = this._world?.bodies.length ?? 0;
+      physicsStats.contacts = this._world?.contacts.length ?? 0;
+      physicsStats.frameMs = performance.now() - frameStart;
     } catch (e) {
       Logger.error(e.toString());
     }
   }
+
+  /**
+   * Per-frame timings and counts for the last completed step. Mirrors `renderer.stats`; read by the
+   * editor's performance HUD.
+   *
+   * `rayMs`/`rayCount` cover queries made from anywhere in the frame (camera rigs probe during the
+   * scene's late pass, i.e. after `update()` has returned), so they belong to the frame rather than
+   * to `frameMs` — do not expect the parts to sum to it exactly.
+   */
+  public get stats(): PhysicsStats { return physicsStats; }
 
   // ---- Low-level world access (for bodies/constraints not owned by a scene node, e.g. ragdolls) ----
 
@@ -326,6 +353,7 @@ export class PhysicsSystem {
     const world = this._world;
     if (!world) return null;
 
+    const rayStart = performance.now();
     PhysicsSystem._rayFrom.set(from[0], from[1], from[2]);
     PhysicsSystem._rayTo.set(to[0], to[1], to[2]);
 
@@ -336,6 +364,8 @@ export class PhysicsSystem {
       if (result.hasHit && (nearest === null || result.distance < nearest)) nearest = result.distance;
     });
 
+    physicsStats.rayMs += performance.now() - rayStart;
+    physicsStats.rayCount++;
     return nearest;
   }
 

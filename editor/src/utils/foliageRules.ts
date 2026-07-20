@@ -41,16 +41,31 @@ function bakeModel(node: ModelNode): any {
   const normalMat = Vec.mat3.normalFromMat4(Vec.mat3.create(), world)
 
   const v = Vec.vec3.create()
-  const points = (arr: ArrayLike<number>[]) => Array.from(arr).map(p => {
-    Vec.vec3.set(v, p[0], p[1], p[2])
-    Vec.vec3.transformMat4(v, v, world)
-    return [v[0], v[1], v[2]]
-  })
-  const directions = (arr: ArrayLike<number>[]) => Array.from(arr).map(p => {
-    Vec.vec3.set(v, p[0], p[1], p[2])
-    if (normalMat) { Vec.vec3.transformMat3(v, v, normalMat); Vec.vec3.normalize(v, v) }
-    return [v[0], v[1], v[2]]
-  })
+  // Geometry stores attributes flat (stride 3, or 2 for uvs); the foliage rule format is nested, so
+  // these walk the flat buffer and emit tuples.
+  const points = (arr: ArrayLike<number>) => {
+    const out: number[][] = []
+    for (let i = 0; i < arr.length; i += 3) {
+      Vec.vec3.set(v, arr[i], arr[i + 1], arr[i + 2])
+      Vec.vec3.transformMat4(v, v, world)
+      out.push([v[0], v[1], v[2]])
+    }
+    return out
+  }
+  const directions = (arr: ArrayLike<number>) => {
+    const out: number[][] = []
+    for (let i = 0; i < arr.length; i += 3) {
+      Vec.vec3.set(v, arr[i], arr[i + 1], arr[i + 2])
+      if (normalMat) { Vec.vec3.transformMat3(v, v, normalMat); Vec.vec3.normalize(v, v) }
+      out.push([v[0], v[1], v[2]])
+    }
+    return out
+  }
+  const pairs = (arr: ArrayLike<number>) => {
+    const out: number[][] = []
+    for (let i = 0; i < arr.length; i += 2) out.push([arr[i], arr[i + 1]])
+    return out
+  }
 
   return {
     geometry: {
@@ -58,7 +73,7 @@ function bakeModel(node: ModelNode): any {
       normals: directions(g.normals),
       tangents: directions(g.tangents),
       bitangents: directions(g.bitangents),
-      texCoords: Array.from(g.uvs).map(uv => [uv[0], uv[1]]),
+      texCoords: pairs(g.uvs),
       indices: [...g.indices],
     },
     material: node.model.material.serialize(),

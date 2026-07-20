@@ -15,6 +15,12 @@ export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";
 export { Texture } from "./graphics/texture";
 export { Loader } from "./graphics/loader";
+// The pure (no DOM, no GL) half of model import, so the editor can run it inside a Web Worker.
+// Pair with Loader.assembleAssimpModels, which does the GL half on the main thread.
+export { parseAssimpFiles, parseResultTransferables } from "./graphics/utils/assimpLoader";
+export type { AssimpParseResult, ParsedMesh, OutputMaterial } from "./graphics/utils/assimpLoader";
+export { GLTFLoader } from "./graphics/utils/gltfLoader";
+export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
 export { InputManager } from "./input/inputManager";
 export { TextureManager } from "./graphics/systems/textureManager";
 export { RigidBody as Body, Trigger } from "./physics/body";
@@ -46,6 +52,10 @@ export { Shape } from "./physics/shape";
 // Scene.physics is a public field of this type and scripts already reach through it (startRagdoll,
 // isGrounded), so the class belongs in the public surface too.
 export { PhysicsSystem } from "./physics/physicsSystem";
+export { physicsStats } from "./physics/physicsStats";
+export type { PhysicsStats } from "./physics/physicsStats";
+export { sceneStats, sceneStatsDetail } from "./core/scene/sceneStats";
+export type { SceneStats } from "./core/scene/sceneStats";
 export { convexHull, hullFromPositions, HULL_BUDGETS } from "./physics/convexHull";
 export type { Hull, HullQuality } from "./physics/convexHull";
 export { Terrain } from "./terrain/terrain";

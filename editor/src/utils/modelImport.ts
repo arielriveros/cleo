@@ -1,4 +1,8 @@
 import { Node, ModelNode, Model, AnimatedModel, Loader } from 'cleo'
+import { parseModelFiles, parseGltfFiles, ImportCancelled } from '../workers/importClient'
+
+/** Reports parse progress (0..1) and the current stage. See importClient for why this exists. */
+export type ImportProgress = (fraction: number, stage: string) => void
 
 // World TRS of the glTF scene node an entry came from (mirrors the engine's ImportTransform shape;
 // declared locally so this file doesn't depend on a freshly rebuilt dist d.ts).
@@ -27,24 +31,44 @@ function quatToEulerDeg([x, y, z, w]: [number, number, number, number]): [number
 // Animated-first for GLTF (skinned models keep their skeleton/animations), static otherwise. Textures
 // referenced by the files land in TextureManager during parse. Reused for the initial import parse and
 // the on-Accept re-parse (after the user uploads previously-missing textures).
-export async function parseBundleToRoot(files: File[], name: string): Promise<{ root: Node; children: ModelNode[] }> {
+export async function parseBundleToRoot(
+  files: File[],
+  name: string,
+  onProgress: ImportProgress = () => {}
+): Promise<{ root: Node; children: ModelNode[] }> {
   const isGltf = files.some(f => f.name.toLowerCase().endsWith('.gltf'))
   let parsed: ParsedEntry[] = []
   if (isGltf) {
     try {
-      const animated = await Loader.loadAnimatedModelsFromFile(files)
-      // The animated loader wraps EVERY primitive in an AnimatedModel, even non-skinned ones. The
-      // renderer picks the skinned shader for any AnimatedModel, so a jointless mesh drawn with it throws
-      // GL_INVALID_OPERATION (vertex attribute type mismatch). Unwrap non-skinned results back to a plain
-      // Model so they use the static shader; keep genuinely skinned models as AnimatedModel.
-      parsed = animated.map(p => {
-        const m = p.model as AnimatedModel
-        const transform = (p as any).transform as ImportedTransform | undefined
-        return m.hasSkin ? p : { name: p.name, model: new Model(m.geometry, m.material), transform }
-      })
-    } catch { parsed = [] }
+      // Parsed off the main thread (descriptors only), then assembled here where a GL context exists.
+      const descriptors = await parseGltfFiles(files, true, onProgress)
+      onProgress(0.95, 'Building meshes')
+      const assembled = Loader.assembleGltfModels(descriptors, files)
+      // assembleGltfModels only builds an AnimatedModel for primitives that actually carry joint
+      // bindings, so the old "unwrap every non-skinned AnimatedModel" step is no longer needed — but
+      // the reason it existed still holds: the renderer picks the skinned shader for ANY
+      // AnimatedModel, and a jointless mesh drawn with it throws GL_INVALID_OPERATION.
+      parsed = assembled.map(p => ({
+        name: p.name,
+        model: p.model,
+        transform: p.transform as ImportedTransform | undefined,
+      }))
+    } catch (e) {
+      if (e instanceof ImportCancelled) throw e
+      parsed = []
+    }
   }
-  if (!parsed.length) parsed = await Model.fromFile({ files })
+  if (!parsed.length) {
+    // Assimp path (.obj/.fbx/.glb and anything else non-glTF). Split across the worker boundary:
+    // parseModelFiles runs the WASM conversion off the main thread and returns flat typed arrays,
+    // then assembleAssimpModels builds Geometry/Material here — it creates GL textures, so it cannot
+    // leave the main thread. Falls back to running the identical parse inline if no worker is
+    // available, so behaviour is unchanged in that case, just blocking.
+    const descriptors = await parseModelFiles(files, onProgress)
+    onProgress(0.95, 'Building meshes')
+    const assembled = await Loader.assembleAssimpModels(descriptors, files)
+    parsed = assembled.map(a => ({ name: a.name, model: new Model(a.geometry, a.material) }))
+  }
   if (!parsed.length) throw new Error(`No models parsed from "${name}"`)
 
   const root = new Node(name)

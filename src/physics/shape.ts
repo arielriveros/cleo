@@ -110,12 +110,9 @@ export class Shape {
      * @returns trimesh shape
      */
     public static TriMesh(geometry: Geometry, scale: vec3 = vec3.fromValues(1, 1, 1)): Shape {
-        const vertices = geometry.positions;
-        const indices = geometry.indices;
-        const numVertices: number[] = [];
-        for (const v of vertices) numVertices.push(v[0], v[1], v[2]);
-
-        const trimesh = new Trimesh(numVertices, indices);
+        // cannon's Trimesh wants plain arrays; Geometry stores flat typed arrays, so this is a
+        // straight widening rather than the per-vertex unpack it used to be.
+        const trimesh = new Trimesh(Array.from(geometry.positions), Array.from(geometry.indices));
         trimesh.setScale(new Vec3( scale[0], scale[1], scale[2]));
         return new Shape(trimesh);
     }

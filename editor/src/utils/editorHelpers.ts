@@ -65,13 +65,15 @@ function collectMeshPositions(root: Node, includeSkinned: boolean): number[][] {
       const skinned = model instanceof AnimatedModel && model.hasSkin;
       const positions = skinned && !includeSkinned ? null : model.geometry?.positions;
       if (positions && positions.length) {
+        // Geometry stores positions flat: component c of vertex i is positions[i * 3 + c].
         if (node === root) {
-          for (const p of positions) out.push([p[0], p[1], p[2]]);
+          for (let i = 0; i < positions.length; i += 3)
+            out.push([positions[i], positions[i + 1], positions[i + 2]]);
         } else {
           const rel = Vec.mat4.multiply(Vec.mat4.create(), rootInv, node.worldTransform);
           const v = Vec.vec3.create();
-          for (const p of positions) {
-            Vec.vec3.transformMat4(v, Vec.vec3.fromValues(p[0], p[1], p[2]), rel);
+          for (let i = 0; i < positions.length; i += 3) {
+            Vec.vec3.transformMat4(v, Vec.vec3.fromValues(positions[i], positions[i + 1], positions[i + 2]), rel);
             out.push([v[0], v[1], v[2]]);
           }
         }

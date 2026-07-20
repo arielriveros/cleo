@@ -152,6 +152,63 @@ export type ImportTransform = {
     scale: [number, number, number];
 };
 
+/**
+ * Where an image's pixels come from, without decoding them. `bytes` is transferable; the rest are
+ * references the main thread resolves against `TextureManager`.
+ */
+export type GltfImageSource =
+    | { kind: 'bytes'; bytes: Uint8Array; mime: string }
+    | { kind: 'dataUri'; uri: string }
+    | { kind: 'file'; fileName: string }
+    | { kind: 'path'; uri: string }
+    | { kind: 'missing'; uri?: string };
+
+/** PBR material parameters plus indices into {@link GltfParseResult.images} — no texture ids, no GL. */
+export interface GltfMaterialDescriptor {
+    baseColor: [number, number, number];
+    metallic: number;
+    roughness: number;
+    opacity: number;
+    emissiveFactor: [number, number, number];
+    doubleSided: boolean;
+    transparent: boolean;
+    textures: {
+        baseColorTexture?: number;
+        metallicRoughnessTexture?: number;
+        normalMap?: number;
+        occlusionMap?: number;
+        emissiveMap?: number;
+    };
+}
+
+export interface GltfGeometryDescriptor {
+    positions: Float32Array;
+    normals: Float32Array;
+    uvs: Float32Array;
+    tangents: Float32Array;
+    indices: Uint32Array;
+}
+
+export interface GltfMeshDescriptor {
+    name: string;
+    geometry: GltfGeometryDescriptor;
+    materialIndex: number;
+    transform?: ImportTransform;
+    /** Present only for skinned primitives parsed in animated mode. */
+    jointIndices?: Float32Array;
+    jointWeights?: Float32Array;
+    skinIndex?: number;
+}
+
+/** Everything a glTF yields that needs no GL context. See `GLTFLoader.parseDescriptorsFromFiles`. */
+export interface GltfParseResult {
+    meshes: GltfMeshDescriptor[];
+    materials: GltfMaterialDescriptor[];
+    images: GltfImageSource[];
+    skins: (Skin | undefined)[];
+    animations: Animation[];
+}
+
 export class GLTFLoader {
     // Definite-assignment: every load entry point (loadFromJson/loadFromUrl/loadFromFiles/...) assigns this
     // before anything reads it; the constructor has no data to assign from.
@@ -164,6 +221,9 @@ export class GLTFLoader {
     // re-decoded images) instead of sharing the handful the file actually defines.
     private materialCache = new Map<number, Material>();
     private textureIdCache = new Map<string, string | undefined>();
+    // Descriptor-mode state: images described once each, keyed the same way textureIdCache is.
+    private imageSources: GltfImageSource[] = [];
+    private imageIndexCache = new Map<string, number>();
 
     async loadFromPath(filePath: string): Promise<{name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[]> {
         // Extract base path for relative URI resolution
@@ -392,23 +452,6 @@ export class GLTFLoader {
         }
     }
 
-    private convertToVec3Array(data: Float32Array): [number, number, number][] {
-        const result: [number, number, number][] = [];
-        for (let i = 0; i < data.length; i += 3) {
-            result.push([data[i], data[i + 1], data[i + 2]]);
-        }
-        return result;
-    }
-
-    private convertToVec2Array(data: Float32Array): [number, number][] {
-        const result: [number, number][] = [];
-        for (let i = 0; i < data.length; i += 2) {
-            // Flip V coordinate to convert from GLTF (bottom-left) to WebGL (top-left) convention
-            result.push([data[i], 1.0 - data[i + 1]]);
-        }
-        return result;
-    }
-
     /**
      * Match a GLTF-relative URI (e.g. "textures/foo.png") against the provided files.
      * Robust to folder imports (webkitRelativePath) and plain multi-select (basename only).
@@ -436,6 +479,230 @@ export class GLTFLoader {
         const buffer = this.buffers[bufferView.buffer];
         const byteOffset = bufferView.byteOffset || 0;
         return new Uint8Array(buffer.slice(byteOffset, byteOffset + bufferView.byteLength));
+    }
+
+    // ---- descriptor mode -------------------------------------------------------------------------
+    //
+    // Everything below produces PLAIN DATA: no Texture, no Material, no Geometry, no GL. It is what
+    // lets glTF parsing run in a Web Worker, with `Loader.assembleGltfModels` turning the result into
+    // engine objects on the main thread (where a GL context exists). The eager paths further down
+    // (`parseMeshes`/`parseAnimatedMeshes`) are thin wrappers over the same functions, so the worker
+    // and inline routes cannot drift apart.
+
+    /**
+     * Describe an image without decoding or uploading it — the exact point where the old code called
+     * into `TextureManager` and therefore needed a GL context.
+     *
+     * `file` resolution happens here because only the parser knows how a glTF URI maps onto the
+     * uploaded file list; the descriptor carries the resolved *name* so the main thread can look the
+     * File back up without repeating the matching rules.
+     */
+    private describeImage(image: GLTFImage): GltfImageSource {
+        if (image.bufferView !== undefined)
+            return { kind: 'bytes', bytes: this.bufferViewImageBytes(image), mime: image.mimeType || 'image/jpeg' };
+
+        if (image.uri && image.uri.startsWith('data:'))
+            return { kind: 'dataUri', uri: image.uri };
+
+        if (image.uri) {
+            // File-import flow: a URI that was not uploaded stays unresolved (kind 'missing') rather
+            // than falling through to a relative fetch that is certain to fail.
+            if (this.files.length) {
+                const file = this.findFile(image.uri);
+                return file ? { kind: 'file', fileName: file.name } : { kind: 'missing', uri: image.uri };
+            }
+            return { kind: 'path', uri: this.basePath + image.uri };
+        }
+        return { kind: 'missing' };
+    }
+
+    /**
+     * Index into {@link GltfParseResult.images} for a texture reference, deduped exactly as the eager
+     * path deduped TextureManager ids: many texture/material entries alias few images, and several
+     * image entries can share a URI (Blender does this), so each underlying image is described once.
+     */
+    private imageIndexFor(textureIndex: number): number | undefined {
+        if (!this.gltf.textures || !this.gltf.images) return undefined;
+        const texture = this.gltf.textures[textureIndex];
+        if (!texture || texture.source === undefined) return undefined;
+
+        const image = this.gltf.images[texture.source];
+        const cacheKey = image.uri !== undefined ? `uri:${image.uri}` : `bv:${image.bufferView}`;
+        const cached = this.imageIndexCache.get(cacheKey);
+        if (cached !== undefined) return cached;
+
+        const index = this.imageSources.length;
+        this.imageSources.push(this.describeImage(image));
+        this.imageIndexCache.set(cacheKey, index);
+        return index;
+    }
+
+    /** Material parameters plus image *indices* — no texture ids, so no GL. */
+    private describeMaterial(materialIndex?: number): GltfMaterialDescriptor {
+        if (materialIndex === undefined || !this.gltf.materials)
+            return { baseColor: [1, 1, 1], metallic: 1, roughness: 1, opacity: 1, emissiveFactor: [0, 0, 0], doubleSided: false, transparent: false, textures: {} };
+
+        const gltfMaterial = this.gltf.materials[materialIndex];
+        const pbr = gltfMaterial.pbrMetallicRoughness;
+
+        const textures: GltfMaterialDescriptor['textures'] = {};
+        if (pbr?.baseColorTexture) textures.baseColorTexture = this.imageIndexFor(pbr.baseColorTexture.index);
+        if (pbr?.metallicRoughnessTexture) textures.metallicRoughnessTexture = this.imageIndexFor(pbr.metallicRoughnessTexture.index);
+        if (gltfMaterial.normalTexture) textures.normalMap = this.imageIndexFor(gltfMaterial.normalTexture.index);
+        if (gltfMaterial.occlusionTexture) textures.occlusionMap = this.imageIndexFor(gltfMaterial.occlusionTexture.index);
+        if (gltfMaterial.emissiveTexture) textures.emissiveMap = this.imageIndexFor(gltfMaterial.emissiveTexture.index);
+
+        return {
+            baseColor: pbr?.baseColorFactor
+                ? [pbr.baseColorFactor[0], pbr.baseColorFactor[1], pbr.baseColorFactor[2]]
+                : [1, 1, 1],
+            metallic: pbr?.metallicFactor === undefined ? 1.0 : pbr.metallicFactor,
+            roughness: pbr?.roughnessFactor === undefined ? 1.0 : pbr.roughnessFactor,
+            opacity: pbr?.baseColorFactor ? pbr.baseColorFactor[3] : 1.0,
+            emissiveFactor: gltfMaterial.emissiveFactor
+                ? [gltfMaterial.emissiveFactor[0], gltfMaterial.emissiveFactor[1], gltfMaterial.emissiveFactor[2]]
+                : [0, 0, 0],
+            doubleSided: !!gltfMaterial.doubleSided,
+            transparent: gltfMaterial.alphaMode === 'BLEND',
+            textures,
+        };
+    }
+
+    /** Vertex attributes as flat typed arrays — the shape `Geometry` adopts without copying. */
+    private describeGeometry(primitive: GLTFMesh['primitives'][0]): GltfGeometryDescriptor {
+        const empty = new Float32Array(0);
+        let positions: Float32Array = empty, normals: Float32Array = empty;
+        let uvs: Float32Array = empty, tangents: Float32Array = empty;
+
+        if (primitive.attributes.POSITION !== undefined)
+            positions = this.getAccessorData(primitive.attributes.POSITION) as Float32Array;
+        if (primitive.attributes.NORMAL !== undefined)
+            normals = this.getAccessorData(primitive.attributes.NORMAL) as Float32Array;
+        if (primitive.attributes.TEXCOORD_0 !== undefined) {
+            const src = this.getAccessorData(primitive.attributes.TEXCOORD_0) as Float32Array;
+            // Flip V: glTF UVs have a bottom-left origin, the engine samples top-left. Copied rather
+            // than adopted in place because the accessor data may be a view onto a shared buffer.
+            uvs = new Float32Array(src.length);
+            for (let i = 0; i < src.length; i += 2) {
+                uvs[i] = src[i];
+                uvs[i + 1] = 1.0 - src[i + 1];
+            }
+        }
+
+        // glTF tangents are vec4 (xyz + handedness); Geometry stores vec3, so drop w.
+        if (primitive.attributes.TANGENT !== undefined) {
+            const src = this.getAccessorData(primitive.attributes.TANGENT) as Float32Array;
+            tangents = new Float32Array((src.length / 4) * 3);
+            for (let i = 0, o = 0; i < src.length; i += 4, o += 3) {
+                tangents[o] = src[i]; tangents[o + 1] = src[i + 1]; tangents[o + 2] = src[i + 2];
+            }
+        }
+
+        let indices: Uint32Array;
+        if (primitive.indices !== undefined) {
+            const data = this.getAccessorData(primitive.indices);
+            indices = data instanceof Uint32Array ? data : Uint32Array.from(data);
+        } else {
+            // Non-indexed geometry: consecutive triples form triangles.
+            const count = positions.length / 3;
+            indices = new Uint32Array(count);
+            for (let i = 0; i < count; i++) indices[i] = i;
+        }
+
+        return { positions, normals, uvs, tangents, indices };
+    }
+
+    /**
+     * Parse uploaded glTF files into plain data. **Pure: no DOM, no WebGL** — safe to run in a worker.
+     * Pair with `Loader.assembleGltfModels`.
+     *
+     * `animated` additionally extracts skins, animations and per-vertex joint bindings; skipping it for
+     * a static import avoids paying for skeleton parsing that would be discarded.
+     */
+    public async parseDescriptorsFromFiles(files: File[], animated: boolean): Promise<GltfParseResult> {
+        this.files = files;
+        // .gltf only, matching loadFromFiles: a .glb is binary (JSON.parse of its text would fail) and
+        // is routed through the assimp path instead.
+        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
+        if (!gltfFile) throw new Error('No GLTF file found in the uploaded files');
+
+        this.gltf = JSON.parse(await gltfFile.text());
+        await this.loadBuffersFromFiles();
+        return this.buildDescriptors(animated);
+    }
+
+    private buildDescriptors(animated: boolean): GltfParseResult {
+        this.imageSources = [];
+        this.imageIndexCache = new Map();
+
+        const materials: GltfMaterialDescriptor[] = [];
+        const materialIndexByGltfIndex = new Map<number, number>();
+        const materialSlot = (gltfIndex?: number): number => {
+            const key = gltfIndex === undefined ? -1 : gltfIndex;
+            const existing = materialIndexByGltfIndex.get(key);
+            if (existing !== undefined) return existing;
+            const slot = materials.length;
+            materials.push(this.describeMaterial(gltfIndex));
+            materialIndexByGltfIndex.set(key, slot);
+            return slot;
+        };
+
+        const skins: (Skin | null)[] = [];
+        const animations: Animation[] = [];
+        if (animated) {
+            if (this.gltf.skins) for (const s of this.gltf.skins) skins.push(this.parseSkin(s));
+            if (this.gltf.animations) for (const a of this.gltf.animations) animations.push(this.parseAnimation(a));
+        }
+
+        const meshes: GltfMeshDescriptor[] = [];
+        if (this.gltf.meshes) {
+            for (const instance of this.getMeshInstances()) {
+                const mesh = this.gltf.meshes[instance.meshIndex];
+                if (!mesh) continue;
+                for (const primitive of mesh.primitives) {
+                    const descriptor: GltfMeshDescriptor = {
+                        name: instance.name || mesh.name || (animated ? 'AnimatedMesh' : 'Mesh'),
+                        geometry: this.describeGeometry(primitive),
+                        materialIndex: materialSlot(primitive.material),
+                        transform: instance.transform,
+                    };
+
+                    if (animated && primitive.attributes.JOINTS_0 !== undefined && primitive.attributes.WEIGHTS_0 !== undefined) {
+                        const jointData = this.getAccessorData(primitive.attributes.JOINTS_0);
+                        // Joint indices ride in a Float32Array (that is what the skinned shader binds),
+                        // so integer accessor types are widened and float ones floored.
+                        const jointIndices = new Float32Array(jointData.length);
+                        for (let i = 0; i < jointData.length; i++)
+                            jointIndices[i] = jointData instanceof Float32Array ? Math.floor(jointData[i]) : jointData[i];
+
+                        descriptor.jointIndices = jointIndices;
+                        descriptor.jointWeights = this.getAccessorData(primitive.attributes.WEIGHTS_0) as Float32Array;
+                        // Skins are referenced by the node that instantiates the mesh; fall back to the
+                        // first skin when the node does not say.
+                        descriptor.skinIndex = instance.skinIndex !== undefined ? instance.skinIndex : 0;
+                    }
+
+                    meshes.push(descriptor);
+                }
+            }
+        }
+
+        return { meshes, materials, images: this.imageSources, skins: skins.map(s => s ?? undefined), animations };
+    }
+
+    /** Buffers in `result` that can be transferred rather than copied across a worker boundary. */
+    public static parseResultTransferables(result: GltfParseResult): ArrayBuffer[] {
+        const out: ArrayBuffer[] = [];
+        const add = (a?: { buffer: ArrayBufferLike; byteLength: number }) => {
+            if (a && a.byteLength > 0) out.push(a.buffer as ArrayBuffer);
+        };
+        for (const m of result.meshes) {
+            add(m.geometry.positions); add(m.geometry.normals); add(m.geometry.uvs);
+            add(m.geometry.tangents); add(m.geometry.indices);
+            add(m.jointIndices); add(m.jointWeights);
+        }
+        for (const img of result.images) if (img.kind === 'bytes') add(img.bytes);
+        return out;
     }
 
     /**
@@ -578,53 +845,14 @@ export class GLTFLoader {
         return result;
     }
 
+    /**
+     * Eager-path geometry. Delegates to {@link describeGeometry} so there is a single implementation
+     * of glTF attribute decoding shared with the worker route — and so the flat typed arrays are
+     * adopted straight into `Geometry` rather than being exploded into per-vertex arrays first.
+     */
     private async createGeometry(primitive: GLTFMesh['primitives'][0]): Promise<Geometry> {
-        // Assign (never push(...spread)) the converted arrays: spreading 65k+ vertices as call
-        // arguments overflows the JS engine's argument limit and throws a RangeError on large meshes.
-        let positions: [number, number, number][] = [];
-        let normals: [number, number, number][] = [];
-        let uvs: [number, number][] = [];
-        const tangents: [number, number, number][] = [];
-        let indices: number[] = [];
-
-        // Load positions
-        if (primitive.attributes.POSITION !== undefined) {
-            const positionData = this.getAccessorData(primitive.attributes.POSITION) as Float32Array;
-            positions = this.convertToVec3Array(positionData);
-        }
-
-        // Load normals
-        if (primitive.attributes.NORMAL !== undefined) {
-            const normalData = this.getAccessorData(primitive.attributes.NORMAL) as Float32Array;
-            normals = this.convertToVec3Array(normalData);
-        }
-
-        // Load texture coordinates
-        if (primitive.attributes.TEXCOORD_0 !== undefined) {
-            const uvData = this.getAccessorData(primitive.attributes.TEXCOORD_0) as Float32Array;
-            uvs = this.convertToVec2Array(uvData);
-        }
-
-        // Load tangents
-        if (primitive.attributes.TANGENT !== undefined) {
-            const tangentData = this.getAccessorData(primitive.attributes.TANGENT) as Float32Array;
-            for (let i = 0; i < tangentData.length; i += 4) {
-                tangents.push([tangentData[i], tangentData[i + 1], tangentData[i + 2]]);
-            }
-        }
-
-        // Load indices
-        if (primitive.indices !== undefined) {
-            const indexData = this.getAccessorData(primitive.indices);
-            indices = Array.from(indexData);
-        } else {
-            // Generate indices for non-indexed geometry
-            for (let i = 0; i < positions.length; i++) {
-                indices.push(i);
-            }
-        }
-
-        return new Geometry(positions, normals, uvs, tangents, [], indices);
+        const g = this.describeGeometry(primitive);
+        return new Geometry(g.positions, g.normals, g.uvs, g.tangents, [], g.indices);
     }
 
     private async createMaterial(materialIndex?: number): Promise<Material> {

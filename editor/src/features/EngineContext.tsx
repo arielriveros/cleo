@@ -25,6 +25,7 @@ import {
   setThumbnailDirtySuppressor,
 } from "../utils/modelThumbnails";
 import { parseBundleToRoot } from "../utils/modelImport";
+import { cancelAllImports, ImportCancelled } from "../workers/importClient";
 import { detectMissingTextures } from "../utils/textureRefs";
 
 // A mesh awaiting user review in the import modal (parsed but not yet committed to the library).
@@ -2107,7 +2108,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       steps: bundles.map(b => ({ name: b.name, status: 'pending' as StepStatus, detail: 'Queued' })),
       cancellable: true,
       // Settling the review modal lets a loop parked on it reach the cancel check below.
-      onCancel: () => { if (pendingResolverRef.current) resolveModelImport(null); },
+      // cancelAllImports additionally terminates the worker, which is the only way to stop a parse
+      // that is already running — assimp's conversion is one uninterruptible WASM call, so before the
+      // worker existed Cancel could only take effect between models.
+      onCancel: () => {
+        cancelAllImports();
+        if (pendingResolverRef.current) resolveModelImport(null);
+      },
     });
 
     // Map an import stage onto the store's generic step. One place, so the labels and the bar can't drift.
@@ -2135,8 +2142,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // Parse for review (registers textures; broken slots for any files missing from the upload).
         setStage(i, 'parsing', `Reading ${bundle.files.length} file${bundle.files.length === 1 ? '' : 's'}`);
         let parsedResult: { root: Node; children: ModelNode[] };
-        try { parsedResult = await parseBundleToRoot(bundle.files, bundle.name); }
+        try {
+          parsedResult = await parseBundleToRoot(bundle.files, bundle.name,
+            (_fraction, stage) => setStage(i, 'parsing', stage || undefined));
+        }
         catch (e) {
+          // A cancel terminates the worker, which rejects whatever it was parsing — report that as
+          // cancelled rather than as a failure, since it is exactly what the user asked for.
+          if (e instanceof ImportCancelled || task.cancelled) {
+            setStage(i, 'skipped', 'Cancelled');
+            continue;
+          }
           Logger.warn(`${e}`, 'Editor');
           setStage(i, 'failed', undefined, `${e}`);
           continue;

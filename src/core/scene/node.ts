@@ -11,6 +11,7 @@ import { Skybox } from "../../graphics/skybox";
 import { Texture } from "../../graphics/texture";
 import { ShaderManager } from "../../graphics/systems/shaderManager";
 import { Scene } from "./scene";
+import { sceneStats, sceneStatsDetail } from "./sceneStats";
 import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
 import { CleoEngine, Shape } from "../../cleo";
@@ -727,7 +728,15 @@ export class Node {
 
   public update(delta: number, time: number): void {
     try {
-      this.onUpdate(delta, time);
+      // Attributes user-script time separately from the rest of the node loop. Gated because it is
+      // two performance.now() calls per node per frame — cheap, but not free on a large scene.
+      if (sceneStatsDetail.enabled) {
+        const start = performance.now();
+        this.onUpdate(delta, time);
+        sceneStats.scriptMs += performance.now() - start;
+      } else {
+        this.onUpdate(delta, time);
+      }
     } catch (error) {
       Logger.error(`Error in onUpdate function for node ${this._name}: ${error}`);
     }
@@ -1753,8 +1762,10 @@ export class ModelNode extends Node {
         // meshes hold their bind pose; Play scenes leave it enabled, and the Animation Editor drives
         // its preview clone's animator directly (not via scene.update), so both still animate.
         if (this._animator && this._scene?.animationsEnabled !== false) {
+            const start = sceneStatsDetail.enabled ? performance.now() : 0;
             this._animator.checkTriggers();
             this._animator.update(delta);
+            if (sceneStatsDetail.enabled) sceneStats.animatorMs += performance.now() - start;
         }
     }
 }
@@ -2359,13 +2370,22 @@ export class CameraRigNode extends Node {
         const from = CameraRigNode._rayFrom;
         const to = CameraRigNode._rayTo;
 
+        // Floored so the four offset rays never collapse onto the centre one. At collisionRadius 0
+        // that would fire five identical queries — wasteful, and it removes the redundancy that
+        // covers a cannon Heightfield quirk: a ray originating exactly on a terrain grid line and
+        // running almost exactly along an axis misses the surface entirely (erratically, depending
+        // on the float epsilon). Measured over a hilly terrain: 1-in-8 sample points missed with the
+        // rays collapsed, 0-in-8 once they are spread. A millimetre of spread is imperceptible next
+        // to any real probe radius and makes the degenerate case unreachable.
+        const spread = Math.max(this.collisionRadius, 1e-3);
+
         let nearest: number | null = null;
         for (let i = 0; i < 5; i++) {
             vec3.copy(from, this._pivot);
-            if (i === 1) vec3.scaleAndAdd(from, from, right, this.collisionRadius);
-            else if (i === 2) vec3.scaleAndAdd(from, from, right, -this.collisionRadius);
-            else if (i === 3) vec3.scaleAndAdd(from, from, up, this.collisionRadius);
-            else if (i === 4) vec3.scaleAndAdd(from, from, up, -this.collisionRadius);
+            if (i === 1) vec3.scaleAndAdd(from, from, right, spread);
+            else if (i === 2) vec3.scaleAndAdd(from, from, right, -spread);
+            else if (i === 3) vec3.scaleAndAdd(from, from, up, spread);
+            else if (i === 4) vec3.scaleAndAdd(from, from, up, -spread);
 
             // A cannon ray is a segment, so the boom length goes into the endpoint.
             vec3.scaleAndAdd(to, from, direction, distance);

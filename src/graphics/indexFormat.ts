@@ -34,7 +34,7 @@ export const GL_UNSIGNED_INT = 0x1405;
  * `RangeError: too many function arguments` somewhere around 125k elements, which is precisely the
  * large-mesh case this module is here to support. Do not "simplify" it back.
  */
-export function maxIndex(indices: number[]): number {
+export function maxIndex(indices: ArrayLike<number>): number {
     let max = -1;
     for (let i = 0; i < indices.length; i++)
         if (indices[i] > max) max = indices[i];
@@ -42,7 +42,7 @@ export function maxIndex(indices: number[]): number {
 }
 
 /** True when `indices` cannot be represented as 16-bit and must be uploaded as `UNSIGNED_INT`. */
-export function needs32Bit(indices: number[]): boolean {
+export function needs32Bit(indices: ArrayLike<number>): boolean {
     return maxIndex(indices) >= INDEX_16_LIMIT;
 }
 
@@ -56,13 +56,19 @@ export function needs32Bit(indices: number[]): boolean {
  *         — so bad input currently corrupts geometry with no diagnostic. This runs once per upload, not
  *         per frame, so the scan is free in context.
  */
-export function createIndexArray(indices: number[]): Uint16Array | Uint32Array {
-    for (let i = 0; i < indices.length; i++) {
-        const v = indices[i];
-        if (!Number.isInteger(v) || v < 0)
-            throw new Error(`createIndexArray: index ${i} is ${v}; expected a non-negative integer.`);
+export function createIndexArray(indices: ArrayLike<number>): Uint16Array | Uint32Array {
+    // A Uint32Array cannot hold a negative, fractional or NaN index by construction, so the scan is
+    // only meaningful for plain arrays — and skipping it matters because Geometry now stores indices
+    // as Uint32Array and this runs on every upload.
+    if (!(indices instanceof Uint32Array)) {
+        for (let i = 0; i < indices.length; i++) {
+            const v = indices[i];
+            if (!Number.isInteger(v) || v < 0)
+                throw new Error(`createIndexArray: index ${i} is ${v}; expected a non-negative integer.`);
+        }
     }
-    return needs32Bit(indices) ? new Uint32Array(indices) : new Uint16Array(indices);
+    if (!needs32Bit(indices)) return new Uint16Array(indices);
+    return indices instanceof Uint32Array ? indices : new Uint32Array(indices);
 }
 
 /** The GL element type matching an array from {@link createIndexArray}. */
