@@ -83,25 +83,14 @@ async function pickDirectory(win, title) {
   return res.filePaths[0];
 }
 
-// Write the core game files (index.html + game.js + game.json) into `dir`, plus any loose asset
-// files (present only when publishing with "embed assets" unchecked).
+// Write the four files that make up a published game into `dir`. All game data — scenes, meshes and
+// textures — is in the single binary game.bin; only scripts are a separate file.
 async function writeWebFiles(dir, files) {
   await fsp.mkdir(dir, { recursive: true });
   await fsp.writeFile(path.join(dir, 'index.html'), files.indexHtml, 'utf-8');
   await fsp.writeFile(path.join(dir, 'game.js'), files.gameJs, 'utf-8');
   await fsp.writeFile(path.join(dir, 'game.scripts.js'), files.scriptsJs || 'window.CLEO_GAME_SCRIPTS = {};\n', 'utf-8');
-  await fsp.writeFile(path.join(dir, 'game.json'), files.gameJson, 'utf-8');
-  await writeAssets(dir, files.assets);
-}
-
-// Decode base64 asset payloads to binary files under `dir` (e.g. dir/assets/asset_0.png).
-async function writeAssets(dir, assets) {
-  for (const a of assets || []) {
-    const dest = path.join(dir, a.path);
-    if (!dest.startsWith(dir)) continue; // guard against path escapes
-    await fsp.mkdir(path.dirname(dest), { recursive: true });
-    await fsp.writeFile(dest, Buffer.from(a.base64, 'base64'));
-  }
+  await fsp.writeFile(path.join(dir, 'game.bin'), Buffer.from(files.gameBin));
 }
 
 ipcMain.handle('publish:web', async (event, files) => {
@@ -127,7 +116,7 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
     const dir = await pickDirectory(win, 'Choose an empty folder for the desktop build');
     if (!dir) return { ok: false, canceled: true };
 
-    // 1) The web trio + Electron scaffold. preload injects game.json so it runs from file://.
+    // 1) The web files + Electron scaffold. preload injects game.bin so it runs from file://.
     await writeWebFiles(dir, files);
     const electronVersion = require('electron/package.json').version;
     const name = path.basename(dir) || 'cleo-game';

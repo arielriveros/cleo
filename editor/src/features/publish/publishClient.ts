@@ -1,10 +1,10 @@
 import { Logger } from 'cleo';
 import { extractScripts, buildScriptsSource } from './extractScripts';
 import { runPublishJob } from '../../workers/workerClient';
-import type { PublishFiles, PublishOptions, PlayerTemplates } from '../../workers/projectJobs';
+import type { PublishFiles, PlayerTemplates } from '../../workers/projectJobs';
 
 // Re-exported so callers keep importing the publish types from the publish module.
-export type { PublishFiles, PublishOptions } from '../../workers/projectJobs';
+export type { PublishFiles } from '../../workers/projectJobs';
 
 export interface PublishResult {
   ok: boolean;
@@ -46,33 +46,33 @@ async function loadPlayerTemplates(): Promise<PlayerTemplates> {
  *
  * Split of labour: script *extraction* happens here, because wrapping each script needs the engine's
  * buildFactoryBody (see extractScripts.ts) and it is cheap. Everything genuinely costly — obfuscating
- * that source, externalizing base64 images, deduping geometry, JSON.stringify of the whole scene and
- * (optionally) zipping — runs off-thread. Note `data` is cloned into the worker, so unlike the old
- * in-place path the caller's object is no longer mutated.
+ * that source, deduping geometry, packing the whole game into game.bin and (optionally) zipping —
+ * runs off-thread. Note `data` is cloned into the worker, so although the packer mutates its copy,
+ * the caller's object is untouched.
  */
-async function assemble(data: any, options: PublishOptions | undefined, zip: boolean) {
+async function assemble(data: any, zip: boolean) {
   const templates = await loadPlayerTemplates();
   const { scripts } = extractScripts(data); // strips node scripts out of `data`
   const scriptsSource = buildScriptsSource(scripts);
 
-  const output = await runPublishJob({ data, scriptsSource, templates, options, zip });
+  const output = await runPublishJob({ data, scriptsSource, templates, zip });
   for (const warning of output.warnings) Logger.warn(warning, 'Publish');
   return output;
 }
 
 /** Build the published file set (used by the desktop bridge, which writes them itself). */
-export async function assemblePublishFiles(data: any, options?: PublishOptions): Promise<PublishFiles> {
-  const { files } = await assemble(data, options, false);
+export async function assemblePublishFiles(data: any): Promise<PublishFiles> {
+  const { files } = await assemble(data, false);
   if (!files) throw new Error('Publish produced no files');
   return files;
 }
 
 // Web publish. Desktop -> native folder write. Browser -> .zip download.
-export async function publishWeb(data: any, options?: PublishOptions, name = 'cleo-game'): Promise<string> {
+export async function publishWeb(data: any, name = 'cleo-game'): Promise<string> {
   const bridge = getDesktopBridge();
 
   if (bridge) {
-    const files = await assemblePublishFiles(data, options);
+    const files = await assemblePublishFiles(data);
     const res = await bridge.publishWeb(files);
     if (res.canceled) return 'Publish canceled';
     if (!res.ok) throw new Error(res.error || 'Publish failed');
@@ -80,7 +80,7 @@ export async function publishWeb(data: any, options?: PublishOptions, name = 'cl
   }
 
   // Browser fallback: the worker also zips, so the main thread only wraps the bytes and downloads.
-  const { zip } = await assemble(data, options, true);
+  const { zip } = await assemble(data, true);
   if (!zip) throw new Error('Publish produced no archive');
 
   const blob = new Blob([zip], { type: 'application/zip' });
@@ -97,11 +97,11 @@ export async function publishWeb(data: any, options?: PublishOptions, name = 'cl
 // a native installer via electron-builder.
 export async function publishDesktop(
   data: any,
-  options: { installer: boolean } & PublishOptions,
+  options: { installer: boolean },
 ): Promise<string> {
   const bridge = getDesktopBridge();
   if (!bridge) throw new Error('Desktop publishing is only available in the Cleo desktop app.');
-  const files = await assemblePublishFiles(data, options);
+  const files = await assemblePublishFiles(data);
   const res = await bridge.publishDesktop(files, { installer: options.installer });
   if (res.canceled) return 'Publish canceled';
   if (!res.ok) throw new Error(res.error || 'Publish failed');

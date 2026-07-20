@@ -1,3 +1,5 @@
+import { Logger } from "../../core/logger";
+
 const DIFFUSE_TEXTURE = 1;
 const SPECULAR_TEXTURE = 2;
 const AMBIENT_TEXTURE = 3;
@@ -41,7 +43,7 @@ async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: 
 
         // Check if the conversion succeeded
         if (!result.IsSuccess() || result.FileCount() == 0) {
-            console.error(result.GetErrorCode());
+            Logger.print('error', [result.GetErrorCode()], 'Import');
             throw new Error('Conversion failed');
         }
 
@@ -61,7 +63,7 @@ async function loadAssimpModel(urls: string[], options = {}): Promise<{ meshes: 
         return output;
     } 
     catch (error) {
-        console.error(error);
+        Logger.print('error', [error], 'Import');
         throw error;
     }
 }
@@ -83,7 +85,7 @@ async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[],
 
         // Check if the conversion succeeded
         if (!result.IsSuccess() || result.FileCount() == 0) {
-            console.error(result.GetErrorCode());
+            Logger.print('error', [result.GetErrorCode()], 'Import');
             throw new Error('Conversion failed');
         }
 
@@ -103,7 +105,7 @@ async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[],
         return output;
     }
     catch (error) {
-        console.error(error);
+        Logger.print('error', [error], 'Import');
         throw error;
     }
 }
@@ -125,7 +127,7 @@ async function convertToGltf2FromFiles(files: File[]): Promise<File[]> {
 
     let result = ajs.ConvertFileList(fileList, 'gltf2');
     if (!result.IsSuccess() || result.FileCount() == 0) {
-        console.error('Assimp glTF2 conversion error code:', result.GetErrorCode?.());
+        Logger.print('error', ['Assimp glTF2 conversion error code:', result.GetErrorCode?.()], 'Import');
         throw new Error('Failed to convert model to glTF2 (assimp)');
     }
 
@@ -245,7 +247,7 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
                             atob(textureData.pcData.substring(0, 100));
                             return base64String;
                         } catch (e) {
-                            console.error('Invalid base64 data:', e);
+                            Logger.print('error', ['Invalid base64 data:', e], 'Import');
                             return undefined;
                         }
                     }

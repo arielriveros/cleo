@@ -462,19 +462,19 @@ export class Animator {
                 const nodeIndex = this._skin.joints[jointIndex].nodeIndex;
                 this._nodeIndexToJointIndex.set(nodeIndex, jointIndex);
             }
-            console.log(`Animator initialized with ${this._skin.joints.length} joints`);
-            console.log('Joint node indices:', Array.from(this._nodeIndexToJointIndex.keys()));
+            Logger.info(`Animator initialized with ${this._skin.joints.length} joints`, 'Animation');
+            Logger.print('info', ['Joint node indices:', Array.from(this._nodeIndexToJointIndex.keys())], 'Animation');
         }
-        
+
         // If model has animations, set the first one as default
         if (animatedModel.animations.length > 0) {
-            console.log(`Found ${animatedModel.animations.length} animations`);
+            Logger.info(`Found ${animatedModel.animations.length} animations`, 'Animation');
             animatedModel.animations.forEach((anim, i) => {
-                console.log(`  Animation ${i}: "${anim.name}" with ${anim.channels.length} channels`);
+                Logger.info(`  Animation ${i}: "${anim.name}" with ${anim.channels.length} channels`, 'Animation');
             });
             this.playAnimation(0);
         } else {
-            console.warn('AnimatedModel has no animations');
+            Logger.warn('AnimatedModel has no animations', 'Animation');
         }
     }
     
@@ -483,7 +483,7 @@ export class Animator {
      */
     public playAnimation(animationIndex: number, loop: boolean = true, blend: boolean = true): void {
         if (!this._animatedModel || animationIndex < 0 || animationIndex >= this._animatedModel.animations.length) {
-            console.warn(`Animation index ${animationIndex} out of range`);
+            Logger.warn(`Animation index ${animationIndex} out of range`, 'Animation');
             return;
         }
         
@@ -533,7 +533,7 @@ export class Animator {
         
         const animationIndex = this._animatedModel.animations.findIndex(anim => anim.name === name);
         if (animationIndex === -1) {
-            console.warn(`Animation "${name}" not found`);
+            Logger.warn(`Animation "${name}" not found`, 'Animation');
             return;
         }
         
@@ -569,9 +569,9 @@ export class Animator {
             }
         }
         
-        console.log(`Built bone map with ${this._bones.size} bones for animation "${animation.name}"`);
-        console.log(`Skin has ${this._skin?.joints.length || 0} joints`);
-        console.log('Animation target node indices:', Array.from(this._bones.values()).map(b => b.id));
+        Logger.info(`Built bone map with ${this._bones.size} bones for animation "${animation.name}"`, 'Animation');
+        Logger.info(`Skin has ${this._skin?.joints.length || 0} joints`, 'Animation');
+        Logger.print('info', ['Animation target node indices:', Array.from(this._bones.values()).map(b => b.id)], 'Animation');
         
         // Log which joints have animation
         if (this._skin) {
@@ -583,13 +583,13 @@ export class Animator {
                     animatedCount++;
                 }
             }
-            console.log(`${animatedCount} out of ${this._skin.joints.length} joints have animation data`);
-            
+            Logger.info(`${animatedCount} out of ${this._skin.joints.length} joints have animation data`, 'Animation');
+
             // If no joints have animation data, this animation is likely invalid or targets the wrong nodes
             if (animatedCount === 0) {
-                console.warn(`⚠️ Animation "${animation.name}" has no channels targeting the skin joints. This animation may not work correctly.`);
-                console.warn(`Animation channels target nodes:`, animation.channels.map(c => c.targetNodeIndex));
-                console.warn(`Skin joint nodes:`, this._skin.joints.map(j => j.nodeIndex));
+                Logger.warn(`⚠️ Animation "${animation.name}" has no channels targeting the skin joints. This animation may not work correctly.`, 'Animation');
+                Logger.print('warn', ['Animation channels target nodes:', animation.channels.map(c => c.targetNodeIndex)], 'Animation');
+                Logger.print('warn', ['Skin joint nodes:', this._skin.joints.map(j => j.nodeIndex)], 'Animation');
             }
         }
     }
@@ -1464,7 +1464,7 @@ export class Animator {
             const fn = new Function('context', `with(context) { return ${condition}; }`);
             return Boolean(fn(context));
         } catch (error) {
-            console.warn(`Failed to evaluate animation condition: ${condition}`, error);
+            Logger.print('warn', [`Failed to evaluate animation condition: ${condition}`, error], 'Animation');
             return false;
         }
     }

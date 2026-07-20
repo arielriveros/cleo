@@ -6,6 +6,7 @@ import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
 import RendererOptions from "./renderer/RendererOptions";
 import RendererStats from "./renderer/RendererStats";
+import DebugOverlay from "./logger/DebugOverlay";
 import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
 import AnimationPlayer from "./animation/AnimationPlayer";
 import { useStateMachine } from "./animation/StateMachineContext";
@@ -389,6 +390,8 @@ export default function EngineViewport() {
     return (
         <div ref={viewportRef} onDragOver={onViewportDragOver} onDrop={onViewportDrop}
              onContextMenu={(e) => e.preventDefault()}>
+            {/* Logger.debug(...) toasts, bottom-left, in every editor mode. Self-expires after 10s. */}
+            <DebugOverlay />
             {/* Floating top-right overlays: the gizmo-mode toggle (where the gizmo is active) sits to the
                 left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead. */}
             <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>

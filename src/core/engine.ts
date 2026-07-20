@@ -3,7 +3,7 @@ import { InputManager } from "../input/inputManager";
 import { PhysicsSystem } from "../physics/physicsSystem";
 import { Logger } from "./logger";
 import { Scene } from "./scene/scene";
-import { EventEmitter } from 'events';
+import { engineEventBus } from "./eventBus";
 
 interface CleoConfig {
   graphics?: {
@@ -61,7 +61,9 @@ export class CleoEngine {
   public onPreInitialize: () => Promise<void>;
   public onPostInitialize: () => void;
 
-  public static eventEmitter = new EventEmitter();
+  // The engine-wide event bus lives in its own module (see eventBus.ts) so lightweight producers like
+  // Logger can emit without importing the renderer graph; this is the same object, unchanged for consumers.
+  public static eventEmitter = engineEventBus;
 
   // The one engine running in this process — the editor reuses a single instance for both the edit-time
   // viewport and Play mode, and a published build only ever constructs one. Lets a script-facing facade

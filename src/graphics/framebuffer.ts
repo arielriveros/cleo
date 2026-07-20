@@ -1,5 +1,6 @@
 import { gl } from './renderer';
 import { Texture, TextureConfig } from './texture';
+import { Logger } from '../core/logger';
 
 interface FrameBufferOptions {
     usage?: 'color' | 'depth';
@@ -67,7 +68,7 @@ export class Framebuffer {
 
         const framebufferStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
         if (framebufferStatus !== gl.FRAMEBUFFER_COMPLETE) {
-            console.error('Framebuffer is not complete:', framebufferStatus);
+            Logger.print('error', ['Framebuffer is not complete:', framebufferStatus], 'Renderer');
         }
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);

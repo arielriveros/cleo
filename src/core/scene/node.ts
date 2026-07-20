@@ -852,7 +852,7 @@ export class Node {
             break;
           }
           default:
-            console.error(`Shape type ${shape.type} not supported`);
+            Logger.error(`Shape type ${shape.type} not supported`, 'Physics');
         }
       }
     }

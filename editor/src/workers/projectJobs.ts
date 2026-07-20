@@ -11,23 +11,21 @@
 //    cheap, so the caller runs it and passes the resulting source string in for obfuscation.
 
 import JSZip from 'jszip';
-import { externalizeAssets, ExternalAsset } from '../features/publish/externalizeAssets';
-import { packAssets } from '../features/publish/packAssets';
+import { packGameBin } from '../features/publish/pack';
 import { obfuscateScripts } from '../features/publish/obfuscate';
 import { idbSet } from '../utils/idb';
 import { BundleData, BundleManifest, BundleTexture, BundleTextureIndexRow, BUNDLE_PATHS } from '../utils/bundle';
 
-// The files that make up a published game.
+// The files that make up a published game: index.html + game.js + game.scripts.js + game.bin.
+//
+// All game DATA lives in the single binary (scenes, geometry, textures, config — see publish/pack.ts).
+// Scripts stay a separate real <script> file so they load as native functions with no eval, which is
+// what keeps obfuscation and CSP behaviour unchanged.
 export interface PublishFiles {
   indexHtml: string;
-  gameJs: string;    // the player+engine bundle (static)
-  gameJson: string;  // serialized game data (scene + `assets` table; no scripts)
-  scriptsJs: string; // per-game scripts as real functions (game.scripts.js)
-  assets?: ExternalAsset[]; // loose image files (only when publishing with embedAssets=false)
-}
-
-export interface PublishOptions {
-  embedAssets?: boolean; // default true — false extracts images to loose assets/ files
+  gameJs: string;      // the player+engine bundle (static)
+  gameBin: ArrayBuffer; // all game data, binary-packed
+  scriptsJs: string;   // per-game scripts as real functions (game.scripts.js)
 }
 
 /** Player templates are fetched same-origin on the main thread and handed to the job. */
@@ -45,7 +43,6 @@ export type ProjectJob =
       data: any;
       scriptsSource: string;
       templates: PlayerTemplates;
-      options?: PublishOptions;
       /** When true the job also zips the result and returns only the archive bytes. */
       zip: boolean;
     }
@@ -58,8 +55,8 @@ export type ProjectJobResult =
   | { kind: 'save' }
   | { kind: 'stringify'; bytes: ArrayBuffer }
   | { kind: 'parse'; data: any }
-  // `files` is omitted when zipping (the archive already contains them — no point cloning the whole
-  // game.json string back across the thread boundary just to throw it away).
+  // `files` is omitted when zipping (the archive already contains them — no point sending the whole
+  // game.bin back across the thread boundary just to throw it away).
   | { kind: 'publish'; files?: PublishFiles; zip?: ArrayBuffer; warnings: string[] }
   | { kind: 'exportBundle'; zip: ArrayBuffer }
   | { kind: 'importBundle'; bundle: BundleData };
@@ -72,18 +69,11 @@ export interface JobOutcome {
 
 async function runPublish(job: Extract<ProjectJob, { kind: 'publish' }>): Promise<JobOutcome> {
   const warnings: string[] = [];
-  let data = job.data;
 
-  // Transform order: optional image externalization -> geometry/asset packing. Scripts were already
-  // stripped from `data` by the caller (extractScripts) before it was sent over.
-  let assets: ExternalAsset[] | undefined;
-  if (job.options && job.options.embedAssets === false) {
-    const result = externalizeAssets(data);
-    data = result.data;
-    assets = result.assets;
-  }
-
-  packAssets(data); // dedupe geometry into data.assets.geometries + move textures under data.assets
+  // Scripts were already stripped from `data` by the caller (extractScripts) before it was sent over,
+  // so everything left is data and goes into the binary. packGameBin mutates `data` (geometry -> refs),
+  // which is safe: it is the worker's own structured-clone copy.
+  const { buffer: gameBin } = packGameBin(job.data);
 
   const { code: scriptsJs, warning } = await obfuscateScripts(job.scriptsSource);
   if (warning) warnings.push(warning);
@@ -91,19 +81,18 @@ async function runPublish(job: Extract<ProjectJob, { kind: 'publish' }>): Promis
   const files: PublishFiles = {
     indexHtml: job.templates.indexHtml,
     gameJs: job.templates.gameJs,
-    gameJson: JSON.stringify(data),
+    gameBin,
     scriptsJs,
-    assets,
   };
 
-  if (!job.zip) return { result: { kind: 'publish', files, warnings }, transfer: [] };
+  // Transfer the packed bytes rather than cloning them — this is the largest object in a publish.
+  if (!job.zip) return { result: { kind: 'publish', files, warnings }, transfer: [gameBin] };
 
   const archive = new JSZip();
   archive.file('index.html', files.indexHtml);
   archive.file('game.js', files.gameJs);
   archive.file('game.scripts.js', files.scriptsJs);
-  archive.file('game.json', files.gameJson);
-  for (const a of files.assets || []) archive.file(a.path, a.base64, { base64: true });
+  archive.file('game.bin', gameBin);
   const zipped = await archive.generateAsync({ type: 'arraybuffer' });
 
   return { result: { kind: 'publish', zip: zipped, warnings }, transfer: [zipped] };

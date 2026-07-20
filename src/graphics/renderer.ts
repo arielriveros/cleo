@@ -2745,7 +2745,7 @@ export class Renderer {
                 setLights(shaderName, node);
             } catch (error) {
                 // Shader may not have lighting uniforms (e.g., basic shader)
-                console.warn(`Could not set lighting uniforms for shader ${shaderName}:`, error);
+                Logger.print('warn', [`Could not set lighting uniforms for shader ${shaderName}:`, error], 'Renderer');
             }
         }
     }

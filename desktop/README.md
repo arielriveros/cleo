@@ -27,11 +27,11 @@ npm --prefix desktop start
 
 In the editor toolbar, use **Publish**:
 
-- **Web (HTML)** — writes three files to a folder you choose: `index.html` (CSS embedded),
-  `game.js` (engine + runtime), and `game.json` (scene data with assets embedded as base64).
-  Serve the folder over HTTP to play. In a plain browser (no desktop app) this downloads a `.zip`
-  of the same three files instead.
-- **Desktop (Electron)** — scaffolds a runnable Electron game folder (the web trio plus `main.js`,
+- **Web (HTML)** — writes four files to a folder you choose: `index.html` (CSS embedded),
+  `game.js` (engine + runtime), `game.scripts.js` (your node scripts), and `game.bin` (all game
+  data — scenes, meshes and textures — packed into one binary). Serve the folder over HTTP to play.
+  In a plain browser (no desktop app) this downloads a `.zip` of the same files instead.
+- **Desktop (Electron)** — scaffolds a runnable Electron game folder (the web files plus `main.js`,
   `preload.js`, `package.json`). `cd` in, then `npm install && npm start`.
 - **Desktop installer** — additionally packages a native installer via electron-builder
   (needs network access to download Electron).

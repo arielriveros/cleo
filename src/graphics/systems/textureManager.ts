@@ -1,6 +1,7 @@
 import { Loader } from "../loader";
 import { CubemapFaces, Texture, TextureConfig } from "../texture";
 import { parseBase64DataUri } from "../../core/base64";
+import { Logger } from "../../core/logger";
 import { v4 as uuidv4 } from 'uuid';
 
 export class TextureManager {
@@ -40,7 +41,7 @@ export class TextureManager {
         }).catch((err) => {
             // Missing/broken image path (e.g. a texture file not included in an import): drop the
             // texture rather than leaving the load promise to surface as an unhandled rejection.
-            console.warn('Failed to load texture from path:', path, err);
+            Logger.print('warn', ['Failed to load texture from path:', path, err], 'Texture');
             this._textures.delete(identifier);
         });
         return identifier;
@@ -78,7 +79,7 @@ export class TextureManager {
 
         const image = new Image();
         image.onerror = () => {
-            console.error('Failed to load image from data URI');
+            Logger.error('Failed to load image from data URI', 'Texture');
             this.createFallbackTexture(texture, identifier);
         };
         image.onload = () => {
@@ -110,13 +111,13 @@ export class TextureManager {
                 
                 const fallbackImage = new Image();
                 fallbackImage.onload = () => {
-                    console.log('Fallback texture created successfully');
+                    Logger.info('Fallback texture created successfully', 'Texture');
                     texture.create(fallbackImage, 1, 1);
                 };
                 fallbackImage.src = canvas.toDataURL();
             }
         } catch (err) {
-            console.error('Failed to create fallback texture:', err);
+            Logger.print('error', ['Failed to create fallback texture:', err], 'Texture');
             this._textures.delete(identifier);
         }
     }
@@ -161,7 +162,7 @@ export class TextureManager {
         texture.setObjectUrl(url);
 
         const drop = (reason: string) => {
-            console.warn(reason);
+            Logger.warn(reason, 'Texture');
             texture.revokeObjectUrl();
             this._textures.delete(identifier);
         };
@@ -191,7 +192,7 @@ export class TextureManager {
         file.arrayBuffer()
             .then(buf => this._decodeInto(texture, identifier, new Uint8Array(buf), file.type || 'image/png'))
             .catch(() => {
-                console.warn('Failed to read texture file:', file.name);
+                Logger.print('warn', ['Failed to read texture file:', file.name], 'Texture');
                 this._textures.delete(identifier);
             });
 
@@ -277,6 +278,50 @@ export class TextureManager {
             textures.push({ id, data, config: texture.config });
         });
         return textures;
+    }
+
+    /**
+     * Snapshot textures as raw compressed bytes — `{ id, bytes, mime, config }` records.
+     *
+     * The bytes-oriented twin of {@link serializeTextureData}, for consumers that write binary rather
+     * than JSON (publishing packs them into game.bin). For every imported texture this is strictly
+     * cheaper than the base64 path AND smaller on disk: `Texture.source` already retains the original
+     * compressed PNG/JPEG bytes, so there is nothing to encode and no 33% base64 inflation to pay.
+     *
+     * Path-loaded images have no retained bytes, so they fall back through serializeTexture's canvas
+     * re-encode and are decoded straight back to bytes. Data-backed textures (terrain splat maps) have
+     * no image to embed and are skipped, exactly as in serializeTextureData.
+     */
+    public serializeTextureBytes(ids?: Iterable<string>): { id: string, bytes: Uint8Array, mime: string, config: any }[] {
+        const out: { id: string, bytes: Uint8Array, mime: string, config: any }[] = [];
+
+        const collect = (id: string, texture: Texture): void => {
+            // 1. The common case: original compressed bytes, already on the Texture. No work at all.
+            const source = texture.source;
+            if (source) {
+                out.push({ id, bytes: source.bytes, mime: source.mime, config: texture.config });
+                return;
+            }
+
+            // 2. No retained bytes (path-loaded, or restored from a non-base64 data URI): go through the
+            //    data-URL path and decode it back. Costs a canvas encode, same as saving does today.
+            const uri = this.serializeTexture(id);
+            if (!uri) return; // data-backed texture, or no 2D context — nothing to embed
+            const parsed = parseBase64DataUri(uri);
+            if (!parsed) return;
+            out.push({ id, bytes: parsed.bytes, mime: parsed.mime, config: texture.config });
+        };
+
+        if (ids) {
+            for (const id of ids) {
+                const texture = this._textures.get(id);
+                if (texture) collect(id, texture);
+            }
+            return out;
+        }
+
+        this._textures.forEach((texture, id) => collect(id, texture));
+        return out;
     }
 
     /** The six faces as data URLs, or undefined if a 2D canvas context cannot be obtained. */

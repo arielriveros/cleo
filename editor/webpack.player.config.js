@@ -3,7 +3,7 @@ const path = require("path");
 
 // Builds the standalone game player (engine + runtime) into editor/public/player/.
 // Output: index.html (CSS inlined) + game.js. These are the static, game-independent files
-// every published game reuses; only game.json changes per game. They land in public/ so the
+// every published game reuses; only game.bin changes per game. They land in public/ so the
 // editor dev server and production build both serve them (used by the browser ZIP publish path),
 // and so publishing can fetch them from same-origin.
 //

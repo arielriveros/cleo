@@ -8,7 +8,7 @@
 // runJob(). That path blocks the main thread exactly like the old code did — it is a correctness
 // backstop, not the happy path, so publishing never becomes impossible just because a worker failed.
 
-import { runJob, ProjectJob, ProjectJobResult, PublishFiles, PublishOptions, PlayerTemplates } from './projectJobs';
+import { runJob, ProjectJob, ProjectJobResult, PublishFiles, PlayerTemplates } from './projectJobs';
 import type { BundleData } from '../utils/bundle';
 
 interface Response {
@@ -108,7 +108,6 @@ export interface PublishJobInput {
   data: any;
   scriptsSource: string;
   templates: PlayerTemplates;
-  options?: PublishOptions;
   zip: boolean;
 }
 
@@ -119,8 +118,8 @@ export interface PublishJobOutput {
 }
 
 /**
- * Run the publish assembly (image externalization, geometry packing, script obfuscation,
- * JSON.stringify and — optionally — zipping) off the main thread.
+ * Run the publish assembly (geometry packing into game.bin, script obfuscation and — optionally —
+ * zipping) off the main thread.
  */
 export async function runPublishJob(input: PublishJobInput): Promise<PublishJobOutput> {
   const result = await dispatch({ kind: 'publish', ...input });

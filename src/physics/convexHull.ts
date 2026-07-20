@@ -18,6 +18,8 @@
  * heightfield and particle. There is no convex/trimesh narrowphase.
  */
 
+import { Logger } from "../core/logger";
+
 export type Hull = {
     /** Hull points, recentred so the centroid sits at the origin (see `center`). */
     vertices: number[][];
@@ -550,7 +552,7 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
         // measured against the FULL point set, which is what makes containment exact.
         const silhouette = quickhull(supportSample(deduplicate(positions, eps), MAX_HULL_POINTS), eps);
         if (!silhouette) {
-            console.warn(`convexHull: silhouette hull failed (${positions.length} positions); the '${quality}' hull stays at the bounding box.`);
+            Logger.warn(`convexHull: silhouette hull failed (${positions.length} positions); the '${quality}' hull stays at the bounding box.`, 'Physics');
         } else {
             const support = (n: V3): number => {
                 let max = -Infinity;
@@ -595,10 +597,11 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
             if (cut === 0 && failed > 0) {
                 // Candidates wanted to cut but every attempt degenerated — a genuine anomaly worth
                 // capturing (a boxy mesh where nothing cuts at all is normal and stays silent).
-                console.warn(
+                Logger.warn(
                     `convexHull: all ${failed} cutting planes failed (quality='${quality}'). ` +
                     `candidates=${candidates.length} positions=${positions.length} extent=${extent.toExponential(3)} eps=${eps.toExponential(3)}. ` +
-                    `Mesh captured in __cleoHullDebug — run copy(JSON.stringify(__cleoHullDebug)) to export it.`
+                    `Mesh captured in __cleoHullDebug — run copy(JSON.stringify(__cleoHullDebug)) to export it.`,
+                    'Physics'
                 );
                 try { (globalThis as any).__cleoHullDebug = { quality, positions }; } catch { /* ignore */ }
             }
@@ -634,10 +637,10 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
 
     const unmerged = finalize(poly, eps, false);
     if (unmerged && containsAll(unmerged)) {
-        console.warn('convexHull: coplanar merge violated containment; using unmerged hull faces.');
+        Logger.warn('convexHull: coplanar merge violated containment; using unmerged hull faces.', 'Physics');
         return unmerged;
     }
 
-    console.warn('convexHull: carve failed the containment audit; falling back to the bounding box.');
+    Logger.warn('convexHull: carve failed the containment audit; falling back to the bounding box.', 'Physics');
     return finalize(box, eps);
 }

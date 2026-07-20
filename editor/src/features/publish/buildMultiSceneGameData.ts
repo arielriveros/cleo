@@ -75,15 +75,17 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     scenes[meta.id] = { name: meta.name, scene: gd.scene, ui: gd.ui }
   }
 
-  // Textures once, for the whole game (the same call Scene.serialize(useCache=false) makes).
-  let textures: any[] = []
-  try { textures = TextureManager.Instance.serializeTextureData() } catch { textures = [] }
+  // Textures once, for the whole game (they are global, not per scene). As raw compressed bytes, not
+  // base64: the packer writes them verbatim into game.bin, so publishing neither encodes nor inflates
+  // them. Must run on the main thread — the canvas fallback inside needs a DOM.
+  let textureBytes: any[] = []
+  try { textureBytes = TextureManager.Instance.serializeTextureBytes() } catch { textureBytes = [] }
 
   const out: any = {
     version: 2,
     entry: src.mainSceneId in scenes ? src.mainSceneId : Object.keys(scenes)[0],
     scenes,
-    textures,
+    textureBytes,
   }
   if (src.settings) out.config = { graphics: { clearColor: src.settings.clearColor }, render: src.settings }
   return out

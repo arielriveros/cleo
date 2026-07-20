@@ -1,5 +1,6 @@
 import { gl } from "./renderer";
 import { bytesToDataUrl } from "../core/base64";
+import { Logger } from "../core/logger";
 
 export interface TextureConfig {
     flipY?: boolean;
@@ -110,18 +111,18 @@ export class Texture {
         if (this._target === gl.TEXTURE_2D) {
             if (data) {
                 const img = data as HTMLImageElement;
-                console.log('Creating texture with image:', {
+                Logger.print('info', ['Creating texture with image:', {
                     width: img.width,
                     height: img.height,
                     complete: img.complete,
                     naturalWidth: img.naturalWidth,
                     naturalHeight: img.naturalHeight,
                     src: img.src?.substring(0, 50) + '...'
-                });
-                
+                }], 'Texture');
+
                 // Validate image is properly loaded
                 if (!img.complete || img.naturalWidth === 0) {
-                    console.error('Image not properly loaded before texture creation');
+                    Logger.error('Image not properly loaded before texture creation', 'Texture');
                     this.unbind();
                     return;
                 }
@@ -202,7 +203,7 @@ export class Texture {
 
     public updateImg(data: HTMLImageElement | null): void {
         if (this._target !== gl.TEXTURE_2D) {
-            console.error('Cannot update 2D texture with cubemap face');
+            Logger.error('Cannot update 2D texture with cubemap face', 'Texture');
             return;
         }
         this.bind();
@@ -227,7 +228,7 @@ export class Texture {
 
     public updateFace(face: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ', data: HTMLImageElement): void {
         if (this._target !== gl.TEXTURE_CUBE_MAP) {
-            console.error('Cannot set cubemap face on non-cubemap texture');
+            Logger.error('Cannot set cubemap face on non-cubemap texture', 'Texture');
             return;
         }
         
@@ -301,7 +302,7 @@ export class Texture {
     private checkForErrors(): void {
         const error = gl.getError();
         if (error !== gl.NO_ERROR) {
-            console.error(`Error creating texture: ${error} with usage ${this._usage}, internal format ${this._internalFormat}, format ${this._format}`);
+            Logger.error(`Error creating texture: ${error} with usage ${this._usage}, internal format ${this._internalFormat}, format ${this._format}`, 'Texture');
         }
     }
 

@@ -959,8 +959,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       && !libs.terrainMaterials.length && !libs.scripts.length;
     if (empty) {
       // Deferred, not cancelled: the libraries are effect deps, so the commit that delivers them runs
-      // this again. Only worth a debug line — it is the normal path when the IndexedDB reads are fast.
-      Logger.debug('Startup asset resync deferred: libraries not populated yet, will retry.', 'Editor');
+      // this again.
+      Logger.warn('Startup asset resync deferred: libraries not populated yet, will retry.', 'Editor');
       return;
     }
     initialResyncDoneRef.current = true;

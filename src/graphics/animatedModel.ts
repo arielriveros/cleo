@@ -1,6 +1,7 @@
 import { Mesh } from './mesh';
 import { Material } from './material';
 import { Geometry } from '../core/geometry';
+import { Logger } from '../core/logger';
 import { mat4 } from 'gl-matrix';
 
 // Animation data structures based on GLTF specification
@@ -401,10 +402,10 @@ export class AnimatedModel {
             const boneWeights: number[] = [];
             
             // Debug: log the data structure we're working with
-            console.log(`Vertex count: ${vertexCount}`);
-            console.log(`Joint indices length: ${this._jointIndices.length}`);
-            console.log(`Joint weights length: ${this._jointWeights.length}`);
-            console.log(`Expected bone data length: ${vertexCount * 4}`);
+            Logger.info(`Vertex count: ${vertexCount}`, 'Animation');
+            Logger.info(`Joint indices length: ${this._jointIndices.length}`, 'Animation');
+            Logger.info(`Joint weights length: ${this._jointWeights.length}`, 'Animation');
+            Logger.info(`Expected bone data length: ${vertexCount * 4}`, 'Animation');
             
             for (let i = 0; i < vertexCount; i++) {
                 const baseIndex = i * 4;
@@ -447,7 +448,7 @@ export class AnimatedModel {
                 boneWeights.push(weights[0], weights[1], weights[2], weights[3]);
             }
             
-            console.log(`Created ${boneIndices.length / 4} vertices worth of bone data`);
+            Logger.info(`Created ${boneIndices.length / 4} vertices worth of bone data`, 'Animation');
             this._mesh.createAnimated(vertices, vertexCount, boneIndices, boneWeights, this._geometry.indices);
             this._isAnimated = true;
         } else {
@@ -468,7 +469,7 @@ export class AnimatedModel {
         
         // This method will be called by the renderer when the shader manager is available
         // For now, we just mark that it needs to be initialized
-        console.log(`AnimatedModel needs to be initialized with shader: ${shaderType}`);
+        Logger.info(`AnimatedModel needs to be initialized with shader: ${shaderType}`, 'Animation');
     }
 
     /**

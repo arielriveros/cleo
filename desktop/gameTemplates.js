@@ -1,5 +1,5 @@
 // Static templates for a published desktop (Electron) game folder.
-// The game renderer (game.js) reads window.CLEO_GAME_DATA, which the preload injects from game.json,
+// The game renderer (game.js) reads window.CLEO_GAME_BUFFER, which the preload injects from game.bin,
 // so the game runs from file:// without needing an HTTP server.
 
 const GAME_MAIN_JS = `const { app, BrowserWindow } = require('electron');
@@ -36,12 +36,18 @@ const GAME_PRELOAD_JS = `const { contextBridge } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-// Load the serialized game data from disk and expose it to the page before game.js runs.
+// Load the packed game data from disk and expose it to the page before game.js runs.
 try {
-  const raw = fs.readFileSync(path.join(__dirname, 'game.json'), 'utf-8');
-  contextBridge.exposeInMainWorld('CLEO_GAME_DATA', JSON.parse(raw));
+  const buf = fs.readFileSync(path.join(__dirname, 'game.bin'));
+  // Hand over a standalone ArrayBuffer, not buf.buffer: readFileSync can return a view into a larger
+  // pooled buffer, so buf.buffer would carry unrelated bytes and a nonzero start offset — the player
+  // reads the header at offset 0 and would see garbage.
+  contextBridge.exposeInMainWorld(
+    'CLEO_GAME_BUFFER',
+    buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+  );
 } catch (e) {
-  console.error('Failed to load game.json:', e);
+  console.error('Failed to load game.bin:', e);
 }
 `;
 
@@ -69,8 +75,8 @@ function gameReadme(name) {
     'npm start',
     '```',
     '',
-    'This opens the game in an Electron window. The game data is embedded in `game.json`',
-    '(assets included as base64), loaded by `preload.js` and rendered by `game.js`.',
+    'This opens the game in an Electron window. All game data — scenes, meshes and textures —',
+    'is packed into `game.bin`, loaded by `preload.js` and rendered by `game.js`.',
     ''
   ].join('\n');
 }

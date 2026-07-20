@@ -2,6 +2,7 @@ import { Geometry } from "../../core/geometry";
 import { Material } from "../material";
 import { TextureManager } from "../systems/textureManager";
 import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../animatedModel";
+import { Logger } from "../../core/logger";
 import { mat4, quat, vec3 } from "gl-matrix";
 
 // GLTF Types based on the specification
@@ -396,7 +397,7 @@ export class GLTFLoader {
                     const arrayBuffer = await bufferFile.arrayBuffer();
                     this.buffers.push(arrayBuffer);
                 } else {
-                    console.warn(`Buffer file ${buffer.uri} not found in uploaded files`);
+                    Logger.warn(`Buffer file ${buffer.uri} not found in uploaded files`, 'Loader');
                     this.buffers.push(new ArrayBuffer(0));
                 }
             } else if (buffer.uri && buffer.uri.startsWith('data:')) {
@@ -758,7 +759,7 @@ export class GLTFLoader {
                 return TextureManager.Instance.addTextureFromPath(this.basePath + image.uri, cfg);
             }
         } catch (error) {
-            console.warn('Failed to load texture:', error);
+            Logger.print('warn', ['Failed to load texture:', error], 'Loader');
         }
 
         return undefined;

@@ -1,6 +1,6 @@
-// Publish-time transform: pull node scripts OUT of game.json and emit them as real functions in a
+// Publish-time transform: pull node scripts OUT of the game data and emit them as real functions in a
 // separate game.scripts.js. The published game then loads scripts as normal JS (parsed by the browser)
-// instead of eval-ing script strings from JSON at runtime.
+// instead of eval-ing script strings at runtime.
 //
 // The factory body is built by the engine's buildFactoryBody — the same function the editor's eval path
 // compiles through — so the two paths cannot drift apart. It is also what rewrites the script's `import`
@@ -16,7 +16,7 @@ import { buildFactoryBody } from 'cleo';
 export type ScriptMap = Record<string, string>;
 
 // Walk the scene tree (root included) collecting `{ nodeId: script }` and stripping `script` from the
-// nodes, so game.json contains no script strings.
+// nodes, so the packed game data contains no script strings.
 export function extractScripts(data: any): { data: any; scripts: ScriptMap } {
   const scripts: ScriptMap = {};
 

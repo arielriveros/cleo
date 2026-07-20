@@ -7,6 +7,7 @@ import { GLTFLoader, ImportTransform, GltfParseResult } from "./utils/gltfLoader
 import { Model } from "./model";
 import { AnimatedModel, Animation, Skin } from "./animatedModel";
 import { TextureManager } from "./systems/textureManager";
+import { Logger } from "../core/logger";
 
 /**
  * Determines the correct base path for assets based on the current environment
@@ -108,7 +109,7 @@ export class Loader {
                         if (isValid) {
                             return TextureManager.Instance.addTextureFromBase64(base64, { wrapping: 'repeat', mipMap: false });
                         } else {
-                            console.warn('Base64 texture data is not a valid image, skipping:', base64.slice(0, 50));
+                            Logger.print('warn', ['Base64 texture data is not a valid image, skipping:', base64.slice(0, 50)], 'Loader');
                         }
                     }
                     if (path && !path.startsWith('*')) {
@@ -210,7 +211,7 @@ export class Loader {
                     default: return undefined; // 'missing' — the texture was never uploaded
                 }
             } catch (error) {
-                console.warn('Failed to load texture:', error);
+                Logger.print('warn', ['Failed to load texture:', error], 'Loader');
                 return undefined;
             }
         });
@@ -281,7 +282,7 @@ export class Loader {
                 if (isValid) {
                     return TextureManager.Instance.addTextureFromBase64(textureData, { wrapping: 'repeat', mipMap: false });
                 } else {
-                    console.warn('Base64 texture data is not a valid image, skipping:', textureData.slice(0, 50));
+                    Logger.print('warn', ['Base64 texture data is not a valid image, skipping:', textureData.slice(0, 50)], 'Loader');
                 }
             }
 
