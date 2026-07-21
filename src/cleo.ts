@@ -6,6 +6,8 @@ export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, Cam
 export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions, FollowSpace, AimMode } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
+export { TypedEmitter, engineEventBus } from "./core/eventBus";
+export type { EngineEventMap, SceneChange, ChangeKind } from "./core/eventBus";
 export { Mesh } from "./graphics/mesh";
 export { Material, TerrainMaterial, CustomMaterial } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";

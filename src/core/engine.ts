@@ -65,6 +65,13 @@ export class CleoEngine {
   // Logger can emit without importing the renderer graph; this is the same object, unchanged for consumers.
   public static eventEmitter = engineEventBus;
 
+  // Authoring gate for property-level SCENE_CHANGED events (transform/material/variable/... — the kinds
+  // fired from every setter). Default false so a published game and Play mode pay nothing: those setters
+  // run every frame from scripts and physics, and their changes must not allocate a payload, walk the
+  // bus, or mark the editor "unsaved". The editor flips this true only while editing and false on Play.
+  // STRUCTURAL changes (add/remove/visible) ignore this flag — the Scene relies on them for correctness.
+  public static authoringMode = false;
+
   // The one engine running in this process — the editor reuses a single instance for both the edit-time
   // viewport and Play mode, and a published build only ever constructs one. Lets a script-facing facade
   // (Game, src/core/game.ts) reach the live engine without every caller threading it through by hand.

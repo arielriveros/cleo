@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Collapsable from '../../../components/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Hint } from '../../../components/ui';
 import { ProbeIcon } from '../sectionIcons';
+import { useCleoEngine } from '../../EngineContext';
 
 export default function LightProbeEditor(props: { node: LightProbeNode }) {
   const [state, setState] = useState({
@@ -38,6 +39,14 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     props.node.blendDistance = state.blendDistance;
   }, [state, props.node]);
 
+  const { eventEmitter } = useCleoEngine();
+  // Emit from the user handlers (not the apply-effect above, which also runs on mount/node-select and would
+  // false-dirty on selection). 'environment' kind marks the tab unsaved without triggering a tree rebuild.
+  const update = (patch: Partial<typeof state>) => {
+    setState((prev) => ({ ...prev, ...patch }));
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node });
+  };
+
   const bounded = state.sizeX > 0 && state.sizeY > 0 && state.sizeZ > 0;
 
   return (
@@ -45,7 +54,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
       <div className='w-full p-2'>
         <PropertyTable columns={['45%', '55%']}>
           <PropertyRow label='Resolution'>
-            <Select value={state.resolution} onChange={(e) => setState((prev) => ({ ...prev, resolution: parseInt(e.target.value) }))}>
+            <Select value={state.resolution} onChange={(e) => update({ resolution: parseInt(e.target.value) })}>
               <option value={64}>64</option>
               <option value={128}>128</option>
               <option value={256}>256</option>
@@ -53,30 +62,30 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
             </Select>
           </PropertyRow>
           <PropertyRow label='Mode'>
-            <Select value={state.mode} onChange={(e) => setState((prev) => ({ ...prev, mode: e.target.value as 'baked' | 'realtime' }))}>
+            <Select value={state.mode} onChange={(e) => update({ mode: e.target.value as 'baked' | 'realtime' })}>
               <option value='baked'>Baked</option>
               <option value='realtime'>Real-time</option>
             </Select>
           </PropertyRow>
           {state.mode === 'realtime' && (
             <PropertyRow label='Update every (s)'>
-              <NumberInput min={0} step={0.1} value={state.updateFrequency} onChange={(v) => setState((prev) => ({ ...prev, updateFrequency: v }))} />
+              <NumberInput min={0} step={0.1} value={state.updateFrequency} onChange={(v) => update({ updateFrequency: v })} />
             </PropertyRow>
           )}
           <PropertyRow label='Intensity'>
-            <Slider min={0} max={3} step={0.05} value={state.intensity} onChange={(v) => setState((prev) => ({ ...prev, intensity: v }))} />
+            <Slider min={0} max={3} step={0.05} value={state.intensity} onChange={(v) => update({ intensity: v })} />
           </PropertyRow>
           <PropertyRow label='Size X'>
-            <NumberInput min={0} step={0.5} value={state.sizeX} onChange={(v) => setState((prev) => ({ ...prev, sizeX: Math.max(0, v) }))} />
+            <NumberInput min={0} step={0.5} value={state.sizeX} onChange={(v) => update({ sizeX: Math.max(0, v) })} />
           </PropertyRow>
           <PropertyRow label='Size Y'>
-            <NumberInput min={0} step={0.5} value={state.sizeY} onChange={(v) => setState((prev) => ({ ...prev, sizeY: Math.max(0, v) }))} />
+            <NumberInput min={0} step={0.5} value={state.sizeY} onChange={(v) => update({ sizeY: Math.max(0, v) })} />
           </PropertyRow>
           <PropertyRow label='Size Z'>
-            <NumberInput min={0} step={0.5} value={state.sizeZ} onChange={(v) => setState((prev) => ({ ...prev, sizeZ: Math.max(0, v) }))} />
+            <NumberInput min={0} step={0.5} value={state.sizeZ} onChange={(v) => update({ sizeZ: Math.max(0, v) })} />
           </PropertyRow>
           <PropertyRow label='Blend Distance' divider={false}>
-            <NumberInput min={0} step={0.1} value={state.blendDistance} onChange={(v) => setState((prev) => ({ ...prev, blendDistance: Math.max(0, v) }))} />
+            <NumberInput min={0} step={0.1} value={state.blendDistance} onChange={(v) => update({ blendDistance: Math.max(0, v) })} />
           </PropertyRow>
         </PropertyTable>
         <Hint className='mt-2'>

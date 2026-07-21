@@ -24,6 +24,7 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
             <Select value={constraints} onChange={(e) => {
               props.node.constraints = e.target.value as 'free' | 'spherical' | 'cylindrical';
               setConstraints(e.target.value as 'free' | 'spherical' | 'cylindrical');
+              eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node });
             }}>
               <option value='free'>Free</option>
               <option value='spherical'>Spherical</option>

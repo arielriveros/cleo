@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, hullFromPositions, Logger } from 'cleo'
 import type { RagdollOptions, HullQuality } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
@@ -100,9 +100,15 @@ export default function PhysicsEditor(props: {node: Node}) {
     if(sceneChanged) setSceneChanged(false)
   }, [sceneChanged]);
 
+  // Set while loading body/trigger props from the shared map on node-select, so the persist-effects below
+  // can tell a load apart from a user edit and dirty the tab only on the latter.
+  const bodyLoadRef = useRef(false);
+  const triggerLoadRef = useRef(false);
+
   useEffect(() => {
     const body = bodies.get(props.node.id);
-    if (body)
+    if (body) {
+      bodyLoadRef.current = true; // a load from the map, not a user edit — the persist-effect must not dirty
       setBodyProperties({
         mass: body.mass,
         linearDamping: body.linearDamping,
@@ -117,6 +123,7 @@ export default function PhysicsEditor(props: {node: Node}) {
         cameraCollision: body.cameraCollision ?? true,
         shapes: body.shapes
       })
+    }
     else setBodyProperties(null)
   }, [props.node, bodies])
 
@@ -136,13 +143,17 @@ export default function PhysicsEditor(props: {node: Node}) {
         shapes: bodyProperties.shapes
       });
       eventEmitter.emit('PHYSICS_CHANGED');
+      if (bodyLoadRef.current) bodyLoadRef.current = false;
+      else eventEmitter.emit('SCENE_CHANGED', { kind: 'physics', node: props.node });
     }
   }, [bodyProperties])
 
   useEffect(() => {
     const trigger = triggers.get(props.node.id);
-    if (trigger)
+    if (trigger) {
+      triggerLoadRef.current = true;
       setTriggerProperties({shapes: trigger.shapes})
+    }
     else setTriggerProperties(null)
   }, [props.node, triggers])
 
@@ -151,6 +162,8 @@ export default function PhysicsEditor(props: {node: Node}) {
     if (triggerProperties) {
       triggers.set(props.node.id, { shapes: triggerProperties.shapes });
       eventEmitter.emit('PHYSICS_CHANGED');
+      if (triggerLoadRef.current) triggerLoadRef.current = false;
+      else eventEmitter.emit('SCENE_CHANGED', { kind: 'physics', node: props.node });
     }
   }, [triggerProperties])
 
@@ -264,8 +277,8 @@ export default function PhysicsEditor(props: {node: Node}) {
     }
   };
 
-  const removeBody = () => { bodies.delete(props.node.id); setBodyProperties(null); eventEmitter.emit('PHYSICS_CHANGED'); }
-  const removeTrigger = () => { triggers.delete(props.node.id); setTriggerProperties(null); eventEmitter.emit('PHYSICS_CHANGED'); }
+  const removeBody = () => { bodies.delete(props.node.id); setBodyProperties(null); eventEmitter.emit('PHYSICS_CHANGED'); eventEmitter.emit('SCENE_CHANGED', { kind: 'physics', node: props.node }); }
+  const removeTrigger = () => { triggers.delete(props.node.id); setTriggerProperties(null); eventEmitter.emit('PHYSICS_CHANGED'); eventEmitter.emit('SCENE_CHANGED', { kind: 'physics', node: props.node }); }
 
   const shapeTools = (target: 'body' | 'trigger', shapes: ShapeDescription[]) => (
     <ShapeTools

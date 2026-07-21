@@ -21,6 +21,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
   // The rig writes camera.fov every frame while it owns FOV; leaving this slider live would let the
   // two fight, with the rig winning and the slider looking broken.
   const fovDrivenByRig = !!rig?.fovEnabled;
+  const { eventEmitter } = useCleoEngine();
 
   const [cameraState, setCameraState] = useState({
     type: props.node.camera.type,
@@ -57,7 +58,10 @@ export default function CameraEditor(props: { node: CameraNode }) {
     props.node.camera.top = cameraState.top;
   }, [cameraState, props.node]);
 
-  const set = (patch: Partial<typeof cameraState>) => setCameraState((prev) => ({ ...prev, ...patch }));
+  const set = (patch: Partial<typeof cameraState>) => {
+    setCameraState((prev) => ({ ...prev, ...patch }));
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'camera', node: props.node });
+  };
 
   return (
     <>

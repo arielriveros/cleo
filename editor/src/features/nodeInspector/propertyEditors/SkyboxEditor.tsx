@@ -3,8 +3,10 @@ import { Texture, Skybox, SkyboxNode } from 'cleo'
 import { CubemapFaces } from 'cleo/graphics/texture';
 import Collapsable from '../../../components/Collapsable'
 import { SkyboxIcon } from '../sectionIcons'
+import { useCleoEngine } from '../../EngineContext';
 
 function FaceEditor(props: { faceName: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ', texture: Texture }) {
+    const { eventEmitter } = useCleoEngine();
     const [img, setImg] = useState<HTMLImageElement | null>(null);
 
     useEffect(() => {
@@ -36,6 +38,7 @@ function FaceEditor(props: { faceName: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ
                         img.onload = () => {
                             setImg(img);
                             props.texture.updateFace(props.faceName, img)
+                            eventEmitter.emit('SCENE_CHANGED', { kind: 'texture' })
                         }
                     }
                     reader.readAsDataURL(file);

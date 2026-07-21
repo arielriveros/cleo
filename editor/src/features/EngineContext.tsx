@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useRef, useEffect } from "react";
 import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin, setGameHost } from "cleo";
-import type { AnimationCompatibility, HullQuality } from "cleo";
+import type { AnimationCompatibility, HullQuality, SceneChange } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
@@ -668,7 +668,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const openSceneIdRef = useRef<string>('');
   const scenesLoadedRef = useRef(false);
   const isPlayModeRef = useRef(false);
-  useEffect(() => { isPlayModeRef.current = isPlayMode; }, [isPlayMode]);
+  useEffect(() => {
+    isPlayModeRef.current = isPlayMode;
+    // Gate the engine's property-level change events: emit only while editing a ready scene — never during
+    // Play (its transient edits must not mark the scene unsaved) and never before the scene has loaded (so
+    // the initial parse's setter storm costs nothing). Structural changes ignore this and always emit.
+    CleoEngine.authoringMode = isSceneReady && !isPlayMode;
+  }, [isPlayMode, isSceneReady]);
   const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null });
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
@@ -2469,8 +2475,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // edits. Play mode never marks dirty (it runs a separate play scene, so its edits must not make the
   // editor scene look unsaved), and neither does propagation (see dirtySuppressRef).
   useEffect(() => {
-    const mark = () => {
+    const mark = (e?: SceneChange) => {
       if (!dirtyArmedRef.current || isPlayModeRef.current || dirtySuppressRef.current) return;
+      // Ignore mutations to editor-owned nodes — the free-fly viewport camera (an __editor__Camera Node,
+      // moved every frame during navigation) and the __editor__/__debug__ helper icons + physics wireframes
+      // the reconciler splices in. None are user edits, and without this the engine's new per-setter transform
+      // events would mark a clean scene unsaved the instant the user orbits the camera.
+      if (e?.node && (e.node.name.includes('__editor__') || e.node.name.includes('__debug__'))) return;
       markTabDirty(activeTabIdRef.current);
     };
     const emitter = eventEmitter.current;
@@ -2933,7 +2944,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
           // Logs bypass this bridge: the console panel's store subscribes to CleoEngine.eventEmitter
           // directly (features/logger/logStore.ts), so it also catches everything logged before mount.
-          CleoEngine.eventEmitter.on('SCENE_CHANGED', () => { eventEmitter.current.emit('SCENE_CHANGED') });
+          CleoEngine.eventEmitter.on('SCENE_CHANGED', (e) => { eventEmitter.current.emit('SCENE_CHANGED', e) });
           
           await setupInitialScene();
 
@@ -3003,7 +3014,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       try { withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current)); }
       finally { suppressReconcileRef.current = false; }
     };
-    const schedule = () => {
+    const schedule = (e?: SceneChange) => {
+      // Structural/visibility/name changes affect which helper icons + wireframes are needed; the per-setter
+      // transform/material/... events do not, so skip them (PHYSICS_CHANGED passes no payload and still runs).
+      if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
       if (suppressReconcileRef.current || reconcileScheduledRef.current) return;
       reconcileScheduledRef.current = true;
       requestAnimationFrame(runReconcile);
@@ -3384,13 +3398,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const game: GameActions = { reset: () => { resetPlay(); }, exit: () => { stopPlay(); }, pause: () => { pausePlay(); } };
 
-  // Warn before closing/reloading the page while a project save is in flight.
+  // Warn before closing/reloading the page while a save is in flight OR any tab has unsaved edits — dirty
+  // state is only ever cleared by an explicit Save, so a reload would otherwise silently drop the work.
+  const hasUnsavedWork = savingState === 'saving' || Object.keys(dirtyTabs).length > 0;
   useEffect(() => {
-    if (savingState !== 'saving') return;
+    if (!hasUnsavedWork) return;
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [savingState]);
+  }, [hasUnsavedWork]);
 
   return (
   <EngineContext.Provider value={{

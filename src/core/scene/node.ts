@@ -19,6 +19,7 @@ import { Logger } from "../logger";
 import { compileScript, createScriptImporter, ScriptFactory, SCRIPT_HANDLERS } from "../scripting/scriptRuntime";
 import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
 import type { BVH } from "../bvh";
+import type { ChangeKind } from "../eventBus";
 import { clamp, dampAngleDeg, dampTime, dampVec3Time, eulerFromQuatDeg, wrapDegrees, RAD2DEG } from "../math";
 import { aimFromDirection, boomOffset, collisionRatio, shakeOffsets } from "../cameraRigMath";
 
@@ -567,7 +568,7 @@ export class Node {
     // if the node already has a parent, remove it from the parent's children
     if (node.parent) {
       node.parent.removeChild(node, true);
-      CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node });
     }
     
     node.parent = this;
@@ -582,7 +583,7 @@ export class Node {
         child.scene = this.scene;
       }
     }
-    CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node });
   }
 
   /**
@@ -603,7 +604,7 @@ export class Node {
     node.parent = null;
     node.scene = null;
     this._children.splice(this._children.indexOf(node), 1);
-    CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node });
   }
 
   /**
@@ -926,7 +927,7 @@ export class Node {
     this._name = name;
     // The scene indexes nodes by name for getNodesByName/findNode; a rename must invalidate that
     // exactly like the visible setter already invalidates scene-derived state below.
-    CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'name', node: this });
   }
   /**
    * Sets the parent pointer *only* — it does not move the node in the tree. Use {@link addChild} to
@@ -959,8 +960,13 @@ export class Node {
     // Preserve the access level across value/type edits; default new variables to 'public'.
     const resolvedAccess: NodeVariableAccess = access ?? existing?.access ?? 'public';
     this._variables.set(name, { type: resolvedType, value, access: resolvedAccess });
+    this._notifyChange('variable', name, existing?.value, value);
   }
-  public removeVariable(name: string): void { this._variables.delete(name); }
+  public removeVariable(name: string): void {
+    const existing = this._variables.get(name);
+    this._variables.delete(name);
+    this._notifyChange('variable', name, existing?.value, undefined);
+  }
 
   /** True if this node is somewhere beneath `ancestor` in the hierarchy (any depth). */
   public isDescendantOf(ancestor: Node): boolean {
@@ -1163,11 +1169,27 @@ export class Node {
     this._updateTranslationMatrix();
   }
 
+  /**
+   * Notify observers (the editor) that a *property* of this node changed, of the given {@link ChangeKind}.
+   * Gated on {@link CleoEngine.authoringMode}: outside the editor's edit mode this is a complete no-op, so
+   * the setters that call it — run every frame by scripts and physics — allocate nothing and never touch
+   * the bus in Play mode or a published game. Structural changes do NOT go through here; they emit
+   * unconditionally because the Scene relies on them to re-filter its node lists.
+   *
+   * `prop`/`prev`/`next` are optional detail (e.g. a variable name and its old/new value) — enough for a
+   * panel to refresh precisely and for a future undo/redo recorder to build the inverse edit.
+   */
+  private _notifyChange(kind: ChangeKind, prop?: string, prev?: unknown, next?: unknown): void {
+    if (CleoEngine.authoringMode)
+      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind, node: this, prop, prev, next });
+  }
+
   private _updateTranslationMatrix(): void {
     if (this._body)
       this._body.setPosition(this._position);
 
     mat4.fromTranslation(this._translationMatrix, this._position);
+    this._notifyChange('transform');
   }
 
   /** Rotates by `value` DEGREES around local X (pitch). */
@@ -1219,6 +1241,7 @@ export class Node {
     quat.copy(this._quaternion, quaternion);
     eulerFromQuatDeg(this._euler, this._quaternion);
     mat4.fromQuat(this._rotationMatrix, this._quaternion);
+    this._notifyChange('transform');
     return this;
   }
   
@@ -1226,6 +1249,7 @@ export class Node {
     quat.fromEuler(this._quaternion, this._euler[0], this._euler[1], this._euler[2]);
     if (this._body) this._body.setQuaternion(this._quaternion);
     mat4.fromQuat(this._rotationMatrix, this._quaternion);
+    this._notifyChange('transform');
   }
 
   public setXScale(value: number): Node {
@@ -1280,6 +1304,7 @@ export class Node {
 
   private _updateScaleMatrix(): void {
     mat4.fromScaling(this._scaleMatrix, this._scale);
+    this._notifyChange('transform');
   }
 
   /** This node's rigid body, or `null` if it has none. See {@link setBody}. */
@@ -1462,7 +1487,7 @@ export class Node {
     this._visible = value;
     for (const child of this._children)
       child.visible = value;
-    CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'visibility', node: this });
   }
 
   /** Event-less recursive visibility used by LOD switching/culling; does not touch _visible. */
@@ -1658,7 +1683,7 @@ export class ModelNode extends Node {
       this._model.material.config.castShadow = value;
       for (const child of this._children)
         child.visible = value;
-      CleoEngine.eventEmitter.emit('SCENE_CHANGED');
+      // The base setter (super.visible) already emitted the visibility SCENE_CHANGED for this node.
     }
 
     /**

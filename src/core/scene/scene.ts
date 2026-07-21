@@ -71,7 +71,13 @@ export class Scene {
         this._numPointLights = 0;
         this._numSpotlights = 0;
 
-        CleoEngine.eventEmitter.on('SCENE_CHANGED', () => this._onChange());
+        // Only STRUCTURAL changes alter which nodes exist / the type-filtered lists, so only they need a
+        // re-traversal. Property edits (transform/material/variable/...) now share this event but must not
+        // trigger the full re-filter — especially not per-frame during a gizmo drag. A payload-less emit
+        // (defensive / legacy) is treated as structural.
+        CleoEngine.eventEmitter.on('SCENE_CHANGED', (e) => {
+            if (!e || e.kind === 'structure' || e.kind === 'visibility' || e.kind === 'name') this._onChange();
+        });
     }
 
     public start(): void {

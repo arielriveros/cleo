@@ -161,14 +161,18 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     eventEmitter.emit('SCENE_CHANGED');
   };
 
+  const markMaterialDirty = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'material', node: props.node });
   const setColor = (key: string, setter: (hex: string) => void) => (c: [number, number, number]) => {
     model.material.properties.set(key, c);
     setter(vec3ToHex(c));
+    markMaterialDirty();
   };
   const setNum = (key: string, setter: (v: number) => void) => (v: number) => {
     model.material.properties.set(key, v);
     setter(v);
+    markMaterialDirty();
   };
+  const updateOption = (patch: Partial<typeof options>) => { setOptions((prev) => ({ ...prev, ...patch })); markMaterialDirty(); };
 
   // Rendered as a function call (not a component) so the TextureInspector at each position stays
   // mounted across re-renders instead of remounting.
@@ -201,7 +205,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 <PropertyRow label='Specular'><ColorInput color={specular} onChange={setColor('specular', setSpecular)} /></PropertyRow>
                 <PropertyRow label='Ambient'><ColorInput color={ambient} onChange={setColor('ambient', setAmbient)} /></PropertyRow>
                 <PropertyRow label='Emission'><ColorInput color={emission} onChange={setColor('emissive', setEmission)} /></PropertyRow>
-                <PropertyRow label='Shininess'><NumberInput value={Number(shininess)} onChange={(v) => { model.material.properties.set('shininess', v); setShininess(v); }} /></PropertyRow>
+                <PropertyRow label='Shininess'><NumberInput value={Number(shininess)} onChange={setNum('shininess', setShininess)} /></PropertyRow>
                 <PropertyRow label='Opacity' divider={false}><Slider min={0} max={1} step={0.01} value={defaultOpacity} onChange={setNum('opacity', setDefaultOpacity)} /></PropertyRow>
               </PropertyTable>
             </Section>
@@ -257,11 +261,11 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
         <Section title='Options'>
           <div className='flex flex-col gap-1.5'>
-            <Toggle label='Wireframe' checked={options.wireframe} onChange={(c) => setOptions((prev) => ({ ...prev, wireframe: c }))} />
-            <Toggle label='Transparent' checked={options.transparent} onChange={(c) => setOptions((prev) => ({ ...prev, transparent: c }))} />
-            <Toggle label='Cast Shadow' checked={options.castShadow} onChange={(c) => setOptions((prev) => ({ ...prev, castShadow: c }))} />
+            <Toggle label='Wireframe' checked={options.wireframe} onChange={(c) => updateOption({ wireframe: c })} />
+            <Toggle label='Transparent' checked={options.transparent} onChange={(c) => updateOption({ transparent: c })} />
+            <Toggle label='Cast Shadow' checked={options.castShadow} onChange={(c) => updateOption({ castShadow: c })} />
             <Field label='Side'>
-              <Select value={options.side} onChange={(e) => setOptions((prev) => ({ ...prev, side: e.target.value as 'front' | 'back' | 'double' }))}>
+              <Select value={options.side} onChange={(e) => updateOption({ side: e.target.value as 'front' | 'back' | 'double' })}>
                 <option value='front'>Front</option>
                 <option value='back'>Back</option>
                 <option value='double'>Both</option>

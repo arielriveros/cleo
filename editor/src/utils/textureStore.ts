@@ -43,6 +43,23 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
   })
 }
 
+// Run write ops in a readwrite transaction and resolve only when the transaction has COMMITTED
+// (tx.oncomplete) — not merely when each put/delete fired its own onsuccess. This matters because the
+// bundle-import path calls window.location.reload() immediately after writing textures: a reload aborts a
+// still-open transaction, so resolving on per-request success (as this store used to) let the reload drop
+// every texture while the libraries/scenes — written via idbSet, which already awaits oncomplete —
+// survived. Mirrors idbSet's durability guarantee.
+async function writeTx(run: (store: IDBObjectStore) => void): Promise<void> {
+  const db = await openDB()
+  return new Promise<void>((resolve, reject) => {
+    const t = db.transaction(TEXTURE_STORE, 'readwrite')
+    t.oncomplete = () => resolve()
+    t.onerror = () => reject(t.error)
+    t.onabort = () => reject(t.error)
+    run(t.objectStore(TEXTURE_STORE))
+  })
+}
+
 /** Ids already in the store — used to skip re-writing payloads we already hold. */
 export async function storedTextureIds(): Promise<Set<string>> {
   try {
@@ -56,8 +73,7 @@ export async function storedTextureIds(): Promise<Set<string>> {
 
 export async function putTextures(records: StoredTexture[]): Promise<void> {
   if (!records.length) return
-  const store = await tx('readwrite')
-  await Promise.all(records.map(r => request(store.put(r, r.id))))
+  await writeTx(store => { for (const r of records) store.put(r, r.id) })
 }
 
 export async function getAllTextures(): Promise<StoredTexture[]> {
@@ -71,8 +87,7 @@ export async function getAllTextures(): Promise<StoredTexture[]> {
 
 export async function deleteTextures(ids: string[]): Promise<void> {
   if (!ids.length) return
-  const store = await tx('readwrite')
-  await Promise.all(ids.map(id => request(store.delete(id))))
+  await writeTx(store => { for (const id of ids) store.delete(id) })
 }
 
 /**

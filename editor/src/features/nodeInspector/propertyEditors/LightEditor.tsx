@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { LightNode, PointLight, Spotlight, SpriteNode } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
+import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
 import { ColorInput, PropertyTable, PropertyRow, Slider, Section } from '../../../components/ui'
 import { LightIcon } from '../sectionIcons'
@@ -10,7 +11,9 @@ import { LightIcon } from '../sectionIcons'
 export { ColorInput };
 
 export default function LightEditor(props: {node: LightNode}) {
+  const { eventEmitter } = useCleoEngine();
   const light = props.node.light;
+  const markLightDirty = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'light', node: props.node });
 
   const [diffuse, setDiffuse] = useState(vec3ToHex(light.diffuse));
   const [specular, setSpecular] = useState(vec3ToHex(light.specular));
@@ -74,7 +77,10 @@ export default function LightEditor(props: {node: LightNode}) {
       (editorSprite[0] as SpriteNode).sprite.material.properties.set('color', light.diffuse);
   }, [props.node, diffuse])
 
-  const set = (patch: Partial<typeof properties>) => setProperties((prev) => ({ ...prev, ...patch }));
+  const set = (patch: Partial<typeof properties>) => {
+    setProperties((prev) => ({ ...prev, ...patch }));
+    markLightDirty();
+  };
 
   return (
     <Collapsable title='Light' icon={<LightIcon />} persistKey='light'>
@@ -82,13 +88,13 @@ export default function LightEditor(props: {node: LightNode}) {
       <Section title='Colors'>
         <PropertyTable columns={['35%', '65%']}>
           <PropertyRow label='Diffuse'>
-            <ColorInput color={diffuse} onChange={(color) => { light.diffuse = color; setDiffuse(vec3ToHex(color)); }} />
+            <ColorInput color={diffuse} onChange={(color) => { light.diffuse = color; setDiffuse(vec3ToHex(color)); markLightDirty(); }} />
           </PropertyRow>
           <PropertyRow label='Specular'>
-            <ColorInput color={specular} onChange={(color) => { light.specular = color; setSpecular(vec3ToHex(color)); }} />
+            <ColorInput color={specular} onChange={(color) => { light.specular = color; setSpecular(vec3ToHex(color)); markLightDirty(); }} />
           </PropertyRow>
           <PropertyRow label='Ambient' divider={false}>
-            <ColorInput color={ambient} onChange={(color) => { light.ambient = color; setAmbient(vec3ToHex(color)); }} />
+            <ColorInput color={ambient} onChange={(color) => { light.ambient = color; setAmbient(vec3ToHex(color)); markLightDirty(); }} />
           </PropertyRow>
         </PropertyTable>
       </Section>

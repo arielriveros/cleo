@@ -82,6 +82,8 @@ export default function TextureInspector(props: { tex: string, material: Materia
       props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, false)
 
     setTexture(null);
+    eventEmitter.emit('TEXTURES_CHANGED');
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'texture' });
   }
 
   const onTextureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,6 +122,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
     setOpen(false);
     // notify others
     eventEmitter.emit("TEXTURES_CHANGED");
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'texture' });
   }
 
   const allowDrop = (e: React.DragEvent) => {

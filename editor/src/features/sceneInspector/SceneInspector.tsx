@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { Logger, ModelNode, Node } from 'cleo';
+import type { SceneChange } from 'cleo';
 import CameraIcon from '../../icons/camera.png'
 import CameraRigIcon from '../../icons/camera-rig.png'
 import ModelIcon from '../../icons/model.png'
@@ -280,8 +281,14 @@ export default function SceneInspector() {
       setNodes(list);
     };
     rebuild(); // also rebuild immediately when the mode / template root / scene name changes
-    eventEmitter.on('SCENE_CHANGED', rebuild);
-    return () => { eventEmitter.off("SCENE_CHANGED", rebuild) }; // Remove the listener on component unmount
+    // Only structural changes (add/remove/rename/visibility) alter the tree — ignore the per-setter
+    // transform/material/... events the engine now emits, so a gizmo drag doesn't rebuild the tree 60x/sec.
+    const onSceneChanged = (e?: SceneChange) => {
+      if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
+      rebuild();
+    };
+    eventEmitter.on('SCENE_CHANGED', onSceneChanged);
+    return () => { eventEmitter.off("SCENE_CHANGED", onSceneChanged) }; // Remove the listener on component unmount
   }, [eventEmitter, editorScene, editorMode, templateRootId, sceneName]);
 
   const handleSelectNode = (nodeId: string | null) => {
