@@ -1,7 +1,7 @@
 import { Node } from 'cleo'
 import type { NodeVariableAccess } from 'cleo'
 import { useState, useEffect } from 'react'
-import { useCleoEngine } from '../../EngineContext'
+import { useEventBus } from '../../EventBusContext'
 import Collapsable from '../../../components/Collapsable'
 import { NumberInput, TextInput, Toggle, VectorInput, TypeSelect, AccessSelect, Button, Hint, cn, labelClass } from '../../../components/ui'
 import { VariablesIcon } from '../sectionIcons'
@@ -19,7 +19,7 @@ function defaultValue(type: VarType): any {
 }
 
 export default function CustomVariablesEditor(props: { node: Node }) {
-  const { eventEmitter } = useCleoEngine()
+  const eventEmitter = useEventBus()
   const [vars, setVars] = useState<{ name: string, type: VarType, value: any, access: NodeVariableAccess }[]>([])
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<VarType>('number')

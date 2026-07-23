@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import { SpriteNode } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
 import MaterialSlot from './MaterialSlot';
-import { useCleoEngine } from '../../EngineContext';
+import { useEventBus } from '../../EventBusContext';
 import { Field, Select } from '../../../components/ui';
 import { SpriteIcon } from '../sectionIcons';
 
 export default function SpriteEditor(props: {node: SpriteNode}) {
-  const { eventEmitter: eventEmitter } = useCleoEngine();
+  const eventEmitter = useEventBus();
   const [constraints, setConstraints] = useState<'free' | 'spherical' | 'cylindrical'>(props.node.constraints);
 
   useEffect(() => { eventEmitter.emit('TEXTURES_CHANGED') }, [])

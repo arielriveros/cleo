@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { TextureManager, Material } from 'cleo';
-import { useCleoEngine } from '../../EngineContext';
+import { useEventBus } from '../../EventBusContext';
 import { cn, TextInput, Button } from '../../../components/ui';
 import ImportIcon from '../../../icons/import.png';
 import NullImage from '../../../images/null.png';
@@ -12,7 +12,7 @@ const thumbSrc = (id: string): string | undefined => {
 };
 
 export default function TextureInspector(props: { tex: string, material: Material }) {
-  const { eventEmitter: eventEmitter } = useCleoEngine();
+  const eventEmitter = useEventBus();
   const [texture, setTexture] = useState<string | null>(null);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [texturesIds, setTexturesIds] = useState<string[]>([]);

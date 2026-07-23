@@ -1,11 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import EventEmitter from 'events';
-import { CleoEngine, Scene, TextureManager, setGameHost, Logger } from 'cleo';
+import { CleoEngine, Scene, TextureManager, setGameHost, setScriptProvider, registerTemplates, Logger } from 'cleo';
 import { UIRuntime } from '../features/uiInspector/uiRuntime';
 import PlayerUI from './PlayerUI';
 import { unpackGameBin, inflateSceneGeometry } from './unpack';
-import { attachScripts } from './attachScripts';
 
 // Standalone, data-driven runtime for a published Cleo game. It loads game.bin — the single binary
 // holding every scene, mesh and texture (built by the editor via buildMultiSceneGameData + pack.ts) —
@@ -93,6 +92,17 @@ async function boot(): Promise<void> {
     try { if (!TextureManager.Instance.getTexture(t.id)) TextureManager.Instance.addTextureFromBytes(t.bytes, t.mime, t.config, t.id); } catch { /* skip a bad texture */ }
   }
 
+  // Templates once, globally: the registry backs scene.instantiate and must survive a Game.loadScene
+  // switch. Their geometry is inflated here rather than lazily — a script may instantiate one at any
+  // moment, and there is no parse step to hang the work off.
+  for (const t of (data.templates ?? [])) inflateSceneGeometry(t.node, pack);
+  registerTemplates(data.templates);
+
+  // How the engine finds a node's precompiled script. Node parsing consults this whenever a node has no
+  // `script` source — which is every node here, and, crucially, also every node created later by
+  // scene.instantiate (matched through the __sourceId it carries from its template).
+  setScriptProvider(id => ((window as any).CLEO_GAME_SCRIPTS ?? {})[id]);
+
   const table = data.scenes ?? {};
   let currentId = data.entry in table ? data.entry : Object.keys(table)[0];
 
@@ -109,9 +119,10 @@ async function boot(): Promise<void> {
     // parse. Deferring it to here means an unvisited scene's meshes are never touched at all.
     inflateSceneGeometry(entry.scene, pack);
     const scene = new Scene();
+    // Scripts bind during parse, through the provider registered above — there is no separate attach pass
+    // any more, because one could not reach a node that does not exist until a script instantiates it.
     scene.parse({ scene: entry.scene, textures: [] }, true); // textures already registered
-    const attached = attachScripts(scene);
-    Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length} scriptsAttached=${attached}`, 'Player');
+    Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
     engine.setScene(scene);
     setTimeout(() => { scene.start(); startUI(entry.ui?.elements); }, 100);
   };

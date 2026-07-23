@@ -1,5 +1,14 @@
-import { createContext, useContext, useState, useRef, useEffect } from "react";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin, setGameHost } from "cleo";
+import { createContext, useContext, useState, useRef, useEffect, useMemo } from "react";
+import { EventBusContext } from "./EventBusContext";
+import { SelectionContext, type SelectionContextValue } from "./SelectionContext";
+import { PlaybackContext, type PlaybackContextValue } from "./PlaybackContext";
+import { AssetLibraryContext, type AssetLibraryContextValue } from "./AssetLibraryContext";
+import { DocumentContext, type DocumentContextValue } from "./DocumentContext";
+import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
+import { EditorSessionsContext, type EditorSessionsContextValue } from "./EditorSessionsContext";
+import { useStableActions } from "../utils/useStableActions";
+import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin, setGameHost, registerTemplates } from "cleo";
 import type { AnimationCompatibility, HullQuality, SceneChange } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
@@ -470,7 +479,8 @@ const EngineContext = createContext<{
   resolveSceneConfirm: (decision: 'save' | 'discard' | 'cancel') => void;
   /** Mark a tab as having unsaved edits. For edits the SCENE_CHANGED listener cannot see (e.g. animation
    *  state-machine edits, which live in StateMachineContext's own React state). */
-  markTabDirty: (tabId: string) => void;
+  /** `reason` labels the cause in the Dirty debug channel (see utils/dirtyDebug). */
+  markTabDirty: (tabId: string, reason?: string) => void;
   clearTabDirty: (tabId: string) => void;
   /** Run `fn` without its scene edits marking any tab dirty — for editor chrome (gizmos, helper icons)
    *  whose nodes live in the scene and emit SCENE_CHANGED like any other, but are not the user's work. */
@@ -601,9 +611,20 @@ export const useCleoEngine = () => {
     return useContext(EngineContext);
 };
 
+/**
+ * The live editing scene. `spawnRulesEnabled` is off from the moment it exists, not set later: Scene.parse
+ * applies spawnOnStart, and setupInitialScene() parses into this object during boot — a flag assigned after
+ * that would arrive too late and hide every dormant node in the editor viewport.
+ */
+function createEditorScene(): Scene {
+  const scene = new Scene();
+  scene.spawnRulesEnabled = false;
+  return scene;
+}
+
 export function EngineProvider(props: { children: React.ReactNode }) {
   const instanceRef = useRef<CleoEngine | null>(null);
-  const editorSceneRef = useRef<Scene>(new Scene());
+  const editorSceneRef = useRef<Scene>(createEditorScene());
   const eventEmitter = useRef(new EventEmitter());
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
@@ -623,10 +644,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // stale value; go through markTabDirty/clearTabDirty rather than setDirtyTabs so the two stay in step.
   const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
   const dirtyTabsRef = useRef<Record<string, boolean>>({});
-  const markTabDirty = (id: string) => {
-    if (dirtyTabsRef.current[id]) return;
+  /** Name a tab for the Dirty debug channel. Reads tabsRef rather than the `tabs` closure so async flows
+   *  never log a stale title; the ref is declared further down but is only ever read at call time. */
+  const labelForTab = (id: string) => {
+    const tab = tabsRef.current.find(t => t.id === id);
+    return tab ? `${id} (${tab.kind} "${tab.title}")` : id;
+  };
+  const markTabDirty = (id: string, reason = 'direct') => {
+    if (dirtyTabsRef.current[id]) return; // only the clean -> dirty transition, so the log stays one line
     dirtyTabsRef.current = { ...dirtyTabsRef.current, [id]: true };
     setDirtyTabs(dirtyTabsRef.current);
+    logDirtyMark(labelForTab(id), reason);
   };
   const clearTabDirty = (id: string) => {
     if (!dirtyTabsRef.current[id]) return;
@@ -634,6 +662,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     delete next[id];
     dirtyTabsRef.current = next;
     setDirtyTabs(next);
+    logDirtyClear(labelForTab(id));
   };
   // Per-tab runtime scene + root. Animation tabs also record where the SOURCE node lives (its scene may
   // be the main scene OR a template tab's scene) so authored state machines are written back correctly.
@@ -914,7 +943,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Called by the script tab's editor on every edit: buffer the source and mark the tab dirty.
   const setScriptTabSource = (tabId: string, scriptId: string, source: string) => {
     scriptTabSourceRef.current.set(scriptId, source);
-    markTabDirty(tabId);
+    markTabDirty(tabId, 'script-source');
   };
   const getScriptTabSource = (scriptId: string): string | undefined => scriptTabSourceRef.current.get(scriptId);
 
@@ -1164,6 +1193,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     dirtyArmedRef.current = false;
     const scene = new Scene();
     scene.animationsEnabled = false; // editing scene: skinned models hold bind pose (no playback)
+    scene.spawnRulesEnabled = false; // ...and a spawnOnStart=false node still shows while it is being authored
     // Shared with mesh tabs: editor camera, an __editor__ viewing light (hidden from the tree — it lights
     // the template, it is not part of it) and the cubemap background + reflections. Every node it adds
     // sits at the scene root, outside the template subtree, so Save Template never serializes any of it.
@@ -1222,6 +1252,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const pos = Array.from(inst.position) as [number, number, number];
         const rot = Array.from(inst.rotation) as [number, number, number];
         const scl = Array.from(inst.scale) as [number, number, number];
+        // Per-instance node state the rebuild would otherwise drop — the subtree is reconstructed from the
+        // ASSET, which knows nothing about how this particular placement was configured.
+        const spawnOnStart = inst.spawnOnStart;
         const wasSelected = inst.id === selectedNode;
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
@@ -1231,7 +1264,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         parent.removeChild(inst);
         const newId = instantiateTemplate(template, parent, maps, materialsRef.current); // re-tags __templateId
         const newNode = scene.getNodeById(newId);
-        if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
+        if (newNode) {
+          newNode.setPosition(pos).setRotation(rot).setScale(scl);
+          newNode.spawnOnStart = spawnOnStart;
+        }
         if (wasSelected) reselectId = newId;
         count++;
       }
@@ -1285,6 +1321,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Clone the source node (with its skin, animations, mappings and state machine) into a fresh scene.
     const scene = new Scene();
     scene.animationsEnabled = false; // the AnimationPlayer drives the clone directly, not scene.update
+    scene.spawnRulesEnabled = false; // ...and a spawnOnStart=false node still shows while it is being authored
     const json = await source.serialize();
     stripDebug(json);
     regenerateIds(json, new Map()); // distinct ids so the clone never collides with the original
@@ -1319,7 +1356,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
     // The edit landed on the source node, so its owner has unsaved changes — the scene tab when the model
     // lives in the open scene, the template tab when it came from a template.
-    if (rt.sourceTabId) markTabDirty(rt.sourceTabId);
+    if (rt.sourceTabId) markTabDirty(rt.sourceTabId, 'anim-state-machine');
   };
 
   // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation
@@ -1360,7 +1397,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       added++;
     });
     if (added > 0) {
-      if (rt?.sourceTabId) markTabDirty(rt.sourceTabId);
+      if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-import');
       eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
       Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName}`, 'Editor');
     }
@@ -1403,7 +1440,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       Logger.warn('No matching bones — load the SAME file this character was imported from (same format/export)', 'Editor');
       return;
     }
-    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId);
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-skeleton');
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     Logger.info(`Added bone names to ${matched} joints — animation import now matches by name. Save the project to keep them.`, 'Editor');
   };
@@ -1417,7 +1454,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const finalName = cloneNode.model.renameAnimation(oldName, newName) ?? oldName;
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
     if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.renameAnimation(oldName, finalName);
-    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId);
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-rename-clip');
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     return finalName;
   };
@@ -1429,7 +1466,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) cloneNode.model.removeAnimation(name);
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
     if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.removeAnimation(name);
-    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId);
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-remove-clip');
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
 
@@ -1692,6 +1729,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     dirtyArmedRef.current = false;
     const scene = new Scene();
     scene.animationsEnabled = false; // skinned models hold their bind pose while editing
+    scene.spawnRulesEnabled = false; // ...and a spawnOnStart=false node still shows while it is being authored
     // Same asset-edit environment as template tabs — see createAssetEditScene. The viewing light is
     // __editor__ named, so it neither appears in the mesh's tree nor gets saved into the asset.
     void createAssetEditScene(scene, withoutDirty);
@@ -1765,6 +1803,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const pos = Array.from(inst.position) as [number, number, number];
         const rot = Array.from(inst.rotation) as [number, number, number];
         const scl = Array.from(inst.scale) as [number, number, number];
+        // Per-instance node state the rebuild would otherwise drop — the subtree is reconstructed from the
+        // ASSET, which knows nothing about how this particular placement was configured.
+        const spawnOnStart = inst.spawnOnStart;
         const wasSelected = inst.id === selectedNode;
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
@@ -1772,7 +1813,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         parent.removeChild(inst);
         const newId = instantiateModelAsset(asset, parent, materialsRef.current, modelsRef.current);
         const newNode = scene.getNodeById(newId);
-        if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl);
+        if (newNode) {
+          newNode.setPosition(pos).setRotation(rot).setScale(scl);
+          newNode.spawnOnStart = spawnOnStart;
+        }
         if (wasSelected) reselectId = newId;
         count++;
       }
@@ -1963,7 +2007,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const tab = tabs.find(t => t.id === activeTabId);
     if (!tab || tab.kind !== 'model') return;
     setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, title: name } : x));
-    markTabDirty(tab.id);
+    markTabDirty(tab.id, 'model-rename');
   };
 
   /**
@@ -2023,7 +2067,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       };
       setModelSessions(prev => ({ ...prev, [tab.id]: next }));
       applyActiveModelLevel(runtime.scene, levelIds, next.activeLevel);
-      markTabDirty(tab.id);
+      markTabDirty(tab.id, 'model-lod-add');
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
     } catch (e) {
@@ -2049,7 +2093,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const activeLevel = Math.min(session.activeLevel >= level ? session.activeLevel - 1 : session.activeLevel, levelIds.length - 1);
     setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, levelIds, lodRefs, distances, activeLevel: Math.max(0, activeLevel) } }));
     applyActiveModelLevel(runtime.scene, levelIds, Math.max(0, activeLevel));
-    markTabDirty(tab.id);
+    markTabDirty(tab.id, 'model-lod-remove');
   };
 
   const setModelLodDistance = (level: number, distance: number) => {
@@ -2059,7 +2103,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!session || level >= session.distances.length) return;
     const distances = session.distances.map((d, i) => i === level ? Math.max(0, distance) : d);
     setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, distances } }));
-    markTabDirty(tab.id);
+    markTabDirty(tab.id, 'model-lod-distance');
   };
 
   const setModelCullDistance = (distance: number) => {
@@ -2068,7 +2112,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const session = modelSessions[tab.id];
     if (!session) return;
     setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, cullDistance: Math.max(0, distance) } }));
-    markTabDirty(tab.id);
+    markTabDirty(tab.id, 'model-cull-distance');
   };
 
   const setActiveModelLevel = (level: number) => {
@@ -2301,7 +2345,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Rename the active material tab (bound to the name field in the material-mode inspector).
   const setActiveMaterialName = (name: string) => {
     setTabs(prev => prev.map(t => (t.id === activeTabId && t.kind === 'material') ? { ...t, title: name } : t));
-    markTabDirty(activeTabId);
+    markTabDirty(activeTabId, 'material-rename');
   };
 
   // --- Terrain materials (mirror the material asset flow above, but assigned to terrain paint layers) ---
@@ -2417,7 +2461,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const setActiveTerrainMaterialName = (name: string) => {
     setTabs(prev => prev.map(t => (t.id === activeTabId && t.kind === 'terrainMaterial') ? { ...t, title: name } : t));
-    markTabDirty(activeTabId);
+    markTabDirty(activeTabId, 'terrain-material-rename');
   };
 
   // Keep non-reactive mirrors of the active tab (read by the once-registered SCENE_CHANGED/dimension listeners).
@@ -2476,13 +2520,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // editor scene look unsaved), and neither does propagation (see dirtySuppressRef).
   useEffect(() => {
     const mark = (e?: SceneChange) => {
-      if (!dirtyArmedRef.current || isPlayModeRef.current || dirtySuppressRef.current) return;
+      // Guards are split one per line so the Dirty channel can name which one rejected a mark (verbose
+      // mode). Behaviour is unchanged when the channel is off — logDirtySkip is then a no-op.
+      if (!dirtyArmedRef.current) return logDirtySkip('not-armed', e);
+      if (isPlayModeRef.current) return logDirtySkip('play-mode', e);
+      if (dirtySuppressRef.current) return logDirtySkip('suppressed', e);
       // Ignore mutations to editor-owned nodes — the free-fly viewport camera (an __editor__Camera Node,
       // moved every frame during navigation) and the __editor__/__debug__ helper icons + physics wireframes
       // the reconciler splices in. None are user edits, and without this the engine's new per-setter transform
       // events would mark a clean scene unsaved the instant the user orbits the camera.
-      if (e?.node && (e.node.name.includes('__editor__') || e.node.name.includes('__debug__'))) return;
-      markTabDirty(activeTabIdRef.current);
+      if (e?.node && (e.node.name.includes('__editor__') || e.node.name.includes('__debug__')))
+        return logDirtySkip('editor-owned', e);
+      markTabDirty(activeTabIdRef.current, describeChange(e));
     };
     const emitter = eventEmitter.current;
     emitter.on('SCENE_CHANGED', mark);
@@ -2762,7 +2811,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Swap the live rig only when it's the scene on screen; the CHANGE_DIMENSION handler mirrors the value
     // into dimensionRef, and the scene tab is the only one whose dimension is its own.
     if (sceneId === openSceneIdRef.current) eventEmitter.current.emit('CHANGE_DIMENSION', dimension);
-    markTabDirty(SCENE_TAB_ID);
+    markTabDirty(SCENE_TAB_ID, 'scene-dimension');
   };
 
   /** Delete a scene asset. Returns null on success, or the reason it is not allowed. */
@@ -2965,6 +3014,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // The editor scene runs unpaused (for camera nav), so disable animator playback and pin
           // skinned models to their bind/T pose — animations only play in Play mode + the Anim Editor.
           editorSceneRef.current.animationsEnabled = false;
+          // spawnRulesEnabled is already off — see createEditorScene, which has to set it before the parse
+          // that setupInitialScene() above has already done.
           editorSceneRef.current.start();
           showBindPoseForSkinnedModels(editorSceneRef.current);
 
@@ -3291,9 +3342,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
       ui: uiStateRef.current,
+      templates: templatesRef.current,
+      materials: materialsRef.current,
       useCache: true,
     });
     const newScene = new Scene();
+    // Templates are global and shared by every scene in the session, so they are registered here rather
+    // than per-parse — a runtime Game.loadScene must not drop what a script can still instantiate.
+    registerTemplates(json.templates);
     newScene.parse(json, true);
     return newScene;
   };
@@ -3311,8 +3367,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const tmp = new Scene();
     tmp.parse({ scene: clone.scene, textures: [] }, true);
     resyncScene(tmp, maps, currentLibs(), data.assetHashes);
-    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, ui: clone.ui ?? { version: 1, elements: [] }, useCache: true });
+    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, ui: clone.ui ?? { version: 1, elements: [] }, scriptAssets: scriptAssetsRef.current, templates: templatesRef.current, materials: materialsRef.current, useCache: true });
     const scene = new Scene();
+    registerTemplates(gd.templates);
     scene.parse(gd, true); // gd injects scripts into nodes → compiled here
     return { scene, ui: gd.ui?.elements ?? [] };
   };
@@ -3407,6 +3464,78 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasUnsavedWork]);
+
+  // Split-out slice contexts (Selection / Playback / AssetLibrary / Document). The state still lives here;
+  // each exposes a narrow, memoized value so a consumer of one slice needn't re-render on every unrelated
+  // EngineContext change. Actions go through useStableActions, so only real state changes bust each memo.
+  const selectionValue = useMemo<SelectionContextValue>(() => ({
+    selectedNode, isGizmoDragging, gizmoMode, setGizmoMode,
+  }), [selectedNode, isGizmoDragging, gizmoMode]);
+
+  const playActions = useStableActions({ startPlay, stopPlay, pausePlay });
+  const playbackValue = useMemo<PlaybackContextValue>(() => ({
+    isPlayMode, ...playActions,
+  }), [isPlayMode, playActions]);
+
+  const libraryActions = useStableActions({
+    addTemplate, removeTemplate, updateTemplate,
+    addMaterial, removeMaterial, updateMaterial,
+    addTerrainMaterial, removeTerrainMaterial, updateTerrainMaterial,
+    addModel, removeModel, updateModel,
+    addScriptAsset, removeScriptAsset, updateScriptAsset,
+  });
+  const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
+    templates, materials, terrainMaterials, models, scriptAssets, assetsLoaded, ...libraryActions,
+  }), [templates, materials, terrainMaterials, models, scriptAssets, assetsLoaded, libraryActions]);
+
+  const documentActions = useStableActions({
+    setActiveTab, closeTab, reorderTabs, saveActiveTab, saveAll, markTabDirty, clearTabDirty, withoutDirty,
+  });
+  const documentValue = useMemo<DocumentContextValue>(() => ({
+    tabs, activeTabId, activeTab, dirtyTabs, savingState,
+    mainDirty: !!dirtyTabs[SCENE_TAB_ID],
+    ...documentActions,
+  }), [tabs, activeTabId, activeTab, dirtyTabs, savingState, documentActions]);
+
+  const projectActions = useStableActions({
+    openScene, createScene, renameScene, deleteScene, duplicateScene, setMainScene,
+    setSceneDimension, resolveSceneConfirm, replaceProjectMeta,
+  });
+  const projectValue = useMemo<ProjectContextValue>(() => ({
+    sceneList, mainSceneId, openSceneId, pendingSceneConfirm,
+    // Mirrors the main value: reads sceneList so it recomputes on change, falling back to the meta ref.
+    sceneDimension: sceneList.find(s => s.id === openSceneId)?.dimension ?? projectMetaRef.current?.prefs?.dimension ?? '3D',
+    ...projectActions,
+  }), [sceneList, mainSceneId, openSceneId, pendingSceneConfirm, projectActions]);
+
+  const sessionActions = useStableActions({
+    enterTemplateEditor,
+    enterMaterialEditor, createMaterialForNode, setActiveMaterialName,
+    enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
+    enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply,
+    importAnimationFiles, importSkeletonNames, renameAnimationClip, removeAnimationClip, resolveAnimationImport,
+    enterModelEditor, setActiveModelName, addModelLodFromAsset, removeModelLod,
+    setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
+    enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource,
+    scriptAssetOf, createScriptForNode, attachScriptToNode, detachScriptFromNode,
+  });
+  const editorSessionsValue = useMemo<EditorSessionsContextValue>(() => ({
+    editingTemplateName, templateRootId,
+    editingMaterialName,
+    editingTerrainMaterialName, editingTerrainMaterialNode,
+    animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport,
+    modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
+    modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
+      ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
+      : null,
+    pendingModelImport,
+    ...sessionActions,
+  }), [
+    editingTemplateName, templateRootId, editingMaterialName,
+    editingTerrainMaterialName, editingTerrainMaterialNode,
+    animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport,
+    activeTab, modelSessions, pendingModelImport, sessionActions,
+  ]);
 
   return (
   <EngineContext.Provider value={{
@@ -3532,7 +3661,23 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       clearTabDirty,
       withoutDirty,
     }}>
-    {props.children}
+    {/* The bus first: its value is the emitter ref, which never changes, so bus-only consumers never
+        re-render from context at all. */}
+    <EventBusContext.Provider value={eventEmitter.current}>
+      <SelectionContext.Provider value={selectionValue}>
+        <PlaybackContext.Provider value={playbackValue}>
+          <AssetLibraryContext.Provider value={assetLibraryValue}>
+            <DocumentContext.Provider value={documentValue}>
+              <ProjectContext.Provider value={projectValue}>
+                <EditorSessionsContext.Provider value={editorSessionsValue}>
+                  {props.children}
+                </EditorSessionsContext.Provider>
+              </ProjectContext.Provider>
+            </DocumentContext.Provider>
+          </AssetLibraryContext.Provider>
+        </PlaybackContext.Provider>
+      </SelectionContext.Provider>
+    </EventBusContext.Provider>
   </EngineContext.Provider>
   );
 }

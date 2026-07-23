@@ -3,8 +3,9 @@
 // buildFactoryBody), and obfuscation is by far the most expensive step of a publish.
 
 // Aggressive-but-eval-free obfuscation. transformObjectKeys/renameGlobals are OFF on purpose so the
-// public interface survives: the returned { onStart, onUpdate, ... } keys are read by the player's
-// attachScripts.ts, and `window.CLEO_GAME_SCRIPTS` must keep its name. No debugProtection/selfDefending
+// public interface survives: the returned { onStart, onUpdate, ... } keys are read by the engine when it
+// binds a factory, and `window.CLEO_GAME_SCRIPTS` must keep its name — the player registers a script
+// provider over it (player/index.tsx). No debugProtection/selfDefending
 // so we never reintroduce the Function constructor / eval.
 const OBFUSCATOR_OPTIONS = {
   compact: true,

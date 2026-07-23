@@ -32,6 +32,9 @@ export function extractScripts(data: any): { data: any; scripts: ScriptMap } {
 
   if (data?.scene) visit(data.scene);                       // v1: single scene
   if (data?.scenes) for (const s of Object.values<any>(data.scenes)) visit(s?.scene); // v2: every scene
+  // Templates too, keyed by their template-internal node ids. Scene.instantiate stamps that id onto each
+  // copy as `__sourceId` when it renumbers, which is how a node created at runtime finds its factory here.
+  if (data?.templates) for (const t of data.templates) visit(t?.node);
   return { data, scripts };
 }
 

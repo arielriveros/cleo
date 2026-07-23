@@ -16,7 +16,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Camera } from "../camera";
 import { CleoEngine, Shape } from "../../cleo";
 import { Logger } from "../logger";
-import { compileScript, createScriptImporter, ScriptFactory, SCRIPT_HANDLERS } from "../scripting/scriptRuntime";
+import { compileScript, createScriptImporter, resolveNodeScript, ScriptFactory, SCRIPT_HANDLERS } from "../scripting/scriptRuntime";
 import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
 import type { BVH } from "../bvh";
 import type { ChangeKind } from "../eventBus";
@@ -346,6 +346,7 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
         };
     };
 
+    node.onConstruct = guard('onConstruct');
     node.onStart = guard('onStart');
     node.onSpawn = guard('onSpawn');
     node.onUpdate = guard('onUpdate');
@@ -461,6 +462,20 @@ export class Node {
   protected _hasStarted: boolean = false;
   protected _markForRemoval: boolean = false;
 
+  // Spawn lifecycle. `_spawnOnStart` is authored (inspector + serialized); `_spawned` is the runtime state.
+  // Both default to the pre-existing behaviour — every node that never touches them is spawned, always —
+  // so old scenes and code-built scenes are unaffected. A dormant node is dropped from the scene's derived
+  // lists (Scene._filterByType), which is what makes despawn cover EVERY consumer at once rather than the
+  // subset that happens to check `visible`.
+  protected _spawnOnStart: boolean = true;
+  protected _spawned: boolean = true;
+  // onConstruct is once per node per scene load, so it needs its own latch — _hasStarted cannot serve, since
+  // a dormant node receives onConstruct and never starts.
+  protected _hasConstructed: boolean = false;
+  // onSpawn is once per LIFE: set when it fires, cleared by despawn. Without it a node woken from another
+  // node's onConstruct would get onSpawn from spawn() and again from Scene.start's spawn pass.
+  protected _spawnNotified: boolean = false;
+
   protected _body: RigidBody | null;
   protected _trigger: Trigger | null;
 
@@ -480,6 +495,23 @@ export class Node {
   // attachScriptFactory/attachClassScript install a script's handlers as own-properties shadowing these.
 
   /**
+   * Called once for **every** node in the scene, spawned or not — the one handler a dormant node still
+   * receives. Runs before {@link onSpawn} and {@link onStart}, with {@link scene} already available.
+   *
+   * This is where a node decides its own fate, since a node flagged `spawnOnStart = false` gets no other
+   * handler until something wakes it:
+   *
+   *   onConstruct() {
+   *     if (Game.difficulty > 2) this.spawn();
+   *   }
+   *
+   * Fires once per node per scene load, never again — not on re-parenting, and not on a later
+   * spawn/despawn cycle. Note that a script class is never CONSTRUCTED (its methods are bound onto the
+   * live node), so this, not a `constructor()`, is the hook that replaces one.
+   */
+  public onConstruct(): void {}
+
+  /**
    * Called once when the scene starts, or immediately on `addChild` if the scene is already running.
    * Runs after {@link onSpawn} and after node variables and script fields are restored, so it is the
    * first place both are safe to read.
@@ -490,9 +522,12 @@ export class Node {
   public onStart(): void {}
 
   /**
-   * Called the moment this node is attached to a parent, before {@link onStart}. Fires on re-parenting
-   * as well as on first spawn, so it may run more than once in a node's lifetime — put one-time setup
-   * in {@link onStart} instead.
+   * Called once each time this node becomes live — at scene start, or when {@link spawn} wakes it — after
+   * {@link onConstruct} and before {@link onStart}. A node that is despawned and spawned again gets a fresh
+   * one, so this is the place for per-life setup (reset health, clear state); use {@link onStart} for setup
+   * that must happen only once, and {@link onConstruct} for anything a dormant node must still do.
+   *
+   * Re-parenting does not re-fire it: moving a node in the tree does not begin a new life.
    */
   public onSpawn(): void {}
 
@@ -570,18 +605,24 @@ export class Node {
       node.parent.removeChild(node, true);
       CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node });
     }
-    
+
     node.parent = this;
     this._children.push(node);
-    node.onSpawn();
-    if (this._hasStarted)
-      node.start();
-    if (this.scene) {
+
+    // Scene FIRST, then the handlers. onStart routinely calls this.after/this.every, and those go through
+    // `this.scene` — running start() before the scene was attached made every timer scheduled from onStart
+    // a silent no-op. It is also what lets start() below read `scene.spawnRulesEnabled`.
+    if (this.scene)
       node.scene = this.scene;
-      for (const child of node.children) {
-        child.onSpawn();
-        child.scene = this.scene;
-      }
+
+    // Only when the scene is already running. During a scene LOAD the parent has not started yet and every
+    // node is attached before Scene.start runs the three passes over the finished tree — firing here as well
+    // would deliver each handler twice (a descendant fires on its own attach, then again on its parent's).
+    if (this._hasStarted) {
+      node.applySpawnRules();
+      node.runConstructHandlers();
+      node.runSpawnHandlers();
+      node.start();
     }
     CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node });
   }
@@ -595,7 +636,10 @@ export class Node {
    *                 treats the detach as a despawn.
    */
   public removeChild(node: Node, reparent: boolean = false): void {
-    if (!reparent) {
+    // A node that is already dormant has had all of this done by despawn() — firing onDespawn again here is
+    // what used to make node.remove() deliver it twice (remove() fires it, then the Scene.update sweep
+    // reached this line).
+    if (!reparent && node._spawned) {
       // Before onDespawn, and before `scene` is cleared below: a pending this.after/this.every must not
       // fire against a node no longer in the tree.
       node.scene?.cancelTimers(node);
@@ -659,8 +703,11 @@ export class Node {
     this._worldSphereDirty = true;
     this._worldBoxDirty = true;
 
+    // Dormant subtrees cost nothing per frame — nothing reads their matrices while they are asleep, and
+    // spawn() recomputes them before anything can.
     for (const child of this._children) {
-      child.updateTransforms(this._worldTransform);
+      if (child._spawned)
+        child.updateTransforms(this._worldTransform);
     }
   }
 
@@ -690,14 +737,178 @@ export class Node {
   // Scratch matrix for _updateWorldCache (avoids a per-frame allocation).
   private static readonly _rotationScratch: mat4 = mat4.create();
 
-  /** Despawns this node (and all its children) — fires onDespawn, cancels its pending timers, detaches
-   *  its physics body, and removes it from the scene at the next update. */
+  /**
+   * Destroys this node and its whole subtree: it is {@link despawn}ed immediately (onDespawn, timers
+   * cancelled, physics bodies dropped) and unlinked from the scene at the next update.
+   *
+   * This is permanent — the node cannot be brought back. For something that should reappear later (a pooled
+   * projectile, a door, an enemy wave), use {@link despawn} and {@link spawn} instead.
+   */
   public remove(): void {
-    this._markForRemoval = true;
-    this.scene?.cancelTimers(this);
-    try { this.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn function for node ${this._name}: ${e}`); }
+    this.despawn();
+    this._forEachInSubtree(n => { n._markForRemoval = true; });
+  }
+
+  /**
+   * Brings a dormant node (and its subtree) back to life: it renders, updates, animates and simulates again.
+   * No-op if it is already spawned.
+   *
+   * Fires {@link onSpawn} every time. {@link onStart} runs only on the FIRST spawn — a node returning from
+   * despawn keeps whatever state it had, so put per-life setup in `onSpawn` and one-time setup in `onStart`.
+   *
+   *   this.findNode('Door').spawn();
+   *
+   * Descendants that carry their own `spawnOnStart = false` stay asleep, so waking a spawner does not fire
+   * every projectile parked under it. Pass `{ subtree: true }` when you mean the whole group instead:
+   *
+   *   this.findNode('EnemyCamp').spawn({ subtree: true });
+   *
+   * @param options `subtree: true` wakes every descendant, ignoring their own spawnOnStart flags.
+   */
+  public spawn(options: { subtree?: boolean } = {}): void {
+    if (this._spawned) return;
+
+    // Exactly which nodes wake, decided before anything fires: this one unconditionally — an explicit spawn
+    // overrides its own flag, or it could never be woken at all — and each descendant only if its own
+    // spawnOnStart allows. Waking a spawner must not fire every projectile parked under it.
+    const waking: Node[] = [];
+    const collect = (node: Node, applySpawnRules: boolean) => {
+      if (node._spawned) return;   // already awake, and so is everything beneath it
+      if (applySpawnRules && !node._spawnOnStart && node._scene?.spawnRulesEnabled !== false) return;
+      waking.push(node);
+      for (const child of node._children) collect(child, !options.subtree);
+    };
+    collect(this, false);
+
+    for (const node of waking) node._spawned = true;
+
+    // World matrices went stale while dormant (updateTransforms skips dormant subtrees), and physics/render
+    // both read them the same frame this returns.
+    this.updateTransforms(this._parent ? this._parent.worldTransform : null);
+
+    for (const node of waking) {
+      // A pooled node must not resume the momentum it had when it despawned. The body re-enters the world on
+      // the next PhysicsSystem.update, which finds it through the scene lists this node just rejoined.
+      if (node._body) {
+        node._body.velocity.set(0, 0, 0);
+        node._body.angularVelocity.set(0, 0, 0);
+      }
+      node._spawnNotified = true;
+      try { node.onSpawn(); } catch (e) { Logger.error(`Error in onSpawn for node ${node.name}: ${e}`); }
+    }
+
+    // onStart is once per node lifetime, so a node returning from despawn does not get it again — and none
+    // of this runs before the scene itself starts, which will reach these nodes on its own.
+    if (this._scene?.hasStarted) {
+      for (const node of waking) {
+        if (node._hasStarted) continue;
+        try {
+          node._hasStarted = true;
+          node.onStart();
+        } catch (e) { Logger.error(`Error in onStart function for node ${node.name}: ${e}`); }
+      }
+    }
+
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this });
+  }
+
+  /**
+   * Puts this node and its subtree to sleep without destroying it: it stops rendering, stops receiving
+   * {@link onUpdate}, stops animating, and its physics body and trigger leave the world. Pending
+   * {@link after}/{@link every} timers are cancelled and {@link onDespawn} fires once. No-op if it is
+   * already dormant.
+   *
+   * The node stays in the scene tree and remains findable by name/id, so a script can always
+   * {@link spawn} it again. Use {@link remove} instead when it should never come back.
+   *
+   *   this.findNode('Enemy').despawn();
+   */
+  public despawn(): void {
+    if (!this._spawned) return;
+
+    this._forEachInSubtree(n => {
+      // A descendant that was already dormant on its own has had all of this done — firing its onDespawn
+      // again from an ancestor's despawn would deliver the handler twice for one sleep.
+      if (!n._spawned) return;
+
+      // Before onDespawn: a pending this.after/this.every must not fire against a node that is going away.
+      n._scene?.cancelTimers(n);
+      try { n.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn function for node ${n.name}: ${e}`); }
+
+      // PhysicsSystem walks scene.nodes, which no longer contains this node once the flag is cleared below —
+      // so it will never get another chance to drop these itself. Without this the collider keeps blocking
+      // and colliding while its mesh is gone.
+      const physics = n._scene?.physics;
+      if (physics) {
+        if (n._body) physics.removeBody(n._body);
+        if (n._trigger) physics.removeBody(n._trigger);
+      }
+
+      n._spawned = false;
+      n._spawnNotified = false;   // next spawn is a new life, and gets its own onSpawn
+    });
+
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this });
+  }
+
+  /**
+   * Put every subtree flagged `spawnOnStart = false` to sleep, without starting anything.
+   *
+   * Called by `Scene.parse` so the rule takes effect the moment a scene is built rather than at
+   * `scene.start()`. Both the editor and the player defer that start behind a timeout, and the engine
+   * renders during the gap — so a pool of dormant nodes would otherwise be drawn for a beat and then pop
+   * out of existence. Harmless to run twice; `start()` reaches the same state on its own.
+   */
+  public applySpawnRules(): void {
+    if (this._scene?.spawnRulesEnabled === false) return;
+
+    let slept = false;
+    const walk = (node: Node) => {
+      // `_hasStarted` means a script already spawned it explicitly; that decision wins over the flag.
+      if (!node._hasStarted && !node._spawnOnStart) {
+        if (node._spawned) slept = true;
+        node._forEachInSubtree(n => { n._spawned = false; });
+        return;
+      }
+      for (const child of node._children) walk(child);
+    };
+    walk(this);
+
+    // Scene rebuilds its cached node lists only on a structural change, so a flag flipped without one leaves
+    // a dormant node in scene.models, still rendering.
+    if (slept)
+      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this });
+  }
+
+  /**
+   * Fire {@link onConstruct} across this subtree, once per node, dormant nodes included.
+   *
+   * Driven by Scene.start (and by addChild for a node added to a running scene) rather than from the attach
+   * itself, so `this.scene` is always live inside the handler — during a load a node is attached to its
+   * parent before that parent joins the scene, so at attach time a nested node cannot see the scene at all.
+   */
+  public runConstructHandlers(): void {
+    this._forEachInSubtree(n => {
+      if (n._hasConstructed) return;
+      n._hasConstructed = true;
+      try { n.onConstruct(); } catch (e) { Logger.error(`Error in onConstruct for node ${n.name}: ${e}`); }
+    });
+  }
+
+  /** Fire {@link onSpawn} across this subtree, for the nodes that are actually awake. */
+  public runSpawnHandlers(): void {
+    this._forEachInSubtree(n => {
+      if (!n._spawned || n._spawnNotified) return;
+      n._spawnNotified = true;
+      try { n.onSpawn(); } catch (e) { Logger.error(`Error in onSpawn for node ${n.name}: ${e}`); }
+    });
+  }
+
+  /** Applies `fn` to this node and every descendant, parents before children. */
+  private _forEachInSubtree(fn: (node: Node) => void): void {
+    fn(this);
     for (const child of this._children)
-      child.remove();
+      child._forEachInSubtree(fn);
   }
 
   /** Resolves after `seconds` of unpaused game time. For `async onStart/onUpdate/...` handlers. */
@@ -717,9 +928,30 @@ export class Node {
   }
 
   public start(): void {
+    // A node flagged dormant does not start: no onStart, and no descent into its children (a subtree under a
+    // dormant root is dormant too). onDespawn is deliberately NOT fired — it never spawned, so there is
+    // nothing to tear down. Editor scenes opt out via `scene.spawnRulesEnabled = false` so a node the user
+    // has flagged dormant still shows and can be selected while authoring. {@link spawn} is the way past
+    // this, and it bypasses the check rather than going through here.
+    // `!_hasStarted` guards against undoing an explicit spawn: the scene's start walk reaches nodes in tree
+    // order, so a script that spawns something declared LATER in the tree would otherwise have its work
+    // reverted a moment later when the walk arrives and re-applies the flag.
+    if (!this._hasStarted && !this._spawnOnStart && this._scene?.spawnRulesEnabled !== false) {
+      this._forEachInSubtree(n => { n._spawned = false; });
+      // The emit is not optional. Scene caches its node lists and only rebuilds them on a structural change;
+      // by the time start() runs, the play bootstrap has already rendered frames (setScene -> update, then a
+      // deferred start()), so those lists exist and still hold this node. Without this it stays in
+      // scene.models forever and keeps drawing, despawned in name only.
+      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this });
+      return;
+    }
+
     try {
-      this._hasStarted = true;
-      this.onStart();
+      // Guarded so start() is idempotent — onStart is once per node lifetime.
+      if (!this._hasStarted) {
+        this._hasStarted = true;
+        this.onStart();
+      }
       for (const child of this._children)
         child.start();
     } catch (error) {
@@ -754,7 +986,8 @@ export class Node {
           rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
           scale: [this._scale[0], this._scale[1], this._scale[2]],
           children: children,
-          variables: this._serializeVariables()
+          variables: this._serializeVariables(),
+          spawnOnStart: this._spawnOnStart
         });
       });
     });
@@ -784,6 +1017,11 @@ export class Node {
     if (json.scale) node.setScale(json.scale);
     node.updateTransforms(parent.worldTransform);
 
+    // Absent in scenes saved before the spawn lifecycle existed, which is exactly the `true` default — so
+    // every pre-existing scene keeps spawning everything. Must land before the trailing addChild, which is
+    // what may immediately start() the node.
+    if (json.spawnOnStart === false) node._spawnOnStart = false;
+
     // Restore custom variables before scripts so onStart can read them.
     Node._parseVariables(node, json.variables);
 
@@ -794,6 +1032,17 @@ export class Node {
 
     if (json.script)
       Node._parseScript(node, json.script);
+    else {
+      // No-eval (published) path: the source was stripped at publish time and lives as a real function in
+      // game.scripts.js. Doing this HERE rather than in a pass over the finished scene is what makes a node
+      // created later — by Scene.instantiate — get its script too; `__sourceId` is the template's original
+      // id, which is the key those factories are registered under.
+      const factory = resolveNodeScript(json.__sourceId ?? json.id);
+      if (factory) {
+        try { attachScriptFactory(node, factory); }
+        catch (e) { Logger.error(`Failed to attach script for node ${node.name}: ${e}`, 'Script'); }
+      }
+    }
 
     // Shape dimensions and offsets are authored in node-local units, so the node's world scale is
     // applied here. Rotations are scale-invariant and pass through untouched, which is what keeps a
@@ -882,34 +1131,8 @@ export class Node {
       setShapes(json.trigger.shapes, node.setTrigger());
 
     if (json.children) {
-      for (const child of json.children) {
-        if (child.type === 'model')
-          ModelNode.parse(node, child);
-        else if (child.type === 'light')
-          LightNode.parse(node, child);
-        else if (child.type === 'lightProbe')
-          LightProbeNode.parse(node, child);
-        else if (child.type === 'skybox')
-          SkyboxNode.parse(node, child);
-        else if (child.type === 'camera')
-          CameraNode.parse(node, child);
-        else if (child.type === 'sprite')
-          SpriteNode.parse(node, child);
-        else if (child.type === 'animatedSprite')
-          AnimatedSpriteNode.parse(node, child);
-        else if (child.type === 'landscape')
-          LandscapeNode.parse(node, child);
-        else if (child.type === 'volumetricClouds')
-          VolumetricCloudsNode.parse(node, child);
-        else if (child.type === 'skyAtmosphere')
-          SkyAtmosphereNode.parse(node, child);
-        else if (child.type === 'lodGroup')
-          LodGroupNode.parse(node, child);
-        else if (child.type === 'cameraRig')
-          CameraRigNode.parse(node, child);
-        else
-          Node.parse(node, child);
-      }
+      for (const child of json.children)
+        parseNodeJson(node, child);
     }
     parent.addChild(node);
   }
@@ -968,6 +1191,32 @@ export class Node {
     this._notifyChange('variable', name, existing?.value, undefined);
   }
 
+  // --- Scene lookups ----------------------------------------------------------------------------
+  // Real methods, not just conveniences synthesized by the legacy script proxy (wrapNode). A CLASS-based
+  // script runs natively on the node — no proxy — so without these `this.findNode('Player')` is simply not a
+  // function there, while the identical line works in a legacy `this.onStart = ...` script. The proxy still
+  // intercepts these names ahead of the node, so a legacy script keeps getting access-checked proxies back.
+
+  /**
+   * The first node in this node's scene named `name`, or `undefined`. Searches the whole scene, not just
+   * this node's children — for those, use {@link getChildByName}.
+   *
+   *   this.findNode('Door').spawn();
+   */
+  public findNode(name: string): Node | undefined {
+    return this._scene?.findNode(name);
+  }
+
+  /** Every node in this node's scene named `name` — names are not unique. Empty if none match. */
+  public getNodesByName(name: string): Node[] {
+    return this._scene?.getNodesByName(name) ?? [];
+  }
+
+  /** The node with this unique id anywhere in the scene, or `undefined`. */
+  public getNodeById(id: string): Node | undefined {
+    return this._scene?.getNodeById(id);
+  }
+
   /** True if this node is somewhere beneath `ancestor` in the hierarchy (any depth). */
   public isDescendantOf(ancestor: Node): boolean {
     let n: Node | null = this._parent;
@@ -1016,6 +1265,32 @@ export class Node {
   }
   public get hasStarted(): boolean { return this._hasStarted; }
   public get markForRemoval(): boolean { return this._markForRemoval; }
+
+  /**
+   * Whether this node is awake: rendering, updating, and simulating. `false` means it is dormant — placed in
+   * the scene but asleep, either because {@link spawnOnStart} was off or because something called
+   * {@link despawn}. Read-only; use {@link spawn} / {@link despawn} to change it.
+   */
+  public get spawned(): boolean { return this._spawned; }
+
+  /**
+   * Whether this node wakes up on its own when the scene starts (default `true`).
+   *
+   * Set it `false` to author a node in place — positioned, textured, scripted, with its collider — that stays
+   * dormant until a script calls {@link spawn} on it. Nothing else can wake it: it does not render, update,
+   * animate or collide, and its {@link onStart} has not run yet. It IS still findable by name and id, which
+   * is how a script gets hold of it:
+   *
+   *   this.findNode('Enemy').spawn();
+   *
+   * Editing scenes ignore this flag (see `Scene.spawnRulesEnabled`) so the node stays visible in the editor.
+   */
+  public get spawnOnStart(): boolean { return this._spawnOnStart; }
+  public set spawnOnStart(value: boolean) {
+    const prev = this._spawnOnStart;
+    this._spawnOnStart = value;
+    this._notifyChange('component', 'spawnOnStart', prev, value);
+  }
 
   /**
    * This node's transform relative to its parent. Live reference — read-only in practice; it is
@@ -1632,6 +1907,7 @@ export class ModelNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     model: model,
                     animationMappings: animationMappings,
                     stateMachine: stateMachine,
@@ -1901,6 +2177,7 @@ export class LodGroupNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     distances: [...this.distances],
                     cullDistance: this.cullDistance
                 });
@@ -2511,6 +2788,7 @@ export class CameraRigNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
 
                     followId: this._followId,
                     lookAtId: this._lookAtId,
@@ -2745,6 +3023,7 @@ export class LandscapeNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     terrain: this._terrain.serialize(),
                 });
             });
@@ -2833,6 +3112,7 @@ export class LightNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     lightType: this._type,
                     light: lightData
                 });
@@ -3078,6 +3358,7 @@ export class LightProbeNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     resolution: this._resolution,
                     mode: this._mode,
                     updateFrequency: this._updateFrequency,
@@ -3147,6 +3428,7 @@ export class SkyboxNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     skybox: skybox
                 });
             });
@@ -3399,6 +3681,7 @@ export class VolumetricCloudsNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     clouds: {
                         coverage: this._coverage,
                         density: this._density,
@@ -3693,6 +3976,7 @@ export class SkyAtmosphereNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     atmosphere: {
                         useSceneSun: this._useSceneSun,
                         sunDirection: this._sunDirection,
@@ -3790,6 +4074,7 @@ export class CameraNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     camera: {
                         type: this._camera.type,
                         fov: this._camera.fov,
@@ -3912,6 +4197,7 @@ export class SpriteNode extends Node {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     sprite: sprite
                 });
             });
@@ -4051,6 +4337,7 @@ export class AnimatedSpriteNode extends SpriteNode {
                     scale: [this._scale[0], this._scale[1], this._scale[2]],
                     children: children,
                     variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
                     sprite: sprite,
                     animation: {
                         columns: this._columns,
@@ -4111,4 +4398,32 @@ export class AnimatedSpriteNode extends SpriteNode {
         this._currentFrame = this._startFrame;
         this._seqIndex = 0;
     }
+}
+/**
+ * Reconstruct a serialized subtree under `parent`, dispatching on its `type`.
+ *
+ * `Node.parse` alone always builds a plain Node, so anything routed through it loses its subclass — a model
+ * comes back as an empty transform. Every path that materializes a subtree (scene parse via
+ * `_commonParse`, runtime `Scene.instantiate`, the editor's template/mesh instantiation) goes through here,
+ * so a new node type only has to be registered in one place. `ModelNode.parse` detects animated vs static
+ * models itself, so skinned meshes round-trip through the single `'model'` case.
+ *
+ * Declared last in this module because it needs every node class above it in scope.
+ */
+export function parseNodeJson(parent: Node, json: any): void {
+  switch (json?.type) {
+    case 'model': ModelNode.parse(parent, json); break;
+    case 'light': LightNode.parse(parent, json); break;
+    case 'lightProbe': LightProbeNode.parse(parent, json); break;
+    case 'skybox': SkyboxNode.parse(parent, json); break;
+    case 'camera': CameraNode.parse(parent, json); break;
+    case 'sprite': SpriteNode.parse(parent, json); break;
+    case 'animatedSprite': AnimatedSpriteNode.parse(parent, json); break;
+    case 'landscape': LandscapeNode.parse(parent, json); break;
+    case 'volumetricClouds': VolumetricCloudsNode.parse(parent, json); break;
+    case 'skyAtmosphere': SkyAtmosphereNode.parse(parent, json); break;
+    case 'lodGroup': LodGroupNode.parse(parent, json); break;
+    case 'cameraRig': CameraRigNode.parse(parent, json); break;
+    default: Node.parse(parent, json);
+  }
 }

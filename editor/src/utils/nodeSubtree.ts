@@ -1,27 +1,19 @@
-import { Node, ModelNode, LightNode, SkyboxNode, CameraNode, CameraRigNode, SpriteNode, AnimatedSpriteNode, LodGroupNode } from 'cleo'
+import { parseNodeJson, collectNodeIds, regenerateNodeIds, remapNodeRefs as engineRemapNodeRefs } from 'cleo'
 import { cryptoRandomId } from './UIModel'
 
 // Shared helpers for serialized node subtrees, used by both the Template and Mesh asset systems.
 // Kept here (rather than duplicated) so template instances and imported meshes reconstruct identically.
+//
+// The type dispatch and the id-renumbering now live in the ENGINE (core/scene/nodeJson.ts + node.ts), because
+// the runtime needs exactly the same operations for scene.instantiate — and the copy that used to live here
+// was missing the landscape / lightProbe / volumetricClouds / skyAtmosphere cases. These are thin
+// re-exports so every existing call site keeps working.
 
-/**
- * Base Node.parse always creates a plain Node; dispatch by type so a subtree rooted at any node
- * subclass (model/light/sprite/...) is reconstructed correctly (mirrors Node._commonParse).
- * ModelNode.parse itself detects animated vs static models, so animated meshes round-trip here.
- */
-export function parseByType(parent: Node, json: any): void {
-  switch (json.type) {
-    case 'model': (ModelNode as any).parse(parent, json); break
-    case 'light': (LightNode as any).parse(parent, json); break
-    case 'skybox': (SkyboxNode as any).parse(parent, json); break
-    case 'camera': (CameraNode as any).parse(parent, json); break
-    case 'sprite': (SpriteNode as any).parse(parent, json); break
-    case 'animatedSprite': (AnimatedSpriteNode as any).parse(parent, json); break
-    case 'lodGroup': (LodGroupNode as any).parse(parent, json); break
-    case 'cameraRig': (CameraRigNode as any).parse(parent, json); break
-    default: (Node as any).parse(parent, json)
-  }
-}
+/** @see parseNodeJson — reconstructs a serialized subtree under `parent`, dispatching on its `type`. */
+export const parseByType = parseNodeJson
+
+/** @see remapNodeRefs — rewrites node-reference fields (camera rig pins) through an id map. */
+export const remapNodeRefs = engineRemapNodeRefs
 
 /** Remove editor/debug helper children so an asset only contains user content. */
 export function stripDebug(nodeJson: any): void {
@@ -32,12 +24,8 @@ export function stripDebug(nodeJson: any): void {
   }
 }
 
-/** Collect every node id present in a serialized subtree. */
-export function collectIds(nodeJson: any, out: string[] = []): string[] {
-  if (nodeJson?.id) out.push(nodeJson.id)
-  if (Array.isArray(nodeJson?.children)) nodeJson.children.forEach((c: any) => collectIds(c, out))
-  return out
-}
+/** @see collectNodeIds — every node id present in a serialized subtree. */
+export const collectIds = collectNodeIds
 
 /** Collect every texture id referenced anywhere in the subtree (material.textures maps). */
 export function collectTextureIds(obj: any, set: Set<string>): void {
@@ -53,45 +41,12 @@ export function collectTextureIds(obj: any, set: Set<string>): void {
   }
 }
 
-/** Node-reference fields that store another node's id and so must be rewritten alongside it. */
-const NODE_REF_KEYS = ['followId', 'lookAtId', 'cameraNodeId']
-
-function assignIds(nodeJson: any, map: Map<string, string>): void {
-  if (nodeJson?.id) {
-    const nid = cryptoRandomId()
-    map.set(nodeJson.id, nid)
-    nodeJson.id = nid
-  }
-  if (Array.isArray(nodeJson?.children)) nodeJson.children.forEach((c: any) => assignIds(c, map))
-}
-
-/**
- * Rewrite node-reference fields (CameraRigNode's follow/lookAt/camera pins) through an id map.
- *
- * References to nodes OUTSIDE the copied subtree are deliberately left alone: those mean "follow the
- * player that already exists in the scene", which is exactly what should survive an instantiation.
- */
-export function remapNodeRefs(nodeJson: any, map: Map<string, string>): void {
-  for (const key of NODE_REF_KEYS) {
-    const value = nodeJson?.[key]
-    if (typeof value === 'string' && map.has(value)) nodeJson[key] = map.get(value)
-  }
-  if (Array.isArray(nodeJson?.collisionIgnoreIds))
-    nodeJson.collisionIgnoreIds = nodeJson.collisionIgnoreIds.map((id: any) =>
-      typeof id === 'string' && map.has(id) ? map.get(id) : id)
-  if (Array.isArray(nodeJson?.children)) nodeJson.children.forEach((c: any) => remapNodeRefs(c, map))
-}
-
 /**
  * Recursively assign fresh ids to a serialized subtree, filling `map` with oldId -> newId.
  *
- * Two passes, and the second is not optional: a node may reference a sibling that has not been
- * renumbered yet, so the references can only be fixed once the whole map exists. Doing the remap in
- * here rather than leaving it to callers means a copied subtree can never silently keep pointing at
- * the original — a template holding a camera rig and its follow target would otherwise have every
- * instance follow the FIRST instance's target.
+ * Passes the editor's own id factory so copied nodes keep the same id shape as every other node the editor
+ * creates; the two-pass reference remap (and why it must be a second pass) lives in the engine helper.
  */
 export function regenerateIds(nodeJson: any, map: Map<string, string>): void {
-  assignIds(nodeJson, map)
-  remapNodeRefs(nodeJson, map)
+  regenerateNodeIds(nodeJson, map, cryptoRandomId)
 }

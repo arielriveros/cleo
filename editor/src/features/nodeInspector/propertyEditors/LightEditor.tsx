@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { LightNode, PointLight, Spotlight, SpriteNode } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
-import { useCleoEngine } from '../../EngineContext';
+import { useEventBus } from '../../EventBusContext';
 import Collapsable from '../../../components/Collapsable'
 import { ColorInput, PropertyTable, PropertyRow, Slider, Section } from '../../../components/ui'
 import { LightIcon } from '../sectionIcons'
@@ -11,7 +11,7 @@ import { LightIcon } from '../sectionIcons'
 export { ColorInput };
 
 export default function LightEditor(props: {node: LightNode}) {
-  const { eventEmitter } = useCleoEngine();
+  const eventEmitter = useEventBus();
   const light = props.node.light;
   const markLightDirty = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'light', node: props.node });
 

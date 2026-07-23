@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ModelNode, Material, CustomMaterial } from 'cleo';
-import { useCleoEngine } from '../../EngineContext';
+import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { newCustomMaterial } from '../../../utils/customMaterials';
 import Collapsable from '../../../components/Collapsable';
@@ -139,7 +139,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     material.config.castShadow = options.castShadow;
   }, [options, material])
 
-  const { eventEmitter: eventEmitter } = useCleoEngine();
+  const eventEmitter = useEventBus();
 
   useEffect(() => { eventEmitter.emit('TEXTURES_CHANGED') }, [])
 

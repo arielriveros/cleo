@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Terrain, LandscapeNode } from "cleo";
 import { useCleoEngine, TerrainTool, TerrainBrushMode } from "../EngineContext";
+import { useSelection } from "../SelectionContext";
 import TerrainLayerSlot from "./TerrainLayerSlot";
 import { Toggle } from "../../components/ui";
 
@@ -14,7 +15,8 @@ const TOOLS: { id: TerrainTool; label: string }[] = [
 /** Floating panel shown while landscape mode is active: create/import terrain, sculpt, paint terrain
  *  materials onto the 4 layers, and scatter each painted material's foliage. */
 export default function LandscapeInspector() {
-    const { editorScene, eventEmitter, terrainBrush, setGizmoMode } = useCleoEngine();
+    const { editorScene, eventEmitter, terrainBrush } = useCleoEngine();
+    const { setGizmoMode } = useSelection();
 
     const [size, setSize] = useState(200);
     const [resolution, setResolution] = useState(129);

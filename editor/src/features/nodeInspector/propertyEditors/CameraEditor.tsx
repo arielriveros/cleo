@@ -3,7 +3,9 @@ import { CameraNode, CameraRigNode, Node } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Hint, cn, valueClass } from '../../../components/ui';
 import { CameraIcon, MaterialIcon } from '../sectionIcons';
-import { useCleoEngine } from '../../EngineContext';
+import { useEventBus } from '../../EventBusContext';
+import { useAssetLibrary } from '../../AssetLibraryContext';
+import { useEditorSessions } from '../../EditorSessionsContext';
 import { getScreenMaterialIds, applyScreenMaterials, isScreenMaterialAsset } from '../../../utils/screenMaterials';
 
 /** The nearest CameraRigNode above this camera, if any — the rig drives its transform. */
@@ -21,7 +23,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
   // The rig writes camera.fov every frame while it owns FOV; leaving this slider live would let the
   // two fight, with the rig winning and the slider looking broken.
   const fovDrivenByRig = !!rig?.fovEnabled;
-  const { eventEmitter } = useCleoEngine();
+  const eventEmitter = useEventBus();
 
   const [cameraState, setCameraState] = useState({
     type: props.node.camera.type,
@@ -113,7 +115,9 @@ export default function CameraEditor(props: { node: CameraNode }) {
 // Ordered list of screen-space (post-process) custom-material passes run by this camera. Each row
 // references a material asset by id; the live materials are rebuilt from the assets on every edit.
 function ScreenMaterialsList(props: { node: CameraNode }) {
-  const { materials, enterMaterialEditor, eventEmitter } = useCleoEngine();
+  const { materials } = useAssetLibrary();
+  const { enterMaterialEditor } = useEditorSessions();
+  const eventEmitter = useEventBus();
   const [dragOver, setDragOver] = useState(false);
   const [, force] = useState(0); // node mutations don't trigger React; bump to re-read the list
 

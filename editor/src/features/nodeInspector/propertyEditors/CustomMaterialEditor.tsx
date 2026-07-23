@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ModelNode, CustomMaterial, customSeedTemplate, tryCompileCustom } from 'cleo'
 import type { CustomBaseType, CustomRenderMode } from 'cleo'
-import { useCleoEngine } from '../../EngineContext'
+import { useEventBus } from '../../EventBusContext'
 import { seedCustomMaterial } from '../../../utils/customMaterials'
 import GlslCodeEditor from '../scriptEditor/GlslCodeEditor'
 import CustomUniformsEditor from './CustomUniformsEditor'
@@ -29,7 +29,7 @@ const keyToBase = (k: string): CustomBaseType => (k === 'scratch' ? null : k as 
  * repeatedly, mid-keystroke. Typing now only stores the text; the user chooses when to pay for a compile.
  */
 export default function CustomMaterialEditor(props: { node: ModelNode }) {
-  const { eventEmitter } = useCleoEngine()
+  const eventEmitter = useEventBus()
   const mat = props.node.model.material as CustomMaterial
   const [source, setSource] = useState(mat.fragmentSource)
   const [error, setError] = useState<string | null>(null)

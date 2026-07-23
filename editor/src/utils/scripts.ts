@@ -234,6 +234,13 @@ export function defaultScriptClass(name: string, baseType: ScriptBaseType): stri
 // ${className} runs on every node this script is attached to. Handlers are method overrides; class fields are
 // the node's variables — public/private/protected controls inspector visibility & cross-node access, and a
 // leading underscore marks an internal field hidden from the inspector.
+//
+// The node already exists, so this class is never CONSTRUCTED — its methods are bound onto the live node.
+// Field initializers above still apply, but a constructor() you write here would never run. Use:
+//   onConstruct — once per node, even if it is dormant (spawnOnStart off). The only handler an unspawned
+//                 node gets, so it is where one decides whether to spawn itself.
+//   onSpawn     — once each time the node becomes live (again after a despawn/spawn cycle).
+//   onStart     — once per node, on its first spawn.
 export default class ${className} extends ${base} {
   public speed: number = 5
   private _elapsed: number = 0

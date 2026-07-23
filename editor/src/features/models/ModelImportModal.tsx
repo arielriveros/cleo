@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { useCleoEngine } from '../EngineContext'
+import { useEditorSessions } from '../EditorSessionsContext'
 import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 
 // Centered review modal shown once per imported model, between parsing and committing to the library.
@@ -7,7 +7,7 @@ import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 // the upload, and offers scale normalization. Accept commits (thumbnail + material assets + add); Cancel
 // discards. Mounted globally in Editor so it overlays the whole editor.
 export default function ModelImportModal() {
-  const { pendingModelImport, resolveModelImport } = useCleoEngine()
+  const { pendingModelImport, resolveModelImport } = useEditorSessions()
 
   const [extraFiles, setExtraFiles] = useState<File[]>([])
   const [resolved, setResolved] = useState<Set<string>>(new Set())

@@ -1,5 +1,5 @@
 import { ModelNode, AnimatedModel } from 'cleo'
-import { useCleoEngine } from '../../EngineContext'
+import { useEditorSessions } from '../../EditorSessionsContext'
 import Collapsable from '../../../components/Collapsable'
 import { Button, Hint } from '../../../components/ui'
 import { AnimationIcon } from '../sectionIcons'
@@ -7,7 +7,7 @@ import { AnimationIcon } from '../sectionIcons'
 // Entry point to the Animation Editor mode, shown only for skinned models (an AnimatedModel with a
 // skin + animator). Mirrors the skinned-mesh gate used by PhysicsEditor's Ragdoll section.
 export default function AnimationSlot(props: { node: ModelNode }) {
-  const { enterAnimationEditor } = useCleoEngine()
+  const { enterAnimationEditor } = useEditorSessions()
 
   const model = props.node.model
   const isSkinned = model instanceof AnimatedModel && model.hasSkin && !!props.node.animator

@@ -4,7 +4,7 @@ import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
-import { useCleoEngine } from '../../EngineContext'
+import { useEventBus } from '../../EventBusContext'
 import { Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { SkyIcon } from '../sectionIcons'
 
@@ -39,7 +39,7 @@ function readNode(node: SkyAtmosphereNode): AtmoState {
 }
 
 export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) {
-  const { eventEmitter } = useCleoEngine()
+  const eventEmitter = useEventBus()
   const [state, setState] = useState<AtmoState>(() => readNode(props.node))
 
   useEffect(() => { setState(readNode(props.node)) }, [props.node])

@@ -58,6 +58,8 @@ export interface PackManifest {
   version: number;
   entry: string;
   scenes: Record<string, { name: string; scene: any; ui: any }>;
+  /** Baked node templates for runtime scene.instantiate. Global, like textures — not per scene. */
+  templates?: { id: string; name: string; node: any }[];
   config?: any;
   geometries: Record<string, PackedGeometry>;
   textures: PackedTexture[];
@@ -204,6 +206,8 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
   };
   // One shared geometry table across every scene — identical meshes dedupe across scenes for free.
   for (const s of Object.values<any>(data?.scenes ?? {})) visit(s?.scene);
+  // Templates share that table, so a template of a mesh already placed in a scene adds no bytes at all.
+  for (const t of (data?.templates ?? [])) visit(t?.node);
 
   // --- Textures: original compressed bytes, no base64 anywhere ----------------------------------
 
@@ -222,6 +226,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     version: PACK_VERSION,
     entry: data?.entry ?? '',
     scenes: data?.scenes ?? {},
+    templates: data?.templates,
     config: data?.config,
     geometries,
     textures,

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import Collapsable from '../../../components/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Hint } from '../../../components/ui';
 import { ProbeIcon } from '../sectionIcons';
-import { useCleoEngine } from '../../EngineContext';
+import { useEventBus } from '../../EventBusContext';
 
 export default function LightProbeEditor(props: { node: LightProbeNode }) {
   const [state, setState] = useState({
@@ -39,7 +39,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     props.node.blendDistance = state.blendDistance;
   }, [state, props.node]);
 
-  const { eventEmitter } = useCleoEngine();
+  const eventEmitter = useEventBus();
   // Emit from the user handlers (not the apply-effect above, which also runs on mount/node-select and would
   // false-dirty on selection). 'environment' kind marks the tab unsaved without triggering a tree rebuild.
   const update = (patch: Partial<typeof state>) => {

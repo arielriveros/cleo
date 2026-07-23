@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CustomMaterial, TextureManager } from 'cleo'
 import type { CustomUniform, CustomUniformType } from 'cleo'
-import { useCleoEngine } from '../../EngineContext'
+import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import Collapsable from '../../../components/Collapsable'
 import { NumberInput, TextInput, Toggle, Select, VectorInput, ColorInput, TypeSelect, Button, Hint, cn, labelClass } from '../../../components/ui'
@@ -27,7 +27,7 @@ function defaultValue(type: CustomUniformType): any {
  * (add/remove/retype) change the assembled shader → `onChange(true)` recompiles; value edits `onChange(false)`.
  */
 export default function CustomUniformsEditor(props: { material: CustomMaterial, onChange: (structural: boolean) => void }) {
-  const { eventEmitter } = useCleoEngine()
+  const eventEmitter = useEventBus()
   const mat = props.material
   const [list, setList] = useState<CustomUniform[]>([])
   const [newName, setNewName] = useState('')

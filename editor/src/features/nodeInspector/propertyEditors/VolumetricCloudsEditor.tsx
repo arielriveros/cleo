@@ -4,7 +4,7 @@ import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
-import { useCleoEngine } from '../../EngineContext'
+import { useEventBus } from '../../EventBusContext'
 import { Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { CloudsIcon } from '../sectionIcons'
 
@@ -45,7 +45,7 @@ const cloudTypeName = (t: number) =>
   t < 0.25 ? 'Stratus' : t < 0.5 ? 'Stratocumulus' : t < 0.8 ? 'Cumulus' : 'Cumulonimbus'
 
 export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNode }) {
-  const { eventEmitter } = useCleoEngine()
+  const eventEmitter = useEventBus()
   const [state, setState] = useState<CloudsState>(() => readNode(props.node))
 
   // Re-seed when a different clouds node is selected.

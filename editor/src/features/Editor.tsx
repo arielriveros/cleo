@@ -7,13 +7,13 @@ import ProgressWindow from "./progress/ProgressWindow";
 import AnimationImportModal from "./animation/AnimationImportModal";
 import UnsavedSceneModal from "./dialogs/UnsavedSceneModal";
 import { StateMachineProvider } from "./animation/StateMachineContext";
-import { useCleoEngine } from "./EngineContext";
+import { useDocument } from "./DocumentContext";
 
 // Ctrl/Cmd+S saves the active tab, Ctrl/Cmd+Shift+S saves everything. Bound on the window (capture phase)
 // so it fires wherever focus is — including inside the Monaco script editor, which handles Ctrl+S itself
 // and would otherwise swallow it.
 function useSaveShortcuts() {
-  const { saveActiveTab, saveAll } = useCleoEngine();
+  const { saveActiveTab, saveAll } = useDocument();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== 's' || !(e.ctrlKey || e.metaKey)) return;

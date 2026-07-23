@@ -20,7 +20,7 @@ import { transform } from 'sucrase';
 export type ScriptModule = Record<string, any>;
 
 /** Handlers a script may export. Anything else it exports is ignored. */
-export const SCRIPT_HANDLERS = ['onStart', 'onSpawn', 'onUpdate', 'onCollision', 'onTrigger', 'onDespawn'] as const;
+export const SCRIPT_HANDLERS = ['onConstruct', 'onStart', 'onSpawn', 'onUpdate', 'onCollision', 'onTrigger', 'onDespawn'] as const;
 
 const modules = new Map<string, ScriptModule>();
 
@@ -321,4 +321,26 @@ export type ScriptFactory = (this: any, importer: (specifier: string) => ScriptM
 export function compileScript(source: string): ScriptFactory {
     // eslint-disable-next-line no-new-func
     return new Function('__cleoImport', buildFactoryBody(source)) as ScriptFactory;
+}
+
+let scriptProvider: ((nodeId: string) => ScriptFactory | undefined) | null = null;
+
+/**
+ * Register the lookup a NO-EVAL build uses to find a node's precompiled script factory by node id.
+ *
+ * A published game ships its scripts as real functions in game.scripts.js keyed by node id, and there is no
+ * `script` source string left in the scene JSON to compile. Node parsing consults this to bind them, which
+ * — unlike a one-shot pass over the parsed scene — also covers nodes created later by `Scene.instantiate`.
+ * Those carry `__sourceId` (the id they were copied from), which is the key the registry is built on.
+ *
+ * The editor never sets this: its scenes carry script source and go through `compileScript`.
+ */
+export function setScriptProvider(provider: ((nodeId: string) => ScriptFactory | undefined) | null): void {
+    scriptProvider = provider;
+}
+
+/** The factory registered for `nodeId`, or undefined. See {@link setScriptProvider}. */
+export function resolveNodeScript(nodeId: string | undefined): ScriptFactory | undefined {
+    if (!scriptProvider || !nodeId) return undefined;
+    return scriptProvider(nodeId);
 }

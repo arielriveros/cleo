@@ -24,6 +24,7 @@ interface NodeDescription {
   name: string;
   type: string;
   visible: boolean;
+  spawnOnStart: boolean;
   templateId?: string;
   scriptId?: string;
   children: any[];
@@ -39,6 +40,7 @@ interface SceneNodeItemProps {
   onSelect: (nodeId: string) => void;
   expanded?: boolean;
   visible?: boolean;
+  spawnOnStart?: boolean;
   onSetVisibility: (nodeId: string) => void;
   onExpand: (nodeId: string) => void;
 }
@@ -81,7 +83,9 @@ function SceneNodeItem(props: SceneNodeItemProps) {
       onClick={() => props.onSelect(props.nodeId)}
       draggable={true}
       onDragStart={handleDragStart} >
-      <div>
+      {/* Dormant nodes (spawnOnStart off) read as "present but asleep": the row is dimmed, but stays fully
+          interactive — it is still authored here, and the only way to select it. */}
+      <div className={props.spawnOnStart === false ? 'opacity-50' : undefined} title={props.spawnOnStart === false ? 'Dormant until a script spawns it' : undefined}>
         { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'cameraRig' && <img src={CameraRigIcon} alt='camera rig' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='inline-block w-4 h-4 mr-1 align-middle' /> }
@@ -148,6 +152,7 @@ function SceneListRecursive(props: SceneListRecursiveProps) {
         expanded={expanded}
         onExpand={() => setIsExpanded(!expanded) }
         visible={props.node.visible}
+        spawnOnStart={props.node.spawnOnStart}
         onSetVisibility={props.handleSetVisibility}
         children={props.node.children}
         templateId={props.node.templateId}
@@ -193,6 +198,7 @@ export default function SceneInspector() {
       name: node.name,
       type: node.nodeType,
       visible: node.visible,
+      spawnOnStart: node.spawnOnStart,
       templateId,
       scriptId: getScriptIdOf(node),
       children: templateId ? [] : node.children

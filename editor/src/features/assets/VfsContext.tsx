@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { TextureManager } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
+import { useAssetLibrary } from '../AssetLibraryContext'
 import { idbGet, idbSet } from '../../utils/idb'
 import {
   EMPTY_VFS, LibSnapshot, VfsEntry, VfsIndex, VFS_KEY,
@@ -46,11 +47,13 @@ export function useVfs(): VfsContextValue {
 
 export function VfsProvider({ children }: { children: React.ReactNode }) {
   const engine = useCleoEngine()
+  const { eventEmitter, isSceneReady, sceneList } = engine
+  // The five libraries come from the split-out slice, so reconciliation re-runs on library changes
+  // rather than on every unrelated EngineContext update.
   const {
-    eventEmitter, assetsLoaded, isSceneReady,
+    assetsLoaded,
     materials, terrainMaterials, templates, models, scriptAssets,
-    sceneList,
-  } = engine
+  } = useAssetLibrary()
 
   const [vfs, setVfs] = useState<VfsIndex>(EMPTY_VFS)
   const vfsLoadedRef = useRef(false)

@@ -44,13 +44,20 @@ function reinstantiate(scene: Scene, inst: Node, maps: ResyncMaps, make: (parent
   const pos = Array.from(inst.position) as [number, number, number]
   const rot = Array.from(inst.rotation) as [number, number, number]
   const scl = Array.from(inst.scale) as [number, number, number]
+  // Per-instance node state the rebuild would otherwise drop: the subtree comes back from the ASSET, which
+  // knows nothing about how this particular placement was configured. Without this, a mesh instance flagged
+  // dormant silently comes back spawning on start the next time its asset changes.
+  const spawnOnStart = inst.spawnOnStart
   // Drop the old subtree's out-of-band data so map entries don't leak (mirrors syncModelInstances).
   for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id) }
   // removeChild detaches synchronously; Node.remove() only marks and its deferred sweep mis-splices.
   parent.removeChild(inst)
   const newId = make(parent)
   const newNode = scene.getNodeById(newId)
-  if (newNode) newNode.setPosition(pos).setRotation(rot).setScale(scl)
+  if (newNode) {
+    newNode.setPosition(pos).setRotation(rot).setScale(scl)
+    newNode.spawnOnStart = spawnOnStart
+  }
 }
 
 /**

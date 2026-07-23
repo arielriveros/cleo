@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Node, Scene } from 'cleo'
-import { useCleoEngine } from '../EngineContext'
+import { useEventBus } from '../EventBusContext'
 import { Select, cn } from '../../components/ui'
 
 export interface NodeRefInputProps {
@@ -26,7 +26,7 @@ export interface NodeRefInputProps {
  * a deliberately dependency-free primitive layer.
  */
 export default function NodeRefInput(props: NodeRefInputProps) {
-  const { eventEmitter } = useCleoEngine()
+  const eventEmitter = useEventBus()
   const [version, setVersion] = useState(0)
   const [dragOver, setDragOver] = useState(false)
 

@@ -1,9 +1,23 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode } from "./node";
+import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode, parseNodeJson } from "./node";
 import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
+import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
+import { getTemplate, templateNames } from "./templates";
+
+/** Overrides applied to a freshly instantiated template root. See {@link Scene.instantiate}. */
+export interface InstantiateOptions {
+    /** Parent for the new node. Defaults to the scene root. */
+    parent?: Node;
+    /** Name for the new node. Defaults to the template's own. */
+    name?: string;
+    /** Local position, rotation (Euler DEGREES) and scale, each defaulting to the template's. */
+    position?: number[];
+    rotation?: number[];
+    scale?: number[];
+}
 
 /** One scheduled `this.after`/`this.every` call. `interval === null` means one-shot. */
 interface ScheduledTimer {
@@ -42,6 +56,14 @@ export class Scene {
     // T pose). The editor sets this false on its editing scenes so animations only play in Play mode
     // and the Animation Editor (which drives its preview clone directly). Default true = normal playback.
     private _animationsEnabled: boolean = true;
+    // When false, Node.spawnOnStart is ignored and every node starts spawned. The editor sets this false on
+    // its editing scenes: a node the user flagged dormant must still be visible and selectable while
+    // authoring it — the flag is a RUNTIME rule, honoured in Play mode and in a published game.
+    private _spawnRulesEnabled: boolean = true;
+    // Nodes present in the tree but asleep (see Node.despawn). Kept out of _nodes and every type-filtered
+    // list so they cost nothing and reach no consumer; kept here only so the removal sweep can still free
+    // one that was despawned and then removed.
+    private _dormant: Set<Node> = new Set();
 
     /** Back-reference to the physics system driving this scene (set by PhysicsSystem.set scene).
      *  Exposes physics to node scripts via the injected `scene` identifier (e.g. scene.physics.startRagdoll). */
@@ -83,10 +105,27 @@ export class Scene {
     public start(): void {
         if (this._hasStarted) return;
         Logger.info('Scene starting');
-        
-        this._root.start();
-        
+
+        // BEFORE the walk, not after: a script's onStart may spawn another node, and Node.spawn only runs the
+        // woken node's own onStart once the scene is started. Setting this afterwards meant anything spawned
+        // from an onStart never got one at all. Also makes the early return above cover re-entry.
         this._hasStarted = true;
+
+        // Every dormant node is settled BEFORE any onStart runs, so tree order stops mattering: a script that
+        // spawns a node declared later in the tree used to hit one still flagged awake (spawn() no-ops) and
+        // then watch the walk put it to sleep. Scene.parse has usually done this already; it is idempotent,
+        // and a scene built in code never went through parse at all.
+        this._root.applySpawnRules();
+
+        // Three passes over the finished tree, in the order a script sees them:
+        //   onConstruct — EVERY node, dormant included (the only handler a dormant node gets)
+        //   onSpawn     — the awake ones
+        //   onStart     — the awake ones (Node.start)
+        // Passes rather than one walk, so that a node's onConstruct can spawn a node declared anywhere in the
+        // tree and still have it receive its own onSpawn/onStart normally.
+        this._root.runConstructHandlers();
+        this._root.runSpawnHandlers();
+        this._root.start();
     }
 
     public stop(): void {
@@ -97,6 +136,17 @@ export class Scene {
     /** When false, skinned-model animators are not driven by scene.update (they hold bind pose). */
     public get animationsEnabled(): boolean { return this._animationsEnabled; }
     public set animationsEnabled(value: boolean) { this._animationsEnabled = value; }
+
+    /**
+     * When false, `Node.spawnOnStart` is ignored and every node starts spawned. Set false on editing scenes
+     * so a node flagged dormant still shows in the editor viewport; leave true (the default) for Play mode
+     * and published games, where the flag is the whole point.
+     */
+    public get spawnRulesEnabled(): boolean { return this._spawnRulesEnabled; }
+    public set spawnRulesEnabled(value: boolean) { this._spawnRulesEnabled = value; }
+
+    /** Whether {@link start} has run. Read by Node.spawn to decide if a freshly woken node should start. */
+    public get hasStarted(): boolean { return this._hasStarted; }
 
     public addNode(node: Node): void {
         node.scene = this;
@@ -113,6 +163,50 @@ export class Scene {
         // removeChild does _children.splice(indexOf(node), 1), and indexOf === -1 for a non-child makes
         // splice(-1, 1) delete an unrelated last child (corrupting the tree during the removal sweep).
         (node.parent ?? this._root).removeChild(node);
+    }
+
+    /**
+     * Create a brand-new node subtree from a template asset, live, and add it to the scene.
+     *
+     * The copy is complete: its own children, materials, colliders and scripts, with fresh ids throughout so
+     * nothing is shared with the template or with other instances. It spawns immediately — `onSpawn` then
+     * `onStart` fire before this returns — regardless of the template's `spawnOnStart`, since asking for it
+     * explicitly is the whole point.
+     *
+     *   const bullet = this.scene.instantiate('Bullet', { position: this.worldPosition });
+     *   bullet.body.velocity.set(...);
+     *
+     * @param nameOrId Template name (what you called it in the editor) or its id.
+     * @param options  Parent/name/transform overrides for the new root.
+     * @returns The new node, or `null` if there is no such template — which is also logged.
+     */
+    public instantiate(nameOrId: string, options: InstantiateOptions = {}): Node | null {
+        const template = getTemplate(nameOrId);
+        if (!template) {
+            Logger.error(`instantiate: no template "${nameOrId}". Available: ${templateNames().map(n => `'${n}'`).join(', ') || 'none'}`, 'Scene');
+            return null;
+        }
+
+        // Deep copy first: the registry entry is the shared master and must survive being instantiated a
+        // thousand times, and regenerateNodeIds/the parse below both mutate what they are handed. Not via
+        // JSON — a published build's geometry is typed arrays; see cloneNodeJson.
+        const json = cloneNodeJson(template.node);
+        regenerateNodeIds(json, new Map());
+
+        if (options.name !== undefined) json.name = options.name;
+        if (options.position) json.position = [...options.position];
+        if (options.rotation) json.rotation = [...options.rotation];
+        if (options.scale) json.scale = [...options.scale];
+        // A template flagged dormant would otherwise be instantiated asleep, which cannot be what a caller
+        // that just asked for it wants. Despawn it explicitly if that is the intent.
+        json.spawnOnStart = true;
+
+        const parent = options.parent ?? this._root;
+        parseNodeJson(parent, json);
+
+        // parseNodeJson -> _commonParse -> parent.addChild emitted the structural change, so the traversal
+        // this lookup runs is already rebuilding with the new node in it.
+        return this.getNodeById(json.id) ?? null;
     }
 
     public removeNodesByName(name: string): void {
@@ -145,7 +239,11 @@ export class Scene {
             }
 
             const loopStart = performance.now();
-            for (const node of this._nodes) {
+            // The GETTER, so a structural change since the last frame is picked up here rather than whenever
+            // something else next happens to read a node list. This loop owns the removal sweep and every
+            // onUpdate: running it against a stale set silently skips a node that was just added, and leaves
+            // one marked for removal in the tree until an unrelated reader triggers the re-traversal.
+            for (const node of this.nodes) {
                 if (node instanceof LightNode) this._asignLightIndices();
 
                 if (node.markForRemoval) {
@@ -156,6 +254,12 @@ export class Scene {
                 if (this._hasStarted && !paused)
                     node.update(delta, time);
             }
+            // Dormant nodes are not in _nodes, so the sweep above never sees one — but `despawn()` followed by
+            // `remove()` is an ordinary thing to write, and without this the node would stay in the tree
+            // forever. Almost always empty, so this costs nothing in practice.
+            for (const node of this._dormant)
+                if (node.markForRemoval) this.removeNode(node);
+
             sceneStats.nodeLoopMs = performance.now() - loopStart;
 
             // Camera rigs run LAST, after every onUpdate. A rig cannot do this work from its own
@@ -172,12 +276,26 @@ export class Scene {
                 this._root.updateTransforms();
                 sceneStats.transformMs += performance.now() - rigTransformStart;
 
-                // Deliberately not gated on _hasStarted/!paused: passing snap instead lets a stopped
-                // editor scene still preview the rig's resting pose (instantly, with no collision or
-                // shake) while its properties are being edited.
+                // Deliberately not gated on _hasStarted/!paused: an editing scene keeps previewing the rig's
+                // resting pose (instantly, with no collision or shake) while its properties are edited.
+                //
+                // AUTHORING is what "not playing" actually means here. The old `!_hasStarted || paused` never
+                // snapped in the editor: its scene is started AND unpaused (both required for the free-fly
+                // viewport camera), so the rig ran with full damping, collision and shake while authoring —
+                // and damping asymptotes rather than settling, so the camera visibly drifted.
                 const rigStart = performance.now();
-                const snap = !this._hasStarted || paused;
-                for (const rig of rigs) rig.lateUpdate(delta, snap);
+                const authoring = CleoEngine.authoringMode;
+                const snap = authoring || !this._hasStarted || paused;
+                // A rig writes its own transform and its camera child's every frame. Those are DERIVED, never
+                // the user's edit, so they must not reach the editor as authoring changes or the scene would
+                // read as permanently unsaved. Same intent as the editor's withoutDirty, applied at the source;
+                // safe because this pass is synchronous, so no real edit can interleave and be swallowed.
+                CleoEngine.authoringMode = false;
+                try {
+                    for (const rig of rigs) rig.lateUpdate(delta, snap);
+                } finally {
+                    CleoEngine.authoringMode = authoring;
+                }
                 sceneStats.rigMs = performance.now() - rigStart;
             }
 
@@ -243,9 +361,12 @@ export class Scene {
     
     private _breadthFirstTraversal(): void {
         const visited: Set<Node> = new Set();
+        const active: Set<Node> = new Set();
+        const dormant: Set<Node> = new Set();
         const queue: Node[] = [];
 
         visited.add(this._root);
+        active.add(this._root);
         queue.push(this._root);
 
         while (queue.length > 0) {
@@ -254,18 +375,29 @@ export class Scene {
             for (const child of current.children) {
                 if (!visited.has(child)) {
                     visited.add(child);
+                    // Node.spawn/despawn set the flag across the whole subtree, so a per-node test is enough —
+                    // a child of a dormant node is itself dormant and needs no bookkeeping from here.
+                    (child.spawned ? active : dormant).add(child);
                     queue.push(child);
                 }
             }
         }
 
-        this._nodes = visited;
+        this._nodes = active;
+        this._dormant = dormant;
         this._dirty = false;
 
-        this._filterByType();
+        this._filterByType(visited);
     }
 
-    private _filterByType(): void {
+    /**
+     * `nodes` (the type-filtered lists and the per-frame loop) holds only SPAWNED nodes — that is what makes
+     * despawn reach every consumer at once, including the renderer's light loops, which never looked at
+     * `visible`. The name/id indexes are built from `visited` instead, dormant nodes included: a script must
+     * still be able to `findNode('Door').spawn()` something that is asleep, and that lookup is the only way
+     * back for a node placed with `spawnOnStart = false`.
+     */
+    private _filterByType(visited: Set<Node> = this._nodes): void {
         // This seems unoptimized, TODO: Fix later
         this._cameras = new Set();
         this._lights = new Set();
@@ -303,7 +435,9 @@ export class Scene {
                 this._skyAtmosphere = node;
             if (node instanceof CameraNode)
                 this._cameras.add(node);
+        }
 
+        for (const node of visited) {
             const byName = this._nodesByName.get(node.name);
             if (byName) byName.push(node); else this._nodesByName.set(node.name, [node]);
             this._nodesById.set(node.id, node);
@@ -395,6 +529,10 @@ export class Scene {
                 TextureManager.Instance.addTextureFromBase64(texture.data, texture.config, texture.id);
         this._dirty = true;
         this._root = newScene.getChildByName('root')[0] as Node;
+        // Before anyone can read a node list: scene.start() is deferred behind a timeout by both the editor
+        // and the player, and frames are rendered in between, so leaving this to start() shows every dormant
+        // node for a beat before it pops away. No emit needed — _dirty above already forces the re-traversal.
+        this._root.applySpawnRules();
     }
 
     // TODO: Move this to a LightManager class

@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { useCleoEngine, type TabKind } from './EngineContext';
+import { type TabKind } from './EngineContext';
+import { useDocument } from './DocumentContext';
+import { usePlayback } from './PlaybackContext';
 import { iconFor } from './assets/assetKinds';
 import type { AssetKind } from '../utils/vfs';
 
@@ -22,7 +24,8 @@ function tabAssetKind(kind: TabKind): AssetKind {
 // closable; the scene tab is unclosable but movable — closing it would leave nothing to show, since the
 // engine always has a scene loaded. Every tab shows a dot when it has unsaved edits.
 export default function TabBar() {
-  const { tabs, activeTabId, dirtyTabs, setActiveTab, closeTab, reorderTabs, isPlayMode } = useCleoEngine();
+  const { tabs, activeTabId, dirtyTabs, setActiveTab, closeTab, reorderTabs } = useDocument();
+  const { isPlayMode } = usePlayback();
   const [dragId, setDragId] = useState<string | null>(null);
 
   return (

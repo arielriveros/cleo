@@ -1,6 +1,6 @@
 import { Scene, TextureManager } from 'cleo'
 import type { RenderSettings } from 'cleo'
-import { buildGameData } from './buildGameData'
+import { buildGameData, bakeTemplates } from './buildGameData'
 import { extractNodeState } from '../../utils/projectStorage'
 import { resyncScene } from '../../utils/sceneResync'
 import { loadSceneData } from '../../utils/sceneStorage'
@@ -81,10 +81,16 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   let textureBytes: any[] = []
   try { textureBytes = TextureManager.Instance.serializeTextureBytes() } catch { textureBytes = [] }
 
+  // Templates once too, for the same reason as textures: the runtime registry is global, the player loads it
+  // at boot, and a Game.loadScene switch must not invalidate what a script can still instantiate. Every
+  // template in the library ships — a script may name any of them, and there is no way to tell statically.
+  const templates = bakeTemplates(src.libs.templates ?? [], src.libs.materials, src.scriptAssets)
+
   const out: any = {
     version: 2,
     entry: src.mainSceneId in scenes ? src.mainSceneId : Object.keys(scenes)[0],
     scenes,
+    templates,
     textureBytes,
   }
   if (src.settings) out.config = { graphics: { clearColor: src.settings.clearColor }, render: src.settings }

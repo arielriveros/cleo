@@ -16,6 +16,8 @@ import { instantiateModelAsset, adoptModelMaterial } from "../utils/models";
 import { NEW_NODE_MIME, addItemTo, findAddItem } from "./sceneInspector/addCatalog";
 import { captureViewport, releaseViewport } from "../utils/pointerCapture";
 import { GizmoMode } from "./EngineContext";
+import { useSelection } from "./SelectionContext";
+import { usePlayback } from "./PlaybackContext";
 
 // One segment of the Move/Rotate/Scale toggle, styled to match the top-toolbar ModeSelector.
 function GizmoSeg({ active, title, onClick, children }: { active: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
@@ -50,8 +52,10 @@ const ScaleIcon = () => (
 );
 
 export default function EngineViewport() {
-    const { instance, editorScene, eventEmitter, selectedNode, isGizmoDragging, isPlayMode, editorMode,
-            gizmoMode, setGizmoMode, templateRootId, modelEditTargetId, templates, models, materials, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
+    const { instance, editorScene, eventEmitter, editorMode,
+            templateRootId, modelEditTargetId, templates, models, materials, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
+    const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode } = useSelection();
+    const { isPlayMode } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
     // The node graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D) has nothing to act on.
     const hideForGraph = editorMode === 'animation' && graphView;

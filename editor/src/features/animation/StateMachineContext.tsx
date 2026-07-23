@@ -244,7 +244,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       smCacheRef.current.set(activeTabId, next) // survive a switch away from this tab
       return next
     })
-    if (!opts?.silent) markTabDirty(activeTabId)
+    if (!opts?.silent) markTabDirty(activeTabId, 'anim-sm-edit')
   }
   const apply = () => {
     if (!target) return

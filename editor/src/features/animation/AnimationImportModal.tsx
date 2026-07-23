@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useCleoEngine } from '../EngineContext'
+import { useEditorSessions } from '../EditorSessionsContext'
 import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 
 // Centered review modal for importing animation clips. For each clip parsed from the file it shows a
@@ -7,7 +7,7 @@ import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 // incompatible) the specific bones that are missing or whose parent relationship differs. The user
 // picks which clips to add. Mounted globally in Editor so it overlays the whole editor.
 export default function AnimationImportModal() {
-  const { pendingAnimationImport, resolveAnimationImport } = useCleoEngine()
+  const { pendingAnimationImport, resolveAnimationImport } = useEditorSessions()
   const [include, setInclude] = useState<boolean[]>([])
 
   // Default: include every clip that matched at least one bone.

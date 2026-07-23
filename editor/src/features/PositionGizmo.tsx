@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useCleoEngine, GizmoMode } from "./EngineContext";
+import { useSelection } from "./SelectionContext";
 import { Model, ModelNode, Material, Geometry, Vec } from "cleo";
 import { GizmoGeometry } from "../utils/GizmoGeometry";
 import { Raycaster } from "cleo";
@@ -15,7 +16,8 @@ type GizmoAxis = 'x' | 'y' | 'z' | null;
 type Transform = { pos: [number, number, number]; rot: [number, number, number]; scale: [number, number, number]; rotQuat: number[] };
 
 export default function PositionGizmo({ selectedNodeId, onTransformChange, viewportRef }: TransformGizmoProps) {
-    const { instance, editorScene, eventEmitter, gizmoMode, withoutDirty } = useCleoEngine();
+    const { instance, editorScene, eventEmitter, withoutDirty } = useCleoEngine();
+    const { gizmoMode } = useSelection();
     const [isDragging, setIsDragging] = useState(false);
     const [draggedAxis, setDraggedAxis] = useState<GizmoAxis>(null);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);

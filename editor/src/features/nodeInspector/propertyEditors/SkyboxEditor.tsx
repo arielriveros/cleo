@@ -3,10 +3,10 @@ import { Texture, Skybox, SkyboxNode } from 'cleo'
 import { CubemapFaces } from 'cleo/graphics/texture';
 import Collapsable from '../../../components/Collapsable'
 import { SkyboxIcon } from '../sectionIcons'
-import { useCleoEngine } from '../../EngineContext';
+import { useEventBus } from '../../EventBusContext';
 
 function FaceEditor(props: { faceName: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ', texture: Texture }) {
-    const { eventEmitter } = useCleoEngine();
+    const eventEmitter = useEventBus();
     const [img, setImg] = useState<HTMLImageElement | null>(null);
 
     useEffect(() => {

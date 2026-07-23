@@ -1,5 +1,5 @@
 import React from 'react'
-import { useCleoEngine } from '../EngineContext'
+import { useProject } from '../ProjectContext'
 import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 
 // Shown when unsaved edits are about to be lost: `openScene` parks a promise (confirmUnsavedScene) when
@@ -7,7 +7,7 @@ import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 // This modal resolves it: Save writes the asset then proceeds, Discard drops the edits and proceeds,
 // Cancel aborts. Mounted globally in Editor.
 export default function UnsavedSceneModal() {
-  const { pendingSceneConfirm, resolveSceneConfirm } = useCleoEngine()
+  const { pendingSceneConfirm, resolveSceneConfirm } = useProject()
 
   if (!pendingSceneConfirm) return null
   const { sceneName, action } = pendingSceneConfirm
