@@ -28,7 +28,8 @@ export class Sprite {
           side: data.material.config?.side,
           wireframe: data.material.config?.wireframe,
           transparent: data.material.config?.transparent,
-          castShadow: data.material.config?.castShadow
+          castShadow: data.material.config?.castShadow,
+          probeable: data.material.config?.probeable
       }
     );
 
@@ -45,6 +46,7 @@ export class Sprite {
           wireframe: this._material.config.wireframe,
           transparent: this._material.config.transparent,
           castShadow: this._material.config.castShadow,
+          probeable: this._material.config.probeable,
       }
     };
 

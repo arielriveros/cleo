@@ -1,9 +1,10 @@
 import { LightProbeNode } from 'cleo';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Collapsable from '../../../components/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Hint } from '../../../components/ui';
 import { ProbeIcon } from '../sectionIcons';
 import { useEventBus } from '../../EventBusContext';
+import { useCleoEngine } from '../../EngineContext';
 
 export default function LightProbeEditor(props: { node: LightProbeNode }) {
   const [state, setState] = useState({
@@ -49,6 +50,52 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
 
   const bounded = state.sizeX > 0 && state.sizeY > 0 && state.sizeZ > 0;
 
+  // --- Cubemap preview -------------------------------------------------------
+  const { instance } = useCleoEngine();
+  const [previewSrc, setPreviewSrc] = useState('');
+
+  // Read-only capture of the probe's baked cube -> equirectangular thumbnail. Never emits SCENE_CHANGED,
+  // so refreshing the preview never marks the tab dirty.
+  const refreshPreview = useCallback(() => {
+    const renderer = instance?.renderer;
+    if (!renderer) return;
+    setPreviewSrc(renderer.renderProbePreview(props.node, 256));
+  }, [instance, props.node]);
+
+  // On select / node change: one deferred refresh (a freshly-added probe bakes on the next engine frame).
+  useEffect(() => {
+    setPreviewSrc('');
+    const id = window.setTimeout(refreshPreview, 60);
+    return () => window.clearTimeout(id);
+  }, [props.node, refreshPreview]);
+
+  // Realtime probes re-bake every updateFrequency seconds; poll and refresh only when a new bake landed.
+  useEffect(() => {
+    if (state.mode !== 'realtime') return;
+    let last = props.node.lastBakeTime;
+    const pollMs = Math.max(250, Math.min(1000, state.updateFrequency * 1000));
+    const id = window.setInterval(() => {
+      if (props.node.lastBakeTime !== last) {
+        last = props.node.lastBakeTime;
+        refreshPreview();
+      }
+    }, pollMs);
+    return () => window.clearInterval(id);
+  }, [state.mode, state.updateFrequency, props.node, refreshPreview]);
+
+  // Baked probes only capture on the engine's next _updateIBL after bake() flags them; wait for the new
+  // bake to land (lastBakeTime advances) before refreshing the thumbnail.
+  const bakeAndPreview = () => {
+    const before = props.node.lastBakeTime;
+    props.node.bake();
+    let tries = 0;
+    const tick = () => {
+      if (props.node.lastBakeTime !== before && props.node.hasBakedMaps) refreshPreview();
+      else if (tries++ < 180) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  };
+
   return (
     <Collapsable title='Light Probe' icon={<ProbeIcon />} persistKey='lightProbe'>
       <div className='w-full p-2'>
@@ -93,7 +140,17 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
             ? 'This probe only lights meshes/pixels inside its box volume (moves and rotates with the node); the IBL feathers out over the blend distance. Set any size to 0 for an unbounded probe.'
             : 'Size 0 = unbounded: the probe affects the whole scene (legacy behavior). Set all three sizes to bound it to a box volume.'}
         </Hint>
-        <Button variant='primary' size='sm' className='mt-2 w-full' onClick={() => props.node.bake()}>Bake Probe</Button>
+        <div className='mt-2'>
+          <div className='text-xs text-muted mb-1'>Cubemap Preview</div>
+          {previewSrc ? (
+            <img src={previewSrc} className='w-full rounded border border-border' style={{ aspectRatio: '2 / 1' }} />
+          ) : (
+            <div className='w-full rounded border border-dashed border-border grid place-items-center text-xs text-muted' style={{ aspectRatio: '2 / 1' }}>
+              Probe not baked yet
+            </div>
+          )}
+        </div>
+        <Button variant='primary' size='sm' className='mt-2 w-full' onClick={bakeAndPreview}>Bake Probe</Button>
       </div>
     </Collapsable>
   );

@@ -138,7 +138,8 @@ export class AnimatedModel {
             side: m.config?.side,
             wireframe: m.config?.wireframe,
             transparent: m.config?.transparent,
-            castShadow: m.config?.castShadow
+            castShadow: m.config?.castShadow,
+            probeable: m.config?.probeable
         };
         
         let material: Material;
@@ -275,6 +276,7 @@ export class AnimatedModel {
             wireframe: this._material.config.wireframe,
             transparent: this._material.config.transparent,
             castShadow: this._material.config.castShadow,
+            probeable: this._material.config.probeable,
         };
         const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'blinn_phongSkinned' ? 'blinn_phong' : t);
         const type = normalizeType(this._material.type as any);

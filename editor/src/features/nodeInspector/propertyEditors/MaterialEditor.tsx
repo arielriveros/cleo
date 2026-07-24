@@ -50,12 +50,13 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   );
 
   // Options state
-  const [options, setOptions] = useState<{ wireframe: boolean; transparent: boolean; side: 'front' | 'back' | 'double'; castShadow: boolean;}>(
+  const [options, setOptions] = useState<{ wireframe: boolean; transparent: boolean; side: 'front' | 'back' | 'double'; castShadow: boolean; probeable: boolean;}>(
   {
     wireframe: material.config.wireframe ?? false,
     transparent: material.config.transparent ?? false,
     side: material.config.side ?? 'front',
     castShadow: material.config.castShadow ?? false,
+    probeable: material.config.probeable ?? true,
   });
 
   useEffect(() => {
@@ -84,6 +85,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       transparent: material.config.transparent ?? false,
       side: material.config.side ?? 'front',
       castShadow: material.config.castShadow ?? false,
+      probeable: material.config.probeable ?? true,
     });
 
   }, [props.node])
@@ -137,6 +139,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     material.config.transparent = options.transparent;
     material.config.side = options.side;
     material.config.castShadow = options.castShadow;
+    material.config.probeable = options.probeable;
   }, [options, material])
 
   const eventEmitter = useEventBus();
@@ -264,6 +267,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             <Toggle label='Wireframe' checked={options.wireframe} onChange={(c) => updateOption({ wireframe: c })} />
             <Toggle label='Transparent' checked={options.transparent} onChange={(c) => updateOption({ transparent: c })} />
             <Toggle label='Cast Shadow' checked={options.castShadow} onChange={(c) => updateOption({ castShadow: c })} />
+            <Toggle label='Probeable' checked={options.probeable} onChange={(c) => updateOption({ probeable: c })} />
             <Field label='Side'>
               <Select value={options.side} onChange={(e) => updateOption({ side: e.target.value as 'front' | 'back' | 'double' })}>
                 <option value='front'>Front</option>

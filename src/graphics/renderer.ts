@@ -29,6 +29,7 @@ import SkyboxVertex from './shaders/environment/skybox.vs'
 import SkyboxFragment from './shaders/environment/skybox.fs'
 import VolumetricCloudsFragment from './shaders/environment/volumetricClouds.fs'
 import SkyAtmosphereFragment from './shaders/environment/skyAtmosphere.fs'
+import ProbePreviewFragment from './shaders/environment/probePreview.fs'
 import SkyFogFragment from './shaders/screen/skyFog.fs'
 
 import ScreenVertex from './shaders/screen/screen.vs'
@@ -49,6 +50,7 @@ import MotionBlurGather from './shaders/screen/motionBlur.fs'
 import PBRVertex from './shaders/materials/pbr.vs'
 import PBRFragment from './shaders/materials/pbr.fs'
 import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
+import TerrainForwardFragment from './shaders/materials/terrainForward.fs'
 
 // Deferred pipeline shaders
 import GeometryPBRFragment from './shaders/deferred/geometryPBR.fs'
@@ -83,7 +85,7 @@ export let gl: WebGL2RenderingContext;
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
-const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned'];
+const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned', 'terrainForward'];
 
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
@@ -200,6 +202,8 @@ export class Renderer {
     // published games never pay for it.
     private _offscreenFBO: Framebuffer | null = null;
     private _presentTarget: Framebuffer | null = null;
+    // Separate 2:1 (non-square) target for the light-probe cubemap preview thumbnail. Allocated on first use.
+    private _probePreviewFBO: Framebuffer | null = null;
 
     // Cascaded shadow maps (directional light, deferred path)
     private readonly _cascadeCount: number = 3;
@@ -419,6 +423,9 @@ export class Renderer {
         const defaultGeometryInstancedShader = new Shader().create(GeometryInstancedVertex, GeometryDefaultFragment);
         // Terrain splat geometry shader (reuses the default 14-float vertex layout).
         const terrainGeometryShader = new Shader().create(DefaultVertex, GeometryTerrainFragment);
+        // Forward-lit terrain: used only by the light-probe capture (a forward pass), where the deferred
+        // terrain G-buffer shader can't be lit. Same 14-float layout as the deferred terrain shader.
+        const terrainForwardShader = new Shader().create(DefaultVertex, TerrainForwardFragment);
         // Instanced billboard foliage (grass) geometry shader.
         const foliageBillboardShader = new Shader().create(GeometryInstancedVertex, GeometryFoliageBillboardFragment);
         // Deferred lighting (fullscreen) shader
@@ -439,6 +446,8 @@ export class Renderer {
         const volumetricCloudsShader = new Shader().create(ScreenVertex, VolumetricCloudsFragment);
         // Sky atmosphere (per-direction Nishita scattering, baked into a cubemap via the IBL cube VS)
         const skyAtmosphereShader = new Shader().create(CubeVertex, SkyAtmosphereFragment);
+        // Probe preview: equirectangular unwrap of a probe's captured cube for the editor thumbnail.
+        const probePreviewShader = new Shader().create(ScreenVertex, ProbePreviewFragment);
         // Sky fog (fullscreen distance fog whose colour is sampled from the atmosphere cubemap)
         const skyFogShader = new Shader().create(ScreenVertex, SkyFogFragment);
         // Screen shaders
@@ -482,6 +491,7 @@ export class Renderer {
         // 'terrain' is used by ModelNode.initializeModel (attribute reflection); 'terrainGeometry' by the deferred pass.
         this._shaderManager.addShader('terrain', terrainGeometryShader);
         this._shaderManager.addShader('terrainGeometry', terrainGeometryShader);
+        this._shaderManager.addShader('terrainForward', terrainForwardShader);
         this._shaderManager.addShader('foliageBillboardInstanced', foliageBillboardShader);
         this._shaderManager.addShader('deferredLighting', deferredLightingShader);
         this._shaderManager.addShader('ssao', ssaoShader);
@@ -494,6 +504,7 @@ export class Renderer {
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('volumetricClouds', volumetricCloudsShader);
         this._shaderManager.addShader('skyAtmosphere', skyAtmosphereShader);
+        this._shaderManager.addShader('probePreview', probePreviewShader);
         this._shaderManager.addShader('skyFog', skyFogShader);
         this._shaderManager.addShader('screen', screenShader);
         this._shaderManager.addShader('present', presentShader);
@@ -684,6 +695,55 @@ export class Renderer {
             this._presentTarget = null;
             this._resizeBuffers(prevW, prevH); // hand the pipeline back to the live viewport
         }
+    }
+
+    /**
+     * Render an equirectangular (2:1) unwrap of a light probe's captured cubemap and return it as a
+     * base64 PNG data URL, for the editor's probe inspector preview. Returns '' if the probe hasn't
+     * been baked yet. A single fullscreen pass into a private offscreen target — the live viewport is
+     * never touched (unlike `screenshotOffscreen`, this doesn't run the whole pipeline, so it needs no
+     * present-target/buffer swap). The probe's sharp linear-HDR `envMap` is tonemapped to display LDR.
+     */
+    public renderProbePreview(probe: LightProbeNode, width: number = 256): string {
+        if (width <= 0) return '';
+        const cube = probe.envMap;
+        if (!probe.hasBakedMaps || !cube) return '';
+
+        const w = width;
+        const h = Math.max(1, Math.floor(width / 2));
+        if (!this._probePreviewFBO) this._probePreviewFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
+        if (this._probePreviewFBO.width !== w || this._probePreviewFBO.height !== h)
+            this._probePreviewFBO.create(w, h);
+
+        this._probePreviewFBO.bind(); // binds the FBO and sets the viewport to w x h
+
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.disable(gl.BLEND);
+        GLState.disable(gl.CULL_FACE);
+
+        this._shaderManager.bind('probePreview');
+        this._shaderManager.setUniform('u_cube', 8);
+        this._shaderManager.setUniform('u_exposure', probe.intensity);
+        cube.bind(8);
+        this._screenQuad.draw();
+
+        const pixels = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
+
+        // Flip Y (WebGL's origin is bottom-left) into the output canvas.
+        const out = document.createElement('canvas');
+        out.width = w; out.height = h;
+        const ctx = out.getContext('2d')!;
+        const img = ctx.createImageData(w, h);
+        for (let y = 0; y < h; y++) {
+            const src = (h - 1 - y) * w * 4;
+            img.data.set(pixels.subarray(src, src + w * 4), y * w * 4);
+        }
+        ctx.putImageData(img, 0, 0);
+        return out.toDataURL('image/png');
     }
 
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
@@ -1482,6 +1542,9 @@ export class Renderer {
                 // don't pollute the captured environment.
                 if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) continue;
                 if (node.model.material.config.transparent) continue;
+                // Per-material opt-out: a mesh flagged non-probeable is excluded from probe captures
+                // (===false so legacy/default materials with the flag unset still render).
+                if (node.model.material.config.probeable === false) continue;
                 this._renderModel(node);
             }
         }
@@ -2377,8 +2440,9 @@ export class Renderer {
         // Check if this is an animated model
         const isAnimatedModel = node.model instanceof AnimatedModel;
         
-        // Use appropriate shader based on model type and material
-        let shaderType: string = node.model.material.type;
+        // Use appropriate shader based on model type and material. Terrain is deferred-only in the main
+        // pipeline; in this forward path (light-probe capture) it uses the forward-lit terrain variant.
+        let shaderType: string = node.model.material.type === 'terrain' ? 'terrainForward' : node.model.material.type;
         if (isAnimatedModel) {
             const animatedModel = node.model as AnimatedModel;
             
@@ -2432,7 +2496,9 @@ export class Renderer {
         if (isAnimatedModel) this._uploadBoneMatrices(shaderType, node);
 
         // Set material uniforms + bind textures
-        if (node.model.material instanceof CustomMaterial)
+        if (node.model.material.type === 'terrain')
+            this._applyTerrainMaterial(node.model.material); // splat/layer uniforms (u_viewPos set above)
+        else if (node.model.material instanceof CustomMaterial)
             this._applyCustomMaterial(node.model.material);
         else
             this._applyMaterial(node.model.material);

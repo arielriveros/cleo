@@ -2,6 +2,7 @@ interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
     transparent?: boolean;
     castShadow?: boolean;
+    probeable?: boolean;
     wireframe?: boolean;
 }
 
@@ -67,6 +68,7 @@ export class Material {
             side: config?.side || 'front',
             transparent: config?.transparent || false,
             castShadow: config?.castShadow === undefined ? true : config.castShadow,
+            probeable: config?.probeable === undefined ? true : config.probeable,
             wireframe: config?.wireframe || false
         };
     }
@@ -214,6 +216,7 @@ export class Material {
             wireframe: this.config.wireframe,
             transparent: this.config.transparent,
             castShadow: this.config.castShadow,
+            probeable: this.config.probeable,
         };
         const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'blinn_phongSkinned' ? 'blinn_phong' : t);
         const type = normalizeType(this.type as any);
@@ -281,7 +284,8 @@ export class Material {
             side: m.config?.side,
             wireframe: m.config?.wireframe,
             transparent: m.config?.transparent,
-            castShadow: m.config?.castShadow
+            castShadow: m.config?.castShadow,
+            probeable: m.config?.probeable
         };
         const type: string = m.type || 'blinn_phong';
         if (type === 'basic') {
@@ -539,6 +543,7 @@ export class CustomMaterial extends Material {
                 wireframe: this.config.wireframe,
                 transparent: this.config.transparent,
                 castShadow: this.config.castShadow,
+                probeable: this.config.probeable,
             },
         };
     }
@@ -550,6 +555,7 @@ export class CustomMaterial extends Material {
             wireframe: m.config?.wireframe,
             transparent: m.config?.transparent,
             castShadow: m.config?.castShadow,
+            probeable: m.config?.probeable,
         });
         cm.renderMode = m.renderMode === 'deferred' ? 'deferred' : m.renderMode === 'screen' ? 'screen' : 'forward';
         cm.baseType = m.baseType ?? null;
