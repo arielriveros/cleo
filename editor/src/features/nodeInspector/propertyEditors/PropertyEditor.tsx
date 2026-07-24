@@ -1,6 +1,7 @@
 import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
+import ModelSlot from './ModelSlot'
 import SkyboxEditor from './SkyboxEditor'
 import TransformEditor from './TransformEditor'
 import LightEditor from './LightEditor'
@@ -31,6 +32,11 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
         {/* NodeInfo (name locked, Delete kept) and Transform stay editable for instances. */}
         <NodeInfo node={props.node} readOnly={ro} />
         {!root && <TransformEditor node={props.node} />}
+
+        {/* Which model asset this subtree came from. Outside the fieldset below on purpose: it is a label
+            and a navigation button, not an edit, and jumping to the asset is exactly what you want from a
+            read-only template instance. Renders itself away for anything not placed from a model. */}
+        {!root && <ModelSlot node={props.node} />}
 
         {/* Everything else is disabled in one shot for a template instance. */}
         <fieldset disabled={ro} className={`${ro ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>

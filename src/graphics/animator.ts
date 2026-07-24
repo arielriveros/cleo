@@ -1,5 +1,6 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { AnimatedModel, Animation, AnimationSampler, AnimationChannel, Skin } from './animatedModel';
+import { AnimationField, FieldWeight, fieldWeights, rateScaleOf } from './animationField';
 import { Node, ModelNode, canAccessVariable } from '../core/scene/node';
 import { InputManager } from '../input/inputManager';
 import { Logger } from '../core/logger';
@@ -39,15 +40,47 @@ export interface AnimationMapping {
 export type AnimationParameterType = 'bool' | 'float' | 'trigger' | 'variable';
 
 /**
- * Binds a 'variable' parameter to a node custom variable, read each frame through the access model
- * ([[node-variable-access]]). `nodeRef` resolves relative to the model node running the machine:
- * 'self', 'parent', or a specific node id in the scene.
+ * Engine-provided node values a 'variable' parameter can bind to, alongside user-authored variables.
+ *
+ * These exist because the ordinary lookup cannot reach them. `_refreshVariableParams` resolves a variable
+ * through `getVariable(name)` and then an OWN property via `hasOwnProperty` — and that guard is deliberate,
+ * since it is the only thing stopping a parameter named `position` from reading a real Node member. But a
+ * prototype getter like `currentSpeed` fails `hasOwnProperty` too, so binding to one would silently read the
+ * default forever. A curated list keeps the guard intact while making the useful values reachable.
+ *
+ * They are all MEASURED state (what the body actually did), which is exactly what an animation machine wants:
+ * a character jammed against a wall should fall back to idle rather than keep running on the spot.
+ */
+export const NODE_BUILTINS: Record<string, { type: 'number' | 'boolean'; read: (node: Node) => number | boolean }> = {
+    currentSpeed:     { type: 'number',  read: n => n.currentSpeed },
+    rawSpeed:         { type: 'number',  read: n => n.rawSpeed },
+    planarSpeed:      { type: 'number',  read: n => n.planarSpeed },
+    verticalSpeed:    { type: 'number',  read: n => n.verticalSpeed },
+    planarAngle:      { type: 'number',  read: n => n.planarAngle },
+    worldPlanarAngle: { type: 'number',  read: n => n.worldPlanarAngle },
+    isGrounded:       { type: 'boolean', read: n => n.isGrounded },
+};
+
+/** Name of a built-in node value. */
+export type NodeBuiltinName = keyof typeof NODE_BUILTINS;
+
+/**
+ * Binds a 'variable' parameter to a node value, read each frame. `nodeRef` resolves relative to the model
+ * node running the machine: 'self', 'parent', or a specific node id in the scene.
+ *
+ * Two sources: a node CUSTOM VARIABLE (the default, read through the access model —
+ * [[node-variable-access]]), or one of the engine's {@link NODE_BUILTINS}.
  */
 export interface AnimationVariableBinding {
     nodeRef: 'self' | 'parent' | string;
     varName: string;
     /** Whether the bound variable reads as a number or boolean (decides which condition ops apply). */
     varType: 'number' | 'boolean';
+    /**
+     * Where `varName` is read from. Absent means 'variable', so every machine authored before built-ins
+     * existed keeps resolving exactly as it did.
+     */
+    source?: 'variable' | 'builtin';
 }
 
 export interface AnimationParameter {
@@ -61,8 +94,21 @@ export interface AnimationParameter {
 
 export interface AnimationState {
     name: string;
-    /** Name of the animation clip this state plays (empty = hold bind pose). */
+    /** Name of the animation clip this state plays (empty = hold bind pose). Ignored when `field` is set. */
     clipName: string;
+    /**
+     * Link to the Animation Field asset this state plays instead of a single clip. Authoring-side only —
+     * the runtime reads `field`, below. Kept so the editor can re-resolve the asset and refresh the copy.
+     */
+    fieldId?: string;
+    /**
+     * Resolved copy of the field, embedded by the editor when the machine is applied. This is what actually
+     * plays: the machine is serialized whole onto the node, so an embedded field travels through scene saves,
+     * templates, bundles and the published game with no extra plumbing anywhere.
+     */
+    field?: AnimationField;
+    /** Names of the machine parameters feeding the field's axes. */
+    fieldInputs?: { x?: string; y?: string };
     loop: boolean;
     speed: number;
     /**
@@ -384,6 +430,20 @@ class Bone {
 }
 
 /**
+ * One clip contributing to an active field blend: its own bone map and length, plus how much of the final
+ * pose it owns this frame. `bones` is shared with {@link Animator}'s per-clip cache and must never be
+ * mutated per-entry — only advanced, which every entry of a field does in lockstep anyway.
+ */
+interface FieldEntry {
+    clipName: string;
+    animation: Animation;
+    bones: Map<string, Bone>;
+    duration: number;
+    weight: number;
+    rateScale: number;
+}
+
+/**
  * Animator class manages skeletal animation playback
  * Based on the LearnOpenGL skeletal animation approach
  */
@@ -438,6 +498,25 @@ export class Animator {
     private _currentStateName: string | null = null;
     private _eventCallbacks: ((eventName: string, clipName: string) => void)[] = [];
     private _prevEventTime: number = 0;
+
+    // ---- Animation field (blend space) playback ----
+    //
+    // When a field is active it REPLACES _bones as the source of the current pose: several clips are posed
+    // at a shared normalized phase and mixed by weight. _currentTime / duration stay meaningful (they read
+    // the weighted duration), so exit-time transitions and event markers keep working untouched.
+    private _fieldDef: AnimationField | null = null;
+    private _fieldInputs: { x?: string; y?: string } | null = null;
+    private _fieldEntries: FieldEntry[] | null = null;
+    /** Live probe coordinates. Driven by parameters in a machine, or set directly by the editor preview. */
+    private _fieldX: number = 0;
+    private _fieldY: number = 0;
+    /** Shared normalized playback position (0..1) across every contributing clip — the anti-foot-slide. */
+    private _fieldPhase: number = 0;
+    /** Bone maps per clip, built once. Weights change every frame; bone maps must not be rebuilt with them. */
+    private _fieldBoneCache: Map<string, { bones: Map<string, Bone>; duration: number; animation: Animation }> = new Map();
+    /** The field being cross-faded OUT of, mirroring _previousBones for the single-clip path. */
+    private _previousFieldEntries: FieldEntry[] | null = null;
+    private _previousFieldPhase: number = 0;
 
     constructor(animatedModel: AnimatedModel, node?: Node) {
         this._animatedModel = animatedModel;
@@ -494,10 +573,16 @@ export class Animator {
         // holding its last frame, and that is exactly when a state machine wants to cross-fade away from it
         // (a Jump landing). `_currentAnimation` being null already covers the only case that must not blend —
         // the very first play. Callers that must not blend out of a bind pose pass blend = false.
-        if (blend && this._currentAnimation && this._currentAnimation !== animation) {
+        // A field is always a distinct pose source from a clip, so switching away from one always blends —
+        // there is no "same animation" case to suppress it the way there is for clip-to-clip.
+        const blendOut = blend && (this._fieldEntries !== null
+            || (!!this._currentAnimation && this._currentAnimation !== animation));
+
+        if (blendOut) {
             // Store current animation state for blending
             this._previousAnimation = this._currentAnimation;
             this._previousBones = new Map(this._bones);
+            this._capturePreviousField();
             this._previousTime = this._currentTime;
             // Read BEFORE _playing/_loop are overwritten below: a clip that already ran to its end must hold
             // its final pose under the cross-fade, not restart.
@@ -510,8 +595,13 @@ export class Animator {
             // No blending - instant switch
             this._isBlending = false;
             this._previousAnimation = null;
+            this._previousFieldEntries = null;
         }
-        
+
+        // A single clip is taking over as the current pose source; any field is now history (it was moved
+        // into the previous slot above when this switch blends).
+        this._clearField();
+
         this._currentAnimation = animation;
         this._currentTime = 0;
         this._loop = loop;
@@ -541,23 +631,28 @@ export class Animator {
     }
     
     /**
-     * Build bone map from animation channels
+     * Build a FRESH bone map from an animation's channels.
+     *
+     * Split out of _buildBoneMap so field playback can build maps of its own. Every live pose source needs
+     * its OWN Bone objects: bones carry the time they were last posed at, and two sources advancing the same
+     * Bone to different times each frame would clobber each other (a field cross-fading into a clip it also
+     * contains is the case that hits this).
      */
-    private _buildBoneMap(animation: Animation): void {
-        this._bones.clear();
-        
+    private _buildBoneMapFor(animation: Animation): Map<string, Bone> {
+        const bones = new Map<string, Bone>();
+
         // Group channels by target node
         for (const channel of animation.channels) {
             const nodeIndex = channel.targetNodeIndex;
             const boneName = `bone_${nodeIndex}`;
-            
+
             // Get or create bone
-            let bone = this._bones.get(boneName);
+            let bone = bones.get(boneName);
             if (!bone) {
                 bone = new Bone(boneName, nodeIndex);
-                this._bones.set(boneName, bone);
+                bones.set(boneName, bone);
             }
-            
+
             // Add channel data based on target path
             const sampler = animation.samplers[channel.samplerIndex];
             if (channel.targetPath === 'translation') {
@@ -568,7 +663,16 @@ export class Animator {
                 bone.addScaleChannel(sampler);
             }
         }
-        
+
+        return bones;
+    }
+
+    /**
+     * Build bone map from animation channels
+     */
+    private _buildBoneMap(animation: Animation): void {
+        this._bones = this._buildBoneMapFor(animation);
+
         Logger.info(`Built bone map with ${this._bones.size} bones for animation "${animation.name}"`, 'Animation');
         Logger.info(`Skin has ${this._skin?.joints.length || 0} joints`, 'Animation');
         Logger.print('info', ['Animation target node indices:', Array.from(this._bones.values()).map(b => b.id)], 'Animation');
@@ -593,7 +697,304 @@ export class Animator {
             }
         }
     }
-    
+
+    // ---- Animation field (blend space) playback ---------------------------------------------------
+    //
+    // A field poses SEVERAL clips at one shared normalized phase and mixes them by weight. It replaces
+    // _bones as the current pose source while active; _recomputePose reads both through _currentLocal /
+    // _previousLocal so the hierarchy accumulation, bind-pose fallback and cross-fade below it are unchanged.
+
+    /** Drop the active field. The caller decides separately what becomes the new pose source. */
+    private _clearField(): void {
+        this._fieldDef = null;
+        this._fieldInputs = null;
+        this._fieldEntries = null;
+        this._fieldPhase = 0;
+    }
+
+    /**
+     * Move the active field into the outgoing slot for a cross-fade, with bone maps of its OWN.
+     *
+     * The copy is not an optimization to skip: the outgoing and incoming sides are advanced to different
+     * times every frame, and sharing Bone objects (which hold their last posed transform) would have each
+     * side overwrite the other. Rebuilding two or three bone maps happens only on a state transition.
+     */
+    private _capturePreviousField(): void {
+        if (!this._fieldEntries) { this._previousFieldEntries = null; return; }
+        this._previousFieldEntries = this._fieldEntries.map(e => ({
+            ...e,
+            bones: this._buildBoneMapFor(e.animation),
+        }));
+        this._previousFieldPhase = this._fieldPhase;
+    }
+
+    /**
+     * Start playing a field, cross-fading out of whatever is currently posed.
+     *
+     * The new field always starts at phase 0. It does NOT inherit the outgoing one's phase: the outgoing
+     * side keeps its own and goes on advancing under the cross-fade (see _previousFieldPhase), so the
+     * transition is covered by the blend rather than by matching up two unrelated cycles.
+     */
+    private _startField(
+        field: AnimationField,
+        inputs: { x?: string; y?: string } | undefined,
+        loop: boolean,
+        blend: boolean,
+        blendOverride?: number,
+    ): void {
+        if (!this._animatedModel) return;
+
+        const hadSource = this._fieldEntries !== null || this._currentAnimation !== null;
+        if (blend && hadSource) {
+            this._previousAnimation = this._currentAnimation;
+            this._previousBones = new Map(this._bones);
+            this._capturePreviousField();
+            this._previousTime = this._currentTime;
+            this._previousAdvancing = this._playing;
+            this._previousLoop = this._loop;
+            this._isBlending = true;
+            this._currentBlendTime = 0;
+            this._activeBlendTime = blendOverride !== undefined ? Math.max(0, blendOverride) : this._blendTime;
+        } else {
+            this._isBlending = false;
+            this._previousAnimation = null;
+            this._previousFieldEntries = null;
+        }
+
+        // A different field means different clips; the cached bone maps are for the old set.
+        if (field !== this._fieldDef) this._fieldBoneCache.clear();
+
+        this._fieldDef = field;
+        this._fieldInputs = inputs ?? null;
+        this._fieldEntries = null;    // rebuilt by the refresh below
+        this._fieldPhase = 0;
+        this._bones.clear();          // the field owns the pose now; stale clip bones must not leak through
+        this._currentAnimation = null;
+        this._currentTime = 0;
+        this._loop = loop;
+        this._playing = true;
+        this._loopsPlayed = 0;
+        this._loopLimit = 0;
+
+        this._refreshFieldWeights();
+    }
+
+    /** The bone map + duration for a clip in the active field, built once and cached by clip name. */
+    private _fieldClip(clipName: string): { bones: Map<string, Bone>; duration: number; animation: Animation } | null {
+        const animation = this._animatedModel?.animations.find(a => a.name === clipName);
+        if (!animation) return null;
+
+        // Keyed by NAME, so the cache has to be checked against the clip that name resolves to today. A clip
+        // replaced under the same name — re-imported, or refreshed from the model asset — produces a new
+        // Animation object, and a stale entry would go on posing the old keyframes at the old duration.
+        const cached = this._fieldBoneCache.get(clipName);
+        if (cached && cached.animation === animation) return cached;
+
+        let duration = 0;
+        for (const sampler of animation.samplers) {
+            if (sampler.input.length > 0) duration = Math.max(duration, sampler.input[sampler.input.length - 1]);
+        }
+        const entry = { bones: this._buildBoneMapFor(animation), duration, animation };
+        this._fieldBoneCache.set(clipName, entry);
+        return entry;
+    }
+
+    /**
+     * Re-sample the field at the current probe and rebuild the contributing entries.
+     *
+     * Runs every frame: the probe moves continuously, so the weights do too. Only the weights are cheap to
+     * recompute — the bone maps come from _fieldBoneCache, so a weight change never rebuilds one.
+     */
+    private _refreshFieldWeights(): void {
+        const field = this._fieldDef;
+        if (!field) { this._fieldEntries = null; return; }
+
+        // A machine drives the probe through its parameters; the editor preview writes _fieldX/_fieldY
+        // directly and leaves _fieldInputs null.
+        if (this._fieldInputs) {
+            const read = (name: string | undefined, fallback: number): number => {
+                if (!name) return fallback;
+                const v = this._paramValues.get(name);
+                if (typeof v === 'number') return v;
+                if (typeof v === 'boolean') return v ? 1 : 0;
+                // Parameter renamed or deleted: hold the last probe rather than snapping the blend to 0,
+                // which would read as the character suddenly standing still.
+                return fallback;
+            };
+            this._fieldX = read(this._fieldInputs.x, this._fieldX);
+            this._fieldY = read(this._fieldInputs.y, this._fieldY);
+        }
+
+        const weights: FieldWeight[] = fieldWeights(field, this._fieldX, this._fieldY);
+        if (weights.length === 0) { this._fieldEntries = []; return; }
+
+        const entries: FieldEntry[] = [];
+        for (const w of weights) {
+            const clip = this._fieldClip(w.sample.clipName);
+            if (!clip) continue; // sample points at a clip this model does not have — skip, don't break the pose
+            entries.push({
+                clipName: w.sample.clipName,
+                animation: clip.animation,
+                bones: clip.bones,
+                duration: clip.duration,
+                weight: w.weight,
+                rateScale: rateScaleOf(w.sample),
+            });
+        }
+
+        // Dropping unresolvable samples above leaves the remainder summing to less than 1, which would fade
+        // the pose towards the bind pose. Re-normalize so what is left still makes a whole pose.
+        const total = entries.reduce((sum, e) => sum + e.weight, 0);
+        if (total > 0 && Math.abs(total - 1) > 1e-6) for (const e of entries) e.weight /= total;
+
+        this._fieldEntries = entries;
+
+        // Keep _currentAnimation pointing at the dominant clip: event markers are authored per clip, and the
+        // public getter is part of the API. It is NOT used for timing — _getAnimationDuration is field-aware.
+        let dominant: FieldEntry | null = null;
+        for (const e of entries) if (!dominant || e.weight > dominant.weight) dominant = e;
+        this._currentAnimation = dominant ? dominant.animation : null;
+    }
+
+    /** Weighted duration of the active field: what one full cycle of the blended motion lasts. */
+    private _fieldDuration(entries: FieldEntry[] | null): number {
+        if (!entries || entries.length === 0) return 0;
+        let d = 0;
+        for (const e of entries) d += e.weight * (e.duration / e.rateScale);
+        return d;
+    }
+
+    /** Pose every contributing clip at the shared phase, each scaled to its OWN length (no foot sliding). */
+    private _poseFieldAt(entries: FieldEntry[], phase: number): void {
+        for (const e of entries) {
+            for (const bone of e.bones.values()) bone.update(phase * e.duration);
+        }
+    }
+
+    /**
+     * Weighted mix of several local transforms into one.
+     *
+     * The N-way generalization of _blendTransforms: lerp translation/scale, and fold rotations in with an
+     * incremental slerp weighted by each contribution's share of the running total. Quaternions are flipped
+     * into the accumulator's hemisphere first — without that, two clips whose quaternions sit on opposite
+     * hemispheres blend the long way round and the limb sweeps through the body.
+     */
+    private _mixTransforms(parts: { m: mat4; w: number }[]): mat4 {
+        const result = mat4.create();
+        if (parts.length === 0) return result;
+        if (parts.length === 1) return mat4.copy(result, parts[0].m);
+
+        const translation = vec3.create();
+        const scale = vec3.create();
+        const rotation = quat.create();
+        const t = vec3.create();
+        const s = vec3.create();
+        const r = quat.create();
+
+        let accW = 0;
+        for (const part of parts) {
+            if (part.w <= 0) continue;
+            mat4.getTranslation(t, part.m);
+            mat4.getScaling(s, part.m);
+            mat4.getRotation(r, part.m);
+
+            if (accW === 0) {
+                vec3.copy(translation, t);
+                vec3.copy(scale, s);
+                quat.copy(rotation, r);
+                accW = part.w;
+                continue;
+            }
+
+            const f = part.w / (accW + part.w);
+            vec3.lerp(translation, translation, t, f);
+            vec3.lerp(scale, scale, s, f);
+            if (quat.dot(rotation, r) < 0) quat.scale(r, r, -1);
+            quat.slerp(rotation, rotation, r, f);
+            accW += part.w;
+        }
+
+        if (accW === 0) return mat4.copy(result, parts[0].m);
+        quat.normalize(rotation, rotation);
+        mat4.fromRotationTranslationScale(result, rotation, translation, scale);
+        return result;
+    }
+
+    /** The field-blended local transform for a bone, or null when no contributing clip animates it. */
+    private _fieldLocal(entries: FieldEntry[] | null, boneName: string): mat4 | null {
+        if (!entries || entries.length === 0) return null;
+        const parts: { m: mat4; w: number }[] = [];
+        for (const e of entries) {
+            const bone = e.bones.get(boneName);
+            if (bone) parts.push({ m: bone.localTransform, w: e.weight });
+        }
+        if (parts.length === 0) return null;
+        // Partial coverage (a bone only some contributing clips animate) is left to the caller's bind-pose
+        // fallback rather than mixed against an implicit identity, which would drag the bone towards origin.
+        return this._mixTransforms(parts);
+    }
+
+    /** Local transform of a bone in the CURRENT pose source (field when one is active, else the clip). */
+    private _currentLocal(boneName: string): mat4 | null {
+        if (this._fieldEntries) return this._fieldLocal(this._fieldEntries, boneName);
+        return this._bones.get(boneName)?.localTransform ?? null;
+    }
+
+    /** Local transform of a bone in the OUTGOING pose source during a cross-fade. */
+    private _previousLocal(boneName: string): mat4 | null {
+        if (this._previousFieldEntries) return this._fieldLocal(this._previousFieldEntries, boneName);
+        return this._previousBones.get(boneName)?.localTransform ?? null;
+    }
+
+    /**
+     * Play a field directly, outside any state machine. The Animation Field editor's preview uses this;
+     * at runtime a field is normally entered through a state (see _enterState).
+     */
+    public playField(field: AnimationField, x: number, y?: number, loop: boolean = true): void {
+        this._fieldX = x;
+        this._fieldY = y ?? 0;
+        this._startField(field, undefined, loop, false);
+    }
+
+    /**
+     * Swap in a new definition for the field already playing, WITHOUT restarting it.
+     *
+     * This is what the field editor calls as the user edits: moving a sample or an axis range has to change
+     * the blend immediately, but going through playField would reset the phase and drop playback on every
+     * drag — the model would twitch back to frame 0 instead of showing the edit take effect mid-stride.
+     * Falls back to playField when nothing is playing yet.
+     */
+    public updateField(field: AnimationField): void {
+        if (!this._fieldDef) { this.playField(field, this._fieldX, this._fieldY); return; }
+        this._fieldDef = field;
+        this._refreshFieldWeights();
+        if (this._fieldEntries) {
+            this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+            this._recomputePose();
+        }
+    }
+
+    /** Move the probe of the field currently playing. No-op when no field is active. */
+    public setFieldProbe(x: number, y?: number): void {
+        if (!this._fieldDef) return;
+        this._fieldX = x;
+        if (y !== undefined) this._fieldY = y;
+        this._refreshFieldWeights();
+        // Re-pose immediately so a paused editor preview responds to the probe without needing a tick.
+        if (this._fieldEntries) {
+            this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+            this._recomputePose();
+        }
+    }
+
+    /** True while a field (rather than a single clip) is producing the pose. */
+    public get isPlayingField(): boolean { return this._fieldEntries !== null; }
+
+    /** The clips contributing to the active field right now, for the editor's weight readout. */
+    public get activeFieldWeights(): { clipName: string; weight: number }[] {
+        return (this._fieldEntries ?? []).map(e => ({ clipName: e.clipName, weight: e.weight }));
+    }
+
     /**
      * Update animation state
      */
@@ -604,20 +1005,34 @@ export class Animator {
             return;
         }
 
-        // Calculate speed if node is available
+        // Calculate speed if node is available.
+        //
+        // Prefer the measured speed of the nearest ancestor that owns a body. The fallback below measures
+        // this._node.position — a LOCAL offset — which is pinned at 0 for the standard character rig
+        // (a `Model` child sitting at a fixed offset under a moving `Playable` root), so the 'speed' trigger
+        // could never fire on exactly the hierarchy the engine's own example recommends.
         if (this._node && deltaTime > 0) {
-            const currentPosition = this._node.position;
-            const distance = vec3.distance(currentPosition, this._lastPosition);
-            this._currentSpeed = distance / deltaTime;
-            vec3.copy(this._lastPosition, currentPosition);
+            const bodied = this._nearestBodiedNode();
+            if (bodied) {
+                this._currentSpeed = bodied.currentSpeed;
+            } else {
+                const currentPosition = this._node.position;
+                const distance = vec3.distance(currentPosition, this._lastPosition);
+                this._currentSpeed = distance / deltaTime;
+                vec3.copy(this._lastPosition, currentPosition);
+            }
         }
         
-        if (!this._playing || !this._currentAnimation || !this._skin) {
+        if (!this._skin || !this._playing) {
             return;
         }
-        
+        // A field poses several clips and has no single _currentAnimation to gate on; either source will do.
+        if (!this._currentAnimation && !this._fieldEntries) {
+            return;
+        }
+
         this._deltaTime = deltaTime * this._speed;
-        
+
         // Update blend time if blending
         if (this._isBlending) {
             this._currentBlendTime += this._deltaTime;
@@ -626,51 +1041,86 @@ export class Animator {
                 this._isBlending = false;
                 this._previousAnimation = null;
                 this._previousBones.clear();
+                this._previousFieldEntries = null;
             }
         }
-        
+
+        // A field's weights track the probe continuously, so they are re-sampled before this frame is posed.
+        if (this._fieldDef) this._refreshFieldWeights();
+
         // Get animation duration (assuming it's the max timestamp in samplers)
         const duration = this._getAnimationDuration();
 
         // Update current time (remember the pre-advance time for event-marker crossing)
         const prevTime = this._currentTime;
         let looped = false;
-        this._currentTime += this._deltaTime;
 
-        // Handle looping or stopping
-        if (this._currentTime >= duration) {
-            this._loopsPlayed++;
-            // _loopLimit is a count of PLAYS, so the pass just finished counts: a limit of 1 stops here, and 0
-            // means forever. Once the budget is spent the clip holds its last frame, same as a non-looping one,
-            // which is what an exit-time transition is waiting on.
-            if (this._loop && (this._loopLimit === 0 || this._loopsPlayed < this._loopLimit)) {
-                this._currentTime = this._currentTime % duration;
-                looped = true;
-            } else {
-                this._currentTime = duration;
-                this._playing = false;
-                // Finish any blend still in flight. From here on the guard at the top of update() returns
-                // early, so _currentBlendTime would never reach _activeBlendTime and the pose would be stuck
-                // at a partial mix forever — reachable whenever a clip is shorter than the blend.
-                if (this._isBlending) {
-                    this._isBlending = false;
-                    this._previousAnimation = null;
-                    this._previousBones.clear();
+        if (this._fieldEntries) {
+            // Advance the shared normalized PHASE, then project it onto the weighted duration — never the
+            // other way round. The weighted duration moves as the blend shifts (a walk is longer than a run),
+            // so deriving the phase from a wall-clock time would jog the pose every time the probe moved.
+            if (duration > 0) this._fieldPhase += this._deltaTime / duration;
+            if (this._fieldPhase >= 1) {
+                this._loopsPlayed++;
+                if (this._loop && (this._loopLimit === 0 || this._loopsPlayed < this._loopLimit)) {
+                    this._fieldPhase = this._fieldPhase % 1;
+                    looped = true;
+                } else {
+                    this._fieldPhase = 1;
+                    this._playing = false;
+                    this._finishBlend();
+                }
+            }
+            this._currentTime = this._fieldPhase * duration;
+        } else {
+            this._currentTime += this._deltaTime;
+
+            // Handle looping or stopping
+            if (this._currentTime >= duration) {
+                this._loopsPlayed++;
+                // _loopLimit is a count of PLAYS, so the pass just finished counts: a limit of 1 stops here, and 0
+                // means forever. Once the budget is spent the clip holds its last frame, same as a non-looping one,
+                // which is what an exit-time transition is waiting on.
+                if (this._loop && (this._loopLimit === 0 || this._loopsPlayed < this._loopLimit)) {
+                    this._currentTime = this._currentTime % duration;
+                    looped = true;
+                } else {
+                    this._currentTime = duration;
+                    this._playing = false;
+                    // Finish any blend still in flight. From here on the guard at the top of update() returns
+                    // early, so _currentBlendTime would never reach _activeBlendTime and the pose would be stuck
+                    // at a partial mix forever — reachable whenever a clip is shorter than the blend.
+                    this._finishBlend();
                 }
             }
         }
 
         // Fire any animation-event markers crossed this frame.
         this._fireDueEvents(prevTime, this._currentTime, duration, looped);
-        
+
         // Update all bones with current animation time
-        for (const bone of this._bones.values()) {
-            bone.update(this._currentTime);
+        if (this._fieldEntries) {
+            this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+        } else {
+            for (const bone of this._bones.values()) {
+                bone.update(this._currentTime);
+            }
         }
-        
-        // If blending, also update previous animation bones. The outgoing clip keeps playing under the
+
+        // If blending, also update the previous pose source. The outgoing motion keeps playing under the
         // cross-fade — freezing it leaves the fading-out legs stopped mid-stride for the whole blend.
-        if (this._isBlending && this._previousAnimation) {
+        if (this._isBlending && this._previousFieldEntries) {
+            if (this._previousAdvancing) {
+                const previousDuration = this._fieldDuration(this._previousFieldEntries);
+                if (previousDuration > 0) this._previousFieldPhase += this._deltaTime / previousDuration;
+                if (this._previousFieldPhase >= 1) {
+                    this._previousFieldPhase = this._previousLoop ? this._previousFieldPhase % 1 : 1;
+                }
+            }
+            // The outgoing field keeps its own weights: it is a snapshot of the mix at the moment the
+            // transition fired, not something the (now irrelevant) probe should keep steering.
+            this._poseFieldAt(this._previousFieldEntries, this._previousFieldPhase);
+        } else if (this._isBlending && this._previousAnimation) {
             if (this._previousAdvancing) {
                 const previousDuration = this._getPreviousAnimationDuration();
                 this._previousTime += this._deltaTime;
@@ -691,6 +1141,15 @@ export class Animator {
         this._recomputePose();
     }
 
+    /** Drop a cross-fade in flight and everything it was fading out of. */
+    private _finishBlend(): void {
+        if (!this._isBlending) return;
+        this._isBlending = false;
+        this._previousAnimation = null;
+        this._previousBones.clear();
+        this._previousFieldEntries = null;
+    }
+
     /**
      * Recompute _finalBoneMatrices from the bones' current local transforms.
      * Split out of update() so seek() can pose the skeleton at an arbitrary time
@@ -705,23 +1164,24 @@ export class Animator {
             const joint = this._skin.joints[jointIndex];
             const nodeIndex = joint.nodeIndex;
             const boneName = `bone_${nodeIndex}`;
-            const bone = this._bones.get(boneName);
+            // Whichever source is posing this bone — a single clip or a weighted field blend.
+            const current = this._currentLocal(boneName);
 
-            if (bone) {
-                if (this._isBlending && this._previousBones.has(boneName)) {
+            if (current) {
+                const previous = this._isBlending ? this._previousLocal(boneName) : null;
+                if (previous) {
                     // Blend between previous and current animation
-                    const previousBone = this._previousBones.get(boneName)!;
                     // A zero blend duration is legal (the setter clamps to >= 0, not > 0) and would divide to
                     // NaN here, which slerps into NaN quaternions and collapses the skeleton. It means
                     // "instant", so read it as fully blended.
                     const blendFactor = this._activeBlendTime > 0
                         ? Math.min(this._currentBlendTime / this._activeBlendTime, 1.0)
                         : 1.0;
-                    const blendedTransform = this._blendTransforms(previousBone.localTransform, bone.localTransform, blendFactor);
+                    const blendedTransform = this._blendTransforms(previous, current, blendFactor);
                     localTransforms.set(nodeIndex, blendedTransform);
                 } else {
                     // Use animated transform
-                    localTransforms.set(nodeIndex, bone.localTransform);
+                    localTransforms.set(nodeIndex, current);
                 }
             } else {
                 // Use initial node transform from GLTF, or identity if not available
@@ -788,12 +1248,20 @@ export class Animator {
      * Does not change play/pause state and does not advance time on its own.
      */
     public seek(time: number): void {
-        if (this._ragdollActive || !this._currentAnimation || !this._skin) return;
+        if (this._ragdollActive || !this._skin) return;
+        if (!this._currentAnimation && !this._fieldEntries) return;
         const duration = this._getAnimationDuration();
         this._currentTime = Math.max(0, Math.min(time, duration));
         this._isBlending = false;
-        for (const bone of this._bones.values()) {
-            bone.update(this._currentTime);
+        if (this._fieldEntries) {
+            // The field's clock is its normalized phase; the seconds the caller passed are only meaningful
+            // relative to the current weighted duration.
+            this._fieldPhase = duration > 0 ? this._currentTime / duration : 0;
+            this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+        } else {
+            for (const bone of this._bones.values()) {
+                bone.update(this._currentTime);
+            }
         }
         this._recomputePose();
     }
@@ -852,8 +1320,11 @@ export class Animator {
      * Get animation duration from samplers
      */
     private _getAnimationDuration(): number {
+        // A field's length is the weighted average of its contributing clips, NOT the dominant clip's own
+        // length — that is what keeps the shared phase advancing at the blended gait's rate.
+        if (this._fieldEntries) return this._fieldDuration(this._fieldEntries);
         if (!this._currentAnimation) return 0;
-        
+
         let maxTime = 0;
         for (const sampler of this._currentAnimation.samplers) {
             if (sampler.input.length > 0) {
@@ -887,11 +1358,12 @@ export class Animator {
     // Control methods
     public play(): void { this._playing = true; }
     public pause(): void { this._playing = false; }
-    public stop(): void { 
+    public stop(): void {
         this._playing = false;
         this._currentTime = 0;
+        this._fieldPhase = 0;
     }
-    public reset(): void { this._currentTime = 0; }
+    public reset(): void { this._currentTime = 0; this._fieldPhase = 0; }
 
     /**
      * Force the skeleton to its bind (default / T) pose and stop playback.
@@ -916,6 +1388,10 @@ export class Animator {
         this._stateMachine = sm;
         this._paramValues.clear();
         this._currentStateName = null;
+        // The new machine's states carry their own fields; anything cached belongs to the old one. Re-applying
+        // an edited machine from the editor goes through here, so this is also what makes a field edit take.
+        this._fieldBoneCache.clear();
+        this._clearField();
         if (!sm) return;
         for (const p of sm.parameters) this._paramValues.set(p.name, p.default);
         this.resetStateMachine();
@@ -956,6 +1432,18 @@ export class Animator {
         const state = this._stateMachine.states.find(s => s.name === name);
         this._currentStateName = name;
         this._prevEventTime = 0;
+
+        // A field state blends several clips by its axis parameters instead of playing one. _startField
+        // takes the transition's cross-fade itself, since it arms the blend rather than playAnimation.
+        if (state?.field) {
+            this._startField(state.field, state.fieldInputs, state.loop, true, blendOverride);
+            this._loopLimit = Math.max(0, Math.floor(state.loopCount ?? 0));
+            this._loopsPlayed = 0;
+            this._speed = state.speed ?? 1.0;
+            this._applyStateSpeed(state);
+            return;
+        }
+
         if (!state || !state.clipName) {
             // No clip bound: hold bind pose.
             this._setTPose();
@@ -985,6 +1473,21 @@ export class Animator {
         this._speed = Math.max(0, typeof v === 'number' ? v : (v ? 1 : 0));
     }
 
+    /**
+     * This node or the nearest ancestor with a rigid body — whatever is actually being moved.
+     *
+     * An animator lives on the skinned ModelNode, but the body that drives a character sits on the root
+     * above it, so "how fast am I going" has to be asked of that root.
+     */
+    private _nearestBodiedNode(): Node | null {
+        let n: Node | null = this._node;
+        while (n) {
+            if (n.body) return n;
+            n = n.parent;
+        }
+        return null;
+    }
+
     /** Resolve the node a 'variable' parameter reads from, relative to this animator's model node. */
     private _resolveVarNode(ref: string): Node | null {
         if (ref === 'self') return this._node;
@@ -1009,6 +1512,21 @@ export class Animator {
             if (p.type !== 'variable' || !p.variable) continue;
             const src = this._resolveVarNode(p.variable.nodeRef);
             let val: number | boolean = p.default;
+
+            // Built-ins are engine state, not user data, so they skip the access model — there is no
+            // variable record to carry an access modifier, and canAccessVariable would wave any unknown
+            // name through anyway. An unrecognized name falls back to the default rather than throwing:
+            // a machine saved against a newer engine must not take the frame down.
+            if (p.variable.source === 'builtin') {
+                const builtin = NODE_BUILTINS[p.variable.varName];
+                if (src && builtin) {
+                    const v = builtin.read(src);
+                    val = p.variable.varType === 'boolean' ? !!v : Number(v);
+                }
+                this._paramValues.set(p.name, val);
+                continue;
+            }
+
             if (src && canAccessVariable(src, this._node, p.variable.varName)) {
                 const name = p.variable.varName;
                 let v: any = src.getVariable(name);
@@ -1325,6 +1843,10 @@ export class Animator {
         this._isBlending = false;
         this._previousAnimation = null;
         this._previousBones.clear();
+        this._previousFieldEntries = null;
+        // Same for a live field, which is a pose source in its own right — leaving it set would have the
+        // very next _recomputePose overwrite the bind pose with the blend again.
+        this._clearField();
 
         // Calculate bind pose transforms for all joints
         const globalTransforms = new Map<number, mat4>();

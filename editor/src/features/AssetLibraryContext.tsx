@@ -4,8 +4,8 @@ import type { useCleoEngine } from './EngineContext';
 type EngineValue = ReturnType<typeof useCleoEngine>;
 
 /**
- * The five asset libraries (templates, materials, terrain materials, models, script assets) plus their
- * CRUD, split out of the large EngineContext.
+ * The asset libraries (templates, materials, terrain materials, models, script assets, animation fields)
+ * plus their CRUD, split out of the large EngineContext.
  *
  * This is the biggest self-contained cluster in the old context, and the Assets explorer / VfsContext
  * consume exactly this slice — so they can subscribe here instead of re-rendering on every unrelated
@@ -20,6 +20,7 @@ export type AssetLibraryContextValue = Pick<EngineValue,
   | 'terrainMaterials' | 'addTerrainMaterial' | 'removeTerrainMaterial' | 'updateTerrainMaterial'
   | 'models' | 'addModel' | 'removeModel' | 'updateModel'
   | 'scriptAssets' | 'addScriptAsset' | 'removeScriptAsset' | 'updateScriptAsset'
+  | 'animationFields' | 'addAnimationField' | 'removeAnimationField' | 'updateAnimationField'
   | 'assetsLoaded'
 >;
 

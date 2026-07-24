@@ -19,10 +19,21 @@ import { InputManager, Logger, Node } from 'cleo'
  *
  * The Model's Animator reads `moveSpeed` off this node: add a state-machine parameter of type Variable bound
  * to Parent → moveSpeed (number), then transition Idle→Walk above 0.1 and Walk→Run above 0.6.
+ *
+ * You can skip `moveSpeed` entirely and bind that parameter to **Built-in → Parent → planarSpeed** instead,
+ * which is the same measurement in world units rather than normalized 0..1. See the README.
  */
 export default class ThirdPersonPlayableNode extends Node {
-  /** Animator input: 0 idle, 0.5 walking, 1 running. Normalized so retuning the speeds below can't
-   *  invalidate the animator's thresholds. */
+  /**
+   * Animator input: 0 idle, ~0.4 walking, 1 running — the character's REAL speed across the ground,
+   * normalized against `runSpeed` so retuning the speeds below can't invalidate the animator's thresholds.
+   *
+   * Measured, not commanded. Reading it off the input keys instead (`running ? 1 : 0.5`) reports a full
+   * sprint while the character is jammed against a wall, sliding on ice, or held by a constraint — the
+   * animation runs on the spot because it is being told what you asked for rather than what happened.
+   * `planarSpeed` comes from how far the body actually moved last physics step, so a blocked character
+   * falls back to idle on its own.
+   */
   protected moveSpeed: number = 0
 
   /**
@@ -80,6 +91,12 @@ export default class ThirdPersonPlayableNode extends Node {
     const input = InputManager.instance
     if (this._jumpCooldown > 0) this._jumpCooldown -= delta
 
+    // Publish the MEASURED speed every frame, before any early return below — this has to reflect what the
+    // body actually did, including the frames where the answer is "nothing". `planarSpeed` ignores falling,
+    // so a jump does not read as a sprint. Normalized against runSpeed so the animator's thresholds survive
+    // retuning walkSpeed/runSpeed; drop the normalization if you bind the animator to planarSpeed directly.
+    this.moveSpeed = this.runSpeed > 0 ? Math.min(1, this.planarSpeed / this.runSpeed) : 0
+
     // Land only once the cooldown has run out. isGrounded allows ~0.1s of grace, so it is still true on the
     // frames right after take-off and would otherwise end the jump before the character had left the floor.
     if (this.isJumping && this._jumpCooldown <= 0 && this.isGrounded) this.isJumping = false
@@ -109,7 +126,9 @@ export default class ThirdPersonPlayableNode extends Node {
     const v = this.velocity
     if (length === 0) {
       this.velocity = [0, v[1], 0]
-      this.moveSpeed = 0
+      // moveSpeed is NOT zeroed here — it is measured at the top of onUpdate and decays on its own as the
+      // body actually slows. Forcing it to 0 the instant the key is released would cut the walk animation
+      // off a frame before the character has stopped moving.
       return
     }
 
@@ -136,7 +155,8 @@ export default class ThirdPersonPlayableNode extends Node {
     this.velocity = follow
       ? [moveX * speed, moveY * speed, moveZ * speed]
       : [dirX * speed, v[1], dirZ * speed]
-    this.moveSpeed = running ? 1 : 0.5
+    // No moveSpeed write here on purpose. This is the COMMANDED velocity; what the body does with it is
+    // settled by the solver, and that is what the measurement at the top of onUpdate reports next frame.
   }
 
   /**

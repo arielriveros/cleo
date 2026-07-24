@@ -130,7 +130,9 @@ a locked linear axis, and no camera pivot child. Beyond those:
 | slower than `walkSpeed`/`runSpeed` everywhere | friction again; at 0 the body hits the commanded speed exactly |
 | character jitters, catches, or gets kicked into the air on terrain | a **box** collider snagging heightfield triangle edges — switch to a **Capsule** |
 | jump does nothing even on flat ground | same: a box bouncing on edge contacts is airborne most frames, so `isGrounded` is false |
-| sprint drops to a walk / the run animation stutters | something gating `running` or `moveSpeed` on `isGrounded` — see above |
+| sprint drops to a walk / the run animation stutters | something gating `running` on `isGrounded` — see above |
+| the run animation plays on the spot against a wall | the animator is reading an *intent* (`running ? 1 : 0.5`) rather than a measurement — bind it to `moveSpeed`/`planarSpeed`, which report what the body actually did |
+| `moveSpeed` reads the same whether or not the character is moving | friction is 0 **and** something is overwriting it after the measurement — it is set once at the top of `onUpdate`, before every early return, on purpose |
 | camera drops to the character's feet | something else is writing the Camera's Y; the script only sets Z |
 
 ## Animator setup (Model → Animation editor → State Machine)
@@ -139,8 +141,12 @@ The script publishes two fields for the animator to read:
 
 | field | meaning |
 |---|---|
-| `moveSpeed` | **0 = idle, 0.5 = walking, 1 = running**. Normalized on purpose, so retuning `walkSpeed`/`runSpeed` can never invalidate the thresholds below. |
+| `moveSpeed` | The character's **real** ground speed, normalized against `runSpeed`: ~0 idle, ~0.4 walking, 1 running. Normalized on purpose, so retuning `walkSpeed`/`runSpeed` can never invalidate the thresholds below. |
 | `isJumping` | true from take-off until the feet are back down. |
+
+`moveSpeed` is **measured, not commanded** — it comes from `planarSpeed`, i.e. how far the body actually
+moved last physics step. Deriving it from the input keys instead (`running ? 1 : 0.5`) reports a full sprint
+while the character is jammed against a wall or held by a constraint, and the run animation plays on the spot.
 
 **1. Parameters** (Variables tab) — both of type **Variable**, bound to **Parent**. They appear under *Parent*
 because the fields are `public`.
@@ -149,6 +155,19 @@ because the fields are `public`.
 |---|---|---|
 | `Speed` | Parent → `moveSpeed` | number |
 | `Jumping` | Parent → `isJumping` | boolean |
+
+> **You can skip the script fields entirely.** A Variable parameter can bind to a **Built-in** — engine-measured
+> state that exists on every node with a body, listed above Self/Parent/Scene in the picker:
+>
+> | instead of | bind to | note |
+> |---|---|---|
+> | `Parent → moveSpeed` | **Built-in → Parent → `planarSpeed`** | Real ground speed in world units, so the thresholds below become `1.0` / `3.0` rather than `0.1` / `0.6`. Ignores falling, so a jump never reads as a sprint. |
+> | `Parent → isJumping` | **Built-in → Parent → `isGrounded`** *(inverted)* | Simpler, but `isGrounded` keeps a ~0.1s grace after take-off, which is exactly what `isJumping`'s cooldown exists to paper over. Prefer the script field here. |
+>
+> The other built-ins are `currentSpeed` (total, including falling), `rawSpeed` (unsmoothed),
+> `verticalSpeed` (signed, positive rising), `planarAngle` (travel direction relative to facing: 0 ahead,
+> ±90 strafing, ±180 backwards) and `worldPlanarAngle`. `planarSpeed` + `planarAngle` are exactly the two
+> axes a 2D **Animation Field** wants for a directional locomotion blend.
 
 **2. States** (drag on the graph canvas, or double-click it)
 
@@ -163,8 +182,11 @@ because the fields are `public`.
 draw one, then drag the other way: the same edge grows a second arrowhead. Select an edge and the sidebar
 shows both directions at once.
 
-`moveSpeed` is only ever **0, 0.5 or 1**, so the speed bands below cannot overlap — every transition out of
-`Jump` is mutually exclusive and the list order can never matter.
+`moveSpeed` moves continuously between **0 and 1** (walking lands near 0.4 with the default
+`walkSpeed 1.5` / `runSpeed 4`), so the `0.1` and `0.6` bands below cannot overlap — every transition out of
+`Jump` is mutually exclusive and the list order can never matter. Because it is measured rather than
+commanded, it also settles to 0 on its own when the character is blocked, which is what stops a run
+animation from playing on the spot against a wall.
 
 | link | direction | conditions | blend |
 |---|---|---|---|

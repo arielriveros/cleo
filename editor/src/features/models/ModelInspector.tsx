@@ -9,9 +9,12 @@ export default function ModelInspector() {
   const {
     activeTab, modelSession, setActiveModelName, models,
     addModelLodFromAsset, removeModelLod, setModelLodDistance, setModelCullDistance, setActiveModelLevel,
+    animationFields, createAnimationFieldForModel, enterAnimationFieldEditor,
   } = useCleoEngine()
 
   if (!modelSession) return null
+
+  const fields = animationFields.filter(f => f.modelId === activeTab.modelId)
 
   // Models selectable as a level: not this model (a model cannot be its own level) and not one already used.
   const candidates = models.filter(m =>
@@ -30,6 +33,33 @@ export default function ModelInspector() {
           value={activeTab.title}
           onChange={e => setActiveModelName(e.target.value)} />
       </div>
+
+      {/* Blend spaces belong to a skinned model, which is exactly what this tab has open — so this is the
+          natural place to create one. Static models have no clips to blend. */}
+      {modelSession.skinned && activeTab.modelId && (
+        <Collapsable title='Animation fields' badge={fields.length || undefined} defaultOpen>
+          <div className='p-2 space-y-1'>
+            <p className='text-[11px] text-gray-400'>
+              A field blends this model’s clips by 1D or 2D parameters. Use one as a state in the
+              animation graph instead of a single clip.
+            </p>
+            {fields.map(f => (
+              <button key={f.id}
+                className='w-full rounded border border-control-hover px-2 py-1 text-left text-xs hover:bg-control'
+                onClick={() => enterAnimationFieldEditor(f.id)}
+                title={`Open the "${f.name}" blend space`}>
+                ⊞ {f.name}
+              </button>
+            ))}
+            <button
+              className='w-full rounded border border-control-hover px-2 py-1 text-xs hover:bg-control'
+              onClick={() => createAnimationFieldForModel(activeTab.modelId!)}
+              title='Create a new blend space from this model'>
+              + New Animation Field
+            </button>
+          </div>
+        </Collapsable>
+      )}
 
       <Collapsable title='LOD levels'>
         <div className='p-2 space-y-2'>

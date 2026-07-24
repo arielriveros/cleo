@@ -24,9 +24,14 @@ const AUTO_DY = 120
 interface StateNodeData {
   label: string
   clipName: string
+  /** Set when the state plays an Animation Field instead of a clip; '' when its asset is missing. */
+  fieldName?: string
+  playsField: boolean
   isEntry: boolean
   loop: boolean
   speed: number
+  /** Parameter the playback rate is read from, when the state binds one instead of using `speed`. */
+  speedParam?: string
   active: boolean
   [key: string]: unknown
 }
@@ -34,6 +39,9 @@ interface StateNodeData {
 function StateNode({ data, selected }: NodeProps) {
   const d = data as StateNodeData
   const border = d.active ? 'border-highlight' : selected ? 'border-selected' : d.isEntry ? 'border-success' : 'border-control-hover'
+  // A blend state and a clip state are read the same way at a glance, so the ⊞ badge is what distinguishes
+  // them — a name alone would not say whether it is one clip or a whole space.
+  const what = d.playsField ? (d.fieldName || '(missing field)') : (d.clipName || '(no clip)')
   return (
     <div className={`rounded border-2 ${border} bg-control text-white shadow-panel`} style={{ width: NODE_W }}>
       <Handle type='target' position={Position.Left} className='!bg-primary !w-2 !h-2' />
@@ -42,8 +50,18 @@ function StateNode({ data, selected }: NodeProps) {
         <span className='text-xs font-semibold truncate flex-1' title={d.label}>{d.label}</span>
       </div>
       <div className='px-2 py-1 text-[10px] text-muted flex items-center justify-between gap-1'>
-        <span className='truncate' title={d.clipName || '(no clip)'}>{d.clipName || '(no clip)'}</span>
-        <span className='shrink-0 text-dim'>{d.loop ? '↻' : '→'} ×{d.speed}</span>
+        <span className={`truncate ${d.playsField && !d.fieldName ? 'text-red-400' : ''}`} title={what}>
+          {d.playsField && <span className='mr-1 text-primary' title='Animation field (blend space)'>⊞</span>}
+          {what}
+        </span>
+        {/* A rate read from a parameter is shown by NAME. It is the single most common reason a state looks
+            right in a preview (which always runs at rate 1) and wrong in Play, so it has to be legible
+            without selecting the node. Highlighted on a field state, where it multiplies an already
+            speed-matched blend. */}
+        <span className={`shrink-0 ${d.speedParam && d.playsField ? 'text-warning' : 'text-dim'}`}
+          title={d.speedParam ? `Playback rate read from the "${d.speedParam}" parameter` : 'Fixed playback rate'}>
+          {d.loop ? '↻' : '→'} ×{d.speedParam ?? d.speed}
+        </span>
       </div>
       <Handle type='source' position={Position.Right} className='!bg-primary !w-2 !h-2' />
     </div>
@@ -78,6 +96,7 @@ function Flow() {
   const {
     target, sm, links, selection, setSelection, graphView, setGraphView,
     addState, setState, addTransition, apply, stateIndex, commitLayout, deleteElements, paramOf,
+    animationFields, fieldOf,
   } = useStateMachine()
   const { screenToFlowPosition } = useReactFlow()
 
@@ -114,11 +133,12 @@ function Flow() {
       selected: selection?.kind === 'state' && selection.name === s.name,
       data: {
         label: s.name, clipName: s.clipName, isEntry: !!s.isEntry,
-        loop: s.loop, speed: s.speed, active: s.name === activeState,
+        playsField: !!s.fieldId, fieldName: fieldOf(s.fieldId)?.name,
+        loop: s.loop, speed: s.speed, speedParam: s.speedParam, active: s.name === activeState,
       } as StateNodeData,
     })))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sm.states, selection, posOf])
+  }, [sm.states, selection, posOf, animationFields])
 
   // Rebuild edges from LINKS, not transitions: A→B and B→A are ONE edge. FloatingEdge draws it as a single
   // line for one direction and two parallel lines for both, and picks the borders to attach to itself.

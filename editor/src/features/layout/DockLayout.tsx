@@ -10,16 +10,16 @@ import { dockComponents, PanelTab } from './panels';
 import { EditorMode, useCleoEngine } from '../EngineContext';
 import './dockview.css';
 
-const DOCK_LAYOUT_KEY = 'cleo_dock_layout_v3';
+const DOCK_LAYOUT_KEY = 'cleo_dock_layout_v4';
 // Pre-dockview layout blob ({ barsDimensions, bottomTab }); removed once on startup.
 const OLD_LAYOUT_KEY = 'cleo_project_layout';
 // v1 grouped Scene/UI under one "explorer" panel and Properties/Scripts/Physics under one
-// "inspector" panel; v2 promoted all five to panels of their own. v3 adds the three animation panels —
-// a restored v2 blob simply has no record of them, so those panels would never exist. Every version bump
-// here discards saved arrangements on purpose: a stale layout cannot gain a panel it has never heard of.
-const OLD_DOCK_LAYOUT_KEY = 'cleo_dock_layout_v1';
-const OLD_DOCK_LAYOUT_KEY_V2 = 'cleo_dock_layout_v2';
-const LAYOUT_VERSION = 3;
+// "inspector" panel; v2 promoted all five to panels of their own. v3 adds the three animation panels;
+// v4 adds the Animation Field panel. A restored older blob simply has no record of them, so those panels
+// would never exist. Every version bump here discards saved arrangements on purpose: a stale layout cannot
+// gain a panel it has never heard of.
+const OLD_DOCK_LAYOUT_KEYS = ['cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3'];
+const LAYOUT_VERSION = 4;
 
 /**
  * Which of the stacked bottom panels the user last chose, tracked outside the dockview layout blob.
@@ -61,8 +61,12 @@ function activeBottomTab(dock: DockviewApi): BottomPanel | null {
 /** Animation-editor panels. Present in every layout, shown only in animation mode — see hiddenPanelIds. */
 const ANIMATION_PANELS = ['animClips', 'animVariables', 'animStateMachine'] as const;
 
+/** Animation-field panels. Same arrangement, for animationField mode. */
+const ANIMATION_FIELD_PANELS = ['animField'] as const;
+
 const CHROME_PANELS = [
-  'scene', 'ui', 'properties', 'scripts', 'physics', 'logger', 'assets', ...ANIMATION_PANELS,
+  'scene', 'ui', 'properties', 'scripts', 'physics', 'logger', 'assets',
+  ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS,
 ] as const;
 
 // The Scene panel hosts the mode-specific tree (there is no separate dock panel for it), so its tab label
@@ -71,6 +75,7 @@ const PANEL_TITLES: Record<string, string> = {
   viewport: 'Viewport', scene: 'Scene', ui: 'UI', properties: 'Properties',
   scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
   animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
+  animField: 'Blend Space',
 };
 
 function panelTitle(id: string, mode: EditorMode): string {
@@ -127,7 +132,7 @@ function buildDefaultLayout(api: DockviewApi) {
   });
   // The animation panels share the Properties tab strip. They are hidden everywhere but animation mode,
   // where Properties itself is hidden — so the strip reads as Clips | Variables | State Machine there.
-  for (const id of ANIMATION_PANELS) {
+  for (const id of [...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS]) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
@@ -183,17 +188,22 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   // are prepended to every branch below rather than added to each list, because the fallthrough is
   // `return []` ("show everything") — miss one branch and Clips leaks into scene mode.
   const anim: readonly string[] = mode === 'animation' ? [] : ANIMATION_PANELS;
+  const field: readonly string[] = mode === 'animationField' ? [] : ANIMATION_FIELD_PANELS;
+  const extra: readonly string[] = [...anim, ...field];
 
-  if (mode === 'landscape') return [...anim, 'scene', 'ui', 'properties', 'scripts', 'physics'];
-  if (mode === 'material' || mode === 'terrainMaterial') return [...anim, 'scene', 'ui', 'scripts', 'physics'];
+  if (mode === 'landscape') return [...extra, 'scene', 'ui', 'properties', 'scripts', 'physics'];
+  if (mode === 'material' || mode === 'terrainMaterial') return [...extra, 'scene', 'ui', 'scripts', 'physics'];
   // Animation brings its own three panels, so Properties has nothing left to host.
-  if (mode === 'animation') return ['ui', 'scripts', 'physics', 'properties'];
-  if (mode === 'template') return [...anim, 'ui']; // the UI layer is irrelevant while authoring a template
+  if (mode === 'animation') return [...field, 'ui', 'scripts', 'physics', 'properties'];
+  // A field tab previews one model and edits one asset: its own panel is the only inspector that applies,
+  // and there is no scene tree to browse.
+  if (mode === 'animationField') return [...anim, 'scene', 'ui', 'scripts', 'physics', 'properties'];
+  if (mode === 'template') return [...extra, 'ui']; // the UI layer is irrelevant while authoring a template
   // A mesh tab is a read-only preview: keep Scene + Properties to inspect the subtree, drop the rest.
-  if (mode === 'model') return [...anim, 'ui', 'scripts', 'physics'];
+  if (mode === 'model') return [...extra, 'ui', 'scripts', 'physics'];
   // A script tab is a pure code editor (rendered over the viewport): drop every node/scene chrome panel.
-  if (mode === 'script') return [...anim, 'scene', 'ui', 'properties', 'scripts', 'physics'];
-  return anim;
+  if (mode === 'script') return [...extra, 'scene', 'ui', 'properties', 'scripts', 'physics'];
+  return extra;
 }
 
 export default function DockLayout() {
@@ -234,8 +244,9 @@ export default function DockLayout() {
   const onReady = (event: DockviewReadyEvent) => {
     const dock = event.api;
     try { localStorage.removeItem(OLD_LAYOUT_KEY); } catch { /* ignore */ }
-    try { localStorage.removeItem(OLD_DOCK_LAYOUT_KEY); } catch { /* ignore */ }
-    try { localStorage.removeItem(OLD_DOCK_LAYOUT_KEY_V2); } catch { /* ignore */ }
+    for (const key of OLD_DOCK_LAYOUT_KEYS) {
+      try { localStorage.removeItem(key); } catch { /* ignore */ }
+    }
     try {
       const raw = localStorage.getItem(DOCK_LAYOUT_KEY);
       if (!raw) throw new Error('no saved layout');

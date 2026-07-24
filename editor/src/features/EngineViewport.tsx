@@ -9,6 +9,7 @@ import RendererStats from "./renderer/RendererStats";
 import DebugOverlay from "./logger/DebugOverlay";
 import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
 import AnimationPlayer from "./animation/AnimationPlayer";
+import AnimationFieldPlayer from "./animationField/AnimationFieldPlayer";
 import { useStateMachine } from "./animation/StateMachineContext";
 import { SegmentedControl } from "../components/ui";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
@@ -160,7 +161,7 @@ export default function EngineViewport() {
             // In landscape/renderer modes the viewport is not a selection surface. In material mode the
             // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
             // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
-            if (editorMode === 'landscape' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation') return;
+            if (editorMode === 'landscape' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
             
             // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
@@ -450,6 +451,9 @@ export default function EngineViewport() {
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
             </>}
+            {/* The blend-space plot (FieldGraph, z-10) leaves the bottom strip clear for this, so unlike the
+                animation graph there is nothing to step aside for — you author and preview at the same time. */}
+            {editorMode === 'animationField' && <AnimationFieldPlayer />}
         </div>
     );
 }

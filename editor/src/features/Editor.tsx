@@ -7,6 +7,7 @@ import ProgressWindow from "./progress/ProgressWindow";
 import AnimationImportModal from "./animation/AnimationImportModal";
 import UnsavedSceneModal from "./dialogs/UnsavedSceneModal";
 import { StateMachineProvider } from "./animation/StateMachineContext";
+import { AnimationFieldProvider } from "./animationField/AnimationFieldContext";
 import { useDocument } from "./DocumentContext";
 
 // Ctrl/Cmd+S saves the active tab, Ctrl/Cmd+Shift+S saves everything. Bound on the window (capture phase)
@@ -35,9 +36,13 @@ export default function Editor() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <MenuBar />
+      {/* Both authoring sessions wrap the whole dock so their panels keep the working copy wherever the
+          user drags them. Only one is ever live at a time — each keys off the active tab. */}
       <StateMachineProvider>
-        <TabBar />
-        <DockLayout />
+        <AnimationFieldProvider>
+          <TabBar />
+          <DockLayout />
+        </AnimationFieldProvider>
       </StateMachineProvider>
       {/* Global mesh-import review modal — overlays the whole editor while an import awaits the user. */}
       <ModelImportModal />

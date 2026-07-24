@@ -38,7 +38,20 @@ export { AnimatedModel } from "./graphics/animatedModel";
 export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
 export { remapAnimationToSkin } from "./graphics/animationRetarget";
 export type { AnimationCompatibility, HierarchyMismatch } from "./graphics/animationRetarget";
-export { Animator, isConditionGroup } from "./graphics/animator";
+export { Animator, isConditionGroup, NODE_BUILTINS } from "./graphics/animator";
+export type { NodeBuiltinName } from "./graphics/animator";
+export {
+    createMotionRecord, sampleMotion, planarSplit, headingAngle, signedAngleBetween, wrapDegrees,
+} from "./physics/motion";
+export type { MotionRecord } from "./physics/motion";
+export { fieldWeights, rateScaleOf } from "./graphics/animationField";
+export type {
+    AnimationField,
+    AnimationFieldMode,
+    AnimationFieldAxis,
+    AnimationFieldSample,
+    FieldWeight,
+} from "./graphics/animationField";
 export type {
     AnimationMapping,
     AnimationStateMachine,

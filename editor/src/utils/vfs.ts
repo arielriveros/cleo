@@ -3,6 +3,7 @@ import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { ScriptAsset } from './scripts'
+import type { AnimationFieldAsset } from './animationFields'
 
 // The editor's virtual filesystem: the folder layout the unified Assets explorer shows.
 //
@@ -16,7 +17,7 @@ import type { ScriptAsset } from './scripts'
 // a virtual extension (.mat/.tmat/.tpl/.model); textures keep their real image extension. Path rules match
 // SVAR's own FileTree.normalizeFile: the extension is everything after the LAST dot.
 
-export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script'
+export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField'
 
 export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
   material: '.mat',
@@ -25,6 +26,7 @@ export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
   model: '.model',
   scene: '.scene',
   script: '.script',
+  animationField: '.afield',
 }
 
 export const KIND_LABEL: Record<AssetKind, string> = {
@@ -35,6 +37,7 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   model: 'model',
   scene: 'scene',
   script: 'script',
+  animationField: 'animation field',
 }
 
 export type VfsEntry = {
@@ -61,6 +64,7 @@ export type LibSnapshot = {
   templates: Template[]
   models: ModelAsset[]
   scripts: ScriptAsset[]
+  animationFields: AnimationFieldAsset[]
   scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
   textureIds: string[]
 }
@@ -110,6 +114,7 @@ export function kindOfExt(ext: string): AssetKind {
     // from an old bundle) keeps resolving.
     case '.mesh': return 'model'
     case '.script': return 'script'
+    case '.afield': return 'animationField'
     default: return 'texture'
   }
 }
@@ -344,6 +349,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const t of libs.templates) visit('template', t.id, t.name)
   for (const m of libs.models) visit('model', m.id, m.name)
   for (const s of libs.scripts) visit('script', s.id, s.name)
+  for (const f of libs.animationFields) visit('animationField', f.id, f.name)
   for (const s of libs.scenes) visit('scene', s.id, s.name)
   for (const id of libs.textureIds) visit('texture', id, id)
 
@@ -408,6 +414,7 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const t of libs.templates) check('template', t.id, t.name)
   for (const m of libs.models) check('model', m.id, m.name)
   for (const s of libs.scripts) check('script', s.id, s.name)
+  for (const f of libs.animationFields) check('animationField', f.id, f.name)
   for (const s of libs.scenes) check('scene', s.id, s.name)
   for (const id of libs.textureIds) check('texture', id, id)
 
@@ -442,6 +449,7 @@ export function buildFileManagerData(vfs: VfsIndex, libs: LibSnapshot): FmEntity
     template: new Set(libs.templates.map(t => t.id)),
     model: new Set(libs.models.map(m => m.id)),
     script: new Set(libs.scripts.map(s => s.id)),
+    animationField: new Set(libs.animationFields.map(f => f.id)),
     scene: new Set(libs.scenes.map(s => s.id)),
     texture: new Set(libs.textureIds),
   }

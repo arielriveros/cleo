@@ -1,7 +1,8 @@
-import { Node, ModelNode, TextureManager } from 'cleo'
+import { Node, ModelNode, AnimatedModel, TextureManager } from 'cleo'
 import { cryptoRandomId } from './UIModel'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, applyMaterialAsset, serializedVar, MATERIAL_ID_VAR, MaterialAsset } from './materials'
+import { skinnedModelJsonOf as skinnedJson } from './modelClips'
 
 // A note on vocabulary, because the editor used to get this wrong:
 //
@@ -23,6 +24,32 @@ export const MODEL_ID_VAR = '__modelId'
 
 /** The pre-rename spelling of MODEL_ID_VAR, still read so unmigrated data keeps resolving. */
 export const LEGACY_MODEL_ID_VAR = '__meshId'
+
+/**
+ * Walk up to the placed model-instance root — the nearest ancestor (or self) carrying `__modelId`.
+ *
+ * The walk is not optional. A model asset instantiates as *a parent Node holding one ModelNode per
+ * sub-mesh* (see parseBundleToRoot), so `__modelId` lands on the HOLDER while the skinned ModelNode — the
+ * only node the animation UI applies to — is a child of it. Reading the variable off the selected node
+ * alone finds nothing for every normally-imported character.
+ *
+ * Mirrors templateInstanceRootOf (templates.ts) in shape and purpose.
+ */
+export function modelInstanceRootOf(node: Node | null | undefined): Node | null {
+  let n: Node | null | undefined = node
+  while (n) {
+    if (n.getVariable(MODEL_ID_VAR) ?? n.getVariable(LEGACY_MODEL_ID_VAR)) return n
+    n = n.parent
+  }
+  return null
+}
+
+/** The model asset id a node belongs to (its own or an ancestor's), or undefined. */
+export function modelIdOf(node: Node | null | undefined): string | undefined {
+  const root = modelInstanceRootOf(node)
+  if (!root) return undefined
+  return root.getVariable(MODEL_ID_VAR) ?? root.getVariable(LEGACY_MODEL_ID_VAR)
+}
 
 /**
  * One extra LOD level of a model asset: a **reference** to another model asset, plus the camera distance
@@ -153,6 +180,53 @@ export function nodeJsonHasModel(nodeJson: any): boolean {
 /** True if the asset carries LOD levels or a cull distance (i.e. it instantiates as a LodGroupNode). */
 export function modelAssetHasLodBehavior(asset: ModelAsset): boolean {
   return !!asset.lods?.length || (asset.cullDistance ?? 0) > 0
+}
+
+// Skeleton + animation clips belong to the MODEL ASSET. The serialized half of that lives in modelClips.ts
+// (engine-free, so it can be unit-tested); re-exported here so call sites have one import for model assets.
+export {
+  skinnedModelJsonOf, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved,
+  assetWithBoneNames, assetClipNames,
+} from './modelClips'
+
+/**
+ * Bring a live subtree's skinned models up to date with their model asset: replace the clip list and merge
+ * in any bone names the asset has.
+ *
+ * Ids, transforms, materials, scripts and bodies are untouched — this exists precisely because
+ * re-instantiating the subtree (what resyncScene does for scenes) would churn node ids and break a
+ * template's script/body/trigger re-keying. Returns how many models were refreshed.
+ *
+ * Clips and bone names ONLY. `ModelNode.model` is read-only, so geometry and sub-mesh structure cannot be
+ * swapped in place; a re-imported character with different sub-meshes still has to be re-placed.
+ */
+export function refreshModelClips(root: Node, models: ModelAsset[]): number {
+  let count = 0
+  const walk = (node: Node) => {
+    const modelId = modelIdOf(node)
+    const asset = modelId ? models.find(m => m.id === modelId) : undefined
+    const model: any = (node as any).model
+    if (asset && model instanceof AnimatedModel && model.hasSkin) {
+      const json = skinnedJson(asset.nodeJson)
+      if (json) {
+        // Replace wholesale rather than diffing: the asset is the source of truth, so a clip deleted there
+        // must disappear here too, and a rename must not leave the old name behind.
+        for (const name of model.animations.map((a: any) => a.name)) model.removeAnimation(name)
+        for (const clip of json.animations ?? []) model.addAnimation(clip)
+
+        const names = json.skin?.nodeNames
+        if (Array.isArray(names) && names.length && model.skin) {
+          const merged: Map<number, string> = model.skin.nodeNames ?? new Map<number, string>()
+          for (const entry of names) merged.set(Number(entry[0]), String(entry[1]))
+          model.skin.nodeNames = merged
+        }
+        count++
+      }
+    }
+    for (const child of node.children) walk(child)
+  }
+  walk(root)
+  return count
 }
 
 /** Every texture id a model asset references, whichever format it was saved in. */

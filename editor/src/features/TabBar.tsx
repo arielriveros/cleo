@@ -15,6 +15,7 @@ function tabAssetKind(kind: TabKind): AssetKind {
     case 'model': return 'model';
     case 'script': return 'script';
     case 'animation': return 'model';
+    case 'animationField': return 'animationField';
     default: return 'scene';
   }
 }

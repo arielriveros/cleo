@@ -110,6 +110,7 @@ async function runExportBundle(job: Extract<ProjectJob, { kind: 'exportBundle' }
   archive.file(`${BUNDLE_PATHS.librariesDir}templates.json`, JSON.stringify(libraries.templates));
   archive.file(`${BUNDLE_PATHS.librariesDir}models.json`, JSON.stringify(libraries.models));
   archive.file(`${BUNDLE_PATHS.librariesDir}scripts.json`, JSON.stringify(libraries.scripts ?? []));
+  archive.file(`${BUNDLE_PATHS.librariesDir}animationFields.json`, JSON.stringify(libraries.animationFields ?? []));
   for (const [id, data] of Object.entries(scenes)) archive.file(`${BUNDLE_PATHS.scenesDir}${id}.json`, JSON.stringify(data));
 
   const index: BundleTextureIndexRow[] = [];
@@ -147,6 +148,7 @@ async function runImportBundle(job: Extract<ProjectJob, { kind: 'importBundle' }
       await readJson(`${BUNDLE_PATHS.librariesDir}meshes.json`, []),
     ),
     scripts: await readJson(`${BUNDLE_PATHS.librariesDir}scripts.json`, []),
+    animationFields: await readJson(`${BUNDLE_PATHS.librariesDir}animationFields.json`, []),
   };
   const vfs = await readJson(BUNDLE_PATHS.vfs, { version: 1, folders: [], entries: [] });
 

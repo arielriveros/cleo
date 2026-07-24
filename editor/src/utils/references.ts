@@ -117,6 +117,26 @@ export function collectReferencedScriptIds(scene: Scene | null | undefined): Set
   return set
 }
 
+/**
+ * Animation Field asset ids referenced by any node's animation state machine.
+ *
+ * Unlike every other kind above, the link is NOT a node variable: a field is referenced from inside the
+ * machine, by the states that play it (`state.fieldId`). The machine lives on the node's animator, so this
+ * reads it there rather than from the serialized `variables` map.
+ */
+export function collectReferencedAnimationFieldIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  if (scene) {
+    for (const node of scene.nodes) {
+      const animator = (node as any).animator
+      for (const state of animator?.getStateMachine?.()?.states ?? []) {
+        if (state?.fieldId) set.add(state.fieldId)
+      }
+    }
+  }
+  return set
+}
+
 /** Terrain-material asset ids referenced by any live terrain paint layer. */
 export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()

@@ -1,5 +1,6 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../physics/body";
+import { MotionRecord, planarSplit, signedAngleBetween, headingAngle } from "../../physics/motion";
 import { Model } from "../../graphics/model";
 import { AnimatedModel } from "../../graphics/animatedModel";
 import { Animator, AnimationMapping, AnimationStateMachine } from "../../graphics/animator";
@@ -1642,6 +1643,131 @@ export class Node {
   public set velocity(value: vec3) {
     // cannon owns the Vec3 and reads it in place every step, so it is mutated rather than replaced.
     this._body?.velocity.set(value[0], value[1], value[2]);
+  }
+
+  // ---- Measured motion -------------------------------------------------------------------------------
+  //
+  // How fast this node is ACTUALLY moving, measured from its body's position delta each physics step.
+  //
+  // This is the counterpart to `velocity`, and the difference matters: `velocity` is what the body was TOLD
+  // to do — the value a controller script wrote — so it reads full speed while the character is jammed
+  // against a wall. These read ~0, because the body did not move. Anything that stops you shows up here:
+  // walls, friction, constraints, a platform carrying you.
+  //
+  // Every one of them is safe on a node with no body (0 or a zero vector), so a caller never has to check,
+  // and every vector is a fresh copy. The smoothed family (`currentVelocity` and everything derived from it)
+  // is what to bind to animation; `rawVelocity` / `rawSpeed` are the unfiltered per-frame values for logic
+  // that needs an immediate answer. See physics/motion.ts for why smoothing is not optional in practice.
+
+  /** The physics motion record for this node's body, or null. */
+  private get _motion(): MotionRecord | null {
+    if (!this._body) return null;
+    return this._scene?.physics?.motionOf(this._body) ?? null;
+  }
+
+  /** World "up" — gravity reversed. Everything planar below is measured against it, not against +Y. */
+  private get _up(): vec3 {
+    return this._scene?.physics?.up ?? vec3.fromValues(0, 1, 0);
+  }
+
+  /**
+   * Smoothed measured world velocity, in units per second.
+   *
+   *   // pressing forward but going nowhere: something is in the way
+   *   const stuck = this.moveInput && this.currentSpeed < 0.1;
+   */
+  public get currentVelocity(): vec3 {
+    const m = this._motion;
+    return m ? vec3.clone(m.smooth) : vec3.create();
+  }
+
+  /** Unfiltered measured world velocity — this frame's delta, no smoothing. */
+  public get rawVelocity(): vec3 {
+    const m = this._motion;
+    return m ? vec3.clone(m.raw) : vec3.create();
+  }
+
+  /**
+   * How fast this node is actually moving, in units per second. `0` when it is standing still, blocked, or
+   * has no body — regardless of what its velocity was set to.
+   */
+  public get currentSpeed(): number {
+    const m = this._motion;
+    return m ? vec3.length(m.smooth) : 0;
+  }
+
+  /** Unfiltered {@link currentSpeed}, for logic that cannot afford the ~90ms smoothing lag. */
+  public get rawSpeed(): number {
+    const m = this._motion;
+    return m ? vec3.length(m.raw) : 0;
+  }
+
+  /**
+   * Actual speed across the ground plane — the component perpendicular to gravity.
+   *
+   * This, not {@link currentSpeed}, is what a locomotion blend wants: falling is fast, and a character in
+   * mid-air should not read as sprinting.
+   */
+  public get planarSpeed(): number {
+    const m = this._motion;
+    if (!m) return 0;
+    return vec3.length(planarSplit(m.smooth, this._up).planar);
+  }
+
+  /**
+   * Signed actual speed along gravity — positive rising, negative falling.
+   *
+   * Correct under any gravity direction, unlike reading `velocity[1]`, and measured rather than commanded:
+   * a body pressed into the floor reports ~0 instead of the downward velocity gravity keeps applying.
+   */
+  public get verticalSpeed(): number {
+    const m = this._motion;
+    if (!m) return 0;
+    return planarSplit(m.smooth, this._up).vertical;
+  }
+
+  /**
+   * Unit vector pointing where this node is actually travelling.
+   *
+   * Holds its last value while the node is still, rather than snapping to zero — see MIN_DIRECTION_SPEED.
+   * Zero vector only if the node has never moved at all.
+   */
+  public get currentDirection(): vec3 {
+    const m = this._motion;
+    return m ? vec3.clone(m.heading) : vec3.create();
+  }
+
+  /** {@link currentDirection} flattened onto the ground plane. Also holds its last value while still. */
+  public get planarDirection(): vec3 {
+    const m = this._motion;
+    return m ? vec3.clone(m.planarHeading) : vec3.create();
+  }
+
+  /**
+   * Where this node is travelling relative to where it is FACING, in degrees: `0` straight ahead, `+90`
+   * strafing, `±180` backpedalling.
+   *
+   * This is the axis a directional locomotion blend needs — it is what picks strafe-left vs strafe-right vs
+   * walk-backwards, and it keeps meaning the same thing as the character turns.
+   *
+   * The node's own heading is derived from {@link worldForward}, never from `rotation[1]`. That is
+   * load-bearing: euler composition is Rz·Ry·Rx, so past a quarter turn a quaternion-oriented node's yaw
+   * folds into pitch and roll and a node turned 179° reads as 1°.
+   */
+  public get planarAngle(): number {
+    const m = this._motion;
+    if (!m) return 0;
+    return signedAngleBetween(this.worldForward, m.planarHeading, this._up);
+  }
+
+  /**
+   * Absolute heading of travel, in degrees, in the same convention as a node's yaw — so it can be assigned
+   * straight to `setRotation([0, angle, 0])` to face that way. Independent of which way this node is facing.
+   */
+  public get worldPlanarAngle(): number {
+    const m = this._motion;
+    if (!m) return 0;
+    return headingAngle(m.planarHeading, this._up);
   }
 
   /**

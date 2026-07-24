@@ -3,6 +3,7 @@ import { ModelNode } from 'cleo';
 import EngineViewport from '../EngineViewport';
 import UIOverlay from '../uiInspector/UIOverlay';
 import StateGraph from '../animation/StateGraph';
+import FieldGraph from '../animationField/FieldGraph';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import UIInspector from '../uiInspector/UIInspector';
@@ -14,6 +15,7 @@ import PropertyEditor from '../nodeInspector/propertyEditors/PropertyEditor';
 import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor';
 import ScriptEditor from '../nodeInspector/scriptEditor/ScriptEditor';
 import ScriptTabView from '../nodeInspector/scriptEditor/ScriptTabView';
+import AnimationFieldPanel from '../animationField/AnimationFieldPanel';
 import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
@@ -33,6 +35,9 @@ function ViewportPanel(_: IDockviewPanelProps) {
       <UIOverlay />
       {/* Animation-mode node graph overlays the viewport when Graph view is active */}
       <StateGraph />
+      {/* Animation-field mode: the blend-space plot overlays the viewport, with the 3D preview showing
+          through it so the pose can be judged while the field is authored */}
+      <FieldGraph />
       {/* Script mode: the dedicated code editor fills the main area (no 3D preview) */}
       {editorMode === 'script' && <ScriptTabView />}
       {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
@@ -143,6 +148,9 @@ function AssetsPanel(_: IDockviewPanelProps) {
 // dock, see Editor.tsx), so each is free to be dragged anywhere without losing the working copy. Shown
 // only in animation mode — see hiddenPanelIds. Each already fills and scrolls itself, so no SidePanel.
 function AnimClipsPanel(_: IDockviewPanelProps) { return <AnimClips />; }
+// The Animation Field editor's single panel. Like the animation panels it lives inside the shared provider
+// that wraps the whole dock (see Editor.tsx), so it can be dragged anywhere without losing the session.
+function AnimFieldPanel(_: IDockviewPanelProps) { return <AnimationFieldPanel />; }
 function AnimVariablesPanel(_: IDockviewPanelProps) { return <AnimVariables />; }
 function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachine />; }
 
@@ -168,4 +176,5 @@ export const dockComponents = {
   animClips: AnimClipsPanel,
   animVariables: AnimVariablesPanel,
   animStateMachine: AnimStateMachinePanel,
+  animField: AnimFieldPanel,
 };

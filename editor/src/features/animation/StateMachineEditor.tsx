@@ -158,16 +158,40 @@ export function StateMachinePanel() {
 
 // ---- Selected state details -----------------------------------------------------------------------
 function SelectedState() {
-  const { sm, selection, clips, setState, removeState, stateIndex, links } = useStateMachine()
+  const { sm, selection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf } = useStateMachine()
   if (selection?.kind !== 'state') return null
   const i = stateIndex(selection.name)
   if (i < 0) return null
   const s = sm.states[i]
 
-  // Only a numeric parameter can be a rate; a trigger is momentary and has no meaningful value.
+  // Only a numeric parameter can be a rate; a trigger is momentary and has no meaningful value. The same
+  // set is what a field's axes may be driven by, for the same reason — and it already includes
+  // variable-bound parameters, which is how a field ends up driven by a node variable.
   const speedParams = sm.parameters.filter(p => p.type === 'float' || (p.type === 'variable' && p.variable?.varType !== 'boolean'))
   const byParam = !!s.speedParam
   const linked = links.filter(l => l.a === s.name || l.b === s.name)
+
+  // A state plays either ONE clip or a whole blend space. `fieldId` is the discriminator, so switching to
+  // Clip clears it (and the embedded copy that rides with it) rather than leaving a field the runtime would
+  // still prefer over clipName.
+  const playsField = !!s.fieldId
+  const field = fieldOf(s.fieldId)
+  const setPlays = (kind: 'clip' | 'field') => {
+    if (kind === 'clip') setState(i, { fieldId: undefined, field: undefined, fieldInputs: undefined })
+    // Switching to a field also drops any speed PARAMETER. On a clip, binding the rate to movement speed is
+    // how you fake speed matching; a field does that properly through the blend, so carrying the binding
+    // over would apply the speed twice — the run clip ends up playing at runSpeed×, i.e. wildly too fast.
+    // The fixed `speed` is kept, so an intentional 0.5× or 2× survives the switch.
+    else setState(i, { clipName: '', fieldId: animationFields[0]?.id ?? '', fieldInputs: {}, speedParam: undefined })
+  }
+
+  // A field already matches speed by CHOOSING clips, so a playback-rate parameter multiplies on top of a
+  // blend that is already correct. Worth flagging for ANY parameter, not just an axis one: two parameters
+  // can read the same value (one bound to planarSpeed, one to a script's moveSpeed) and produce exactly the
+  // same double-apply without sharing a name. The axis case is called out harder because it is unambiguous.
+  const speedByParamOnField = playsField && !!s.speedParam
+  const speedFeedsAxis = speedByParamOnField
+    && (s.speedParam === s.fieldInputs?.x || s.speedParam === s.fieldInputs?.y)
 
   return (
     <div className='flex flex-col gap-2'>
@@ -180,13 +204,49 @@ function SelectedState() {
         ? <p className='text-[10px] text-success'>▶ Entry state — the machine starts here.</p>
         : <p className='text-[10px] text-gray-500'>Right-click this state in the graph to make it the entry.</p>}
 
-      <label className='flex items-center gap-1'>
+      <div className='flex items-center gap-1'>
         <span className='text-[10px] text-gray-400 w-[42px] shrink-0'>Plays</span>
+        <SegmentedControl<'clip' | 'field'>
+          size='sm' value={playsField ? 'field' : 'clip'} onChange={setPlays}
+          options={[
+            { value: 'clip', label: 'Clip', title: 'Play a single animation clip' },
+            { value: 'field', label: 'Field', title: 'Blend several clips through an Animation Field' },
+          ]} />
+      </div>
+
+      {!playsField && (
         <select className={input + ' flex-1 min-w-0'} title='Animation clip' value={s.clipName} onChange={e => setState(i, { clipName: e.target.value })}>
           <option value=''>(no clip)</option>
           {clips.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-      </label>
+      )}
+
+      {playsField && (animationFields.length === 0
+        ? <p className='text-[10px] text-warning'>No animation fields yet — create one from a model in the Assets explorer.</p>
+        : <>
+          <select className={input + ' flex-1 min-w-0'} title='Animation field' value={s.fieldId ?? ''}
+            onChange={e => setState(i, { fieldId: e.target.value })}>
+            <option value=''>(no field)</option>
+            {!field && s.fieldId && <option value={s.fieldId}>{s.fieldId} — missing</option>}
+            {animationFields.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+
+          {/* One parameter per axis: this is where the machine's inputs become the field's inputs. */}
+          {field && <>
+            <FieldAxisBinding
+              label={field.xAxis.name} params={speedParams} value={s.fieldInputs?.x}
+              onPick={name => setState(i, { fieldInputs: { ...s.fieldInputs, x: name } })} />
+            {field.mode === '2d' && (
+              <FieldAxisBinding
+                label={field.yAxis.name} params={speedParams} value={s.fieldInputs?.y}
+                onPick={name => setState(i, { fieldInputs: { ...s.fieldInputs, y: name } })} />
+            )}
+            {/* An unbound axis holds whatever it was last set to, which reads as a blend that never
+                responds — worth calling out, since nothing else in the UI would show it. */}
+            {!s.fieldInputs?.x && <p className='text-[10px] text-warning'>Bind “{field.xAxis.name}” to a parameter or the blend will not move.</p>}
+          </>}
+          <p className='text-[10px] text-gray-500'>Fields are re-embedded on <b>Apply to Model</b>.</p>
+        </>)}
 
       <div className='flex items-center gap-2'>
         <Toggle label='loop' checked={s.loop} onChange={c => setState(i, { loop: c })} className='text-[10px]' />
@@ -200,9 +260,12 @@ function SelectedState() {
         )}
       </div>
 
-      {/* Speed: a fixed rate, or read live from a parameter (e.g. run faster the faster you move). */}
+      {/* Speed: a fixed rate, or read live from a parameter (e.g. run faster the faster you move).
+          On a FIELD state this is a multiplier on top of the blend, not the blend's input — see below. */}
       <div className='flex items-center gap-1'>
-        <span className='text-[10px] text-gray-400 w-[42px] shrink-0'>Speed</span>
+        <span className='text-[10px] text-gray-400 w-[42px] shrink-0' title={playsField
+          ? 'Playback rate MULTIPLIER on top of the blend. The field already matches speed by picking clips — leave it at 1 unless you want slow motion.'
+          : 'Playback rate for this clip.'}>Speed</span>
         <SegmentedControl<'number' | 'param'>
           size='sm' value={byParam ? 'param' : 'number'}
           onChange={v => setState(i, v === 'param' ? { speedParam: speedParams[0]?.name ?? '' } : { speedParam: undefined })}
@@ -220,7 +283,17 @@ function SelectedState() {
           : <input className={input + ' w-[56px]'} type='number' step='0.1' min='0' value={s.speed}
               onChange={e => setState(i, { speed: Math.max(0, parseFloat(e.target.value) || 0) })} />}
       </div>
-      {byParam && <p className='text-[10px] text-gray-500 -mt-1'>Falls back to the fixed speed if the parameter goes missing.</p>}
+      {byParam && !speedByParamOnField && <p className='text-[10px] text-gray-500 -mt-1'>Falls back to the fixed speed if the parameter goes missing.</p>}
+      {speedByParamOnField && (
+        <p className='text-[10px] text-warning -mt-1'>
+          {speedFeedsAxis
+            ? <><b>“{s.speedParam}” already drives this field’s axis.</b> Using it as the playback rate too applies it twice — at speed 4 the run clip plays 4× too fast.</>
+            : <><b>This state plays a field, and its rate is read from “{s.speedParam}”.</b> If that parameter carries movement speed, it multiplies a blend that is already speed-matched — the same double-apply as binding it to the axis.</>}
+          {' '}Set Speed to <b>#</b> 1 unless you specifically want slow motion; the field matches speed by
+          choosing clips, not by playing them faster. <b>The field editor always previews at rate 1</b>, which
+          is why this only shows up in Play.
+        </p>
+      )}
 
       <div className='text-[10px] uppercase tracking-wide text-gray-400 mt-1'>Links</div>
       {linked.length === 0
@@ -239,6 +312,32 @@ function SelectedState() {
             )
           })}
     </div>
+  )
+}
+
+/**
+ * Binds one of a field's axes to a machine parameter — the join between the animation system's inputs and
+ * the blend space's. Only numeric parameters are offered (a trigger is momentary and has no axis value);
+ * a 'variable' parameter is in that set too, which is what lets an axis read a node variable live.
+ */
+function FieldAxisBinding({ label, params, value, onPick }: {
+  label: string
+  params: { name: string }[]
+  value?: string
+  onPick: (name: string) => void
+}) {
+  const missing = !!value && !params.some(p => p.name === value)
+  return (
+    <label className='flex items-center gap-1'>
+      <span className='text-[10px] text-gray-400 w-[42px] shrink-0 truncate' title={label}>{label}</span>
+      {params.length === 0
+        ? <span className='text-[10px] text-warning flex-1'>No numeric parameter to bind.</span>
+        : <select className={input + ' flex-1 min-w-0'} value={value ?? ''} onChange={e => onPick(e.target.value)}>
+            <option value=''>— pick parameter —</option>
+            {missing && <option value={value}>{value} — missing</option>}
+            {params.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+          </select>}
+    </label>
   )
 }
 
@@ -343,28 +442,36 @@ function BoolDriver({ name, initial, onSet }: { name: string; initial: boolean; 
   return <Toggle checked={v} onChange={c => { setV(c); onSet(c) }} />
 }
 
-// Grouped dropdown of the node variables a Variable parameter can bind to (Self / Parent / Scene).
+/**
+ * Grouped dropdown of the values a Variable parameter can bind to: the engine's own measured Built-ins
+ * first, then node variables by access group (Self / Parent / Scene).
+ *
+ * The option key includes `source` deliberately. A built-in `currentSpeed` and a script field of the same
+ * name are two different bindings, and keying on nodeRef+varName alone would make each select the other.
+ */
 function VariablePicker({ vars, value, onPick }: {
   vars: AccessibleVariable[]
   value?: AnimationVariableBinding
   onPick: (b: AnimationVariableBinding | undefined) => void
 }) {
-  const key = (nodeRef: string, varName: string) => `${nodeRef}|${varName}`
-  const current = value ? key(value.nodeRef, value.varName) : ''
-  const groups: Record<AccessibleVariable['group'], AccessibleVariable[]> = { Self: [], Parent: [], Scene: [] }
+  const key = (source: string, nodeRef: string, varName: string) => `${source}|${nodeRef}|${varName}`
+  const current = value ? key(value.source ?? 'variable', value.nodeRef, value.varName) : ''
+  const groups: Record<AccessibleVariable['group'], AccessibleVariable[]> = { 'Built-in': [], Self: [], Parent: [], Scene: [] }
   for (const v of vars) groups[v.group].push(v)
   return (
     <select className={input + ' w-[160px]'} value={current}
-      title='Bind to a node variable — Self (own), Parent (protected/public), Scene (public)'
+      title='Bind to a Built-in (engine-measured, e.g. how fast the node is really moving) or to a node variable — Self (own), Parent (protected/public), Scene (public)'
       onChange={e => {
-        const found = vars.find(v => key(v.nodeRef, v.varName) === e.target.value)
-        onPick(found ? { nodeRef: found.nodeRef, varName: found.varName, varType: found.varType } : undefined)
+        const found = vars.find(v => key(v.source, v.nodeRef, v.varName) === e.target.value)
+        onPick(found
+          ? { nodeRef: found.nodeRef, varName: found.varName, varType: found.varType, source: found.source }
+          : undefined)
       }}>
       <option value=''>{value ? `${value.nodeRef} · ${value.varName} (missing)` : '— pick variable —'}</option>
-      {(['Self', 'Parent', 'Scene'] as const).map(g => groups[g].length > 0 && (
+      {(['Built-in', 'Self', 'Parent', 'Scene'] as const).map(g => groups[g].length > 0 && (
         <optgroup key={g} label={g}>
           {groups[g].map(v => (
-            <option key={key(v.nodeRef, v.varName)} value={key(v.nodeRef, v.varName)}>
+            <option key={key(v.source, v.nodeRef, v.varName)} value={key(v.source, v.nodeRef, v.varName)} title={v.hint}>
               {v.nodeLabel} · {v.varName} ({v.varType})
             </option>
           ))}

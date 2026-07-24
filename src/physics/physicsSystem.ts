@@ -7,6 +7,7 @@ import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
 import { skipCameraHit, CameraProbeBody } from "./cameraRayFilter";
 import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
+import { MotionRecord, createMotionRecord, sampleMotion } from "./motion";
 
 interface PhysicsSystemConfig {
   gravity?: number[];
@@ -37,6 +38,8 @@ export class PhysicsSystem {
   private _time = 0;
   /** Per body: the most ground-like contact seen recently, its surface normal, and when. See _record. */
   private _ground = new WeakMap<Body, { time: number; dot: number; normal: [number, number, number] }>();
+  /** Per body: measured motion (how fast it ACTUALLY moved), sampled in the write-back pass. See motion.ts. */
+  private _motion = new WeakMap<Body, MotionRecord>();
   /** Cannon materials by `friction|restitution`, with a ContactMaterial for every pair. See _materialFor. */
   private _materials = new Map<string, Material>();
 
@@ -104,6 +107,15 @@ export class PhysicsSystem {
         // If node contains a body, update the position and quaternion of itself
         if (node.body) {
           const pos = node.body.position;
+
+          // Measure how far the body ACTUALLY moved this step, before the node is told about it. This is the
+          // right moment in the frame: world.step() has run, and Scene.update — every script's onUpdate —
+          // does not run until after this whole pass (see Engine._gameLoop), so a script reading
+          // node.currentSpeed sees the step that just happened rather than one from last frame.
+          let motion = this._motion.get(node.body);
+          if (!motion) { motion = createMotionRecord(); this._motion.set(node.body, motion); }
+          sampleMotion(motion, [pos.x, pos.y, pos.z], deltaTime, this.up);
+
           node.setPosition([pos.x, pos.y, pos.z]);
 
           const quat = node.body.quaternion;
@@ -319,14 +331,35 @@ export class PhysicsSystem {
    * airborne behavior for free instead of having to branch or guard against a zero vector.
    */
   public groundNormal(body: Body, maxSlopeDegrees: number = 60, graceSeconds: number = GROUND_GRACE): vec3 {
-    const world = this._world;
-    const g = world?.gravity;
-    const gLength = g ? Math.hypot(g.x, g.y, g.z) : 0;
-    const up: vec3 = gLength === 0 ? vec3.fromValues(0, 1, 0) : vec3.fromValues(-g.x / gLength, -g.y / gLength, -g.z / gLength);
-
+    const up = this.up;
     if (!this.isGrounded(body, maxSlopeDegrees, graceSeconds)) return up;
     const stamp = this._ground.get(body);
     return stamp ? vec3.fromValues(stamp.normal[0], stamp.normal[1], stamp.normal[2]) : up;
+  }
+
+  /**
+   * The world's "up": gravity reversed and normalized, or [0, 1, 0] under zero gravity.
+   *
+   * Everything gravity-relative goes through this one definition — grounding, the ground normal, and the
+   * planar/vertical split of measured motion — so inverted or sideways gravity behaves consistently instead
+   * of each site hardcoding Y. Returns a fresh vector.
+   */
+  public get up(): vec3 {
+    const g = this._world?.gravity;
+    const length = g ? Math.hypot(g.x, g.y, g.z) : 0;
+    if (length === 0) return vec3.fromValues(0, 1, 0);
+    return vec3.fromValues(-g!.x / length, -g!.y / length, -g!.z / length);
+  }
+
+  /**
+   * Measured motion for a body — how fast it ACTUALLY moved, not what was commanded of it. Backs
+   * {@link Node.currentSpeed} and the rest of that family.
+   *
+   * Undefined until the body has been through a write-back pass (it has never been simulated, so there is
+   * nothing measured to report). Callers treat that as "at rest".
+   */
+  public motionOf(body: Body): MotionRecord | undefined {
+    return this._motion.get(body);
   }
 
   /**

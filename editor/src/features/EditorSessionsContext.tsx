@@ -34,6 +34,9 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   // Script
   | 'enterScriptEditor' | 'setScriptTabSource' | 'getScriptTabSource' | 'saveScriptSource'
   | 'scriptAssetOf' | 'createScriptForNode' | 'attachScriptToNode' | 'detachScriptFromNode'
+  // Animation field (blend space)
+  | 'enterAnimationFieldEditor' | 'createAnimationFieldForModel' | 'saveAnimationField'
+  | 'editingAnimationFieldId' | 'animationFieldTargetId'
 >;
 
 export const EditorSessionsContext = createContext<EditorSessionsContextValue | null>(null);

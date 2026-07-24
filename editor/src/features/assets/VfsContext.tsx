@@ -52,7 +52,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // rather than on every unrelated EngineContext update.
   const {
     assetsLoaded,
-    materials, terrainMaterials, templates, models, scriptAssets,
+    materials, terrainMaterials, templates, models, scriptAssets, animationFields,
   } = useAssetLibrary()
 
   const [vfs, setVfs] = useState<VfsIndex>(EMPTY_VFS)
@@ -74,13 +74,13 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [eventEmitter])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, scenes: sceneList, textureIds }),
-    [materials, terrainMaterials, templates, models, scriptAssets, sceneList, textureIds],
+    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, scenes: sceneList, textureIds }),
+    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, sceneList, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
-    materials, terrainMaterials, templates, models, scripts: scriptAssets,
+    materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields,
     scenes: sceneList,
     addMaterial: engine.addMaterial,
     updateMaterial: engine.updateMaterial,
@@ -97,6 +97,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addScriptAsset: engine.addScriptAsset,
     updateScriptAsset: engine.updateScriptAsset,
     removeScriptAsset: engine.removeScriptAsset,
+    addAnimationField: engine.addAnimationField,
+    updateAnimationField: engine.updateAnimationField,
+    removeAnimationField: engine.removeAnimationField,
     createScene: engine.createScene,
     renameScene: engine.renameScene,
     deleteScene: engine.deleteScene,
@@ -108,6 +111,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     enterTemplateEditor: engine.enterTemplateEditor,
     enterScriptEditor: engine.enterScriptEditor,
     enterModelEditor: engine.enterModelEditor,
+    enterAnimationFieldEditor: engine.enterAnimationFieldEditor,
     emit: (event, payload) => eventEmitter.emit(event as any, payload),
   }
 
@@ -135,7 +139,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // were the only survivors when this fired.) Requiring at least one asset to be present costs nothing:
   // with every library empty there is, by definition, nothing that needs pruning.
   const librariesPopulated = !!(materials.length || terrainMaterials.length || templates.length
-    || models.length || scriptAssets.length)
+    || models.length || scriptAssets.length || animationFields.length)
 
   useEffect(() => {
     if (!vfsLoaded) return

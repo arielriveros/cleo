@@ -7,6 +7,8 @@ import type {
 } from 'cleo'
 import { isConditionGroup } from 'cleo'
 import { getAnimationTarget, accessibleNodeVariables, AccessibleVariable, AnimationTarget } from './skeleton'
+import { useAssetLibrary } from '../AssetLibraryContext'
+import { AnimationFieldAsset, reembedFields } from '../../utils/animationFields'
 
 // Shared editing session for the Animation State Machine. Both the center node-graph (StateGraph) and
 // the right-sidebar inspector (StateMachineEditor) edit the SAME machine, so the working copy `sm`,
@@ -39,6 +41,9 @@ interface StateMachineContextValue {
   hasBoneNames: boolean
   clips: string[]
   accessVars: AccessibleVariable[]
+  /** Every Animation Field in the project — a state can play one instead of a single clip. */
+  animationFields: AnimationFieldAsset[]
+  fieldOf: (id: string | undefined) => AnimationFieldAsset | undefined
 
   sm: AnimationStateMachine
   selection: SMSelection
@@ -190,6 +195,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     renameAnimationClip, removeAnimationClip, closeTab, activeTabId, eventEmitter,
     scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply,
   } = useCleoEngine()
+  const { animationFields } = useAssetLibrary()
 
   const target = getAnimationTarget(editorScene, animationTargetId)
   const hasBoneNames = !!(target && target.skin.nodeNames && target.skin.nodeNames.size > 0)
@@ -248,8 +254,14 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
   const apply = () => {
     if (!target) return
-    target.animator.setStateMachine(clone(sm))
-    commitAnimationStateMachine(clone(sm)) // marks the SOURCE model's tab dirty — that's where the edit landed
+    // Resolve every field-playing state's `fieldId` into an EMBEDDED copy of the field. This is the one
+    // place that happens: from here the machine is self-contained, so it travels through scene saves,
+    // templates, bundles and the published game without any of them knowing what a field is. A state whose
+    // field asset has been deleted has its copy cleared, degrading it to "no clip" rather than to a pose
+    // nothing in the project can explain.
+    const applied = reembedFields(clone(sm), animationFields)
+    target.animator.setStateMachine(clone(applied))
+    commitAnimationStateMachine(clone(applied)) // marks the SOURCE model's tab dirty — that's where the edit landed
     smCacheRef.current.delete(activeTabId) // in sync with the model again; nothing un-applied to preserve
     clearTabDirty(activeTabId)
     eventEmitter.emit('ANIM_SM_CHANGED')
@@ -464,8 +476,10 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     }))
   }
 
+  const fieldOf = (id: string | undefined) => (id ? animationFields.find(f => f.id === id) : undefined)
+
   const value: StateMachineContextValue = {
-    target, hasBoneNames, clips, accessVars,
+    target, hasBoneNames, clips, accessVars, animationFields, fieldOf,
     sm, selection, setSelection, graphView, setGraphView, simulate, setSimulate,
     apply, paramOf,
     addParam, setParam, removeParam,

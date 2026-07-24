@@ -25,8 +25,9 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithBoneNames } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
+import { AnimationFieldAsset, buildAnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
@@ -239,7 +240,7 @@ function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefO
   }, [key, value, loaded]);
 }
 
-export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'model' | 'script';
+export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -254,7 +255,10 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // Opening one also renders the asset's thumbnail (imports don't — that used to stall the main thread).
 // A 'script' tab is a dedicated code editor for a Script asset (no 3D scene): the full-panel editor renders
 // over the viewport, with a Save Script action. Its working source buffers per-tab until saved.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'model' | 'script';
+// An 'animationField' tab is an edit session for an Animation Field asset: the field's source Model asset
+// is instantiated into a throwaway scene and driven directly by the field editor's transport, while the
+// blend space itself is authored on a 2D plot overlaying the viewport.
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script';
 
 /**
  * The scene tab's id — a fixed sentinel, unlike the library tabs' random ids.
@@ -273,6 +277,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   material: 'Material',
   terrainMaterial: 'Terrain material',
   animation: 'Animation',
+  animationField: 'Animation field',
   model: 'Model',
   script: 'Script',
 };
@@ -303,6 +308,7 @@ export interface EditorTab {
   animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
   modelId?: string | null; // mesh tabs: the previewed mesh asset id
   scriptId?: string | null; // script tabs: the edited script asset id
+  animationFieldId?: string | null; // animation-field tabs: the edited field asset id
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage' | 'move';
@@ -415,6 +421,21 @@ const EngineContext = createContext<{
   detachScriptFromNode: (node: Node) => void;
   /** Persist an edited script asset's source and propagate the change to every linked node. */
   saveScriptSource: (id: string, source: string) => void;
+  // Animation Field assets (blend spaces)
+  animationFields: AnimationFieldAsset[];
+  addAnimationField: (f: AnimationFieldAsset) => void;
+  removeAnimationField: (id: string) => void;
+  updateAnimationField: (id: string, f: AnimationFieldAsset) => void;
+  /** Open (or focus) an Animation Field asset's edit tab. */
+  enterAnimationFieldEditor: (fieldId?: string) => void;
+  /** Create a field for a skinned model asset and open it. Returns the new field's id, or null. */
+  createAnimationFieldForModel: (modelId: string) => string | null;
+  /** The field asset the active animation-field tab edits, or null. */
+  editingAnimationFieldId: string | null;
+  /** The skinned ModelNode previewing that field in the tab's scene, or null. */
+  animationFieldTargetId: string | null;
+  /** Save a field asset and re-embed it into every state machine that plays it. */
+  saveAnimationField: (asset: AnimationFieldAsset) => void;
   /** Open a script asset in its dedicated Script editor tab (creates a new 'node' script when no id is given). */
   enterScriptEditor: (scriptId?: string) => void;
   /** Save the active Script tab's buffered source to its asset and clear the tab's dirty flag. */
@@ -559,6 +580,15 @@ const EngineContext = createContext<{
     attachScriptToNode: () => false,
     detachScriptFromNode: () => {},
     saveScriptSource: () => {},
+    animationFields: [],
+    addAnimationField: () => {},
+    removeAnimationField: () => {},
+    updateAnimationField: () => {},
+    enterAnimationFieldEditor: () => {},
+    createAnimationFieldForModel: () => null,
+    editingAnimationFieldId: null,
+    animationFieldTargetId: null,
+    saveAnimationField: () => {},
     enterScriptEditor: () => {},
     setScriptTabSource: () => {},
     getScriptTabSource: () => undefined,
@@ -855,6 +885,50 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setScriptAssets(prev => prev.filter(x => x.id !== id));
   };
 
+  // Animation Field assets (blend spaces). A field blends clips from ONE model asset by 1D/2D parameters;
+  // the animation state machine consumes it as a state. Persisted to IndexedDB like every other library.
+  const [animationFields, setAnimationFields] = useState<AnimationFieldAsset[]>([]);
+  const animationFieldsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<AnimationFieldAsset[]>('cleo_animation_fields');
+        if (list && list.length) setAnimationFields(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load animation fields:', e); }
+      finally { animationFieldsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary('cleo_animation_fields', animationFields, animationFieldsLoadedRef);
+
+  // Mirror for the save/propagate paths, which run off-render — see the library-mirror block below.
+  const animationFieldsRef = useRef<AnimationFieldAsset[]>([]);
+  animationFieldsRef.current = animationFields;
+
+  const addAnimationField = (f: AnimationFieldAsset) => setAnimationFields(prev => [...prev, f]);
+  const updateAnimationField = (id: string, f: AnimationFieldAsset) =>
+    setAnimationFields(prev => prev.map(x => x.id === id ? f : x));
+  const removeAnimationField = (id: string) => {
+    setAnimationFields(prev => prev.filter(x => x.id !== id));
+    // Clear the embedded copy from every state that played it, across every live scene. Without this the
+    // node keeps posing a field the project no longer contains — a pose with nothing in the editor to
+    // explain it. Clearing degrades the state to "no clip" (bind pose), which reads as broken and is
+    // therefore fixable.
+    let changed = false;
+    for (const scene of liveScenes()) {
+      for (const n of Array.from(scene.nodes)) {
+        if (!(n instanceof ModelNode) || !n.animator) continue;
+        const sm = n.animator.getStateMachine();
+        if (!machineUsesField(sm, id)) continue;
+        n.animator.setStateMachine(reembedFields(sm as any, []) as any);
+        changed = true;
+      }
+    }
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+    // Close its editor tab: the asset it edits is gone, so saving it would resurrect a deleted field.
+    const open = tabsRef.current.find(t => t.kind === 'animationField' && t.animationFieldId === id);
+    if (open) removeTabById(open.id);
+  };
+
   const scriptAssetOf = (node: Node | null): ScriptAsset | undefined => {
     const id = getScriptIdOf(node ?? undefined);
     return id ? scriptAssets.find(a => a.id === id) : undefined;
@@ -954,7 +1028,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && scenesLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && scenesLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -1105,6 +1179,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     : activeTab.kind === 'material' ? 'material'
     : activeTab.kind === 'terrainMaterial' ? 'terrainMaterial'
     : activeTab.kind === 'animation' ? 'animation'
+    : activeTab.kind === 'animationField' ? 'animationField'
     : activeTab.kind === 'model' ? 'model'
     : activeTab.kind === 'script' ? 'script'
     : 'template';
@@ -1121,6 +1196,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // The scene the source node lives in (main or a template tab) — used to enumerate accessible
   // node variables for the state machine's Variable parameters (the clone's scene is isolated).
   const animationSourceScene = activeTab.kind === 'animation' ? (activeRuntime?.sourceScene ?? null) : null;
+  // Animation Field editor: the asset being edited and the skinned model previewing it. The tab's runtime
+  // root is the holder Node the model asset instantiated under, so the ModelNode carrying the skin is found
+  // beneath it rather than being the root itself.
+  const editingAnimationFieldId = activeTab.kind === 'animationField' ? (activeTab.animationFieldId ?? null) : null;
+  const animationFieldTargetId = activeTab.kind === 'animationField' && activeRuntime
+    ? (firstSkinnedModelNode(activeRuntime.scene.getNodeById(activeRuntime.rootId) ?? null)?.id ?? null)
+    : null;
 
   // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries (the scripts library
   // already has scriptAssetsRef). The save + propagation paths read these rather than the render-scoped
@@ -1217,6 +1299,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         return;
       }
       rootId = instantiateTemplate(t, scene.root, engineMaps(), materialsRef.current);
+      // instantiateTemplate re-resolves __materialId against the library but has never touched __modelId, so
+      // a template opened here would show whatever clips were frozen into it when it was saved — a clip
+      // imported against the model since then would simply be missing. Refresh them from the asset.
+      //
+      // Patched in place rather than re-instantiated (which is what resyncScene does for scenes): a rebuild
+      // regenerates node ids, and instantiateTemplate has just re-keyed template.scripts/bodies/triggers onto
+      // the ids it created. withoutDirty because a refresh from the library is not the user's edit.
+      const templateRoot = scene.getNodeById(rootId);
+      if (templateRoot) {
+        withoutDirty(() => {
+          const refreshed = refreshModelClips(templateRoot, modelsRef.current);
+          if (refreshed) Logger.info(`Refreshed animation clips on ${refreshed} model${refreshed === 1 ? '' : 's'} in "${t.name}"`, 'Editor');
+        });
+      }
       name = t.name;
     } else {
       const node = new Node('New Template');
@@ -1359,6 +1455,53 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (rt.sourceTabId) markTabDirty(rt.sourceTabId, 'anim-state-machine');
   };
 
+  // ---- Clips and skeleton belong to the MODEL ASSET --------------------------------------------------
+  //
+  // The node the Animation Editor was opened from is a COPY — of a template's stored subtree, or of the
+  // asset placed in a scene — but it carries a `__modelId` back-link. That link is what decides where a clip
+  // edit lands. Writing only to the copy means importing an animation while editing a template reaches that
+  // template and nothing else: not the asset, not the character's other placements, not the next template.
+  //
+  // So every clip/skeleton action ends the same way: patch the ASSET, then patch every live instance.
+
+  /**
+   * Apply a clip/skeleton change to every live instance of a model asset, in place.
+   *
+   * Deliberately NOT syncModelInstances. That re-instantiates the whole subtree, which would churn node ids,
+   * invalidate the animation tab's own sourceNodeId mid-session, and drop per-placement scripts and bodies.
+   * AnimatedModel's addAnimation/removeAnimation/renameAnimation and the skin's nodeNames Map are all
+   * mutable in place and need no GPU rebuild, so nothing has to be rebuilt at all.
+   *
+   * `except` skips a node the caller has already updated (the Animation Editor's source node). The active
+   * tab's scene is skipped wholesale, because that is the Animation Editor's own preview clone — also
+   * already updated by the caller, and applying the change twice would land the clip on it as "name (2)".
+   */
+  const propagateModelClips = (modelId: string, apply: (m: AnimatedModel) => void, except?: Node | null) => {
+    let count = 0;
+    for (const scene of liveScenes(activeTabId)) {
+      for (const node of Array.from(scene.nodes)) {
+        if (node === except) continue;
+        if (!(node instanceof ModelNode) || !(node.model instanceof AnimatedModel)) continue;
+        if (modelIdOf(node) !== modelId) continue;
+        apply(node.model);
+        count++;
+      }
+    }
+    return count;
+  };
+
+  /**
+   * The model asset an Animation Editor session is editing through, or null when the source node is not a
+   * placed instance of one (a hand-built skinned node, or one imported straight into a scene). A null result
+   * means "keep the edit local to that node", which is the pre-existing behaviour.
+   */
+  const animationSourceAsset = (src: Node | null | undefined): { id: string; asset: ModelAsset } | null => {
+    const id = modelIdOf(src);
+    if (!id) return null;
+    const asset = modelsRef.current.find(m => m.id === id);
+    return asset ? { id, asset } : null;
+  };
+
   // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation
   // Editor. Parses the file, remaps each clip onto the target skeleton by bone name + computes a
   // compatibility report, shows the review modal, then adds the accepted clips to BOTH the preview
@@ -1389,14 +1532,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!decision) { Logger.info('Animation import cancelled', 'Editor'); return; }
 
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
+    const link = animationSourceAsset(src);
+    let asset = link?.asset;
     let added = 0;
     results.forEach((r, i) => {
       if (!decision.include[i]) return;
-      cloneModel.addAnimation(r.remapped);                                        // preview clone
-      if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.addAnimation(r.remapped); // persist
+      // Everything downstream stores the clip the CLONE settled on, not `r.remapped`. addAnimation de-dupes
+      // against the clips already present, so letting each target de-dupe independently could give the same
+      // import a different suffix in the asset than on the node — one clip under two names.
+      const stored = cloneModel.addAnimation(r.remapped);                          // preview clone
+      if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.addAnimation(stored); // persist
+      // The asset, and through it every other placement of this character. Chained rather than written per
+      // clip so a multi-clip import lands as ONE library update instead of one per clip.
+      if (asset) asset = assetWithClipAdded(asset, stored);
+      if (link) propagateModelClips(link.id, m => { m.addAnimation(stored); }, src);
       added++;
     });
     if (added > 0) {
+      if (link && asset) updateModel(link.id, asset);
       if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-import');
       eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
       Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName}`, 'Editor');
@@ -1440,6 +1593,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       Logger.warn('No matching bones — load the SAME file this character was imported from (same format/export)', 'Editor');
       return;
     }
+
+    // Bone names are skeleton data, so they belong to the asset: without this the backfill would have to be
+    // repeated for every placement, and only the one you happened to open would ever match by name.
+    const link = animationSourceAsset(src);
+    if (link) {
+      updateModel(link.id, assetWithBoneNames(link.asset, srcNames));
+      propagateModelClips(link.id, m => { if (m.skin) applyTo(m.skin); }, src);
+    }
+
     if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-skeleton');
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     Logger.info(`Added bone names to ${matched} joints — animation import now matches by name. Save the project to keep them.`, 'Editor');
@@ -1454,6 +1616,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const finalName = cloneNode.model.renameAnimation(oldName, newName) ?? oldName;
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
     if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.renameAnimation(oldName, finalName);
+
+    // Propagate the name the CLONE settled on, not what the user typed: renameAnimation de-dupes against the
+    // clips already there, and re-running that per instance could land on a different suffix each time.
+    const link = animationSourceAsset(src);
+    if (link) {
+      updateModel(link.id, assetWithClipRenamed(link.asset, oldName, finalName));
+      propagateModelClips(link.id, m => { m.renameAnimation(oldName, finalName); }, src);
+    }
+
     if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-rename-clip');
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     return finalName;
@@ -1466,6 +1637,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) cloneNode.model.removeAnimation(name);
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
     if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.removeAnimation(name);
+
+    const link = animationSourceAsset(src);
+    if (link) {
+      updateModel(link.id, assetWithClipRemoved(link.asset, name));
+      propagateModelClips(link.id, m => { m.removeAnimation(name); }, src);
+    }
+
     if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-remove-clip');
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
@@ -2139,6 +2317,103 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     openMeshTab(asset);
   };
 
+  // ---- Animation Field editor ------------------------------------------------------------------------
+
+  // Open (or focus) an Animation Field's edit tab. Like the model tab it owns a throwaway scene, holding
+  // ONE instance of the field's source model asset — the field editor's transport drives that model's
+  // animator directly (the scene is paused), so the blend can be previewed live while it is authored.
+  const enterAnimationFieldEditor = (fieldId?: string) => {
+    if (!instanceRef.current || !fieldId) return;
+    const field = animationFieldsRef.current.find(f => f.id === fieldId);
+    if (!field) { Logger.error('Animation field not found', 'Editor'); return; }
+
+    const existing = tabs.find(t => t.kind === 'animationField' && t.animationFieldId === fieldId);
+    if (existing) { setActiveTabId(existing.id); return; }
+
+    const model = modelsRef.current.find(m => m.id === field.modelId);
+    if (!model) {
+      Logger.error(`"${field.name}" blends a model that no longer exists — the field cannot be opened`, 'Editor');
+      return;
+    }
+
+    // Disarm before constructing the preview scene — see openMeshTab for why this is not optional.
+    dirtyArmedRef.current = false;
+    const scene = new Scene();
+    scene.animationsEnabled = false; // the field transport drives the animator itself, not scene.update
+    scene.spawnRulesEnabled = false;
+    void createAssetEditScene(scene, withoutDirty);
+
+    const holder = new Node(field.name);
+    scene.addNode(holder);
+    instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current);
+    scene.root.updateTransforms();
+
+    const skinned = firstSkinnedModelNode(holder);
+    if (!skinned) {
+      Logger.error(`"${model.name}" has no skeleton — an animation field needs a skinned model`, 'Editor');
+      return;
+    }
+    // Frame the camera + shadow-catching ground around the model, exactly as the Animation Editor does.
+    const bounds = combineBounds(skinned);
+    createAnimationEditorScene(scene, bounds.center, bounds.radius);
+    scene.start();
+    skinned.animator?.showBindPose();
+
+    const tabId = cryptoRandomId();
+    tabRuntimeRef.current.set(tabId, { scene, rootId: holder.id });
+    setTabs(prev => [...prev, { id: tabId, kind: 'animationField', title: field.name, animationFieldId: fieldId }]);
+    setActiveTabId(tabId);
+    eventEmitter.current.emit('TEXTURES_CHANGED');
+  };
+
+  /** Create a field for a skinned model asset and open it. Returns the new field's id, or null. */
+  const createAnimationFieldForModel = (modelId: string): string | null => {
+    const model = modelsRef.current.find(m => m.id === modelId);
+    if (!model) { Logger.error('Model not found', 'Editor'); return null; }
+    if (!modelAssetIsSkinned(model)) {
+      Logger.warn(`"${model.name}" has no skeleton — only skinned models can be blended in an animation field`, 'Editor');
+      return null;
+    }
+    const asset = buildAnimationFieldAsset(`${model.name} Field`, modelId);
+    addAnimationField(asset);
+    // The library update lands in the next commit, so the open has to read the asset we just built rather
+    // than the (still stale) state — hence seeding the ref directly.
+    animationFieldsRef.current = [...animationFieldsRef.current, asset];
+    enterAnimationFieldEditor(asset.id);
+    return asset.id;
+  };
+
+  /**
+   * Persist an edited field and push it into everything already playing it.
+   *
+   * The re-embed is what keeps embed-on-Apply honest: a state stores a COPY of the field, so without this
+   * an edit would only reach nodes whose machine was applied again afterwards. Every live scene is walked
+   * (the open scene plus each asset tab's edit scene), matching how template/model saves propagate.
+   */
+  const saveAnimationField = (asset: AnimationFieldAsset) => {
+    updateAnimationField(asset.id, asset);
+    const fields = animationFieldsRef.current.map(f => f.id === asset.id ? asset : f);
+    animationFieldsRef.current = fields;
+
+    let count = 0;
+    for (const scene of liveScenes()) {
+      for (const n of Array.from(scene.nodes)) {
+        if (!(n instanceof ModelNode) || !n.animator) continue;
+        const sm = n.animator.getStateMachine();
+        if (!machineUsesField(sm, asset.id)) continue;
+        n.animator.setStateMachine(reembedFields(sm as any, fields) as any);
+        count++;
+      }
+    }
+    if (count) {
+      // The edit landed on nodes in those scenes, so their owners have unsaved changes. Only the scene tab
+      // can be identified generically here; an asset tab's own save re-serializes its subtree anyway.
+      markTabDirty(SCENE_TAB_ID, 'animation-field-reembed');
+      eventEmitter.current.emit('SCENE_CHANGED');
+    }
+    Logger.info(`Animation field "${asset.name}" saved${count ? ` (updated ${count} model${count === 1 ? '' : 's'})` : ''}`, 'Editor');
+  };
+
   // Import one or more model files (and folders) into the mesh library. Groups the selection into one
   // bundle per model file; for each: parses, then opens the review modal (missing textures + scale
   // normalization) and awaits the user. On accept, applies any uploaded textures (re-parse), normalizes
@@ -2623,9 +2898,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
 
-  // The live animation session's Apply, registered by StateMachineProvider. An animation tab has no asset
-  // of its own, so "saving" it means applying the machine onto the source model — and the working copy is
-  // React state over in that provider, out of reach from here. Only the active tab ever has a session.
+  // The live animation session's Apply, registered by StateMachineProvider — and by AnimationFieldProvider
+  // for a field tab, which has the same shape of problem. Neither tab can be saved from here: an animation
+  // tab has no asset of its own (saving it means applying the machine onto the source model), and both keep
+  // their working copy as React state inside their own provider. Only the active tab ever has a session, so
+  // one slot is enough.
   const animationApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerAnimationApply = (reg: { tabId: string; apply: () => void } | null) => { animationApplyRef.current = reg; };
 
@@ -2643,10 +2920,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'material': saveMaterialTab(tabId); break;
       case 'terrainMaterial': saveTerrainMaterialTab(tabId); break;
       case 'script': saveScriptTab(tabId); break;
-      case 'animation': {
+      case 'animation':
+      case 'animationField': {
         const reg = animationApplyRef.current;
         if (!reg || reg.tabId !== tabId) return false;
-        reg.apply(); // writes the machine onto the source model, dirtying ITS tab
+        // Animation: writes the machine onto the source model, dirtying ITS tab.
+        // Animation field: writes the field asset to the library and re-embeds it where it is played.
+        reg.apply();
         break;
       }
     }
@@ -2726,7 +3006,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (live && dirtyTabsRef.current[live.tabId]) live.apply();
 
     const ORDER: Record<TabKind, number> = {
-      material: 0, terrainMaterial: 0, script: 0, animation: 0, model: 1, template: 2, scene: 3,
+      material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0,
+      model: 1, template: 2, scene: 3,
     };
     // Snapshot: propagation is suppressed and so cannot extend this set, but taking it up front also makes
     // the loop finite by construction rather than by argument.
@@ -3407,11 +3688,38 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     sceneNames: () => (projectMetaRef.current?.scenes ?? []).map(s => s.name),
   });
 
+  /**
+   * Refresh every animation state's embedded Animation Field from the library.
+   *
+   * A state stores a COPY of the field, written when the machine was applied — that is what lets a field
+   * ride through scene saves and publishing with no extra plumbing. The cost is that the copy can fall
+   * behind the asset: edit a field after applying the machine, or open a scene/template saved before the
+   * last field edit, and the node still plays the old blend. The field editor previews the LIVE field, so
+   * the symptom is a blend that looks right while authoring and wrong in Play.
+   *
+   * Doing this at play start covers every route in one place — the open scene, template instances, whatever
+   * — instead of chasing each one. withoutDirty because refreshing from the library is not the user's edit.
+   */
+  const reembedSceneFields = (scene: Scene) => {
+    let count = 0;
+    withoutDirty(() => {
+      for (const node of Array.from(scene.nodes)) {
+        if (!(node instanceof ModelNode) || !node.animator) continue;
+        const sm = node.animator.getStateMachine();
+        if (!sm) continue;
+        const next = reembedFields(sm as any, animationFieldsRef.current) as any;
+        if (next !== sm) { node.animator.setStateMachine(next); count++; }
+      }
+    });
+    return count;
+  };
+
   const startPlay = async () => {
     const instance = instanceRef.current;
     if (!instance) return;
     instance.input.preventDefault();
     if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', 'play'); return; }
+    reembedSceneFields(editorSceneRef.current);
     playEntrySceneIdRef.current = openSceneIdRef.current;
     currentPlaySceneIdRef.current = openSceneIdRef.current;
     playSceneUiRef.current = uiStateRef.current.elements;
@@ -3483,10 +3791,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addTerrainMaterial, removeTerrainMaterial, updateTerrainMaterial,
     addModel, removeModel, updateModel,
     addScriptAsset, removeScriptAsset, updateScriptAsset,
+    addAnimationField, removeAnimationField, updateAnimationField,
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
-    templates, materials, terrainMaterials, models, scriptAssets, assetsLoaded, ...libraryActions,
-  }), [templates, materials, terrainMaterials, models, scriptAssets, assetsLoaded, libraryActions]);
+    templates, materials, terrainMaterials, models, scriptAssets, animationFields, assetsLoaded, ...libraryActions,
+  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
     setActiveTab, closeTab, reorderTabs, saveActiveTab, saveAll, markTabDirty, clearTabDirty, withoutDirty,
@@ -3518,12 +3827,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
     enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource,
     scriptAssetOf, createScriptForNode, attachScriptToNode, detachScriptFromNode,
+    enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField,
   });
   const editorSessionsValue = useMemo<EditorSessionsContextValue>(() => ({
     editingTemplateName, templateRootId,
     editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport,
+    editingAnimationFieldId, animationFieldTargetId,
     modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
     modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
       ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
@@ -3534,6 +3845,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingTemplateName, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport,
+    editingAnimationFieldId, animationFieldTargetId,
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
 
@@ -3612,6 +3924,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       attachScriptToNode,
       detachScriptFromNode,
       saveScriptSource,
+      animationFields,
+      addAnimationField,
+      removeAnimationField,
+      updateAnimationField,
+      enterAnimationFieldEditor,
+      createAnimationFieldForModel,
+      editingAnimationFieldId,
+      animationFieldTargetId,
+      saveAnimationField,
       enterScriptEditor,
       setScriptTabSource,
       getScriptTabSource,
