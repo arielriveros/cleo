@@ -36,8 +36,9 @@ export type { RagdollOptions } from "./physics/ragdoll";
 export { Model } from "./graphics/model";
 export { AnimatedModel } from "./graphics/animatedModel";
 export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
-export { remapAnimationToSkin } from "./graphics/animationRetarget";
-export type { AnimationCompatibility, HierarchyMismatch } from "./graphics/animationRetarget";
+export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget } from "./graphics/animationRetarget";
+export type { AnimationCompatibility, HierarchyMismatch, BoneMapping, BoneMappingEntry, BoneMatchKind } from "./graphics/animationRetarget";
+export { normalizeBoneName, humanoidSlotOf } from "./graphics/boneNames";
 export { Animator, isConditionGroup, NODE_BUILTINS } from "./graphics/animator";
 export type { NodeBuiltinName } from "./graphics/animator";
 export {

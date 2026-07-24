@@ -8,8 +8,8 @@ import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
 import { EditorSessionsContext, type EditorSessionsContextValue } from "./EditorSessionsContext";
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, remapAnimationToSkin, setGameHost, registerTemplates } from "cleo";
-import type { AnimationCompatibility, HullQuality, SceneChange } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates } from "cleo";
+import type { AnimationCompatibility, BoneMapping, HullQuality, SceneChange } from "cleo";
 import NullImage from '../images/null.png';
 import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
@@ -86,14 +86,24 @@ const IMPORT_STAGES: Record<ImportStage, { label: string; progress: number; stat
   failed:    { label: 'Failed',                       progress: 1,    status: 'failed'  },
   skipped:   { label: 'Skipped',                      progress: 1,    status: 'skipped' },
 };
-// Animation clips parsed from a file, each with a compatibility report vs the target skeleton,
-// awaiting user review in the animation-import modal.
+/** A bone the mapping table lists in a target-joint dropdown: its node index and display name. */
+export type RetargetBoneOption = { node: number; name: string };
+// Animation clips parsed from a file, each with a compatibility report vs the target skeleton, plus the
+// bone mapping (retarget) the user can inspect and correct — all awaiting review in the import modal.
 export type PendingAnimationImportView = {
   fileName: string;
-  clips: { name: string; report: AnimationCompatibility }[];
+  /** `animatedNodes` are the source bones THIS clip drives, so the modal can recount matched/missing live
+   *  against the (possibly edited) mapping rather than showing the stale open-time report. */
+  clips: { name: string; report: AnimationCompatibility; animatedNodes: number[] }[];
+  /** The source→target bone mapping the reports were computed from. Edited in the modal. */
+  mapping: BoneMapping;
+  /** Source bones the clips animate (the mapping's left column), and every target joint (the dropdowns). */
+  sourceBones: RetargetBoneOption[];
+  targetBones: RetargetBoneOption[];
 };
-// The user's decision from the animation-import modal: which clips to add (by index).
-export type AnimationImportDecision = { include: boolean[] };
+// The user's decision: which clips to add (by index), and the mapping as finally edited. The mapping rides
+// back so the accept path retargets against exactly what the user saw and corrected.
+export type AnimationImportDecision = { include: boolean[]; mapping: BoneMapping };
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
 import {
@@ -1503,9 +1513,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation
-  // Editor. Parses the file, remaps each clip onto the target skeleton by bone name + computes a
-  // compatibility report, shows the review modal, then adds the accepted clips to BOTH the preview
-  // clone (so the transport/state-machine see them) and the source node (so they persist on save).
+  // Editor. Parses the file, builds a bone MAPPING from the file's skeleton onto the model's, shows the
+  // review modal (where the user can correct the mapping), then RETARGETS each accepted clip through the
+  // final mapping and adds it to the preview clone, the source node, the model asset and every placement.
   const importAnimationFiles = async (files: File[]) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
     const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
@@ -1521,26 +1531,54 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     catch (e) { Logger.error('Failed to parse animation file: ' + e, 'Editor'); return; }
     if (!parsed.animations.length) { Logger.warn('No animation clips found in the file', 'Editor'); return; }
     if (!parsed.skin) { Logger.warn('The imported file has no skeleton to match against', 'Editor'); return; }
+    const sourceSkin = parsed.skin;
 
-    const results = parsed.animations.map(clip => remapAnimationToSkin(clip, parsed.skin, targetSkin));
+    // ONE mapping for the whole file — every clip in it shares the source skeleton, so matching is done once
+    // and each clip's report is derived cheaply from it (and re-derived as the user edits rows in the modal).
+    const mapping = buildBoneMapping(parsed.animations, sourceSkin, targetSkin);
     const fileName = files.find(f => /\.(gltf|glb|fbx)$/i.test(f.name))?.name ?? files[0]?.name ?? 'animation';
+
+    // Diagnostic (scope 'Retarget'): one structured snapshot per import, so a broken retarget can be
+    // diagnosed from the console without the user's asset files. Includes each key bone's bind rotation
+    // computed both from the inverse bind matrix and from the node transforms — their disagreement is the
+    // tell-tale for an animated glTF whose node transforms are its frame-0 pose, not its bind pose.
+    try { Logger.print('debug', [describeRetarget(parsed.animations, sourceSkin, targetSkin, mapping)], 'Retarget'); }
+    catch (e) { Logger.warn('Retarget diagnostics failed: ' + e, 'Retarget'); }
+
+    // Bone lists for the mapping table: the source bones the clips actually animate (mapping order), and
+    // every target joint for the dropdowns.
+    const nameOf = (skin: any, node: number): string => skin.nodeNames?.get(node) ?? `node ${node}`;
+    const sourceBones = mapping.entries.map(e => ({ node: e.sourceNode, name: e.sourceName ?? `node ${e.sourceNode}` }));
+    const targetBones = targetSkin.joints.map((j: any) => ({ node: j.nodeIndex, name: nameOf(targetSkin, j.nodeIndex) }));
 
     const decision = await new Promise<AnimationImportDecision | null>(resolve => {
       pendingAnimResolverRef.current = resolve;
-      setPendingAnimationImport({ fileName, clips: results.map(r => ({ name: r.report.clipName, report: r.report })) });
+      setPendingAnimationImport({
+        fileName,
+        clips: parsed.animations.map(clip => ({
+          name: clip.name,
+          report: mappingReport(clip, sourceSkin, targetSkin, mapping),
+          animatedNodes: [...new Set(clip.channels.map((ch: any) => ch.targetNodeIndex))] as number[],
+        })),
+        mapping, sourceBones, targetBones,
+      });
     });
     if (!decision) { Logger.info('Animation import cancelled', 'Editor'); return; }
+    const finalMapping = decision.mapping; // the user may have re-pointed bones
 
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
     const link = animationSourceAsset(src);
     let asset = link?.asset;
     let added = 0;
-    results.forEach((r, i) => {
+    parsed.animations.forEach((clip, i) => {
       if (!decision.include[i]) return;
-      // Everything downstream stores the clip the CLONE settled on, not `r.remapped`. addAnimation de-dupes
+      // Retarget against the FINAL mapping, here on accept — this is the one expensive pass, deferred out of
+      // the modal's per-edit re-renders (which only recompute the cheap reports).
+      const remapped = retargetAnimation(clip, sourceSkin, targetSkin, finalMapping);
+      // Everything downstream stores the clip the CLONE settled on, not `remapped`. addAnimation de-dupes
       // against the clips already present, so letting each target de-dupe independently could give the same
       // import a different suffix in the asset than on the node — one clip under two names.
-      const stored = cloneModel.addAnimation(r.remapped);                          // preview clone
+      const stored = cloneModel.addAnimation(remapped);                          // preview clone
       if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.addAnimation(stored); // persist
       // The asset, and through it every other placement of this character. Chained rather than written per
       // clip so a multi-clip import lands as ONE library update instead of one per clip.

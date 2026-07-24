@@ -222,17 +222,33 @@ class Bone {
     private _name: string;
     private _id: number;
     private _localTransform: mat4;
-    
+
     private _positions: KeyPosition[] = [];
     private _rotations: KeyRotation[] = [];
     private _scales: KeyScale[] = [];
-    
+
+    // The bone's REST pose, used for any channel it has no keyframes for. Non-root skeletal bones are
+    // rotation-only — they hold their bind offset and never translate — so without this a rotation-only
+    // bone would fall back to a zero translation and collapse onto its parent's origin. Defaults to identity
+    // so a bone with no rest seeded behaves exactly as before.
+    private _restT: vec3 = vec3.create();
+    private _restR: quat = quat.create();
+    private _restS: vec3 = vec3.fromValues(1, 1, 1);
+
     constructor(name: string, id: number) {
         this._name = name;
         this._id = id;
         this._localTransform = mat4.create();
     }
-    
+
+    /** Seed the bone's rest pose from its skin bind transform (decomposed T/R/S). */
+    public setRest(rest: mat4): void {
+        mat4.getTranslation(this._restT, rest);
+        mat4.getRotation(this._restR, rest);
+        quat.normalize(this._restR, this._restR);
+        mat4.getScaling(this._restS, rest);
+    }
+
     /**
      * Add position channel data
      */
@@ -351,7 +367,7 @@ class Bone {
      */
     private _interpolatePosition(animationTime: number): vec3 {
         if (this._positions.length === 0) {
-            return vec3.fromValues(0, 0, 0);
+            return vec3.clone(this._restT); // no channel: hold the bind offset, not the origin
         }
         
         if (this._positions.length === 1) {
@@ -376,7 +392,7 @@ class Bone {
      */
     private _interpolateRotation(animationTime: number): quat {
         if (this._rotations.length === 0) {
-            return quat.create();
+            return quat.clone(this._restR); // no channel: hold the bind rotation
         }
         
         if (this._rotations.length === 1) {
@@ -404,7 +420,7 @@ class Bone {
      */
     private _interpolateScale(animationTime: number): vec3 {
         if (this._scales.length === 0) {
-            return vec3.fromValues(1, 1, 1);
+            return vec3.clone(this._restS); // no channel: hold the bind scale
         }
         
         if (this._scales.length === 1) {
@@ -650,6 +666,10 @@ export class Animator {
             let bone = bones.get(boneName);
             if (!bone) {
                 bone = new Bone(boneName, nodeIndex);
+                // Seed its rest pose so a channel it lacks falls back to the bind offset — the same rest
+                // source _recomputePose uses for a joint with no channels at all, keeping the two consistent.
+                const rest = this._skin?.nodeTransforms?.get(nodeIndex);
+                if (rest) bone.setRest(rest);
                 bones.set(boneName, bone);
             }
 
