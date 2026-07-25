@@ -3632,6 +3632,7 @@ export interface VolumetricCloudsOptions {
     lightSteps?: number;      // secondary (toward-sun) samples (2..12)
     maxDistance?: number;     // max ray length
     jitter?: boolean;         // dither the march start to hide banding
+    resolutionScale?: number; // 0.25..1 — rays per screen axis (1 = one ray/pixel, 0.5 = one ray per 2x2 block)
     // Render
     enabled?: boolean;
     opacity?: number;         // 0..1 — final composite opacity
@@ -3677,6 +3678,7 @@ export class VolumetricCloudsNode extends Node {
     private _lightSteps: number;
     private _maxDistance: number;
     private _jitter: boolean;
+    private _resolutionScale: number;
     // Render
     private _enabled: boolean;
     private _opacity: number;
@@ -3716,6 +3718,7 @@ export class VolumetricCloudsNode extends Node {
         this._lightSteps = options.lightSteps ?? 6;
         this._maxDistance = options.maxDistance ?? 60000;
         this._jitter = options.jitter ?? true;
+        this._resolutionScale = options.resolutionScale ?? 1.0;
 
         this._enabled = options.enabled ?? true;
         this._opacity = options.opacity ?? 1.0;
@@ -3788,6 +3791,8 @@ export class VolumetricCloudsNode extends Node {
     public set maxDistance(v: number) { this._maxDistance = Math.max(1, v); }
     public get jitter(): boolean { return this._jitter; }
     public set jitter(v: boolean) { this._jitter = v; }
+    public get resolutionScale(): number { return this._resolutionScale; }
+    public set resolutionScale(v: number) { this._resolutionScale = Math.min(1, Math.max(0.25, v)); }
 
     // --- Render ---
     public get enabled(): boolean { return this._enabled; }
@@ -3847,6 +3852,7 @@ export class VolumetricCloudsNode extends Node {
                         lightSteps: this._lightSteps,
                         maxDistance: this._maxDistance,
                         jitter: this._jitter,
+                        resolutionScale: this._resolutionScale,
                         enabled: this._enabled,
                         opacity: this._opacity
                     }

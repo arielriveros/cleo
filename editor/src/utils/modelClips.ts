@@ -88,6 +88,18 @@ export function assetWithClipRemoved<T extends ClipBearingAsset>(asset: T, name:
 }
 
 /**
+ * Toggle root motion on a clip in an asset's serialized model. A name that is not there, or a value that
+ * matches what the clip already carries, leaves the asset untouched (withClips returns the original on no-op).
+ */
+export function assetWithClipRootMotion<T extends ClipBearingAsset>(asset: T, name: string, on: boolean): T {
+  return withClips(asset, clips => {
+    const clip = clips.find((c: any) => c.name === name)
+    if (!clip || !!clip.rootMotion === on) return clips
+    return clips.map((c: any) => c.name === name ? { ...c, rootMotion: on } : c)
+  })
+}
+
+/**
  * Merge bone names into an asset's serialized skin, so animation import can match by name from then on.
  *
  * The serialized skin stores `nodeNames` as entry PAIRS (`[number, string][]`) — a Map does not survive

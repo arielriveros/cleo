@@ -1,67 +1,83 @@
 import { InputManager, Logger, Node } from 'cleo'
 
 /**
- * Third-person character controller — attach to the "Playable" root.
+ * Third-person STRAFE character controller — attach to the "Playable" root.
+ *
+ * Facing lives on the BODY (this node). While you hold a movement key the body turns to the camera's look
+ * direction and the WASD direction relative to that facing chooses a strafe clip — press D looking north and
+ * the character keeps facing north but side-steps east (the right-strafe animation). Let go and the body stops
+ * turning, so the camera orbits freely around a still character; swing it far enough and a ROOT-MOTION turn
+ * clip physically turns the body to catch up.
+ *
+ * Because the body turns, the Camera Pivot — which is a child of this node — would be dragged round with it.
+ * To keep the camera where the player pointed it, this script counter-rotates the pivot by the body's yaw
+ * change every frame, so the world aim is held while the body rotates underneath it.
  *
  * Expected hierarchy (Playable must be at the scene root — a body on a parented node is placed wrong):
  *
- *   Playable          ← this script, has the RigidBody
- *   ├── Model         ← animated mesh; this script turns it to face travel
- *   └── Camera Pivot  ← ThirdPersonCameraPivot.ts
+ *   Playable          ← this script, has the RigidBody. THIS is what turns to face the camera.
+ *   ├── Model         ← animated mesh; no script. It inherits the body's facing (never rotated on its own).
+ *   └── Camera Pivot  ← ThirdPersonCameraPivot.ts on a Camera Rig node
  *       └── Camera
  *
- * Required body setup on Playable (Physics panel):
- *   mass 1 · linearDamping 0–0.05 · linearConstraints [1, 1, 1] · angularConstraints [0, 0, 0]
+ * Required body setup on Playable (Physics panel): capsule collider · friction 0 · mass 1 ·
+ * linearDamping 0–0.05 · linearConstraints [1, 1, 1] · angularConstraints [0, 0, 0]. The angular lock stops
+ * the PHYSICS SOLVER from spinning the body; this script still rotates it directly, which the lock allows.
  *
- * Both constraints matter. A locked linear axis (the old demo used [1, 1, 0]) silently kills movement along
- * it, because we drive velocity rather than teleporting. Locking angular stops physics from tipping or
- * spinning the root — which would drag the camera around with it, since the pivot is a child.
- *
- * The Model's Animator reads `moveSpeed` off this node: add a state-machine parameter of type Variable bound
- * to Parent → moveSpeed (number), then transition Idle→Walk above 0.1 and Walk→Run above 0.6.
- *
- * You can skip `moveSpeed` entirely and bind that parameter to **Built-in → Parent → planarSpeed** instead,
- * which is the same measurement in world units rather than normalized 0..1. See the README.
+ * The Model's Animator reads three fields off this node (Variable parameters → Parent): `moveDir` (strafe
+ * angle, Field X), `isJumping`, `turnRequest` (which turn-in-place clip). Speed is read from the engine as
+ * Built-in → Parent → `planarSpeed`. Enable **Root motion** on the four turn clips in the Animation editor's
+ * Clips panel — that is what lets the turn animation drive the body. See the README for the full setup.
  */
 export default class ThirdPersonPlayableNode extends Node {
   /**
-   * Animator input: 0 idle, ~0.4 walking, 1 running — the character's REAL speed across the ground,
-   * normalized against `runSpeed` so retuning the speeds below can't invalidate the animator's thresholds.
-   *
-   * Measured, not commanded. Reading it off the input keys instead (`running ? 1 : 0.5`) reports a full
-   * sprint while the character is jammed against a wall, sliding on ice, or held by a constraint — the
-   * animation runs on the spot because it is being told what you asked for rather than what happened.
-   * `planarSpeed` comes from how far the body actually moved last physics step, so a blocked character
-   * falls back to idle on its own.
+   * Animator input (Field X): the travel direction relative to the way the BODY is facing, in DEGREES.
+   * 0 = ahead (W), +90 = strafe right (D), -90 = strafe left (A), ±180 = back (S). Includes the body's
+   * catch-up offset while it is still turning to the camera, so the blend shows the right strafe even
+   * mid-turn. Smoothed (see `directionSmoothing`) so the field probe glides rather than snapping.
    */
-  protected moveSpeed: number = 0
+  protected moveDir: number = 0
+
+  /** Animator input: true from take-off until the feet are back down. */
+  protected isJumping: boolean = false
 
   /**
-   * Animator input: true from take-off until the feet are back down. Bind an animator parameter to it
-   * (variable → Parent → isJumping) and the Jump state lasts exactly as long as the character is airborne,
-   * rather than as long as the clip happens to be. See the README for the state machine.
+   * Animator input: which turn-in-place clip to play — 0 none, +1/+2 turn 90°/180° right, -1/-2 left. The
+   * script holds the code while the turn clip's ROOT MOTION rotates the body and clears it to 0 once the body
+   * has caught the camera, which returns the machine to Idle.
    */
-  protected isJumping: boolean = false
+  protected turnRequest: number = 0
 
   private walkSpeed: number = 1.5
   private runSpeed: number = 4
   /** Upward speed applied on jump. Height is speed²/(2·gravity) — mass-independent, unlike an impulse. */
   private jumpSpeed: number = 4
-  /** How fast the mesh swings round to face the way it is moving, in degrees per second. */
+  /** How fast the BODY swings round to the camera's look direction while MOVING, in degrees per second.
+   *  Turn-in-place (idle) is NOT driven by this — the root-motion turn clip rotates the body there. */
   private turnSpeed: number = 540
-  /** Name of the child that holds the camera; its yaw is what "forward" means for the player. Optional —
-   *  if nothing matches, the child that contains the Camera is used instead. */
+  /** How far (degrees) the camera may swing off the body before an idle turn-in-place fires. 90 keeps the
+   *  camera free for a quarter-turn each way. */
+  private turnThreshold: number = 90
+  /** Damping time constant (seconds) for `moveDir`, so the blend-space Direction axis glides between strafes
+   *  instead of snapping. 0 = instant. */
+  private directionSmoothing: number = 0.12
+  /** Name of the child that holds the camera; its yaw + this body's yaw is the world look direction. Falls
+   *  back to the child that contains the Camera if nothing matches. */
   protected pivotName: string = 'Camera Pivot'
 
   /** Seconds left in which the slope-follow must not touch Y, so it can't eat a jump. See onUpdate. */
   private _jumpCooldown: number = 0
+  /** True while an idle turn-in-place is in progress (its root-motion clip is rotating the body). */
+  private _turning: boolean = false
+  /** The smoothed strafe angle actually published as `moveDir`. */
+  private _smoothDir: number = 0
+  /** Body yaw at the end of the previous frame. The change since then — from a root-motion turn — is what the
+   *  pivot is counter-rotated by, so the camera holds its world aim. */
+  private _lastBodyYaw: number = 0
 
   onStart() {
     if (!this.body) Logger.warn(`${this.name} has no rigid body — the controller cannot move it`, 'Script')
 
-    // A locked linear axis silently eats all movement along it, because this controller drives velocity
-    // instead of teleporting. The demo character ships with linearConstraints [1, 1, 0] — reuse that body and
-    // W/S die while A/D still work, which reads as movement being broken in "some" directions only.
     const factor = this.body ? this.body.linearFactor : null
     if (factor && (factor.x === 0 || factor.y === 0 || factor.z === 0))
       Logger.warn(
@@ -70,8 +86,10 @@ export default class ThirdPersonPlayableNode extends Node {
 
     if (!this._findPivot())
       Logger.warn(
-        `${this.name} has no camera pivot child — movement will follow the world +Z axis instead of the ` +
-        `camera. Add the Camera Pivot as a child, or set pivotName to match it.`, 'Script')
+        `${this.name} has no camera pivot child — movement and facing will follow the world +Z axis instead ` +
+        `of the camera. Add the Camera Pivot as a child, or set pivotName to match it.`, 'Script')
+
+    this._lastBodyYaw = this._bodyYaw()
 
     // registerKeyPress is edge-triggered, so holding Space cannot repeat the jump. One callback per key.
     InputManager.instance.registerKeyPress('Space', () => {
@@ -90,23 +108,25 @@ export default class ThirdPersonPlayableNode extends Node {
   onUpdate(delta: number, time: number) {
     const input = InputManager.instance
     if (this._jumpCooldown > 0) this._jumpCooldown -= delta
-
-    // Publish the MEASURED speed every frame, before any early return below — this has to reflect what the
-    // body actually did, including the frames where the answer is "nothing". `planarSpeed` ignores falling,
-    // so a jump does not read as a sprint. Normalized against runSpeed so the animator's thresholds survive
-    // retuning walkSpeed/runSpeed; drop the normalization if you bind the animator to planarSpeed directly.
-    this.moveSpeed = this.runSpeed > 0 ? Math.min(1, this.planarSpeed / this.runSpeed) : 0
-
-    // Land only once the cooldown has run out. isGrounded allows ~0.1s of grace, so it is still true on the
-    // frames right after take-off and would otherwise end the jump before the character had left the floor.
     if (this.isJumping && this._jumpCooldown <= 0 && this.isGrounded) this.isJumping = false
 
-    // Move relative to where the camera looks. Take the pivot's yaw ANGLE rather than its worldForward:
-    // forward must stay flat on XZ, or looking down would walk the character into the floor.
     const pivot = this._findPivot()
-    const yaw = this._pivotYaw(pivot) * Math.PI / 180
-    const forward = [Math.sin(yaw), 0, Math.cos(yaw)]
-    const right = [Math.cos(yaw), 0, -Math.sin(yaw)]
+    const bodyYaw = this._bodyYaw()
+
+    // Hold the camera's world aim against the body's rotation. Any change in body yaw since last frame is
+    // root motion from a turn clip (this script's own MOVING rotation is compensated inside _faceBodyToYaw,
+    // and excluded below by stamping _lastBodyYaw after it). The pivot is a child, so subtracting the body's
+    // delta from its local yaw leaves its WORLD yaw — the look direction — untouched.
+    const bodyDelta = this._shortestAngle(bodyYaw - this._lastBodyYaw)
+    if (pivot && this._hasYaw(pivot) && Math.abs(bodyDelta) > 1e-4)
+      (pivot as any).yaw = this._shortestAngle((pivot as any).yaw - bodyDelta)
+
+    // World look direction = the body's yaw plus the pivot's local yaw (it is a child of the body). This is
+    // "forward" for movement and the target the body turns to face while moving.
+    const worldAim = pivot ? this._shortestAngle(bodyYaw + this._pivotYaw(pivot)) : bodyYaw
+    const yawRad = worldAim * Math.PI / 180
+    const forward = [Math.sin(yawRad), 0, Math.cos(yawRad)]
+    const right = [Math.cos(yawRad), 0, -Math.sin(yawRad)]
 
     let axisForward = 0
     let axisRight = 0
@@ -115,31 +135,49 @@ export default class ThirdPersonPlayableNode extends Node {
     if (input.isKeyPressed('KeyD')) axisRight -= 1 // right is cross(forward, up), which points -X at yaw 0
     if (input.isKeyPressed('KeyA')) axisRight += 1
 
+    const moving = axisForward !== 0 || axisRight !== 0
+    const v = this.velocity
+
+    if (!moving) {
+      // Idle: no horizontal drift, camera free. Fire a turn-in-place once it has swung past the threshold;
+      // the root-motion clip does the rotating, so the script only manages `turnRequest`.
+      this.velocity = [0, v[1], 0]
+      this._updateTurnInPlace(worldAim, bodyYaw)
+      // Body unchanged by the script this frame; any yaw change next frame is the turn clip's root motion.
+      this._lastBodyYaw = bodyYaw
+      return
+    }
+
+    // Moving cancels any turn-in-place — the body is about to face the camera under the moving turn instead.
+    this._turning = false
+    this.turnRequest = 0
+
+    // Strafe angle for the field: intent relative to the body's CURRENT facing (which may still be catching
+    // up to the aim). atan2(-axisRight, axisForward) is the intent relative to the aim; add the aim→body
+    // offset to make it relative to the body. Smoothed so the probe glides between strafes.
+    const intent = Math.atan2(-axisRight, axisForward) * 180 / Math.PI
+    const target = this._shortestAngle(intent + this._shortestAngle(worldAim - bodyYaw))
+    const a = this.directionSmoothing > 0 ? 1 - Math.exp(-delta / this.directionSmoothing) : 1
+    this._smoothDir = this._shortestAngle(this._smoothDir + this._shortestAngle(target - this._smoothDir) * a)
+    this.moveDir = this._smoothDir
+
+    // Turn the BODY toward the look direction (and counter-rotate the pivot in the same step, so this rotation
+    // adds no camera lag). Stamp _lastBodyYaw with the commanded yaw so the top-of-frame counter-rotation next
+    // frame ignores it — it was already compensated here.
+    this._lastBodyYaw = this._faceBodyToYaw(worldAim, this.turnSpeed, delta, pivot)
+
+    // World-space travel direction, camera-relative — the velocity math is unchanged from a face-your-movement
+    // controller; only the facing differs.
     let dirX = forward[0] * axisForward + right[0] * axisRight
     let dirZ = forward[2] * axisForward + right[2] * axisRight
     const length = Math.hypot(dirX, dirZ)
+    dirX /= length
+    dirZ /= length
 
     const running = input.isKeyPressed('ShiftLeft')
     const speed = running ? this.runSpeed : this.walkSpeed
 
-    // Keep the vertical component: it belongs to gravity and the jump. Only steer the horizontal plane.
-    const v = this.velocity
-    if (length === 0) {
-      this.velocity = [0, v[1], 0]
-      // moveSpeed is NOT zeroed here — it is measured at the top of onUpdate and decays on its own as the
-      // body actually slows. Forcing it to 0 the instant the key is released would cut the walk animation
-      // off a frame before the character has stopped moving.
-      return
-    }
-
-    dirX /= length
-    dirZ /= length
-    this._faceDirection(dirX, dirZ, delta)
-
-    // Travel ALONG the ground rather than horizontally through it: project the direction onto the surface.
-    // On the flat this changes nothing (the normal is up), but on a slope a purely horizontal velocity either
-    // grinds into the uphill face or sails off the downhill one — and going airborne is what made downhill
-    // faster than uphill, since a body out of contact pays no friction.
+    // Travel ALONG the ground rather than horizontally through it: project onto the surface.
     const n = this.groundNormal
     const into = dirX * n[0] + dirZ * n[2]
     let moveX = dirX - n[0] * into
@@ -148,24 +186,62 @@ export default class ThirdPersonPlayableNode extends Node {
     const slopeLength = Math.hypot(moveX, moveY, moveZ)
     if (slopeLength > 0) { moveX /= slopeLength; moveY /= slopeLength; moveZ /= slopeLength }
 
-    // Y is only ours while we are actually on the ground and not mid-jump. The cooldown is what protects the
-    // jump: `moveY` would otherwise overwrite the impulse on the very next frame. Testing `v[1] > 0` instead
-    // would not work — climbing a slope also drives Y positive.
     const follow = this.isGrounded && this._jumpCooldown <= 0
     this.velocity = follow
       ? [moveX * speed, moveY * speed, moveZ * speed]
       : [dirX * speed, v[1], dirZ * speed]
-    // No moveSpeed write here on purpose. This is the COMMANDED velocity; what the body does with it is
-    // settled by the solver, and that is what the measurement at the top of onUpdate reports next frame.
   }
 
   /**
-   * The child whose yaw defines "forward". Prefers `pivotName`, but falls back to whichever child holds the
-   * Camera, so renaming the pivot in the editor can't silently pin forward to the world +Z axis.
+   * Idle turn-in-place: decide WHICH turn clip should play and hold its code until the body has caught the
+   * camera. It does not rotate anything — the turn clip's root motion rotates the body, and the counter-
+   * rotation at the top of onUpdate keeps the camera still while it does. Hysteresis (fire at the threshold,
+   * clear near 0) stops it chattering when the camera hovers at the threshold.
+   */
+  private _updateTurnInPlace(worldAim: number, bodyYaw: number): void {
+    const diff = this._shortestAngle(worldAim - bodyYaw)
+    if (!this._turning) {
+      if (Math.abs(diff) < this.turnThreshold) return
+      this._turning = true
+      const magnitude180 = Math.abs(diff) >= 135
+      const side = diff > 0 ? 1 : -1 // +yaw turns toward +X, i.e. to the character's right
+      this.turnRequest = side * (magnitude180 ? 2 : 1)
+    } else if (Math.abs(diff) < 10) {
+      // The root motion has brought the body within a few degrees of the aim — end the turn.
+      this._turning = false
+      this.turnRequest = 0
+    }
+  }
+
+  /**
+   * Rotate the body toward `targetYaw` at most `speed` deg this frame, pushing the rotation into the physics
+   * body (setRotation does that). Counter-rotates the pivot by the SAME step in the same call, so a moving
+   * turn holds the camera with no one-frame lag. Returns the yaw it commanded.
    *
-   * Deliberately re-resolved each frame rather than cached in a field: a field holding a Node would be picked
-   * up by the reflection system and serialized into scriptVars, which is circular. The scan is a handful of
-   * children deep.
+   * Writes the yaw with setRotation, which is full-range on the way IN (fromEuler) — only READING rotation[1]
+   * folds past ±90°, and this never does: body yaw is read through worldForward (see _bodyYaw).
+   */
+  private _faceBodyToYaw(targetYaw: number, speed: number, delta: number, pivot: Node | null): number {
+    const cur = this._bodyYaw()
+    const diff = this._shortestAngle(targetYaw - cur)
+    const maxStep = speed * delta
+    const step = Math.abs(diff) > maxStep ? Math.sign(diff) * maxStep : diff
+    const newYaw = this._shortestAngle(cur + step)
+    this.setRotation([0, newYaw, 0])
+    if (pivot && this._hasYaw(pivot)) (pivot as any).yaw = this._shortestAngle((pivot as any).yaw - step)
+    return newYaw
+  }
+
+  /** This body's world yaw in DEGREES, read from worldForward so it is full-range (never rotation[1]). */
+  private _bodyYaw(): number {
+    const f = this.worldForward
+    return Math.atan2(f[0], f[2]) * 180 / Math.PI
+  }
+
+  /**
+   * The child whose yaw contributes the look direction. Prefers `pivotName`, falls back to whichever child
+   * holds the Camera. Re-resolved each frame rather than cached in a field: a field holding a Node would be
+   * picked up by the reflection system and serialized into scriptVars, which is circular.
    */
   private _findPivot(): Node | null {
     const named = this.children.find(child => child.name === this.pivotName)
@@ -173,16 +249,14 @@ export default class ThirdPersonPlayableNode extends Node {
     return this.children.find(child => this._holdsCamera(child)) || null
   }
 
+  private _hasYaw(pivot: Node): boolean {
+    return typeof (pivot as any).yaw === 'number' && isFinite((pivot as any).yaw)
+  }
+
   /**
-   * The pivot's heading in DEGREES.
-   *
-   * A Camera Rig pivot exposes `yaw` directly, and that is the value to use. Reading `rotation[1]`
-   * off a rig would break past a quarter turn: the rig orients itself with a quaternion, and the
-   * engine's euler decomposition (Rz·Ry·Rx) can only express |yaw| <= 90 — beyond that the excess
-   * folds into pitch and roll, so a pivot turned 179° reads as 1° and the character walks backwards.
-   *
-   * Plain-Node pivots (the pre-rig version of ThirdPersonCameraPivot) set their euler directly, so
-   * for those `rotation[1]` is still both correct and full-range.
+   * The pivot's LOCAL heading in degrees. A Camera Rig exposes `yaw` directly; reading `rotation[1]` off a rig
+   * folds past a quarter turn (the euler decomposition can only express |yaw| ≤ 90). Plain-Node pivots set
+   * their euler directly, so `rotation[1]` is correct and full-range for those.
    */
   private _pivotYaw(pivot: Node | null): number {
     if (!pivot) return 0
@@ -195,25 +269,11 @@ export default class ThirdPersonPlayableNode extends Node {
     return node.children.some(child => this._holdsCamera(child))
   }
 
-  /**
-   * Turn the mesh towards the direction of travel, at most turnSpeed per second.
-   *
-   * Only the Model child rotates — this node never does. That is what lets the Camera Pivot own its own
-   * heading: as a child, any yaw here would be inherited and drag the camera round with the character.
-   */
-  private _faceDirection(dirX: number, dirZ: number, delta: number): void {
-    const target = Math.atan2(dirX, dirZ) * 180 / Math.PI
-    const maxStep = this.turnSpeed * delta
-
-    for (const model of this.children.filter(child => child.nodeType === 'model')) {
-      let angle = model.rotation[1]
-      let difference = target - angle
-      // Take the short way round, so turning from 179° to -179° is 2°, not 358°.
-      while (difference > 180) difference -= 360
-      while (difference < -180) difference += 360
-
-      angle += Math.abs(difference) > maxStep ? Math.sign(difference) * maxStep : difference
-      model.setRotation([0, angle, 0])
-    }
+  /** Signed shortest angular distance in degrees, in (-180, 180]. Doubles as a wrap for a single angle. */
+  private _shortestAngle(a: number): number {
+    let d = a % 360
+    if (d > 180) d -= 360
+    if (d < -180) d += 360
+    return d
   }
 }

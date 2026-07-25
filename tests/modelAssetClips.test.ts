@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     skinnedModelJsonOf, uniqueClipName, assetClipNames,
-    assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithBoneNames,
+    assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames,
 } from '../editor/src/utils/modelClips';
 
 // Patching a model asset's serialized clip list. This is the half of "clips belong to the asset" that has
@@ -162,5 +162,39 @@ describe('assetClipNames', () => {
     it('handles a null clip list and a missing asset', () => {
         expect(assetClipNames(asset(null))).toEqual([]);
         expect(assetClipNames(undefined)).toEqual([]);
+    });
+});
+
+describe('assetWithClipRootMotion', () => {
+    const rootMotionOf = (a: any, name: string) =>
+        skinnedModelJsonOf(a.nodeJson).animations.find((c: any) => c.name === name)?.rootMotion;
+
+    it('sets the flag on the named clip only', () => {
+        const patched = assetWithClipRootMotion(asset(['idle', 'turn']), 'turn', true);
+        expect(rootMotionOf(patched, 'turn')).toBe(true);
+        expect(rootMotionOf(patched, 'idle')).toBeUndefined();
+    });
+
+    it('clears the flag back off', () => {
+        const on = assetWithClipRootMotion(asset(['turn']), 'turn', true);
+        const off = assetWithClipRootMotion(on, 'turn', false);
+        expect(rootMotionOf(off, 'turn')).toBe(false);
+    });
+
+    it('is a no-op (same reference) for an unknown name', () => {
+        const a = asset(['idle']);
+        expect(assetWithClipRootMotion(a, 'nope', true)).toBe(a);
+    });
+
+    it('is a no-op when the value already matches', () => {
+        const on = assetWithClipRootMotion(asset(['turn']), 'turn', true);
+        expect(assetWithClipRootMotion(on, 'turn', true)).toBe(on);
+    });
+
+    it('never mutates the input', () => {
+        const original = asset(['turn']);
+        const before = JSON.stringify(original);
+        assetWithClipRootMotion(original, 'turn', true);
+        expect(JSON.stringify(original)).toBe(before);
     });
 });

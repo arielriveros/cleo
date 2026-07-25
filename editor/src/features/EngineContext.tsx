@@ -30,7 +30,7 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithBoneNames } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { AnimationFieldAsset, buildAnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { groupImportFiles } from "../utils/importGrouping";
@@ -512,6 +512,7 @@ const EngineContext = createContext<{
   importSkeletonNames: (files: File[]) => Promise<void>;
   renameAnimationClip: (oldName: string, newName: string) => string;
   removeAnimationClip: (name: string) => void;
+  setClipRootMotion: (name: string, on: boolean) => void;
   pendingAnimationImport: PendingAnimationImportView | null;
   resolveAnimationImport: (decision: AnimationImportDecision | null) => void;
   // Project persistence
@@ -652,6 +653,7 @@ const EngineContext = createContext<{
     importSkeletonNames: async () => {},
     renameAnimationClip: (o) => o,
     removeAnimationClip: () => {},
+    setClipRootMotion: () => {},
     pendingAnimationImport: null,
     resolveAnimationImport: () => {},
     savingState: 'idle',
@@ -1728,6 +1730,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
 
     if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-remove-clip');
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+  };
+
+  // Toggle root motion on an animation clip (preview clone + source node + asset + placed instances).
+  const setClipRootMotion = (name: string, on: boolean) => {
+    const rt = tabRuntimeRef.current.get(activeTabId);
+    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) cloneNode.model.setAnimationRootMotion(name, on);
+    const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
+    if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.setAnimationRootMotion(name, on);
+
+    const link = animationSourceAsset(src);
+    if (link) {
+      updateModel(link.id, assetWithClipRootMotion(link.asset, name, on));
+      propagateModelClips(link.id, m => { m.setAnimationRootMotion(name, on); }, src);
+    }
+
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-clip-root-motion');
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
 
@@ -4074,6 +4094,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       importSkeletonNames,
       renameAnimationClip,
       removeAnimationClip,
+      setClipRootMotion,
       pendingAnimationImport,
       resolveAnimationImport,
       replaceProjectMeta,

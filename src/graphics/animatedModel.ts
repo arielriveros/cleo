@@ -21,6 +21,13 @@ export interface Animation {
     name: string;
     samplers: AnimationSampler[];
     channels: AnimationChannel[];
+    /**
+     * When true, the Animator extracts this clip's ROOT bone translation/rotation and applies it to the
+     * character (the nearest bodied ancestor, else the model node) instead of posing it in place — so a clip
+     * authored with root motion (e.g. a turn-in-place or a stepping locomotion) actually moves the character.
+     * Plain data, so it rides the model-asset save through {@link AnimatedModel.serialize}/{@link parse}.
+     */
+    rootMotion?: boolean;
 }
 
 // Skinning data structures
@@ -516,6 +523,14 @@ export class AnimatedModel {
         const stored: Animation = { ...clip, name };
         this._animations.push(stored);
         return stored;
+    }
+
+    /** Toggle root-motion extraction on a clip by name. Returns true if the clip exists. */
+    public setAnimationRootMotion(name: string, on: boolean): boolean {
+        const clip = this._animations.find(a => a.name === name);
+        if (!clip) return false;
+        clip.rootMotion = on;
+        return true;
     }
 
     /** Remove an animation clip by name. Returns true if one was removed. */

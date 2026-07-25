@@ -97,6 +97,10 @@ interface StateMachineContextValue {
 
   renameClip: (oldName: string, typed: string) => void
   deleteClip: (name: string) => void
+  /** Whether a clip has root motion enabled (read live off the model). */
+  rootMotionOf: (name: string) => boolean
+  /** Toggle root motion on a clip — patches the model asset and every placed instance. */
+  toggleClipRootMotion: (name: string, on: boolean) => void
 
   importAnimationFiles: (files: File[]) => void
   importSkeletonNames: (files: File[]) => void
@@ -192,7 +196,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const {
     editorScene, animationTargetId, animationSourceScene, animationSourceId,
     commitAnimationStateMachine, importAnimationFiles, importSkeletonNames,
-    renameAnimationClip, removeAnimationClip, closeTab, activeTabId, eventEmitter,
+    renameAnimationClip, removeAnimationClip, setClipRootMotion, closeTab, activeTabId, eventEmitter,
     scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply,
   } = useCleoEngine()
   const { animationFields } = useAssetLibrary()
@@ -476,6 +480,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     }))
   }
 
+  // Root motion is read straight off the live model; the ANIM_CLIPS_CHANGED force-render above reflects a
+  // toggle without a working-copy edit, since the flag lives on the clip, not in the state machine.
+  const rootMotionOf = (name: string) => !!target?.model.animations.find(a => a.name === name)?.rootMotion
+  const toggleClipRootMotion = (name: string, on: boolean) => setClipRootMotion(name, on)
+
   const fieldOf = (id: string | undefined) => (id ? animationFields.find(f => f.id === id) : undefined)
 
   const value: StateMachineContextValue = {
@@ -487,7 +496,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
     addCondition, addGroup, setCondition, setGroupOp, removeNode,
     addEvent, setEvent, removeEvent,
-    renameClip, deleteClip,
+    renameClip, deleteClip, rootMotionOf, toggleClipRootMotion,
     importAnimationFiles, importSkeletonNames, closeTab, activeTabId,
   }
 

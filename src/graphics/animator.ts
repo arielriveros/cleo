@@ -440,6 +440,18 @@ class Bone {
         return finalScale;
     }
     
+    /**
+     * Sample this bone's translation + rotation at an arbitrary time WITHOUT touching `_localTransform`.
+     * Used by root-motion extraction to read the root bone at two times per frame; reuses the same
+     * interpolation the normal pose path uses, so the extracted delta matches what would have been posed.
+     */
+    public sampleTR(time: number): { t: vec3; r: quat } {
+        return { t: vec3.clone(this._interpolatePosition(time)), r: quat.clone(this._interpolateRotation(time)) };
+    }
+
+    /** Overwrite the local transform directly — root motion locks the root bone to a fixed pose with this. */
+    public setLocalTransform(m: mat4): void { mat4.copy(this._localTransform, m); }
+
     public get localTransform(): mat4 { return this._localTransform; }
     public get name(): string { return this._name; }
     public get id(): number { return this._id; }
@@ -533,6 +545,18 @@ export class Animator {
     /** The field being cross-faded OUT of, mirroring _previousBones for the single-clip path. */
     private _previousFieldEntries: FieldEntry[] | null = null;
     private _previousFieldPhase: number = 0;
+
+    // ---- Root motion ----
+    //
+    // When the current clip is flagged `rootMotion`, the ROOT bone's per-frame translation/rotation delta is
+    // applied to the character (the nearest bodied ancestor, else the model node) and the root bone is then
+    // locked to its clip-start pose so the mesh is not also moved in model space. Single-clip playback only;
+    // a field blends several clips and has no single root to extract.
+    private _rootMotionActive: boolean = false;
+    private _rootBoneName: string | null = null;
+    private _rootRefT: vec3 = vec3.create();
+    private _rootRefR: quat = quat.create();
+    private _rootRefS: vec3 = vec3.fromValues(1, 1, 1);
 
     constructor(animatedModel: AnimatedModel, node?: Node) {
         this._animatedModel = animatedModel;
@@ -629,8 +653,12 @@ export class Animator {
 
         // Build bone map from animation channels
         this._buildBoneMap(animation);
+
+        // Arm root motion for this clip, if it carries it: lock onto its root bone and snapshot the pose the
+        // extraction holds the mesh at while the delta drives the character.
+        this._setupRootMotion(animation);
     }
-    
+
     /**
      * Play animation by name
      */
@@ -783,6 +811,11 @@ export class Animator {
 
         // A different field means different clips; the cached bone maps are for the old set.
         if (field !== this._fieldDef) this._fieldBoneCache.clear();
+
+        // A field blends several clips and has no single root to extract; make sure a clip's root motion does
+        // not linger and keep driving the character while the field plays.
+        this._rootMotionActive = false;
+        this._rootBoneName = null;
 
         this._fieldDef = field;
         this._fieldInputs = inputs ?? null;
@@ -1125,6 +1158,9 @@ export class Animator {
             for (const bone of this._bones.values()) {
                 bone.update(this._currentTime);
             }
+            // Root motion runs AFTER the pose loop: it drives the character by this frame's root delta, then
+            // overwrites the root bone's just-posed transform with the locked reference so the mesh stays put.
+            if (this._rootMotionActive) this._applyRootMotion(prevTime, this._currentTime, duration, looped);
         }
 
         // If blending, also update the previous pose source. The outgoing motion keeps playing under the
@@ -1159,6 +1195,120 @@ export class Animator {
 
         // Turn the current bone local transforms into final skinning matrices.
         this._recomputePose();
+    }
+
+    // ---- Root motion -----------------------------------------------------------------------------
+
+    /**
+     * Arm (or disarm) root motion for the clip that just started. Finds the clip's root bone and captures the
+     * pose the extraction will lock the mesh to. Disarms when the clip carries no root motion or has no root.
+     */
+    private _setupRootMotion(animation: Animation): void {
+        this._rootMotionActive = false;
+        this._rootBoneName = null;
+        if (!animation.rootMotion) return;
+
+        const rootName = this._findRootMotionBone(animation);
+        const bone = rootName ? this._bones.get(rootName) : null;
+        if (!bone) return;
+
+        const ref = bone.sampleTR(0);
+        vec3.copy(this._rootRefT, ref.t);
+        quat.copy(this._rootRefR, ref.r);
+        // The root bone's animation channels rarely touch scale; take it from the bind pose so the locked
+        // matrix reproduces the rig's own scale rather than a bare 1.
+        vec3.set(this._rootRefS, 1, 1, 1);
+        const rest = this._skin?.nodeTransforms?.get(bone.id);
+        if (rest) mat4.getScaling(this._rootRefS, rest);
+
+        this._rootBoneName = rootName;
+        this._rootMotionActive = true;
+    }
+
+    /**
+     * The bone name of the clip's root-motion bone: the HIGHEST joint this clip actually animates (one whose
+     * ancestors are all un-animated). That handles both a rig whose root bone carries the motion and the
+     * common "static Armature → animated Hips" layout, where the structural skeleton root has no channels.
+     * Returns null when the clip animates no joints (nothing to extract).
+     */
+    private _findRootMotionBone(animation: Animation): string | null {
+        if (!this._skin) return null;
+        const animated = new Set(animation.channels.map(c => c.targetNodeIndex));
+        const parentOf = new Map<number, number | undefined>();
+        for (const j of this._skin.joints) parentOf.set(j.nodeIndex, j.parentIndex);
+
+        const isHighestAnimated = (nodeIndex: number): boolean => {
+            let p = parentOf.get(nodeIndex);
+            while (p !== undefined) {
+                if (animated.has(p)) return false;
+                p = parentOf.get(p);
+            }
+            return true;
+        };
+
+        // Prefer the declared skeleton root when the clip animates it directly.
+        const skel = this._skin.skeleton;
+        if (skel !== undefined && animated.has(skel) && isHighestAnimated(skel)) return `bone_${skel}`;
+        for (const j of this._skin.joints) {
+            if (animated.has(j.nodeIndex) && isHighestAnimated(j.nodeIndex)) return `bone_${j.nodeIndex}`;
+        }
+        return null;
+    }
+
+    /**
+     * Apply this frame's root-bone delta to the character, then lock the root bone in place.
+     *
+     * The delta is the change in the root bone's local (= model-space) transform between the previous and
+     * current times; on a loop wrap it is composed across the seam so a cycling clip advances smoothly instead
+     * of snapping back. It drives the nearest bodied ancestor (else the model node); the translation is rotated
+     * into the target's frame first. The target's LOCAL rotation is used, which is exact while its parent is
+     * unrotated — true for the character rigs this serves (a Model under an unrotated root, or a body at the
+     * scene root). Finally the root bone is pinned to the clip-start reference so the mesh does not double-move.
+     */
+    private _applyRootMotion(prevTime: number, curTime: number, duration: number, looped: boolean): void {
+        const bone = this._rootBoneName ? this._bones.get(this._rootBoneName) : null;
+        if (!bone) return;
+
+        const deltaT = vec3.create();
+        const deltaR = quat.create();
+        const cur = bone.sampleTR(curTime);
+        const prev = bone.sampleTR(prevTime);
+
+        if (looped && duration > 0) {
+            // Two spans across the loop point: prev→end and start→cur.
+            const end = bone.sampleTR(duration);
+            const start = bone.sampleTR(0);
+            vec3.sub(deltaT, end.t, prev.t);
+            const seg2 = vec3.create();
+            vec3.sub(seg2, cur.t, start.t);
+            vec3.add(deltaT, deltaT, seg2);
+
+            const spanEnd = quat.create();
+            quat.multiply(spanEnd, end.r, quat.invert(quat.create(), prev.r));
+            const spanStart = quat.create();
+            quat.multiply(spanStart, cur.r, quat.invert(quat.create(), start.r));
+            quat.multiply(deltaR, spanStart, spanEnd);
+        } else {
+            vec3.sub(deltaT, cur.t, prev.t);
+            quat.multiply(deltaR, cur.r, quat.invert(quat.create(), prev.r));
+        }
+        quat.normalize(deltaR, deltaR);
+
+        const target = this._nearestBodiedNode() ?? this._node;
+        if (target) {
+            const worldDelta = vec3.transformQuat(vec3.create(), deltaT, target.quaternion);
+            target.setPosition(vec3.add(vec3.create(), target.position, worldDelta));
+            const newQ = quat.normalize(quat.create(), quat.multiply(quat.create(), target.quaternion, deltaR));
+            target.setQuaternion(newQ);
+            // setQuaternion deliberately does not push into the body (see Node), so a bodied target's physics
+            // orientation must be set explicitly. setPosition already pushed the translation.
+            if (target.body) target.body.setQuaternion(newQ);
+        }
+
+        // Pin the root bone to its start pose: the character carries the motion, the mesh renders in place.
+        const locked = mat4.create();
+        mat4.fromRotationTranslationScale(locked, this._rootRefR, this._rootRefT, this._rootRefS);
+        bone.setLocalTransform(locked);
     }
 
     /** Drop a cross-fade in flight and everything it was fading out of. */

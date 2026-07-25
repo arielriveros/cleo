@@ -205,6 +205,7 @@ uniform mat4  u_invViewProj;       // clip -> world (reconstruct rays / position
 uniform vec3  u_sunDir;            // world dir TOWARD the sun ((0,0,0) when there is none)
 uniform vec2  u_sunUV;             // sun screen-space UV (only meaningful while u_sunVisible > 0)
 uniform float u_sunVisible;        // 0..1 edge fade; 0 = behind camera / far off-screen / no sun
+uniform float u_exposure;          // camera exposure the final present applies (present = toSrgb(aces(hdr * u_exposure)))
 
 vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
 vec3 toSrgb(vec3 c)   { return pow(c, vec3(1.0 / 2.2)); }
@@ -555,7 +556,8 @@ const SCREEN_SCRATCH = `// SCREEN custom material: a fullscreen post-process pas
 // Screen-Space Materials list (in linear HDR, before tonemapping).
 // Available: fragTexCoord, u_screenTexture (previous pass color), u_depth (opaque scene depth, 1.0 = sky),
 //   u_time, u_resolution, u_viewPos, u_invViewProj, reconstructWorldPos(uv, depth),
-//   u_sunDir / u_sunUV / u_sunVisible (sun world dir, screen UV, 0..1 visibility fade).
+//   u_sunDir / u_sunUV / u_sunVisible (sun world dir, screen UV, 0..1 visibility fade),
+//   u_exposure (the exposure the final present applies: present = toSrgb(aces(hdr * u_exposure))).
 // Declare your own inputs in the Uniforms panel; they appear here as u_<name>.
 vec4 fragment() {
     vec3 color = texture(u_screenTexture, fragTexCoord).rgb;

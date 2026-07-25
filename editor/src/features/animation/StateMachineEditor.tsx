@@ -41,7 +41,7 @@ function ApplyBar() {
 
 // ---- Clips panel ------------------------------------------------------------------------------------
 export function ClipsPanel() {
-  const { target, clips, hasBoneNames, renameClip, deleteClip, importAnimationFiles, importSkeletonNames } = useStateMachine()
+  const { target, clips, hasBoneNames, renameClip, deleteClip, rootMotionOf, toggleClipRootMotion, importAnimationFiles, importSkeletonNames } = useStateMachine()
   if (!target) return <NoModel />
 
   return (
@@ -69,6 +69,9 @@ export function ClipsPanel() {
               <input className={input + ' flex-1'} defaultValue={name} title='Rename clip (Enter to apply)'
                 onBlur={e => renameClip(name, e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+              <span className='shrink-0' title='Root motion — apply this clip&#39;s root bone translation/rotation to the character (body if it has one) instead of playing it in place'>
+                <Toggle checked={rootMotionOf(name)} onChange={on => toggleClipRootMotion(name, on)} />
+              </span>
               <button className={danger} title='Delete clip' onClick={() => deleteClip(name)}>✕</button>
             </div>
           ))}

@@ -20,7 +20,7 @@ interface CloudsState {
   phaseG: number; silverIntensity: number; silverSpread: number;
   powderStrength: number; absorption: number;
   windDirection: Vec3; windSpeed: number; detailWindFactor: number;
-  steps: number; lightSteps: number; maxDistance: number; jitter: boolean;
+  steps: number; lightSteps: number; maxDistance: number; jitter: boolean; resolutionScale: number;
   enabled: boolean; opacity: number;
 }
 
@@ -37,6 +37,7 @@ function readNode(node: VolumetricCloudsNode): CloudsState {
     powderStrength: node.powderStrength, absorption: node.absorption,
     windDirection: node.windDirection, windSpeed: node.windSpeed, detailWindFactor: node.detailWindFactor,
     steps: node.steps, lightSteps: node.lightSteps, maxDistance: node.maxDistance, jitter: node.jitter,
+    resolutionScale: node.resolutionScale,
     enabled: node.enabled, opacity: node.opacity
   }
 }
@@ -131,6 +132,9 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {slider('Detail Wind Factor', 'detailWindFactor', 0, 5, 0.05)}
 
         {header('Quality')}
+        <Slider label='Resolution Scale' min={0.25} max={1} step={0.05} value={state.resolutionScale}
+          labelClassName='w-[104px]' readout={(v) => `${Math.round(v * 100)}%`}
+          onChange={(v) => apply({ resolutionScale: v })} />
         {slider('March Steps', 'steps', 16, 192, 1, 0)}
         {slider('Light Steps', 'lightSteps', 2, 12, 1, 0)}
         {slider('Max Distance', 'maxDistance', 1000, 120000, 500, 0)}

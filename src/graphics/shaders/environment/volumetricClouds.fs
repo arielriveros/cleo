@@ -283,6 +283,8 @@ void main() {
     if (alpha <= 0.0) { fragColor = vec4(0.0); return; }
 
     // The scene buffer is LINEAR HDR now — output linear scattered radiance and let the single final
-    // tonemapper handle exposure/tonemap/gamma like every other surface.
-    fragColor = vec4(scatteredLight, alpha);
+    // tonemapper handle exposure/tonemap/gamma like every other surface. Output is PREMULTIPLIED
+    // (composited with ONE, ONE_MINUS_SRC_ALPHA) so bilinear upsampling from the reduced-resolution
+    // path doesn't fringe cloud silhouettes toward black.
+    fragColor = vec4(scatteredLight * alpha, alpha);
 }

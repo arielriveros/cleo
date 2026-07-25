@@ -231,6 +231,9 @@ export class Renderer {
     private _compose_FBOs: Framebuffer[];
     private _blur_FBOs: Framebuffer[];
     private _bloomFBO: Framebuffer;
+    // Reduced-resolution volumetric-clouds raymarch target (lazily sized to the node's resolutionScale;
+    // upsampled + composited into the scene buffer). Only used when resolutionScale < 1.
+    private _cloudsFBO: Framebuffer;
 
     // Motion blur: full-res per-pixel velocity + TileMax/NeighborMax (both tile-res).
     private _velocityFBO!: Framebuffer;
@@ -370,6 +373,8 @@ export class Renderer {
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
         this._bloomFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._blur_FBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }), new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } })];
+        // Same config as the blur scratch buffers (LINEAR-filtered float) so the low-res clouds upsample smoothly.
+        this._cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._compose_FBOs = [new Framebuffer({ colorTextureOptions: {precision: 'high'}}), new Framebuffer({ colorTextureOptions: {precision: 'high'}})];
         // Motion blur velocity buffers (signed velocity -> float precision).
         this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
@@ -1956,8 +1961,10 @@ export class Renderer {
         GLState.depthMask(false);
         GLState.enable(gl.BLEND);
         // Composite cloud coverage into the bloom-mask alpha (clouds are bloom-eligible) instead of the
-        // default mask-preserving alpha blend: RGB straight-alpha, ALPHA = coverage over what's behind.
-        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        // default mask-preserving alpha blend. The shader outputs PREMULTIPLIED color, so both RGB and
+        // the bloom-mask ALPHA use ONE, ONE_MINUS_SRC_ALPHA (premultiplied "over"); mathematically
+        // identical to the old straight-alpha composite, and correct when bilinearly upsampled.
+        gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
         this._shaderManager.bind('volumetricClouds');
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
@@ -2046,7 +2053,31 @@ export class Renderer {
         // Render
         this._shaderManager.setUniform('u_opacity', node.opacity);
 
-        this._screenQuad.draw();
+        const scale = node.resolutionScale;
+        if (scale >= 0.999) {
+            // Full resolution: raymarch straight into the bound scene buffer (premultiplied "over" set above).
+            this._screenQuad.draw();
+        } else {
+            // Reduced resolution: raymarch into a low-res target, then bilinear-upsample + composite. Fewer
+            // rays (scale per axis) is the whole point — the raymarch is the pass's dominant GPU cost.
+            const w = Math.max(1, Math.round(this._renderWidth * scale));
+            const h = Math.max(1, Math.round(this._renderHeight * scale));
+            // Pass A: raymarch over transparent black (blend off — the shader's premultiplied output is written directly).
+            if (this._cloudsFBO.width !== w || this._cloudsFBO.height !== h) this._cloudsFBO.resize(w, h);
+            this._cloudsFBO.bind();
+            GLState.disable(gl.BLEND);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._screenQuad.draw();
+            // Pass B: LINEAR-upsample the low-res clouds and premultiplied-"over" composite them into the scene buffer.
+            this._sceneFBO.bind();
+            GLState.enable(gl.BLEND);
+            gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+            this._shaderManager.bind('screen');
+            this._shaderManager.setUniform('u_screenTexture', 0);
+            this._cloudsFBO.colors[0].bind(0);
+            this._screenQuad.draw();
+        }
 
         // Restore the state the following opaque/transparent overlay passes expect (incl. the default
         // mask-preserving alpha blend so later overlays don't clobber the bloom mask).
@@ -2914,6 +2945,7 @@ export class Renderer {
             this._shaderManager.setUniform('u_sunDir', sun.dir);
             this._shaderManager.setUniform('u_sunUV', sun.uv);
             this._shaderManager.setUniform('u_sunVisible', sun.visible);
+            this._shaderManager.setUniform('u_exposure', this._exposure); // lets a pass invert the final present resolve
             this._applyCustomMaterial(mat); // u_time, u_viewPos + user uniforms (samplers from unit 9 up)
             this._screenQuad.draw();
             src = dst;
