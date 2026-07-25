@@ -242,6 +242,13 @@ export type BodyDescription = {
    */
   simulatePhysics?: boolean;
   cameraCollision?: boolean;
+  /**
+   * Meters below the collider's feet that still count as grounded. Optional and defaulting to `0` (off)
+   * for the same reason as the fields above: scenes saved before it existed have none, and the engine
+   * treats absent as 0 — grounding from solver contacts only, exactly as those scenes behaved. A small
+   * value (~0.1–0.2) probes the ground each frame so `isGrounded` stops flickering under a resting body.
+   */
+  groundProbeDistance?: number;
   shapes: ShapeDescription[];
 }
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | CapsuleShapeDescription | PlaneShapeDescription | ConvexShapeDescription;

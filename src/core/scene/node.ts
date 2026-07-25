@@ -1124,7 +1124,9 @@ export class Node {
         // Likewise for the two channels — absent means true, so every pre-existing scene keeps
         // simulating and keeps blocking the camera exactly as it did.
         json.body.simulatePhysics,
-        json.body.cameraCollision
+        json.body.cameraCollision,
+        // Absent in scenes saved before the ground probe existed; RigidBody defaults it to 0 (off).
+        json.body.groundProbeDistance
       ));
     }
 
@@ -1796,6 +1798,10 @@ export class Node {
    * @param cameraCollision   Block a camera rig's collision probe. Default `true`. Independent of
    *                          `simulatePhysics`, so an object can be solid to the camera but not the
    *                          character, or the reverse.
+   * @param groundProbeDistance Meters below the collider's feet that still count as grounded, default
+   *                          `0` (off — grounding uses solver contacts only). A small value (~0.1–0.2)
+   *                          removes `isGrounded` flicker for a character resting on terrain by probing
+   *                          the ground each frame instead of trusting the solver's resting contact.
    * @returns The new body, also available afterwards as {@link body}.
    */
   public setBody(
@@ -1807,7 +1813,8 @@ export class Node {
     friction?: number,
     restitution?: number,
     simulatePhysics?: boolean,
-    cameraCollision?: boolean
+    cameraCollision?: boolean,
+    groundProbeDistance?: number
   ): RigidBody {
     // TODO: Handle the case where the node is a child of another node
     this._body = new RigidBody({
@@ -1819,7 +1826,8 @@ export class Node {
       quaternion: this.worldQuaternion,
       linearConstraints, angularConstraints,
       friction, restitution,
-      simulatePhysics, cameraCollision
+      simulatePhysics, cameraCollision,
+      groundProbeDistance
     }, this);
 
     // handle onCollision event

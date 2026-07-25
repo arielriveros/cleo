@@ -109,6 +109,14 @@ interface RigidBodyConfig {
     simulatePhysics?: boolean;
     /** Block a camera rig's collision probe. Default true. */
     cameraCollision?: boolean;
+    /**
+     * Meters below the collider's feet that still count as grounded. `0` = off — grounding uses the
+     * solver's contacts only, exactly as before. A small value (~0.1–0.2) removes `isGrounded` flicker
+     * for characters resting on terrain: cannon drops a perfectly resting contact for the odd frame, so
+     * instead of only trusting that contact we probe the ground each frame with a short downward raycast.
+     * The probe never vanishes the way a resting contact does, so the grounded stamp stays fresh.
+     */
+    groundProbeDistance?: number;
 }
 
 export class RigidBody extends CBody {
@@ -119,6 +127,8 @@ export class RigidBody extends CBody {
    */
   public readonly friction: number;
   public readonly restitution: number;
+  /** See {@link RigidBodyConfig.groundProbeDistance}. Read by PhysicsSystem's per-frame ground probe. */
+  public readonly groundProbeDistance: number;
 
   constructor(config?: RigidBodyConfig, owner?: Node) {
     super({
@@ -138,6 +148,7 @@ export class RigidBody extends CBody {
     });
     this.friction = config?.friction ?? DEFAULT_FRICTION;
     this.restitution = config?.restitution ?? DEFAULT_RESTITUTION;
+    this.groundProbeDistance = config?.groundProbeDistance ?? 0;
     this.simulatePhysics = config?.simulatePhysics ?? true;
   }
 

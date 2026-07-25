@@ -121,6 +121,8 @@ export default function PhysicsEditor(props: {node: Node}) {
         // Likewise: absent means on, so an older scene behaves identically.
         simulatePhysics: body.simulatePhysics ?? true,
         cameraCollision: body.cameraCollision ?? true,
+        // Absent in scenes saved before the ground probe existed; 0 = off, which is how they behaved.
+        groundProbeDistance: body.groundProbeDistance ?? 0,
         shapes: body.shapes
       })
     }
@@ -140,6 +142,7 @@ export default function PhysicsEditor(props: {node: Node}) {
         restitution: bodyProperties.restitution,
         simulatePhysics: bodyProperties.simulatePhysics,
         cameraCollision: bodyProperties.cameraCollision,
+        groundProbeDistance: bodyProperties.groundProbeDistance,
         shapes: bodyProperties.shapes
       });
       eventEmitter.emit('PHYSICS_CHANGED');
@@ -302,7 +305,7 @@ export default function PhysicsEditor(props: {node: Node}) {
               ? <Hint>Can only add rigid bodies to nodes at root level.</Hint>
               : <>
                   <Hint className='mb-2'>Node does not have a rigid body.</Hint>
-                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, shapes: [] })}>Add Rigid Body</Button>
+                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, groundProbeDistance: 0, shapes: [] })}>Add Rigid Body</Button>
                 </>)
           : <>
               {/* The two channels this body takes part in. Independent on purpose: scenery can block
@@ -326,6 +329,10 @@ export default function PhysicsEditor(props: {node: Node}) {
               <Slider label='Friction' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.friction ?? 0.3} onChange={(v) => setBodyProperties({ ...bodyProperties, friction: v })} />
               {bodyProperties.friction === 0 && <Hint className='mb-1'>Frictionless — nothing will slow this down but damping. What a character wants, since its script sets its own speed.</Hint>}
               <Slider label='Restitution' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.restitution ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, restitution: v })} />
+              <Slider label='Ground probe' labelClassName={LABEL} min={0} max={0.5} step={0.01} value={bodyProperties.groundProbeDistance ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, groundProbeDistance: v })} />
+              {(bodyProperties.groundProbeDistance ?? 0) > 0
+                ? <Hint className='mb-1'>Counts as grounded while the collider's feet are within this distance of solid ground, probed every frame. Removes isGrounded flicker (and false falling animations) for a character resting on terrain.</Hint>
+                : <Hint className='mb-1'>Off — grounding comes from solver contacts only. Raise it (~0.1–0.2) if a resting character flickers to airborne.</Hint>}
               <AxisToggles label='Linear Constraints' value={bodyProperties.linearConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, linearConstraints: v as [number, number, number] })} />
               <AxisToggles label='Angular Constraints' value={bodyProperties.angularConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, angularConstraints: v as [number, number, number] })} />
               <Button variant='danger' size='sm' className='mt-2' onClick={removeBody}>Remove Rigid Body</Button>

@@ -273,6 +273,70 @@ export class PhysicsSystem {
       if (!contact.bj.isTrigger) this._record(contact.bi, dot, [-n.x, -n.y, -n.z]);
       if (!contact.bi.isTrigger) this._record(contact.bj, -dot, [n.x, n.y, n.z]);
     }
+
+    // Ground probe. A resting contact blinks out for the odd frame (see GROUND_GRACE), which is enough
+    // to expire the grace and flip isGrounded to false under a body that never moved — firing an airborne
+    // animation on solid ground. Any body that opted in (groundProbeDistance > 0) also gets a short
+    // downward raycast from its feet, fed into the SAME stamp via _record. Unlike a contact the ray never
+    // vanishes, so the stamp stays fresh and grounded stays true. Off by default (distance 0) so nothing
+    // that did not ask for it pays a raycast or changes behavior.
+    for (const body of world.bodies) {
+      if (!(body instanceof RigidBody) || body.isTrigger || body.groundProbeDistance <= 0) continue;
+      const hit = this._probeGround(body, downX, downY, downZ, body.groundProbeDistance);
+      if (hit) this._record(body, hit.dot, hit.normal);
+    }
+  }
+
+  /**
+   * Short downward raycast from a body's feet along gravity, used to keep {@link isGrounded} stable for
+   * bodies that opted into a groundProbeDistance. Returns the ground-likeness dot (measured against the
+   * world "up", 1 on level ground) and the surface normal of the nearest SOLID hit within the probe
+   * distance below the collider, or null when nothing is under the feet.
+   *
+   * The ray starts at the body centre and runs to just past the collider's lowest point plus the probe
+   * distance, so a hit only counts while the feet are within the threshold of ground. It rejects the body
+   * itself (the ray starts inside its own shape), trigger volumes, and non-solid ghosts.
+   */
+  private _probeGround(
+    body: Body, downX: number, downY: number, downZ: number, probeDistance: number
+  ): { dot: number; normal: [number, number, number] } | null {
+    const world = this._world;
+    if (!world) return null;
+
+    // Distance from the body centre to the collider corner reaching furthest along "down": each AABB axis
+    // independently picks the bound that goes further that way, so this holds for any gravity direction.
+    body.updateAABB();
+    const lo = body.aabb.lowerBound, hi = body.aabb.upperBound, p = body.position;
+    const extent =
+      Math.max(downX * (lo.x - p.x), downX * (hi.x - p.x)) +
+      Math.max(downY * (lo.y - p.y), downY * (hi.y - p.y)) +
+      Math.max(downZ * (lo.z - p.z), downZ * (hi.z - p.z));
+    const reach = extent + probeDistance;
+    if (reach <= 0) return null;
+
+    const rayStart = performance.now();
+    PhysicsSystem._rayFrom.set(p.x, p.y, p.z);
+    PhysicsSystem._rayTo.set(p.x + downX * reach, p.y + downY * reach, p.z + downZ * reach);
+
+    let best: { dot: number; normal: [number, number, number] } | null = null;
+    let bestDist = Infinity;
+    // checkCollisionResponse: only solid bodies are ground — a ghost (simulatePhysics false) is not.
+    world.raycastAll(PhysicsSystem._rayFrom, PhysicsSystem._rayTo, { checkCollisionResponse: true }, (result) => {
+      if (!result.hasHit) return;
+      const b = result.body;
+      if (!b || b === body || b.isTrigger || b.collisionResponse === false) return;
+      if (result.distance >= bestDist) return;
+      bestDist = result.distance;
+      // hitNormalWorld points back up out of the surface toward the ray origin. Its agreement with the
+      // world "up" (= -down) IS the ground-likeness, matching the contact path's dot convention.
+      const n = result.hitNormalWorld;
+      const dot = -(n.x * downX + n.y * downY + n.z * downZ);
+      best = { dot, normal: [n.x, n.y, n.z] };
+    });
+
+    physicsStats.rayMs += performance.now() - rayStart;
+    physicsStats.rayCount++;
+    return best;
   }
 
   private _record(body: Body, dot: number, normal: [number, number, number]): void {
