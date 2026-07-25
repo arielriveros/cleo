@@ -8,8 +8,8 @@ import ModelIcon from '../../icons/model.png'
 import LightIcon from '../../icons/light.png'
 import SkyboxIcon from '../../icons/skybox.png'
 import CloudsIcon from '../../icons/clouds.png'
-import SkyAtmosphereIcon from '../../icons/sky-atmosphere.png'
 import SpriteIcon from '../../icons/sprite.png'
+import { SkyIcon } from '../nodeInspector/sectionIcons'
 import VisibleIcon from '../../icons/visible.png'
 import HiddenIcon from '../../icons/hidden.png'
 import Collapsable from '../../components/Collapsable';
@@ -95,7 +95,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
         { props.nodeType === 'lightProbe' && <img src={SkyboxIcon} alt='light probe' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'volumetricClouds' && <img src={CloudsIcon} alt='volumetric clouds' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'skyAtmosphere' && <img src={SkyAtmosphereIcon} alt='sky atmosphere' className='inline-block w-4 h-4 mr-1 align-middle' /> }
+        { props.nodeType === 'skyAtmosphere' && <span className='inline-block w-4 h-4 mr-1 align-middle text-white'><SkyIcon /></span> }
         { props.nodeName }
       </div>
       <div className='flex flex-row items-center'>

@@ -2,6 +2,11 @@ import { createContext, useContext, useState, useRef, useEffect, useMemo } from 
 import { EventBusContext } from "./EventBusContext";
 import { SelectionContext, type SelectionContextValue } from "./SelectionContext";
 import { PlaybackContext, type PlaybackContextValue } from "./PlaybackContext";
+import {
+  DebugVisibilityContext, type DebugVisibilityContextValue,
+  type DebugVisibility, type DebugCategory, type DebugChannel,
+  loadDebugVisibility, saveDebugVisibility,
+} from "./DebugVisibilityContext";
 import { AssetLibraryContext, type AssetLibraryContextValue } from "./AssetLibraryContext";
 import { DocumentContext, type DocumentContextValue } from "./DocumentContext";
 import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
@@ -121,6 +126,23 @@ import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextur
 import { saveToStorage } from "../workers/workerClient";
 import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
+
+// Rasterise the light-probe glyph (an inner ring + a dashed outer ring, matching the inspector's
+// ProbeIcon) to a white-on-transparent PNG data URL, for use as the probe's viewport billboard texture.
+// A sprite Material.Basic tints this white icon to the probe's cyan.
+function buildProbeIconDataURL(): string {
+  const size = 64, cx = size / 2, cy = size / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([4, 6]);
+  ctx.beginPath(); ctx.arc(cx, cy, 24, 0, Math.PI * 2); ctx.stroke();
+  return canvas.toDataURL('image/png');
+}
 
 type BoxShapeDescription = {
   type: 'box';
@@ -754,6 +776,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const uiStateRef = useRef(uiState);
   const startedRef = useRef(false);
   useEffect(() => { uiStateRef.current = uiState; }, [uiState]);
+
+  // Debug-overlay visibility (collider wireframes, light icons, …), per Editor/Runtime channel. The
+  // reconcilers read the ref (they run in rAF/event callbacks, not render), and toggling emits
+  // DEBUG_VISIBILITY_CHANGED so they re-run. Persisted so a chosen debugging setup survives reloads.
+  const [debugVisibility, setDebugVisibility] = useState<DebugVisibility>(() => loadDebugVisibility());
+  const debugVisibilityRef = useRef(debugVisibility);
+  useEffect(() => { debugVisibilityRef.current = debugVisibility; }, [debugVisibility]);
+  const setDebugCategory = (key: DebugCategory, channel: DebugChannel, value: boolean) => {
+    setDebugVisibility(prev => {
+      const next = { ...prev, [key]: { ...prev[key], [channel]: value } };
+      debugVisibilityRef.current = next; // update before the emit below so the reconcile reads the new value
+      saveDebugVisibility(next);
+      return next;
+    });
+    eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED');
+  };
 
   // Reusable node templates, persisted to IndexedDB (they embed base64 textures and would blow the
   // ~5MB localStorage quota). Loaded asynchronously on mount, migrating any legacy localStorage copy once.
@@ -3326,6 +3364,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           TextureManager.Instance.addTextureFromBase64(LightIcon, {
             mipMap: false
           }, '__editor__light_icon');
+          // Light-probe viewport billboard icon — the concentric-circles probe glyph (matching the
+          // inspector's ProbeIcon), rasterised to a PNG so it can be a sprite texture like the light icon.
+          TextureManager.Instance.addTextureFromBase64(buildProbeIconDataURL(), {
+            mipMap: false
+          }, '__editor__probe_icon');
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
           // Setting the editor scene and camera
@@ -3375,14 +3418,27 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const runReconcile = () => {
       reconcileScheduledRef.current = false;
       // (Terrain-)material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
-      if (isPlayMode || !activeScene || editorMode === 'material' || editorMode === 'terrainMaterial') return;
+      if (editorMode === 'material' || editorMode === 'terrainMaterial') return;
+      const vis = debugVisibilityRef.current;
       suppressReconcileRef.current = true;
-      // withoutDirty as well as suppressReconcileRef: the latter only stops the reconciler re-triggering
-      // ITSELF, while the light icons and gizmo helpers it splices in emit SCENE_CHANGED like any other
-      // node edit and would otherwise read as unsaved work. They are editor bookkeeping, never the user's
-      // change, so they must not dirty the tab at any time — not merely inside an opening settle window.
-      try { withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current)); }
-      finally { suppressReconcileRef.current = false; }
+      try {
+        if (isPlayMode) {
+          // Runtime channel: helpers are rebuilt onto the throwaway play scene (which shares node ids with
+          // the editor scene, so the bodies/triggers maps still resolve). Still __debug__-named, so still
+          // stripped from any real publish. No withoutDirty — play mode never marks the tab dirty.
+          const playScene = instanceRef.current?.scene;
+          if (playScene) reconcileEditorHelpers(playScene, bodiesRef.current, triggersRef.current, vis, 'runtime');
+        } else if (activeScene) {
+          // withoutDirty as well as suppressReconcileRef: the latter only stops the reconciler re-triggering
+          // ITSELF, while the light icons and gizmo helpers it splices in emit SCENE_CHANGED like any other
+          // node edit and would otherwise read as unsaved work. They are editor bookkeeping, never the user's
+          // change, so they must not dirty the tab at any time — not merely inside an opening settle window.
+          withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current, vis, 'editor'));
+          // The reference grid is editor chrome (not a scene node), driven straight off its Editor toggle.
+          // Skipped in renderer mode, where the Renderer panel owns its own grid switch.
+          if (editorMode !== 'renderer') instanceRef.current?.renderer.setGridVisible(vis.grid.editor);
+        }
+      } finally { suppressReconcileRef.current = false; }
     };
     const schedule = (e?: SceneChange) => {
       // Structural/visibility/name changes affect which helper icons + wireframes are needed; the per-setter
@@ -3395,10 +3451,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const emitter = eventEmitter.current;
     emitter.on('SCENE_CHANGED', schedule);
     emitter.on('PHYSICS_CHANGED', schedule);
+    emitter.on('DEBUG_VISIBILITY_CHANGED', schedule);
     schedule(); // initial reconcile for the current scene / mode
     return () => {
       emitter.off('SCENE_CHANGED', schedule);
       emitter.off('PHYSICS_CHANGED', schedule);
+      emitter.off('DEBUG_VISIBILITY_CHANGED', schedule);
     };
   }, [activeScene, isPlayMode, editorMode]);
 
@@ -3542,9 +3600,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       else if (state === 'stop') {
         instanceRef.current.isPaused = false; // Unpause for editor scene
         setIsPlayMode(false);
-        // Restore the editor grid when returning to the editor scene
+        // Restore the editor grid when returning to the editor scene, honouring its Editor toggle.
         if (instanceRef.current.renderer) {
-          instanceRef.current.renderer.setGridVisible(true);
+          instanceRef.current.renderer.setGridVisible(debugVisibilityRef.current.grid.editor);
         }
         // Disable mouse capture and release pointer
         InputManager.instance.disableMouseCapture();
@@ -3718,6 +3776,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     playSceneUiRef.current = ui;
     instance.isPaused = false;
     setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 50);
+    // The new play scene starts with no runtime debug helpers; rebuild them for it (isPlayMode is
+    // already true, so the reconcile effect won't re-fire on its own).
+    eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED');
   };
 
   const installGameHost = () => setGameHost({
@@ -3765,7 +3826,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.setScene(newScene);
     instance.isPaused = false;
     installGameHost();
-    setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 100);
+    // Rebuild runtime debug helpers AFTER scene.start() — the reconcile the isPlayMode flip triggers runs
+    // before start(), which resets the scene and drops those just-added nodes. Emitting here mirrors the
+    // live-toggle path, so Runtime toggles are honoured from the first frame of Play.
+    setTimeout(() => { instance.scene.start(); startUIRuntime(); eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED'); }, 100);
     eventEmitter.current.emit('SET_PLAY_STATE', 'play');
     startedRef.current = true;
   };
@@ -3795,7 +3859,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     playSceneUiRef.current = uiStateRef.current.elements;
     instance.setScene(newScene);
     instance.isPaused = false;
-    setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 50);
+    // Reconcile runtime debug helpers after start() (see startPlay) — reset stays in play mode, so the
+    // isPlayMode effect won't re-fire on its own.
+    setTimeout(() => { instance.scene.start(); startUIRuntime(); eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED'); }, 50);
     startedRef.current = true;
     eventEmitter.current.emit('SET_PLAY_STATE', 'play');
   };
@@ -3822,6 +3888,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const playbackValue = useMemo<PlaybackContextValue>(() => ({
     isPlayMode, ...playActions,
   }), [isPlayMode, playActions]);
+
+  const debugVisibilityValue = useMemo<DebugVisibilityContextValue>(() => ({
+    visibility: debugVisibility, setCategory: setDebugCategory,
+  }), [debugVisibility]);
 
   const libraryActions = useStableActions({
     addTemplate, removeTemplate, updateTemplate,
@@ -4025,6 +4095,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     <EventBusContext.Provider value={eventEmitter.current}>
       <SelectionContext.Provider value={selectionValue}>
         <PlaybackContext.Provider value={playbackValue}>
+         <DebugVisibilityContext.Provider value={debugVisibilityValue}>
           <AssetLibraryContext.Provider value={assetLibraryValue}>
             <DocumentContext.Provider value={documentValue}>
               <ProjectContext.Provider value={projectValue}>
@@ -4034,6 +4105,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
               </ProjectContext.Provider>
             </DocumentContext.Provider>
           </AssetLibraryContext.Provider>
+         </DebugVisibilityContext.Provider>
         </PlaybackContext.Provider>
       </SelectionContext.Provider>
     </EventBusContext.Provider>

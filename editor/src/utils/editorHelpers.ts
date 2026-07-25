@@ -16,6 +16,7 @@ import {
 } from 'cleo';
 import { CameraGeometry } from './EditorModels';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
+import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/DebugVisibilityContext';
 
 /**
  * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes)
@@ -31,6 +32,8 @@ const PROBE_HELPER = '__editor__ProbeHelper';
 const BODY_PREFIX = '__debug__body_';
 const TRIGGER_PREFIX = '__debug__trigger_';
 const SHAPE_PREFIX = '__debug__shape_';
+const AABB_PREFIX = '__debug__aabb_';
+const TERRAIN_PREFIX = '__debug__terrain_';
 
 // Per-scene cache of the last-built shapes signature for each body/trigger id, so unchanged debug
 // subtrees aren't torn down and rebuilt on every SCENE_CHANGED.
@@ -281,13 +284,16 @@ function ensureCameraGizmo(camera: CameraNode) {
   camera.addChild(gizmo);
 }
 
-// Attach a wireframe sphere under a light probe so it is visible/selectable in the viewport.
+// Attach a billboard icon under a light probe so it is visible in the viewport (tinted cyan). Mirrors
+// the light icon: a camera-facing sprite rather than a wireframe sphere.
 function ensureProbeHelper(probe: LightProbeNode) {
   if (probe.getChildByName(PROBE_HELPER).length) return;
-  const model = new Model(Geometry.Sphere(16), Material.Basic({ color: [0.4, 0.8, 1] }, { wireframe: true, castShadow: false }));
-  const helper = new ModelNode(PROBE_HELPER, model);
-  helper.setUniformScale(0.3);
-  probe.addChild(helper);
+  const icon = new SpriteNode(PROBE_HELPER, new Sprite(Material.Basic({
+    color: [0.4, 0.8, 1],
+    texture: '__editor__probe_icon',
+  })));
+  icon.setUniformScale(0.5);
+  probe.addChild(icon);
 }
 
 /**
@@ -370,11 +376,115 @@ function migrateConvexShapes(scene: Scene, shapeLists: Map<string, { shapes: Sha
   }
 }
 
+// A per-node world-AABB wireframe (a unit cube stretched to the node's bounds each frame). Top-level so
+// it inherits no transform: `getBoundingBox()` already returns a world-space box, so the group carries
+// the box directly. `min`/`max` collapse to a zero extent for an empty geometry — clamped so the cube
+// stays a thin visible sliver rather than vanishing to a degenerate scale.
+function ensureAabbBox(scene: Scene, target: Node) {
+  const name = `${AABB_PREFIX}${target.id}`;
+  let group = scene.getNodesByName(name)[0] as ModelNode | undefined;
+  if (!group) {
+    const model = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({ color: [0.3, 0.9, 0.9] }, { wireframe: true, castShadow: false }));
+    group = new ModelNode(name, model);
+    scene.addNode(group);
+  }
+  const box = group;
+  box.onUpdate = () => {
+    const bb = target.getBoundingBox();
+    const cx = (bb.min[0] + bb.max[0]) / 2, cy = (bb.min[1] + bb.max[1]) / 2, cz = (bb.min[2] + bb.max[2]) / 2;
+    const sx = Math.max(bb.max[0] - bb.min[0], 1e-3), sy = Math.max(bb.max[1] - bb.min[1], 1e-3), sz = Math.max(bb.max[2] - bb.min[2], 1e-3);
+    box.setPosition(Vec.vec3.fromValues(cx, cy, cz))
+       .setRotation(Vec.vec3.fromValues(0, 0, 0))
+       .setScale(Vec.vec3.fromValues(sx, sy, sz));
+  };
+}
+
+/**
+ * Wireframe of a terrain's collision heightfield, in terrain-local space (the debug group is placed at
+ * the landscape's world origin, exactly where `Terrain.setOrigin` puts the physics body). Vertices use
+ * the same mapping as `Terrain._buildChunkGeometry` (x = -half + c*e, z = -half + r*e, y = height), so
+ * the wireframe sits on the collided surface. Downsampled to ~64 quads per side — the collider is the
+ * full grid, but a debug view only needs the shape.
+ */
+function buildTerrainDebugMesh(terrain: any): ModelNode | null {
+  const R: number = terrain.resolution, size: number = terrain.size, e: number = terrain.elementSize;
+  const H: Float32Array = terrain.heights;
+  if (!R || !H || H.length < R * R) return null;
+  const half = size / 2;
+  const step = Math.max(1, Math.floor((R - 1) / 64));
+
+  const idx: number[] = [];
+  for (let c = 0; c < R; c += step) idx.push(c);
+  if (idx[idx.length - 1] !== R - 1) idx.push(R - 1);
+
+  const positions: [number, number, number][] = [];
+  const normals: [number, number, number][] = [];
+  const uvs: [number, number][] = [];
+  for (const r of idx)
+    for (const c of idx) {
+      positions.push([-half + c * e, H[r * R + c], -half + r * e]);
+      normals.push([0, 1, 0]);
+      uvs.push([0, 0]);
+    }
+
+  const stride = idx.length;
+  const indices: number[] = [];
+  for (let i = 0; i < idx.length - 1; i++)
+    for (let j = 0; j < idx.length - 1; j++) {
+      const tl = i * stride + j, tr = tl + 1, bl = (i + 1) * stride + j, br = bl + 1;
+      indices.push(tl, bl, tr, tr, bl, br);
+    }
+
+  const geometry = new Geometry(positions, normals, uvs, undefined, undefined, indices);
+  return new ModelNode(TERRAIN_PREFIX, new Model(geometry, Material.Basic({ color: [1, 0, 0] }, { wireframe: true, castShadow: false })));
+}
+
+// Cheap identity of a terrain's heights so the (moderately expensive) wireframe is rebuilt only when the
+// surface is actually sculpted, not on every reconcile.
+function terrainSignature(terrain: any): string {
+  const R: number = terrain.resolution, H: Float32Array = terrain.heights;
+  let sum = 0;
+  const stepN = Math.max(1, Math.floor((H?.length ?? 1) / 512));
+  for (let i = 0; i < (H?.length ?? 0); i += stepN) sum += H[i] * (i + 1);
+  return `${R}|${terrain.size}|${terrain.elementSize}|${H?.length ?? 0}|${sum.toFixed(3)}`;
+}
+
+// Ensure a terrain heightfield wireframe that follows the landscape's world origin, rebuilt when the
+// surface changes. `landscape` is a LandscapeNode (accessed structurally to avoid a hard type import).
+function ensureTerrainDebug(scene: Scene, landscape: any) {
+  const name = `${TERRAIN_PREFIX}${landscape.id}`;
+  const sig = terrainSignature(landscape.terrain);
+  const cache = sigMapFor(scene);
+
+  let group = scene.getNodesByName(name)[0];
+  const stale = !group || cache.get(name) !== sig;
+  if (stale) {
+    if (group) scene.removeNode(group);
+    const mesh = buildTerrainDebugMesh(landscape.terrain);
+    if (!mesh) return;
+    mesh.name = name;
+    scene.addNode(mesh);
+    group = mesh;
+    cache.set(name, sig);
+  }
+  const g = group;
+  g.onUpdate = () => {
+    g.setPosition(landscape.worldPosition).setRotation(Vec.vec3.fromValues(0, 0, 0));
+  };
+}
+
 export function reconcileEditorHelpers(
   scene: Scene,
   bodies: Map<string, BodyDescription>,
   triggers: Map<string, { shapes: ShapeDescription[] }>,
+  visibility?: DebugVisibility,
+  channel: DebugChannel = 'editor',
 ) {
+  // With no settings supplied (or a category missing), fall back to the pre-menu behaviour: everything
+  // on in the editor channel, everything off at runtime.
+  const show = (cat: DebugCategory): boolean =>
+    visibility ? visibility[cat][channel] : channel === 'editor';
+
   migrateConvexShapes(scene, bodies);
   migrateConvexShapes(scene, triggers);
 
@@ -383,56 +493,89 @@ export function reconcileEditorHelpers(
   // draw its own frustum model — it would appear stuck to the viewport.
   const viewCamera = scene.activeCamera;
 
-  // 1-3. Type-driven icons/gizmos (skip editor/debug helper nodes themselves).
+  // 1-3 + spawn markers. Type-driven child icons/gizmos, added or removed to match the toggle (skip
+  // editor/debug helper nodes themselves).
   for (const node of nodes) {
+    if (isHelperName(node.name)) continue;
+
     if (node instanceof LightNode) {
-      if (!isHelperName(node.name)) ensureLightIcon(node);
+      const existing = node.getChildByName(LIGHT_ICON)[0];
+      if (show('lights') && !existing) ensureLightIcon(node);
+      else if (!show('lights') && existing) node.removeChild(existing);
     } else if (node instanceof LightProbeNode) {
-      if (!isHelperName(node.name)) ensureProbeHelper(node);
+      const existing = node.getChildByName(PROBE_HELPER)[0];
+      if (show('probes') && !existing) ensureProbeHelper(node);
+      else if (!show('probes') && existing) node.removeChild(existing);
     } else if (node instanceof CameraNode) {
       // Every camera except the one being viewed through gets a frustum gizmo — reconcile both ways
       // so a hijacked/active camera's stale gizmo is also cleaned up.
       const existing = node.getChildByName(CAMERA_GIZMO)[0];
-      const shouldHave = !isHelperName(node.name) && node !== viewCamera;
+      const shouldHave = show('cameras') && node !== viewCamera;
       if (shouldHave && !existing) ensureCameraGizmo(node);
       else if (!shouldHave && existing) node.removeChild(existing);
     }
   }
 
   // 4. Rigid-body wireframes (red), following the target's local transform.
-  for (const [id, body] of bodies) {
-    const target = scene.getNodeById(id);
-    if (!target) continue;
-    // The group carries only the body's transform; the owner's scale is folded into each shape by
-    // `applyShapeTransform`, exactly as `setShapes` folds it into the collider.
-    ensureShapeGroup(scene, target, `${BODY_PREFIX}${id}`, body.shapes, [1, 0, 0], (debug) => {
-      debug.setPosition(target.position);
-      debug.setRotation(target.rotation);
-    });
+  if (show('colliders')) {
+    for (const [id, body] of bodies) {
+      const target = scene.getNodeById(id);
+      if (!target) continue;
+      // The group carries only the body's transform; the owner's scale is folded into each shape by
+      // `applyShapeTransform`, exactly as `setShapes` folds it into the collider.
+      ensureShapeGroup(scene, target, `${BODY_PREFIX}${id}`, body.shapes, [1, 0, 0], (debug) => {
+        debug.setPosition(target.position);
+        debug.setRotation(target.rotation);
+      });
+    }
+    // Terrain heightfield collision shapes (also red) live in scene.landscapes, not the bodies map.
+    for (const landscape of scene.landscapes) {
+      if ((landscape as any).markForRemoval) continue;
+      ensureTerrainDebug(scene, landscape);
+    }
   }
 
   // 5. Trigger wireframes (green), following the target's world transform.
-  for (const [id, trigger] of triggers) {
-    const target = scene.getNodeById(id);
-    if (!target) continue;
-    ensureShapeGroup(scene, target, `${TRIGGER_PREFIX}${id}`, trigger.shapes, [0, 1, 0], (debug) => {
-      debug.setPosition(target.worldPosition);
-      debug.setQuaternion(target.worldQuaternion);
-    });
+  if (show('triggers')) {
+    for (const [id, trigger] of triggers) {
+      const target = scene.getNodeById(id);
+      if (!target) continue;
+      ensureShapeGroup(scene, target, `${TRIGGER_PREFIX}${id}`, trigger.shapes, [0, 1, 0], (debug) => {
+        debug.setPosition(target.worldPosition);
+        debug.setQuaternion(target.worldQuaternion);
+      });
+    }
   }
 
-  // 6. Remove stale debug groups whose body/trigger (or target node) no longer exists.
-  const cache = sigMapFor(scene);
-  for (const node of nodes) {
-    let id: string | null = null;
-    if (node.name.startsWith(BODY_PREFIX)) id = node.name.slice(BODY_PREFIX.length);
-    else if (node.name.startsWith(TRIGGER_PREFIX)) id = node.name.slice(TRIGGER_PREFIX.length);
-    if (id === null) continue;
+  // 6. Per-node world AABB boxes.
+  if (show('boundingBoxes')) {
+    for (const node of nodes) {
+      if (node instanceof ModelNode && !isHelperName(node.name) && !(node as any).isGizmo)
+        ensureAabbBox(scene, node);
+    }
+  }
 
-    const map = node.name.startsWith(BODY_PREFIX) ? bodies : triggers;
-    if (!map.has(id) || !scene.getNodeById(id)) {
-      scene.removeNode(node);
-      cache.delete(node.name);
+  // 7. Remove stale (or now-hidden) top-level debug groups. A group goes when its category is off, its
+  // backing body/trigger/landscape/node is gone, or (for AABBs) its owner is no longer eligible.
+  const cache = sigMapFor(scene);
+  const landscapeIds = new Set<string>();
+  for (const landscape of scene.landscapes) landscapeIds.add((landscape as any).id);
+
+  for (const node of nodes) {
+    const drop = () => { scene.removeNode(node); cache.delete(node.name); };
+    if (node.name.startsWith(BODY_PREFIX)) {
+      const id = node.name.slice(BODY_PREFIX.length);
+      if (!show('colliders') || !bodies.has(id) || !scene.getNodeById(id)) drop();
+    } else if (node.name.startsWith(TRIGGER_PREFIX)) {
+      const id = node.name.slice(TRIGGER_PREFIX.length);
+      if (!show('triggers') || !triggers.has(id) || !scene.getNodeById(id)) drop();
+    } else if (node.name.startsWith(TERRAIN_PREFIX)) {
+      const id = node.name.slice(TERRAIN_PREFIX.length);
+      if (!show('colliders') || !landscapeIds.has(id)) drop();
+    } else if (node.name.startsWith(AABB_PREFIX)) {
+      const id = node.name.slice(AABB_PREFIX.length);
+      const owner = scene.getNodeById(id);
+      if (!show('boundingBoxes') || !(owner instanceof ModelNode) || isHelperName(owner.name)) drop();
     }
   }
 }

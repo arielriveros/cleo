@@ -10,6 +10,8 @@ import DebugOverlay from "./logger/DebugOverlay";
 import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
 import AnimationPlayer from "./animation/AnimationPlayer";
 import AnimationFieldPlayer from "./animationField/AnimationFieldPlayer";
+import DebugVisibilityMenu from "./DebugVisibilityMenu";
+import DebugSkeletonOverlay from "./DebugSkeletonOverlay";
 import { useStateMachine } from "./animation/StateMachineContext";
 import { SegmentedControl } from "../components/ui";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
@@ -397,9 +399,17 @@ export default function EngineViewport() {
              onContextMenu={(e) => e.preventDefault()}>
             {/* Logger.debug(...) toasts, bottom-left, in every editor mode. Self-expires after 10s. */}
             <DebugOverlay />
-            {/* Floating top-right overlays: the gizmo-mode toggle (where the gizmo is active) sits to the
+            {/* Drives the renderer's skeleton overlay from every skinned model in the scene when the
+                Skeletons debug toggle is on (self-gates off in animation mode, where AnimationSkeletonTool
+                owns the overlay). Renders nothing itself. */}
+            <DebugSkeletonOverlay />
+            {/* Floating top-right overlays: the debug-visibility menu + gizmo-mode toggle sit to the
                 left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead. */}
             <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
+                {/* The debug menu stays available during play so Runtime toggles can be flipped live. */}
+                {editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !hideForGraph && (
+                    <DebugVisibilityMenu />
+                )}
                 {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && !hideForGraph && (
                     <div className='flex items-center rounded overflow-hidden border border-control-hover'>
                         <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
