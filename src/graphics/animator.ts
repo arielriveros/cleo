@@ -557,6 +557,13 @@ export class Animator {
     private _rootRefT: vec3 = vec3.create();
     private _rootRefR: quat = quat.create();
     private _rootRefS: vec3 = vec3.fromValues(1, 1, 1);
+    /**
+     * Rotation of the root bone's PARENT chain within the skin (the static armature). This is what carries a
+     * rig's authoring→engine axis conversion (e.g. an FBX Z-up rig imported Y-up sits under a -90°X armature),
+     * so the root delta must be brought through it — otherwise a yaw authored about the armature's up-axis
+     * comes out as a roll/pitch in world space, i.e. "the turn rotates on the wrong axis".
+     */
+    private _rootParentRot: quat = quat.create();
 
     constructor(animatedModel: AnimatedModel, node?: Node) {
         this._animatedModel = animatedModel;
@@ -1221,8 +1228,34 @@ export class Animator {
         const rest = this._skin?.nodeTransforms?.get(bone.id);
         if (rest) mat4.getScaling(this._rootRefS, rest);
 
+        this._rootParentRot = this._rootParentRotation(bone.id);
         this._rootBoneName = rootName;
         this._rootMotionActive = true;
+    }
+
+    /**
+     * Accumulated rotation of the joints ABOVE `rootNodeIndex` in the skin, in the model node's local space:
+     * `topLocal * … * immediateParentLocal`. These joints are static (the extraction bone is the HIGHEST
+     * animated one), so their bind transforms are their live transforms. This is the axis basis the root
+     * bone's channels are expressed in.
+     */
+    private _rootParentRotation(rootNodeIndex: number): quat {
+        const out = quat.create();
+        if (!this._skin) return out;
+        const parentOf = new Map<number, number | undefined>();
+        for (const j of this._skin.joints) parentOf.set(j.nodeIndex, j.parentIndex);
+
+        const chain: number[] = []; // immediate parent first, up to the skeleton root
+        let p = parentOf.get(rootNodeIndex);
+        while (p !== undefined) { chain.push(p); p = parentOf.get(p); }
+
+        const acc = mat4.create(); // identity
+        for (let i = chain.length - 1; i >= 0; i--) {
+            const local = this._skin.nodeTransforms?.get(chain[i]);
+            if (local) mat4.multiply(acc, acc, local);
+        }
+        mat4.getRotation(out, acc);
+        return quat.normalize(out, out);
     }
 
     /**
@@ -1258,12 +1291,14 @@ export class Animator {
     /**
      * Apply this frame's root-bone delta to the character, then lock the root bone in place.
      *
-     * The delta is the change in the root bone's local (= model-space) transform between the previous and
-     * current times; on a loop wrap it is composed across the seam so a cycling clip advances smoothly instead
-     * of snapping back. It drives the nearest bodied ancestor (else the model node); the translation is rotated
-     * into the target's frame first. The target's LOCAL rotation is used, which is exact while its parent is
-     * unrotated — true for the character rigs this serves (a Model under an unrotated root, or a body at the
-     * scene root). Finally the root bone is pinned to the clip-start reference so the mesh does not double-move.
+     * The delta is the change in the root bone's LOCAL transform between the previous and current times; on a
+     * loop wrap it is composed across the seam so a cycling clip advances smoothly instead of snapping back.
+     * That local delta is expressed in the root bone's own axis basis, so it is first brought into WORLD space
+     * through `Wp = nodeWorldRotation · armatureParentRotation` — the node's orientation and the static
+     * armature above the bone (which carries any authoring→engine axis conversion). Skipping the armature part
+     * is what makes a yaw come out as a roll: the "wrong axis" bug. The resulting world delta then drives the
+     * nearest bodied ancestor (else the model node), whose parent is unrotated so its own transform is world.
+     * Finally the root bone is pinned to the clip-start reference so the mesh does not double-move.
      */
     private _applyRootMotion(prevTime: number, curTime: number, duration: number, looped: boolean): void {
         const bone = this._rootBoneName ? this._bones.get(this._rootBoneName) : null;
@@ -1296,9 +1331,22 @@ export class Animator {
 
         const target = this._nearestBodiedNode() ?? this._node;
         if (target) {
-            const worldDelta = vec3.transformQuat(vec3.create(), deltaT, target.quaternion);
-            target.setPosition(vec3.add(vec3.create(), target.position, worldDelta));
-            const newQ = quat.normalize(quat.create(), quat.multiply(quat.create(), target.quaternion, deltaR));
+            // Wp = the world basis the bone's local delta lives in: the model node's world rotation composed
+            // with the static armature above the bone. Rotate the translation by it, and CONJUGATE the rotation
+            // by it so a yaw about the armature's up-axis becomes a yaw about world up rather than a roll.
+            const wp = quat.multiply(
+                quat.create(),
+                this._node ? this._node.worldQuaternion : quat.create(),
+                this._rootParentRot);
+            quat.normalize(wp, wp);
+            const wpInv = quat.invert(quat.create(), wp);
+
+            const worldT = vec3.transformQuat(vec3.create(), deltaT, wp);
+            target.setPosition(vec3.add(vec3.create(), target.position, worldT));
+
+            // World-space rotation delta, so it LEFT-multiplies the target's (world = local) orientation.
+            const worldR = quat.multiply(quat.create(), quat.multiply(quat.create(), wp, deltaR), wpInv);
+            const newQ = quat.normalize(quat.create(), quat.multiply(quat.create(), worldR, target.quaternion));
             target.setQuaternion(newQ);
             // setQuaternion deliberately does not push into the body (see Node), so a bodied target's physics
             // orientation must be set explicitly. setPosition already pushed the translation.

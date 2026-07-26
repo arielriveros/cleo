@@ -52,6 +52,27 @@ export function modelIdOf(node: Node | null | undefined): string | undefined {
 }
 
 /**
+ * The first skinned ModelNode AT or BENEATH `node` (depth-first, self first), or null.
+ *
+ * Walks DOWN, the mirror of modelInstanceRootOf's walk up: an imported character is a holder Node with the
+ * skinned ModelNode as a CHILD, so any inspector that keys off "is there an animation to edit here" has to
+ * look into the subtree of whatever the user selected — the holder, a template root, or the model node itself.
+ * The gate matches the one the animation UI needs: an AnimatedModel with a skin AND a live animator (the
+ * ModelNode constructor creates the animator for exactly this case). First match on purpose, the same choice
+ * skinnedModelJsonOf makes for a multi-part model.
+ */
+export function skinnedModelNodeOf(node: Node | null | undefined): ModelNode | null {
+  if (!node) return null
+  if (node instanceof ModelNode && node.model instanceof AnimatedModel && node.model.hasSkin && !!node.animator)
+    return node
+  for (const child of node.children) {
+    const found = skinnedModelNodeOf(child)
+    if (found) return found
+  }
+  return null
+}
+
+/**
  * One extra LOD level of a model asset: a **reference** to another model asset, plus the camera distance
  * at which it takes over.
  *

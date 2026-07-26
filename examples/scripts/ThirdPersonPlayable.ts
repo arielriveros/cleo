@@ -9,9 +9,10 @@ import { InputManager, Logger, Node } from 'cleo'
  * turning, so the camera orbits freely around a still character; swing it far enough and a ROOT-MOTION turn
  * clip physically turns the body to catch up.
  *
- * Because the body turns, the Camera Pivot — which is a child of this node — would be dragged round with it.
- * To keep the camera where the player pointed it, this script counter-rotates the pivot by the body's yaw
- * change every frame, so the world aim is held while the body rotates underneath it.
+ * The camera is NOT dragged when the body turns: a Camera Rig's yaw is its WORLD yaw — the rig cancels its
+ * parent's rotation every frame (see CameraRigNode._applyRigTransform) — so its aim is independent of the
+ * body underneath it. That is exactly why forward is read straight off the pivot's yaw, and why the body can
+ * rotate freely without the script ever touching the camera.
  *
  * Expected hierarchy (Playable must be at the scene root — a body on a parented node is placed wrong):
  *
@@ -61,8 +62,8 @@ export default class ThirdPersonPlayableNode extends Node {
   /** Damping time constant (seconds) for `moveDir`, so the blend-space Direction axis glides between strafes
    *  instead of snapping. 0 = instant. */
   private directionSmoothing: number = 0.12
-  /** Name of the child that holds the camera; its yaw + this body's yaw is the world look direction. Falls
-   *  back to the child that contains the Camera if nothing matches. */
+  /** Name of the child that holds the camera; its yaw is the world look direction. Falls back to the child
+   *  that contains the Camera if nothing matches. */
   protected pivotName: string = 'Camera Pivot'
 
   /** Seconds left in which the slope-follow must not touch Y, so it can't eat a jump. See onUpdate. */
@@ -71,9 +72,6 @@ export default class ThirdPersonPlayableNode extends Node {
   private _turning: boolean = false
   /** The smoothed strafe angle actually published as `moveDir`. */
   private _smoothDir: number = 0
-  /** Body yaw at the end of the previous frame. The change since then — from a root-motion turn — is what the
-   *  pivot is counter-rotated by, so the camera holds its world aim. */
-  private _lastBodyYaw: number = 0
 
   onStart() {
     if (!this.body) Logger.warn(`${this.name} has no rigid body — the controller cannot move it`, 'Script')
@@ -88,8 +86,6 @@ export default class ThirdPersonPlayableNode extends Node {
       Logger.warn(
         `${this.name} has no camera pivot child — movement and facing will follow the world +Z axis instead ` +
         `of the camera. Add the Camera Pivot as a child, or set pivotName to match it.`, 'Script')
-
-    this._lastBodyYaw = this._bodyYaw()
 
     // registerKeyPress is edge-triggered, so holding Space cannot repeat the jump. One callback per key.
     InputManager.instance.registerKeyPress('Space', () => {
@@ -113,17 +109,10 @@ export default class ThirdPersonPlayableNode extends Node {
     const pivot = this._findPivot()
     const bodyYaw = this._bodyYaw()
 
-    // Hold the camera's world aim against the body's rotation. Any change in body yaw since last frame is
-    // root motion from a turn clip (this script's own MOVING rotation is compensated inside _faceBodyToYaw,
-    // and excluded below by stamping _lastBodyYaw after it). The pivot is a child, so subtracting the body's
-    // delta from its local yaw leaves its WORLD yaw — the look direction — untouched.
-    const bodyDelta = this._shortestAngle(bodyYaw - this._lastBodyYaw)
-    if (pivot && this._hasYaw(pivot) && Math.abs(bodyDelta) > 1e-4)
-      (pivot as any).yaw = this._shortestAngle((pivot as any).yaw - bodyDelta)
-
-    // World look direction = the body's yaw plus the pivot's local yaw (it is a child of the body). This is
-    // "forward" for movement and the target the body turns to face while moving.
-    const worldAim = pivot ? this._shortestAngle(bodyYaw + this._pivotYaw(pivot)) : bodyYaw
+    // World look direction = the Camera Rig's yaw, which IS its world yaw (the rig cancels its parent's
+    // rotation), so it needs no correction for the body turning underneath it. This is "forward" for movement
+    // and the target the body turns to face while moving.
+    const worldAim = pivot ? this._pivotYaw(pivot) : bodyYaw
     const yawRad = worldAim * Math.PI / 180
     const forward = [Math.sin(yawRad), 0, Math.cos(yawRad)]
     const right = [Math.cos(yawRad), 0, -Math.sin(yawRad)]
@@ -143,8 +132,6 @@ export default class ThirdPersonPlayableNode extends Node {
       // the root-motion clip does the rotating, so the script only manages `turnRequest`.
       this.velocity = [0, v[1], 0]
       this._updateTurnInPlace(worldAim, bodyYaw)
-      // Body unchanged by the script this frame; any yaw change next frame is the turn clip's root motion.
-      this._lastBodyYaw = bodyYaw
       return
     }
 
@@ -161,10 +148,9 @@ export default class ThirdPersonPlayableNode extends Node {
     this._smoothDir = this._shortestAngle(this._smoothDir + this._shortestAngle(target - this._smoothDir) * a)
     this.moveDir = this._smoothDir
 
-    // Turn the BODY toward the look direction (and counter-rotate the pivot in the same step, so this rotation
-    // adds no camera lag). Stamp _lastBodyYaw with the commanded yaw so the top-of-frame counter-rotation next
-    // frame ignores it — it was already compensated here.
-    this._lastBodyYaw = this._faceBodyToYaw(worldAim, this.turnSpeed, delta, pivot)
+    // Turn the BODY toward the look direction. The camera is unaffected — the rig's aim is its own world yaw,
+    // independent of the body — so there is nothing to compensate.
+    this._faceBodyToYaw(worldAim, this.turnSpeed, delta)
 
     // World-space travel direction, camera-relative — the velocity math is unchanged from a face-your-movement
     // controller; only the facing differs.
@@ -215,21 +201,17 @@ export default class ThirdPersonPlayableNode extends Node {
 
   /**
    * Rotate the body toward `targetYaw` at most `speed` deg this frame, pushing the rotation into the physics
-   * body (setRotation does that). Counter-rotates the pivot by the SAME step in the same call, so a moving
-   * turn holds the camera with no one-frame lag. Returns the yaw it commanded.
+   * body (setRotation does that).
    *
    * Writes the yaw with setRotation, which is full-range on the way IN (fromEuler) — only READING rotation[1]
    * folds past ±90°, and this never does: body yaw is read through worldForward (see _bodyYaw).
    */
-  private _faceBodyToYaw(targetYaw: number, speed: number, delta: number, pivot: Node | null): number {
+  private _faceBodyToYaw(targetYaw: number, speed: number, delta: number): void {
     const cur = this._bodyYaw()
     const diff = this._shortestAngle(targetYaw - cur)
     const maxStep = speed * delta
     const step = Math.abs(diff) > maxStep ? Math.sign(diff) * maxStep : diff
-    const newYaw = this._shortestAngle(cur + step)
-    this.setRotation([0, newYaw, 0])
-    if (pivot && this._hasYaw(pivot)) (pivot as any).yaw = this._shortestAngle((pivot as any).yaw - step)
-    return newYaw
+    this.setRotation([0, this._shortestAngle(cur + step), 0])
   }
 
   /** This body's world yaw in DEGREES, read from worldForward so it is full-range (never rotation[1]). */
@@ -249,14 +231,11 @@ export default class ThirdPersonPlayableNode extends Node {
     return this.children.find(child => this._holdsCamera(child)) || null
   }
 
-  private _hasYaw(pivot: Node): boolean {
-    return typeof (pivot as any).yaw === 'number' && isFinite((pivot as any).yaw)
-  }
-
   /**
-   * The pivot's LOCAL heading in degrees. A Camera Rig exposes `yaw` directly; reading `rotation[1]` off a rig
-   * folds past a quarter turn (the euler decomposition can only express |yaw| ≤ 90). Plain-Node pivots set
-   * their euler directly, so `rotation[1]` is correct and full-range for those.
+   * The pivot's WORLD heading in degrees. A Camera Rig exposes `yaw`, which is its world yaw (it cancels its
+   * parent's rotation), so it is directly the look direction. Reading `rotation[1]` off a rig folds past a
+   * quarter turn (the euler decomposition can only express |yaw| ≤ 90). Plain-Node pivots set their euler
+   * directly, so `rotation[1]` is the fallback for those.
    */
   private _pivotYaw(pivot: Node | null): number {
     if (!pivot) return 0

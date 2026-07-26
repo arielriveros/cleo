@@ -41,7 +41,9 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
         {/* Everything else is disabled in one shot for a template instance. */}
         <fieldset disabled={ro} className={`${ro ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
           { props.node.nodeType === 'model' && <MaterialSlot node={props.node as ModelNode} /> }
-          { props.node.nodeType === 'model' && <AnimationSlot node={props.node as ModelNode} /> }
+          {/* Any node that IS or CONTAINS a skinned model — AnimationSlot finds it in the subtree and renders
+              away otherwise, so selecting a character's holder root (e.g. inside a template) shows it too. */}
+          { !root && <AnimationSlot node={props.node} /> }
           { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
           { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }

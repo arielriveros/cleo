@@ -39,6 +39,7 @@ function rmRotateY(name: string, duration: number): Animation {
 interface DuckNode {
     position: vec3;
     quaternion: quat;
+    worldQuaternion: quat;
     setPosition(v: vec3): void;
     setQuaternion(q: quat): void;
     parent: DuckNode | null;
@@ -52,6 +53,8 @@ function makeNode(opts?: { parent?: DuckNode | null; withBody?: boolean }): Duck
     const body = opts?.withBody ? { q: quat.create(), setQuaternion(q: quat) { quat.copy(this.q, q); } } : null;
     return {
         position, quaternion,
+        // Parentless test nodes: world rotation == local rotation. Kept in sync on setQuaternion.
+        worldQuaternion: quaternion,
         setPosition(v) { vec3.copy(position, v); },
         setQuaternion(q) { quat.copy(quaternion, q); },
         parent: opts?.parent ?? null,
@@ -142,6 +145,43 @@ describe('Animator — root motion', () => {
         a.update(0.5);
         expect(node.position[0]).toBeCloseTo(0); // no extraction; the slide stays in the pose
         expect(boneX(a)).toBeCloseTo(1);
+    });
+
+    // The regression for "the turn rotates on the wrong axis": an FBX-style rig sits under a static armature
+    // that converts Z-up authoring to the engine's Y-up (a -90° X rotation). A turn is authored as a yaw about
+    // the armature's up-axis (Z). Without conjugating the delta through the armature rotation, that Z-yaw would
+    // rotate the character about world Z (a roll); it must come out as a yaw about world Y.
+    it('converts a root delta through the static armature so a yaw stays a yaw', () => {
+        const armature = mat4.fromXRotation(mat4.create(), -Math.PI / 2); // Z-up → Y-up
+        const s = Math.sin(Math.PI / 4), c = Math.cos(Math.PI / 4);
+        const skin: Skin = {
+            joints: [
+                { nodeIndex: 0, inverseBindMatrix: mat4.create() },                 // armature (static, parentless)
+                { nodeIndex: 1, inverseBindMatrix: mat4.create(), parentIndex: 0 }, // hips (animated root)
+            ],
+            nodeTransforms: new Map([[0, armature], [1, mat4.create()]]),
+        };
+        // Hips yaw about its own up (authoring Z) from 0 to 90°.
+        const clip: Animation = {
+            name: 'turn',
+            rootMotion: true,
+            samplers: [{ input: [0, 1], output: [0, 0, 0, 1, 0, 0, s, c], interpolation: 'LINEAR' }],
+            channels: [{ samplerIndex: 0, targetNodeIndex: 1, targetPath: 'rotation' }],
+        };
+        const node = makeNode();
+        const a = new Animator({ skin, animations: [clip] } as unknown as AnimatedModel, node as any);
+        a.playAnimationByName('turn', true, false);
+        a.play();
+        a.update(0.5);
+        a.update(0.4); // to t=0.9, staying off the loop point
+
+        // The node must have turned about WORLD Y (0, ±1, 0), not Z or X.
+        const axis = vec3.create();
+        const angle = quat.getAxisAngle(axis, node.quaternion);
+        expect(angle).toBeGreaterThan(0.1);
+        expect(Math.abs(axis[1])).toBeCloseTo(1);          // rotation axis is world up
+        expect(Math.abs(axis[0])).toBeLessThan(0.05);
+        expect(Math.abs(axis[2])).toBeLessThan(0.05);
     });
 
     it('stops driving the node once a field takes over', () => {

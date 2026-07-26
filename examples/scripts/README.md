@@ -97,9 +97,9 @@ Both constraints matter:
   while `A`/`D` still work. `onStart` warns if it finds a locked axis.
 - Locking **angular** stops the physics *solver* tipping or spinning the root on contact. It does **not** stop
   the script: `ThirdPersonPlayable` rotates the body directly (a kinematic set the lock allows) to face the
-  camera, and the turn clips' root motion does the same. Because the Camera Pivot is a child of the body, the
-  script counter-rotates the pivot by the body's yaw change each frame so the camera holds its aim while the
-  body turns underneath it.
+  camera, and the turn clips' root motion does the same. The camera is **not** dragged when the body turns — a
+  Camera Rig's yaw is its *world* yaw (the rig cancels its parent's rotation each frame), so its aim is
+  independent of the body underneath it. That is why the Camera Pivot must be a **Camera Rig**, not a plain Empty.
 
 ## About `isGrounded`
 
@@ -314,15 +314,18 @@ raise it for softer direction changes, drop it toward `0` for an instant snap.
 
 ## How they fit together
 
-Facing lives on the **body** (the Playable). The world look direction is the body's yaw plus the Camera Pivot's
-local yaw. While you hold a movement key, `ThirdPersonPlayable` turns the *body* toward that look direction and
-drives `node.velocity` camera-relative on the horizontal plane, publishing the strafe angle (relative to the
-body's facing) as `moveDir`. Let go and it stops turning the body, so the camera orbits a still character; swing
-past `turnThreshold` and a **root-motion turn clip** rotates the body to catch up.
+Facing lives on the **body** (the Playable). The world look direction is simply the Camera Rig's yaw. While you
+hold a movement key, `ThirdPersonPlayable` turns the *body* toward that look direction and drives `node.velocity`
+camera-relative on the horizontal plane, publishing the strafe angle (relative to the body's facing) as
+`moveDir`. Let go and it stops turning the body, so the camera orbits a still character; swing past
+`turnThreshold` and a **root-motion turn clip** rotates the body to catch up.
 
-Because the pivot is a child of the body, any body rotation would drag the camera — so the script counter-rotates
-the pivot by the body's yaw change each frame, holding the world aim steady. Its own moving-turn compensates in
-the same step (no lag); a root-motion turn is compensated the next frame, which at rest is imperceptible.
+The body turning never disturbs the camera: a **Camera Rig** publishes its yaw as a *world* yaw and cancels its
+parent's rotation every frame (`CameraRigNode._applyRigTransform`), so the aim you set with the mouse is held no
+matter how the body spins underneath it. This is why the pivot must be a Camera Rig — a plain Empty parented to
+the body would be dragged round with it. (Keep the rig's own local position centred on the body — head height,
+no horizontal offset; put the shoulder offset on the rig's **Socket Offset** — so the body's yaw doesn't swing
+the camera's position either.)
 
 Jumping is gated on `node.isGrounded`, which the engine answers from the physics contacts. That covers terrain
 and ordinary bodies alike, ignores trigger volumes, and follows whatever direction gravity currently points.
