@@ -1,19 +1,36 @@
 import { mat4, quat } from 'gl-matrix';
 import { Geometry } from '../core/geometry';
 import { Model } from '../graphics/model';
-import { Material, TerrainFoliageRule } from '../graphics/material';
+import {
+    Material, TerrainFoliageRule, FoliageCollision,
+    FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY,
+} from '../graphics/material';
 
 export type FoliageKind = 'mesh' | 'billboard';
 
 export interface FoliageParams {
-    /** Blades/props added per brush application. */
+    /** Blades/props per SQUARE METRE — the brush multiplies it by the disc area, whole-terrain
+     *  generation by the terrain area, so the same number means the same look at any scale. */
     density: number;
     minScale: number;
     maxScale: number;
 }
 
-const DEFAULT_PARAMS: FoliageParams = { density: 8, minScale: 0.8, maxScale: 1.4 };
-const MAX_INSTANCES = 200000;
+const DEFAULT_PARAMS: FoliageParams = { density: DEFAULT_FOLIAGE_DENSITY.billboard, minScale: 0.8, maxScale: 1.4 };
+export const MAX_INSTANCES = 200000;
+
+/**
+ * GPU buffers left behind by layers that were disposed with their terrain. The renderer's foliage pass
+ * only walks LIVE landscapes, so a detached terrain's own `collectStaleBuffers()` would never be called
+ * again — this module-level queue is how those buffers still reach a `gl.deleteBuffer`.
+ */
+const ORPHANED_FOLIAGE_BUFFERS: WebGLBuffer[] = [];
+
+/** Drain the buffers of disposed foliage layers. Called by the renderer, which owns the GL context. */
+export function collectOrphanedFoliageBuffers(): WebGLBuffer[] {
+    if (ORPHANED_FOLIAGE_BUFFERS.length === 0) return [];
+    return ORPHANED_FOLIAGE_BUFFERS.splice(0, ORPHANED_FOLIAGE_BUFFERS.length);
+}
 
 /**
  * A spatial-grid cell of a foliage layer: the packed instance matrices whose XZ position falls in this
@@ -24,6 +41,7 @@ const MAX_INSTANCES = 200000;
 export interface FoliageCell {
     matrices: Float32Array;              // packed mat4s for this cell (16 floats/instance)
     count: number;
+    indices: Int32Array;                 // instance indices in this cell (see forEachInstanceNear)
     min: [number, number, number];       // world AABB (instance extents, expanded by geometry size)
     max: [number, number, number];
     glBuffer: WebGLBuffer | null;         // renderer-owned; lazily created
@@ -76,6 +94,10 @@ export class FoliageLayer {
     public billboardDistance = Infinity;
     /** Hide instances beyond this camera distance; 0 = use the renderer's global foliage cull distance. */
     public cullDistance = 0;
+    /** Static physics proxy for nearby instances, or null for non-collidable foliage (grass). Mirrored
+     *  from the rule onto the LAYER so a published build — which rebuilds layers straight from the
+     *  serialized foliage blob, without re-parsing every terrain material — still gets colliders. */
+    public collision: FoliageCollision | null = null;
 
     // Compact instance data, stride 5: [x, y, z, yaw, scale].
     private _instances: number[] = [];
@@ -124,7 +146,11 @@ export class FoliageLayer {
         if (rule.density !== undefined) params.density = rule.density;
         if (rule.minScale !== undefined) params.minScale = rule.minScale;
         if (rule.maxScale !== undefined) params.maxScale = rule.maxScale;
-        if (rule.kind === 'billboard') return FoliageLayer.Billboard(rule.name, rule.textureId || 'Null', params);
+        if (rule.kind === 'billboard') {
+            const bb = FoliageLayer.Billboard(rule.name, rule.textureId || 'Null', params);
+            bb.collision = rule.collision ?? null;
+            return bb;
+        }
         const base = (rule.models?.length ? rule.models[0] : rule.model);
         const layer = FoliageLayer.Mesh(rule.name, Model.parse(base), params);
         layer._applyMeshPrototype(rule);
@@ -159,6 +185,7 @@ export class FoliageLayer {
             this.billboardDistance = Infinity;
         }
         this.cullDistance = Math.max(0, Number(src.cullDistance) || 0);
+        this.collision = src.collision ?? null;
         this.initialized = false; // new Model objects — the foliage pass re-uploads their meshes
     }
 
@@ -170,6 +197,7 @@ export class FoliageLayer {
         if (rule.minScale !== undefined) this.params.minScale = rule.minScale;
         if (rule.maxScale !== undefined) this.params.maxScale = rule.maxScale;
         if (this.kind === 'billboard') {
+            this.collision = rule.collision ?? null;
             const tex = rule.textureId || 'Null';
             if (tex !== this.textureId) {
                 this.textureId = tex;
@@ -185,13 +213,15 @@ export class FoliageLayer {
     }
 
     /** Append one instance at an exact position (random yaw + scale from params) without rebuilding.
-     *  Call {@link commit} once after a batch of pushes. */
-    public pushInstance(x: number, y: number, z: number): void {
-        if (this._instances.length / 5 >= MAX_INSTANCES) return;
+     *  Call {@link commit} once after a batch of pushes. Returns false when the instance ceiling is
+     *  reached, so callers can report the clipping instead of silently dropping the request. */
+    public pushInstance(x: number, y: number, z: number): boolean {
+        if (this._instances.length / 5 >= MAX_INSTANCES) return false;
         const yaw = Math.random() * Math.PI * 2;
         const scale = this.params.minScale + Math.random() * (this.params.maxScale - this.params.minScale);
         this._instances.push(x, y, z, yaw, scale);
         this._dirty = true;
+        return true;
     }
 
     /** Rebuild the spatial grid if any instances were pushed since the last commit. */
@@ -204,15 +234,32 @@ export class FoliageLayer {
 
     /** Remove all instances (used before regenerating foliage across the whole terrain). */
     public clear(): void {
+        // Reset the pending-push flag FIRST: the early return below would otherwise leave it set and
+        // cost a redundant full _rebuild() on the next commit().
+        this._dirty = false;
         if (this._instances.length === 0) return;
         this._instances = [];
         this._rebuild();
     }
 
+    /** Release this layer's GPU buffers (queued for the renderer to delete) and drop its instances. */
+    public dispose(): void {
+        for (const c of this.cells) if (c.glBuffer) ORPHANED_FOLIAGE_BUFFERS.push(c.glBuffer);
+        for (const b of this._stale) ORPHANED_FOLIAGE_BUFFERS.push(b);
+        this._stale = [];
+        this.cells = [];
+        this._instances = [];
+        this._dirty = false;
+        this.count = 0;
+        this.initialized = false;
+        this.version++;
+    }
+
     /** Scatter new instances within the brush disc; Y is sampled from the terrain surface. */
     public scatter(worldX: number, worldZ: number, radius: number, sampleHeight: (x: number, z: number) => number): boolean {
         if (this.count >= MAX_INSTANCES) return false;
-        const n = Math.max(1, Math.floor(this.params.density));
+        // density is per m², so the disc area sets the count — the same number reads the same at any radius.
+        const n = Math.max(1, Math.round(this.params.density * Math.PI * radius * radius));
         let added = 0;
         for (let i = 0; i < n && this.count + added < MAX_INSTANCES; i++) {
             const a = Math.random() * Math.PI * 2;
@@ -251,6 +298,43 @@ export class FoliageLayer {
             this.cellSize = size;
             this._rebuild();
         }
+    }
+
+    /**
+     * Visit every instance whose base falls within `radius` of world (x, z). The spatial grid's cell
+     * AABBs reject whole buckets with one test each, so this stays cheap on a 100k-instance layer.
+     *
+     * `index` is only stable until the next rebuild (any scatter/erase/clear) — consumers that cache it
+     * must watch {@link version} and re-query when it changes.
+     */
+    public forEachInstanceNear(
+        x: number, z: number, radius: number,
+        cb: (index: number, ix: number, iy: number, iz: number, yaw: number, scale: number) => void,
+    ): void {
+        const r2 = radius * radius;
+        for (const cell of this.cells) {
+            // Cheap AABB reject on XZ (the cell's Y extent is irrelevant to a horizontal radius query).
+            const dx = x < cell.min[0] ? cell.min[0] - x : x > cell.max[0] ? x - cell.max[0] : 0;
+            const dz = z < cell.min[2] ? cell.min[2] - z : z > cell.max[2] ? z - cell.max[2] : 0;
+            if (dx * dx + dz * dz > r2) continue;
+            for (let j = 0; j < cell.indices.length; j++) {
+                const i = cell.indices[j];
+                const b = i * 5;
+                const ex = this._instances[b] - x, ez = this._instances[b + 2] - z;
+                if (ex * ex + ez * ez > r2) continue;
+                cb(i, this._instances[b], this._instances[b + 1], this._instances[b + 2],
+                    this._instances[b + 3], this._instances[b + 4]);
+            }
+        }
+    }
+
+    /** Read one instance into `out` = [x, y, z, yaw, scale]. False if the index is out of range. */
+    public instanceAt(index: number, out: number[]): boolean {
+        const b = index * 5;
+        if (index < 0 || b + 4 >= this._instances.length) return false;
+        out[0] = this._instances[b]; out[1] = this._instances[b + 1]; out[2] = this._instances[b + 2];
+        out[3] = this._instances[b + 3]; out[4] = this._instances[b + 4];
+        return true;
     }
 
     /** WebGL buffers left over from the previous cell layout; the renderer deletes these. Returns and clears. */
@@ -311,6 +395,7 @@ export class FoliageLayer {
             cells.push({
                 matrices,
                 count: arr.length,
+                indices: Int32Array.from(arr),
                 min: [minX - extent, minY - extent, minZ - extent],
                 max: [maxX + extent, maxY + extent, maxZ + extent],
                 glBuffer: null,
@@ -335,6 +420,10 @@ export class FoliageLayer {
             name: this.name,
             textureId: this.textureId,
             params: this.params,
+            // `params.density` round-trips independently of the terrain material's rule, so it carries
+            // its own unit marker (see deserialize).
+            densityUnit: FOLIAGE_DENSITY_UNIT,
+            collision: this.collision ?? undefined,
             // `model` stays the single primary model so older builds still load this JSON; the full
             // multi-sub-mesh + LOD payload rides in `models`/`lods`.
             model: this.kind === 'mesh' ? this.model.serialize() : undefined,
@@ -351,10 +440,18 @@ export class FoliageLayer {
     }
 
     public static deserialize(json: any): FoliageLayer {
+        // Migrate the density unit into a COPY — `json.params` is re-read by the editor's resync paths,
+        // so mutating it in place would divide a second time on the next load.
+        const params = { ...(json.params || {}) };
+        if (json.densityUnit !== FOLIAGE_DENSITY_UNIT && params.density !== undefined)
+            params.density = Math.max(0, params.density / 100);
+
         let layer: FoliageLayer;
-        if (json.kind === 'billboard') layer = FoliageLayer.Billboard(json.name, json.textureId, json.params);
-        else {
-            layer = FoliageLayer.Mesh(json.name, Model.parse(json.models?.length ? json.models[0] : json.model), json.params);
+        if (json.kind === 'billboard') {
+            layer = FoliageLayer.Billboard(json.name, json.textureId, params);
+            layer.collision = json.collision ?? null;
+        } else {
+            layer = FoliageLayer.Mesh(json.name, Model.parse(json.models?.length ? json.models[0] : json.model), params);
             layer._applyMeshPrototype(json);
         }
         if (json.instances) {

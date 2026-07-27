@@ -335,6 +335,43 @@ export class Material {
 export type TerrainBaseType = 'basic' | 'blinn_phong' | 'pbr';
 
 /**
+ * An optional physics proxy for a foliage prototype. Instances of a rule carrying one get a static
+ * collider while they are near the camera (see `terrain/foliageColliders.ts`); rules without one are
+ * never collidable, which is what keeps grass free. Every dimension is in PROTOTYPE units and is
+ * multiplied by the instance's own random scale.
+ */
+export interface FoliageCollision {
+    shape: 'cylinder' | 'box' | 'sphere';
+    /** Cylinder/sphere radius. */
+    radius?: number;
+    /** Cylinder/box height. */
+    height?: number;
+    /** Box footprint (defaults to `radius * 2` when absent). */
+    width?: number;
+    depth?: number;
+    /** Shape centre above the instance base. Defaults to half the height (or the radius for a sphere). */
+    offsetY?: number;
+}
+
+/** Marker stamped on a rule whose `density` is expressed in instances per square metre. */
+export const FOLIAGE_DENSITY_UNIT = 'm2';
+
+/** Per-m² densities a freshly authored rule starts at. Grass is dense; scattered props are sparse. */
+export const DEFAULT_FOLIAGE_DENSITY = { billboard: 2.0, mesh: 0.05 };
+
+/**
+ * Bring a serialized foliage rule up to the per-m² density unit, in place. Rules written before the
+ * unit change expressed `density` as instances per 100x100 world-unit tile, so they divide by 10000/100
+ * = 100. IDEMPOTENT: the `densityUnit` marker is what stops a serialize→parse round trip dividing twice.
+ */
+export function migrateFoliageRule<T extends { density?: number; densityUnit?: string }>(rule: T): T {
+    if (rule.densityUnit === FOLIAGE_DENSITY_UNIT) return rule;
+    rule.density = Math.max(0, (rule.density ?? 8) / 100);
+    rule.densityUnit = FOLIAGE_DENSITY_UNIT;
+    return rule;
+}
+
+/**
  * A foliage prototype a TerrainMaterial auto-instances (or, referenced by name in a material's
  * exclude list, a foliage type to keep off that material). Plain data only — no runtime engine
  * imports — so `material.ts` stays free of a circular dependency with `terrain/foliage.ts`.
@@ -359,9 +396,14 @@ export interface TerrainFoliageRule {
     billboard?: { textureId: string; distance: number } | null;
     /** Hide instances beyond this camera distance; 0/absent = the renderer's global foliage cull. */
     cullDistance?: number;
+    /** Instances per SQUARE METRE — the same unit for the brush disc and whole-terrain generation. */
     density?: number;
+    /** Unit marker for `density`. Absent = legacy per-100x100-tile; see {@link migrateFoliageRule}. */
+    densityUnit?: string;
     minScale?: number;
     maxScale?: number;
+    /** Static physics proxy spawned for nearby instances. Absent/null = never collidable (grass). */
+    collision?: FoliageCollision | null;
 }
 
 /**
@@ -417,7 +459,9 @@ export class TerrainMaterial extends Material {
             displacementMap: this.textures.get('displacementMap') ?? null,
             displacementScale: this.displacementScale,
             heightBlend: this.heightBlend,
-            foliageInclude: this.foliageInclude.map(r => ({ ...r })),
+            // Stamping the unit on the way OUT is what makes the round trip idempotent: it also rescues
+            // rules the editor built by hand (which never pass through parse) from a spurious migration.
+            foliageInclude: this.foliageInclude.map(r => ({ ...r, densityUnit: FOLIAGE_DENSITY_UNIT })),
             foliageExclude: [...this.foliageExclude],
         };
     }
@@ -438,7 +482,11 @@ export class TerrainMaterial extends Material {
         if (m.displacementMap) tm.textures.set('displacementMap', m.displacementMap);
         tm.displacementScale = m.displacementScale ?? 0.05;
         tm.heightBlend = m.heightBlend ?? 0;
-        tm.foliageInclude = Array.isArray(m.foliageInclude) ? m.foliageInclude.map((r: any) => ({ ...r })) : [];
+        // The ONLY JSON -> live-rule path (Terrain.deserialize and the editor's asset parse both funnel
+        // here), so it is where the density-unit migration runs. Downstream consumers may assume every
+        // live foliageInclude entry is already per-m².
+        tm.foliageInclude = Array.isArray(m.foliageInclude)
+            ? m.foliageInclude.map((r: any) => migrateFoliageRule({ ...r })) : [];
         tm.foliageExclude = Array.isArray(m.foliageExclude) ? [...m.foliageExclude] : [];
         return tm;
     }

@@ -51,7 +51,27 @@ function ConditionRow({ from, to, path, node }: { from: string; to: string; path
       </select>
       {type === 'float' && (
         <input className={input + ' w-[52px]'} type='number' step='0.1' value={node.value ?? 0}
+          title='Threshold'
           onChange={e => setCondition(from, to, path, { value: parseFloat(e.target.value) || 0 })} />
+      )}
+      {/* Hysteresis band, for the two operators that can chatter. A measured value sitting on a threshold
+          satisfies `> x` and `< x` on alternating frames, so a machine with one of each flips state every
+          frame — which is what a spasming animation usually is. The band is centred on the threshold, which is
+          what pushes the two halves of such a pair apart. */}
+      {(node.op === 'gt' || node.op === 'lt') && (
+        <label className='flex items-center gap-0.5 text-[10px] text-gray-400'
+          title={'Hysteresis band, centred on the threshold. Full width — so ±0.4 on “> 1” engages at 1.2 and '
+            + 'does not release until the value falls back through 0.8. Put the same band on the opposite '
+            + 'condition (“< 1”) and the pair stops flipping every frame when the value hovers at 1. '
+            + '0 or blank = off.'}>
+          ±
+          <input className={input + ' w-[46px]'} type='number' step='0.05' min='0' placeholder='0'
+            value={node.hysteresis ?? ''}
+            onChange={e => {
+              const raw = e.target.value.trim()
+              setCondition(from, to, path, { hysteresis: raw === '' ? undefined : Math.max(0, parseFloat(raw) || 0) })
+            }} />
+        </label>
       )}
       <button className={danger} title='Remove condition' onClick={() => removeNode(from, to, path)}>✕</button>
     </div>

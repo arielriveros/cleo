@@ -63,17 +63,51 @@ export function dampVec3Time(out: vec3, current: vec3, target: vec3, seconds: ve
     return out;
 }
 
+/**
+ * Wraps a value into the half-open window (-span/2, span/2] centred on zero.
+ *
+ * The generic form of {@link wrapDegrees}. Anything cyclic wants this: a heading in degrees (span 360), a
+ * normalized blend-space axis that closes on itself (span 1), a turntable in radians (span 2*PI). A
+ * non-positive or non-finite span means "not cyclic" and the value passes through untouched, so a caller
+ * can hand it a user-authored axis range without pre-checking it.
+ */
+export function wrapSpan(value: number, span: number): number {
+    if (!(span > 0) || !isFinite(span)) return value;
+    const half = span / 2;
+    let v = value % span;
+    if (v > half) v -= span;
+    else if (v <= -half) v += span;
+    return v;
+}
+
 /** Wraps an angle into (-180, 180]. */
 export function wrapDegrees(degrees: number): number {
-    let d = degrees % 360;
-    if (d > 180) d -= 360;
-    else if (d <= -180) d += 360;
-    return d;
+    return wrapSpan(degrees, 360);
+}
+
+/** Shortest signed step from `from` to `to` on a circle of circumference `span`. */
+export function deltaWrapped(from: number, to: number, span: number): number {
+    return wrapSpan(to - from, span);
 }
 
 /** Shortest signed rotation from `from` to `to`, in (-180, 180]. */
 export function deltaAngleDeg(from: number, to: number): number {
-    return wrapDegrees(to - from);
+    return deltaWrapped(from, to, 360);
+}
+
+/**
+ * `dampTime` along the SHORTEST arc of a cycle of circumference `span`. Damping the raw values instead
+ * would send a quantity crossing the seam the long way around (on span 360: 179 -> -179 would travel -358
+ * instead of +2), which is a full-range lurch rather than a two-unit step.
+ *
+ * The result is NOT re-wrapped into the window: it stays in whatever range the caller's `current` was
+ * expressed in, so a blend-space probe damped this way keeps sitting inside its authored min..max.
+ */
+export function dampWrapped(current: number, target: number, span: number, seconds: number, dt: number): number {
+    const delta = deltaWrapped(current, target, span);
+    if (!(seconds > 1e-6)) return current + delta;
+    if (dt <= 0) return current;
+    return current + delta * (1 - Math.exp(-dt / seconds));
 }
 
 /**
@@ -81,10 +115,7 @@ export function deltaAngleDeg(from: number, to: number): number {
  * +/-180 the long way around (179 -> -179 would travel -358 instead of +2).
  */
 export function dampAngleDeg(current: number, target: number, seconds: number, dt: number): number {
-    const delta = deltaAngleDeg(current, target);
-    if (!(seconds > 1e-6)) return wrapDegrees(current + delta);
-    if (dt <= 0) return wrapDegrees(current);
-    return wrapDegrees(current + delta * (1 - Math.exp(-dt / seconds)));
+    return wrapDegrees(dampWrapped(current, target, 360, seconds, dt));
 }
 
 // --- noise ---------------------------------------------------------------------------------------

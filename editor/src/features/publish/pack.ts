@@ -21,6 +21,11 @@
  *   16  manifest            UTF-8 JSON, zero-padded to the next 4-byte boundary
  *   ..  blob region         concatenated chunks, each zero-padded to a 4-byte boundary
  *
+ * The manifest gained optional fields over time (foliage geometry refs, terrain splat/height chunks)
+ * without a version bump: an older reader ignores a field it does not know, and an older FILE simply
+ * lacks it — so the readers fall back. Bumping the version would instead make every already-published
+ * game.bin unloadable, which buys nothing.
+ *
  * Chunk offsets in the manifest are **relative to the start of the blob region**, not absolute.
  * They have to be: an absolute offset depends on the manifest's length, which depends on how many
  * digits the offsets take to write — a circular dependency that would otherwise need an iterative
@@ -73,6 +78,10 @@ export interface PackStats {
 
 const align4 = (n: number): number => (n + 3) & ~3;
 
+/** Structured clone across the worker boundary can turn a Uint8Array back into a plain array. */
+const asBytes = (input: any): Uint8Array =>
+  input instanceof Uint8Array ? input : new Uint8Array(input);
+
 /**
  * Narrowest lossless index width.
  *
@@ -91,9 +100,32 @@ function toIndexArray(indices: ArrayLike<number>): Uint16Array | Uint32Array {
   return max >= INDEX_16_LIMIT ? new Uint32Array(indices) : new Uint16Array(indices);
 }
 
-function toFloats(input: any): Float32Array {
+/** Components per element, so a nested `[[x,y,z], ...]` attribute can be flattened. */
+const ATTR_STRIDE: Record<AttrName, number> = {
+  positions: 3, normals: 3, tangents: 3, bitangents: 3, texCoords: 2,
+};
+
+/**
+ * Normalize an attribute to a flat Float32Array, whatever shape it arrived in.
+ *
+ * Both shapes really occur. `Model.serialize()` emits flat arrays, but the editor's foliage rule baker
+ * (utils/foliageRules.ts) emits NESTED tuples — and `new Float32Array(number[][])` does not throw, it
+ * yields an array of NaN. Normalizing here is also what makes the nested copy of a foliage mesh and the
+ * flat copy of the same mesh hash identically, so they dedupe to one chunk instead of two.
+ *
+ * Mirrors `toFlat` in src/core/geometry.ts, duplicated for the same reason as toIndexArray above: this
+ * module may not import `cleo`.
+ */
+function toFloats(input: any, stride: number): Float32Array {
   if (!input || input.length === 0) return EMPTY_F32;
-  return input instanceof Float32Array ? input : new Float32Array(input);
+  if (input instanceof Float32Array) return input;
+  if (typeof input[0] === 'object' && input[0] !== null) {
+    const out = new Float32Array(input.length * stride);
+    for (let i = 0; i < input.length; i++)
+      for (let k = 0; k < stride; k++) out[i * stride + k] = input[i][k] ?? 0;
+    return out;
+  }
+  return new Float32Array(input);
 }
 
 const EMPTY_F32 = new Float32Array(0);
@@ -160,7 +192,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     const arrays: GeoArrays = { attrs: {} };
     let h = 0x811c9dc5;
     for (const name of ATTRS) {
-      const floats = toFloats(raw[name]);
+      const floats = toFloats(raw[name], ATTR_STRIDE[name]);
       if (floats.length === 0) continue; // omit empty attributes entirely
       arrays.attrs[name] = floats;
       h = hashBytes(h, floats);
@@ -194,13 +226,43 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     return id;
   };
 
+  const internModelJson = (model: any): void => {
+    if (model && model.geometry && typeof model.geometry === 'object') {
+      model.geometryRef = intern(model.geometry);
+      delete model.geometry;
+    }
+  };
+
+  /**
+   * Every prototype mesh a foliage rule or a serialized foliage layer carries: the legacy single model,
+   * LOD0's sub-meshes, and each extra LOD level's.
+   *
+   * These used to bypass the packer entirely and ship as decimal-string JSON inside the manifest — and
+   * TWICE over, because the same mesh appears both on the terrain material's rule and on the scattered
+   * layer built from it. Interning both makes them collapse to one chunk.
+   */
+  const internFoliageSource = (src: any): void => {
+    if (!src || typeof src !== 'object') return;
+    internModelJson(src.model);
+    for (const m of (src.models ?? [])) internModelJson(m);
+    for (const l of (src.lods ?? [])) for (const m of (l?.models ?? [])) internModelJson(m);
+  };
+
   const visit = (node: any): void => {
     if (node && typeof node === 'object') {
-      const model = node.model;
-      if (model && model.geometry && typeof model.geometry === 'object') {
-        model.geometryRef = intern(model.geometry);
-        delete model.geometry;
+      internModelJson(node.model);
+
+      const terrain = node.terrain;
+      if (terrain) {
+        for (const f of (terrain.foliage ?? [])) internFoliageSource(f);
+        for (const layer of (terrain.layers ?? []))
+          for (const rule of (layer?.material?.foliageInclude ?? [])) internFoliageSource(rule);
+        // Compressed heights/splat (see publish/terrainImages.ts) move out of the JSON manifest into
+        // the blob, referenced exactly like a geometry chunk.
+        if (terrain.splatBytes) { terrain.splatChunk = addChunk(asBytes(terrain.splatBytes)); delete terrain.splatBytes; }
+        if (terrain.heightBytes) { terrain.heightChunk = addChunk(asBytes(terrain.heightBytes)); delete terrain.heightBytes; }
       }
+
       for (const child of (node.children ?? [])) visit(child);
     }
   };

@@ -249,6 +249,8 @@ export type BodyDescription = {
    * value (~0.1–0.2) probes the ground each frame so `isGrounded` stops flickering under a resting body.
    */
   groundProbeDistance?: number;
+  /** Time constant for this body's MEASURED motion, in seconds. 0/absent = the engine default (~0.09s). */
+  motionSmoothing?: number;
   shapes: ShapeDescription[];
 }
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | CapsuleShapeDescription | PlaneShapeDescription | ConvexShapeDescription;

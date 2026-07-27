@@ -1,6 +1,11 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { AnimatedModel, Animation, AnimationSampler, AnimationChannel, Skin } from './animatedModel';
-import { AnimationField, FieldWeight, fieldWeights, rateScaleOf } from './animationField';
+import {
+    AnimationField, AnimationFieldAxis, FieldWeight, fieldWeights, rateScaleOf, phaseOffsetOf,
+    axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
+} from './animationField';
+import { clamp, dampTime, dampWrapped, wrapSpan } from '../core/math';
+import { skeletonTopology, SkeletonTopology } from './skeletonTopology';
 import { Node, ModelNode, canAccessVariable } from '../core/scene/node';
 import { InputManager } from '../input/inputManager';
 import { Logger } from '../core/logger';
@@ -59,6 +64,25 @@ export const NODE_BUILTINS: Record<string, { type: 'number' | 'boolean'; read: (
     planarAngle:      { type: 'number',  read: n => n.planarAngle },
     worldPlanarAngle: { type: 'number',  read: n => n.worldPlanarAngle },
     isGrounded:       { type: 'boolean', read: n => n.isGrounded },
+
+    // Rate of change, not state. These are what make a START and a STOP expressible: speed alone cannot tell
+    // a character breaking into a run from one already running at that speed, so a machine reading only
+    // `planarSpeed` can pick a gait but can never play the transition into it.
+    planarAcceleration: { type: 'number',  read: n => n.planarAcceleration },
+    isAccelerating:     { type: 'boolean', read: n => n.isAccelerating },
+    isDecelerating:     { type: 'boolean', read: n => n.isDecelerating },
+    isMoving:           { type: 'boolean', read: n => n.isMoving },
+    movingTime:         { type: 'number',  read: n => n.movingTime },
+    stillTime:          { type: 'number',  read: n => n.stillTime },
+    turnRate:           { type: 'number',  read: n => n.turnRate },
+    angularSpeed:       { type: 'number',  read: n => n.angularSpeed },
+
+    // Air / ground, for jump and land states.
+    isFalling:      { type: 'boolean', read: n => n.isFalling },
+    airTime:        { type: 'number',  read: n => n.airTime },
+    groundedTime:   { type: 'number',  read: n => n.groundedTime },
+    groundDistance: { type: 'number',  read: n => n.groundDistance },
+    slopeAngle:     { type: 'number',  read: n => n.slopeAngle },
 };
 
 /** Name of a built-in node value. */
@@ -137,6 +161,21 @@ export interface AnimationCondition {
     op: AnimationConditionOp;
     /** Threshold for float comparisons ('gt' | 'lt' | 'eq' | 'neq'). */
     value?: number;
+    /**
+     * Full width of a latching band centred on `value`, in parameter units. Applies to 'gt' and 'lt'; ignored
+     * by every other operator.
+     *
+     * A bare threshold on a measured value chatters: a speed hovering at 0.1 satisfies `Speed > 0.1` and
+     * `Speed < 0.1` on alternating frames, so a machine with one of each flips state every frame — which is
+     * what "the animation spasms" usually turns out to be. With a band of `h`, `> value` does not engage until
+     * `value + h/2` and does not release until the parameter falls back through `value - h/2` (mirrored for
+     * `<`), so a `>`/`<` pair on the same threshold ends up with its two engage points `h` apart and the
+     * signal has to genuinely swing before the machine moves.
+     *
+     * The latch is keyed by the condition's own terms, so two identical conditions share one band — which is
+     * what you want, since they are asking the same question of the same signal.
+     */
+    hysteresis?: number;
 }
 
 /** An AND/OR gate over conditions and nested gates. See {@link AnimationTransition.condition}. */
@@ -175,6 +214,18 @@ export interface AnimationTransition {
      * {@link Animator.blendTime}. Per-edge because one machine wants a snappy landing and a lazy gait change.
      */
     blendTime?: number;
+    /**
+     * Seconds the machine must already have spent in `from` before this transition may fire at all.
+     *
+     * The blunt instrument against a state pair that ping-pongs, and the one that works even when the cause is
+     * not a single threshold (two states whose conditions genuinely overlap, a trigger raised every frame).
+     * Unlike `hasExitTime` it is measured in real seconds from state entry, not in normalized clip time, so it
+     * is meaningful for a looping state with no natural exit point.
+     *
+     * Distinct from `blendTime`: a blend covers the change visually, but the machine can still change its mind
+     * mid-blend and re-arm a new one from a pose that has barely moved. This stops it changing its mind.
+     */
+    minDwell?: number;
 }
 
 export interface AnimationEventMarker {
@@ -354,12 +405,20 @@ class Bone {
     }
     
     /**
-     * Calculate interpolation factor (0-1) between two keyframes
+     * Calculate interpolation factor (0-1) between two keyframes.
+     *
+     * CLAMPED, and it has to be. The index helpers return `length - 2` for any time past the last keyframe, so
+     * an unclamped factor greater than 1 EXTRAPOLATES beyond the final pose along the last segment's slope.
+     * A clip's duration is the longest of its channels, so any bone whose channel ends earlier is asked for a
+     * time past its own end on every cycle — and an animation field drives several clips of differing lengths
+     * to the same phase, which makes it routine rather than rare. Two coincident keyframes divide by zero and
+     * also land here; holding the earlier keyframe is the only defined answer.
      */
     private _getScaleFactor(lastTimeStamp: number, nextTimeStamp: number, animationTime: number): number {
-        const midWayLength = animationTime - lastTimeStamp;
         const framesDiff = nextTimeStamp - lastTimeStamp;
-        return midWayLength / framesDiff;
+        if (!(framesDiff > 0)) return 0;
+        const midWayLength = animationTime - lastTimeStamp;
+        return clamp(midWayLength / framesDiff, 0, 1);
     }
     
     /**
@@ -469,7 +528,25 @@ interface FieldEntry {
     duration: number;
     weight: number;
     rateScale: number;
+    /** Fraction of a cycle this clip is shifted by. See {@link AnimationFieldSample.phaseOffset}. */
+    phaseOffset: number;
 }
+
+/**
+ * Damped weight below which a clip that is fading out stops being posed.
+ *
+ * Larger than animationField's own WEIGHT_EPSILON on purpose: this one ends a decaying exponential, which
+ * never actually reaches zero, so too tight a value keeps every clip a character has ever blended through
+ * posed forever. At 1e-3 a contribution is well under a tenth of a percent of the pose.
+ */
+const WEIGHT_FADE_EPSILON = 1e-3;
+
+/**
+ * How far a rival must lead the current dominant clip before the dominant changes hands.
+ *
+ * Only affects which clip owns event markers and what `currentAnimation` reports — never the blend itself.
+ */
+const DOMINANT_SWITCH_MARGIN = 0.05;
 
 /**
  * Animator class manages skeletal animation playback
@@ -526,6 +603,20 @@ export class Animator {
     private _currentStateName: string | null = null;
     private _eventCallbacks: ((eventName: string, clipName: string) => void)[] = [];
     private _prevEventTime: number = 0;
+    /**
+     * Real seconds spent in the current state. What {@link AnimationTransition.minDwell} is measured against —
+     * deliberately not derived from _currentTime, which a field re-scales as its blend shifts and which a
+     * looping state wraps.
+     */
+    private _stateTime: number = 0;
+    /**
+     * Latch state for conditions with a hysteresis band, keyed by the condition's terms.
+     *
+     * Keyed by value rather than by identity because a condition leaf is a plain serialized object with no
+     * stable identity across an edit, and because two leaves asking the same question of the same parameter
+     * should share one band anyway.
+     */
+    private _condLatch: Map<string, boolean> = new Map();
 
     // ---- Animation field (blend space) playback ----
     //
@@ -535,13 +626,54 @@ export class Animator {
     private _fieldDef: AnimationField | null = null;
     private _fieldInputs: { x?: string; y?: string } | null = null;
     private _fieldEntries: FieldEntry[] | null = null;
-    /** Live probe coordinates. Driven by parameters in a machine, or set directly by the editor preview. */
+    /**
+     * SMOOTHED probe coordinates — what the field is actually sampled at. Set directly by the editor preview
+     * (which wants no lag), damped towards _fieldTargetX/Y when a machine is driving the axes.
+     */
     private _fieldX: number = 0;
     private _fieldY: number = 0;
+    /**
+     * The probe the parameters are asking for, after the axis deadband. Kept separate from _fieldX/_fieldY so
+     * the damping has a fixed target: damping towards a value that is itself the damped result would stall.
+     */
+    private _fieldTargetX: number = 0;
+    private _fieldTargetY: number = 0;
+    /** False until the first parameter read, which snaps the probe instead of damping in from 0. */
+    private _fieldProbeSeeded: boolean = false;
     /** Shared normalized playback position (0..1) across every contributing clip — the anti-foot-slide. */
     private _fieldPhase: number = 0;
+    /** Phase at the START of this frame, so event markers get a monotonic window (see _fireDueEvents). */
+    private _prevFieldPhase: number = 0;
+    /**
+     * Damped weight per clip name, surviving between frames.
+     *
+     * This is what keeps the contributing SET continuous. fieldWeights drops a clip the moment its weight
+     * goes negligible, and an entry appearing or vanishing between two frames is a discontinuity no amount of
+     * probe smoothing can remove — _mixTransforms seeds its accumulator from the first entry and folds the
+     * rest in incrementally, so the set changing changes the result. Holding a departing clip here at a
+     * decaying weight turns that step into a fade.
+     */
+    private _fieldWeightState: Map<string, number> = new Map();
+    /**
+     * Last seen rate scale and phase offset per clip name, so a clip that is FADING OUT — and whose sample the
+     * field no longer returns — keeps being posed the way it was while it was still contributing.
+     */
+    private _fieldSampleMeta: Map<string, { rateScale: number; phaseOffset: number }> = new Map();
+    /** False until the first weight evaluation of a field, which snaps rather than fading up from nothing. */
+    private _fieldWeightsSeeded: boolean = false;
+    /**
+     * Clip currently treated as dominant, held with a margin.
+     *
+     * _currentAnimation follows this, and it owns event-marker ownership plus the public getter. Picking the
+     * per-frame maximum outright makes the identity flicker every frame around a 50/50 crossing, which fires
+     * (or drops) markers at random.
+     */
+    private _fieldDominant: string | null = null;
     /** Bone maps per clip, built once. Weights change every frame; bone maps must not be rebuilt with them. */
     private _fieldBoneCache: Map<string, { bones: Map<string, Bone>; duration: number; animation: Animation }> = new Map();
+    /** Cached skeleton hierarchy; see _topology(). */
+    private _topologyCache: SkeletonTopology | null = null;
+    private _topologySkin: Skin | null = null;
     /** The field being cross-faded OUT of, mirroring _previousBones for the single-clip path. */
     private _previousFieldEntries: FieldEntry[] | null = null;
     private _previousFieldPhase: number = 0;
@@ -765,6 +897,12 @@ export class Animator {
         this._fieldInputs = null;
         this._fieldEntries = null;
         this._fieldPhase = 0;
+        this._prevFieldPhase = 0;
+        this._fieldWeightState.clear();
+        this._fieldSampleMeta.clear();
+        this._fieldWeightsSeeded = false;
+        this._fieldDominant = null;
+        this._fieldProbeSeeded = false;
     }
 
     /**
@@ -786,9 +924,15 @@ export class Animator {
     /**
      * Start playing a field, cross-fading out of whatever is currently posed.
      *
-     * The new field always starts at phase 0. It does NOT inherit the outgoing one's phase: the outgoing
+     * A DIFFERENT field starts at phase 0. It does NOT inherit the outgoing one's phase: the outgoing
      * side keeps its own and goes on advancing under the cross-fade (see _previousFieldPhase), so the
      * transition is covered by the blend rather than by matching up two unrelated cycles.
+     *
+     * Re-entering the SAME field object is the exception, and the reason is the ping-pong case: two
+     * transitions sitting either side of one threshold re-enter a state every frame while the parameter
+     * hovers, and restarting the cycle from zero each time is a stutter with no animation content behind it.
+     * The identity test is deliberately by reference — each state embeds its own copy of a field, so two
+     * different states playing the same asset are still different objects and still reset.
      */
     private _startField(
         field: AnimationField,
@@ -816,8 +960,10 @@ export class Animator {
             this._previousFieldEntries = null;
         }
 
+        const sameField = field === this._fieldDef;
+
         // A different field means different clips; the cached bone maps are for the old set.
-        if (field !== this._fieldDef) this._fieldBoneCache.clear();
+        if (!sameField) this._fieldBoneCache.clear();
 
         // A field blends several clips and has no single root to extract; make sure a clip's root motion does
         // not linger and keep driving the character while the field plays.
@@ -827,7 +973,15 @@ export class Animator {
         this._fieldDef = field;
         this._fieldInputs = inputs ?? null;
         this._fieldEntries = null;    // rebuilt by the refresh below
-        this._fieldPhase = 0;
+        if (!sameField) {
+            this._fieldPhase = 0;
+            this._fieldWeightState.clear();
+            this._fieldSampleMeta.clear();
+            this._fieldWeightsSeeded = false;
+            this._fieldDominant = null;
+            this._fieldProbeSeeded = false;
+        }
+        this._prevFieldPhase = this._fieldPhase;
         this._bones.clear();          // the field owns the pose now; stale clip bones must not leak through
         this._currentAnimation = null;
         this._currentTime = 0;
@@ -837,6 +991,10 @@ export class Animator {
         this._loopLimit = 0;
 
         this._refreshFieldWeights();
+        // Re-derived after the refresh, since the weighted duration is only known once the entries exist. On a
+        // carried phase this restores the clock the exit-time gate reads; on a reset it is 0 either way.
+        this._currentTime = this._fieldPhase * this._fieldDuration(this._fieldEntries);
+        this._prevEventTime = this._currentTime;
     }
 
     /** The bone map + duration for a clip in the active field, built once and cached by clip name. */
@@ -869,36 +1027,46 @@ export class Animator {
         const field = this._fieldDef;
         if (!field) { this._fieldEntries = null; return; }
 
-        // A machine drives the probe through its parameters; the editor preview writes _fieldX/_fieldY
-        // directly and leaves _fieldInputs null.
-        if (this._fieldInputs) {
-            const read = (name: string | undefined, fallback: number): number => {
-                if (!name) return fallback;
-                const v = this._paramValues.get(name);
-                if (typeof v === 'number') return v;
-                if (typeof v === 'boolean') return v ? 1 : 0;
-                // Parameter renamed or deleted: hold the last probe rather than snapping the blend to 0,
-                // which would read as the character suddenly standing still.
-                return fallback;
-            };
-            this._fieldX = read(this._fieldInputs.x, this._fieldX);
-            this._fieldY = read(this._fieldInputs.y, this._fieldY);
-        }
+        this._advanceFieldProbe(field);
 
         const weights: FieldWeight[] = fieldWeights(field, this._fieldX, this._fieldY);
-        if (weights.length === 0) { this._fieldEntries = []; return; }
+        const damped = this._dampFieldWeights(field, weights);
+        if (damped.size === 0) { this._fieldEntries = []; this._fieldDominant = null; return; }
 
         const entries: FieldEntry[] = [];
         for (const w of weights) {
+            const weight = damped.get(w.sample.clipName);
+            if (weight === undefined) continue;   // damped out, or already emitted for a duplicated clip
+            damped.delete(w.sample.clipName);
             const clip = this._fieldClip(w.sample.clipName);
             if (!clip) continue; // sample points at a clip this model does not have — skip, don't break the pose
+            const meta = { rateScale: rateScaleOf(w.sample), phaseOffset: phaseOffsetOf(w.sample) };
+            this._fieldSampleMeta.set(w.sample.clipName, meta);
             entries.push({
                 clipName: w.sample.clipName,
                 animation: clip.animation,
                 bones: clip.bones,
                 duration: clip.duration,
-                weight: w.weight,
-                rateScale: rateScaleOf(w.sample),
+                weight,
+                ...meta,
+            });
+        }
+
+        // Whatever is LEFT in `damped` is fading out: a clip the field no longer returns at all. It still has
+        // to be posed, or the fade the damping just bought would not be visible anywhere.
+        //
+        // Its sample is gone, so its rate scale and phase offset come from the remembered meta. That matters
+        // for the OFFSET in particular: defaulting it to 0 would jog the clip by however much it was shifted
+        // on the exact frame it starts fading, turning the fade this exists to provide back into a pop.
+        for (const [clipName, weight] of damped) {
+            const clip = this._fieldClip(clipName);
+            if (!clip) continue;
+            const meta = this._fieldSampleMeta.get(clipName);
+            entries.push({
+                clipName, animation: clip.animation, bones: clip.bones,
+                duration: clip.duration, weight,
+                rateScale: meta?.rateScale ?? 1,
+                phaseOffset: meta?.phaseOffset ?? 0,
             });
         }
 
@@ -907,13 +1075,148 @@ export class Animator {
         const total = entries.reduce((sum, e) => sum + e.weight, 0);
         if (total > 0 && Math.abs(total - 1) > 1e-6) for (const e of entries) e.weight /= total;
 
+        // Heaviest first. The mix itself no longer depends on this — _mixTransforms is order-independent —
+        // but the debug readout reads better heaviest-first, and a stable order keeps diffs of it readable.
+        entries.sort((a, b) => b.weight - a.weight);
+
         this._fieldEntries = entries;
 
         // Keep _currentAnimation pointing at the dominant clip: event markers are authored per clip, and the
         // public getter is part of the API. It is NOT used for timing — _getAnimationDuration is field-aware.
-        let dominant: FieldEntry | null = null;
-        for (const e of entries) if (!dominant || e.weight > dominant.weight) dominant = e;
+        const dominant = this._resolveFieldDominant(entries);
         this._currentAnimation = dominant ? dominant.animation : null;
+    }
+
+    /**
+     * Move the probe towards what the parameters are asking for.
+     *
+     * Filtering — this and the weight damping both — is a RUNTIME concern, gated on a machine driving the
+     * axes. The field editor writes the probe directly and gets the field exactly as authored: a lag between
+     * the pointer and the pose would make placing samples guesswork, and the two agree at steady state
+     * anyway, so the preview still cannot drift from the game.
+     *
+     * Two filters, in this order. The DEADBAND decides whether the target moved at all — below it the probe is
+     * not merely slow to follow, it does not follow, which is the only thing that fully removes buzz from a
+     * noisy input. The DAMP then closes the remaining gap over the axis's smoothing time, frame-rate
+     * independently. A wrapping axis is damped along the shortest arc, or a heading crossing the seam would
+     * travel the long way round and sweep the blend through every clip on the way.
+     *
+     * The editor preview leaves `_fieldInputs` null and writes `_fieldX/_fieldY` directly; it wants the probe
+     * exactly where the pointer is, so this whole path is skipped for it.
+     */
+    private get _fieldFiltering(): boolean { return this._fieldInputs !== null; }
+
+    private _advanceFieldProbe(field: AnimationField): void {
+        if (!this._fieldFiltering || !this._fieldInputs) return;
+
+        const read = (name: string | undefined, fallback: number): number => {
+            if (!name) return fallback;
+            const v = this._paramValues.get(name);
+            if (typeof v === 'number') return v;
+            if (typeof v === 'boolean') return v ? 1 : 0;
+            // Parameter renamed or deleted: hold the last probe rather than snapping the blend to 0,
+            // which would read as the character suddenly standing still.
+            return fallback;
+        };
+
+        const rawX = read(this._fieldInputs.x, this._fieldTargetX);
+        const rawY = read(this._fieldInputs.y, this._fieldTargetY);
+        const spanX = axisWrapSpan(field.xAxis);
+        const spanY = axisWrapSpan(field.yAxis);
+
+        // Deadband against the committed TARGET, not against the damped probe: comparing to the probe would
+        // let the target creep one deadzone at a time and never settle.
+        const dzX = axisDeadzone(field.xAxis);
+        const dzY = axisDeadzone(field.yAxis);
+        if (Math.abs(this._wrappedGap(rawX, this._fieldTargetX, spanX)) > dzX) this._fieldTargetX = rawX;
+        if (Math.abs(this._wrappedGap(rawY, this._fieldTargetY, spanY)) > dzY) this._fieldTargetY = rawY;
+
+        // The first read snaps. Damping in from 0 would walk the blend up through every clip between the
+        // origin and wherever the character actually is on the frame the state is entered.
+        if (!this._fieldProbeSeeded) {
+            this._fieldProbeSeeded = true;
+            this._fieldX = this._fieldTargetX;
+            this._fieldY = this._fieldTargetY;
+            return;
+        }
+
+        const dt = this._deltaTime;
+        this._fieldX = this._dampAxis(this._fieldX, this._fieldTargetX, field.xAxis, spanX, dt);
+        this._fieldY = this._dampAxis(this._fieldY, this._fieldTargetY, field.yAxis, spanY, dt);
+    }
+
+    /** Signed gap from `b` to `a`, along the shortest arc when the axis wraps (`span <= 0` = straight line). */
+    private _wrappedGap(a: number, b: number, span: number): number {
+        return wrapSpan(a - b, span);
+    }
+
+    private _dampAxis(current: number, target: number, axis: AnimationFieldAxis | undefined, span: number, dt: number): number {
+        const seconds = axisSmoothing(axis);
+        if (seconds <= 0 || dt <= 0) return target;
+        return span > 0
+            ? dampWrapped(current, target, span, seconds, dt)
+            : dampTime(current, target, seconds, dt);
+    }
+
+    /**
+     * Damp each clip's weight towards what the field asked for, keeping departing clips alive until they are
+     * negligible. Returns clipName -> damped weight; a clip below WEIGHT_EPSILON is dropped and forgotten.
+     *
+     * Duplicate clip names inside one field collapse into a single entry: the same Bone map cannot be posed at
+     * two different weights, and it is the same motion either way.
+     */
+    private _dampFieldWeights(field: AnimationField, weights: FieldWeight[]): Map<string, number> {
+        const targets = new Map<string, number>();
+        for (const w of weights) targets.set(w.sample.clipName, (targets.get(w.sample.clipName) ?? 0) + w.weight);
+
+        const seconds = weightSmoothing(field);
+        const dt = this._deltaTime;
+
+        // The FIRST evaluation of a field must snap. Damping from an empty state means damping up from zero,
+        // and a zero-weight pose is the bind pose — the character would unfold into its blend over the
+        // smoothing time every time the state is entered.
+        const seed = !this._fieldWeightsSeeded;
+        this._fieldWeightsSeeded = true;
+
+        if (seed || !this._fieldFiltering || seconds <= 0 || dt <= 0) {
+            this._fieldWeightState = targets;
+            return new Map(targets);
+        }
+
+        const next = new Map<string, number>();
+        // The union of "what the field wants" and "what is still fading" — a clip missing from `targets` is
+        // damped towards 0 rather than dropped, which is the entire point.
+        const names = new Set<string>([...this._fieldWeightState.keys(), ...targets.keys()]);
+        for (const name of names) {
+            const target = targets.get(name) ?? 0;
+            const current = this._fieldWeightState.get(name) ?? 0;
+            const w = dampTime(current, target, seconds, dt);
+            if (w <= WEIGHT_FADE_EPSILON && target <= 0) continue;   // faded out; stop posing it
+            next.set(name, w);
+        }
+
+        this._fieldWeightState = next;
+        return new Map(next);
+    }
+
+    /**
+     * The dominant entry, switching only when a rival leads by a margin.
+     *
+     * Without the margin the identity flips every frame either side of a 50/50 crossing. That matters because
+     * _currentAnimation decides which clip's event markers are live, so a flickering dominant fires markers
+     * from two clips at once or drops both.
+     */
+    private _resolveFieldDominant(entries: FieldEntry[]): FieldEntry | null {
+        if (entries.length === 0) { this._fieldDominant = null; return null; }
+
+        let best: FieldEntry | null = null;
+        for (const e of entries) if (!best || e.weight > best.weight) best = e;
+
+        const held = this._fieldDominant ? entries.find(e => e.clipName === this._fieldDominant) ?? null : null;
+        if (held && best && best.weight - held.weight < DOMINANT_SWITCH_MARGIN) return held;
+
+        this._fieldDominant = best ? best.clipName : null;
+        return best;
     }
 
     /** Weighted duration of the active field: what one full cycle of the blended motion lasts. */
@@ -924,85 +1227,143 @@ export class Animator {
         return d;
     }
 
-    /** Pose every contributing clip at the shared phase, each scaled to its OWN length (no foot sliding). */
+    /**
+     * Pose every contributing clip at the shared phase, each scaled to its OWN length (no foot sliding) and
+     * shifted by its own offset (so clips that start at different points in the gait line up).
+     */
     private _poseFieldAt(entries: FieldEntry[], phase: number): void {
         for (const e of entries) {
-            for (const bone of e.bones.values()) bone.update(phase * e.duration);
+            // Wrapped, not clamped: the offset moves a clip AROUND its cycle, so phase 0.9 with an offset of
+            // 0.3 is 0.2 into the next lap, not held at the end.
+            //
+            // The comparison is STRICTLY greater, not a modulo. Phase 1.0 is a real terminal state — a field
+            // that has finished its last loop parks there and holds its final frame, which is what an
+            // exit-time transition waits on — and `1 % 1` is 0, which would snap that held pose back to the
+            // first frame. With offsets in [0,1) and phase in [0,1], this keeps 1.0 meaning 1.0.
+            let p = phase + e.phaseOffset;
+            if (p > 1) p -= 1;
+            for (const bone of e.bones.values()) bone.update(p * e.duration);
         }
     }
 
     /**
-     * Weighted mix of several local transforms into one.
+     * Weighted mix of several local transforms into one. ORDER-INDEPENDENT — that property is the point.
      *
-     * The N-way generalization of _blendTransforms: lerp translation/scale, and fold rotations in with an
-     * incremental slerp weighted by each contribution's share of the running total. Quaternions are flipped
-     * into the accumulator's hemisphere first — without that, two clips whose quaternions sit on opposite
-     * hemispheres blend the long way round and the limb sweeps through the body.
+     * This used to fold rotations with an incremental slerp against a running accumulator. That is not
+     * commutative, and the entries it is handed are sorted by weight, so any two weights CROSSING reordered
+     * the fold and moved the result. Measured on four plausible leg orientations: 0.119 degrees of change
+     * from the swap alone, 0.267 degrees across all 24 orderings — every frame, on a bone near the root of
+     * the limb, so it amplifies down the chain. A probe dithering on a tie line does exactly that.
+     *
+     * So: flatten every quaternion into ONE reference hemisphere, take the weighted sum, and normalize
+     * (nlerp). Commutative, associative up to float rounding, and for the near-identical poses a blend space
+     * mixes it lands ~0.07 degrees from the slerp fold — far inside the artefact it removes. Translation and
+     * scale were already order-independent (a sequential affine lerp IS the exact weighted mean); they are
+     * written as plain weighted sums here because that is now the obvious form.
+     *
+     * `reference` must be STABLE frame to frame. Using the first part, as an obvious implementation would,
+     * reintroduces the bug at one remove: measured, that still leaves a 0.030 degree spread across orderings,
+     * because which quaternion gets flipped then depends on which one happened to come first. Callers pass
+     * the dominant clip's rotation, which has its own switch hysteresis.
      */
-    private _mixTransforms(parts: { m: mat4; w: number }[]): mat4 {
+    private _mixTransforms(parts: { m: mat4; w: number }[], reference?: quat | null): mat4 {
         const result = mat4.create();
         if (parts.length === 0) return result;
         if (parts.length === 1) return mat4.copy(result, parts[0].m);
 
-        const translation = vec3.create();
-        const scale = vec3.create();
-        const rotation = quat.create();
         const t = vec3.create();
         const s = vec3.create();
         const r = quat.create();
 
-        let accW = 0;
+        // No caller-supplied reference: the heaviest part. Deterministic given the same set, whatever order
+        // it arrives in. Its own SIGN does not matter — negating the reference negates every flip decision
+        // and so negates the sum, and q and -q are the same rotation.
+        let ref = reference ?? null;
+        if (!ref) {
+            let best: { m: mat4; w: number } | null = null;
+            for (const part of parts) if (!best || part.w > best.w) best = part;
+            ref = mat4.getRotation(quat.create(), (best ?? parts[0]).m);
+        }
+
+        const translation = vec3.create();
+        const scale = vec3.create();
+        const rotation = quat.create();   // starts at (0,0,0,0) — an accumulator, not a rotation yet
+        quat.set(rotation, 0, 0, 0, 0);
+
+        let total = 0;
         for (const part of parts) {
             if (part.w <= 0) continue;
             mat4.getTranslation(t, part.m);
             mat4.getScaling(s, part.m);
             mat4.getRotation(r, part.m);
 
-            if (accW === 0) {
-                vec3.copy(translation, t);
-                vec3.copy(scale, s);
-                quat.copy(rotation, r);
-                accW = part.w;
-                continue;
-            }
+            vec3.scaleAndAdd(translation, translation, t, part.w);
+            vec3.scaleAndAdd(scale, scale, s, part.w);
 
-            const f = part.w / (accW + part.w);
-            vec3.lerp(translation, translation, t, f);
-            vec3.lerp(scale, scale, s, f);
-            if (quat.dot(rotation, r) < 0) quat.scale(r, r, -1);
-            quat.slerp(rotation, rotation, r, f);
-            accW += part.w;
+            // Into the reference hemisphere. Without this a clip whose quaternion sits on the far side
+            // cancels against the others instead of adding to them, and the limb sweeps through the body.
+            const w = quat.dot(ref, r) < 0 ? -part.w : part.w;
+            rotation[0] += r[0] * w;
+            rotation[1] += r[1] * w;
+            rotation[2] += r[2] * w;
+            rotation[3] += r[3] * w;
+            total += part.w;
         }
 
-        if (accW === 0) return mat4.copy(result, parts[0].m);
+        if (total === 0) return mat4.copy(result, parts[0].m);
+        vec3.scale(translation, translation, 1 / total);
+        vec3.scale(scale, scale, 1 / total);
+
+        // Exactly-opposed contributions can still sum to nothing, which would normalize to NaN and collapse
+        // the skeleton. Unreachable once every part is in one hemisphere, but this is user data.
+        if (quat.length(rotation) < 1e-8) quat.copy(rotation, ref);
         quat.normalize(rotation, rotation);
+
         mat4.fromRotationTranslationScale(result, rotation, translation, scale);
         return result;
     }
 
-    /** The field-blended local transform for a bone, or null when no contributing clip animates it. */
-    private _fieldLocal(entries: FieldEntry[] | null, boneName: string): mat4 | null {
+    /**
+     * The field-blended local transform for a bone, or null when no contributing clip animates it.
+     *
+     * `dominantClip` names the entry whose rotation anchors the hemisphere. It is the clip
+     * {@link _resolveFieldDominant} is holding, so it only changes when the dominant genuinely changes hands
+     * — which is what keeps the mix stable while two weights trade places around a tie.
+     */
+    private _fieldLocal(entries: FieldEntry[] | null, boneName: string, dominantClip?: string | null): mat4 | null {
         if (!entries || entries.length === 0) return null;
         const parts: { m: mat4; w: number }[] = [];
+        let reference: quat | null = null;
         for (const e of entries) {
             const bone = e.bones.get(boneName);
-            if (bone) parts.push({ m: bone.localTransform, w: e.weight });
+            if (!bone) continue;
+            parts.push({ m: bone.localTransform, w: e.weight });
+            // The dominant clip may not animate this bone; then there is no anchor and _mixTransforms falls
+            // back to the heaviest part, which is deterministic for a fixed set of contributions.
+            if (dominantClip && e.clipName === dominantClip) {
+                reference = mat4.getRotation(quat.create(), bone.localTransform);
+            }
         }
         if (parts.length === 0) return null;
         // Partial coverage (a bone only some contributing clips animate) is left to the caller's bind-pose
         // fallback rather than mixed against an implicit identity, which would drag the bone towards origin.
-        return this._mixTransforms(parts);
+        return this._mixTransforms(parts, reference);
     }
 
     /** Local transform of a bone in the CURRENT pose source (field when one is active, else the clip). */
     private _currentLocal(boneName: string): mat4 | null {
-        if (this._fieldEntries) return this._fieldLocal(this._fieldEntries, boneName);
+        if (this._fieldEntries) return this._fieldLocal(this._fieldEntries, boneName, this._fieldDominant);
         return this._bones.get(boneName)?.localTransform ?? null;
     }
 
-    /** Local transform of a bone in the OUTGOING pose source during a cross-fade. */
+    /**
+     * Local transform of a bone in the OUTGOING pose source during a cross-fade.
+     *
+     * No dominant clip is tracked for the outgoing side — its weights are a frozen snapshot taken when the
+     * transition fired, so they cannot cross and the heaviest-part fallback is already stable.
+     */
     private _previousLocal(boneName: string): mat4 | null {
-        if (this._previousFieldEntries) return this._fieldLocal(this._previousFieldEntries, boneName);
+        if (this._previousFieldEntries) return this._fieldLocal(this._previousFieldEntries, boneName, null);
         return this._previousBones.get(boneName)?.localTransform ?? null;
     }
 
@@ -1056,6 +1417,59 @@ export class Animator {
     }
 
     /**
+     * Everything between a machine parameter and the pose, in one snapshot, for diagnosing a blend that will
+     * not sit still.
+     *
+     * A field is a chain — parameter, deadbanded target, damped probe, weights, pose — and when it vibrates
+     * the only question worth asking is WHICH LINK is moving. Reading them all at one instant answers it:
+     * a raw value that jitters while the probe is calm means the noise is upstream in whatever writes the
+     * parameter; a calm probe with restless weights means the field's own layout; both calm while the
+     * character still shakes means the pose blend or the state machine.
+     *
+     * Read-only and allocated per call — this is a debug surface, not a per-frame path.
+     */
+    public get fieldDebug(): {
+        active: boolean;
+        /** Straight from the machine parameters, before any filtering. Null when an axis is unbound. */
+        rawX: number | null; rawY: number | null;
+        /** After the axis deadband: what the damping is currently heading towards. */
+        targetX: number; targetY: number;
+        /** After damping: where the field is actually being sampled. */
+        probeX: number; probeY: number;
+        weights: { clipName: string; weight: number; phaseOffset: number }[];
+        dominant: string | null;
+        phase: number;
+        /** Weighted cycle length in seconds; moves as the blend shifts. */
+        duration: number;
+        stateName: string | null;
+        /** Seconds since the current state was entered — what a minDwell gate is measured against. */
+        stateTime: number;
+    } {
+        const raw = (name: string | undefined): number | null => {
+            if (!name) return null;
+            const v = this._paramValues.get(name);
+            if (typeof v === 'number') return v;
+            if (typeof v === 'boolean') return v ? 1 : 0;
+            return null;
+        };
+        return {
+            active: this._fieldEntries !== null,
+            rawX: raw(this._fieldInputs?.x),
+            rawY: raw(this._fieldInputs?.y),
+            targetX: this._fieldTargetX, targetY: this._fieldTargetY,
+            probeX: this._fieldX, probeY: this._fieldY,
+            weights: (this._fieldEntries ?? []).map(e => ({
+                clipName: e.clipName, weight: e.weight, phaseOffset: e.phaseOffset,
+            })),
+            dominant: this._fieldDominant,
+            phase: this._fieldPhase,
+            duration: this._fieldDuration(this._fieldEntries),
+            stateName: this._currentStateName,
+            stateTime: this._stateTime,
+        };
+    }
+
+    /**
      * Update animation state
      */
     public update(deltaTime: number): void {
@@ -1064,6 +1478,11 @@ export class Animator {
             this._updateRagdollMatrices();
             return;
         }
+
+        // Dwell is counted here, above every early return, because a state whose clip has finished sets
+        // _playing false — and the returns below would then freeze the clock a minDwell gate is waiting on,
+        // locking the machine into that state permanently.
+        if (deltaTime > 0) this._stateTime += deltaTime;
 
         // Calculate speed if node is available.
         //
@@ -1119,6 +1538,7 @@ export class Animator {
             // Advance the shared normalized PHASE, then project it onto the weighted duration — never the
             // other way round. The weighted duration moves as the blend shifts (a walk is longer than a run),
             // so deriving the phase from a wall-clock time would jog the pose every time the probe moved.
+            this._prevFieldPhase = this._fieldPhase;
             if (duration > 0) this._fieldPhase += this._deltaTime / duration;
             if (this._fieldPhase >= 1) {
                 this._loopsPlayed++;
@@ -1156,7 +1576,16 @@ export class Animator {
         }
 
         // Fire any animation-event markers crossed this frame.
-        this._fireDueEvents(prevTime, this._currentTime, duration, looped);
+        //
+        // A field's _currentTime is `phase * weightedDuration`, and the duration moves with the weights — so
+        // it is NOT monotonic, and comparing this frame's value against the last frame's can step backwards
+        // (dropping every marker in between) or leap forwards (firing markers the animation never reached).
+        // Both phases are projected through the SAME duration instead, which is monotonic by construction.
+        if (this._fieldEntries) {
+            this._fireDueEvents(this._prevFieldPhase * duration, this._fieldPhase * duration, duration, looped);
+        } else {
+            this._fireDueEvents(prevTime, this._currentTime, duration, looped);
+        }
 
         // Update all bones with current animation time
         if (this._fieldEntries) {
@@ -1242,8 +1671,7 @@ export class Animator {
     private _rootParentRotation(rootNodeIndex: number): quat {
         const out = quat.create();
         if (!this._skin) return out;
-        const parentOf = new Map<number, number | undefined>();
-        for (const j of this._skin.joints) parentOf.set(j.nodeIndex, j.parentIndex);
+        const parentOf = this._topology().parentNodeOfNode;
 
         const chain: number[] = []; // immediate parent first, up to the skeleton root
         let p = parentOf.get(rootNodeIndex);
@@ -1267,8 +1695,7 @@ export class Animator {
     private _findRootMotionBone(animation: Animation): string | null {
         if (!this._skin) return null;
         const animated = new Set(animation.channels.map(c => c.targetNodeIndex));
-        const parentOf = new Map<number, number | undefined>();
-        for (const j of this._skin.joints) parentOf.set(j.nodeIndex, j.parentIndex);
+        const parentOf = this._topology().parentNodeOfNode;
 
         const isHighestAnimated = (nodeIndex: number): boolean => {
             let p = parentOf.get(nodeIndex);
@@ -1369,6 +1796,20 @@ export class Animator {
     }
 
     /**
+     * This skin's topology, built once and rebuilt only if the skin itself is swapped.
+     *
+     * Keyed on the Skin OBJECT rather than a dirty flag: a skin's hierarchy is fixed once it is parsed, so
+     * identity is the whole invalidation rule, and it cannot go stale behind a model change.
+     */
+    private _topology(): SkeletonTopology {
+        if (!this._topologyCache || this._topologySkin !== this._skin) {
+            this._topologySkin = this._skin;
+            this._topologyCache = skeletonTopology(this._skin!);
+        }
+        return this._topologyCache;
+    }
+
+    /**
      * Recompute _finalBoneMatrices from the bones' current local transforms.
      * Split out of update() so seek() can pose the skeleton at an arbitrary time
      * without advancing time or running trigger logic.
@@ -1408,55 +1849,49 @@ export class Animator {
             }
         }
 
-        // Calculate global transforms by accumulating through parent hierarchy
+        // Accumulate global transforms down the hierarchy.
+        //
+        // A flat loop in topological order, not the memoized recursion this used to be. The recursion looked
+        // up each joint's parent with `joints.find(...)` — a linear scan, inside the recursion, per joint, per
+        // frame. The topology answers that in a map, and its `order` guarantees a parent is finished before
+        // any child asks for it.
+        const topo = this._topology();
         const globalTransforms = new Map<number, mat4>();
 
-        const calculateGlobalTransform = (nodeIndex: number): mat4 => {
-            // Check if already calculated
-            if (globalTransforms.has(nodeIndex)) {
-                return globalTransforms.get(nodeIndex)!;
-            }
-
-            // Get local transform
-            const localTransform = localTransforms.get(nodeIndex);
-            if (!localTransform) {
-                // If not in local transforms map, try to get from initial node transforms
-                const initialTransform = this._skin!.nodeTransforms?.get(nodeIndex);
-                if (initialTransform) {
-                    globalTransforms.set(nodeIndex, initialTransform);
-                    return initialTransform;
-                }
-                // Fallback to identity
-                const identity = mat4.create();
-                globalTransforms.set(nodeIndex, identity);
-                return identity;
-            }
-
-            // Find parent
-            const joint = this._skin!.joints.find(j => j.nodeIndex === nodeIndex);
-            const parentIndex = joint?.parentIndex;
-
-            let globalTransform = mat4.create();
-
-            if (parentIndex !== undefined) {
-                // Has parent - multiply parent's global transform by local transform
-                const parentGlobal = calculateGlobalTransform(parentIndex);
-                mat4.multiply(globalTransform, parentGlobal, localTransform);
-            } else {
-                // No parent - local transform IS the global transform
-                mat4.copy(globalTransform, localTransform);
-            }
-
-            globalTransforms.set(nodeIndex, globalTransform);
-            return globalTransform;
+        // The global of a node that is NOT a joint: a skin's root is routinely parented to an armature or an
+        // empty, whose transform still applies. Such a node has no animated local, so it resolves straight to
+        // its rest transform exactly as the old recursion's fallback did.
+        const outsideSkin = (nodeIndex: number): mat4 => {
+            let m = globalTransforms.get(nodeIndex);
+            if (m) return m;
+            m = this._skin!.nodeTransforms?.get(nodeIndex) ?? mat4.create();
+            globalTransforms.set(nodeIndex, m);
+            return m;
         };
+
+        for (const jointIndex of topo.order) {
+            const joint = this._skin.joints[jointIndex];
+            const nodeIndex = joint.nodeIndex;
+            const local = localTransforms.get(nodeIndex) ?? this._skin.nodeTransforms?.get(nodeIndex) ?? mat4.create();
+
+            const parentNode = topo.parentNode[jointIndex];
+            const global = mat4.create();
+            if (parentNode === undefined) {
+                mat4.copy(global, local);
+            } else {
+                const parentJoint = topo.parentJoint[jointIndex];
+                const parentGlobal = parentJoint >= 0
+                    ? globalTransforms.get(this._skin.joints[parentJoint].nodeIndex)!
+                    : outsideSkin(parentNode);
+                mat4.multiply(global, parentGlobal, local);
+            }
+            globalTransforms.set(nodeIndex, global);
+        }
 
         // Calculate final bone matrices: finalMatrix = globalTransform × inverseBindMatrix
         for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
             const joint = this._skin.joints[jointIndex];
-            const nodeIndex = joint.nodeIndex;
-
-            const globalTransform = calculateGlobalTransform(nodeIndex);
+            const globalTransform = globalTransforms.get(joint.nodeIndex) ?? mat4.create();
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
         }
     }
@@ -1475,6 +1910,7 @@ export class Animator {
             // The field's clock is its normalized phase; the seconds the caller passed are only meaningful
             // relative to the current weighted duration.
             this._fieldPhase = duration > 0 ? this._currentTime / duration : 0;
+            this._prevFieldPhase = this._fieldPhase;   // a scrub is not playback; it must not fire events
             this._poseFieldAt(this._fieldEntries, this._fieldPhase);
         } else {
             for (const bone of this._bones.values()) {
@@ -1580,8 +2016,9 @@ export class Animator {
         this._playing = false;
         this._currentTime = 0;
         this._fieldPhase = 0;
+        this._prevFieldPhase = 0;
     }
-    public reset(): void { this._currentTime = 0; this._fieldPhase = 0; }
+    public reset(): void { this._currentTime = 0; this._fieldPhase = 0; this._prevFieldPhase = 0; }
 
     /**
      * Force the skeleton to its bind (default / T) pose and stop playback.
@@ -1610,6 +2047,9 @@ export class Animator {
         // an edited machine from the editor goes through here, so this is also what makes a field edit take.
         this._fieldBoneCache.clear();
         this._clearField();
+        // Bands belong to the machine that authored them: a re-applied machine may have changed a threshold,
+        // and a latch keyed on the old terms would keep a condition held past its new release point.
+        this._condLatch.clear();
         if (!sm) return;
         for (const p of sm.parameters) this._paramValues.set(p.name, p.default);
         this.resetStateMachine();
@@ -1650,6 +2090,7 @@ export class Animator {
         const state = this._stateMachine.states.find(s => s.name === name);
         this._currentStateName = name;
         this._prevEventTime = 0;
+        this._stateTime = 0;
 
         // A field state blends several clips by its axis parameters instead of playing one. _startField
         // takes the transition's cross-fade itself, since it arms the blend rather than playAnimation.
@@ -1773,6 +2214,10 @@ export class Animator {
             if (t.from !== '*' && t.from !== this._currentStateName) continue;
             if (t.to === this._currentStateName) continue;
 
+            // Dwell gate: refuse to leave a state we only just entered. Checked before the conditions so a
+            // trigger is not consumed by a transition that cannot fire yet.
+            if (t.minDwell && this._stateTime < t.minDwell) continue;
+
             // Exit-time gate: wait until the clip reaches the normalized exit time.
             if (t.hasExitTime) {
                 const exit = (t.exitTime ?? 1.0) * duration;
@@ -1823,12 +2268,45 @@ export class Animator {
             case 'trigger': return v === true;
             case 'true':    return v === true;
             case 'false':   return v === false;
-            case 'gt':      return typeof v === 'number' && v > (c.value ?? 0);
-            case 'lt':      return typeof v === 'number' && v < (c.value ?? 0);
+            case 'gt':      return typeof v === 'number' && this._thresholdMet(c, v, true);
+            case 'lt':      return typeof v === 'number' && this._thresholdMet(c, v, false);
             case 'eq':      return typeof v === 'number' && v === (c.value ?? 0);
             case 'neq':     return typeof v === 'number' && v !== (c.value ?? 0);
             default:        return false;
         }
+    }
+
+    /**
+     * A 'gt'/'lt' comparison, latching when the condition authors a hysteresis band.
+     *
+     * The band is CENTRED on the authored threshold — `hysteresis` is its full width, so a `> 1` with a
+     * hysteresis of 0.4 engages at 1.2 and does not release until the value falls back through 0.8. That
+     * symmetry is what makes it work on the case it exists for: a `> x` / `< x` PAIR either side of one
+     * threshold. Widening only the release would leave both halves still satisfiable at the same value (0.95
+     * genuinely is `< 1` while 1.05 genuinely is `> 1`), and the machine would keep flipping. Centring the
+     * band pushes the two engage points apart instead — `> 1 ±0.4` fires at 1.2, `< 1 ±0.4` at 0.8 — so
+     * nothing happens until the signal genuinely swings.
+     *
+     * The latch is updated whenever the condition is evaluated, including for a transition that does not fire:
+     * it tracks the signal, not the transition. A band that only advanced on the frames some transition
+     * happened to be considered would mean nothing.
+     */
+    private _thresholdMet(c: AnimationCondition, v: number, greater: boolean): boolean {
+        const threshold = c.value ?? 0;
+        const h = typeof c.hysteresis === 'number' && c.hysteresis > 0 ? c.hysteresis : 0;
+        if (h === 0) return greater ? v > threshold : v < threshold;
+
+        const half = h / 2;
+        const engage = greater ? threshold + half : threshold - half;
+        const release = greater ? threshold - half : threshold + half;
+
+        const key = `${c.param}|${c.op}|${threshold}|${h}`;
+        const latched = this._condLatch.get(key) === true;
+        const met = latched
+            ? (greater ? v > release : v < release)
+            : (greater ? v > engage : v < engage);
+        this._condLatch.set(key, met);
+        return met;
     }
 
     /** Fire event markers on the current clip whose time was crossed in (prev, cur]. */
@@ -1878,8 +2356,7 @@ export class Animator {
         if (!this._skin || !this._node) return;
 
         // Walk up the skeleton to the nearest ancestor (inclusive) that owns a body.
-        const parentOf = new Map<number, number | undefined>();
-        for (const j of this._skin.joints) parentOf.set(j.nodeIndex, j.parentIndex);
+        const parentOf = this._topology().parentNodeOfNode;
         const drivingIndex = (nodeIndex: number): number | null => {
             let n: number | undefined = nodeIndex;
             while (n !== undefined) {

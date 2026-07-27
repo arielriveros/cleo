@@ -1,4 +1,5 @@
 import { vec3 } from 'gl-matrix';
+import { damp, deltaAngleDeg, wrapDegrees } from '../core/math';
 
 // ---------------------------------------------------------------------------
 // Measured motion.
@@ -14,16 +15,6 @@ import { vec3 } from 'gl-matrix';
 // ---------------------------------------------------------------------------
 
 /**
- * Smoothing time constant, in seconds. The smoothed velocity closes ~63% of the gap to the raw value in
- * this long.
- *
- * A single frame's position delta is noisy — solver jitter, variable frame times, contact churn — and a
- * walk/run threshold driven straight off it flips state several times a second. ~90ms is short enough that
- * stopping still reads as stopped almost immediately, and long enough to kill the flicker.
- */
-const SMOOTHING_TAU = 0.09;
-
-/**
  * Speed (units/second) below which direction is considered undefined and the last heading is held.
  *
  * Normalizing a near-zero vector gives NaN, which would collapse an animation blend to the bind pose. Even
@@ -32,6 +23,55 @@ const SMOOTHING_TAU = 0.09;
  * correctly.
  */
 const MIN_DIRECTION_SPEED = 0.05;
+
+/**
+ * Tuning for one body's measured motion. Every threshold in this module is here rather than a module const,
+ * so a heavy vehicle and a twitchy character can be filtered differently without touching engine source.
+ */
+export interface MotionConfig {
+    /**
+     * Smoothing time constant, in seconds. The smoothed velocity closes ~63% of the gap to the raw value in
+     * this long.
+     *
+     * A single frame's position delta is noisy — solver jitter, variable frame times, contact churn — and a
+     * walk/run threshold driven straight off it flips state several times a second. ~90ms is short enough that
+     * stopping still reads as stopped almost immediately, and long enough to kill the flicker.
+     */
+    tau: number;
+    /** Planar speed at which a still body starts counting as moving. */
+    moveEnter: number;
+    /**
+     * Planar speed at which a moving body stops counting as moving. Strictly below `moveEnter` — the gap IS
+     * the feature: one threshold would make `moving` chatter for a body drifting at exactly that speed, which
+     * is the whole reason this is not just `planarSpeed > 0`.
+     */
+    moveExit: number;
+    /** Magnitude of planar acceleration (units/s^2) treated as deliberately speeding up or slowing down. */
+    accelThreshold: number;
+}
+
+export const MOTION_DEFAULTS: MotionConfig = {
+    tau: 0.09,
+    moveEnter: 0.15,
+    moveExit: 0.05,
+    accelThreshold: 1.0,
+};
+
+/** A config with every field defaulted, so callers can pass a partial override or nothing at all. */
+export function motionConfig(over?: Partial<MotionConfig> | null): MotionConfig {
+    if (!over) return MOTION_DEFAULTS;
+    const num = (v: number | undefined, fallback: number) =>
+        typeof v === 'number' && isFinite(v) && v >= 0 ? v : fallback;
+    const moveEnter = num(over.moveEnter, MOTION_DEFAULTS.moveEnter);
+    return {
+        tau: num(over.tau, MOTION_DEFAULTS.tau),
+        moveEnter,
+        // Clamped below moveEnter: an exit at or above entry is not hysteresis, it is a band that latches on
+        // and never releases (or releases the same frame it engages).
+        moveExit: Math.min(num(over.moveExit, MOTION_DEFAULTS.moveExit), moveEnter * 0.9),
+        accelThreshold: num(over.accelThreshold, MOTION_DEFAULTS.accelThreshold),
+    };
+}
 
 /** Per-body measured motion state. Owned by PhysicsSystem; every public Node property derives from this. */
 export interface MotionRecord {
@@ -46,6 +86,24 @@ export interface MotionRecord {
     /** Last planar (gravity-perpendicular) direction seen above the threshold, held while still. */
     planarHeading: vec3;
     /**
+     * Smoothed speed across the ground plane. Stored rather than derived on demand so `accel` differentiates
+     * exactly the quantity `Node.planarSpeed` reports — differentiating a separately-computed value would let
+     * the two disagree about whether the body is speeding up.
+     */
+    planarSpeed: number;
+    /** Smoothed d(planarSpeed)/dt, units/s^2. Positive speeding up, negative slowing down. */
+    accel: number;
+    /** Whether the body counts as moving, with hysteresis. See {@link MotionConfig.moveExit}. */
+    moving: boolean;
+    /** Seconds `moving` has been true continuously; 0 while still. */
+    movingTime: number;
+    /** Seconds `moving` has been false continuously; 0 while moving. */
+    stillTime: number;
+    /** FACING heading in degrees, from the body's own orientation rather than its travel. Source of turnRate. */
+    yaw: number;
+    /** Smoothed rate of change of `yaw`, degrees/second. Signed. */
+    turnRate: number;
+    /**
      * False until the first sample has been taken.
      *
      * Without it the first frame measures `distance(pos, [0,0,0]) / dt` — a body spawned 50 units from the
@@ -53,6 +111,12 @@ export interface MotionRecord {
      * on the frame it appears.
      */
     seeded: boolean;
+    /**
+     * False until a facing has been recorded. Separate from `seeded` because `forward` is optional: a caller
+     * that never supplies one leaves turnRate at 0 rather than differentiating against a default yaw of 0,
+     * which would report a spin on the first frame of every body that happens not to face +Z.
+     */
+    yawSeeded: boolean;
 }
 
 export function createMotionRecord(): MotionRecord {
@@ -62,21 +126,39 @@ export function createMotionRecord(): MotionRecord {
         smooth: vec3.create(),
         heading: vec3.create(),
         planarHeading: vec3.create(),
+        planarSpeed: 0,
+        accel: 0,
+        moving: false,
+        movingTime: 0,
+        stillTime: 0,
+        yaw: 0,
+        turnRate: 0,
         seeded: false,
+        yawSeeded: false,
     };
 }
 
 /**
- * Take one sample: measure the delta since the last call, smooth it, and refresh the held headings.
+ * Take one sample: measure the delta since the last call, smooth it, and refresh everything derived from it.
  *
- * `up` is the gravity-reversed unit vector, needed to split the planar heading out. Mutates `rec` in place —
- * it is a per-body record read every frame, not a value to reallocate.
+ * `up` is the gravity-reversed unit vector, needed to split the planar heading out. `forward` is the body's
+ * own facing, used only for `turnRate` — omit it and turn rate stays 0. `cfg` tunes every threshold.
+ *
+ * Mutates `rec` in place — it is a per-body record read every frame, not a value to reallocate.
  */
-export function sampleMotion(rec: MotionRecord, pos: vec3, dt: number, up: vec3): void {
+export function sampleMotion(
+    rec: MotionRecord,
+    pos: vec3,
+    dt: number,
+    up: vec3,
+    forward?: vec3 | null,
+    cfg: MotionConfig = MOTION_DEFAULTS,
+): void {
     if (!rec.seeded) {
         // Seed only. There is no previous position to measure against, and inventing one produces a spike.
         vec3.copy(rec.lastPos, pos);
         rec.seeded = true;
+        if (forward) { rec.yaw = headingAngle(forward, up); rec.yawSeeded = true; }
         return;
     }
     if (dt <= 0) return; // a paused or duplicated frame measures nothing; keep the last values
@@ -86,15 +168,43 @@ export function sampleMotion(rec: MotionRecord, pos: vec3, dt: number, up: vec3)
     vec3.copy(rec.lastPos, pos);
 
     // Frame-rate independent: a fixed lerp factor would smooth twice as hard at 120fps as at 60.
-    const alpha = 1 - Math.exp(-dt / SMOOTHING_TAU);
+    const alpha = 1 - Math.exp(-dt / cfg.tau);
     vec3.lerp(rec.smooth, rec.smooth, rec.raw, alpha);
+
+    const { planar } = planarSplit(rec.smooth, up);
+    const planarSpeed = vec3.length(planar);
+
+    // Acceleration differentiates the ALREADY-SMOOTHED speed and then smooths the result again. Differentiating
+    // the raw delta instead divides frame-to-frame noise by dt, which amplifies it — at 60fps a millimetre of
+    // solver jitter reads as several units/s^2, far past any threshold worth setting.
+    rec.accel = damp(rec.accel, (planarSpeed - rec.planarSpeed) / dt, 1 / cfg.tau, dt);
+    rec.planarSpeed = planarSpeed;
+
+    // Moving is a latching band, not a comparison: a body drifting at exactly the threshold would otherwise
+    // flip every frame, and the timers below — which exist to let a transition demand "has been still a
+    // moment" — would reset every frame with it and never reach any value worth waiting for.
+    const moving = rec.moving ? planarSpeed > cfg.moveExit : planarSpeed > cfg.moveEnter;
+    if (moving !== rec.moving) {
+        rec.moving = moving;
+        rec.movingTime = 0;
+        rec.stillTime = 0;
+    }
+    if (moving) rec.movingTime += dt; else rec.stillTime += dt;
+
+    if (forward) {
+        const yaw = headingAngle(forward, up);
+        // Shortest arc, so a body turning through the +/-180 seam reports a small rate rather than a 360/dt
+        // spike that would trip every turn threshold on the frame it crosses.
+        if (rec.yawSeeded) rec.turnRate = damp(rec.turnRate, deltaAngleDeg(rec.yaw, yaw) / dt, 1 / cfg.tau, dt);
+        rec.yaw = wrapDegrees(yaw);
+        rec.yawSeeded = true;
+    }
 
     // Headings follow the SMOOTHED velocity so they are as steady as the speeds derived alongside them —
     // a jittery direction is worse than a jittery speed, since it makes a 2D blend flicker between clips.
     if (vec3.length(rec.smooth) > MIN_DIRECTION_SPEED) {
         vec3.normalize(rec.heading, rec.smooth);
-        const { planar } = planarSplit(rec.smooth, up);
-        if (vec3.length(planar) > MIN_DIRECTION_SPEED) vec3.normalize(rec.planarHeading, planar);
+        if (planarSpeed > MIN_DIRECTION_SPEED) vec3.normalize(rec.planarHeading, planar);
     }
 }
 
@@ -158,10 +268,6 @@ export function headingAngle(dir: vec3, up: vec3): number {
     return signedAngleBetween(planarReference(up), dir, up);
 }
 
-/** Wrap an angle in degrees to (-180, 180]. */
-export function wrapDegrees(angle: number): number {
-    let a = angle % 360;
-    if (a > 180) a -= 360;
-    if (a <= -180) a += 360;
-    return a;
-}
+// `wrapDegrees` used to be defined here as well as in core/math. Re-exported instead of duplicated: two
+// copies of the same wrap are two chances to fix a seam bug in only one of them.
+export { wrapDegrees };

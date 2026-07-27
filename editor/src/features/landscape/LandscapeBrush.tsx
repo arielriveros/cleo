@@ -19,6 +19,8 @@ export default function LandscapeBrush({ viewportRef }: Props) {
     const paintingRef = useRef(false);
     const lastTimeRef = useRef(0);
     const cursorRef = useRef<ModelNode | null>(null);
+    // When foliage was last scattered/erased during the current stroke, and where. See foliageDue.
+    const lastFoliageRef = useRef({ t: 0, x: NaN, z: NaN });
 
     // A flat wireframe ring (unit radius) built as a line loop. Uses calculateTangents=false to avoid the
     // buggy tangent path in Geometry.Circle, and needs no tangents for a Basic wireframe material anyway.
@@ -84,6 +86,20 @@ export default function LandscapeBrush({ viewportRef }: Props) {
         };
         const hideCursor = () => { if (cursorRef.current) cursorRef.current.visible = false; };
 
+        // Foliage work is rate-limited while the splat paint is not: both scatter and erase re-bucket the
+        // whole spatial grid of every touched layer, which at grass density is far too expensive to run on
+        // every mousemove. Fires when enough wall-clock has passed OR the cursor has covered enough ground,
+        // so a slow deliberate drag and a fast flick both lay down an even trail.
+        const FOLIAGE_MIN_MS = 120;
+        const FOLIAGE_MIN_TRAVEL = 0.35; // fraction of the brush radius
+        const foliageDue = (point: Vec3Like, radius: number): boolean => {
+            const now = performance.now(), s = lastFoliageRef.current;
+            const moved = Math.hypot(point[0] - s.x, point[2] - s.z) >= radius * FOLIAGE_MIN_TRAVEL;
+            if (isFinite(s.x) && now - s.t < FOLIAGE_MIN_MS && !moved) return false;
+            s.t = now; s.x = point[0]; s.z = point[2];
+            return true;
+        };
+
         const apply = (clientX: number, clientY: number, dt: number) => {
             const h = hit(clientX, clientY);
             if (!h) return;
@@ -91,14 +107,23 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             if (b.mode === 'move') { showCursor(h.point); return; } // gizmo drives the terrain; no brushing
             if (b.mode === 'paint') {
                 h.node.terrain.paint(h.point as any, { radius: b.radius, strength: b.strength, falloff: b.falloff, layer: b.paintLayer }, dt);
-                // Keep only the painted material's own foliage in the stroke (erase everything it doesn't include).
-                const m = h.node.terrain.layers[b.paintLayer]?.material;
-                h.node.terrain.eraseFoliageExcept(h.point as any, b.radius, m ? m.foliageInclude.map(r => r.name) : []);
+                if (foliageDue(h.point, b.radius)) {
+                    // Erase FIRST, then scatter: the other way round the erase would take out the instances
+                    // this very stroke just placed.
+                    const m = h.node.terrain.layers[b.paintLayer]?.material;
+                    h.node.terrain.eraseFoliageExcept(h.point as any, b.radius, m ? m.foliageInclude.map(r => r.name) : []);
+                    // Painting a material lays down that material's own foliage. Without this, painting could
+                    // only ever REMOVE foliage — the whole point of a material-driven foliage system is that
+                    // the paint stroke is what instances it.
+                    h.node.terrain.scatterFoliageFromMaterials(h.point as any, b.radius);
+                }
             }
             else if (b.mode === 'foliage') {
                 // Material-driven: scatter each painted material's included foliage; erase clears all near the point.
-                if (b.foliageErase) h.node.terrain.eraseAllFoliage(h.point as any, b.radius);
-                else h.node.terrain.scatterFoliageFromMaterials(h.point as any, b.radius);
+                if (foliageDue(h.point, b.radius)) {
+                    if (b.foliageErase) h.node.terrain.eraseAllFoliage(h.point as any, b.radius);
+                    else h.node.terrain.scatterFoliageFromMaterials(h.point as any, b.radius);
+                }
             }
             else
                 h.node.terrain.sculpt(h.point as any, { radius: b.radius, strength: b.strength, falloff: b.falloff, mode: b.tool }, dt);
@@ -117,6 +142,8 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             if (!h) return;
             paintingRef.current = true;
             lastTimeRef.current = performance.now();
+            // A fresh stroke always applies foliage on its first sample — a click should do something.
+            lastFoliageRef.current = { t: 0, x: NaN, z: NaN };
             // Reuse the gizmo suppression so camera + click-selection ignore this drag.
             eventEmitter.emit('GIZMO_DRAG_START', { axis: 'terrain', nodeId: h.node.id });
             apply(e.clientX, e.clientY, 1 / 60);

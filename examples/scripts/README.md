@@ -193,18 +193,27 @@ gaits, plus the backward pair mirrored (see the wrap note):
 | run left | `-90` | `4` |
 | walk backward | `180` | `1.5` |
 | run backward | `180` | `4` |
-| walk backward *(copy)* | `-180` | `1.5` |
-| run backward *(copy)* | `-180` | `4` |
 
-> **The backward clips MUST be placed at both `+180` and `-180`.** The Direction axis is a straight line, not a
-> circle: a probe at `moveDir = -170` (backing and slightly left) is a hair from `-180` but *350 units* from
-> `+180`. Without the `-180` copies, moving straight back while drifting left snaps to the left-strafe clip.
-> Same two clips, two coordinates — no extra animation needed.
+> **Turn on `wrap` for the Direction axis** (Animation Field panel, Smoothing block — it is on by default for
+> new fields). That makes the axis a CIRCLE, so `-180` and `+180` are the same heading and a probe at `-170`
+> is ten degrees from the backward clips rather than three hundred and fifty.
+>
+> This replaces older advice to place the backward clips at **both** `+180` and `-180`. Do not do that any
+> more: with `wrap` on, the two ends are literally the same point, so the copies land on top of each other.
+> The engine now splits one sample's worth of weight between coincident samples and the panel flags them, so
+> a leftover duplicate is harmless — but it is still two rows saying one thing. Without `wrap`, the duplicate
+> is still the only way to cover the seam, and the ±180 crossing will lurch through every clip on the way.
 
 **Diagonals are synthesized, not authored.** The gradient-band blend already mixes forward + right for a probe
 at 45°, so with only the four cardinal clips a diagonal reads as a blend of the two neighbours — combined with
 the script's `directionSmoothing`, that is what makes turning between strafes glide. Dropping real clips at
 `±45` / `±135` sharpens it further if you have them, but it is not needed.
+
+> **If a diagonal looks like the legs are fighting rather than blending**, the two clips being mixed start at
+> different points in the gait — one on the left foot, one on the right. That is worst at an even mix, which
+> is exactly the diagonal. Set **phase** to `0.5` on one of them (or press ½ next to it) to shift it half a
+> cycle. If instead the pose *buzzes* at a diagonal, it is the probe rather than the clips: open the State
+> Machine panel's Preview, turn on `simulate`, and read the 1s spread column — it names which value is moving.
 
 **Idle is not in this field.** Leave the field to the walk/run motion; idle is a separate state below. (A single
 idle sample at the origin would lose to the nearest walk clip at zero speed, because the plot blends by

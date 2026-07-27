@@ -37,3 +37,44 @@ export function skipCameraHit(
     if (reject && reject(body.owner ?? null)) return true;
     return false;
 }
+
+/** The subset of a cannon `Body` the GENERAL ray filter looks at. Structural, for the same reason as above. */
+export interface RayHitBody {
+    isTrigger?: boolean;
+    /** cannon's own solidity channel. `false` means the solver ignores it — a ghost. */
+    collisionResponse?: boolean;
+    owner?: Node | null;
+}
+
+/** What {@link skipRayHit} is allowed to let through. Mirrors PhysicsSystem.raycast's options. */
+export interface RayFilter<TBody = RayHitBody> {
+    ignore?: TBody | TBody[] | null;
+    includeTriggers?: boolean;
+    includeGhosts?: boolean;
+    reject?: (owner: Node | null, body: TBody) => boolean;
+}
+
+/**
+ * Whether a general raycast should ignore a hit on `body`.
+ *
+ * Split out of `PhysicsSystem.raycast` for the same reason `skipCameraHit` was: the rule is the part with
+ * behaviour worth pinning, and `physicsSystem.ts` reaches the scene graph (and through it WebGL), so it
+ * cannot be loaded by the unit suite at all.
+ *
+ * The defaults encode what "solid" ordinarily means — a trigger volume is something you walk THROUGH, and a
+ * body the solver ignores is not something a foot can stand on — while leaving both overridable, because the
+ * camera probe deliberately wants the opposite of each.
+ */
+export function skipRayHit<TBody extends RayHitBody>(
+    body: TBody | null | undefined,
+    filter?: RayFilter<TBody>
+): boolean {
+    if (!body) return true;
+    const f = filter ?? {};
+    const ignore = f.ignore;
+    if (ignore && (Array.isArray(ignore) ? ignore.includes(body) : ignore === body)) return true;
+    if (!f.includeTriggers && body.isTrigger) return true;
+    if (!f.includeGhosts && body.collisionResponse === false) return true;
+    if (f.reject && f.reject(body.owner ?? null, body)) return true;
+    return false;
+}

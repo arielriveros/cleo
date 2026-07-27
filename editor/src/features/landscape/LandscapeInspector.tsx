@@ -30,6 +30,8 @@ export default function LandscapeInspector() {
     const [hasTerrain, setHasTerrain] = useState(false);
     const [paintLayer, setPaintLayer] = useState(0);
     const [foliageErase, setFoliageErase] = useState(false);
+    /** Outcome of the last whole-terrain generation, shown under the button. */
+    const [foliageStatus, setFoliageStatus] = useState('');
 
     // Keep the shared brush ref in sync with the UI.
     useEffect(() => {
@@ -55,19 +57,28 @@ export default function LandscapeInspector() {
     };
 
     // Create the single terrain, or — if one already exists — rebuild it at the new size/resolution while
-    // preserving the sculpted shape (resampled), the layer materials, and regenerating foliage everywhere.
+    // preserving the sculpted shape, the painted splat, the layer materials and the scattered foliage.
+    // All four are resampled: rebuilding used to keep only the heights, which silently reset every paint
+    // layer to layer 0 and then regenerated foliage against that blank splat.
     const createOrUpdateTerrain = () => {
         const existing = activeLandscape();
         if (existing) {
             const old = existing.terrain;
             const next = new Terrain({ size, resolution, chunkQuads });
+            // Instances are stored in world space, so the replacement needs its origin before any
+            // foliage is re-placed onto it (setTerrain would otherwise set it one step too late).
+            next.setOrigin(existing.worldPosition);
             next.resampleHeightsFrom(old);
+            next.resampleSplatFrom(old);
             for (let i = 0; i < old.layers.length && i < 4; i++) {
                 const L = old.layers[i];
                 if (L.material) next.setLayer(i, L.material, { tiling: L.tiling, auto: L.auto, hRange: L.hRange, sRange: L.sRange, materialId: L.materialId ?? null });
             }
+            next.foliageColliders = { ...old.foliageColliders };
+            // Carry the author's placement across rather than re-rolling it — a resize is not a request
+            // to redistribute every tree.
+            next.resampleFoliageFrom(old);
             existing.setTerrain(next);
-            next.generateFoliageEverywhere();
             eventEmitter.emit('SCENE_CHANGED');
             return;
         }
@@ -80,10 +91,25 @@ export default function LandscapeInspector() {
         setHasTerrain(true);
     };
 
+    // Regenerating replaces every scattered instance, so confirm before discarding work — and report what
+    // happened either way. The old version returned a boolean nobody read, which made a mis-set-up terrain
+    // (no foliage-bearing material on any layer) look identical to a working one that placed nothing.
     const generateFoliage = () => {
         const node = activeLandscape();
         if (!node) { alert('Create a terrain first.'); return; }
-        node.terrain.generateFoliageEverywhere();
+        const existing = node.terrain.foliage.reduce((n, f) => n + f.count, 0);
+        if (existing > 0 && !window.confirm(
+            `Replace ${existing.toLocaleString()} existing foliage instances across this terrain?`)) return;
+
+        const result = node.terrain.generateFoliageEverywhere();
+        if (result.reason === 'no-rules')
+            setFoliageStatus('No foliage placed: no terrain material assigned to a paint layer defines any foliage. Add foliage under the “Terrain Mat.” tab, then assign that material to a layer.');
+        else if (result.reason === 'no-coverage')
+            setFoliageStatus('No foliage placed: no painted region is dominated by a layer whose material includes foliage (or every candidate point was excluded).');
+        else
+            setFoliageStatus(
+                `Placed ${result.placed.toLocaleString()} instances across ${result.layers} layer(s).` +
+                (result.reason === 'clipped' ? ' Hit the 200,000-instance ceiling — lower the density.' : ''));
         eventEmitter.emit('SCENE_CHANGED');
     };
 
@@ -128,7 +154,7 @@ export default function LandscapeInspector() {
                     <input type="number" className={num} value={chunkQuads} min={8} max={64} step={8} onChange={e => setChunkQuads(Number(e.target.value))} />
                 </div>
                 <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={createOrUpdateTerrain}>{hasTerrain ? 'Update Terrain' : 'Create Terrain'}</button>
-                {hasTerrain && <div className="text-[10px] text-gray-400 mt-1">Update rebuilds the terrain at the new size/resolution, keeps materials + shape, and refills foliage.</div>}
+                {hasTerrain && <div className="text-[10px] text-gray-400 mt-1">Update rebuilds the terrain at the new size/resolution, resampling the shape, the painted layers and the scattered foliage onto it.</div>}
                 <div className="text-[10px] text-gray-400 mt-1">Smaller chunks = finer culling &amp; LOD granularity, more draw calls.</div>
             </div>
 
@@ -168,9 +194,11 @@ export default function LandscapeInspector() {
                         <Toggle checked={foliageErase} onChange={setFoliageErase} />
                     </div>
                     <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={generateFoliage}>Generate Foliage (whole terrain)</button>
+                    {foliageStatus && <p className="text-[10px] text-gray-300 bg-surface/60 rounded px-1.5 py-1">{foliageStatus}</p>}
                     <p className="text-[10px] text-gray-400">
-                        The brush scatters each painted material’s foliage (and skips excluded types).
-                        Define a material’s foliage in the “Terrain Mat.” tab, then paint that material here.
+                        The brush scatters each painted material’s foliage (and skips excluded types), and so
+                        does the Paint tool. Define a material’s foliage in the “Terrain Mat.” tab, then paint
+                        that material here.
                     </p>
                 </div>
             )}

@@ -123,6 +123,8 @@ export default function PhysicsEditor(props: {node: Node}) {
         cameraCollision: body.cameraCollision ?? true,
         // Absent in scenes saved before the ground probe existed; 0 = off, which is how they behaved.
         groundProbeDistance: body.groundProbeDistance ?? 0,
+        // Likewise: absent means 0, which the engine reads as "use the default (~0.09s)".
+        motionSmoothing: body.motionSmoothing ?? 0,
         shapes: body.shapes
       })
     }
@@ -143,6 +145,7 @@ export default function PhysicsEditor(props: {node: Node}) {
         simulatePhysics: bodyProperties.simulatePhysics,
         cameraCollision: bodyProperties.cameraCollision,
         groundProbeDistance: bodyProperties.groundProbeDistance,
+        motionSmoothing: bodyProperties.motionSmoothing,
         shapes: bodyProperties.shapes
       });
       eventEmitter.emit('PHYSICS_CHANGED');
@@ -331,8 +334,16 @@ export default function PhysicsEditor(props: {node: Node}) {
               <Slider label='Restitution' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.restitution ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, restitution: v })} />
               <Slider label='Ground probe' labelClassName={LABEL} min={0} max={0.5} step={0.01} value={bodyProperties.groundProbeDistance ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, groundProbeDistance: v })} />
               {(bodyProperties.groundProbeDistance ?? 0) > 0
-                ? <Hint className='mb-1'>Counts as grounded while the collider's feet are within this distance of solid ground, probed every frame. Removes isGrounded flicker (and false falling animations) for a character resting on terrain.</Hint>
+                ? <Hint className='mb-1'>Counts as grounded while the collider's feet are within this distance of solid ground, probed every frame. Removes isGrounded flicker (and false falling animations) for a character resting on terrain. Also what makes the groundDistance animation built-in answer.</Hint>
                 : <Hint className='mb-1'>Off — grounding comes from solver contacts only. Raise it (~0.1–0.2) if a resting character flickers to airborne.</Hint>}
+              {/* Filters the MEASURED motion this body reports — currentSpeed, planarSpeed,
+                  planarAcceleration, turnRate. Those are what an animation field's axes and a machine's
+                  speed thresholds read, so this slider is the first thing to reach for when a blend
+                  vibrates: the noise is in the measurement, not the animation. */}
+              <Slider label='Motion smoothing' labelClassName={LABEL} min={0} max={0.5} step={0.01} value={bodyProperties.motionSmoothing ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, motionSmoothing: v })} />
+              {(bodyProperties.motionSmoothing ?? 0) > 0
+                ? <Hint className='mb-1'>Time constant for this body's measured motion — currentSpeed, planarSpeed, acceleration, turn rate. Higher is steadier but slower to react. Raise it if an animation blend driven by speed vibrates.</Hint>
+                : <Hint className='mb-1'>Default (~0.09s). Raise it if animations driven by this body's speed jitter; lower it if a script needs a faster answer than it gets.</Hint>}
               <AxisToggles label='Linear Constraints' value={bodyProperties.linearConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, linearConstraints: v as [number, number, number] })} />
               <AxisToggles label='Angular Constraints' value={bodyProperties.angularConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, angularConstraints: v as [number, number, number] })} />
               <Button variant='danger' size='sm' className='mt-2' onClick={removeBody}>Remove Rigid Body</Button>

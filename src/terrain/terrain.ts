@@ -11,6 +11,25 @@ import { TextureManager } from '../graphics/systems/textureManager';
 import { Loader } from '../graphics/loader';
 import { Logger } from '../core/logger';
 import { FoliageLayer } from './foliage';
+import { DEFAULT_FOLIAGE_DENSITY } from '../graphics/material';
+import { FoliageColliderField, FoliageColliderSettings, DEFAULT_FOLIAGE_COLLIDERS } from './foliageColliders';
+
+/** Ceiling on candidate points a single brush application may try, so a wide brush at grass density
+ *  can't stall the pointer handler. Whole-terrain generation is not capped (it is an explicit action). */
+const MAX_SCATTER_PER_CALL = 20000;
+
+/** What a whole-terrain foliage regeneration actually did, so the editor can report it instead of
+ *  silently appearing to do nothing. */
+export interface FoliageGenerateResult {
+    /** Instances placed. */
+    placed: number;
+    /** Distinct foliage layers that received at least one instance. */
+    layers: number;
+    /** Instances destroyed by the wipe that precedes a regeneration. */
+    cleared: number;
+    /** Why nothing (or not everything) was placed. Absent on a clean full run. */
+    reason?: 'no-rules' | 'no-coverage' | 'clipped';
+}
 
 /** One paintable terrain material layer (splat channel 0..3). */
 export interface TerrainLayer {
@@ -130,6 +149,11 @@ export class Terrain {
     private _bodyDirty = false;
     private _lastBodyBuild = 0;       // throttles heightfield rebuilds during a sculpt drag
     private _origin = vec3.create();  // node world position, terrain centre
+    private _disposed = false;        // dispose() is called repeatedly for a markForRemoval landscape
+    /** Pooled static colliders for nearby collidable foliage instances; created on first use. */
+    private _colliders: FoliageColliderField | null = null;
+    /** Activation policy for {@link _colliders}. Serialized with the terrain. */
+    public foliageColliders: FoliageColliderSettings = { ...DEFAULT_FOLIAGE_COLLIDERS };
 
     // Texture painting (splat map + up to 4 layers).
     private _splatRes: number;
@@ -172,6 +196,9 @@ export class Terrain {
         for (const ch of this._chunks) ch.model.material = m;
     }
     public get material(): Material { return this._material; }
+    /** World position of the terrain centre (the owning LandscapeNode's world position). */
+    public get origin(): vec3 { return this._origin; }
+    public get splatResolution(): number { return this._splatRes; }
     public setOrigin(worldPos: vec3): void { vec3.copy(this._origin, worldPos); }
 
     // --- height sampling ----------------------------------------------------------------------
@@ -475,6 +502,69 @@ export class Terrain {
         }
         for (const ch of this._chunks) this._refreshChunkGeometry(ch);
         this._bodyDirty = true;
+    }
+
+    /**
+     * Fill this terrain's splat map by resampling another terrain's (bilinear on RGBA, renormalized),
+     * stretching the painted pattern to this grid. The companion to {@link resampleHeightsFrom}: without
+     * it "Update Terrain" would keep the sculpted shape but reset every paint layer to layer 0.
+     */
+    public resampleSplatFrom(other: Terrain): void {
+        const S = this._splatRes, oS = other._splatRes, oSplat = other._splat;
+        for (let r = 0; r < S; r++) {
+            const fz = (S > 1 ? r / (S - 1) : 0) * (oS - 1);
+            const z0 = Math.min(oS - 1, Math.floor(fz)), z1 = Math.min(oS - 1, z0 + 1), tz = fz - z0;
+            for (let c = 0; c < S; c++) {
+                const fx = (S > 1 ? c / (S - 1) : 0) * (oS - 1);
+                const x0 = Math.min(oS - 1, Math.floor(fx)), x1 = Math.min(oS - 1, x0 + 1), tx = fx - x0;
+                const i00 = (z0 * oS + x0) * 4, i10 = (z0 * oS + x1) * 4;
+                const i01 = (z1 * oS + x0) * 4, i11 = (z1 * oS + x1) * 4;
+                const out = (r * S + c) * 4;
+                let sum = 0;
+                for (let k = 0; k < 4; k++) {
+                    const top = oSplat[i00 + k] + (oSplat[i10 + k] - oSplat[i00 + k]) * tx;
+                    const bot = oSplat[i01 + k] + (oSplat[i11 + k] - oSplat[i01 + k]) * tx;
+                    const v = top + (bot - top) * tz;
+                    this._splat[out + k] = v;
+                    sum += v;
+                }
+                // Renormalize to 255 so the shader's weight sum stays 1 after the interpolation.
+                if (sum > 0) {
+                    const s = 255 / sum;
+                    for (let k = 0; k < 4; k++) this._splat[out + k] = Math.round(this._splat[out + k] * s);
+                } else this._splat[out] = 255;
+            }
+        }
+        this._splatTex.updateRegion(0, 0, S, S, this._splat);
+    }
+
+    /**
+     * Re-place another terrain's scattered foliage onto this one, re-sampling Y from the new heights.
+     * Keeps hand-painted foliage across a size/resolution change instead of regenerating it (which would
+     * discard the author's placement). Positions are normalized by size so the pattern stretches.
+     */
+    public resampleFoliageFrom(other: Terrain): void {
+        const scale = other.size > 0 ? this._cfg.size / other.size : 1;
+        const inst: number[] = [0, 0, 0, 0, 0];
+        for (const src of other.foliage) {
+            if (src.count === 0) continue;
+            // Reuse this terrain's own layer for the name when its material still declares the rule,
+            // so prototypes stay linked; otherwise carry the source layer's prototype across verbatim.
+            let dst = this._foliageByKey.get(src.name);
+            if (!dst) {
+                dst = FoliageLayer.deserialize({ ...src.serialize(), instances: undefined });
+                this._foliageByKey.set(src.name, dst);
+                this._foliage.push(dst);
+            }
+            for (let i = 0; i < src.count; i++) {
+                if (!src.instanceAt(i, inst)) continue;
+                const lx = (inst[0] - other.origin[0]) * scale;
+                const lz = (inst[2] - other.origin[2]) * scale;
+                const y = this._origin[1] + this.heightAt(lx, lz);
+                if (!dst.pushInstance(this._origin[0] + lx, y, this._origin[2] + lz)) break;
+            }
+            dst.commit();
+        }
     }
 
     /** Replace the height field from a heightmap image's red channel, scaled to [0, amplitude]. */
@@ -799,9 +889,13 @@ export class Terrain {
         const wx = worldPoint[0], wz = worldPoint[2];
         const splat: [number, number, number, number] = [0, 0, 0, 0];
         const touched = new Set<FoliageLayer>();
+        const area = Math.PI * radius * radius;
         for (const { rule, layerIndex } of rules) {
-            const density = Math.max(1, Math.floor(rule.density ?? 8));
-            for (let i = 0; i < density; i++) {
+            // density is per m², so a wide brush scatters proportionally more. Capped because a 100-unit
+            // brush at grass density is >60k candidate points, and this runs from a pointer handler.
+            const count = Math.min(MAX_SCATTER_PER_CALL,
+                Math.max(1, Math.round((rule.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * area)));
+            for (let i = 0; i < count; i++) {
                 const a = Math.random() * Math.PI * 2;
                 const rr = Math.sqrt(Math.random()) * radius;
                 const px = wx + Math.cos(a) * rr;
@@ -856,22 +950,29 @@ export class Terrain {
     }
 
     /**
-     * Regenerate material-driven foliage across the ENTIRE terrain: clears existing instances, then for
-     * each foliage prototype an assigned layer material includes, scatters jittered points over the whole
-     * surface, placing where that rule's layer dominates and no present material excludes it. Density is
-     * scaled by area (rule.density is treated as instances per ~100x100 world-unit tile).
+     * Regenerate material-driven foliage across the ENTIRE terrain: for each foliage prototype an
+     * assigned layer material includes, scatter `density * area` jittered points over the whole surface,
+     * placing where that rule's layer dominates and no present material excludes it.
+     *
+     * The existing instances are wiped first — but ONLY once we know there is something to replace them
+     * with. Clearing ahead of that check is what used to make a mis-set-up terrain silently destroy
+     * hand-painted foliage while appearing to do nothing.
      */
-    public generateFoliageEverywhere(): boolean {
+    public generateFoliageEverywhere(): FoliageGenerateResult {
         const rules = this._activeFoliageRules();
-        for (const layer of this._foliage) layer.clear();
-        if (rules.length === 0) return false;
+        if (rules.length === 0)
+            return { placed: 0, layers: 0, cleared: 0, reason: 'no-rules' };
+
+        let cleared = 0;
+        for (const layer of this._foliage) { cleared += layer.count; layer.clear(); }
 
         const half = this._cfg.size / 2, size = this._cfg.size;
         const splat: [number, number, number, number] = [0, 0, 0, 0];
         const touched = new Set<FoliageLayer>();
-        const areaTiles = Math.max(1, (size * size) / (100 * 100)); // density is per 100x100 tile
+        let placed = 0, clipped = false;
         for (const { rule, layerIndex } of rules) {
-            const count = Math.max(1, Math.floor((rule.density ?? 8) * areaTiles));
+            // density is instances per m² — the same unit the brush uses.
+            const count = Math.max(1, Math.round((rule.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * size * size));
             for (let i = 0; i < count; i++) {
                 const lx = -half + Math.random() * size;
                 const lz = -half + Math.random() * size;
@@ -882,12 +983,38 @@ export class Terrain {
                 if (this._foliageExcludedAt(rule.name, splat)) continue;
                 const y = this._origin[1] + this.heightAt(lx, lz);
                 const layer = this._resolveFoliageLayer(rule);
-                layer.pushInstance(this._origin[0] + lx, y, this._origin[2] + lz);
+                if (!layer.pushInstance(this._origin[0] + lx, y, this._origin[2] + lz)) { clipped = true; break; }
+                placed++;
                 touched.add(layer);
             }
         }
         for (const l of this._foliage) l.commit();
-        return touched.size > 0;
+        this.pruneFoliage();
+        return {
+            placed,
+            layers: touched.size,
+            cleared,
+            reason: placed === 0 ? 'no-coverage' : clipped ? 'clipped' : undefined,
+        };
+    }
+
+    /**
+     * Drop empty runtime foliage layers no active rule names any more — the residue of a renamed rule,
+     * which `_resolveFoliageLayer` would otherwise strand in `_foliage` (and in the save file) forever.
+     * Layers that still hold instances survive: those are user work, not residue.
+     */
+    public pruneFoliage(): number {
+        const live = new Set(this._activeFoliageRules().map(r => r.rule.name));
+        let removed = 0;
+        for (let i = this._foliage.length - 1; i >= 0; i--) {
+            const layer = this._foliage[i];
+            if (live.has(layer.name) || layer.count > 0) continue;
+            layer.dispose();
+            this._foliage.splice(i, 1);
+            if (this._foliageByKey.get(layer.name) === layer) this._foliageByKey.delete(layer.name);
+            removed++;
+        }
+        return removed;
     }
 
     // --- picking ------------------------------------------------------------------------------
@@ -964,6 +1091,20 @@ export class Terrain {
         if (this._bodyDirty && Date.now() - this._lastBodyBuild > 200) this._rebuildBody();
     }
 
+    /**
+     * Refresh the pooled static colliders around `camPos` for collidable foliage. Driven once per step by
+     * PhysicsSystem — which means colliders only exist in play mode, never while authoring.
+     */
+    public updateFoliageColliders(world: World, camPos: vec3 | null, material?: PhysicsMaterial): void {
+        if (!this.foliageColliders.enabled && !this._colliders) return;
+        if (!this._colliders) this._colliders = new FoliageColliderField();
+        this._colliders.update(world, this._foliage, camPos, this._origin,
+            material ?? this._physicsMaterial, this.foliageColliders);
+    }
+
+    /** Bodies the foliage collider pool currently has in the world (0 when disabled or in the editor). */
+    public get foliageColliderCount(): number { return this._colliders?.activeCount ?? 0; }
+
     private _rebuildBody(): void {
         if (!this._world || !this._body) return;
         try {
@@ -983,10 +1124,31 @@ export class Terrain {
         }
     }
 
+    /**
+     * Release every GPU/physics resource this terrain owns. Idempotent, because PhysicsSystem calls it
+     * once per frame for a landscape flagged `markForRemoval` until the node actually leaves the scene.
+     */
     public dispose(world?: World): void {
+        if (this._disposed) return;
+        this._disposed = true;
         const w = world || this._world;
         if (w && this._body) w.removeBody(this._body);
         this._body = null;
+        this._colliders?.dispose(w ?? undefined);
+        this._colliders = null;
+        // Foliage cell buffers reach the renderer through the module-level orphan queue: once the terrain
+        // is detached, the foliage pass no longer walks it to drain collectStaleBuffers().
+        for (const layer of this._foliage) layer.dispose();
+        this._foliage = [];
+        this._foliageByKey.clear();
+        for (const ch of this._chunks) ch.model.mesh.dispose();
+        this._chunks = [];
+        // The splat texture is exclusively ours (built in the constructor under a synthetic id), so unlike
+        // an imported texture it is safe to free the GL object as well as drop the registry entry —
+        // removeTexture alone deliberately does not, since other holders may still draw a shared texture.
+        this._splatTex.delete();
+        TextureManager.Instance.removeTexture(this._splatId);
+        this._world = null;
     }
 
     // --- serialization ------------------------------------------------------------------------
@@ -1026,6 +1188,7 @@ export class Terrain {
                 sRange: [L.sRange[0], L.sRange[1]],
             })),
             foliage: this._foliage.map(f => f.serialize()),
+            foliageColliders: { ...this.foliageColliders },
         };
     }
 
@@ -1033,26 +1196,53 @@ export class Terrain {
         const terrain = new Terrain({
             size: json.size, resolution: json.resolution, chunkQuads: json.chunkQuads,
         }, material);
-        if (json.heights) {
-            const bytes = base64ToBytes(json.heights);
-            if (json.heightFormat === 'u16') {
-                const u16 = new Uint16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+        // `heightsU16` / `splatData` are pre-decoded typed arrays supplied by the published-game loader
+        // (which inflates them out of game.bin); `heights` / `splat` are the base64 form the editor saves.
+        if (json.heightsU16 || json.heights) {
+            const bytes: Uint8Array | null = json.heights ? base64ToBytes(json.heights) : null;
+            if (json.heightsU16 || json.heightFormat === 'u16') {
+                const u16: Uint16Array = json.heightsU16
+                    ? (json.heightsU16 instanceof Uint16Array
+                        ? json.heightsU16
+                        : new Uint16Array(json.heightsU16.buffer ?? json.heightsU16))
+                    : new Uint16Array(bytes!.buffer, bytes!.byteOffset, Math.floor(bytes!.byteLength / 2));
                 const min = json.heightMin ?? 0, max = json.heightMax ?? 1;
                 const span = (max - min) || 1;
                 const n = Math.min(terrain._heights.length, u16.length);
                 for (let i = 0; i < n; i++) terrain._heights[i] = min + (u16[i] / 65535) * span;
             } else {
                 // Legacy Float32 heights (scenes saved before the Uint16 format).
-                const floats = new Float32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 4));
+                const floats = new Float32Array(bytes!.buffer, bytes!.byteOffset, Math.floor(bytes!.byteLength / 4));
                 terrain._heights.set(floats.subarray(0, terrain._heights.length));
             }
             for (const ch of terrain._chunks) terrain._refreshChunkGeometry(ch);
         }
-        if (json.splat && json.splatRes === terrain._splatRes) {
-            const sbytes = base64ToBytes(json.splat);
-            terrain._splat.set(sbytes.subarray(0, terrain._splat.length));
+        const splatBytes: Uint8Array | null =
+            json.splatData ? new Uint8Array(json.splatData.buffer ?? json.splatData)
+                : json.splat ? base64ToBytes(json.splat) : null;
+        if (splatBytes) {
+            const srcRes = json.splatRes ?? terrain._splatRes;
+            if (srcRes === terrain._splatRes) terrain._splat.set(splatBytes.subarray(0, terrain._splat.length));
+            else {
+                // A resolution change used to DROP the splat entirely, silently resetting every paint
+                // layer to layer 0. Nearest-neighbour resample instead — approximate beats erased.
+                const S = terrain._splatRes;
+                for (let r = 0; r < S; r++) {
+                    const sr = Math.min(srcRes - 1, Math.round((S > 1 ? r / (S - 1) : 0) * (srcRes - 1)));
+                    for (let c = 0; c < S; c++) {
+                        const sc = Math.min(srcRes - 1, Math.round((S > 1 ? c / (S - 1) : 0) * (srcRes - 1)));
+                        const si = (sr * srcRes + sc) * 4, di = (r * S + c) * 4;
+                        for (let k = 0; k < 4; k++) terrain._splat[di + k] = splatBytes[si + k] ?? 0;
+                    }
+                }
+                Logger.warn(
+                    `Terrain splat map was saved at ${srcRes}x${srcRes} but this terrain is ` +
+                    `${terrain._splatRes}x${terrain._splatRes} — resampled.`, 'Terrain');
+            }
             terrain._splatTex.updateRegion(0, 0, terrain._splatRes, terrain._splatRes, terrain._splat);
         }
+        if (json.foliageColliders)
+            terrain.foliageColliders = { ...DEFAULT_FOLIAGE_COLLIDERS, ...json.foliageColliders };
         if (Array.isArray(json.layers)) {
             for (let i = 0; i < json.layers.length && i < 4; i++) {
                 const lj = json.layers[i];

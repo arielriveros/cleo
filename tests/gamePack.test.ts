@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { packGameBin, PACK_HEADER_BYTES } from '../editor/src/features/publish/pack';
-import { unpackGameBin, inflateSceneGeometry } from '../editor/src/player/unpack';
+import { unpackGameBin, inflateSceneGeometry, inflateTerrainData } from '../editor/src/player/unpack';
 
 /**
  * Round-trip contract for the `game.bin` container that publishing emits.
@@ -158,6 +158,91 @@ describe('game.bin round-trip', () => {
     expect(() => unpackGameBin(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0]).buffer))
       .toThrow(/Not a Cleo game pack/);
     expect(() => unpackGameBin(new ArrayBuffer(4))).toThrow(/truncated/);
+  });
+
+  it('interns foliage prototype geometry, and dedupes the nested and flat copies of it', async () => {
+    // The same mesh reaches the packer twice in two DIFFERENT shapes: the terrain material's foliage
+    // rule carries it as nested tuples (utils/foliageRules.ts bakes it that way) while the scattered
+    // layer carries the flat Model.serialize() form. Both must normalize to the same bytes, or the
+    // dedup silently ships the mesh twice — and `new Float32Array(number[][])` would fill it with NaN.
+    const flat = cube();
+    const nested = {
+      positions: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+      normals: [[0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 0, 1]],
+      tangents: [[1, 0, 0], [1, 0, 0], [1, 0, 0], [1, 0, 0]],
+      bitangents: [[0, 1, 0], [0, 1, 0], [0, 1, 0], [0, 1, 0]],
+      texCoords: [[0, 0], [1, 0], [1, 1], [0, 1]],
+      indices: [0, 1, 2, 0, 2, 3],
+    };
+    const terrainNode = {
+      terrain: {
+        foliage: [{ kind: 'mesh', name: 'oak', models: [{ geometry: flat, material: {} }] }],
+        layers: [{ material: { foliageInclude: [{ kind: 'mesh', name: 'oak', models: [{ geometry: nested, material: {} }] }] } }],
+      },
+      children: [],
+    };
+
+    const data = gameWith([terrainNode]);
+    const { buffer } = packGameBin(data);
+
+    // One chunk for both copies, and no vertex arrays left in the scene trees at all. (The geometry
+    // TABLE legitimately keys its chunk refs by attribute name, so only the scenes are checked.)
+    const game = unpackGameBin(buffer);
+    expect(Object.keys(game.manifest.geometries)).toHaveLength(1);
+    expect(JSON.stringify(game.manifest.scenes).includes('"positions"')).toBe(false);
+
+    const scene = game.manifest.scenes.main.scene as any;
+    inflateSceneGeometry(scene, game);
+    const t = scene.children[0].terrain;
+    const fromLayer = t.foliage[0].models[0].geometry;
+    const fromRule = t.layers[0].material.foliageInclude[0].models[0].geometry;
+
+    expect(Array.from(fromLayer.positions)).toEqual(flat.positions);
+    expect(Array.from(fromRule.positions)).toEqual(flat.positions);
+    // Distinct arrays: FoliageLayer builds separate Model objects from each, and Geometry.scale()
+    // writes positions in place.
+    expect(fromRule.positions.buffer).not.toBe(fromLayer.positions.buffer);
+  });
+
+  it('round-trips deflated terrain heights and splat through the blob', async () => {
+    const heights = new Uint16Array([0, 1234, 65535, 42, 7, 900, 12, 3]);
+    const splat = new Uint8Array(64);
+    for (let i = 0; i < 16; i++) { splat[i * 4] = 200; splat[i * 4 + 1] = 55; } // alpha stays 0 on purpose
+
+    const deflate = async (bytes: Uint8Array) => new Uint8Array(await new Response(
+      new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+
+    const node = {
+      terrain: {
+        resolution: 3, splatRes: 4, heightFormat: 'u16', heightMin: 0, heightMax: 10,
+        heightBytes: await deflate(new Uint8Array(heights.buffer)),
+        splatBytes: await deflate(splat),
+      },
+      children: [],
+    };
+
+    const { buffer } = packGameBin(gameWith([node]));
+    const game = unpackGameBin(buffer);
+    const scene = game.manifest.scenes.main.scene as any;
+    await inflateTerrainData(scene, game);
+
+    const t = scene.children[0].terrain;
+    expect(Array.from(t.heightsU16)).toEqual(Array.from(heights));
+    // Byte-exact including the zero alpha — the reason this is DEFLATE and not a canvas PNG encode.
+    expect(Array.from(t.splatData)).toEqual(Array.from(splat));
+    expect(t.splatChunk).toBeUndefined();
+    expect(t.heightChunk).toBeUndefined();
+  });
+
+  it('leaves a terrain with only base64 payloads untouched (old game.bin still loads)', async () => {
+    const node = { terrain: { heights: 'AAAA', splat: 'BBBB', splatRes: 2 }, children: [] };
+    const { buffer } = packGameBin(gameWith([node]));
+    const game = unpackGameBin(buffer);
+    const scene = game.manifest.scenes.main.scene as any;
+    await inflateTerrainData(scene, game);
+
+    expect(scene.children[0].terrain.heights).toBe('AAAA');
+    expect(scene.children[0].terrain.splat).toBe('BBBB');
   });
 
   it('is dramatically smaller than the JSON it replaces', () => {

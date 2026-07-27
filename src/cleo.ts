@@ -14,8 +14,8 @@ export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { TypedEmitter, engineEventBus } from "./core/eventBus";
 export type { EngineEventMap, SceneChange, ChangeKind } from "./core/eventBus";
 export { Mesh } from "./graphics/mesh";
-export { Material, TerrainMaterial, CustomMaterial } from "./graphics/material";
-export type { TerrainBaseType, TerrainFoliageRule, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
+export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule } from "./graphics/material";
+export type { TerrainBaseType, TerrainFoliageRule, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
 export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment } from "./graphics/systems/customShaders";
 export { Renderer } from "./graphics/renderer";
 export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
@@ -36,16 +36,23 @@ export type { RagdollOptions } from "./physics/ragdoll";
 export { Model } from "./graphics/model";
 export { AnimatedModel } from "./graphics/animatedModel";
 export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
-export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget } from "./graphics/animationRetarget";
+export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget, humanoidRigOf } from "./graphics/animationRetarget";
+export { skeletonTopology } from "./graphics/skeletonTopology";
+export type { SkeletonTopology } from "./graphics/skeletonTopology";
 export type { AnimationCompatibility, HierarchyMismatch, BoneMapping, BoneMappingEntry, BoneMatchKind } from "./graphics/animationRetarget";
 export { normalizeBoneName, humanoidSlotOf } from "./graphics/boneNames";
 export { Animator, isConditionGroup, NODE_BUILTINS } from "./graphics/animator";
 export type { NodeBuiltinName } from "./graphics/animator";
 export {
     createMotionRecord, sampleMotion, planarSplit, headingAngle, signedAngleBetween, wrapDegrees,
+    motionConfig, MOTION_DEFAULTS,
 } from "./physics/motion";
-export type { MotionRecord } from "./physics/motion";
-export { fieldWeights, rateScaleOf } from "./graphics/animationField";
+export type { MotionRecord, MotionConfig } from "./physics/motion";
+export {
+    fieldWeights, rateScaleOf, phaseOffsetOf, coincidentSamples,
+    axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
+    DEFAULT_AXIS_SMOOTHING, DEFAULT_WEIGHT_SMOOTHING,
+} from "./graphics/animationField";
 export type {
     AnimationField,
     AnimationFieldMode,
@@ -73,6 +80,7 @@ export { Shape } from "./physics/shape";
 // Scene.physics is a public field of this type and scripts already reach through it (startRagdoll,
 // isGrounded), so the class belongs in the public surface too.
 export { PhysicsSystem } from "./physics/physicsSystem";
+export type { PhysicsRaycastHit, PhysicsRaycastOptions } from "./physics/physicsSystem";
 export { physicsStats } from "./physics/physicsStats";
 export type { PhysicsStats } from "./physics/physicsStats";
 export { sceneStats, sceneStatsDetail } from "./core/scene/sceneStats";
@@ -80,9 +88,11 @@ export type { SceneStats } from "./core/scene/sceneStats";
 export { convexHull, hullFromPositions, HULL_BUDGETS } from "./physics/convexHull";
 export type { Hull, HullQuality } from "./physics/convexHull";
 export { Terrain } from "./terrain/terrain";
-export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings } from "./terrain/terrain";
-export { FoliageLayer, crossQuadGeometry } from "./terrain/foliage";
+export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
+export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
+export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS } from "./terrain/foliageColliders";
+export type { FoliageColliderSettings } from "./terrain/foliageColliders";
 export { Raycaster } from "./core/raycaster";
 export type { Ray, RaycastHit } from "./core/raycaster";
 export { BVH, rayTriangleIntersection } from "./core/bvh";

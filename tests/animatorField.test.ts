@@ -3,6 +3,7 @@ import { mat4, vec3 } from 'gl-matrix';
 import { Animator } from '../src/graphics/animator';
 import type { AnimatedModel, Animation, Skin } from '../src/graphics/animatedModel';
 import type { AnimationField } from '../src/graphics/animationField';
+import type { AnimationParameter, AnimationState, AnimationStateMachine } from '../src/graphics/animator';
 
 // Field playback inside the Animator: weighted N-clip posing, the shared phase, and the weighted duration.
 // fieldWeights is covered on its own in animationField.test.ts; what is tested here is everything the
@@ -212,5 +213,289 @@ describe('Animator — leaving a field', () => {
         expect(a.isBlending).toBe(false);
         a.seek(2);
         expect(boneX(a)).toBeCloseTo(20);
+    });
+});
+
+// ---- Temporal stability -------------------------------------------------------------------------------
+//
+// Everything above drives the probe DIRECTLY, the way the field editor does — deliberately unfiltered, so the
+// preview shows exactly what a probe position produces. A running game instead drives the axes from machine
+// parameters, and those come from measurement: noisy. This block covers the filtering that only exists on
+// that path, which is the difference between a steady blend and the vibration this was written to fix.
+
+/** A machine with one field state whose X axis reads the parameter `Speed`. */
+function speedMachine(field: AnimationField, over?: Partial<AnimationState>) {
+    return {
+        parameters: [{ name: 'Speed', type: 'float', default: 0 } as AnimationParameter],
+        states: [{
+            name: 'Locomotion', clipName: '', loop: true, speed: 1, isEntry: true,
+            field, fieldInputs: { x: 'Speed' }, ...over,
+        } as AnimationState],
+        transitions: [],
+        events: [],
+    } as AnimationStateMachine;
+}
+
+/** Run the machine for `seconds` at a fixed step, exactly as ModelNode.update does each frame. */
+function step(a: Animator, seconds: number, dt = 1 / 60) {
+    for (let t = 0; t < seconds - 1e-9; t += dt) {
+        a.checkTriggers();
+        a.update(dt);
+    }
+}
+
+const weightOf = (a: Animator, clip: string) =>
+    a.activeFieldWeights.find(w => w.clipName === clip)?.weight ?? 0;
+
+describe('Animator — field probe filtering', () => {
+    it('eases the probe towards a stepped parameter instead of jumping to it', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(speedMachine({ ...field1D(), xAxis: { name: 'Speed', min: 0, max: 100, smoothing: 0.2 } }));
+
+        // Seeded at 0 => pure walk. Now demand full speed in one frame.
+        expect(weightOf(a, 'walk')).toBeCloseTo(1);
+        a.setFloat('Speed', 100);
+
+        a.checkTriggers();
+        a.update(1 / 60);
+        const afterOneFrame = weightOf(a, 'run');
+        // A step input must NOT arrive as a step: one frame of a 0.2s time constant is ~8% of the way.
+        expect(afterOneFrame).toBeGreaterThan(0);
+        expect(afterOneFrame).toBeLessThan(0.2);
+
+        // ...and must converge, monotonically, without overshooting.
+        let prev = afterOneFrame;
+        for (let i = 0; i < 60; i++) {
+            a.checkTriggers();
+            a.update(1 / 60);
+            const cur = weightOf(a, 'run');
+            expect(cur).toBeGreaterThanOrEqual(prev - 1e-9);
+            expect(cur).toBeLessThanOrEqual(1 + 1e-9);
+            prev = cur;
+        }
+        expect(prev).toBeGreaterThan(0.95);
+    });
+
+    it('rejects a parameter that alternates inside the deadzone', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(speedMachine({
+            ...field1D(),
+            // Both filters off isolates the deadband: anything that gets past it lands in the pose at once,
+            // and — the point of this test — anything it stops shows up as a weight that does not move AT ALL.
+            // Leaving weight smoothing on would leave the weights still asymptotically converging, which reads
+            // as the deadband leaking when it is doing its job.
+            xAxis: { name: 'Speed', min: 0, max: 100, smoothing: 0, deadzone: 5 },
+            weightSmoothing: 0,
+        }));
+        a.setFloat('Speed', 50);
+        step(a, 0.5);
+        const settled = weightOf(a, 'run');
+
+        // Noise of +/-2 around 50 is inside the 5-unit band, so the pose must not move at all.
+        for (const noise of [2, -2, 1.5, -1.5, 2, -2]) {
+            a.setFloat('Speed', 50 + noise);
+            a.checkTriggers();
+            a.update(1 / 60);
+            expect(weightOf(a, 'run')).toBeCloseTo(settled, 10);
+        }
+
+        // A move that clears the band does get through — a deadband that never releases is just a freeze.
+        a.setFloat('Speed', 60);
+        a.checkTriggers();
+        a.update(1 / 60);
+        expect(weightOf(a, 'run')).toBeGreaterThan(settled);
+    });
+
+    it('seeds the probe on the first frame rather than damping up from zero', () => {
+        const a = makeAnimator([walk(), run()]);
+        const machine = speedMachine({ ...field1D(), xAxis: { name: 'Speed', min: 0, max: 100, smoothing: 0.3 } });
+        machine.parameters[0].default = 100;
+        a.setStateMachine(machine);
+
+        // Entering a state at full speed must pose the run immediately. Damping in from 0 would walk the
+        // character up through every gait between the origin and where it actually is.
+        expect(weightOf(a, 'run')).toBeCloseTo(1);
+    });
+
+    it('fades a clip out of the mix rather than dropping it between frames', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(speedMachine({
+            ...field1D(),
+            // No probe lag, so the WEIGHT damping is the only filter in play.
+            xAxis: { name: 'Speed', min: 0, max: 100, smoothing: 0 },
+            weightSmoothing: 0.15,
+        }));
+        a.setFloat('Speed', 50);
+        step(a, 1);
+        expect(weightOf(a, 'walk')).toBeGreaterThan(0.4);
+
+        // Snap the probe onto 'run'. fieldWeights now returns run alone — but walk must still be posed,
+        // decaying, because a clip vanishing from the set in one frame is a discontinuity in the pose.
+        a.setFloat('Speed', 100);
+        a.checkTriggers();
+        a.update(1 / 60);
+        const fading = weightOf(a, 'walk');
+        expect(fading).toBeGreaterThan(0.1);
+
+        let prev = fading;
+        for (let i = 0; i < 10; i++) {
+            a.checkTriggers();
+            a.update(1 / 60);
+            const cur = weightOf(a, 'walk');
+            expect(cur).toBeLessThanOrEqual(prev + 1e-9);
+            prev = cur;
+        }
+        // And it does leave eventually — a fade that never completes poses every clip forever.
+        step(a, 2);
+        expect(a.activeFieldWeights.map(w => w.clipName)).toEqual(['run']);
+        expect(weightOf(a, 'run')).toBeCloseTo(1);
+    });
+
+    it('keeps the weights rigid when the field asks for no smoothing', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(speedMachine({
+            ...field1D(),
+            xAxis: { name: 'Speed', min: 0, max: 100, smoothing: 0 },
+            weightSmoothing: 0,
+        }));
+        a.setFloat('Speed', 50);
+        a.checkTriggers();
+        a.update(1 / 60);
+        // The knobs have to be real in both directions, or "turn it off to compare" is not available.
+        expect(weightOf(a, 'walk')).toBeCloseTo(0.5);
+        expect(weightOf(a, 'run')).toBeCloseTo(0.5);
+    });
+
+    /**
+     * The pose must not depend on what order the contributing clips happen to be in.
+     *
+     * It used to. `_mixTransforms` folded rotations with a sequential slerp, which is not commutative, and
+     * the entries are sorted by weight — so any two weights crossing reordered the fold and moved the pose.
+     * Measured before the fix: 0.119 degrees from a single swap, 0.267 across all orderings, every frame,
+     * on a bone near the root of the limb. That is a blend humming rather than a blend blending.
+     */
+    it('produces the same pose whatever order the contributions arrive in', () => {
+        const clips = [
+            slideClip('a', 10, 1), slideClip('b', 20, 2), slideClip('c', 30, 1.5), slideClip('d', 40, 1.2),
+        ];
+        const samples = [
+            { clipName: 'a', x: 0 }, { clipName: 'b', x: 33 }, { clipName: 'c', x: 66 }, { clipName: 'd', x: 100 },
+        ];
+
+        // Same four samples, four different authoring orders. fieldWeights preserves sample order, so this is
+        // exactly the reordering a weight crossing produces at runtime.
+        const poseFor = (order: number[]) => {
+            const a = makeAnimator(clips.map(c => ({ ...c })));
+            a.playField({ mode: '1d', xAxis: { name: 'Speed', min: 0, max: 100 }, samples: order.map(i => samples[i]) }, 50);
+            a.seek(a.duration * 0.4);
+            return Array.from(a.getFinalBoneMatrices()[0]);
+        };
+
+        const base = poseFor([0, 1, 2, 3]);
+        for (const order of [[3, 2, 1, 0], [1, 3, 0, 2], [2, 0, 3, 1]]) {
+            const other = poseFor(order);
+            // Float summation is not associative, so this is a tight tolerance rather than exact equality —
+            // the artefact being guarded against was four orders of magnitude larger than this.
+            for (let i = 0; i < base.length; i++) expect(other[i]).toBeCloseTo(base[i], 9);
+        }
+    });
+
+    it('carries the phase when the SAME field state is re-entered', () => {
+        const a = makeAnimator([walk(), run()]);
+        const machine = speedMachine(field1D());
+        // Two transitions either side of one threshold: the classic ping-pong. Here it is provoked directly by
+        // re-entering the state, which is what that pair does every frame.
+        a.setStateMachine(machine);
+        step(a, 0.5);
+        const phased = boneX(a);
+        expect(phased).toBeGreaterThan(0);
+
+        a.resetStateMachine();   // re-enters the entry state, same embedded field object
+        // Restarting the cycle from 0 here is the stutter: the pose must be where it was, not back at frame 0.
+        expect(boneX(a)).toBeCloseTo(phased, 5);
+    });
+});
+
+// A field poses every clip at ONE shared phase, which is what stops the feet sliding — but it also assumes
+// every clip starts at the same point in its gait. Clips from different sources routinely do not, and two
+// walk cycles half a lap apart put the legs in opposition rather than in step.
+describe('Animator — per-sample phase offset', () => {
+    it('shifts a clip around its own cycle by the authored fraction', () => {
+        const a = makeAnimator([walk(), run()]);
+        // Walk alone, offset by a quarter. Walk slides 0 -> 10 over 1s, so phase 0 now poses it at 2.5.
+        a.playField({
+            mode: '1d', xAxis: { name: 'Speed', min: 0, max: 100 },
+            samples: [{ clipName: 'walk', x: 0, phaseOffset: 0.25 }],
+        }, 0);
+        a.seek(0);
+        expect(boneX(a)).toBeCloseTo(2.5);
+
+        a.seek(a.duration * 0.5);   // phase 0.5 + 0.25 = 0.75
+        expect(boneX(a)).toBeCloseTo(7.5);
+    });
+
+    it('wraps rather than clamping at the end of the cycle', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.playField({
+            mode: '1d', xAxis: { name: 'Speed', min: 0, max: 100 },
+            samples: [{ clipName: 'walk', x: 0, phaseOffset: 0.5 }],
+        }, 0);
+        // Phase 0.8 + 0.5 = 1.3 -> 0.3 into the NEXT lap, not held at the end of this one.
+        a.seek(a.duration * 0.8);
+        expect(boneX(a)).toBeCloseTo(3);
+    });
+
+    it('puts two clips half a cycle apart back in step', () => {
+        const a = makeAnimator([walk(), run()]);
+        const at = (offset: number) => {
+            a.playField({
+                mode: '1d', xAxis: { name: 'Speed', min: 0, max: 100 },
+                samples: [{ clipName: 'walk', x: 0 }, { clipName: 'run', x: 100, phaseOffset: offset }],
+            }, 50);
+            a.seek(a.duration * 0.25);
+            return boneX(a);
+        };
+        // walk at phase .25 is x=2.5; run at phase .25 is x=5 -> even mix 3.75.
+        expect(at(0)).toBeCloseTo(3.75);
+        // Offset run by half: it now poses at phase .75, x=15 -> even mix 8.75. The offset must MOVE the pose,
+        // or it is not doing anything.
+        expect(at(0.5)).toBeCloseTo(8.75);
+    });
+
+    it('treats a negative or out-of-range offset as the cycle position it names', () => {
+        const a = makeAnimator([walk(), run()]);
+        const at = (offset: number) => {
+            a.playField({
+                mode: '1d', xAxis: { name: 'Speed', min: 0, max: 100 },
+                samples: [{ clipName: 'walk', x: 0, phaseOffset: offset }],
+            }, 0);
+            a.seek(0);
+            return boneX(a);
+        };
+        // The quantity is cyclic, so there is no invalid input — only one to wrap.
+        expect(at(-0.75)).toBeCloseTo(at(0.25));
+        expect(at(1.25)).toBeCloseTo(at(0.25));
+    });
+
+    it('keeps a fading-out clip on its offset instead of snapping it back to zero', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(speedMachine({
+            mode: '1d', xAxis: { name: 'Speed', min: 0, max: 100, smoothing: 0 },
+            samples: [{ clipName: 'walk', x: 0 }, { clipName: 'run', x: 100, phaseOffset: 0.5 }],
+            weightSmoothing: 0.15,
+        }));
+        a.setFloat('Speed', 50);
+        step(a, 1);
+
+        // Snap onto walk. 'run' leaves the field's own weight set, so its SAMPLE — and with it the offset — is
+        // gone; only the remembered meta keeps it posed where it was. Losing that would jog it half a cycle on
+        // the very frame it starts fading, which is a pop in the middle of the fade meant to prevent one.
+        a.setFloat('Speed', 0);
+        a.checkTriggers();
+        a.update(1 / 60);
+        const fading = a.fieldDebug.weights.find(w => w.clipName === 'run');
+        expect(fading).toBeDefined();
+        expect(fading!.weight).toBeGreaterThan(0.1);
+        expect(fading!.phaseOffset).toBeCloseTo(0.5);
     });
 });

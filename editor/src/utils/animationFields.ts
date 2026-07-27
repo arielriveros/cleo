@@ -30,10 +30,15 @@ export type AnimationFieldAsset = {
   /** Authored even in 1D mode so switching to 2D and back does not lose the axis the user set up. */
   yAxis: AnimationFieldAxis
   samples: AnimationFieldSample[]
+  /** See AnimationField.weightSmoothing. Absent = the engine default, not 0. */
+  weightSmoothing?: number
 }
 
 export const DEFAULT_X_AXIS: AnimationFieldAxis = { name: 'Speed', min: 0, max: 100 }
-export const DEFAULT_Y_AXIS: AnimationFieldAxis = { name: 'Direction', min: -180, max: 180 }
+// `wrap` on by default, because this axis is a HEADING: -180 and +180 are the same direction, and without it
+// a character turning through the seam swings the probe across the whole range in one frame and the blend
+// snaps. A new field gets this right; an existing one is nudged in the panel rather than changed underneath.
+export const DEFAULT_Y_AXIS: AnimationFieldAxis = { name: 'Direction', min: -180, max: 180, wrap: true }
 
 export function buildAnimationFieldAsset(name: string, modelId: string, id?: string): AnimationFieldAsset {
   return {
@@ -61,6 +66,9 @@ export function toRuntimeField(asset: AnimationFieldAsset): AnimationField {
     samples: asset.samples.map(s => ({ ...s })),
   }
   if (asset.mode === '2d') field.yAxis = { ...asset.yAxis }
+  // Only written when authored. Absent means the engine's default, and emitting an explicit copy of that
+  // default would put a value into every scene that the engine could then never change.
+  if (typeof asset.weightSmoothing === 'number') field.weightSmoothing = asset.weightSmoothing
   return field
 }
 

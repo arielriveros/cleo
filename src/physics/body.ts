@@ -117,6 +117,17 @@ interface RigidBodyConfig {
      * The probe never vanishes the way a resting contact does, so the grounded stamp stays fresh.
      */
     groundProbeDistance?: number;
+    /**
+     * Time constant, in seconds, for this body's MEASURED motion (`Node.currentSpeed` and everything derived
+     * from it, including the acceleration and turn-rate values an animation machine binds to). `0` = the
+     * engine default (~90ms).
+     *
+     * Worth raising for anything whose measured speed is noisy — a capsule straddling heightfield seams, a
+     * body being carried, a ragdoll settling — because that noise is what a blend driven off `planarSpeed`
+     * turns into visible vibration. Worth lowering for something that must react instantly and does not feed
+     * an animation blend. The filter is frame-rate independent either way.
+     */
+    motionSmoothing?: number;
 }
 
 export class RigidBody extends CBody {
@@ -129,6 +140,8 @@ export class RigidBody extends CBody {
   public readonly restitution: number;
   /** See {@link RigidBodyConfig.groundProbeDistance}. Read by PhysicsSystem's per-frame ground probe. */
   public readonly groundProbeDistance: number;
+  /** See {@link RigidBodyConfig.motionSmoothing}. Read by PhysicsSystem when it samples measured motion. */
+  public readonly motionSmoothing: number;
 
   constructor(config?: RigidBodyConfig, owner?: Node) {
     super({
@@ -149,6 +162,7 @@ export class RigidBody extends CBody {
     this.friction = config?.friction ?? DEFAULT_FRICTION;
     this.restitution = config?.restitution ?? DEFAULT_RESTITUTION;
     this.groundProbeDistance = config?.groundProbeDistance ?? 0;
+    this.motionSmoothing = config?.motionSmoothing ?? 0;
     this.simulatePhysics = config?.simulatePhysics ?? true;
   }
 

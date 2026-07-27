@@ -1,4 +1,7 @@
-import { Scene, Node, ModelNode, AnimatedModel, Animator, Vec, canAccessVariable, NODE_BUILTINS } from 'cleo'
+import {
+  Scene, Node, ModelNode, AnimatedModel, Animator, Vec, canAccessVariable, NODE_BUILTINS,
+  skeletonTopology, humanoidSlotOf,
+} from 'cleo'
 import type { Skin } from 'cleo'
 import { getScriptIdOf, type ScriptAsset } from '../../utils/scripts'
 
@@ -29,29 +32,37 @@ export interface JointTreeNode {
   children: JointTreeNode[]
 }
 
-/** Build the joint hierarchy (roots + children) from a Skin's flat joint list. */
+/**
+ * Build the joint hierarchy (roots + children) from a Skin's flat joint list.
+ *
+ * Delegates the node-index/joint-index bridge to the engine's shared `skeletonTopology`, which is also what
+ * the Animator poses through — so the tree drawn here cannot disagree with the hierarchy actually being
+ * evaluated, and malformed rigs (a self-parented bone, a cycle) degrade the same way in both.
+ */
 export function buildJointTree(skin: Skin): JointTreeNode[] {
-  const nodeIndexToJoint = new Map<number, number>()
-  skin.joints.forEach((j, i) => nodeIndexToJoint.set(j.nodeIndex, i))
-
+  const topo = skeletonTopology(skin)
   const treeNodes: JointTreeNode[] = skin.joints.map((j, i) => ({ index: i, nodeIndex: j.nodeIndex, children: [] }))
-  const roots: JointTreeNode[] = []
-
-  skin.joints.forEach((j, i) => {
-    const parentJoint = j.parentIndex !== undefined ? nodeIndexToJoint.get(j.parentIndex) : undefined
-    if (parentJoint !== undefined && parentJoint !== i) {
-      treeNodes[parentJoint].children.push(treeNodes[i])
-    } else {
-      roots.push(treeNodes[i])
-    }
-  })
-
-  return roots
+  for (let i = 0; i < treeNodes.length; i++) {
+    const p = topo.parentJoint[i]
+    if (p >= 0) treeNodes[p].children.push(treeNodes[i])
+  }
+  return topo.roots.map(i => treeNodes[i])
 }
 
-/** Display label for a joint (the Skin carries no joint names, so we key off the GLTF node index). */
+/**
+ * Display label for a joint: its real bone name where the rig has one, else the node index.
+ *
+ * The skin DOES carry names (`nodeNames`, parsed from the GLTF and preserved through serialization); this
+ * used to ignore them and print `Joint 12 (node 34)` for everything, which is unreadable for picking out a
+ * foot or a hand. The humanoid slot is appended when the name is recognizable, because that is the term the
+ * engine itself uses for the bone — retargeting and any future rig feature find bones by slot, not by name.
+ */
 export function jointLabel(skin: Skin, index: number): string {
-  return `Joint ${index} (node ${skin.joints[index].nodeIndex})`
+  const nodeIndex = skin.joints[index].nodeIndex
+  const name = skin.nodeNames?.get(nodeIndex)
+  if (!name) return `Joint ${index} (node ${nodeIndex})`
+  const slot = humanoidSlotOf(name)
+  return slot ? `${name}  ·  ${slot}` : name
 }
 
 /**
@@ -122,6 +133,20 @@ const BUILTIN_HINTS: Record<string, string> = {
   planarAngle: 'Travel direction relative to the node’s facing, in degrees: 0 ahead, ±90 strafing, ±180 backwards.',
   worldPlanarAngle: 'Absolute travel heading in degrees, independent of facing.',
   isGrounded: 'True while the body is resting on something solid.',
+
+  planarAcceleration: 'How hard the node is speeding up (+) or slowing down (−) across the ground, units/s². This is what tells a start-run apart from a run.',
+  isAccelerating: 'True while the node is deliberately gaining ground speed — the gate for an Idle → StartRun transition.',
+  isDecelerating: 'True while the node is deliberately losing ground speed — the gate for a Run → StopRun transition.',
+  isMoving: 'True while the node is moving across the ground, with hysteresis so it does not chatter at walking pace.',
+  movingTime: 'Seconds the node has been moving continuously; 0 while still. Use it to require a move has lasted before committing to it.',
+  stillTime: 'Seconds the node has been still continuously; 0 while moving. The right gate for settling into Idle (e.g. stillTime > 0.2).',
+  turnRate: 'How fast the node is turning, degrees/s, signed. Non-zero even when turning in place, where every speed reads 0.',
+  angularSpeed: 'Magnitude of the body’s angular velocity, rad/s. Commanded by the solver, not measured — prefer turnRate for animation.',
+  isFalling: 'True while off the ground AND losing height. Ask this rather than “not isGrounded”, which is also true on the way up.',
+  airTime: 'Seconds airborne continuously; 0 while grounded. Lets airtime rather than clip length drive a fall animation.',
+  groundedTime: 'Seconds grounded continuously; 0 while airborne. Use it to stop a landing state firing again mid-run.',
+  groundDistance: 'Distance from the collider to the ground below, or −1 when unknown. Needs a Ground Probe on the body (Physics panel).',
+  slopeAngle: 'Tilt of the ground under the node, degrees from level. Reads 0 while airborne.',
 }
 
 /** Whether `requester` may bind to a class-script field of `access` declared on `owner`. Mirrors the legacy
@@ -147,6 +172,8 @@ export function accessibleNodeVariables(
   sourceNode: Node | null,
   sourceScene: Scene | null,
   scriptAssets: ScriptAsset[] = [],
+  /** Ids of nodes the project has authored a rigid body for — the editor's `bodies` map. See below. */
+  bodiedIds?: Set<string>,
 ): AccessibleVariable[] {
   const out: AccessibleVariable[] = []
   if (!sourceNode) return out
@@ -182,7 +209,13 @@ export function accessibleNodeVariables(
    * `Playable(body) → holder → ModelNode(animator)`, so neither Self nor Parent is the thing that moves.
    * Without the bodied ancestor there is simply no way to reach the speed from the machine.
    *
-   * Not offered for every node in the scene: seven entries each would bury the variables the user authored,
+   * Self and Parent are offered UNCONDITIONALLY, and it is a mistake to gate them on `node.body`: the editor
+   * never calls `setBody`, so no node in the authoring scene has one. Physics is held in a side map and only
+   * materialized when the scene is parsed for Play, which means gating on the live body hides every built-in
+   * from the very screen they are authored on. `bodiedIds` is that side map's key set, which is why the
+   * bodied-ancestor entry takes it rather than reading `node.body`.
+   *
+   * Not offered for every node in the scene: twenty entries each would bury the variables the user authored,
    * and no other node's speed is what this character animates to.
    */
   const builtins = (nodeRef: string, label: string) => {
@@ -194,11 +227,17 @@ export function accessibleNodeVariables(
     }
   }
 
-  /** The nearest ancestor (or self) with a rigid body — whatever is actually being moved. */
+  /**
+   * The nearest ancestor (or self) with a rigid body — whatever is actually being moved.
+   *
+   * Checks the authored set first and the live body second, so this resolves both while authoring (where only
+   * the side map knows) and at runtime (where only the node does).
+   */
+  const hasBody = (n: Node) => !!n.body || !!bodiedIds?.has(n.id)
   const bodiedAncestor = (): Node | null => {
     let n: Node | null = sourceNode
     while (n) {
-      if (n.body) return n
+      if (hasBody(n)) return n
       n = n.parent
     }
     return null

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { fieldWeights, rateScaleOf, AnimationField, AnimationFieldSample } from '../src/graphics/animationField';
+import {
+    fieldWeights, rateScaleOf, phaseOffsetOf, coincidentSamples,
+    AnimationField, AnimationFieldSample,
+} from '../src/graphics/animationField';
 
 // Weighting is the whole contract of a blend space: the Animator turns whatever comes out of fieldWeights
 // straight into a pose, so a weight set that does not sum to 1 shows up as a character melting towards the
@@ -172,6 +175,175 @@ describe('fieldWeights — 2D gradient band', () => {
     });
 });
 
+// A heading axis closes on itself: -180 and +180 are the same direction. Without `wrap`, normalization is
+// linear, so a character turning through that seam moves the probe across the ENTIRE axis in one frame and
+// every weight in the field changes at once. That is the violent version of the jitter this exists to fix,
+// so these tests are about continuity across the seam, not just about which clips come out.
+describe('fieldWeights — wrapping axes', () => {
+    const dirAxis = { name: 'Direction', min: -180, max: 180, wrap: true };
+
+    const dir1D = (samples: AnimationFieldSample[]): AnimationField =>
+        ({ mode: '1d', xAxis: dirAxis, samples });
+
+    const dir2D = (samples: AnimationFieldSample[]): AnimationField => ({
+        mode: '2d',
+        xAxis: { name: 'Speed', min: 0, max: 100 },
+        yAxis: dirAxis,
+        samples,
+    });
+
+    const fwd = { clipName: 'fwd', x: 0 };
+    const left = { clipName: 'left', x: -90 };
+    const right = { clipName: 'right', x: 90 };
+    const back = { clipName: 'back', x: 180 };
+
+    it('1D: brackets across the seam instead of pinning to an end sample', () => {
+        const f = dir1D([fwd, left, right, back]);
+        // Halfway between 'right' (90) and 'back' (180) going one way round...
+        expect(byClip(fieldWeights(f, 135))).toEqual({ right: 0.5, back: 0.5 });
+        // ...and halfway between 'back' (180 === -180) and 'left' (-90) going the other. Unwrapped, -135 is
+        // outside nothing and would bracket left/fwd or clamp — it must not reach 'fwd' at all.
+        expect(byClip(fieldWeights(f, -135))).toEqual({ back: 0.5, left: 0.5 });
+    });
+
+    it('1D: crossing +/-180 changes every weight by a hair', () => {
+        const f = dir1D([fwd, left, right, back]);
+        const before = byClip(fieldWeights(f, 179.5));
+        const after = byClip(fieldWeights(f, -179.5));
+
+        // The bracketing PAIR does change across the seam — right|back becomes back|left, because that is
+        // genuinely the next segment round the circle. What must not change is any clip's actual share: 'back'
+        // holds ~0.99 either side, and the sliver hands over from 'right' to 'left'. Comparing over the union
+        // of both key sets is the honest check; comparing key sets alone would fail on a correct result.
+        for (const clip of new Set([...Object.keys(before), ...Object.keys(after)])) {
+            expect(Math.abs((after[clip] ?? 0) - (before[clip] ?? 0))).toBeLessThan(0.02);
+        }
+        expect(after.back).toBeGreaterThan(0.98);
+    });
+
+    it('1D: without wrap the same crossing swaps the entire weight set', () => {
+        const f: AnimationField = { mode: '1d', xAxis: { ...dirAxis, wrap: false }, samples: [fwd, left, right, back] };
+        // This is the bug, pinned so the fix cannot be quietly reverted: 'back' owns +179.5, and one degree of
+        // turn later the probe has fallen off the other end of the axis onto 'left'.
+        expect(byClip(fieldWeights(f, 179.5))).toEqual({ right: expect.any(Number), back: expect.any(Number) });
+        expect(Object.keys(byClip(fieldWeights(f, -179.5)))).toEqual(['left']);
+    });
+
+    it('2D: a wrapped Y axis measures the short way round', () => {
+        const f = dir2D([
+            { clipName: 'fwd', x: 100, y: 0 },
+            { clipName: 'back', x: 100, y: 180 },
+        ]);
+        // A probe just past the seam is 5 degrees from 'back' and 175 from 'fwd', so 'back' must dominate.
+        const w = byClip(fieldWeights(f, 100, -175));
+        expect(w.back).toBeGreaterThan(w.fwd ?? 0);
+        expect(sum(fieldWeights(f, 100, -175))).toBeCloseTo(1);
+    });
+
+    it('2D: weights stay continuous while the probe sweeps a full turn', () => {
+        const f = dir2D([
+            { clipName: 'fwd', x: 100, y: 0 },
+            { clipName: 'left', x: 100, y: -90 },
+            { clipName: 'right', x: 100, y: 90 },
+            { clipName: 'back', x: 100, y: 180 },
+        ]);
+        // The seam must be no more of a discontinuity than any other step of the same size.
+        let worst = 0;
+        let prev = byClip(fieldWeights(f, 100, -180));
+        for (let y = -179; y <= 180; y++) {
+            const cur = byClip(fieldWeights(f, 100, y));
+            for (const clip of ['fwd', 'left', 'right', 'back']) {
+                worst = Math.max(worst, Math.abs((cur[clip] ?? 0) - (prev[clip] ?? 0)));
+            }
+            prev = cur;
+        }
+        expect(worst).toBeLessThan(0.05);
+    });
+
+    it('ignores wrap on a degenerate range rather than dividing by it', () => {
+        const f: AnimationField = {
+            mode: '1d',
+            xAxis: { name: 'd', min: 0, max: 0, wrap: true },
+            samples: [{ clipName: 'a', x: 0 }, { clipName: 'b', x: 0 }],
+        };
+        const w = fieldWeights(f, 0);
+        expect(sum(w)).toBeCloseTo(1);
+        expect(w.every(e => Number.isFinite(e.weight))).toBe(true);
+    });
+});
+
+// Two samples on the same coordinate used to each claim a FULL share, so a duplicated point pulled the blend
+// towards its clip and moved the true midpoint between it and its neighbours off where the plot drew it.
+// This is not a corner case: a wrapping axis makes its two ends the same point, and the project's own README
+// used to prescribe placing the backward clip at both +180 and -180.
+describe('fieldWeights — coincident samples', () => {
+    it('splits one sample’s worth of weight rather than counting each in full', () => {
+        const single = field1D([{ clipName: 'a', x: 0 }, { clipName: 'b', x: 100 }]);
+        const doubled = field1D([{ clipName: 'a', x: 0 }, { clipName: 'b', x: 100 }, { clipName: 'b2', x: 100 }]);
+
+        // 1D brackets a pair, so use 2D where the gradient band sees every sample at once.
+        const s2 = field2D([{ clipName: 'a', x: 0, y: 0 }, { clipName: 'b', x: 100, y: 0 }]);
+        const d2 = field2D([
+            { clipName: 'a', x: 0, y: 0 }, { clipName: 'b', x: 100, y: 0 }, { clipName: 'b2', x: 100, y: 0 },
+        ]);
+        const a = byClip(fieldWeights(s2, 50, 0));
+        const d = byClip(fieldWeights(d2, 50, 0));
+
+        // 'a' must keep exactly the share it had; the duplicated point splits b's share between its members.
+        expect(d.a).toBeCloseTo(a.a, 10);
+        expect(d.b + d.b2).toBeCloseTo(a.b, 10);
+        expect(d.b).toBeCloseTo(d.b2, 10);
+        expect(sum(fieldWeights(d2, 50, 0))).toBeCloseTo(1);
+
+        // Unused in 1D, but assert the pair still normalizes so the setup above cannot rot silently.
+        expect(sum(fieldWeights(single, 50))).toBeCloseTo(1);
+        expect(sum(fieldWeights(doubled, 50))).toBeCloseTo(1);
+    });
+
+    it('treats the two ends of a wrapping axis as one point', () => {
+        const dirAxis = { name: 'Direction', min: -180, max: 180, wrap: true };
+        const mk = (samples: AnimationFieldSample[]): AnimationField =>
+            ({ mode: '2d', xAxis: { name: 'Speed', min: 0, max: 100 }, yAxis: dirAxis, samples });
+
+        const once = mk([
+            { clipName: 'fwd', x: 100, y: 0 },
+            { clipName: 'side', x: 100, y: 90 },
+            { clipName: 'back', x: 100, y: 180 },
+        ]);
+        // The old advice: the same backward clip authored at BOTH ends of the axis.
+        const twice = mk([
+            { clipName: 'fwd', x: 100, y: 0 },
+            { clipName: 'side', x: 100, y: 90 },
+            { clipName: 'back', x: 100, y: 180 },
+            { clipName: 'back2', x: 100, y: -180 },
+        ]);
+
+        // At 135 — halfway between side and back — the duplicate must not tip the balance.
+        const a = byClip(fieldWeights(once, 100, 135));
+        const b = byClip(fieldWeights(twice, 100, 135));
+        expect(b.side).toBeCloseTo(a.side, 6);
+        expect((b.back ?? 0) + (b.back2 ?? 0)).toBeCloseTo(a.back, 6);
+    });
+
+    it('reports coincident groups for the authoring warning', () => {
+        const dirAxis = { name: 'Direction', min: -180, max: 180, wrap: true };
+        const f: AnimationField = {
+            mode: '2d', xAxis: { name: 'Speed', min: 0, max: 100 }, yAxis: dirAxis,
+            samples: [
+                { clipName: 'fwd', x: 100, y: 0 },
+                { clipName: 'back', x: 100, y: 180 },
+                { clipName: 'back2', x: 100, y: -180 },
+            ],
+        };
+        // +180 and -180 draw at opposite edges of the plot while being the same point — exactly the case a
+        // user cannot see and therefore has to be told about.
+        expect(coincidentSamples(f)).toEqual([[1, 2]]);
+
+        f.yAxis = { ...dirAxis, wrap: false };
+        expect(coincidentSamples(f)).toEqual([]);   // without wrap they really are two different points
+    });
+});
+
 describe('rateScaleOf', () => {
     // A 0 or negative rate scale would divide the weighted duration into Infinity/NaN and freeze the phase.
     it('falls back to 1 for absent, zero and negative values', () => {
@@ -182,5 +354,17 @@ describe('rateScaleOf', () => {
 
     it('passes a positive value through', () => {
         expect(rateScaleOf({ clipName: 'a', x: 0, rateScale: 0.5 })).toBe(0.5);
+    });
+});
+
+describe('phaseOffsetOf', () => {
+    // A cycle position has no invalid value, only one that needs wrapping — so nothing is rejected.
+    it('folds any number into [0, 1)', () => {
+        expect(phaseOffsetOf({ clipName: 'a', x: 0 })).toBe(0);
+        expect(phaseOffsetOf({ clipName: 'a', x: 0, phaseOffset: 0.5 })).toBe(0.5);
+        expect(phaseOffsetOf({ clipName: 'a', x: 0, phaseOffset: 1 })).toBe(0);
+        expect(phaseOffsetOf({ clipName: 'a', x: 0, phaseOffset: 1.25 })).toBeCloseTo(0.25);
+        expect(phaseOffsetOf({ clipName: 'a', x: 0, phaseOffset: -0.25 })).toBeCloseTo(0.75);
+        expect(phaseOffsetOf({ clipName: 'a', x: 0, phaseOffset: NaN })).toBe(0);
     });
 });

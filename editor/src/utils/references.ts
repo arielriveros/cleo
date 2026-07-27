@@ -5,20 +5,14 @@ import { collectTextureIds } from './nodeSubtree'
 import { ModelAsset, MODEL_ID_VAR, LEGACY_MODEL_ID_VAR } from './models'
 import { Template, TEMPLATE_ID_VAR } from './templates'
 import { SCRIPT_ID_VAR } from './scripts'
-import { TerrainMaterialAsset } from './terrainMaterials'
+import {
+  TerrainMaterialAsset, collectTerrainMaterialTextureIds,
+  collectFoliageRuleTextureIds, collectFoliageLayerTextureIds,
+} from './terrainMaterials'
 
 // Which texture / material asset ids are actually used anywhere — the main scene plus the asset libraries.
-// Used by the Textures and Materials explorers to flag orphaned (unreferenced) assets with a warning badge.
-
-// Add every texture id a terrain-material's foliage rules reference: billboard textureId (top-level, missed
-// by the generic textures-map walker) + mesh-prop model textures.
-function collectFoliageRuleTextures(foliageInclude: any, set: Set<string>): void {
-  if (!Array.isArray(foliageInclude)) return
-  for (const rule of foliageInclude) {
-    if (rule?.textureId) set.add(rule.textureId)
-    collectTextureIds(rule?.model, set)
-  }
-}
+// Used by the Textures and Materials explorers to flag orphaned (unreferenced) assets with a warning badge,
+// and (via collectPublishedTextureIds) to decide what a published build actually ships.
 
 /** Texture ids referenced by any material: live main-scene node materials + material/mesh/template/
  *  terrain-material assets + live terrain layers & foliage. */
@@ -43,23 +37,59 @@ export function collectReferencedTextureIds(
       for (const layer of terrain.layers ?? []) {
         const lm = layer?.material
         if (lm?.textures) for (const id of lm.textures.values()) set.add(id) // base + displacementMap
-        collectFoliageRuleTextures(lm?.foliageInclude, set)
+        collectFoliageRuleTextureIds(lm?.foliageInclude, set)
       }
-      for (const f of terrain.foliage ?? []) {
-        if (f?.textureId) set.add(f.textureId)
-        if (f?.model?.material?.textures) for (const id of f.model.material.textures.values()) set.add(id)
-      }
+      collectFoliageLayerTextureIds(terrain.foliage, set)
     }
   }
   for (const m of materials) collectTextureIds(m.material, set)
   for (const m of models) collectTextureIds(m.nodeJson, set)
   for (const t of templates) collectTextureIds(t.nodeJson, set)
-  for (const t of terrainMaterials) {
-    collectTextureIds(t.material, set)              // base-surface + mesh-foliage model textures
-    if (t.material?.displacementMap) set.add(t.material.displacementMap) // top-level, missed by the walker
-    collectFoliageRuleTextures(t.material?.foliageInclude, set)
-  }
+  for (const t of terrainMaterials)
+    for (const id of collectTerrainMaterialTextureIds(t.material)) set.add(id)
   return set
+}
+
+/**
+ * Every texture id a SERIALIZED scene tree references — i.e. what a published build actually needs.
+ *
+ * Driven off the serialized scenes rather than the asset libraries (which is what `referencedTextureIds`
+ * in textureStore.ts does for a bundle export): a publish must ship what the scenes use, not everything
+ * the project ever imported.
+ *
+ * Deliberately BROAD, because the failure mode is asymmetric — shipping a texture nothing uses wastes a
+ * few KB, while missing one ships a broken game. So it does two passes:
+ *
+ *  1. `collectTextureIds`, a generic deep walk that picks up every `textures` slot→id map anywhere in the
+ *     tree. That is what catches the indirect cases: a camera's inline `screenMaterials`, a
+ *     CustomMaterial's sampler2D uniforms (whose ids also live in `textures`), and terrain layer
+ *     materials' base surfaces.
+ *  2. The terrain-specific fields that are NOT inside a `textures` map and so are invisible to (1):
+ *     `displacementMap`, and each foliage rule's billboard/impostor texture.
+ *
+ * The terrain's composite splat texture never appears here — Terrain.serialize does not emit the
+ * composite material, and its pixels ride in the terrain blob rather than the TextureManager.
+ */
+export function collectPublishedTextureIds(node: any, set: Set<string>): void {
+  if (!node || typeof node !== 'object') return
+
+  collectTextureIds(node, set)
+
+  const walkTerrain = (n: any): void => {
+    const terrain = n?.terrain
+    if (terrain) {
+      for (const layer of terrain.layers ?? []) {
+        if (!layer) continue
+        if (layer.material) for (const id of collectTerrainMaterialTextureIds(layer.material)) set.add(id)
+        if (layer.textureId) set.add(layer.textureId) // legacy plain-albedo layers
+        collectFoliageRuleTextureIds(layer.material?.foliageInclude, set)
+      }
+      // Serialized foliage layers carry the same field names as rules (textureId/models/lods/billboard).
+      collectFoliageRuleTextureIds(terrain.foliage, set)
+    }
+    for (const child of n?.children ?? []) walkTerrain(child)
+  }
+  walkTerrain(node)
 }
 
 /** Material asset ids referenced by any placed node (__materialId), a camera's screen-space pass

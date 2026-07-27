@@ -33,6 +33,8 @@ interface AnimationFieldContextValue {
   setName: (name: string) => void
   setMode: (mode: AnimationFieldMode) => void
   setAxis: (which: 'x' | 'y', patch: Partial<AnimationFieldAxis>) => void
+  /** Undefined clears the override, restoring the engine default — not the same as 0, which is rigid. */
+  setWeightSmoothing: (seconds: number | undefined) => void
   addSample: (at?: { x: number; y: number }) => void
   setSample: (i: number, patch: Partial<AnimationFieldSample>) => void
   removeSample: (i: number) => void
@@ -131,6 +133,7 @@ export function AnimationFieldProvider({ children }: { children: ReactNode }) {
   const setMode = (mode: AnimationFieldMode) => update(f => ({ ...f, mode }))
   const setAxis = (which: 'x' | 'y', patch: Partial<AnimationFieldAxis>) =>
     update(f => which === 'x' ? { ...f, xAxis: { ...f.xAxis, ...patch } } : { ...f, yAxis: { ...f.yAxis, ...patch } })
+  const setWeightSmoothing = (seconds: number | undefined) => update(f => ({ ...f, weightSmoothing: seconds }))
 
   const addSample = (at?: { x: number; y: number }) => {
     if (!field) return
@@ -200,7 +203,7 @@ export function AnimationFieldProvider({ children }: { children: ReactNode }) {
 
   const value: AnimationFieldContextValue = {
     target, clips, clipDurations, field,
-    setName, setMode, setAxis, addSample, setSample, removeSample,
+    setName, setMode, setAxis, setWeightSmoothing, addSample, setSample, removeSample,
     selected, setSelected,
     probe, setProbe, weights,
     save, dirty: !!dirtyTabs[activeTabId],

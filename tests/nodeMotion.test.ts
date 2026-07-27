@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { vec3 } from 'gl-matrix';
 import {
     createMotionRecord, sampleMotion, planarSplit, headingAngle, signedAngleBetween, wrapDegrees,
+    motionConfig, MOTION_DEFAULTS,
 } from '../src/physics/motion';
 
 // The measured-motion math. This is what backs Node.currentSpeed and friends, and it is where the subtle
@@ -190,6 +191,200 @@ describe('signedAngleBetween', () => {
     it('returns 0 when either vector has no planar component', () => {
         expect(signedAngleBetween(UP, vec3.fromValues(1, 0, 0), UP)).toBe(0);
         expect(signedAngleBetween(forward, vec3.create(), UP)).toBe(0);
+    });
+});
+
+// ---- Change over time --------------------------------------------------------------------------------
+//
+// Speed alone cannot tell a character breaking into a run from one already running at that speed, so a
+// machine reading only `planarSpeed` can choose a gait but can never play the transition into it. These are
+// the values that make a start and a stop expressible, and each has one way to be subtly wrong: a derivative
+// that amplifies solver noise, a boolean that chatters on its threshold, and a turn rate that spikes when a
+// heading crosses the seam.
+
+/** Move at `velocity` for `steps` frames, holding a facing, so turn rate can be measured alongside speed. */
+function runFacing(
+    rec: ReturnType<typeof createMotionRecord>,
+    velocity: number[],
+    facingDeg: number,
+    steps: number,
+    dt: number,
+) {
+    const fwd = (deg: number) =>
+        vec3.fromValues(Math.sin(deg * Math.PI / 180), 0, Math.cos(deg * Math.PI / 180));
+    if (!rec.seeded) sampleMotion(rec, rec.lastPos, dt, UP, fwd(facingDeg));
+    const pos = vec3.clone(rec.lastPos);
+    for (let i = 0; i < steps; i++) {
+        vec3.scaleAndAdd(pos, pos, vec3.fromValues(velocity[0], velocity[1], velocity[2]), dt);
+        sampleMotion(rec, pos, dt, UP, fwd(facingDeg));
+    }
+}
+
+describe('sampleMotion — acceleration', () => {
+    it('reads positive while speeding up and negative while slowing down', () => {
+        const rec = createMotionRecord();
+        run(rec, [0, 0, 1], 20, 1 / 60);   // ramping up towards 1 u/s
+        expect(rec.accel).toBeGreaterThan(0);
+
+        run(rec, [0, 0, 1], 200, 1 / 60);  // settled at a steady pace
+        expect(Math.abs(rec.accel)).toBeLessThan(0.05);
+
+        run(rec, [0, 0, 0], 10, 1 / 60);   // stopped dead
+        expect(rec.accel).toBeLessThan(0);
+    });
+
+    it('does not report acceleration for a body that has never moved', () => {
+        const rec = createMotionRecord();
+        run(rec, [0, 0, 0], 60, 1 / 60);
+        expect(rec.accel).toBeCloseTo(0, 6);
+    });
+
+    /**
+     * The reason acceleration differentiates the SMOOTHED speed rather than the raw delta. A sub-millimetre
+     * position wobble is nothing as a speed, but dividing it by dt twice turns it into tens of units/s^2 —
+     * far past any threshold worth setting, so `isAccelerating` would be true at random on a standing body.
+     */
+    it('stays small under position noise, which a raw derivative would amplify', () => {
+        const rec = createMotionRecord();
+        const dt = 1 / 60;
+        sampleMotion(rec, vec3.create(), dt, UP);
+        for (let i = 0; i < 240; i++) {
+            const jitter = (i % 2 === 0 ? 1 : -1) * 0.0005;   // 0.5mm of solver churn, alternating
+            sampleMotion(rec, vec3.fromValues(0, 0, jitter), dt, UP);
+        }
+        expect(Math.abs(rec.accel)).toBeLessThan(1);
+    });
+});
+
+describe('sampleMotion — moving band and timers', () => {
+    it('latches: it takes more speed to start moving than to keep moving', () => {
+        const rec = createMotionRecord();
+        const cfg = motionConfig({ moveEnter: 0.5, moveExit: 0.1 });
+        const dt = 1 / 60;
+        const walk = (v: number, steps: number) => {
+            const pos = vec3.clone(rec.lastPos);
+            for (let i = 0; i < steps; i++) {
+                vec3.scaleAndAdd(pos, pos, vec3.fromValues(0, 0, v), dt);
+                sampleMotion(rec, pos, dt, UP, null, cfg);
+            }
+        };
+        sampleMotion(rec, vec3.create(), dt, UP, null, cfg);
+
+        walk(0.3, 60);                        // above exit, below enter
+        expect(rec.moving).toBe(false);       // never started, so it must not be moving
+
+        walk(2, 60);                          // clearly moving now
+        expect(rec.moving).toBe(true);
+
+        walk(0.3, 60);                        // back to the same speed as the first leg
+        expect(rec.moving).toBe(true);        // ...but now it IS moving. That asymmetry is the whole point.
+
+        walk(0, 60);
+        expect(rec.moving).toBe(false);
+    });
+
+    it('does not chatter for a body sitting exactly on the entry threshold', () => {
+        const rec = createMotionRecord();
+        const cfg = motionConfig({ moveEnter: 0.5, moveExit: 0.1 });
+        const dt = 1 / 60;
+        sampleMotion(rec, vec3.create(), dt, UP, null, cfg);
+
+        const pos = vec3.create();
+        let flips = 0;
+        let prev = rec.moving;
+        for (let i = 0; i < 240; i++) {
+            // Hovering either side of moveEnter — the case a bare comparison flips on every frame.
+            vec3.scaleAndAdd(pos, pos, vec3.fromValues(0, 0, i % 2 === 0 ? 0.52 : 0.48), dt);
+            sampleMotion(rec, pos, dt, UP, null, cfg);
+            if (rec.moving !== prev) { flips++; prev = rec.moving; }
+        }
+        expect(flips).toBeLessThanOrEqual(1);
+    });
+
+    it('runs one timer at a time, resetting the other on every flip', () => {
+        const rec = createMotionRecord();
+        run(rec, [0, 0, 3], 60, 1 / 60);
+        expect(rec.moving).toBe(true);
+        expect(rec.movingTime).toBeCloseTo(1, 1);
+        expect(rec.stillTime).toBe(0);
+
+        run(rec, [0, 0, 0], 120, 1 / 60);
+        expect(rec.moving).toBe(false);
+        expect(rec.stillTime).toBeGreaterThan(0);
+        expect(rec.movingTime).toBe(0);
+    });
+});
+
+describe('sampleMotion — turn rate', () => {
+    it('reads zero for a body holding its facing', () => {
+        const rec = createMotionRecord();
+        runFacing(rec, [0, 0, 3], 40, 60, 1 / 60);
+        expect(rec.turnRate).toBeCloseTo(0, 4);
+    });
+
+    it('is signed by the direction of the turn', () => {
+        const dt = 1 / 60;
+        const fwd = (deg: number) =>
+            vec3.fromValues(Math.sin(deg * Math.PI / 180), 0, Math.cos(deg * Math.PI / 180));
+
+        const left = createMotionRecord();
+        sampleMotion(left, vec3.create(), dt, UP, fwd(0));
+        for (let i = 1; i <= 60; i++) sampleMotion(left, vec3.create(), dt, UP, fwd(-i * 2));
+
+        const right = createMotionRecord();
+        sampleMotion(right, vec3.create(), dt, UP, fwd(0));
+        for (let i = 1; i <= 60; i++) sampleMotion(right, vec3.create(), dt, UP, fwd(i * 2));
+
+        expect(left.turnRate).toBeLessThan(0);
+        expect(right.turnRate).toBeGreaterThan(0);
+        expect(Math.abs(left.turnRate)).toBeCloseTo(Math.abs(right.turnRate), 3);
+    });
+
+    /**
+     * The seam. A body turning through +/-180 changes yaw by two degrees, but the raw difference of the two
+     * yaw values is 358 — which at 60fps is a 21,000 deg/s spike that trips every turn threshold in a machine
+     * on the one frame it crosses.
+     */
+    it('measures the short way round when the facing crosses +/-180', () => {
+        const dt = 1 / 60;
+        const fwd = (deg: number) =>
+            vec3.fromValues(Math.sin(deg * Math.PI / 180), 0, Math.cos(deg * Math.PI / 180));
+        const rec = createMotionRecord();
+        sampleMotion(rec, vec3.create(), dt, UP, fwd(179));
+        sampleMotion(rec, vec3.create(), dt, UP, fwd(-179));
+        // 2 degrees in 1/60s is 120 deg/s, damped — a few tens. Certainly not thousands.
+        expect(Math.abs(rec.turnRate)).toBeLessThan(200);
+    });
+
+    it('seeds the facing, so the first frame is not a full-circle spike', () => {
+        const rec = createMotionRecord();
+        // A body facing +X on the frame it appears must not report having turned 90 degrees to get there.
+        sampleMotion(rec, vec3.create(), 1 / 60, UP, vec3.fromValues(1, 0, 0));
+        expect(rec.turnRate).toBe(0);
+        expect(rec.yawSeeded).toBe(true);
+    });
+
+    it('leaves turn rate alone when no facing is supplied', () => {
+        const rec = createMotionRecord();
+        run(rec, [0, 0, 3], 60, 1 / 60);   // `run` passes no forward vector
+        expect(rec.turnRate).toBe(0);
+        expect(rec.yawSeeded).toBe(false);
+    });
+});
+
+describe('motionConfig', () => {
+    it('defaults every field and rejects nonsense', () => {
+        expect(motionConfig(null)).toEqual(MOTION_DEFAULTS);
+        expect(motionConfig({ tau: -1 }).tau).toBe(MOTION_DEFAULTS.tau);
+        expect(motionConfig({ tau: NaN }).tau).toBe(MOTION_DEFAULTS.tau);
+        expect(motionConfig({ tau: 0.2 }).tau).toBe(0.2);
+    });
+
+    // An exit at or above entry is not hysteresis: the band either latches on and never releases, or
+    // releases the same frame it engages — which is exactly the chatter it is supposed to prevent.
+    it('forces the exit threshold below the entry threshold', () => {
+        const cfg = motionConfig({ moveEnter: 0.2, moveExit: 0.5 });
+        expect(cfg.moveExit).toBeLessThan(cfg.moveEnter);
     });
 });
 

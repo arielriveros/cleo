@@ -1,6 +1,6 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../physics/body";
-import { MotionRecord, planarSplit, signedAngleBetween, headingAngle } from "../../physics/motion";
+import { MotionRecord, MotionConfig, motionConfig, planarSplit, signedAngleBetween, headingAngle } from "../../physics/motion";
 import { Model } from "../../graphics/model";
 import { AnimatedModel } from "../../graphics/animatedModel";
 import { Animator, AnimationMapping, AnimationStateMachine } from "../../graphics/animator";
@@ -25,6 +25,14 @@ import { clamp, dampAngleDeg, dampTime, dampVec3Time, eulerFromQuatDeg, wrapDegr
 import { aimFromDirection, boomOffset, collisionRatio, shakeOffsets } from "../cameraRigMath";
 
 type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup' | 'cameraRig';
+
+/**
+ * Downward speed (units/s, gravity-relative) past which {@link Node.isFalling} reports true.
+ *
+ * Not zero: a body resting on a surface is pressed into it by gravity every step and measures a small
+ * downward drift, so a zero threshold would call a standing character a falling one.
+ */
+const FALLING_SPEED = -0.5;
 
 export type NodeVariableType = 'number' | 'string' | 'boolean' | 'vec3';
 /**
@@ -1126,7 +1134,9 @@ export class Node {
         json.body.simulatePhysics,
         json.body.cameraCollision,
         // Absent in scenes saved before the ground probe existed; RigidBody defaults it to 0 (off).
-        json.body.groundProbeDistance
+        json.body.groundProbeDistance,
+        // Likewise: absent means 0, which RigidBody reads as "use the engine default".
+        json.body.motionSmoothing
       ));
     }
 
@@ -1647,6 +1657,23 @@ export class Node {
     this._body?.velocity.set(value[0], value[1], value[2]);
   }
 
+  /**
+   * This node's angular velocity in radians per second, about each world axis. `[0, 2, 0]` is spinning
+   * anticlockwise about the world up at 2 rad/s.
+   *
+   * The rotational counterpart to {@link velocity}, and read the same way: commanded, not measured. A body
+   * whose `angularConstraints` lock an axis still reports whatever was written to it — {@link turnRate} is
+   * what the node actually did. A fresh vector each read; assigning to a bodyless node does nothing.
+   */
+  public get angularVelocity(): vec3 {
+    if (!this._body) return vec3.create();
+    const a = this._body.angularVelocity;
+    return vec3.fromValues(a.x, a.y, a.z);
+  }
+  public set angularVelocity(value: vec3) {
+    this._body?.angularVelocity.set(value[0], value[1], value[2]);
+  }
+
   // ---- Measured motion -------------------------------------------------------------------------------
   //
   // How fast this node is ACTUALLY moving, measured from its body's position delta each physics step.
@@ -1772,6 +1799,140 @@ export class Node {
     return headingAngle(m.planarHeading, this._up);
   }
 
+  // ---- Measured motion: change over time -------------------------------------------------------------
+  //
+  // Everything above answers "what is this node doing"; these answer "what is it in the middle of doing".
+  // That distinction is the whole reason they exist: a locomotion machine can pick a gait from `planarSpeed`
+  // alone, but it cannot tell a character breaking into a run from one already running at that speed, and so
+  // it cannot play a start or a stop. `planarSpeed` says WHERE on the curve; these say WHICH WAY along it.
+  //
+  // All measured, all smoothed, all safe on a bodyless node. See physics/motion.ts for the filtering, and
+  // `Body.motionSmoothing` to retune it per character.
+
+  /**
+   * How hard this node is speeding up or slowing down across the ground plane, in units/second^2. Positive
+   * accelerating, negative braking, ~0 at a steady pace or standing still.
+   *
+   *   // "start running" fires while the character is still slow but clearly committing to it
+   *   Idle -> StartRun  when  isMoving AND planarAcceleration > 2
+   */
+  public get planarAcceleration(): number {
+    return this._motion?.accel ?? 0;
+  }
+
+  /**
+   * True while this node is deliberately gaining planar speed. {@link planarAcceleration} past a threshold
+   * (`Body.motionSmoothing`'s config owns the threshold), so it does not fire on solver noise.
+   */
+  public get isAccelerating(): boolean {
+    const m = this._motion;
+    return !!m && m.accel > this._motionThresholds.accelThreshold;
+  }
+
+  /** True while this node is deliberately losing planar speed — what a stop/skid animation waits for. */
+  public get isDecelerating(): boolean {
+    const m = this._motion;
+    return !!m && m.accel < -this._motionThresholds.accelThreshold;
+  }
+
+  /**
+   * Whether this node counts as moving across the ground, with hysteresis.
+   *
+   * Not the same as `planarSpeed > 0`, and the difference is the point: the threshold to start moving is
+   * higher than the threshold to stop, so a node drifting at walking-pace-minus-epsilon reports one steady
+   * answer instead of alternating every frame and dragging a state machine with it.
+   */
+  public get isMoving(): boolean {
+    return this._motion?.moving ?? false;
+  }
+
+  /** Seconds this node has been continuously {@link isMoving}; 0 while still. */
+  public get movingTime(): number {
+    return this._motion?.movingTime ?? 0;
+  }
+
+  /**
+   * Seconds this node has been continuously NOT {@link isMoving}; 0 while moving.
+   *
+   * The right gate for "settle into idle": `StopRun -> Idle when stillTime > 0.2` waits for the character to
+   * have actually stopped, where a bare `planarSpeed < 0.1` fires on the first frame it dips.
+   */
+  public get stillTime(): number {
+    return this._motion?.stillTime ?? 0;
+  }
+
+  /**
+   * How fast this node is turning, in degrees per second, signed. Measured from its body's FACING, not its
+   * direction of travel — so it is non-zero for a character turning in place, where every other value here
+   * reads zero.
+   *
+   * Wrap-safe: a turn through ±180 reports its true rate rather than a full-circle spike.
+   */
+  public get turnRate(): number {
+    return this._motion?.turnRate ?? 0;
+  }
+
+  /** Magnitude of this node's angular velocity, in radians/second. Commanded (solver state), not measured. */
+  public get angularSpeed(): number {
+    if (!this._body) return 0;
+    const a = this._body.angularVelocity;
+    return Math.hypot(a.x, a.y, a.z);
+  }
+
+  /**
+   * True while this node is genuinely falling: off the ground and losing height.
+   *
+   * Ask this rather than `!isGrounded`. `isGrounded` holds true for a ~0.1s grace after the last ground
+   * contact (deliberately — see its own docs), so it is late to report a fall; and it goes false the instant a
+   * character jumps, so its negation reports a fall on the way UP.
+   */
+  public get isFalling(): boolean {
+    return !this.isGrounded && this.verticalSpeed < FALLING_SPEED;
+  }
+
+  /** Seconds this node has been continuously airborne (past the grounded grace); 0 while grounded. */
+  public get airTime(): number {
+    if (!this._body) return 0;
+    return this._scene?.physics?.airborneTimes(this._body).airTime ?? 0;
+  }
+
+  /** Seconds this node has been continuously grounded; 0 while airborne. */
+  public get groundedTime(): number {
+    if (!this._body) return 0;
+    return this._scene?.physics?.airborneTimes(this._body).groundedTime ?? 0;
+  }
+
+  /**
+   * Distance from this node's collider to the ground below it, in world units, or `-1` when unknown.
+   *
+   * Requires a `groundProbeDistance` on the body — the value comes from that probe's raycast, and without one
+   * there is nothing measuring the gap. Capped by the probe distance, so it answers "how close to landing",
+   * not "how high up". `-1`, never 0, for unknown: 0 means resting on the ground.
+   */
+  public get groundDistance(): number {
+    if (!this._body) return -1;
+    return this._scene?.physics?.groundDistance(this._body) ?? -1;
+  }
+
+  /**
+   * Tilt of the ground under this node, in degrees from level: 0 on the flat, 90 against a wall.
+   *
+   * Derived from {@link groundNormal}, so it reads 0 while airborne (that normal falls back to up) — which is
+   * the harmless answer for the slope-lean blends this feeds.
+   */
+  public get slopeAngle(): number {
+    const n = this.groundNormal;
+    const up = this._up;
+    const d = Math.max(-1, Math.min(1, vec3.dot(vec3.normalize(vec3.create(), n), up)));
+    return Math.acos(d) * 180 / Math.PI;
+  }
+
+  /** Motion thresholds in force for this node's body, defaulted when it set none. */
+  private get _motionThresholds(): MotionConfig {
+    const tau = this._body?.motionSmoothing ?? 0;
+    return motionConfig(tau > 0 ? { tau } : null);
+  }
+
   /**
    * Gives this node a rigid body, created at its current world position and orientation, and wires
    * {@link onCollision}. The body drives the node's transform from here on.
@@ -1802,6 +1963,10 @@ export class Node {
    *                          `0` (off — grounding uses solver contacts only). A small value (~0.1–0.2)
    *                          removes `isGrounded` flicker for a character resting on terrain by probing
    *                          the ground each frame instead of trusting the solver's resting contact.
+   * @param motionSmoothing   Time constant in seconds for this body's MEASURED motion — `currentSpeed`,
+   *                          `planarAcceleration`, `turnRate` and everything else derived from its position
+   *                          delta. Default `0` = the engine's ~90ms. Raise it when a blend driven off those
+   *                          values vibrates; lower it when a script needs a faster answer.
    * @returns The new body, also available afterwards as {@link body}.
    */
   public setBody(
@@ -1814,7 +1979,8 @@ export class Node {
     restitution?: number,
     simulatePhysics?: boolean,
     cameraCollision?: boolean,
-    groundProbeDistance?: number
+    groundProbeDistance?: number,
+    motionSmoothing?: number
   ): RigidBody {
     // TODO: Handle the case where the node is a child of another node
     this._body = new RigidBody({
@@ -1827,7 +1993,7 @@ export class Node {
       linearConstraints, angularConstraints,
       friction, restitution,
       simulatePhysics, cameraCollision,
-      groundProbeDistance
+      groundProbeDistance, motionSmoothing
     }, this);
 
     // handle onCollision event

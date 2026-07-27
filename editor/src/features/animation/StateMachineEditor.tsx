@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { AnimationVariableBinding, AnimationParameterType } from 'cleo'
+import { useState, useEffect, useRef } from 'react'
+import type { Animator, AnimationVariableBinding, AnimationParameterType } from 'cleo'
 import { AccessibleVariable } from './skeleton'
 import { useStateMachine } from './StateMachineContext'
 import ConditionTree from './ConditionTree'
@@ -390,10 +390,105 @@ function SelectedTransition() {
                 }} />
               <span className='text-dim'>s {t.blendTime === undefined && '(default)'}</span>
             </label>
+            {/* The blunt fix for a state pair that ping-pongs. A blend covers a change visually, but the
+                machine can still change its mind mid-blend and re-arm from a pose that barely moved — which
+                reads as a spasm. This stops it changing its mind at all for a while. */}
+            <label className='flex items-center gap-1 text-[10px]'
+              title={'Seconds the machine must already have spent in the source state before this transition may '
+                + 'fire. Use it when two states flip back and forth every frame. Unlike exit time this is real '
+                + 'seconds, so it works for a looping state with no natural end.'}>
+              min dwell
+              <input className={input + ' w-[52px]'} type='number' step='0.05' min='0' placeholder='0'
+                value={t.minDwell ?? ''}
+                onChange={e => {
+                  const raw = e.target.value.trim()
+                  setTransition(from, to, { minDwell: raw === '' ? undefined : Math.max(0, parseFloat(raw) || 0) })
+                }} />
+              <span className='text-dim'>s {t.minDwell === undefined && '(off)'}</span>
+            </label>
             <ConditionTree from={from} to={to} />
           </>}
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Every link in the chain from a machine parameter to the pose, sampled live, with the spread each value has
+ * covered over the last second.
+ *
+ * A blend that vibrates is one link in that chain moving, and the only useful question is WHICH. The spread
+ * is what answers it: a value that has settled reads 0.000, and a value that is buzzing reads its amplitude
+ * even though the instantaneous number looks calm. A restless RAW with a calm probe means the noise is in
+ * whatever writes the parameter; a calm probe with restless WEIGHTS means the field's own layout; everything
+ * calm while the character still shakes means the pose blend or the machine.
+ *
+ * Only mounted while `simulate` is on, and it polls rather than subscribing — a debug surface should not be
+ * able to slow down what it is measuring.
+ */
+function FieldDebug({ animator }: { animator: Animator }) {
+  const [, tick] = useState(0)
+  const historyRef = useRef(new Map<string, { min: number; max: number; at: number }[]>())
+
+  useEffect(() => {
+    let raf = 0
+    const loop = () => { tick(x => x + 1); raf = requestAnimationFrame(loop) }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
+  const d = animator.fieldDebug
+  if (!d.active) return <p className='text-[10px] text-gray-500'>No animation field in the current state.</p>
+
+  // Spread over a rolling ~1s window. Entries are dropped by age rather than by count so the window means the
+  // same thing whatever frame rate the editor happens to be running at.
+  const now = performance.now()
+  const spread = (key: string, value: number): string => {
+    if (!Number.isFinite(value)) return '—'
+    const hist = historyRef.current
+    const list = hist.get(key) ?? []
+    list.push({ min: value, max: value, at: now })
+    while (list.length && now - list[0].at > 1000) list.shift()
+    hist.set(key, list)
+    let lo = Infinity, hi = -Infinity
+    for (const e of list) { if (e.min < lo) lo = e.min; if (e.max > hi) hi = e.max }
+    return (hi - lo).toFixed(3)
+  }
+
+  const Row = ({ label, value, k, hint }: { label: string; value: number | null; k: string; hint: string }) => (
+    <div className='flex items-center gap-2 text-[10px] tabular-nums' title={hint}>
+      <span className='w-[52px] shrink-0 text-gray-400'>{label}</span>
+      <span className='w-[64px] text-right'>{value === null ? 'unbound' : value.toFixed(3)}</span>
+      <span className='w-[56px] text-right text-dim'>±{value === null ? '—' : spread(k, value)}</span>
+    </div>
+  )
+
+  return (
+    <div className='mt-1 flex flex-col gap-0.5 rounded border border-control p-1.5'>
+      <div className='flex items-center justify-between text-[10px] text-gray-400'>
+        <span>field · value / 1s spread</span>
+        <span className='text-dim'>{d.stateName ?? '—'} · {d.stateTime.toFixed(2)}s</span>
+      </div>
+      <Row label='raw X' value={d.rawX} k='rx' hint='Straight off the machine parameter, before any filtering. Spread here means the noise is upstream — in the script or measurement feeding it.' />
+      <Row label='target X' value={d.targetX} k='tx' hint='After the axis deadband. If raw is noisy but this is not, the deadband is absorbing it.' />
+      <Row label='probe X' value={d.probeX} k='px' hint='After damping — where the field is actually sampled.' />
+      <Row label='raw Y' value={d.rawY} k='ry' hint='As raw X, for the second axis.' />
+      <Row label='target Y' value={d.targetY} k='ty' hint='As target X, for the second axis.' />
+      <Row label='probe Y' value={d.probeY} k='py' hint='As probe X, for the second axis.' />
+      <Row label='cycle' value={d.duration} k='dur' hint='Weighted cycle length in seconds. Moves as the blend shifts; a large spread means the mix is churning.' />
+      <div className='mt-0.5 border-t border-control pt-0.5'>
+        {d.weights.map(w => (
+          <div key={w.clipName} className='flex items-center gap-2 text-[10px] tabular-nums'
+            title={w.phaseOffset ? `phase offset ${w.phaseOffset.toFixed(2)}` : undefined}>
+            <span className={`w-[52px] shrink-0 truncate ${w.clipName === d.dominant ? 'text-highlight' : 'text-gray-400'}`}>
+              {w.clipName}
+            </span>
+            <span className='w-[64px] text-right'>{(w.weight * 100).toFixed(1)}%</span>
+            <span className='w-[56px] text-right text-dim'>±{spread('w:' + w.clipName, w.weight * 100)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -431,6 +526,7 @@ function PreviewSection() {
           </div>
         ))}
         {sm.parameters.length === 0 && <p className='text-[11px] text-gray-400'>No parameters.</p>}
+        {simulate && hasMachine && <FieldDebug animator={target.animator} />}
       </div>
     </Collapsable>
   )
@@ -471,7 +567,18 @@ function VariablePicker({ vars, value, onPick }: {
           : undefined)
       }}>
       <option value=''>{value ? `${value.nodeRef} · ${value.varName} (missing)` : '— pick variable —'}</option>
-      {(['Built-in', 'Self', 'Parent', 'Scene'] as const).map(g => groups[g].length > 0 && (
+      {/* Built-ins get one optgroup PER NODE. There are twenty of them per bodied node, and a single flat
+          group would run to sixty rows with the node buried in each label — the heading has to carry it. */}
+      {[...new Set(groups['Built-in'].map(v => v.nodeLabel))].map(label => (
+        <optgroup key={`builtin:${label}`} label={`Built-in · ${label}`}>
+          {groups['Built-in'].filter(v => v.nodeLabel === label).map(v => (
+            <option key={key(v.source, v.nodeRef, v.varName)} value={key(v.source, v.nodeRef, v.varName)} title={v.hint}>
+              {v.varName} ({v.varType})
+            </option>
+          ))}
+        </optgroup>
+      ))}
+      {(['Self', 'Parent', 'Scene'] as const).map(g => groups[g].length > 0 && (
         <optgroup key={g} label={g}>
           {groups[g].map(v => (
             <option key={key(v.source, v.nodeRef, v.varName)} value={key(v.source, v.nodeRef, v.varName)} title={v.hint}>

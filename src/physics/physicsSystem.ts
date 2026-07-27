@@ -1,16 +1,61 @@
 import { Logger } from "../cleo";
 import { Scene } from "../core/scene/scene";
 import { ModelNode, Node, unwrapScriptNode } from "../core/scene/node";
-import { World, Body, Constraint, Material, ContactMaterial, Vec3 } from 'cannon-es';
+import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase } from 'cannon-es';
 import { vec3 } from "gl-matrix";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
-import { skipCameraHit, CameraProbeBody } from "./cameraRayFilter";
+import { skipCameraHit, CameraProbeBody, skipRayHit, RayHitBody, RayFilter } from "./cameraRayFilter";
 import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
-import { MotionRecord, createMotionRecord, sampleMotion } from "./motion";
+import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
+
+/**
+ * A body's forward axis in world space: its local +Z rotated by its orientation.
+ *
+ * +Z matches the engine's node convention (see `Node.worldForward`), so a turn rate measured from this agrees
+ * with the yaw a script reads back. Written into `out` — this runs once per bodied node per frame.
+ */
+function bodyForward(body: Body, out: vec3): vec3 {
+  const q = body.quaternion;
+  const x = q.x, y = q.y, z = q.z, w = q.w;
+  // The third column of the rotation matrix, expanded from the quaternion.
+  out[0] = 2 * (x * z + w * y);
+  out[1] = 2 * (y * z - w * x);
+  out[2] = 1 - 2 * (x * x + y * y);
+  return out;
+}
 
 interface PhysicsSystemConfig {
   gravity?: number[];
+}
+
+/** A single hit from {@link PhysicsSystem.raycast}. Vectors are world space and freshly allocated. */
+export interface PhysicsRaycastHit {
+  point: vec3;
+  /** Surface normal, pointing back out of the surface towards the ray's origin. */
+  normal: vec3;
+  /** Distance from the ray's start, in world units. */
+  distance: number;
+  body: Body;
+  /** The Node that owns `body`, or null for bodies with no owner — the terrain heightfield, for instance. */
+  node: Node | null;
+}
+
+export interface PhysicsRaycastOptions {
+  /**
+   * Hand cannon's own `collisionResponse` filter to the broad phase. Default true, which is what "solid"
+   * normally means. The camera probe turns it off so that a body which is a ghost to the SOLVER still blocks
+   * the boom — the two channels are deliberately independent.
+   */
+  checkCollisionResponse?: boolean;
+  /** Bodies to skip. Nearly always the caster's own body, since a ray usually starts inside it. */
+  ignore?: Body | Body[] | null;
+  /** Let trigger volumes count as hits. Default false — walking through a trigger is not walking into a wall. */
+  includeTriggers?: boolean;
+  /** Let bodies with `simulatePhysics = false` count as hits. Default false. */
+  includeGhosts?: boolean;
+  /** Last word on each candidate. Return true to skip it. `owner` is null for a body with no Node. */
+  reject?: (owner: Node | null, body: Body) => boolean;
 }
 
 /**
@@ -37,11 +82,37 @@ export class PhysicsSystem {
   /** Unpaused seconds of simulated time; the clock GROUND_GRACE is measured against. */
   private _time = 0;
   /** Per body: the most ground-like contact seen recently, its surface normal, and when. See _record. */
-  private _ground = new WeakMap<Body, { time: number; dot: number; normal: [number, number, number] }>();
+  private _ground = new WeakMap<Body, {
+    time: number;
+    dot: number;
+    normal: [number, number, number];
+    /** Gap under the feet, when the stamp came from a ground probe. Undefined for a stamp from a contact —
+     *  a contact is by definition touching, but it cannot say how far the ray would have travelled. */
+    gap?: number;
+  }>();
   /** Per body: measured motion (how fast it ACTUALLY moved), sampled in the write-back pass. See motion.ts. */
   private _motion = new WeakMap<Body, MotionRecord>();
+  /**
+   * Per body: the resolved motion tuning. Cached because `motionSmoothing` is readonly on the body, so the
+   * config can only change when the body does — rebuilding an object per bodied node per frame would be pure
+   * garbage.
+   */
+  private _motionCfg = new WeakMap<Body, MotionConfig>();
+  /** Per body: how long it has been continuously airborne / grounded, in unpaused seconds. */
+  private _airborne = new WeakMap<Body, { airTime: number; groundedTime: number }>();
+  /** Scratch for the per-frame body facing; never escapes the write-back pass. */
+  private _forwardScratch = vec3.create();
   /** Cannon materials by `friction|restitution`, with a ContactMaterial for every pair. See _materialFor. */
   private _materials = new Map<string, Material>();
+  /**
+   * Mirror of the world's body membership. The write-back pass asks "is this body already in the world?"
+   * once per node per frame, and `world.bodies.indexOf` answers it with a linear scan — quadratic in the
+   * body count, which the pooled foliage colliders push into the hundreds. A Set answers in O(1).
+   *
+   * Only tracks bodies added THROUGH this system; subsystems that talk to the world directly (the foliage
+   * collider pool, ragdoll constraints) manage their own membership and are never tested here.
+   */
+  private _inWorld = new Set<Body>();
 
   constructor(config?: PhysicsSystemConfig) {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
@@ -51,6 +122,10 @@ export class PhysicsSystem {
     try {
       this._world = new World();
       this._world.gravity.set(this._gravity[0], this._gravity[1], this._gravity[2]);
+      // Sweep-and-prune instead of cannon's default NaiveBroadphase, which enumerates every body pair:
+      // the pooled foliage colliders add hundreds of static bodies, and O(N^2) pair generation over them
+      // dominates the step long before the narrowphase does.
+      this._world.broadphase = new SAPBroadphase(this._world);
       this._world.allowSleep = false;
       this._world.quatNormalizeSkip = 0;
       // Accurate quaternion normalization. The fast approximation destabilizes orientation-sensitive
@@ -77,6 +152,8 @@ export class PhysicsSystem {
       // grace window can't quietly expire behind a paused game.
       this._time += deltaTime;
       this._stampGroundContacts();
+      // After the stamps, so the clocks agree with what isGrounded answers this frame rather than last.
+      this._updateAirborneTimes(deltaTime);
 
       // Timed apart from the step on purpose: this pass is scene-graph work that would stay on the
       // main thread even if cannon moved to a worker, so the two costs answer different questions.
@@ -89,9 +166,10 @@ export class PhysicsSystem {
         if (!bodyToAdd || !node.hasStarted) continue;
 
         // If body is not in the world, add it
-        if (this._world.bodies.indexOf(bodyToAdd) === -1) {
+        if (!this._inWorld.has(bodyToAdd)) {
           this._assignMaterial(bodyToAdd);
           this._world.addBody(bodyToAdd);
+          this._inWorld.add(bodyToAdd);
         }
 
         // If node is marked for removal, remove it from the world
@@ -102,6 +180,7 @@ export class PhysicsSystem {
           // listener attached. Dropping the body from the world is sufficient, and the body itself
           // becomes garbage with the node.
           this._world.removeBody(bodyToAdd);
+          this._inWorld.delete(bodyToAdd);
         }
 
         // If node contains a body, update the position and quaternion of itself
@@ -114,7 +193,13 @@ export class PhysicsSystem {
           // node.currentSpeed sees the step that just happened rather than one from last frame.
           let motion = this._motion.get(node.body);
           if (!motion) { motion = createMotionRecord(); this._motion.set(node.body, motion); }
-          sampleMotion(motion, [pos.x, pos.y, pos.z], deltaTime, this.up);
+          sampleMotion(
+            motion, [pos.x, pos.y, pos.z], deltaTime, this.up,
+            // Facing comes from the BODY's orientation, not the node's: the node has not been written yet on
+            // this frame, so reading it would differentiate against a value one frame stale.
+            bodyForward(node.body, this._forwardScratch),
+            this._motionConfigFor(node.body),
+          );
 
           node.setPosition([pos.x, pos.y, pos.z]);
 
@@ -142,6 +227,12 @@ export class PhysicsSystem {
         // and walks it back to the world default, so a frictionless character would still have friction on the
         // one surface it spends all its time on.
         landscape.terrain.ensureRegistered(this._world, this._defaultMaterial);
+        // Pooled static colliders for collidable foliage near the camera. Driven from here rather than
+        // Scene.update because that has no world reference — and because the editor never steps physics,
+        // which is exactly what keeps foliage bodies out of authoring mode.
+        const cam = this._scene.activeCamera;
+        landscape.terrain.updateFoliageColliders(
+          this._world, cam ? (cam.worldPosition as vec3) : null, this._defaultMaterial);
       }
       physicsStats.terrainMs = performance.now() - terrainStart;
 
@@ -168,16 +259,17 @@ export class PhysicsSystem {
   /** Add a standalone body to the world (deduplicated). Takes the default surface if it has no material. */
   public addBody(body: Body): void {
     if (!this._world) return;
-    if (this._world.bodies.indexOf(body) === -1) {
+    if (!this._inWorld.has(body)) {
       this._assignMaterial(body);
       this._world.addBody(body);
+      this._inWorld.add(body);
     }
   }
 
   /** Remove a standalone body from the world if present. */
   public removeBody(body: Body): void {
     if (!this._world) return;
-    if (this._world.bodies.indexOf(body) !== -1)
+    if (this._inWorld.delete(body))
       this._world.removeBody(body);
   }
 
@@ -283,15 +375,16 @@ export class PhysicsSystem {
     for (const body of world.bodies) {
       if (!(body instanceof RigidBody) || body.isTrigger || body.groundProbeDistance <= 0) continue;
       const hit = this._probeGround(body, downX, downY, downZ, body.groundProbeDistance);
-      if (hit) this._record(body, hit.dot, hit.normal);
+      if (hit) this._record(body, hit.dot, hit.normal, hit.gap);
     }
   }
 
   /**
    * Short downward raycast from a body's feet along gravity, used to keep {@link isGrounded} stable for
    * bodies that opted into a groundProbeDistance. Returns the ground-likeness dot (measured against the
-   * world "up", 1 on level ground) and the surface normal of the nearest SOLID hit within the probe
-   * distance below the collider, or null when nothing is under the feet.
+   * world "up", 1 on level ground), the surface normal of the nearest SOLID hit within the probe distance
+   * below the collider, and the `gap` from the collider's lowest point down to that hit — or null when
+   * nothing is under the feet.
    *
    * The ray starts at the body centre and runs to just past the collider's lowest point plus the probe
    * distance, so a hit only counts while the feet are within the threshold of ground. It rejects the body
@@ -299,9 +392,8 @@ export class PhysicsSystem {
    */
   private _probeGround(
     body: Body, downX: number, downY: number, downZ: number, probeDistance: number
-  ): { dot: number; normal: [number, number, number] } | null {
-    const world = this._world;
-    if (!world) return null;
+  ): { dot: number; normal: [number, number, number]; gap: number } | null {
+    if (!this._world) return null;
 
     // Distance from the body centre to the collider corner reaching furthest along "down": each AABB axis
     // independently picks the bound that goes further that way, so this holds for any gravity direction.
@@ -314,32 +406,25 @@ export class PhysicsSystem {
     const reach = extent + probeDistance;
     if (reach <= 0) return null;
 
-    const rayStart = performance.now();
-    PhysicsSystem._rayFrom.set(p.x, p.y, p.z);
-    PhysicsSystem._rayTo.set(p.x + downX * reach, p.y + downY * reach, p.z + downZ * reach);
+    // The defaults are exactly this probe's rules: only solid bodies are ground, a trigger is not, a ghost is
+    // not, and the ray starts inside the body's own shape so the body itself must be skipped.
+    const hit = this.raycast(
+      [p.x, p.y, p.z],
+      [p.x + downX * reach, p.y + downY * reach, p.z + downZ * reach],
+      { ignore: body });
+    if (!hit) return null;
 
-    let best: { dot: number; normal: [number, number, number] } | null = null;
-    let bestDist = Infinity;
-    // checkCollisionResponse: only solid bodies are ground — a ghost (simulatePhysics false) is not.
-    world.raycastAll(PhysicsSystem._rayFrom, PhysicsSystem._rayTo, { checkCollisionResponse: true }, (result) => {
-      if (!result.hasHit) return;
-      const b = result.body;
-      if (!b || b === body || b.isTrigger || b.collisionResponse === false) return;
-      if (result.distance >= bestDist) return;
-      bestDist = result.distance;
-      // hitNormalWorld points back up out of the surface toward the ray origin. Its agreement with the
-      // world "up" (= -down) IS the ground-likeness, matching the contact path's dot convention.
-      const n = result.hitNormalWorld;
-      const dot = -(n.x * downX + n.y * downY + n.z * downZ);
-      best = { dot, normal: [n.x, n.y, n.z] };
-    });
-
-    physicsStats.rayMs += performance.now() - rayStart;
-    physicsStats.rayCount++;
-    return best;
+    // The normal points back up out of the surface toward the ray origin. Its agreement with the world "up"
+    // (= -down) IS the ground-likeness, matching the contact path's dot convention.
+    const n = hit.normal;
+    const dot = -(n[0] * downX + n[1] * downY + n[2] * downZ);
+    // The ray starts at the body CENTRE, so subtracting the collider's own reach turns the hit distance into
+    // the gap under the feet — which is what "how far off the ground am I" has to mean. Clamped at 0: while
+    // the collider is penetrating the surface the arithmetic goes slightly negative.
+    return { dot, normal: [n[0], n[1], n[2]], gap: Math.max(0, hit.distance - extent) };
   }
 
-  private _record(body: Body, dot: number, normal: [number, number, number]): void {
+  private _record(body: Body, dot: number, normal: [number, number, number], gap?: number): void {
     if (body.isTrigger) return;
     const prev = this._ground.get(body);
 
@@ -353,7 +438,7 @@ export class PhysicsSystem {
     // expire the grace out from under a body that never moved.
     if (prev && this._time - prev.time <= GROUND_GRACE && dot < prev.dot) return;
 
-    this._ground.set(body, { time: this._time, dot, normal });
+    this._ground.set(body, { time: this._time, dot, normal, gap });
   }
 
   /**
@@ -402,6 +487,26 @@ export class PhysicsSystem {
   }
 
   /**
+   * Distance from `body`'s feet to the ground below it, in world units, or `-1` when it cannot be answered.
+   *
+   * Only bodies with a `groundProbeDistance` can answer at all: the number comes from that probe's raycast,
+   * and a solver contact — the other source of a ground stamp — knows it is touching but not how far a ray
+   * would have travelled. `-1` rather than 0 for "unknown" on purpose: 0 means "resting on the ground", which
+   * is the one answer a caller must not be handed by accident.
+   *
+   * Capped by the probe distance by construction, so this is a near-ground refinement (how close to landing),
+   * not a general altimeter.
+   */
+  public groundDistance(body: Body): number {
+    if (!body || body.isTrigger) return -1;
+    const stamp = this._ground.get(body);
+    if (!stamp || stamp.gap === undefined) return -1;
+    // A stale stamp is not an answer: the body may have left the surface entirely since.
+    if (this._time - stamp.time > GROUND_GRACE) return -1;
+    return stamp.gap;
+  }
+
+  /**
    * The world's "up": gravity reversed and normalized, or [0, 1, 0] under zero gravity.
    *
    * Everything gravity-relative goes through this one definition — grounding, the ground normal, and the
@@ -426,6 +531,52 @@ export class PhysicsSystem {
     return this._motion.get(body);
   }
 
+  /** This body's motion tuning, from its own `motionSmoothing` where it set one. Cached per body. */
+  private _motionConfigFor(body: Body): MotionConfig {
+    let cfg = this._motionCfg.get(body);
+    if (!cfg) {
+      const tau = body instanceof RigidBody ? body.motionSmoothing : 0;
+      cfg = motionConfig(tau > 0 ? { tau } : null);
+      this._motionCfg.set(body, cfg);
+    }
+    return cfg;
+  }
+
+  /**
+   * How long a body has been continuously in the air, and continuously on the ground, in seconds.
+   *
+   * Derived from {@link isGrounded}, so it inherits the grace window: `airTime` does not start climbing until
+   * the grace has expired, which is exactly what makes it usable as a fall trigger where raw `isGrounded` is
+   * not. Both are 0 for a body that has never been simulated.
+   */
+  public airborneTimes(body: Body): { airTime: number; groundedTime: number } {
+    return this._airborne.get(body) ?? { airTime: 0, groundedTime: 0 };
+  }
+
+  /**
+   * Advance the per-body air/ground clocks. Runs once per frame, after the ground stamps are in.
+   *
+   * Only bodies that have a motion record are tracked — that is the set which has been through a write-back
+   * pass, i.e. the simulated ones. Walking the world's whole body list would also clock every piece of
+   * pooled foliage collider, none of which anything asks about.
+   */
+  private _updateAirborneTimes(deltaTime: number): void {
+    // `initialize` swallows a World construction failure, so every per-frame pass has to tolerate no world.
+    if (deltaTime <= 0 || !this._world) return;
+    for (const body of this._world.bodies) {
+      if (!this._motion.has(body)) continue;
+      let rec = this._airborne.get(body);
+      if (!rec) { rec = { airTime: 0, groundedTime: 0 }; this._airborne.set(body, rec); }
+      if (this.isGrounded(body)) {
+        rec.groundedTime += deltaTime;
+        rec.airTime = 0;
+      } else {
+        rec.airTime += deltaTime;
+        rec.groundedTime = 0;
+      }
+    }
+  }
+
   /**
    * Distance from `from` to the nearest solid surface along the segment `from -> to`, or null when
    * nothing blocks it. Backs camera-rig collision, which is why it filters the way it does.
@@ -447,19 +598,70 @@ export class PhysicsSystem {
    *               e.g. the terrain heightfield — those should normally be kept). Return true to skip.
    */
   public raycastCamera(from: vec3, to: vec3, reject?: (owner: Node | null) => boolean): number | null {
+    // Everything this needs beyond the general form lives in skipCameraHit, so the standard filters are
+    // turned OFF and delegated to it wholesale — it has its own opinion about triggers and ghosts, and
+    // applying both would silently change which bodies block a camera.
+    const hit = this.raycast(from, to, {
+      checkCollisionResponse: false,
+      includeTriggers: true,
+      includeGhosts: true,
+      reject: (_owner, body) => skipCameraHit(body as CameraProbeBody | null, reject),
+    });
+    return hit ? hit.distance : null;
+  }
+
+  /**
+   * Nearest solid hit along the segment `from -> to`, with the point and surface normal — or null when
+   * nothing is in the way.
+   *
+   * The general form the two specialized rays above and below are built from. It exists because per-bone
+   * queries (a foot looking for the ground under ITSELF rather than under the character's capsule) need the
+   * hit POINT and NORMAL, and nothing here used to return either: `raycastCamera` gives a bare distance, and
+   * `isGrounded`/`groundNormal` answer per body.
+   *
+   * `raycastAll` rather than `raycastClosest`, deliberately: cannon's `isTrigger` is consulted only by the
+   * solver, and `Ray.intersectBody` filters on `collisionResponse` and collision groups alone — so
+   * `raycastClosest` happily returns a trigger volume and there is no way to reject it and continue.
+   * Verified: with a trigger 2 units in front of a wall at 4, raycastClosest reports the trigger. Collecting
+   * every hit and choosing the nearest survivor is what makes trigger volumes, the per-body camera channel
+   * and a caller's ignore list all expressible in one pass.
+   *
+   * The ray is a SEGMENT — bake the length into `to` rather than passing a max distance.
+   */
+  public raycast(from: vec3, to: vec3, options?: PhysicsRaycastOptions): PhysicsRaycastHit | null {
     const world = this._world;
     if (!world) return null;
 
+    const opts = options ?? {};
     const rayStart = performance.now();
     PhysicsSystem._rayFrom.set(from[0], from[1], from[2]);
     PhysicsSystem._rayTo.set(to[0], to[1], to[2]);
 
-    let nearest: number | null = null;
-    world.raycastAll(PhysicsSystem._rayFrom, PhysicsSystem._rayTo, { checkCollisionResponse: false }, (result) => {
-      if (skipCameraHit(result.body as CameraProbeBody | null, reject)) return;
-      // `distance` is only meaningful on a hit; it is -1 after a reset.
-      if (result.hasHit && (nearest === null || result.distance < nearest)) nearest = result.distance;
-    });
+    let nearest: PhysicsRaycastHit | null = null;
+    world.raycastAll(
+      PhysicsSystem._rayFrom, PhysicsSystem._rayTo,
+      // Defaults to cannon's own solidity filter; the camera turns it off so ghosts still block the boom.
+      { checkCollisionResponse: opts.checkCollisionResponse ?? true },
+      (result) => {
+        // `distance` is only meaningful on a hit; it is -1 after a reset.
+        if (!result.hasHit) return;
+        const body = result.body;
+        if (!body) return;
+        // Cheapest first: a hit further than the current best cannot win no matter what the filter says.
+        if (nearest !== null && result.distance >= nearest.distance) return;
+        if (skipRayHit(body as unknown as RayHitBody, opts as RayFilter<RayHitBody>)) return;
+
+        const owner = (body as any).owner instanceof Node ? (body as any).owner as Node : null;
+        const p = result.hitPointWorld;
+        const n = result.hitNormalWorld;
+        nearest = {
+          point: vec3.fromValues(p.x, p.y, p.z),
+          normal: vec3.fromValues(n.x, n.y, n.z),
+          distance: result.distance,
+          body,
+          node: owner,
+        };
+      });
 
     physicsStats.rayMs += performance.now() - rayStart;
     physicsStats.rayCount++;
@@ -504,6 +706,7 @@ export class PhysicsSystem {
     });
     this._world.bodies = [];
     this._world.clearForces();
+    this._inWorld.clear();
   }
 
   public set scene(scene: Scene) {

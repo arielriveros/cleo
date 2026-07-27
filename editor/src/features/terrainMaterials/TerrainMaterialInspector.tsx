@@ -1,11 +1,21 @@
 import { useMemo, useState } from 'react'
-import { Node, ModelNode, TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger } from 'cleo'
+import {
+  Node, ModelNode, TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger,
+  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES,
+} from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor'
 import TextureInspector from '../nodeInspector/propertyEditors/TextureInspector'
 import { buildFoliageRuleFromModelAsset } from '../../utils/foliageRules'
 import { Toggle } from '../../components/ui'
+
+/** Terrain side length the density estimate is quoted against (matches the Landscape panel's default). */
+const ESTIMATE_SIZE = 200
+
+/** Instances a rule would place over a default-sized terrain — the sanity check on a per-m² number. */
+const estimateFor = (r: TerrainFoliageRule): number =>
+  Math.round((r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * ESTIMATE_SIZE * ESTIMATE_SIZE)
 
 // The right-sidebar inspector shown while a terrain-material tab is active. Edits the preview sphere's
 // TerrainMaterial in place: the base surface (via the shared MaterialEditor), the terrain blend fields,
@@ -49,7 +59,13 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   const addBillboard = () => {
     if (!newFoliageTex) { alert('Pick a texture for the grass billboard.'); return }
     const name = `${newFoliageTex.slice(0, 10)}_${mat.foliageInclude.length}`
-    mat.foliageInclude.push({ kind: 'billboard', name, textureId: newFoliageTex, density: 8, minScale: 0.8, maxScale: 1.4 })
+    // densityUnit must be stamped here: rules pushed straight onto a live material never pass through
+    // TerrainMaterial.parse, which is where an unmarked rule would be treated as legacy and divided by 100.
+    mat.foliageInclude.push({
+      kind: 'billboard', name, textureId: newFoliageTex,
+      density: DEFAULT_FOLIAGE_DENSITY.billboard, densityUnit: FOLIAGE_DENSITY_UNIT,
+      minScale: 0.8, maxScale: 1.4,
+    })
     changed()
   }
   const addModel = (files: FileList | null) => {
@@ -59,7 +75,9 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
       const rule: TerrainFoliageRule = {
         kind: 'mesh', // rendering mode (real geometry vs 'billboard'), not the old asset-type name
         name: `${models[0].name}_${mat.foliageInclude.length}`,
-        model: models[0].model.serialize(), density: 4, minScale: 0.8, maxScale: 1.4,
+        model: models[0].model.serialize(),
+        density: DEFAULT_FOLIAGE_DENSITY.mesh, densityUnit: FOLIAGE_DENSITY_UNIT,
+        minScale: 0.8, maxScale: 1.4,
       }
       mat.foliageInclude.push(rule)
       changed()
@@ -197,8 +215,13 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
                 <button className='text-red-300 text-xs px-1' onClick={() => removeRule(i)} title='Remove'>✕</button>
               </div>
               <div className='flex items-center justify-between'>
-                <span className={label}>Density</span>
-                <input type='number' className={num} value={r.density ?? 8} onChange={e => patchRule(i, { density: Number(e.target.value) })} />
+                <span className={label} title='Instances per square metre — the same unit for the brush and for whole-terrain generation.'>Density /m²</span>
+                <input type='number' step={0.01} min={0} className={num} value={r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh} onChange={e => patchRule(i, { density: Math.max(0, Number(e.target.value)) })} />
+              </div>
+              {/* Without this estimate a plausible-looking number silently clips at MAX_INSTANCES. */}
+              <div className={`text-[10px] ${estimateFor(r) > MAX_INSTANCES ? 'text-red-300' : 'text-gray-400'}`}>
+                ≈ {estimateFor(r).toLocaleString()} instances on a {ESTIMATE_SIZE}×{ESTIMATE_SIZE} terrain
+                {estimateFor(r) > MAX_INSTANCES && ` — over the ${MAX_INSTANCES.toLocaleString()} ceiling`}
               </div>
               <div className='flex items-center justify-between'>
                 <span className={label}>Scale min/max</span>
@@ -238,6 +261,37 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
                     )}
                   </span>
                 </div>
+
+                {/* Physics proxy. Only instances near the camera get a body (pooled + recycled), so this is
+                    safe on a tree layer but should stay off for anything grass-like. */}
+                <div className='flex items-center justify-between'>
+                  <span className={label} title='Static collider spawned for nearby instances. Off = walk straight through.'>Collision</span>
+                  <select
+                    className={num}
+                    value={r.collision?.shape ?? ''}
+                    onChange={e => patchRule(i, {
+                      collision: e.target.value
+                        ? { shape: e.target.value as any, radius: r.collision?.radius ?? 0.4, height: r.collision?.height ?? 2 }
+                        : null,
+                    })}>
+                    <option value=''>(none)</option>
+                    <option value='cylinder'>Cylinder</option>
+                    <option value='box'>Box</option>
+                    <option value='sphere'>Sphere</option>
+                  </select>
+                </div>
+                {r.collision && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='Prototype units — each instance multiplies these by its own random scale.'>Radius / height</span>
+                    <span className='flex gap-1'>
+                      <input type='number' step={0.05} min={0} className={num} value={r.collision.radius ?? 0.4}
+                        onChange={e => patchRule(i, { collision: { ...r.collision!, radius: Math.max(0, Number(e.target.value)) } })} />
+                      <input type='number' step={0.1} min={0} className={num} value={r.collision.height ?? 2}
+                        disabled={r.collision.shape === 'sphere'}
+                        onChange={e => patchRule(i, { collision: { ...r.collision!, height: Math.max(0, Number(e.target.value)) } })} />
+                    </span>
+                  </div>
+                )}
               </>}
             </div>
           ))}

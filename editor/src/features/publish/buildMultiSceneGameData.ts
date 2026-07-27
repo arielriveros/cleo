@@ -1,6 +1,8 @@
 import { Scene, TextureManager } from 'cleo'
 import type { RenderSettings } from 'cleo'
 import { buildGameData, bakeTemplates } from './buildGameData'
+import { compressTerrainData } from './terrainImages'
+import { collectPublishedTextureIds } from '../../utils/references'
 import { extractNodeState } from '../../utils/projectStorage'
 import { resyncScene } from '../../utils/sceneResync'
 import { loadSceneData } from '../../utils/sceneStorage'
@@ -75,16 +77,35 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     scenes[meta.id] = { name: meta.name, scene: gd.scene, ui: gd.ui }
   }
 
-  // Textures once, for the whole game (they are global, not per scene). As raw compressed bytes, not
-  // base64: the packer writes them verbatim into game.bin, so publishing neither encodes nor inflates
-  // them. Must run on the main thread — the canvas fallback inside needs a DOM.
-  let textureBytes: any[] = []
-  try { textureBytes = TextureManager.Instance.serializeTextureBytes() } catch { textureBytes = [] }
+  // Bulk terrain data (height field + splat map) out of the JSON manifest and into deflated byte
+  // arrays the packer moves into game.bin. Main thread: CompressionStream lives here, alongside the
+  // rest of the DOM-dependent publish prep.
+  for (const entry of Object.values(scenes)) await compressTerrainData(entry.scene)
 
   // Templates once too, for the same reason as textures: the runtime registry is global, the player loads it
   // at boot, and a Game.loadScene switch must not invalidate what a script can still instantiate. Every
   // template in the library ships — a script may name any of them, and there is no way to tell statically.
   const templates = bakeTemplates(src.libs.templates ?? [], src.libs.materials, src.scriptAssets)
+
+  // Textures once, for the whole game (they are global, not per scene). As raw compressed bytes, not
+  // base64: the packer writes them verbatim into game.bin, so publishing neither encodes nor inflates
+  // them. Must run on the main thread — the canvas fallback inside needs a DOM.
+  //
+  // Narrowed to what the SERIALIZED scenes and templates actually reference. Unfiltered, this shipped
+  // the entire TextureManager — every texture the project had ever imported, used or not. Note the
+  // filter must run AFTER bakeTemplates, since a template can be the only referrer of a texture.
+  const wanted = new Set<string>()
+  for (const entry of Object.values(scenes)) collectPublishedTextureIds(entry.scene, wanted)
+  for (const t of templates) collectPublishedTextureIds((t as any).node, wanted)
+
+  let textureBytes: any[] = []
+  try {
+    // Empty means the walker found nothing to keep — far more likely a walker bug than a genuinely
+    // textureless game, so fall back to shipping everything rather than a build with no textures.
+    textureBytes = wanted.size > 0
+      ? TextureManager.Instance.serializeTextureBytes(wanted)
+      : TextureManager.Instance.serializeTextureBytes()
+  } catch { textureBytes = [] }
 
   const out: any = {
     version: 2,

@@ -197,7 +197,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     editorScene, animationTargetId, animationSourceScene, animationSourceId,
     commitAnimationStateMachine, importAnimationFiles, importSkeletonNames,
     renameAnimationClip, removeAnimationClip, setClipRootMotion, closeTab, activeTabId, eventEmitter,
-    scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply,
+    scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply, bodies,
   } = useCleoEngine()
   const { animationFields } = useAssetLibrary()
 
@@ -209,12 +209,25 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const [graphView, setGraphView] = useState(true)
   const [simulate, setSimulate] = useState(false)
   const [, force] = useState(0)
+  // Bumped when physics changes, purely to invalidate accessVars below. `bodies` is a ref-backed Map, so its
+  // identity never changes and it is worthless as a memo dependency — adding a rigid body while this tab is
+  // open would otherwise leave the built-in list stale until the tab was reopened.
+  const [bodiesRev, setBodiesRev] = useState(0)
+  useEffect(() => {
+    const onPhysics = () => setBodiesRev(x => x + 1)
+    eventEmitter.on('PHYSICS_CHANGED', onPhysics)
+    return () => { eventEmitter.off('PHYSICS_CHANGED', onPhysics) }
+  }, [eventEmitter])
 
   const clips = target ? target.model.animations.map(a => a.name) : []
+  // `bodies` is the authored physics side map. It is passed because no node in the EDITOR scene has a live
+  // rigid body — the editor never calls setBody, so the only record that a character is the thing that moves
+  // is this map. Without it the "(body)" group of built-ins can never appear while authoring.
   const accessVars = useMemo<AccessibleVariable[]>(
     () => accessibleNodeVariables(
-      animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null, animationSourceScene, scriptAssets),
-    [animationSourceScene, animationSourceId, animationTargetId, scriptAssets])
+      animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null, animationSourceScene, scriptAssets,
+      new Set(bodies.keys())),
+    [animationSourceScene, animationSourceId, animationTargetId, scriptAssets, bodies, bodiesRev])
 
   // Un-applied working copies, per animation tab. There is only ever ONE live session (this provider keys
   // off the active tab), so without a cache, switching away from an animation tab and back would reload the

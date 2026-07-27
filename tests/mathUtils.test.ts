@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { quat, vec3 } from 'gl-matrix';
 import {
     clamp, damp, dampTime, dampVec3Time, dampAngleDeg, deltaAngleDeg,
-    eulerFromQuatDeg, noise1, fbm1, wrapDegrees,
+    eulerFromQuatDeg, noise1, fbm1, wrapDegrees, wrapSpan, deltaWrapped, dampWrapped,
 } from '../src/core/math';
 
 describe('damp', () => {
@@ -93,6 +93,46 @@ describe('angles', () => {
 
     it('snaps when the time constant is zero', () => {
         expect(dampAngleDeg(179, -179, 0, 0.016)).toBeCloseTo(-179, 10);
+    });
+});
+
+// The generic form of the degree helpers above. Degrees are just span 360; a blend-space axis normalized to
+// 0..1 is span 1, and an animation field's Direction axis is whatever the user typed. One implementation for
+// all of them, because two copies of a wrap are two chances to fix a seam bug in only one place.
+describe('wrapSpan / deltaWrapped / dampWrapped', () => {
+    it('wraps into (-span/2, span/2]', () => {
+        expect(wrapSpan(0.6, 1)).toBeCloseTo(-0.4, 10);
+        expect(wrapSpan(-0.6, 1)).toBeCloseTo(0.4, 10);
+        expect(wrapSpan(0.5, 1)).toBeCloseTo(0.5, 10);
+        expect(wrapSpan(-0.5, 1)).toBeCloseTo(0.5, 10);
+        expect(wrapSpan(2.25, 1)).toBeCloseTo(0.25, 10);
+    });
+
+    // A non-cyclic axis hands its own range straight in, so this has to be a no-op rather than a divide.
+    it('passes the value through for a non-positive or non-finite span', () => {
+        expect(wrapSpan(5, 0)).toBe(5);
+        expect(wrapSpan(5, -1)).toBe(5);
+        expect(wrapSpan(5, Infinity)).toBe(5);
+    });
+
+    it('agrees with the degree helpers at span 360', () => {
+        for (const v of [-540, -181, -180, -1, 0, 1, 180, 181, 540]) {
+            expect(wrapSpan(v, 360)).toBeCloseTo(wrapDegrees(v), 10);
+        }
+        expect(deltaWrapped(170, -170, 360)).toBeCloseTo(deltaAngleDeg(170, -170), 10);
+    });
+
+    it('damps across the seam by the short arc, leaving the value in the caller’s range', () => {
+        // 0.95 -> 0.05 on a unit circle is a step of +0.1, not -0.9. The result is deliberately NOT re-wrapped:
+        // a blend-space probe damped this way has to stay inside its authored min..max.
+        const next = dampWrapped(0.95, 0.05, 1, 0.1, 0.1);
+        expect(next).toBeGreaterThan(0.95);
+        expect(next).toBeLessThan(1.05);
+    });
+
+    it('snaps when the time constant is zero and holds when dt is zero', () => {
+        expect(dampWrapped(0.95, 0.05, 1, 0, 0.1)).toBeCloseTo(1.05, 10);
+        expect(dampWrapped(0.95, 0.05, 1, 0.1, 0)).toBeCloseTo(0.95, 10);
     });
 });
 

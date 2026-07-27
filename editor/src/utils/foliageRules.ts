@@ -1,4 +1,7 @@
-import { Node, ModelNode, AnimatedModel, TerrainFoliageRule, Vec } from 'cleo'
+import {
+  Node, ModelNode, AnimatedModel, TerrainFoliageRule, Vec,
+  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT,
+} from 'cleo'
 import { ModelAsset, resolvedLods } from './models'
 import { parseByType, regenerateIds } from './nodeSubtree'
 
@@ -106,8 +109,12 @@ export function buildFoliageRuleFromModelAsset(asset: ModelAsset, existing?: Ter
     lods: lods.length ? lods : undefined,
     cullDistance: asset.cullDistance ?? 0,
     billboard: existing?.billboard ?? null,
-    density: existing?.density ?? 4,
+    // `existing` is a live (already-migrated) rule, so its density passes through untouched — but the
+    // unit marker must be stamped or the rule this returns would be re-divided on its next load.
+    density: existing?.density ?? DEFAULT_FOLIAGE_DENSITY.mesh,
+    densityUnit: FOLIAGE_DENSITY_UNIT,
     minScale: existing?.minScale ?? 0.8,
     maxScale: existing?.maxScale ?? 1.4,
+    collision: existing?.collision ?? null,
   }
 }

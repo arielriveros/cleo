@@ -541,8 +541,18 @@ function nodeScale(skin: Skin, node: number): [number, number, number] {
     return [s[0], s[1], det < 0 ? -s[2] : s[2]];
 }
 
-/** The DISTINCT humanoid-slot bones on a skin, node index keyed by slot. */
-function slotIndex(skin: Skin): Map<string, number> {
+/**
+ * The DISTINCT humanoid-slot bones on a skin, NODE index keyed by slot (`hips`, `foot.L`, `hand.R`, ...).
+ *
+ * Retargeting needs this to pair two skeletons; anything that has to find a body part by meaning rather than
+ * by name needs exactly the same answer. That is why it is public: it is the "where are this character's
+ * feet" query, and re-deriving it elsewhere would mean a second bone-naming heuristic that could disagree
+ * with the one retargeting already uses.
+ *
+ * Empty for a skin with no `nodeNames` (an animation-only file, or a rig whose bones are named nothing
+ * recognizable) — absence of a slot is a normal answer, not a failure.
+ */
+export function humanoidRigOf(skin: Skin): Map<string, number> {
     const out = new Map<string, number>();
     for (const j of skin.joints) {
         const nm = skin.nodeNames?.get(j.nodeIndex);
@@ -551,6 +561,9 @@ function slotIndex(skin: Skin): Map<string, number> {
     }
     return out;
 }
+
+/** @deprecated Internal alias kept so this module's own call sites read as they did. Use humanoidRigOf. */
+const slotIndex = humanoidRigOf;
 
 /**
  * A plain, loggable snapshot of a retarget: the header the modal shows plus, for a handful of key bones, the

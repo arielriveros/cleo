@@ -79,6 +79,7 @@ import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats } from './renderStats';
 import { TerrainLodSettings } from '../terrain/terrain';
 import type { FoliageCell } from '../terrain/foliage';
+import { collectOrphanedFoliageBuffers } from '../terrain/foliage';
 
 // gl is a global variable that will be used throughout the application
 export let gl: WebGL2RenderingContext;
@@ -913,6 +914,10 @@ export class Renderer {
     private _foliagePass(scene: Scene): void {
         const defaultAttrs = this._shaderManager.getShader('blinn_phongGeometry').attributes;
         const camPos = this._activeCamera.position;
+
+        // Buffers of layers that were disposed with their terrain. Drained here, ahead of the landscape
+        // loop, because those layers are no longer reachable from any live landscape to be drained per-layer.
+        for (const buf of collectOrphanedFoliageBuffers()) gl.deleteBuffer(buf);
 
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;

@@ -4,7 +4,7 @@ import EventEmitter from 'events';
 import { CleoEngine, Scene, TextureManager, setGameHost, setScriptProvider, registerTemplates, Logger } from 'cleo';
 import { UIRuntime } from '../features/uiInspector/uiRuntime';
 import PlayerUI from './PlayerUI';
-import { unpackGameBin, inflateSceneGeometry } from './unpack';
+import { unpackGameBin, inflateSceneGeometry, inflateTerrainData } from './unpack';
 
 // Standalone, data-driven runtime for a published Cleo game. It loads game.bin — the single binary
 // holding every scene, mesh and texture (built by the editor via buildMultiSceneGameData + pack.ts) —
@@ -111,13 +111,16 @@ async function boot(): Promise<void> {
     return Object.keys(table).find(id => table[id].name === nameOrId);
   };
 
-  const startScene = (id: string) => {
+  // Async because terrain splat/height payloads are DEFLATE-compressed in game.bin and
+  // DecompressionStream has no synchronous form. Everything after the await is unchanged.
+  const startScene = async (id: string) => {
     const entry = table[id];
     if (!entry) { Logger.warn(`loadScene: no scene "${id}"`, 'Player'); return; }
     currentId = id;
     // Resolve this scene's geometryRefs into typed-array views over game.bin, immediately before
     // parse. Deferring it to here means an unvisited scene's meshes are never touched at all.
     inflateSceneGeometry(entry.scene, pack);
+    await inflateTerrainData(entry.scene, pack);
     const scene = new Scene();
     // Scripts bind during parse, through the provider registered above — there is no separate attach pass
     // any more, because one could not reach a node that does not exist until a script instantiates it.
@@ -134,7 +137,7 @@ async function boot(): Promise<void> {
       UIRuntime.stop();
       engine.physics.clear();
       engine.input.clear();
-      startScene(id);
+      void startScene(id).catch(showError);
     },
     currentSceneName: () => table[currentId]?.name ?? '',
     sceneNames: () => Object.values(table).map(s => s.name),
@@ -143,7 +146,7 @@ async function boot(): Promise<void> {
   const scriptCount = Object.keys((window as any).CLEO_GAME_SCRIPTS || {}).length;
   Logger.info(`scenes=${Object.keys(table).length} textures=${pack.textures.length} geometries=${Object.keys(data.geometries ?? {}).length} scriptsInFile=${scriptCount}`, 'Player');
 
-  startScene(currentId);
+  await startScene(currentId);
 }
 
 boot().catch(showError);

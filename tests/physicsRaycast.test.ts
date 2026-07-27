@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { World, Body, Box, Vec3, Heightfield, RaycastResult } from 'cannon-es';
-import { skipCameraHit } from '../src/physics/cameraRayFilter';
+import { skipCameraHit, skipRayHit } from '../src/physics/cameraRayFilter';
 
 // Mirrors PhysicsSystem.raycastCamera: every hit along the segment, filtered, nearest survivor wins.
 // PhysicsSystem itself imports the cleo barrel and cannot be loaded here, so the filter rule lives in
@@ -111,5 +111,47 @@ describe('skipCameraHit', () => {
     it('keeps ownerless bodies when a reject rule is supplied', () => {
         const reject = (owner: any) => owner !== null && owner.name === 'player';
         expect(skipCameraHit({}, reject)).toBe(false);
+    });
+});
+
+// The general filter behind PhysicsSystem.raycast. Its defaults are what "solid" ordinarily means, which is
+// the OPPOSITE of what the camera probe wants on two counts — so the two rules cannot be merged, and the
+// defaults have to be pinned or a foot ends up standing on a trigger volume.
+describe('skipRayHit', () => {
+    it('rejects a missing body', () => {
+        expect(skipRayHit(null)).toBe(true);
+        expect(skipRayHit(undefined)).toBe(true);
+    });
+
+    it('accepts a plain solid body with no options', () => {
+        expect(skipRayHit({})).toBe(false);
+    });
+
+    it('rejects triggers and ghosts by default, and keeps them when asked', () => {
+        expect(skipRayHit({ isTrigger: true })).toBe(true);
+        expect(skipRayHit({ isTrigger: true }, { includeTriggers: true })).toBe(false);
+        expect(skipRayHit({ collisionResponse: false })).toBe(true);
+        expect(skipRayHit({ collisionResponse: false }, { includeGhosts: true })).toBe(false);
+        // Absent means solid: bodies the engine did not create carry neither field.
+        expect(skipRayHit({ collisionResponse: undefined })).toBe(false);
+    });
+
+    it('skips the caster itself, given singly or as a list', () => {
+        const self = {};
+        const other = {};
+        expect(skipRayHit(self, { ignore: self })).toBe(true);
+        expect(skipRayHit(other, { ignore: self })).toBe(false);
+        expect(skipRayHit(other, { ignore: [self, other] })).toBe(true);
+        expect(skipRayHit(other, { ignore: null })).toBe(false);
+    });
+
+    it('gives the caller rule the last word, with the owning node', () => {
+        const owned = { owner: { name: 'crate' } as any };
+        expect(skipRayHit(owned, { reject: (o) => (o as any)?.name === 'crate' })).toBe(true);
+        expect(skipRayHit(owned, { reject: (o) => (o as any)?.name === 'wall' })).toBe(false);
+        // An ownerless body — the terrain heightfield — reaches the rule as null rather than being dropped.
+        let sawOwner: unknown = 'unset';
+        skipRayHit({}, { reject: (o) => { sawOwner = o; return false; } });
+        expect(sawOwner).toBeNull();
     });
 });
