@@ -9,6 +9,7 @@ import {
   TerrainMaterialAsset, collectTerrainMaterialTextureIds,
   collectFoliageRuleTextureIds, collectFoliageLayerTextureIds,
 } from './terrainMaterials'
+import type { TilesetAsset } from './tilesets'
 
 // Which texture / material asset ids are actually used anywhere — the main scene plus the asset libraries.
 // Used by the Textures and Materials explorers to flag orphaned (unreferenced) assets with a warning badge,
@@ -22,6 +23,7 @@ export function collectReferencedTextureIds(
   models: ModelAsset[],
   templates: Template[],
   terrainMaterials: TerrainMaterialAsset[] = [],
+  tilesets: TilesetAsset[] = [],
 ): Set<string> {
   const set = new Set<string>()
   if (scene) {
@@ -41,12 +43,16 @@ export function collectReferencedTextureIds(
       }
       collectFoliageLayerTextureIds(terrain.foliage, set)
     }
+    // Live tilemaps: each layer's tileset draws from one atlas texture.
+    for (const tn of scene.tilemaps)
+      for (const ts of tn.tilemap.tilesets.values()) if (ts.textureId) set.add(ts.textureId)
   }
   for (const m of materials) collectTextureIds(m.material, set)
   for (const m of models) collectTextureIds(m.nodeJson, set)
   for (const t of templates) collectTextureIds(t.nodeJson, set)
   for (const t of terrainMaterials)
     for (const id of collectTerrainMaterialTextureIds(t.material)) set.add(id)
+  for (const t of tilesets) if (t.textureId) set.add(t.textureId)
   return set
 }
 
@@ -74,6 +80,14 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
   if (!node || typeof node !== 'object') return
 
   collectTextureIds(node, set)
+
+  // A serialized tilemap's atlas ids sit on its embedded tilesets, NOT inside a `textures` map, so the
+  // generic walk above cannot see them — exactly like terrain's displacementMap.
+  const walkTilemap = (n: any): void => {
+    for (const ts of n?.tilemap?.tilesets ?? []) if (ts?.textureId) set.add(ts.textureId)
+    for (const child of n?.children ?? []) walkTilemap(child)
+  }
+  walkTilemap(node)
 
   const walkTerrain = (n: any): void => {
     const terrain = n?.terrain
@@ -161,6 +175,19 @@ export function collectReferencedAnimationFieldIds(scene: Scene | null | undefin
       const animator = (node as any).animator
       for (const state of animator?.getStateMachine?.()?.states ?? []) {
         if (state?.fieldId) set.add(state.fieldId)
+      }
+    }
+  }
+  return set
+}
+
+/** Tileset asset ids referenced by any live tilemap layer. */
+export function collectReferencedTilesetIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  if (scene) {
+    for (const tn of scene.tilemaps) {
+      for (const layer of tn.tilemap.layers) {
+        if (layer.cfg.tilesetId) set.add(layer.cfg.tilesetId)
       }
     }
   }

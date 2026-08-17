@@ -26,6 +26,7 @@ export interface SceneRefs {
   meshIds?: string[];
   templateIds: string[];
   terrainMaterialIds: string[];
+  tilesetIds: string[];
   textureIds: string[];
 }
 

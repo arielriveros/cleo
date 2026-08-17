@@ -5,6 +5,7 @@ import type { Template } from '../../utils/templates'
 import type { ModelAsset } from '../../utils/models'
 import type { ScriptAsset } from '../../utils/scripts'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
+import type { TilesetAsset } from '../../utils/tilesets'
 import type { SceneMeta } from '../../utils/sceneStorage'
 import {
   renderMaterialAssetThumbnail, renderModelAssetThumbnail, renderTerrainMaterialAssetThumbnail,
@@ -24,6 +25,7 @@ export type AssetDeps = {
   models: ModelAsset[]
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
+  tilesets: TilesetAsset[]
   scenes: SceneMeta[]
 
   addMaterial: (m: MaterialAsset) => void
@@ -44,6 +46,9 @@ export type AssetDeps = {
   addAnimationField: (f: AnimationFieldAsset) => void
   updateAnimationField: (id: string, f: AnimationFieldAsset) => void
   removeAnimationField: (id: string) => void
+  addTileset: (t: TilesetAsset) => void
+  updateTileset: (id: string, t: TilesetAsset) => void
+  removeTileset: (id: string) => void
   createScene: (name?: string) => Promise<string>
   renameScene: (sceneId: string, name: string) => void
   deleteScene: (sceneId: string) => Promise<string | null>
@@ -57,11 +62,12 @@ export type AssetDeps = {
   enterModelEditor: (id?: string) => void
   enterScriptEditor: (id?: string) => void
   enterAnimationFieldEditor: (id?: string) => void
+  enterTilesetEditor: (id?: string) => void
 
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | SceneMeta
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | TilesetAsset | SceneMeta
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value))
@@ -76,6 +82,7 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'model': return deps.models.find(m => m.id === id)
     case 'script': return deps.scripts.find(s => s.id === id)
     case 'animationField': return deps.animationFields.find(f => f.id === id)
+    case 'tileset': return deps.tilesets.find(t => t.id === id)
     case 'scene': return deps.scenes.find(s => s.id === id)
     case 'texture': return undefined
   }
@@ -149,6 +156,11 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateAnimationField(id, { ...a, name: stem })
       break
     }
+    case 'tileset': {
+      const a = deps.tilesets.find(t => t.id === id)
+      if (a) deps.updateTileset(id, { ...a, name: stem })
+      break
+    }
     case 'scene': {
       const a = deps.scenes.find(s => s.id === id)
       if (a) deps.renameScene(id, stem)
@@ -168,6 +180,7 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'model': deps.removeModel(id); break
     case 'script': deps.removeScriptAsset(id); break
     case 'animationField': deps.removeAnimationField(id); break
+    case 'tileset': deps.removeTileset(id); break
     case 'scene': {
       void deps.deleteScene(id)
       break
@@ -224,6 +237,14 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       if (!a) return null
       // modelId is deliberately carried over: a duplicated field blends the same character's clips.
       deps.addAnimationField({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'tileset': {
+      const a = deps.tilesets.find(t => t.id === id)
+      if (!a) return null
+      // textureId carries over: duplicating a tileset means re-slicing the same atlas, or keeping a
+      // second variant of its per-tile metadata.
+      deps.addTileset({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
     case 'scene': {
@@ -285,6 +306,9 @@ export async function regenerateThumbnail(
       return false
     case 'template':
     case 'script':
+    // A tileset's card shows its atlas image, produced by a canvas downscale on save rather than by
+    // the 3D thumbnail renderer this function drives.
+    case 'tileset':
     // A field's card shows its kind icon: its content is a 2D plot, not something the 3D thumbnail
     // renderer (which poses a model in a preview scene) has any way to draw.
     case 'animationField':
@@ -307,6 +331,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'model': deps.enterModelEditor(id); return true
     case 'script': deps.enterScriptEditor(id); return true
     case 'animationField': deps.enterAnimationFieldEditor(id); return true
+    case 'tileset': deps.enterTilesetEditor(id); return true
     case 'scene': void deps.openScene(id); return true
     default: return false
   }
@@ -321,8 +346,9 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'model': return 'placed copies stay in the scene'
     case 'script': return 'nodes using it lose their script and its variables'
     case 'animationField': return 'animation states playing it fall back to no clip'
+    case 'tileset': return 'tilemap layers painted with it are cleared'
     case 'scene': return 'the project switches to another scene'
-    case 'texture': return 'materials using it show no texture'
+    case 'texture': return 'materials and tilesets using it show no texture'
   }
 }
 
@@ -335,6 +361,7 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
     case 'terrainMaterial': return [['text/cleo-terrain-material', assetId]]
     case 'script': return [['text/cleo-script', assetId]]
     case 'animationField': return [['text/cleo-animation-field', assetId]]
+    case 'tileset': return [['text/cleo-tileset', assetId]]
     case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
     case 'texture': return [
       ['text/cleo-asset', JSON.stringify({ type: 'texture', id: assetId })],
@@ -385,6 +412,10 @@ const ICONS: Record<AssetKind | 'folder', string> = {
   // A blend space: two axes with sample points scattered across them.
   animationField: svg('#d47ab8',
     `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#8f3a70" fill-opacity=".18"/><path d="M3.5 16.5h17M8 20.5v-17" stroke-opacity=".5"/><circle cx="8" cy="16.5" r="1.5"/><circle cx="13" cy="10" r="1.5"/><circle cx="18" cy="7" r="1.5"/>`,
+  ),
+  // A sliced atlas: the grid, with one cell picked out.
+  tileset: svg('#7ec8a9',
+    `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#2f7a63" fill-opacity=".2"/><path d="M9 3.5v17M14.5 3.5v17M3.5 9h17M3.5 14.5h17" stroke-opacity=".55"/><rect x="9" y="9" width="5.5" height="5.5" fill="#7ec8a9" fill-opacity=".45" stroke="none"/>`,
   ),
   texture: svg('#9aa4b2',
     `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>`,

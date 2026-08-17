@@ -13,6 +13,10 @@
 // This module is pure data — no DOM, no WebGL, no `cleo` import — because it runs inside
 // projectWorker.ts. See the header of workers/projectJobs.ts for why that constraint is load-bearing.
 
+// JSON, not a .ts constant, so webpack.player.config.js (CommonJS) can `require` the same file the
+// packer imports. One number, one source of truth.
+import playerContract from './playerContract.json';
+
 /** File layout, version 1:
  *
  *   0   magic "CLEOPAK1"   8 bytes ASCII
@@ -38,6 +42,26 @@ export const PACK_MAGIC = 'CLEOPAK1';
 export const PACK_VERSION = 1;
 export const PACK_HEADER_BYTES = 16;
 
+/**
+ * Player contract — a SECOND version number, orthogonal to PACK_VERSION above.
+ *
+ * PACK_VERSION describes the byte layout and must stay 1 forever (see the note above about not
+ * orphaning already-published games). But "an older reader ignores a field it does not know" only
+ * degrades gracefully when the missing field is optional, and some are not: when the packer moved
+ * terrain heights out of the manifest string into `heightChunk`, a player that ignores `heightChunk`
+ * does not fall back — it renders a perfectly flat landscape and logs nothing. The same is true of
+ * an engine with no animation-field playback meeting a `state.field`.
+ *
+ * That is a real bug that shipped: `editor/public/player/game.js` is a build artifact nothing forces
+ * you to rebuild, so it sat a month behind the packer and every publish in that month silently lost
+ * its terrain and its blend spaces.
+ *
+ * So: the player build stamps this number into `public/player/build.json`, publishClient compares it
+ * before shipping the bundle, and the player re-checks `manifest.contract` at boot. Bump it whenever
+ * the packer starts emitting something an older player cannot read.
+ */
+export const PLAYER_CONTRACT: number = playerContract.contract;
+
 /** Where a chunk sits in the blob region: byte offset and byte length. */
 export interface ChunkRef { o: number; l: number }
 
@@ -61,6 +85,8 @@ export interface PackedTexture {
 export interface PackManifest {
   format: 'cleopak';
   version: number;
+  /** See PLAYER_CONTRACT. Absent on games published before the guard existed. */
+  contract?: number;
   entry: string;
   scenes: Record<string, { name: string; scene: any; ui: any }>;
   /** Baked node templates for runtime scene.instantiate. Global, like textures — not per scene. */
@@ -263,6 +289,18 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
         if (terrain.heightBytes) { terrain.heightChunk = addChunk(asBytes(terrain.heightBytes)); delete terrain.heightBytes; }
       }
 
+      // Tilemap chunks, symmetric to terrain's: the deflated cell grids move out of the JSON manifest and
+      // into the blob, referenced the same way a geometry chunk is.
+      const tilemap = node.tilemap;
+      if (tilemap) {
+        for (const layer of (tilemap.layers ?? [])) {
+          for (const chunk of (layer?.chunks ?? [])) {
+            if (chunk.dataBytes) { chunk.dataChunk = addChunk(asBytes(chunk.dataBytes)); delete chunk.dataBytes; }
+            if (chunk.tintBytes) { chunk.tintChunk = addChunk(asBytes(chunk.tintBytes)); delete chunk.tintBytes; }
+          }
+        }
+      }
+
       for (const child of (node.children ?? [])) visit(child);
     }
   };
@@ -286,6 +324,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
   const manifest: PackManifest = {
     format: 'cleopak',
     version: PACK_VERSION,
+    contract: PLAYER_CONTRACT,
     entry: data?.entry ?? '',
     scenes: data?.scenes ?? {},
     templates: data?.templates,

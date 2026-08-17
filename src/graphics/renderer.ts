@@ -2,7 +2,12 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
-import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode, LightProbeNode, VolumetricCloudsNode, SkyAtmosphereNode } from '../core/scene/node';
+import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode, LightProbeNode, TilemapNode, VolumetricCloudsNode, SkyAtmosphereNode } from '../core/scene/node';
+import { Tilemap } from '../tilemap/tilemap';
+import { TilemapLayer } from '../tilemap/tilemapLayer';
+import { TileMesh } from '../tilemap/tileMesh';
+import { CHUNK_SIZE, TileChunk } from '../tilemap/chunk';
+import { cellToWorld } from '../tilemap/cellMath';
 import { PointLight, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
@@ -51,6 +56,8 @@ import PBRVertex from './shaders/materials/pbr.vs'
 import PBRFragment from './shaders/materials/pbr.fs'
 import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
 import TerrainForwardFragment from './shaders/materials/terrainForward.fs'
+import TilemapVertex from './shaders/materials/tilemap.vs'
+import TilemapFragment from './shaders/materials/tilemap.fs'
 
 // Deferred pipeline shaders
 import GeometryPBRFragment from './shaders/deferred/geometryPBR.fs'
@@ -441,6 +448,8 @@ export class Renderer {
         // Forward-lit terrain: used only by the light-probe capture (a forward pass), where the deferred
         // terrain G-buffer shader can't be lit. Same 14-float layout as the deferred terrain shader.
         const terrainForwardShader = new Shader().create(DefaultVertex, TerrainForwardFragment);
+        // Tilemap chunks: a 2D-only pos/uv/colour layout of their own, not the 14-float model layout.
+        const tilemapShader = new Shader().create(TilemapVertex, TilemapFragment);
         // Instanced billboard foliage (grass) geometry shader.
         const foliageBillboardShader = new Shader().create(GeometryInstancedVertex, GeometryFoliageBillboardFragment);
         // Deferred lighting (fullscreen) shader
@@ -507,6 +516,7 @@ export class Renderer {
         this._shaderManager.addShader('terrain', terrainGeometryShader);
         this._shaderManager.addShader('terrainGeometry', terrainGeometryShader);
         this._shaderManager.addShader('terrainForward', terrainForwardShader);
+        this._shaderManager.addShader('tilemap', tilemapShader);
         this._shaderManager.addShader('foliageBillboardInstanced', foliageBillboardShader);
         this._shaderManager.addShader('deferredLighting', deferredLightingShader);
         this._shaderManager.addShader('ssao', ssaoShader);
@@ -1949,8 +1959,8 @@ export class Renderer {
         // Gizmos on top (also draws the editor skeleton overlay when set).
         if (gizmoNodes.length > 0 || this._skeletonOverlay) this._renderGizmos(gizmoNodes);
 
-        // Sprites (always transparent, forward).
-        this._renderSpritesPass(scene);
+        // Tiles + sprites, depth-sorted together (always transparent, forward).
+        this._render2DPass(scene);
 
         // Selection silhouette mask (consumed by the post-process outline pass).
         const selectedSprites: SpriteNode[] = [];
@@ -2147,15 +2157,156 @@ export class Renderer {
         GLState.depthMask(true);
     }
 
-    private _renderSpritesPass(scene: Scene): void {
-        // Back-to-front so blended sprites composite correctly. Selection outlines are handled
-        // separately by the mask pass, so no special-casing of the selected sprite here.
-        const spriteNodes: SpriteNode[] = [];
-        for (const node of scene.sprites) if (node.visible) spriteNodes.push(node);
-        spriteNodes.sort((a, b) =>
-            vec3.distance(this._activeCamera.position, b.worldPosition) -
-            vec3.distance(this._activeCamera.position, a.worldPosition));
-        for (const node of spriteNodes) this._renderSprite(node);
+    /**
+     * The single depth-sorted 2D pass: tilemap chunks and sprites drawn in one interleaved order.
+     *
+     * Both the forward and deferred pipelines call this — they used to carry two separate, subtly
+     * different sprite loops, and a tilemap has to interleave with sprites in both.
+     *
+     * Ordering is (band, depth) ascending. `band` is the layer's `order`, and sprites join the band of
+     * the tilemap's nominated entity layer; `depth` is the negated world Y of the thing's BASE (a
+     * sprite's feet, a tile band's anchor row), so something lower on screen draws in front. That is
+     * what lets a character walk behind a tree's leaves and in front of its trunk with no authoring.
+     *
+     * A scene with no tilemap keeps the historical camera-distance ordering exactly, so every existing
+     * 3D scene renders unchanged.
+     */
+    private _render2DPass(scene: Scene): void {
+        const sprites: SpriteNode[] = [];
+        for (const node of scene.sprites) if (node.visible) sprites.push(node);
+
+        const tilemaps: TilemapNode[] = [];
+        for (const node of scene.tilemaps) if (node.visible) tilemaps.push(node);
+
+        if (tilemaps.length === 0) {
+            // Back-to-front so blended sprites composite correctly. Selection outlines come from the
+            // mask pass, so there is no special-casing of the selected sprite here.
+            sprites.sort((a, b) =>
+                vec3.distance(this._activeCamera.position, b.worldPosition) -
+                vec3.distance(this._activeCamera.position, a.worldPosition));
+            for (const node of sprites) this._renderSprite(node);
+            return;
+        }
+
+        type Draw2D =
+            | { band: number; depth: number; sprite: SpriteNode }
+            | { band: number; depth: number; node: TilemapNode; layer: TilemapLayer; chunk: TileChunk;
+                indexOffset: number; indexCount: number };
+        const list: Draw2D[] = [];
+
+        // Sprites join the first tilemap's entity layer. With several tilemaps in one scene the first
+        // one wins rather than the pass guessing — a scene that needs different bands per region should
+        // say so by ordering its layers, not by which map happened to be traversed first.
+        const host = tilemaps[0].tilemap;
+        const entityBand = host.layers[host.entityLayer]?.cfg.order ?? 0;
+        for (const sprite of sprites) {
+            // The sprite's BASE, not its centre: a character's feet are what sorts against a trunk row.
+            const base = sprite.worldPosition[1] - sprite.worldScale[1] * 0.5;
+            list.push({ band: entityBand, depth: -base, sprite });
+        }
+
+        for (const node of tilemaps) {
+            const tilemap = node.tilemap;
+            for (let i = 0; i < tilemap.layers.length; i++) {
+                const layer = tilemap.layers[i];
+                if (!layer.cfg.visible || layer.cfg.opacity <= 0) continue;
+                const tileset = tilemap.tilesetOf(i);
+                if (!tileset) continue;
+
+                for (const chunk of layer.chunks.values()) {
+                    if (chunk.count === 0) continue;
+                    if (!this._chunkVisible(tilemap, layer, chunk, node.worldPosition)) continue;
+                    frameStats.tilemapChunks++;
+
+                    if (!chunk.mesh) chunk.mesh = new TileMesh();
+                    if (chunk.meshDirty) {
+                        chunk.mesh.build(chunk, layer, tileset, tilemap.grid, tilemap.time);
+                        chunk.meshDirty = false;
+                    } else if (chunk.animated) {
+                        chunk.mesh.patchAnimatedUVs(tileset, tilemap.time);
+                    }
+
+                    if (layer.cfg.ySorted) {
+                        for (const b of chunk.mesh.bands)
+                            list.push({ band: layer.cfg.order, depth: -b.sortY, node, layer, chunk,
+                                        indexOffset: b.indexOffset, indexCount: b.indexCount });
+                    } else {
+                        list.push({ band: layer.cfg.order, depth: 0, node, layer, chunk,
+                                    indexOffset: 0, indexCount: chunk.mesh.indexCount });
+                    }
+                }
+            }
+        }
+
+        list.sort((a, b) => (a.band - b.band) || (a.depth - b.depth));
+
+        // Draw state is set once for the whole list rather than restored per item the way _renderSprite
+        // does: depth testing stays on so 3D geometry still occludes, but nothing here writes depth.
+        GLState.enable(gl.BLEND);
+        GLState.depthMask(false);
+        for (const item of list) {
+            if ('sprite' in item) this._renderSprite(item.sprite, false);
+            else this._drawTileBand(item.node, item.layer, item.chunk, item.indexOffset, item.indexCount);
+        }
+        GLState.depthMask(true);
+    }
+
+    /** Frustum test for one chunk, in world space. `origin` is the owning node's world position. */
+    private _chunkVisible(tilemap: Tilemap, layer: TilemapLayer, chunk: TileChunk, origin: vec3): boolean {
+        if (!this._frustumCulling) return true;
+        // A parallaxed layer is drawn at a camera-dependent offset, so its world box moves with the
+        // camera; culling it against the un-offset box would pop tiles in and out at the screen edge.
+        if (layer.cfg.parallax[0] !== 1 || layer.cfg.parallax[1] !== 1) return true;
+        const g = tilemap.grid;
+        // Local cell math plus the node's world position, matching how the mesh is built and drawn —
+        // `tilemap.cellToWorld` would fold in the map's own origin, which is only refreshed by the
+        // per-frame update the editor never runs.
+        const c0 = cellToWorld(g, chunk.cx * CHUNK_SIZE, chunk.cy * CHUNK_SIZE);
+        const c1 = cellToWorld(g, (chunk.cx + 1) * CHUNK_SIZE, (chunk.cy + 1) * CHUNK_SIZE);
+        // Isometric chunks are diamonds, so their axis-aligned extent runs to the opposite corners too;
+        // padding by the chunk's own width keeps the test conservative for every grid kind.
+        const padX = CHUNK_SIZE * g.cellWidth, padY = CHUNK_SIZE * g.cellHeight;
+        const min = [origin[0] + Math.min(c0[0], c1[0]) - padX, origin[1] + Math.min(c0[1], c1[1]) - padY, origin[2] - 1];
+        const max = [origin[0] + Math.max(c0[0], c1[0]) + padX, origin[1] + Math.max(c0[1], c1[1]) + padY, origin[2] + 1];
+        return this._frustum.intersectsAABB(min, max);
+    }
+
+    private _drawTileBand(node: TilemapNode, layer: TilemapLayer, chunk: TileChunk,
+                          indexOffset: number, indexCount: number): void {
+        const tilemap = node.tilemap;
+        const tileset = tilemap.tilesetById(layer.cfg.tilesetId);
+        if (!tileset || !chunk.mesh || indexCount <= 0) return;
+
+        this._shaderManager.bind('tilemap');
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+
+        // Chunk meshes are built in MAP-LOCAL space (cellToWorld with no origin applied), so the node's
+        // world position belongs here — reading it straight off the node rather than from tilemap.origin
+        // keeps drawing correct even when nothing has ticked the map's per-frame update, which is exactly
+        // the case in the editor (Scene.update only calls node.update once the scene is started).
+        //
+        // Parallax and the layer's z offset ride in this matrix too, and only here: applying either to the
+        // node's transform would dirty the scene, emit SCENE_CHANGED every frame and desync physics.
+        const cam = this._activeCamera.position;
+        const origin = node.worldPosition;
+        const model = mat4.create();
+        mat4.fromTranslation(model, [
+            origin[0] + cam[0] * (1 - layer.cfg.parallax[0]),
+            origin[1] + cam[1] * (1 - layer.cfg.parallax[1]),
+            origin[2] + layer.cfg.zOffset,
+        ]);
+        this._shaderManager.setUniform('u_model', model);
+
+        const texture = TextureManager.Instance.getTexture(tileset.textureId)
+            || TextureManager.Instance.getTexture('Null');
+        this._shaderManager.setUniform('u_tileset', 0);
+        if (texture) texture.bind(0);
+
+        this._applyCull('double');
+        chunk.mesh.drawRange(indexOffset, indexCount);
+        frameStats.tilemapDraws++;
+        frameStats.objects++;
     }
 
     // --- Shared helpers ---------------------------------------------------------------------------
@@ -2439,33 +2590,16 @@ export class Renderer {
             this._renderGizmos(gizmoNodes);
         }
 
-        const spriteNodes = Array.from(scene.sprites);
-        const selectedSprites: SpriteNode[] = [];
-        const nonSelectedSprites: SpriteNode[] = [];
-        
-        // Separate selected and non-selected sprites
-        for (const node of spriteNodes) {
-            if (!node.visible) continue;
-            
-            if (this._selectedNodeId && node.id === this._selectedNodeId) {
-                selectedSprites.push(node);
-            } else {
-                nonSelectedSprites.push(node);
-            }
-        }
-
-        // Sort non-selected sprites by distance to camera
-        nonSelectedSprites.sort((a, b) => {
-            const aDist = vec3.distance(this._activeCamera.position, a.worldPosition);
-            const bDist = vec3.distance(this._activeCamera.position, b.worldPosition);
-            return bDist - aDist;
-        });
-
-        // Render non-selected sprites first, then the selected ones on top.
-        for (const node of nonSelectedSprites) this._renderSprite(node);
-        for (const node of selectedSprites) this._renderSprite(node);
+        // Tiles + sprites, depth-sorted together. This used to be an inline copy of the sprite loop that
+        // additionally drew the selected sprite last, on top of everything — the selection outline comes
+        // from the mask pass below, so the selected sprite now draws in its correct depth order.
+        this._render2DPass(scene);
 
         // Selection silhouette mask (consumed by the post-process outline pass).
+        const selectedSprites: SpriteNode[] = [];
+        if (this._selectedNodeId)
+            for (const node of scene.sprites)
+                if (node.visible && node.id === this._selectedNodeId) selectedSprites.push(node);
         this._renderSelectionMask(selectedNodes, selectedSprites);
     }
 
@@ -2562,7 +2696,12 @@ export class Renderer {
         node.model.mesh.draw(mode);
     }
 
-    private _renderSprite(node: SpriteNode): void {
+    /**
+     * `manageDepth` false means the caller owns the blend/depth-mask state for a whole batch. The 2D
+     * pass sets it once around its interleaved list; restoring depth writes per sprite there would let
+     * a sprite occlude the tile band drawn after it.
+     */
+    private _renderSprite(node: SpriteNode, manageDepth: boolean = true): void {
         if (!node.initialized)
             node.initializeSprite();
         frameStats.objects++;
@@ -2636,7 +2775,7 @@ export class Renderer {
         node.sprite.mesh.draw(mode);
 
         // Restore depth writes after drawing sprite
-        GLState.depthMask(true);
+        if (manageDepth) GLState.depthMask(true);
     }
 
     /**

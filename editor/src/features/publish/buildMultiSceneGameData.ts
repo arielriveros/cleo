@@ -1,7 +1,8 @@
 import { Scene, TextureManager } from 'cleo'
 import type { RenderSettings } from 'cleo'
 import { buildGameData, bakeTemplates } from './buildGameData'
-import { compressTerrainData } from './terrainImages'
+import { compressTerrainData, compressTilemapData } from './terrainImages'
+import { stripDimensionData } from './stripDimensionData'
 import { collectPublishedTextureIds } from '../../utils/references'
 import { extractNodeState } from '../../utils/projectStorage'
 import { resyncScene } from '../../utils/sceneResync'
@@ -34,6 +35,8 @@ export interface MultiSceneSources {
   libs: AssetLibs
   scriptAssets?: ScriptAsset[]
   settings?: RenderSettings
+  /** The OPEN scene's live dimension. Its meta can be one save behind, and the live value is the truth. */
+  liveDimension?: '2D' | '3D'
 }
 
 export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<any> {
@@ -77,10 +80,28 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     scenes[meta.id] = { name: meta.name, scene: gd.scene, ui: gd.ui }
   }
 
-  // Bulk terrain data (height field + splat map) out of the JSON manifest and into deflated byte
-  // arrays the packer moves into game.bin. Main thread: CompressionStream lives here, alongside the
-  // rest of the DOM-dependent publish prep.
-  for (const entry of Object.values(scenes)) await compressTerrainData(entry.scene)
+  // Discard the authoring each scene's dimension does not use — a landscape in a 2D scene, a tilemap in
+  // a 3D one. The ordering here is load-bearing and there are two reasons for it: compressing a heightfield
+  // we are about to delete is pure waste, and the texture filter below is driven off the SERIALIZED scenes,
+  // so a landscape stripped after it would still drag its layer textures into the build.
+  for (const meta of src.scenes) {
+    const entry = scenes[meta.id]
+    if (!entry) continue
+    // An UNKNOWN dimension strips nothing. A scene saved before dimension became per-scene has none
+    // recorded, and guessing wrong here would silently delete the authoring the game is built around —
+    // the same asymmetry the texture walker reasons about, so it errs the same way. One save per scene
+    // records the resolved value and the strip starts applying.
+    const dimension = meta.id === src.openSceneId ? (src.liveDimension ?? meta.dimension) : meta.dimension
+    if (dimension) stripDimensionData(entry.scene, dimension)
+  }
+
+  // Bulk terrain and tilemap data (height field, splat map, tile grids) out of the JSON manifest and into
+  // deflated byte arrays the packer moves into game.bin. Main thread: CompressionStream lives here,
+  // alongside the rest of the DOM-dependent publish prep.
+  for (const entry of Object.values(scenes)) {
+    await compressTerrainData(entry.scene)
+    await compressTilemapData(entry.scene)
+  }
 
   // Templates once too, for the same reason as textures: the runtime registry is global, the player loads it
   // at boot, and a Game.loadScene switch must not invalidate what a script can still instantiate. Every

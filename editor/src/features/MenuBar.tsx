@@ -12,6 +12,7 @@ import ImportBundleModal from "./dialogs/ImportBundleModal";
 import { startTask } from "./progress/progressStore";
 import Topbar from "../components/Topbar";
 import ModeSelector from "./ModeSelector";
+import UndoButtons from "./UndoButtons";
 import { Button, buttonVariants, cn } from "../components/ui";
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
@@ -50,7 +51,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, tilesets, sceneDimension } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -97,7 +98,7 @@ export default function MenuBar() {
   
   // The two project-I/O buttons both operate on the whole workspace as one portable .zip.
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
-  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields });
+  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, tilesets });
 
   // Export the entire project — every scene, all asset libraries, the folder layout (VFS) and texture
   // payloads — as project.cleoproj.zip: a full, portable replica of the workspace. Assembled off-thread.
@@ -159,8 +160,9 @@ export default function MenuBar() {
         data = await buildMultiSceneGameData({
           mainSceneId, openSceneId, scenes: sceneList,
           liveScene: editorScene, liveScripts: scripts, liveBodies: bodies, liveTriggers: triggers, liveUi: ui,
-          libs: { materials, models, templates, terrainMaterials, scripts: scriptAssets },
+          libs: { materials, models, templates, terrainMaterials, scripts: scriptAssets, tilesets },
           scriptAssets,
+          liveDimension: sceneDimension,
           settings: renderSettings(),
         });
       } catch (e: any) {
@@ -311,7 +313,8 @@ export default function MenuBar() {
         </div>
       </div>
       <ModeSelector />
-      <div className='flex items-center h-full px-1.5'>
+      <div className='flex items-center h-full px-1.5 gap-1.5'>
+        <UndoButtons />
         <Button
           variant='subtle' size='sm' className='h-[25px]'
           disabled={playState !== 'stopped'}

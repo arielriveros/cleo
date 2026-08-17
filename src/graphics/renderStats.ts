@@ -17,6 +17,10 @@ export interface RenderStats {
     triangles: number;
     /** Vertices/indices submitted this frame. */
     vertices: number;
+    /** Tilemap chunk meshes visited by the 2D pass (post frustum cull). */
+    tilemapChunks: number;
+    /** Draw calls the 2D pass issued for tiles — one per chunk, or one per depth band when Y-sorted. */
+    tilemapDraws: number;
     /** CPU time spent inside render() (ms), excluding occasional IBL bakes. */
     frameMs: number;
 }
@@ -31,6 +35,8 @@ export const frameStats: RenderStats = {
     instances: 0,
     triangles: 0,
     vertices: 0,
+    tilemapChunks: 0,
+    tilemapDraws: 0,
     frameMs: 0,
 };
 
@@ -44,4 +50,6 @@ export function resetFrameStats(): void {
     frameStats.instances = 0;
     frameStats.triangles = 0;
     frameStats.vertices = 0;
+    frameStats.tilemapChunks = 0;
+    frameStats.tilemapDraws = 0;
 }

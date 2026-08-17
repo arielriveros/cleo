@@ -4,6 +4,8 @@ import { Raycaster, Node, Vec, Logger } from "cleo";
 import PositionGizmo from "./PositionGizmo";
 import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
+import TilemapBrush from "./tilemap/TilemapBrush";
+import TilemapInspector from "./tilemap/TilemapInspector";
 import RendererOptions from "./renderer/RendererOptions";
 import RendererStats from "./renderer/RendererStats";
 import DebugOverlay from "./logger/DebugOverlay";
@@ -56,33 +58,25 @@ const ScaleIcon = () => (
 );
 
 export default function EngineViewport() {
-    const { instance, editorScene, eventEmitter, editorMode,
-            templateRootId, modelEditTargetId, templates, models, materials, scripts, bodies, triggers, terrainBrush } = useCleoEngine();
+    const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension,
+            templateRootId, modelEditTargetId, templates, models, materials, scripts, bodies, triggers } = useCleoEngine();
     const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode } = useSelection();
     const { isPlayMode } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
+
     // The node graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D) has nothing to act on.
     const hideForGraph = editorMode === 'animation' && graphView;
     const viewportRef = useRef<HTMLDivElement>(null);
-    // The landscape brush mode is a ref (not reactive); mirror it so the terrain move-gizmo mounts on demand.
-    const [terrainMode, setTerrainMode] = useState(terrainBrush.current.mode);
-    useEffect(() => {
-        const onChange = () => setTerrainMode(terrainBrush.current.mode);
-        eventEmitter.on('TERRAIN_BRUSH_CHANGED', onChange);
-        return () => { eventEmitter.off('TERRAIN_BRUSH_CHANGED', onChange); };
-    }, [eventEmitter, terrainBrush]);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
     const wasDraggingRef = useRef(false);
     const isGizmoDraggingRef = useRef(false);
     const justFinishedGizmoDragRef = useRef(false);
-    // Mirror the viewport dimension so the floating 2D/3D control reflects the current state.
-    const [dimension, setDimension] = useState<'2D' | '3D'>('3D');
-    useEffect(() => {
-        const onDim = (d: '2D' | '3D') => setDimension(d);
-        eventEmitter.on('CHANGE_DIMENSION', onDim);
-        return () => { eventEmitter.off('CHANGE_DIMENSION', onDim); };
-    }, [eventEmitter]);
+    // The floating control is a VIEW toggle: it swaps the camera rig and nothing else. It used to write
+    // the scene's authored dimension, which meant glancing at a 3D scene through an orthographic camera
+    // dirtied the tab, raised the "you'll lose your landscape" prompt, and changed what a publish would
+    // keep. The scene's type is edited in its own settings panel; this is just a lens.
+    const dimension = viewDimension;
  
     useEffect(() => {
         if (viewportRef.current && instance) {
@@ -114,6 +108,44 @@ export default function EngineViewport() {
         // Clicks on floating viewport overlays (e.g. the 2D/3D control) bubble to these div-level
         // listeners; ignore them so they don't deselect nodes or start a drag.
         const inOverlay = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-cleo-overlay]');
+
+        /**
+         * The landscape or tilemap under a ray, or null. The click-selection fallback for the two node
+         * types the generic raycaster skips.
+         *
+         * A tilemap only counts when the cell under the cursor actually holds a tile: its plane is
+         * infinite, so selecting on any plane hit would make it impossible ever to deselect in a 2D scene.
+         * A terrain has a bounded footprint, so any hit on it counts.
+         */
+        const pickGroundNode = (ray: { origin: Vec.vec3; direction: Vec.vec3 }): Node | null => {
+            let best: Node | null = null;
+            let bestDistance = Infinity;
+
+            for (const landscape of Array.from(editorScene.landscapes) as any[]) {
+                if (!landscape.visible) continue;
+                const point = landscape.terrain?.raycast(ray.origin, ray.direction);
+                if (!point) continue;
+                const distance = Vec.vec3.distance(ray.origin as Vec.vec3, point);
+                if (distance < bestDistance) { bestDistance = distance; best = landscape; }
+            }
+
+            for (const node of Array.from(editorScene.tilemaps) as any[]) {
+                if (!node.visible) continue;
+                const dz = ray.direction[2];
+                if (Math.abs(dz) < 1e-6) continue;
+                const t = (node.worldPosition[2] - ray.origin[2]) / dz;
+                if (t <= 0 || t >= bestDistance) continue;
+                const x = ray.origin[0] + ray.direction[0] * t;
+                const y = ray.origin[1] + ray.direction[1] * t;
+                node.tilemap.setOrigin(node.worldPosition);
+                const [col, row] = node.tilemap.worldToCell(x, y);
+                const painted = node.tilemap.layers.some((_: unknown, i: number) =>
+                    node.tilemap.getTile(i, col, row) !== null);
+                if (painted) { bestDistance = t; best = node; }
+            }
+
+            return best;
+        };
 
         // Any button starts a potential drag: left orbits the camera, right pans, and both should end up
         // captured (see handleMouseMove).
@@ -161,10 +193,10 @@ export default function EngineViewport() {
             if (inOverlay(event.target)) return;
             // Don't allow selection during play mode
             if (isPlayMode) return;
-            // In landscape/renderer modes the viewport is not a selection surface. In material mode the
-            // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
-            // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
-            if (editorMode === 'landscape' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
+            // In landscape/tilemap/renderer modes the viewport is not a selection surface. In material mode
+            // the preview sphere stays selected (it drives the material inspector), so clicks must not change
+            // it. Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
+            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
             
             // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
@@ -217,9 +249,13 @@ export default function EngineViewport() {
                     console.log('Selected node:', { id: target.id, name: target.name, type: target.nodeType });
                     eventEmitter.emit('SELECT_NODE', target.id);
                 } else {
-                    // Deselect if clicking on empty space
-                    console.log('No hits, deselecting');
-                    eventEmitter.emit('SELECT_NODE', null);
+                    // Nothing ordinary was hit. Terrain and tilemaps are deliberately skipped by
+                    // Raycaster.raycast (a terrain has its own analytic picker, and a tilemap's box spans
+                    // everything it has ever painted), so they get their own pass here — otherwise the two
+                    // node types you can see filling the viewport would be the only ones you cannot click.
+                    const analytic = pickGroundNode(ray);
+                    // A click on genuinely empty space still deselects, which is how a selection is cleared.
+                    eventEmitter.emit('SELECT_NODE', analytic?.id ?? null);
                 }
             } catch (error) {
                 console.error('Error during node selection:', error);
@@ -294,11 +330,25 @@ export default function EngineViewport() {
             if (p) return p as Vec.vec3;
         }
 
+        // A tilemap's plane is the drop surface in a 2D scene, the way terrain is in a 3D one.
+        for (const tn of Array.from(editorScene.tilemaps) as any[]) {
+            const planeZ = tn.worldPosition[2];
+            const dz = ray.direction[2];
+            if (Math.abs(dz) < 1e-6) continue;
+            const t = (planeZ - ray.origin[2]) / dz;
+            if (t <= 0) continue;
+            return Vec.vec3.scaleAndAdd(Vec.vec3.create(), ray.origin, ray.direction, t);
+        }
+
         // Raycaster already skips the __editor__/__debug__ helpers; drop the gizmo too, as click-select does.
         const hits = Raycaster.raycast(ray, Array.from(editorScene.nodes).filter(n => !(n as any).isGizmo));
         if (hits.length > 0) return hits[0].point as Vec.vec3;
 
-        const t = -ray.origin[1] / ray.direction[1]; // ground plane y = 0
+        // The fallback plane follows the RIG IN USE, not how the scene is authored: under the 2D camera
+        // the world you are looking at lies on z = 0, so intersecting y = 0 would put every drop behind
+        // the viewer — and that is true whether or not the scene calls itself 2D.
+        const axis = viewDimension === '2D' ? 2 : 1;
+        const t = -ray.origin[axis] / ray.direction[axis];
         const distance = (Number.isFinite(t) && t > 0) ? t : 10;
         return Vec.vec3.scaleAndAdd(Vec.vec3.create(), ray.origin, ray.direction, distance);
     };
@@ -415,7 +465,7 @@ export default function EngineViewport() {
                 {editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !hideForGraph && (
                     <DebugVisibilityMenu />
                 )}
-                {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && !hideForGraph && (
+                {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && !hideForGraph && (
                     <div className='flex items-center rounded overflow-hidden border border-control-hover'>
                         <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'rotation'} title='Rotate' onClick={() => setGizmoMode('rotation')}><RotateIcon /></GizmoSeg>
@@ -426,8 +476,8 @@ export default function EngineViewport() {
                     <select
                         data-cleo-overlay
                         value={dimension}
-                        onChange={(e) => eventEmitter.emit('CHANGE_DIMENSION', e.target.value as '2D' | '3D')}
-                        title='Viewport dimension'
+                        onChange={(e) => setViewDimension(e.target.value as '2D' | '3D')}
+                        title='Viewport camera — view only. The scene’s 2D/3D type is in its settings.'
                         className='bg-surface-raised/80 hover:bg-surface-raised text-white text-xs rounded px-1.5 py-1 border border-white/10 cursor-pointer focus:outline-none'
                     >
                         <option value='3D'>3D</option>
@@ -435,20 +485,18 @@ export default function EngineViewport() {
                     </select>
                 )}
             </div>
-            {editorMode !== 'landscape' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
+            {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}
             />}
+            {editorMode === 'tilemap' && <>
+                <TilemapBrush viewportRef={viewportRef} />
+                <TilemapInspector />
+            </>}
             {editorMode === 'landscape' && <>
                 <LandscapeBrush viewportRef={viewportRef} />
                 <LandscapeInspector />
-                {/* "Move" tool: a transform gizmo on the terrain node; its Y arrow sets the global height. */}
-                {terrainMode === 'move' && terrainBrush.current.activeLandscapeId && <PositionGizmo
-                    selectedNodeId={terrainBrush.current.activeLandscapeId}
-                    onTransformChange={handleTransformChange}
-                    viewportRef={viewportRef}
-                />}
             </>}
             {editorMode === 'renderer' && <RendererOptions />}
             {editorMode === 'renderer' && <RendererStats />}

@@ -10,7 +10,8 @@
     "prebuild:player": "npm run build:engine",
     "start": "webpack serve  --hot --open",
     "build": "webpack --config webpack.config.js --mode development",
-    "build:player": "webpack --config webpack.player.config.js"
+    "build:player": "webpack --config webpack.player.config.js",
+    "build:player:only": "webpack --config webpack.player.config.js"
   },
   "keywords": [],
   "author": "",

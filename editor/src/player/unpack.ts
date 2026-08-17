@@ -178,6 +178,39 @@ export async function inflateTerrainData(node: any, game: UnpackedGame): Promise
   for (const child of (node.children ?? [])) await inflateTerrainData(child, game);
 }
 
+/**
+ * Decompress every tilemap's cell grids out of the blob, in place.
+ *
+ * Async for the same reason as the terrain path, and with the same fallback: a game.bin published before
+ * this existed carries `data` as base64, which TilemapLayer.parse reads directly.
+ */
+export async function inflateTilemapData(node: any, game: UnpackedGame): Promise<void> {
+  if (!node || typeof node !== 'object') return;
+
+  const tilemap = node.tilemap;
+  if (tilemap) {
+    for (const layer of (tilemap.layers ?? [])) {
+      for (const chunk of (layer?.chunks ?? [])) {
+        const cells = game.chunkBytes(chunk.dataChunk);
+        if (cells) {
+          const raw = await inflateBytes(cells);
+          // inflateBytes always returns a fresh buffer at offset 0, so this view is 4-byte aligned.
+          chunk.cellsU32 = new Uint32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
+          delete chunk.dataChunk;
+        }
+        const tint = game.chunkBytes(chunk.tintChunk);
+        if (tint) {
+          const raw = await inflateBytes(tint);
+          chunk.tintU32 = new Uint32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
+          delete chunk.tintChunk;
+        }
+      }
+    }
+  }
+
+  for (const child of (node.children ?? [])) await inflateTilemapData(child, game);
+}
+
 /** DEFLATE -> raw bytes. `DecompressionStream` is a global (not DOM), so this file stays testable. */
 async function inflateBytes(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate'));

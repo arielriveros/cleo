@@ -1,4 +1,5 @@
 import { useCleoEngine, EditorMode } from "./EngineContext";
+import { useProject } from "./ProjectContext";
 
 // Inline SVG glyphs (stroke currentColor) so no binary icon assets are needed.
 const SceneIcon = () => (
@@ -12,6 +13,15 @@ const LandscapeIcon = () => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 19 9 8l4 6 2-3 6 8Z" />
     <circle cx="17" cy="6" r="2" />
+  </svg>
+);
+// A sliced grid with one cell filled — the same shape as the tileset asset icon, so the mode and the
+// assets it paints from read as one thing.
+const TilemapIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3.5" y="3.5" width="17" height="17" rx="1.5" />
+    <path d="M9 3.5v17M15 3.5v17M3.5 9h17M3.5 15h17" />
+    <rect x="9" y="9" width="6" height="6" fill="currentColor" stroke="none" />
   </svg>
 );
 const RendererIcon = () => (
@@ -50,11 +60,16 @@ function Segment({ active, disabled, title, onClick, children }: SegmentProps) {
  */
 export default function ModeSelector() {
   const { editorMode, setEditorMode, isPlayMode, activeTab } = useCleoEngine();
+  const { sceneDimension } = useProject();
 
   const select = (mode: EditorMode) => { if (mode !== editorMode) setEditorMode(mode); };
 
-  // The scene/landscape/renderer switch belongs to the scene tab; asset tabs hide it.
+  // The scene/sculpt/renderer switch belongs to the scene tab; asset tabs hide it.
   if (activeTab.kind !== 'scene') return null;
+
+  // Landscape and Tilemap are the same slot, filled by whichever one the open scene's dimension uses.
+  // Offering both would mean offering a tool that cannot render anything in the current scene.
+  const is2D = sceneDimension === '2D';
 
   return (
     <div className='flex items-center h-full mx-[5px]'>
@@ -62,9 +77,15 @@ export default function ModeSelector() {
         <Segment active={editorMode === 'scene'} disabled={isPlayMode} title='Scene editing' onClick={() => select('scene')}>
           <SceneIcon /> Scene
         </Segment>
-        <Segment active={editorMode === 'landscape'} disabled={isPlayMode} title='Landscape sculpting' onClick={() => select('landscape')}>
-          <LandscapeIcon /> Landscape
-        </Segment>
+        {is2D ? (
+          <Segment active={editorMode === 'tilemap'} disabled={isPlayMode} title='Tile painting' onClick={() => select('tilemap')}>
+            <TilemapIcon /> Tilemap
+          </Segment>
+        ) : (
+          <Segment active={editorMode === 'landscape'} disabled={isPlayMode} title='Landscape sculpting' onClick={() => select('landscape')}>
+            <LandscapeIcon /> Landscape
+          </Segment>
+        )}
         <Segment active={editorMode === 'renderer'} disabled={isPlayMode} title='Renderer options & debug channels' onClick={() => select('renderer')}>
           <RendererIcon /> Renderer
         </Segment>

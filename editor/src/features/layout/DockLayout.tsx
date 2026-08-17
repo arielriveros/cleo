@@ -27,8 +27,9 @@ const OLD_LAYOUT_KEY = 'cleo_project_layout';
 // was hidden and reconstituted (see LayoutStore).
 const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
+  'cleo_dock_layout_v5',
 ];
-const LAYOUT_VERSION = 5;
+const LAYOUT_VERSION = 6;
 
 /**
  * One saved arrangement per editor mode.
@@ -49,6 +50,9 @@ const LAYOUT_VERSION = 5;
  * (hiddenPanelIds(mode, true) closes everything but the viewport), and play always runs in scene mode, so a
  * play entry would just be a viewport-only tree saved over and over. Instead nothing is saved while playing
  * and Stop restores `layouts[mode]` — which is exactly what the user had.
+ *
+ * v6 adds the two tilemap panels (Tiles + Layers). Same rule as every earlier bump: a stored v5 tree has
+ * never heard of them, so it is discarded rather than patched.
  */
 type LayoutStore = { version: typeof LAYOUT_VERSION; layouts: Partial<Record<EditorMode, SerializedDockview>> };
 
@@ -95,9 +99,12 @@ const ANIMATION_PANELS = ['animClips', 'animVariables', 'animStateMachine'] as c
 /** Animation-field panels. Same arrangement, for animationField mode. */
 const ANIMATION_FIELD_PANELS = ['animField'] as const;
 
+/** Tilemap-editor panels: the tile palette and the layer stack. Shown only in tilemap mode. */
+const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
+
 const CHROME_PANELS = [
   'scene', 'ui', 'properties', 'scripts', 'physics', 'logger', 'assets',
-  ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS,
+  ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS,
 ] as const;
 
 // The Scene panel hosts the mode-specific tree (there is no separate dock panel for it), so its tab label
@@ -107,6 +114,7 @@ const PANEL_TITLES: Record<string, string> = {
   scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
   animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
   animField: 'Blend Space',
+  tilePalette: 'Tiles', tilemapLayers: 'Layers',
 };
 
 function panelTitle(id: string, mode: EditorMode): string {
@@ -114,6 +122,7 @@ function panelTitle(id: string, mode: EditorMode): string {
   if (id === 'properties') {
     if (mode === 'material') return 'Material';
     if (mode === 'terrainMaterial') return 'Terrain Material';
+    if (mode === 'tileset') return 'Tileset';
   }
   return PANEL_TITLES[id];
 }
@@ -163,7 +172,7 @@ function buildDefaultLayout(api: DockviewApi) {
   });
   // The animation panels share the Properties tab strip. They are hidden everywhere but animation mode,
   // where Properties itself is hidden — so the strip reads as Clips | Variables | State Machine there.
-  for (const id of [...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS]) {
+  for (const id of [...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS]) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
@@ -253,9 +262,14 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   // `return []` ("show everything") — miss one branch and Clips leaks into scene mode.
   const anim: readonly string[] = mode === 'animation' ? [] : ANIMATION_PANELS;
   const field: readonly string[] = mode === 'animationField' ? [] : ANIMATION_FIELD_PANELS;
-  const extra: readonly string[] = [...anim, ...field];
+  const tile: readonly string[] = mode === 'tilemap' ? [] : TILEMAP_PANELS;
+  const extra: readonly string[] = [...anim, ...field, ...tile];
 
-  if (mode === 'landscape') return [...extra, 'scene', 'ui', 'properties', 'scripts', 'physics'];
+  // Landscape and tilemap both keep Scene AND Properties: props are placed alongside the terrain/tiles,
+  // and the node inspector is where the terrain's size, resolution and heightmap now live.
+  if (mode === 'landscape' || mode === 'tilemap') return [...anim, ...field, 'ui', 'scripts', 'physics'];
+  // A tileset tab is a 2D atlas editor rendered over the viewport; Properties hosts its inspector.
+  if (mode === 'tileset') return [...extra, 'scene', 'ui', 'scripts', 'physics'];
   if (mode === 'material' || mode === 'terrainMaterial') return [...extra, 'scene', 'ui', 'scripts', 'physics'];
   // Animation brings its own three panels, so Properties has nothing left to host.
   if (mode === 'animation') return [...field, 'ui', 'scripts', 'physics', 'properties'];

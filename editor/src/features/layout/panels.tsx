@@ -16,6 +16,10 @@ import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor';
 import ScriptEditor from '../nodeInspector/scriptEditor/ScriptEditor';
 import ScriptTabView from '../nodeInspector/scriptEditor/ScriptTabView';
 import AnimationFieldPanel from '../animationField/AnimationFieldPanel';
+import TilesetTabView from '../tileset/TilesetTabView';
+import TilesetInspector from '../tileset/TilesetInspector';
+import TilePalette from '../tilemap/TilePalette';
+import TilemapLayersPanel from '../tilemap/TilemapLayersPanel';
 import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
@@ -40,6 +44,8 @@ function ViewportPanel(_: IDockviewPanelProps) {
       <FieldGraph />
       {/* Script mode: the dedicated code editor fills the main area (no 3D preview) */}
       {editorMode === 'script' && <ScriptTabView />}
+      {/* Tileset mode: the atlas + slicing grid fills the main area (also no 3D preview) */}
+      {editorMode === 'tileset' && <TilesetTabView />}
       {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
       {!isSceneReady && <LoadingScreen progress={loadingProgress} />}
     </div>
@@ -94,6 +100,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   // carries the composite terrain material.
   if (editorMode === 'terrainMaterial') return <SidePanel><TerrainMaterialInspector node={editingTerrainMaterialNode} /></SidePanel>;
   if (editorMode === 'material') return <SidePanel><MaterialPanel /></SidePanel>;
+  if (editorMode === 'tileset') return <SidePanel><TilesetInspector /></SidePanel>;
   // Mesh mode keeps the normal node inspector below the mesh-level controls (LOD levels + cull).
   if (editorMode === 'model') return (
     <SidePanel>
@@ -153,6 +160,9 @@ function AnimClipsPanel(_: IDockviewPanelProps) { return <AnimClips />; }
 function AnimFieldPanel(_: IDockviewPanelProps) { return <AnimationFieldPanel />; }
 function AnimVariablesPanel(_: IDockviewPanelProps) { return <AnimVariables />; }
 function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachine />; }
+// The tilemap editor's two panels. Shown only in tilemap mode — see hiddenPanelIds.
+function TilePalettePanel(_: IDockviewPanelProps) { return <TilePalette />; }
+function TilemapLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><TilemapLayersPanel /></SidePanel>; }
 
 // Panels are movable but not closable — a lost panel would need Reset Layout, so the tab renders
 // the title only (dockview's tab wrapper still owns drag behavior and colors).
@@ -177,4 +187,6 @@ export const dockComponents = {
   animVariables: AnimVariablesPanel,
   animStateMachine: AnimStateMachinePanel,
   animField: AnimFieldPanel,
+  tilePalette: TilePalettePanel,
+  tilemapLayers: TilemapLayersDockPanel,
 };

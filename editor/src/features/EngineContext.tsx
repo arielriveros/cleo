@@ -33,6 +33,9 @@ import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
 import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { AnimationFieldAsset, buildAnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
+import { TilesetAsset, buildTilesetAsset, guessTileSize, reembedTilesets, detachTileset } from "../utils/tilesets";
+import { importAtlasImage } from "./tileset/importAtlas";
+import { renderTilesetThumbnail } from "./tileset/tilesetThumbnail";
 import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
@@ -121,10 +124,11 @@ import { buildAssetHashes, AssetLibs, ASSET_HASH_VERSION } from "../utils/assetH
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
+  collectReferencedTilesetIds,
 } from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
 import { KEYS, libKey } from "../utils/storageKeys";
-import { assetIdOfTab, loadTabState, saveTabState } from "../utils/tabState";
+import { assetIdOfTab, loadTabState, saveTabState, MainMode } from "../utils/tabState";
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf } from "../utils/textureStore";
@@ -286,7 +290,7 @@ function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefO
   }, [key, value, loaded]);
 }
 
-export type EditorMode = 'scene' | 'landscape' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script';
+export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -304,7 +308,10 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // An 'animationField' tab is an edit session for an Animation Field asset: the field's source Model asset
 // is instantiated into a throwaway scene and driven directly by the field editor's transport, while the
 // blend space itself is authored on a 2D plot overlaying the viewport.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script';
+// A 'tileset' tab is a pure 2D editor for a Tileset asset — the atlas image with its slicing grid drawn
+// over it, plus per-tile metadata. Like a script tab it owns NO 3D scene, so it never gets a tabRuntimeRef
+// entry and nothing about it touches the renderer.
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
 
 /**
  * The scene tab's id — a fixed sentinel, unlike the library tabs' random ids.
@@ -326,6 +333,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   animationField: 'Animation field',
   model: 'Model',
   script: 'Script',
+  tileset: 'Tileset',
 };
 
 // Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
@@ -355,9 +363,12 @@ export interface EditorTab {
   modelId?: string | null; // mesh tabs: the previewed mesh asset id
   scriptId?: string | null; // script tabs: the edited script asset id
   animationFieldId?: string | null; // animation-field tabs: the edited field asset id
+  tilesetId?: string | null; // tileset tabs: the edited tileset asset id
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
-export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage' | 'move';
+// No 'move': a landscape is positioned with the ordinary transform gizmo in scene mode, like any other
+// node. Landscape mode is brushes only.
+export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
 export type TerrainBrushState = {
   mode: TerrainBrushMode;
   tool: TerrainTool;
@@ -370,6 +381,28 @@ export type TerrainBrushState = {
   foliageErase: boolean;
   /** Id of the landscape node currently being edited (set by the inspector). */
   activeLandscapeId: string | null;
+};
+
+export type TilemapTool =
+  | 'brush' | 'eraser' | 'rect' | 'bucket' | 'stamp' | 'eyedropper' | 'randomize' | 'autotile';
+
+/**
+ * The tilemap painting state, shared between the floating tool card, the palette panel and the viewport
+ * brush. A ref rather than state for the same reason TerrainBrushState is one: the brush reads it from
+ * pointer handlers that register once, and re-registering them on every slider tick would drop strokes.
+ */
+export type TilemapBrushState = {
+  tool: TilemapTool;
+  /** Id of the tilemap node being painted (set by the inspector; falls back to the first in the scene). */
+  activeTilemapId: string | null;
+  activeLayer: number;
+  /** The palette selection as a rectangle — a single tile for the brush, a block for the stamp. */
+  stamp: { w: number; h: number; tiles: number[] };
+  /** Orientation applied to every tile this brush places. */
+  orient: { flipX: boolean; flipY: boolean; rot90: boolean };
+  /** Variant set the randomize tool draws from, and terrain set the auto-tile tool resolves against. */
+  variantSetId: number | null;
+  terrainId: number | null;
 };
 
 // Create a context to hold the engine and scene
@@ -423,6 +456,7 @@ const EngineContext = createContext<{
   animationSourceScene: Scene | null; // scene the source node lives in (for Variable parameter pickers)
   commitAnimationStateMachine: (sm: any) => void;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
+  tilemapBrush: React.MutableRefObject<TilemapBrushState>;
   loadingProgress: LoadingProgress;
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
@@ -482,6 +516,19 @@ const EngineContext = createContext<{
   animationFieldTargetId: string | null;
   /** Save a field asset and re-embed it into every state machine that plays it. */
   saveAnimationField: (asset: AnimationFieldAsset) => void;
+  // Tileset assets (sliced atlases painted by tilemap layers)
+  tilesets: TilesetAsset[];
+  addTileset: (t: TilesetAsset) => void;
+  removeTileset: (id: string) => void;
+  updateTileset: (id: string, t: TilesetAsset) => void;
+/** Open (or focus) a Tileset asset's edit tab. Creates a fresh, atlas-less one when given no id. */
+  enterTilesetEditor: (tilesetId?: string) => void;
+  /** Import an image file as an atlas, build a tileset sliced around it, and open it. */
+  createTilesetFromImage: (file: File) => Promise<string | null>;
+  /** The tileset asset the active tileset tab edits, or null. */
+  editingTilesetId: string | null;
+  /** Save a tileset asset and push it into every tilemap that embedded a copy. */
+  saveTileset: (asset: TilesetAsset) => void;
   /** Open a script asset in its dedicated Script editor tab (creates a new 'node' script when no id is given). */
   enterScriptEditor: (scriptId?: string) => void;
   /** Save the active Script tab's buffered source to its asset and clear the tab's dirty flag. */
@@ -543,9 +590,27 @@ const EngineContext = createContext<{
   deleteScene: (sceneId: string) => Promise<string | null>;
   duplicateScene: (sceneId: string) => Promise<string | null>;
   setMainScene: (sceneId: string) => void;
-  /** The open scene's camera rig ('2D' ortho pan/zoom vs '3D' free-fly). Per scene, not per project. */
+  /**
+   * What the open scene IS: a 2D scene is authored with tilemaps, a 3D one with landscapes. Persisted on
+   * SceneMeta, edited only from the scene settings panel. It decides which sculpt mode the top bar offers
+   * and which of the two a published build keeps.
+   *
+   * NOT the camera — see viewDimension for the rig you are looking through.
+   */
   sceneDimension: '2D' | '3D';
-  setSceneDimension: (sceneId: string, dimension: '2D' | '3D') => void;
+  setSceneDimension: (sceneId: string, dimension: '2D' | '3D') => Promise<void>;
+  /** Set while a dimension switch is waiting on the user to confirm losing the other dimension's work. */
+  pendingDimensionConfirm: { to: '2D' | '3D'; losing: 'tilemap' | 'landscape'; count: number } | null;
+  resolveDimensionConfirm: (proceed: boolean) => void;
+  /**
+   * Which camera rig the viewport is looking through — orthographic pan/zoom or free-fly.
+   *
+   * Editor-session state, deliberately NOT the scene's authored dimension: looking at a 3D scene through
+   * an orthographic camera is a useful thing to do and must not rewrite what the scene is. Follows the
+   * scene on open and on an authored change; never persisted.
+   */
+  viewDimension: '2D' | '3D';
+  setViewDimension: (dimension: '2D' | '3D') => void;
   // Unsaved-changes confirm dialog (promise parked by openScene/closeTab, resolved by UnsavedSceneModal)
   pendingSceneConfirm: { sceneName: string; action: 'switch' | 'close' } | null;
   resolveSceneConfirm: (decision: 'save' | 'discard' | 'cancel') => void;
@@ -557,6 +622,8 @@ const EngineContext = createContext<{
   /** Run `fn` without its scene edits marking any tab dirty — for editor chrome (gizmos, helper icons)
    *  whose nodes live in the scene and emit SCENE_CHANGED like any other, but are not the user's work. */
   withoutDirty: <T>(fn: () => T) => T;
+  /** True while inside withoutDirty. The undo recorder reads it: nothing suppressed here is a user edit. */
+  isDirtySuppressed: () => boolean;
   }>({
     instance: null,
     editorScene: new Scene(),
@@ -598,6 +665,7 @@ const EngineContext = createContext<{
     animationSourceScene: null,
     commitAnimationStateMachine: () => {},
     terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null } },
+    tilemapBrush: { current: { tool: 'brush', activeTilemapId: null, activeLayer: 0, stamp: { w: 1, h: 1, tiles: [0] }, orient: { flipX: false, flipY: false, rot90: false }, variantSetId: null, terrainId: null } },
     loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
     bodies: new Map(),
@@ -640,6 +708,14 @@ const EngineContext = createContext<{
     editingAnimationFieldId: null,
     animationFieldTargetId: null,
     saveAnimationField: () => {},
+    tilesets: [],
+    addTileset: () => {},
+    removeTileset: () => {},
+    updateTileset: () => {},
+    enterTilesetEditor: () => {},
+    createTilesetFromImage: async () => null,
+    editingTilesetId: null,
+    saveTileset: () => {},
     enterScriptEditor: () => {},
     setScriptTabSource: () => {},
     getScriptTabSource: () => undefined,
@@ -682,12 +758,17 @@ const EngineContext = createContext<{
     duplicateScene: async () => null,
     setMainScene: () => {},
     sceneDimension: '3D',
-    setSceneDimension: () => {},
+    setSceneDimension: async () => {},
+    viewDimension: '3D',
+    setViewDimension: () => {},
+    pendingDimensionConfirm: null,
+    resolveDimensionConfirm: () => {},
     pendingSceneConfirm: null,
     resolveSceneConfirm: () => {},
     markTabDirty: () => {},
     clearTabDirty: () => {},
     withoutDirty: (fn) => fn(),
+    isDirtySuppressed: () => false,
   });
   
   // Create a custom hook to access the engine and scene from anywhere
@@ -724,11 +805,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [restoredSession] = useState(() => loadTabState(SCENE_TAB_ID));
   // The Main tab's sub-mode (scene/landscape/renderer). `editorMode` exposed to consumers is derived
   // from the active tab — 'template' when a template tab is active, else this.
-  const [mainMode, setMainMode] = useState<'scene' | 'landscape' | 'renderer'>(restoredSession.mainMode);
+  const [mainMode, setMainMode] = useState<MainMode>(restoredSession.mainMode);
   // Active transform-gizmo mode (move/rotate/scale), driven by the viewport toggle.
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('position');
   /** Where Play was pressed from, so Stop can put the user back. Null while play started on the scene tab. */
-  const playReturnRef = useRef<{ tabId: string; mainMode: 'scene' | 'landscape' | 'renderer' } | null>(null);
+  const playReturnRef = useRef<{ tabId: string; mainMode: MainMode } | null>(null);
   /** Play is waiting for the forced switch to the scene tab to commit (see startPlay). */
   const pendingPlayRef = useRef(false);
   // Mirrored during RENDER, like tabsRef: startPlay reads it from an async/event path where the render-scoped
@@ -806,12 +887,33 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     dirtySuppressRef.current = true;
     try { return fn(); } finally { dirtySuppressRef.current = prev; }
   };
+  const isDirtySuppressed = () => dirtySuppressRef.current;
   // Thumbnail rendering builds throwaway scenes whose node inserts emit SCENE_CHANGED, which would
   // otherwise mark the active tab unsaved — including right after a save cleared it. Installed once here
   // rather than threaded through every render call, because nothing that module does is ever a user edit.
   setThumbnailDirtySuppressor(withoutDirty);
   const [savingState, setSavingState] = useState<SavingState>('idle');
-  const dimensionRef = useRef<'2D' | '3D'>('3D'); // the Main tab's dimension (template tabs are always 3D)
+  // The rig the viewport is currently looking through. A ref as well as state because applyActiveTab
+   // reads it off-render to restore the Main tab's view when returning from an asset tab (those always
+   // render in 3D). The scene's AUTHORED dimension is a different thing entirely — see setSceneDimension.
+  const [viewDimension, setViewDimensionState] = useState<'2D' | '3D'>('3D');
+  const viewDimensionRef = useRef<'2D' | '3D'>('3D');
+  // Which rig is currently INSTALLED on the camera. Distinct from viewDimensionRef, which tracks the
+  // scene tab's remembered view and is deliberately left alone while an asset tab renders in 3D.
+  const previousViewRef = useRef<'2D' | '3D'>('3D');
+  /**
+   * Where the editor camera was the last time each rig was on screen, so flipping the view is reversible.
+   *
+   * The 2D branch of the CHANGE_DIMENSION handler parks the camera at a fixed pose and the 3D branch
+   * restores nothing, so without this a 3D -> 2D -> 3D round trip left the camera stranded at the 2D pose
+   * with a perspective projection. Tolerable when the toggle was an authoring setting you flipped once;
+   * not when it is a view control you flip constantly.
+   */
+  const viewPoseRef = useRef<Partial<Record<'2D' | '3D', {
+    position: [number, number, number];
+    rotation: [number, number, number];
+    ortho?: { top: number; bottom: number; left: number; right: number };
+  }>>>({});
   const pendingPrefsRef = useRef<ProjectPrefs | null>(null);
 
   // Multi-scene project state. projectMetaRef is the authoritative copy (scene list + main/open ids);
@@ -832,6 +934,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     CleoEngine.authoringMode = isSceneReady && !isPlayMode;
   }, [isPlayMode, isSceneReady]);
   const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null });
+  const tilemapBrush = useRef<TilemapBrushState>({
+    tool: 'brush', activeTilemapId: null, activeLayer: 0,
+    stamp: { w: 1, h: 1, tiles: [0] },
+    orient: { flipX: false, flipY: false, rot90: false },
+    variantSetId: null, terrainId: null,
+  });
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
   const scriptsRef = useRef(new Map<string, string>());
@@ -1042,6 +1150,46 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (open) removeTabById(open.id);
   };
 
+  // Tileset assets (sliced atlases). A tileset is what a tilemap layer paints from; a TilemapNode embeds a
+  // full copy of every one it references, so this library is the authoring source of truth and the embedded
+  // copies are refreshed from it on save (see reembedTilesets).
+  const [tilesets, setTilesets] = useState<TilesetAsset[]>([]);
+  const tilesetsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<TilesetAsset[]>(libKey('tilesets'));
+        if (list && list.length) setTilesets(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load tilesets:', e); }
+      finally { tilesetsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('tilesets'), tilesets, tilesetsLoadedRef);
+
+  const tilesetsRef = useRef<TilesetAsset[]>([]);
+  tilesetsRef.current = tilesets;
+
+  const addTileset = (t: TilesetAsset) => setTilesets(prev => [...prev, t]);
+  const updateTileset = (id: string, t: TilesetAsset) => {
+    setTilesets(prev => prev.map(x => x.id === id ? t : x));
+    // Push the edit into every tilemap that embedded an older copy, across every live scene — otherwise a
+    // change to a tile's solidity or animation would only take effect on maps painted after it.
+    const next = tilesetsRef.current.map(x => x.id === id ? t : x);
+    let changed = false;
+    for (const scene of liveScenes()) if (reembedTilesets(scene, next)) changed = true;
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+  };
+  const removeTileset = (id: string) => {
+    setTilesets(prev => prev.filter(x => x.id !== id));
+    // Unlink every layer painted from it. The cells stay — they are the user's work — but the layer draws
+    // nothing until a tileset is assigned again, which reads as broken and is therefore fixable.
+    let changed = false;
+    for (const scene of liveScenes()) if (detachTileset(scene, id)) changed = true;
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+    const open = tabsRef.current.find(t => t.kind === 'tileset' && t.tilesetId === id);
+    if (open) removeTabById(open.id);
+  };
+
   const scriptAssetOf = (node: Node | null): ScriptAsset | undefined => {
     const id = getScriptIdOf(node ?? undefined);
     return id ? scriptAssets.find(a => a.id === id) : undefined;
@@ -1237,6 +1385,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'terrainMaterial': return libs.terrainMaterials.some(m => m.id === id);
         case 'model': return libs.models.some(m => m.id === id);
         case 'script': return libs.scripts.some(s => s.id === id);
+        case 'tileset': return libs.tilesets.some(t => t.id === id);
         // A field also needs the model it blends — enterAnimationFieldEditor refuses to open without it.
         case 'animationField': {
           const field = fields.find(f => f.id === id);
@@ -1351,6 +1500,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (r) r(decision);
   };
 
+  // Same park-then-resolve pattern, for switching a scene between 2D and 3D while it holds authoring that
+  // only the OTHER dimension uses. The data is kept either way — the switch is reversible — but a published
+  // build discards it, so the user is told before the switch rather than after the export.
+  const [pendingDimensionConfirm, setPendingDimensionConfirm] =
+    useState<{ to: '2D' | '3D'; losing: 'tilemap' | 'landscape'; count: number } | null>(null);
+  const dimensionConfirmResolverRef = useRef<((proceed: boolean) => void) | null>(null);
+  const confirmDimensionSwitch = (to: '2D' | '3D', losing: 'tilemap' | 'landscape', count: number): Promise<boolean> =>
+    new Promise(resolve => {
+      dimensionConfirmResolverRef.current = resolve;
+      setPendingDimensionConfirm({ to, losing, count });
+    });
+  const resolveDimensionConfirm = (proceed: boolean) => {
+    const r = dimensionConfirmResolverRef.current;
+    dimensionConfirmResolverRef.current = null;
+    setPendingDimensionConfirm(null);
+    if (r) r(proceed);
+  };
+
   // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
   const activeRuntime = activeTab.kind !== 'scene' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
@@ -1365,6 +1532,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     : activeTab.kind === 'animationField' ? 'animationField'
     : activeTab.kind === 'model' ? 'model'
     : activeTab.kind === 'script' ? 'script'
+    : activeTab.kind === 'tileset' ? 'tileset'
     : 'template';
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
@@ -1386,6 +1554,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const animationFieldTargetId = activeTab.kind === 'animationField' && activeRuntime
     ? (firstSkinnedModelNode(activeRuntime.scene.getNodeById(activeRuntime.rootId) ?? null)?.id ?? null)
     : null;
+  const editingTilesetId = activeTab.kind === 'tileset' ? (activeTab.tilesetId ?? null) : null;
 
   // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries (the scripts library
   // already has scriptAssetsRef). The save + propagation paths read these rather than the render-scoped
@@ -1439,6 +1608,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const currentLibs = (): AssetLibs => ({
     materials: materialsRef.current, models: modelsRef.current, templates: templatesRef.current,
     terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
+    tilesets: tilesetsRef.current,
   });
 
   // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
@@ -1570,7 +1740,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Public mode switch — only the Main tab's sub-mode (scene/landscape/renderer). Template/material/
   // animation editing are tabs now (opened via enter*Editor), not modes, so they aren't accepted here.
   const setEditorMode = (mode: EditorMode) => {
-    if (mode === 'scene' || mode === 'landscape' || mode === 'renderer') setMainMode(mode);
+    if (mode === 'scene' || mode === 'landscape' || mode === 'tilemap' || mode === 'renderer') setMainMode(mode);
   };
 
   // Force skinned models to their bind (T) pose. Used to keep the editor showing the default pose
@@ -1948,6 +2118,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'model': enterModelEditor(assetId, tab.id); break;
       case 'animationField': enterAnimationFieldEditor(assetId, tab.id); break;
       case 'script': enterScriptEditor(assetId, tab.id); break;
+      // A tileset tab is a pure 2D editor over the library record — nothing to build, so it is live already.
+      case 'tileset': return !!tab.tilesetId && tilesetsRef.current.some(t => t.id === tab.tilesetId);
       default: return true;
     }
     // A script tab is a pure code editor and never gets a runtime entry, so it can only be judged by whether
@@ -2749,6 +2921,75 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     Logger.info(`Animation field "${asset.name}" saved${count ? ` (updated ${count} model${count === 1 ? '' : 's'})` : ''}`, 'Editor');
   };
 
+  // ---- Tileset editor --------------------------------------------------------------------------------
+
+  // Unlike every other asset tab this one owns NO scene: a tileset is an image with a grid drawn over it,
+  // so the editor is a canvas and the tab needs no tabRuntimeRef entry, no throwaway Scene and no renderer
+  // involvement at all. Same shape as the script tab.
+  const enterTilesetEditor = (tilesetId?: string, adoptTabId?: string) => {
+    let asset = tilesetId ? tilesetsRef.current.find(t => t.id === tilesetId) : undefined;
+
+    if (!tilesetId) {
+      // A brand-new tileset starts with no atlas: the image is assigned from the editor's own slot, which
+      // is where its pixel dimensions come from. Building one around a texture up front would need a
+      // picker before the editor has even opened.
+      asset = buildTilesetAsset('Tileset', '', 0, 0);
+      addTileset(asset);
+      // The library update lands in the next commit, so seed the ref directly — otherwise the tab opens
+      // against state that does not yet contain the asset it was just given.
+      tilesetsRef.current = [...tilesetsRef.current, asset];
+    }
+    if (!asset) { Logger.error('Tileset not found', 'Editor'); return; }
+
+    if (!adoptTabId && tilesetId) {
+      const existing = tabsRef.current.find(t => t.kind === 'tileset' && t.tilesetId === tilesetId);
+      if (existing) { setActiveTab(existing.id); return; }
+    }
+    const tabId = adoptTabId ?? cryptoRandomId();
+    commitTab({ id: tabId, kind: 'tileset', title: asset.name, tilesetId: asset.id }, adoptTabId);
+  };
+
+  /**
+   * Import an image and build a tileset around it in one step — the "+ Add > Tileset" path.
+   *
+   * The tile size is guessed from the image, which is right often enough to save retyping it and visibly
+   * wrong when it isn't (the grid draws over the atlas). Returns null when the file could not be decoded,
+   * in which case importAtlasImage has already logged why.
+   */
+  const createTilesetFromImage = async (file: File): Promise<string | null> => {
+    const imported = await importAtlasImage(file, (event) => eventEmitter.current.emit(event as any));
+    if (!imported) return null;
+    const tile = guessTileSize(imported.width, imported.height);
+    // A texture's id is its filename; trim the extension for a readable asset name.
+    const name = imported.textureId.replace(/\.[^./\\]+$/, '') || imported.textureId;
+    const asset = buildTilesetAsset(name, imported.textureId, imported.width, imported.height, {
+      tileWidth: tile, tileHeight: tile,
+    });
+    // The image is already decoded on this path (importAtlasImage registers it through addTextureFromData),
+    // so the card preview can be rendered now rather than waiting for the first save.
+    asset.thumbnail = renderTilesetThumbnail(asset) ?? undefined;
+    addTileset(asset);
+    // The library update lands in the next commit, so seed the ref directly — enterTilesetEditor reads it.
+    tilesetsRef.current = [...tilesetsRef.current, asset];
+    enterTilesetEditor(asset.id);
+    return asset.id;
+  };
+
+  /** Persist an edited tileset and push it into every tilemap already drawing from a copy of it. */
+  const saveTileset = (input: TilesetAsset) => {
+    // The card preview is a plain canvas downscale of the atlas, so it is cheap enough to refresh on every
+    // save rather than needing the explicit regenerate path the 3D-rendered thumbnails use.
+    const asset = { ...input, thumbnail: renderTilesetThumbnail(input) ?? input.thumbnail };
+    updateTileset(asset.id, asset);
+    tilesetsRef.current = tilesetsRef.current.map(t => t.id === asset.id ? asset : t);
+    const open = tabsRef.current.find(t => t.kind === 'tileset' && t.tilesetId === asset.id);
+    if (open) {
+      clearTabDirty(open.id);
+      if (open.title !== asset.name) setTabs(prev => prev.map(t => t.id === open.id ? { ...t, title: asset.name } : t));
+    }
+    Logger.info(`Tileset "${asset.name}" saved`, 'Editor');
+  };
+
   // Import one or more model files (and folders) into the mesh library. Groups the selection into one
   // bundle per model file; for each: parses, then opens the review modal (missing textures + scale
   // normalization) and awaits the user. On accept, applies any uploaded textures (re-parse), normalizes
@@ -3119,7 +3360,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // material tabs are skipped: their preview camera uses a self-contained orbit rig
     // (createMaterialPreviewScene) that the free-fly CHANGE_DIMENSION handler must not overwrite.
     if (tab.kind !== 'material' && tab.kind !== 'terrainMaterial')
-      eventEmitter.current.emit('CHANGE_DIMENSION', tab.kind === 'scene' ? dimensionRef.current : '3D');
+      setViewDimension(tab.kind === 'scene' ? viewDimensionRef.current : '3D');
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     // Animation tabs select via the skeleton tree (SELECT_JOINT), not the mesh, so start with none.
@@ -3219,27 +3460,34 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const tplSet = collectReferencedTemplateIds(scene);
       const tmSet = collectReferencedTerrainMaterialIds(scene);
       const scriptSet = collectReferencedScriptIds(scene);
+      const tilesetSet = collectReferencedTilesetIds(scene);
       const refs: SceneRefs = {
         materialIds: Array.from(matSet),
         modelIds: Array.from(modelSet),
         templateIds: Array.from(tplSet),
         terrainMaterialIds: Array.from(tmSet),
-        textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, models)),
+        tilesetIds: Array.from(tilesetSet),
+        textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, models, tilesets)),
       };
       // Per-asset content hashes let a *closed* scene tell, when reopened, which referenced assets
       // changed while it was closed — so unchanged models/templates aren't needlessly re-instantiated.
       const assetHashes = buildAssetHashes(
-        { materialIds: matSet, modelIds: modelSet, templateIds: tplSet, terrainMaterialIds: tmSet, scriptIds: scriptSet },
+        { materialIds: matSet, modelIds: modelSet, templateIds: tplSet, terrainMaterialIds: tmSet, scriptIds: scriptSet, tilesetIds: tilesetSet },
         currentLibs(),
       );
       await saveSceneData(sceneId, { ...gameData, assetHashes, assetHashVersion: ASSET_HASH_VERSION, savedAt: now });
+      // The AUTHORED dimension, never the view. These used to be the same value, so persisting the rig
+      // mirror here was harmless — the moment the viewport toggle became view-only it would have meant
+      // that merely LOOKING at a 3D scene through the orthographic camera and hitting save rewrote the
+      // scene as 2D, and a publish would then discard its landscape.
+      const authored = dimensionOfScene(sceneId);
       await updateProjectMeta(m => ({
         ...m,
         // prefs.dimension is legacy (it was project-wide); the rig now belongs to the scene. Kept written
         // so rolling back to a build that reads it still lands on something sensible.
-        prefs: { dimension: dimensionRef.current, selectedNode },
+        prefs: { dimension: authored, selectedNode },
         scenes: m.scenes.map(s => s.id === sceneId
-          ? { ...s, updatedAt: now, refs, dimension: dimensionRef.current }
+          ? { ...s, updatedAt: now, refs, dimension: authored }
           : s),
       }));
       clearTabDirty(SCENE_TAB_ID);
@@ -3366,7 +3614,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (live && dirtyTabsRef.current[live.tabId]) live.apply();
 
     const ORDER: Record<TabKind, number> = {
-      material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0,
+      material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0, tileset: 0,
       model: 1, template: 2, scene: 3,
     };
     // Snapshot: propagation is suppressed and so cannot extend this set, but taking it up front also makes
@@ -3438,20 +3686,45 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * so they fall back to the old project-wide preference, then to 3D. The resolved value is persisted onto
    * the scene by the next save (see saveCurrentScene).
    */
+  /**
+   * Swap the camera rig the viewport looks through.
+   *
+   * The single writer of the view: the viewport's own toggle calls it directly, and everything that should
+   * make the view FOLLOW the scene (opening one, changing its authored type, booting) calls it too. It is
+   * never persisted — reloading always lands on the scene's own dimension.
+   */
+  const setViewDimension = (dimension: '2D' | '3D') => {
+    setViewDimensionState(dimension);
+    eventEmitter.current.emit('CHANGE_DIMENSION', dimension);
+  };
+
   const dimensionOfScene = (sceneId: string): '2D' | '3D' => {
     const meta = projectMetaRef.current;
     const scene = meta?.scenes.find(s => s.id === sceneId);
     return scene?.dimension ?? meta?.prefs?.dimension ?? '3D';
   };
 
-  const setSceneDimension = (sceneId: string, dimension: '2D' | '3D') => {
+  const setSceneDimension = async (sceneId: string, dimension: '2D' | '3D'): Promise<void> => {
+    if (dimensionOfScene(sceneId) === dimension) return;
+
+    // Warn when the scene still holds authoring the target dimension has no use for. Only checkable for
+    // the OPEN scene — a closed one's tree is a blob on disk — which is also the only one the user can be
+    // looking at while flipping the switch.
+    if (sceneId === openSceneIdRef.current) {
+      const scene = editorSceneRef.current;
+      const losing = dimension === '3D' ? 'tilemap' : 'landscape';
+      const count = losing === 'tilemap' ? scene.tilemaps.size : scene.landscapes.size;
+      if (count > 0 && !(await confirmDimensionSwitch(dimension, losing, count))) return;
+    }
+
     void updateProjectMeta(m => ({
       ...m,
       scenes: m.scenes.map(s => s.id === sceneId ? { ...s, dimension } : s),
     }));
-    // Swap the live rig only when it's the scene on screen; the CHANGE_DIMENSION handler mirrors the value
-    // into dimensionRef, and the scene tab is the only one whose dimension is its own.
-    if (sceneId === openSceneIdRef.current) eventEmitter.current.emit('CHANGE_DIMENSION', dimension);
+    // Changing what the scene IS also changes what you are looking through — but only for the scene on
+    // screen, and only as a consequence. The view can be flipped back on its own afterwards without
+    // touching this setting again.
+    if (sceneId === openSceneIdRef.current) setViewDimension(dimension);
     markTabDirty(SCENE_TAB_ID, 'scene-dimension');
   };
 
@@ -3554,8 +3827,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls — with
-    // the INCOMING scene's rig, not the outgoing one's, now that each scene carries its own.
-    eventEmitter.current.emit('CHANGE_DIMENSION', dimensionOfScene(sceneId));
+    // the INCOMING scene's rig, not the outgoing one's, now that each scene carries its own. This is also
+    // what makes the view follow the scene: a 3D scene always opens looking 3D, whatever you were last
+    // looking through.
+    setViewDimension(dimensionOfScene(sceneId));
     requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
     Logger.info(`Opened scene "${entry.name}"`, 'Editor');
     return true;
@@ -3682,7 +3957,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           eventEmitter.current.emit('SCENE_CHANGED');
           // Drive the initial camera dimension now that the scene is live (the open scene's own rig,
           // falling back to the legacy project-wide pref, else 3D).
-          eventEmitter.current.emit('CHANGE_DIMENSION', dimensionOfScene(openSceneIdRef.current));
+          setViewDimension(dimensionOfScene(openSceneIdRef.current));
 
           setLoadingProgress({ loaded: 6, total: 6, label: 'Ready' });
         } finally {
@@ -3751,8 +4026,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     eventEmitter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
       if (!instanceRef.current) return;
-      // Only the Main tab's dimension is persisted; template tabs render transiently in 3D.
-      if (activeTabKindRef.current === 'scene') dimensionRef.current = dimension;
+      // Only the Main tab's view is remembered; asset tabs render transiently in 3D and must not
+      // overwrite the rig the scene tab goes back to.
+      if (activeTabKindRef.current === 'scene') viewDimensionRef.current = dimension;
 
       // Wait for scene to be ready
       if (!instanceRef.current.scene) {
@@ -3769,13 +4045,39 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const cameraNode = instanceRef.current.scene.activeCamera;
       // Scene.activeCamera is undefined when no camera is active — nothing to reconfigure.
       if (!cameraNode) return;
+
+      // Remember where the OUTGOING rig was parked before touching anything, so the trip back lands where
+      // you left. Taken first (rather than only on a real switch) so the boot emit records the starting 3D
+      // pose too — otherwise the very first return from 2D would have nothing to restore.
+      //
+      // Scene tab only, and that guard is load-bearing: applyActiveTab installs the incoming tab's scene
+      // BEFORE it asks for a rig, so without it switching to an asset tab would snapshot that tab's own
+      // preview camera under the scene tab's key and then push the scene's pose onto it. Asset tabs are
+      // transient 3D previews that own their framing; leave their cameras alone.
+      let remembered: typeof viewPoseRef.current['2D'] | undefined;
+      if (activeTabKindRef.current === 'scene') {
+        const cam = cameraNode.camera;
+        viewPoseRef.current[previousViewRef.current] = {
+          position: [cameraNode.position[0], cameraNode.position[1], cameraNode.position[2]],
+          rotation: [cameraNode.rotation[0], cameraNode.rotation[1], cameraNode.rotation[2]],
+          ortho: cam.type === 'orthographic'
+            ? { top: cam.top, bottom: cam.bottom, left: cam.left, right: cam.right }
+            : undefined,
+        };
+        previousViewRef.current = dimension;
+        remembered = viewPoseRef.current[dimension];
+      }
+
       if (dimension === '2D') {
         cameraNode.camera.type = 'orthographic';
-        cameraNode.camera.top = 4;
-        cameraNode.camera.bottom = -4;
-        cameraNode.camera.left = -4;
-        cameraNode.camera.right = 4;
-        cameraNode.setZ(10).setRotation([0, 180, 0]);
+        // A remembered 2D pose brings its pan AND its zoom back; a first visit gets the default framing.
+        const o = remembered?.ortho;
+        cameraNode.camera.top = o?.top ?? 4;
+        cameraNode.camera.bottom = o?.bottom ?? -4;
+        cameraNode.camera.left = o?.left ?? -4;
+        cameraNode.camera.right = o?.right ?? 4;
+        if (remembered) cameraNode.setPosition(remembered.position).setRotation(remembered.rotation);
+        else cameraNode.setZ(10).setRotation([0, 180, 0]);
         cameraNode.onUpdate = (delta) => {
             const node = cameraNode;
             const mouse = InputManager.instance.mouse;
@@ -3792,8 +4094,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             }
             // Zoom with mouse wheel by scaling ortho extents
             if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
-              const step = -mouse.wheel.deltaY * 0.001; // wheel up -> zoom in
-              const factor = Math.max(0.1, 1 + step); // avoid inverting
+              // Wheel up (deltaY < 0) SHRINKS the ortho extents, i.e. shows less world, i.e. zooms in —
+              // matching the 3D rig's dolly below and every other wheel in the editor. The sign used to be
+              // negated here, which for an orthographic camera meant wheel-up grew the frustum and zoomed
+              // OUT, the opposite of both the 3D rig and this line's own comment.
+              const step = mouse.wheel.deltaY * 0.001;
+              const factor = Math.max(0.1, 1 + step); // avoid inverting the frustum on a fast scroll
               const cam = cameraNode.camera;
               cam.top *= factor;
               cam.bottom *= factor;
@@ -3825,6 +4131,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
       else {
         cameraNode.camera.type = 'perspective';
+        // Unlike 2D there is no default pose to fall back to — a first switch to 3D keeps whatever the
+        // scene set up. Only a remembered pose moves the camera.
+        if (remembered) cameraNode.setPosition(remembered.position).setRotation(remembered.rotation);
         cameraNode.onUpdate = (delta) => {
           const node = cameraNode;
           const mouse = InputManager.instance.mouse;
@@ -4232,10 +4541,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addModel, removeModel, updateModel,
     addScriptAsset, removeScriptAsset, updateScriptAsset,
     addAnimationField, removeAnimationField, updateAnimationField,
+    addTileset, removeTileset, updateTileset,
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
-    templates, materials, terrainMaterials, models, scriptAssets, animationFields, assetsLoaded, ...libraryActions,
-  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, assetsLoaded, libraryActions]);
+    templates, materials, terrainMaterials, models, scriptAssets, animationFields, tilesets, assetsLoaded, ...libraryActions,
+  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, tilesets, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
     setActiveTab, closeTab, reorderTabs, saveActiveTab, saveAll, markTabDirty, clearTabDirty, withoutDirty,
@@ -4248,14 +4558,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const projectActions = useStableActions({
     openScene, createScene, renameScene, deleteScene, duplicateScene, setMainScene,
-    setSceneDimension, resolveSceneConfirm, replaceProjectMeta,
+    setSceneDimension, resolveSceneConfirm, resolveDimensionConfirm, replaceProjectMeta,
   });
+  const currentDimension = sceneList.find(s => s.id === openSceneId)?.dimension
+    ?? projectMetaRef.current?.prefs?.dimension ?? '3D';
+
+  // Landscape and Tilemap share one slot in the mode selector, filled by whichever the open scene's
+  // dimension uses — so after a switch (or after opening a scene of the other kind) the current mode can
+  // name a tool with no button and no scene to act on. Snap back to plain scene editing rather than
+  // leaving the user in a mode whose panels are hidden and whose brush can never hit anything.
+  useEffect(() => {
+    const stale = currentDimension === '2D' ? 'landscape' : 'tilemap';
+    if (mainModeRef.current === stale) setMainMode('scene');
+  }, [currentDimension, openSceneId]);
+
   const projectValue = useMemo<ProjectContextValue>(() => ({
-    sceneList, mainSceneId, openSceneId, pendingSceneConfirm,
-    // Mirrors the main value: reads sceneList so it recomputes on change, falling back to the meta ref.
-    sceneDimension: sceneList.find(s => s.id === openSceneId)?.dimension ?? projectMetaRef.current?.prefs?.dimension ?? '3D',
+    sceneList, mainSceneId, openSceneId, pendingSceneConfirm, pendingDimensionConfirm,
+    sceneDimension: currentDimension,
     ...projectActions,
-  }), [sceneList, mainSceneId, openSceneId, pendingSceneConfirm, projectActions]);
+  }), [sceneList, mainSceneId, openSceneId, pendingSceneConfirm, pendingDimensionConfirm, currentDimension, projectActions]);
 
   const sessionActions = useStableActions({
     enterTemplateEditor,
@@ -4331,6 +4652,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       animationSourceScene,
       commitAnimationStateMachine,
       terrainBrush,
+      tilemapBrush,
+      isDirtySuppressed,
       loadingProgress,
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,
@@ -4373,6 +4696,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       editingAnimationFieldId,
       animationFieldTargetId,
       saveAnimationField,
+      tilesets,
+      addTileset,
+      removeTileset,
+      updateTileset,
+      enterTilesetEditor,
+      createTilesetFromImage,
+      editingTilesetId,
+      saveTileset,
       enterScriptEditor,
       setScriptTabSource,
       getScriptTabSource,
@@ -4419,8 +4750,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // Reads sceneList so the control re-renders on change; dimensionOfScene reads the meta ref.
       sceneDimension: sceneList.find(s => s.id === openSceneId)?.dimension ?? projectMetaRef.current?.prefs?.dimension ?? '3D',
       setSceneDimension,
+      viewDimension,
+      setViewDimension,
       pendingSceneConfirm,
       resolveSceneConfirm,
+      pendingDimensionConfirm,
+      resolveDimensionConfirm,
       markTabDirty,
       clearTabDirty,
       withoutDirty,

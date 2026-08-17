@@ -236,6 +236,21 @@ export class PhysicsSystem {
       }
       physicsStats.terrainMs = performance.now() - terrainStart;
 
+      // Tilemaps: the same contract as terrain — register the static colliders derived from the solid
+      // tiles, and keep their origin on the node. Driven from here rather than Scene.update for the same
+      // two reasons: this is where the world reference is, and the editor never steps physics, which is
+      // what keeps tile colliders out of authoring mode entirely.
+      const tilemapStart = performance.now();
+      let tilemapColliders = 0;
+      for (const node of this._scene.tilemaps) {
+        if (node.markForRemoval) { node.tilemap.dispose(this._world); continue; }
+        node.tilemap.setOrigin(node.worldPosition);
+        node.tilemap.ensureRegistered(this._world, this._defaultMaterial);
+        tilemapColliders += node.tilemap.colliderCount;
+      }
+      physicsStats.tilemapMs = performance.now() - tilemapStart;
+      physicsStats.tilemapColliders = tilemapColliders;
+
       physicsStats.bodies = this._world?.bodies.length ?? 0;
       physicsStats.contacts = this._world?.contacts.length ?? 0;
       physicsStats.frameMs = performance.now() - frameStart;

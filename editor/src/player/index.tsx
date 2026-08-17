@@ -4,7 +4,8 @@ import EventEmitter from 'events';
 import { CleoEngine, Scene, TextureManager, setGameHost, setScriptProvider, registerTemplates, Logger } from 'cleo';
 import { UIRuntime } from '../features/uiInspector/uiRuntime';
 import PlayerUI from './PlayerUI';
-import { unpackGameBin, inflateSceneGeometry, inflateTerrainData } from './unpack';
+import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
+import { PLAYER_CONTRACT } from '../features/publish/pack';
 
 // Standalone, data-driven runtime for a published Cleo game. It loads game.bin — the single binary
 // holding every scene, mesh and texture (built by the editor via buildMultiSceneGameData + pack.ts) —
@@ -53,6 +54,16 @@ async function boot(): Promise<void> {
   // texture payload stays a view onto this buffer and is only touched when a scene actually starts.
   const pack = unpackGameBin(await loadGameBuffer());
   const data = pack.manifest;
+
+  // The other half of the publish-time guard (see publishClient.loadPlayerTemplates): refuse a
+  // game.bin from a packer newer than this bundle rather than rendering it wrong in silence. Only a
+  // NEWER pack is fatal — an older one has no `contract` field at all and predates every field this
+  // player might miss, so it still loads. showError is used deliberately: Logger is off by now.
+  if (typeof data.contract === 'number' && data.contract > PLAYER_CONTRACT)
+    throw new Error(
+      `This game was published for game format v${data.contract}, but this player only understands ` +
+      `v${PLAYER_CONTRACT}. Rebuild the player ("npm run build:player") and publish again.`
+    );
 
   const engine = new CleoEngine({
     graphics: data?.config?.graphics ?? { clearColor: [0, 0, 0, 1] },
@@ -121,6 +132,7 @@ async function boot(): Promise<void> {
     // parse. Deferring it to here means an unvisited scene's meshes are never touched at all.
     inflateSceneGeometry(entry.scene, pack);
     await inflateTerrainData(entry.scene, pack);
+    await inflateTilemapData(entry.scene, pack);
     const scene = new Scene();
     // Scripts bind during parse, through the provider registered above — there is no separate attach pass
     // any more, because one could not reach a node that does not exist until a script instantiates it.

@@ -71,6 +71,15 @@ export class Camera {
     public set near(value: number) { if (value !== this._near) { this._near = value; this._projDirty = true; } }
     public get far(): number { return this._far; }
     public set far(value: number) { if (value !== this._far) { this._far = value; this._projDirty = true; } }
+    /**
+     * Viewport aspect (width / height), set by {@link resize}.
+     *
+     * Read-only on purpose: it is derived from the viewport, and a setter would let a caller desync it
+     * from the value the projection matrix actually uses. Exposed because anything that UNPROJECTS has
+     * to apply the same scaling `projectionMatrix` does — for an orthographic camera that means
+     * `left`/`right` scaled by this, and `top`/`bottom` not (see {@link Raycaster.screenToRay}).
+     */
+    public get ratio(): number { return this._ratio; }
     public get left(): number { return this._left; }
     public set left(value: number) { if (value !== this._left) { this._left = value; this._projDirty = true; } }
     public get right(): number { return this._right; }

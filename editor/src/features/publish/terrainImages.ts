@@ -60,3 +60,43 @@ export async function compressTerrainData(node: any): Promise<void> {
 
   for (const child of node.children ?? []) await compressTerrainData(child)
 }
+
+/**
+ * The same treatment for a tilemap's cell grids, in place.
+ *
+ * A chunk is 1024 Uint32 cells = 4 KB raw, 5.5 KB as base64, and a painted map has many of them — but the
+ * data is extremely compressible (long runs of the same tile, and every cell's high byte is zero), so this
+ * is where the ratio is best. Best-effort, exactly like the terrain path: a failure leaves the base64
+ * intact and `TilemapLayer.parse` reads either form.
+ */
+export async function compressTilemapData(node: any): Promise<void> {
+  if (!node || typeof node !== 'object') return
+
+  const tilemap = node.tilemap
+  if (tilemap) {
+    for (const layer of tilemap.layers ?? []) {
+      for (const chunk of layer?.chunks ?? []) {
+        try {
+          if (typeof chunk.data === 'string') {
+            const raw = base64ToBytes(chunk.data)
+            if (raw.byteLength >= MIN_COMPRESS_BYTES) {
+              chunk.dataBytes = await deflate(raw)
+              delete chunk.data
+            }
+          }
+          if (typeof chunk.tint === 'string') {
+            const raw = base64ToBytes(chunk.tint)
+            if (raw.byteLength >= MIN_COMPRESS_BYTES) {
+              chunk.tintBytes = await deflate(raw)
+              delete chunk.tint
+            }
+          }
+        } catch (e) {
+          console.warn('[publish] tilemap data compression failed, keeping base64', e)
+        }
+      }
+    }
+  }
+
+  for (const child of node.children ?? []) await compressTilemapData(child)
+}

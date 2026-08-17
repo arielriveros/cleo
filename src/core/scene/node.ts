@@ -19,12 +19,13 @@ import { CleoEngine, Shape } from "../../cleo";
 import { Logger } from "../logger";
 import { compileScript, createScriptImporter, resolveNodeScript, ScriptFactory, SCRIPT_HANDLERS } from "../scripting/scriptRuntime";
 import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
+import { Tilemap } from "../../tilemap/tilemap";
 import type { BVH } from "../bvh";
 import type { ChangeKind } from "../eventBus";
 import { clamp, dampAngleDeg, dampTime, dampVec3Time, eulerFromQuatDeg, wrapDegrees, RAD2DEG } from "../math";
 import { aimFromDirection, boomOffset, collisionRatio, shakeOffsets } from "../cameraRigMath";
 
-type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup' | 'cameraRig';
+type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup' | 'cameraRig';
 
 /**
  * Downward speed (units/s, gravity-relative) past which {@link Node.isFalling} reports true.
@@ -607,16 +608,29 @@ export class Node {
    * mid-game is initialized on attach rather than waiting for the next scene start.
    *
    * The child keeps its *local* transform, so its world position moves with the new parent.
+   *
+   * @param index Where among the existing children to insert. Appends when omitted or out of range.
+   *              Undo/redo passes it so restoring a deleted node puts it back where it was rather than
+   *              at the end of its siblings.
    */
-  public addChild(node: Node): void {
+  public addChild(node: Node, index?: number): void {
+    // Where it came from, captured before the detach so the structural event below can describe the whole
+    // move as one edit. A recorder that saw only "removed" then "added" would need two undos to put a
+    // re-parented node back, and one undo would leave it detached.
+    const from = node.parent
+      ? { parentId: node.parent.id, index: node.parent._children.indexOf(node) }
+      : null;
+
     // if the node already has a parent, remove it from the parent's children
     if (node.parent) {
+      // removeChild emits the detach itself (flagged `reparent-detach`); the emit that used to be
+      // duplicated here was byte-identical to it.
       node.parent.removeChild(node, true);
-      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node });
     }
 
     node.parent = this;
-    this._children.push(node);
+    if (index === undefined || index < 0 || index >= this._children.length) this._children.push(node);
+    else this._children.splice(index, 0, node);
 
     // Scene FIRST, then the handlers. onStart routinely calls this.after/this.every, and those go through
     // `this.scene` — running start() before the scene was attached made every timer scheduled from onStart
@@ -633,7 +647,12 @@ export class Node {
       node.runSpawnHandlers();
       node.start();
     }
-    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node });
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', {
+      kind: 'structure', node,
+      prop: from ? 'reparent' : 'add',
+      prev: from,
+      next: { parentId: this._id, index: this._children.length - 1 },
+    });
   }
 
   /**
@@ -654,10 +673,34 @@ export class Node {
       node.scene?.cancelTimers(node);
       try { node.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
     }
+    const index = this._children.indexOf(node);
     node.parent = null;
     node.scene = null;
-    this._children.splice(this._children.indexOf(node), 1);
-    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node });
+    this._children.splice(index, 1);
+    // The detach half of a re-parent is flagged so a recorder can ignore it: the addChild that follows
+    // describes the same move in full, and treating both as edits would need two undos to reverse one.
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', {
+      kind: 'structure', node,
+      prop: reparent ? 'reparent-detach' : 'remove',
+      prev: { parentId: this._id, index },
+      next: null,
+    });
+  }
+
+  /**
+   * Move an existing child to a different position among its siblings.
+   *
+   * Purely an ordering change — no detach, no handlers, and deliberately no `structure` event, because
+   * nothing about which nodes exist has changed. Used by undo to restore sibling order after a subtree
+   * has been re-parsed in place (parsing always appends).
+   */
+  public moveChildTo(node: Node, index: number): void {
+    const from = this._children.indexOf(node);
+    if (from < 0) return;
+    const to = Math.max(0, Math.min(index, this._children.length - 1));
+    if (from === to) return;
+    this._children.splice(from, 1);
+    this._children.splice(to, 0, node);
   }
 
   /**
@@ -818,7 +861,7 @@ export class Node {
       }
     }
 
-    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this });
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'spawn' });
   }
 
   /**
@@ -857,7 +900,7 @@ export class Node {
       n._spawnNotified = false;   // next spawn is a new life, and gets its own onSpawn
     });
 
-    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this });
+    CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'despawn' });
   }
 
   /**
@@ -886,7 +929,7 @@ export class Node {
     // Scene rebuilds its cached node lists only on a structural change, so a flag flipped without one leaves
     // a dormant node in scene.models, still rendering.
     if (slept)
-      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this });
+      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'sleep' });
   }
 
   /**
@@ -951,7 +994,7 @@ export class Node {
       // by the time start() runs, the play bootstrap has already rendered frames (setScene -> update, then a
       // deferred start()), so those lists exist and still hold this node. Without this it stays in
       // scene.models forever and keeps drawing, despawned in name only.
-      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this });
+      CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'sleep' });
       return;
     }
 
@@ -1477,7 +1520,7 @@ export class Node {
       this._body.setPosition(this._position);
 
     mat4.fromTranslation(this._translationMatrix, this._position);
-    this._notifyChange('transform');
+    this._notifyChange('transform', 'position');
   }
 
   /** Rotates by `value` DEGREES around local X (pitch). */
@@ -1529,7 +1572,7 @@ export class Node {
     quat.copy(this._quaternion, quaternion);
     eulerFromQuatDeg(this._euler, this._quaternion);
     mat4.fromQuat(this._rotationMatrix, this._quaternion);
-    this._notifyChange('transform');
+    this._notifyChange('transform', 'rotation');
     return this;
   }
   
@@ -1537,7 +1580,7 @@ export class Node {
     quat.fromEuler(this._quaternion, this._euler[0], this._euler[1], this._euler[2]);
     if (this._body) this._body.setQuaternion(this._quaternion);
     mat4.fromQuat(this._rotationMatrix, this._quaternion);
-    this._notifyChange('transform');
+    this._notifyChange('transform', 'rotation');
   }
 
   public setXScale(value: number): Node {
@@ -1592,7 +1635,7 @@ export class Node {
 
   private _updateScaleMatrix(): void {
     mat4.fromScaling(this._scaleMatrix, this._scale);
-    this._notifyChange('transform');
+    this._notifyChange('transform', 'scale');
   }
 
   /** This node's rigid body, or `null` if it has none. See {@link setBody}. */
@@ -3383,6 +3426,100 @@ export class LandscapeNode extends Node {
     }
 }
 
+/**
+ * Scene node for a 2D tilemap. Owns a {@link Tilemap} (cells, layers, embedded tilesets and the static
+ * colliders derived from them) positioned on the XY plane at this node's world position.
+ *
+ * Unlike LandscapeNode, the render chunks are NOT wrapped in child ModelNodes. Doing so would put every
+ * chunk into `scene.models`, where the deferred geometry pass would rasterize it as opaque lit geometry
+ * and the raycaster would pick it cell by cell. The tilemap owns its chunk meshes directly and the
+ * renderer reaches them through `scene.tilemaps`, which also means this node has no internal children to
+ * filter out when it serializes.
+ */
+export class TilemapNode extends Node {
+    private _tilemap: Tilemap;
+
+    constructor(name: string, tilemap: Tilemap, id: string = uuidv4()) {
+        super(name, 'tilemap', id);
+        this._tilemap = tilemap;
+        this._tilemap.setOrigin(this.worldPosition);
+    }
+
+    public get tilemap(): Tilemap { return this._tilemap; }
+
+    /** Swap in a different map while keeping this node and its transform. Frees the old one's resources. */
+    public setTilemap(tilemap: Tilemap): void {
+        this._tilemap.dispose();
+        this._tilemap = tilemap;
+        this._tilemap.setOrigin(this.worldPosition);
+    }
+
+    public update(delta: number, time: number): void {
+        super.update(delta, time);
+        // Keep the map's origin on the node so painting, picking and collision all follow it.
+        this._tilemap.setOrigin(this.worldPosition);
+        this._tilemap.update(delta, time);
+    }
+
+    /**
+     * World-space extent of everything painted.
+     *
+     * Syncs the map's origin first, because this is one of the two entry points that read the map in
+     * WORLD space outside the per-frame update — and the editor never runs that update (Scene.update only
+     * ticks nodes once the scene has started). The other is the tilemap brush's cell picking.
+     */
+    public getBoundingBox(): { min: vec3, max: vec3 } {
+        const p = this.worldPosition;
+        this._tilemap.setOrigin(p);
+        const b = this._tilemap.bounds();
+        if (!b) {
+            const e = Math.max(this._tilemap.grid.cellWidth, this._tilemap.grid.cellHeight);
+            return {
+                min: vec3.fromValues(p[0] - e, p[1] - e, p[2] - e),
+                max: vec3.fromValues(p[0] + e, p[1] + e, p[2] + e),
+            };
+        }
+        // cellToWorld is affine in (col,row) for square and isometric grids, so the four extreme cells
+        // bound the whole map; hex adds at most a half-cell parity wobble, covered by the padding below.
+        const hw = this._tilemap.grid.cellWidth / 2, hh = this._tilemap.grid.cellHeight / 2;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const [c, r] of [[b.minCol, b.minRow], [b.maxCol, b.minRow], [b.minCol, b.maxRow], [b.maxCol, b.maxRow]]) {
+            const [x, y] = this._tilemap.cellToWorld(c, r);
+            minX = Math.min(minX, x - hw); maxX = Math.max(maxX, x + hw);
+            minY = Math.min(minY, y - hh); maxY = Math.max(maxY, y + hh);
+        }
+        const depth = this._tilemap.collisionDepth;
+        return {
+            min: vec3.fromValues(minX, minY, p[2] - depth),
+            max: vec3.fromValues(maxX, maxY, p[2] + depth),
+        };
+    }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve) => {
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    name: this._name,
+                    id: this._id,
+                    type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children,
+                    variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
+                    tilemap: this._tilemap.serialize(),
+                });
+            });
+        });
+    }
+
+    public static parse(parent: Node, json: any) {
+        const node = new TilemapNode(json.name, Tilemap.deserialize(json.tilemap), json.id);
+        Node._commonParse(node, parent, json);
+    }
+}
+
 export class LightNode extends Node {
     private readonly _light: Light
     private readonly _type: 'directional' | 'point' | 'spotlight';
@@ -4772,6 +4909,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'sprite': SpriteNode.parse(parent, json); break;
     case 'animatedSprite': AnimatedSpriteNode.parse(parent, json); break;
     case 'landscape': LandscapeNode.parse(parent, json); break;
+    case 'tilemap': TilemapNode.parse(parent, json); break;
     case 'volumetricClouds': VolumetricCloudsNode.parse(parent, json); break;
     case 'skyAtmosphere': SkyAtmosphereNode.parse(parent, json); break;
     case 'lodGroup': LodGroupNode.parse(parent, json); break;

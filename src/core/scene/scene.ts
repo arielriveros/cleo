@@ -1,5 +1,5 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode, parseNodeJson } from "./node";
+import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, TilemapNode, VolumetricCloudsNode, SkyAtmosphereNode, parseNodeJson } from "./node";
 import { vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
@@ -39,6 +39,7 @@ export class Scene {
     private _models: Set<ModelNode>;
     private _sprites: Set<SpriteNode>;
     private _landscapes: Set<LandscapeNode>;
+    private _tilemaps: Set<TilemapNode> = new Set();
     private _lodGroups: Set<LodGroupNode> = new Set();
     private _cameraRigs: Set<CameraRigNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
@@ -84,6 +85,7 @@ export class Scene {
         this._models = new Set();
         this._sprites = new Set();
         this._landscapes = new Set();
+        this._tilemaps = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
         this._volumetricClouds = null;
@@ -404,6 +406,7 @@ export class Scene {
         this._models = new Set();
         this._sprites = new Set();
         this._landscapes = new Set();
+        this._tilemaps = new Set();
         this._lodGroups = new Set();
         this._cameraRigs = new Set();
         this._lightProbes = new Set();
@@ -421,6 +424,8 @@ export class Scene {
                 this._sprites.add(node);
             if (node instanceof LandscapeNode)
                 this._landscapes.add(node);
+            if (node instanceof TilemapNode)
+                this._tilemaps.add(node);
             if (node instanceof LodGroupNode)
                 this._lodGroups.add(node);
             if (node instanceof CameraRigNode)
@@ -617,6 +622,12 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._landscapes;
+    }
+
+    public get tilemaps(): Set<TilemapNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._tilemaps;
     }
 
     public get skybox(): SkyboxNode | null {

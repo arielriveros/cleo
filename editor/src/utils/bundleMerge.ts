@@ -9,6 +9,7 @@ import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { AnimationFieldAsset } from './animationFields'
+import type { TilesetAsset } from './tilesets'
 
 // Pure merge logic for importing a bundle alongside an existing project (the "Merge", not "Replace",
 // path). Any imported id that collides with a local one is re-minted, and every cross-reference to it —
@@ -25,6 +26,7 @@ export interface LocalState {
   modelIds: Set<string>
   scriptIds: Set<string>
   animationFieldIds: Set<string>
+  tilesetIds: Set<string>
   sceneIds: Set<string>
   sceneNames: Set<string>
   /** Local stored textures, id -> {size,mime}, for reuse-vs-remint decisions. */
@@ -40,6 +42,7 @@ export interface MergeResult {
   models: ModelAsset[]
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
+  tilesets: TilesetAsset[]
   /** New scene entries + their blobs (project bundles only). */
   scenes: { meta: SceneMeta; data: SceneAssetData }[]
   /** Imported textures to add (ids possibly re-minted); reused-identical textures are omitted. */
@@ -57,6 +60,7 @@ type Remaps = {
   model: Map<string, string>
   script: Map<string, string>
   afield: Map<string, string>
+  tileset: Map<string, string>
 }
 
 const sub = (m: Map<string, string>, v: any): any => (typeof v === 'string' && m.has(v) ? m.get(v)! : v)
@@ -85,6 +89,14 @@ function remapDeep(obj: any, r: Remaps): void {
     // An animation state's link to its blend-space asset. The state also carries an EMBEDDED copy of the
     // field, which needs no remapping — it is inline data, not a reference.
     if (key === 'fieldId') { obj[key] = sub(r.afield, val); continue }
+    // A tilemap layer's link to its tileset asset, and the id on the tileset copy the map embeds. Both
+    // must move together: the layer looks its tileset up by id in the map's own embedded table, so
+    // remapping one without the other silently leaves the layer with nothing to draw.
+    if (key === 'tilesetId') { obj[key] = sub(r.tileset, val); continue }
+    if (key === 'tilesets' && Array.isArray(val)) {
+      for (const ts of val) if (ts && typeof ts === 'object') { ts.id = sub(r.tileset, ts.id); remapDeep(ts, r) }
+      continue
+    }
     if (key === 'variables' && val && typeof val === 'object') {
       remapVariables(val, r)
       continue
@@ -133,7 +145,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }))
   // Textures carry ArrayBuffers (not JSON-cloneable that way) — keep the originals, remap ids separately.
-  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map() }
+  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), tileset: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
   const textures: BundleTexture[] = []
@@ -149,6 +161,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const m of data.libraries.models) if (local.modelIds.has(m.id)) r.model.set(m.id, cryptoRandomId())
   for (const s of data.libraries.scripts ?? []) if (local.scriptIds.has(s.id)) r.script.set(s.id, cryptoRandomId())
   for (const f of data.libraries.animationFields ?? []) if (local.animationFieldIds.has(f.id)) r.afield.set(f.id, cryptoRandomId())
+  for (const t of data.libraries.tilesets ?? []) if (local.tilesetIds.has(t.id)) r.tileset.set(t.id, cryptoRandomId())
 
   // 3) Apply the id re-mints to the asset records' own ids, then rewrite all references within them.
   const materials = data.libraries.materials.map(m => ({ ...m, id: sub(r.mat, m.id) }))
@@ -157,11 +170,17 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   const models = data.libraries.models.map(m => ({ ...m, id: sub(r.model, m.id) }))
   const scripts = (data.libraries.scripts ?? []).map(s => ({ ...s, id: sub(r.script, s.id) }))
   const animationFields = (data.libraries.animationFields ?? []).map(f => ({ ...f, id: sub(r.afield, f.id) }))
+  const tilesets = (data.libraries.tilesets ?? []).map(t => ({ ...t, id: sub(r.tileset, t.id) }))
   for (const m of materials) remapDeep(m, r)
   for (const m of terrainMaterials) remapDeep(m, r)
   for (const t of templates) remapDeep(t, r)
   for (const m of models) remapDeep(m, r)
   for (const f of animationFields) remapDeep(f, r) // its modelId follows the model library's re-mints
+  // A tileset's atlas follows the texture re-mints, through both textureId and the textureIds mirror.
+  for (const t of tilesets) {
+    remapDeep(t, r)
+    t.textureIds = [t.textureId]
+  }
 
   // 4) Scenes (project bundles): remap references, regenerate node ids, mint a fresh scene id + unique name.
   const takenNames = new Set(local.sceneNames)
@@ -199,6 +218,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
       : e.kind === 'model' ? r.model
       : e.kind === 'script' ? r.script
       : e.kind === 'animationField' ? r.afield
+      : e.kind === 'tileset' ? r.tileset
       : r.tex
     const assetId = sub(remap, e.assetId)
     let path = e.path
@@ -207,5 +227,5 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     vfsEntries.push({ ...e, path, assetId })
   }
 
-  return { materials, terrainMaterials, templates, models, scripts, animationFields, scenes, textures, vfsFolders, vfsEntries }
+  return { materials, terrainMaterials, templates, models, scripts, animationFields, tilesets, scenes, textures, vfsFolders, vfsEntries }
 }

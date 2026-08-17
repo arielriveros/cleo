@@ -1,4 +1,4 @@
-import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, VolumetricCloudsNode, SkyAtmosphereNode } from 'cleo'
+import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import ModelSlot from './ModelSlot'
@@ -13,6 +13,8 @@ import AnimatedSpriteEditor from './SpriteSheetEditor'
 import VolumetricCloudsEditor from './VolumetricCloudsEditor'
 import SkyAtmosphereEditor from './SkyAtmosphereEditor'
 import CameraRigEditor from './CameraRigEditor'
+import TilemapEditor from './TilemapEditor'
+import LandscapeEditor from './LandscapeEditor'
 import SceneSettings from './SceneSettings'
 import { isRootNode } from '../useSelectedNode'
 import { useCleoEngine } from '../../EngineContext'
@@ -51,6 +53,8 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'skybox' && <SkyboxEditor node={props.node as SkyboxNode} /> }
           { props.node.nodeType === 'camera' && <CameraEditor node={props.node as CameraNode} /> }
           { props.node.nodeType === 'cameraRig' && <CameraRigEditor node={props.node as CameraRigNode} /> }
+          { props.node.nodeType === 'tilemap' && <TilemapEditor node={props.node as TilemapNode} /> }
+          { props.node.nodeType === 'landscape' && <LandscapeEditor key={props.node.id} node={props.node as LandscapeNode} /> }
           { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }
         </fieldset>

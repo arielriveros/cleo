@@ -19,6 +19,10 @@ import {
   AnimatedSpriteNode,
   VolumetricCloudsNode,
   SkyAtmosphereNode,
+  TilemapNode,
+  Tilemap,
+  LandscapeNode,
+  Terrain,
   Scene,
 } from 'cleo'
 import type EventEmitter from 'events'
@@ -39,6 +43,8 @@ import SpriteIcon from '../../icons/static-sprite.png'
 import AnimatedSpriteIcon from '../../icons/animated-sprite.png'
 import CloudsIcon from '../../icons/clouds.png'
 import SkyAtmosphereIcon from '../../icons/sky-atmosphere.png'
+import TilemapIcon from '../../icons/tilemap.png'
+import LandscapeIcon from '../../icons/landscape.png'
 
 // The catalog of addable node types. It is data rather than a set of closures inside AddNew because the
 // same item can now be created from three places: the Add grid's click, a drop on the scene tree, and a
@@ -208,6 +214,24 @@ export const ADD_ITEMS: AddItem[] = [
   {
     id: 'volumetricClouds', label: 'Clouds', icon: CloudsIcon, category: 'environment', placeable: false,
     create: async () => new VolumetricCloudsNode('volumetric clouds'),
+  },
+  {
+    id: 'landscape', label: 'Landscape', icon: LandscapeIcon, category: 'environment', placeable: false,
+    // Not placeable, like the clouds and the sky: a terrain spans +/-size/2 around its own origin, so
+    // dropping one at an arbitrary raycast point (possibly mid-air) is worse than putting it at 0.
+    // These defaults are the ones the old "Create Terrain" button used.
+    create: async () => new LandscapeNode('landscape', new Terrain({ size: 200, resolution: 129, chunkQuads: 32 })),
+  },
+  {
+    id: 'tilemap', label: 'Tilemap', icon: TilemapIcon, category: 'sprites',
+    // One default layer, because a map with no layer has nothing to paint on and the layers panel would
+    // open empty. Unit cells: they line up with the 2D camera's default extents, and a tileset's pixel
+    // size is decoupled from world size anyway.
+    create: async () => {
+      const tilemap = new Tilemap({ kind: 'orthogonal', cellWidth: 1, cellHeight: 1 });
+      tilemap.addLayer({ name: 'Ground' });
+      return new TilemapNode('tilemap', tilemap);
+    },
   },
 ];
 

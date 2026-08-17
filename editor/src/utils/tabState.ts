@@ -12,8 +12,11 @@ import { LS_KEYS, lsKey } from './lsScope';
 // tabs pointing at assets another project has never heard of.
 const tabStateKey = () => lsKey(LS_KEYS.editorTabs);
 
-export type MainMode = 'scene' | 'landscape' | 'renderer';
-const MAIN_MODES: readonly MainMode[] = ['scene', 'landscape', 'renderer'];
+// 'landscape' and 'tilemap' are the two dimension-specific sculpting modes: the mode selector offers
+// whichever one matches the open scene's 2D/3D setting. Both are stored here, so a session restores into
+// the mode it left — and a mode missing from MAIN_MODES silently resets to 'scene' on every reload.
+export type MainMode = 'scene' | 'landscape' | 'tilemap' | 'renderer';
+const MAIN_MODES: readonly MainMode[] = ['scene', 'landscape', 'tilemap', 'renderer'];
 
 export type TabState = {
   version: 1;
@@ -37,6 +40,7 @@ const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   model: 'modelId',
   script: 'scriptId',
   animationField: 'animationFieldId',
+  tileset: 'tilesetId',
 };
 
 /** The asset a tab edits, or null for the scene tab and for unsaved "New Material"-style tabs. */

@@ -15,6 +15,14 @@ export interface PhysicsStats {
     writeBackMs: number;
     /** Landscape registration plus any heightfield rebuild that fired this frame. */
     terrainMs: number;
+    /** Tilemap registration plus any collider rebuild that fired this frame. */
+    tilemapMs: number;
+    /**
+     * Static bodies the tilemaps currently have in the world. Surfaced because the greedy merge's cost
+     * is shape-dependent: an open field of solid tiles collapses to one box, a checkerboard does not
+     * collapse at all, and that difference is invisible without a number to look at.
+     */
+    tilemapColliders: number;
     /** Total time in `raycastCamera` this frame, across every ray. */
     rayMs: number;
     /** Rays cast this frame (camera rigs probe 5 each). */
@@ -32,6 +40,8 @@ export const physicsStats: PhysicsStats = {
     stepMs: 0,
     writeBackMs: 0,
     terrainMs: 0,
+    tilemapMs: 0,
+    tilemapColliders: 0,
     rayMs: 0,
     rayCount: 0,
     bodies: 0,
@@ -51,6 +61,7 @@ export function resetPhysicsStats(): void {
     physicsStats.stepMs = 0;
     physicsStats.writeBackMs = 0;
     physicsStats.terrainMs = 0;
+    physicsStats.tilemapMs = 0;
     physicsStats.rayMs = 0;
     physicsStats.rayCount = 0;
 }

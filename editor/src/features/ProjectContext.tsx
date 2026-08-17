@@ -18,6 +18,7 @@ export type ProjectContextValue = Pick<EngineValue,
   | 'openScene' | 'createScene' | 'renameScene' | 'deleteScene' | 'duplicateScene' | 'setMainScene'
   | 'sceneDimension' | 'setSceneDimension'
   | 'pendingSceneConfirm' | 'resolveSceneConfirm'
+  | 'pendingDimensionConfirm' | 'resolveDimensionConfirm'
   | 'replaceProjectMeta'
 >;
 

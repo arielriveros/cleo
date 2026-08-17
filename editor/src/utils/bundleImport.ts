@@ -40,6 +40,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await idbSet(libKey('models', pid), bundle.libraries.models)
   await idbSet(libKey('scripts', pid), bundle.libraries.scripts ?? [])
   await idbSet(libKey('animationFields', pid), bundle.libraries.animationFields ?? [])
+  await idbSet(libKey('tilesets', pid), bundle.libraries.tilesets ?? [])
 
   if (isProject) {
     // Drop every existing scene blob, then write the bundle's. Scoped: an unscoped scan here would wipe
@@ -92,13 +93,14 @@ export async function applyBundleAsNewProject(bundle: BundleData, name?: string)
 
 /** Read the local state a merge needs to detect id/path/name collisions. */
 async function readLocalState(): Promise<LocalState> {
-  const [materials, terrainMaterials, templates, models, scripts, animationFields, vfs, meta, storedTex] = await Promise.all([
+  const [materials, terrainMaterials, templates, models, scripts, animationFields, tilesets, vfs, meta, storedTex] = await Promise.all([
     idbGet<any[]>(libKey('materials')),
     idbGet<any[]>(libKey('terrainMaterials')),
     idbGet<any[]>(libKey('templates')),
     idbGet<any[]>(libKey('models')),
     idbGet<any[]>(libKey('scripts')),
     idbGet<any[]>(libKey('animationFields')),
+    idbGet<any[]>(libKey('tilesets')),
     idbGet<VfsIndex>(vfsKey()),
     idbGet<ProjectMeta>(metaKey()),
     getAllTextures(),
@@ -112,6 +114,7 @@ async function readLocalState(): Promise<LocalState> {
     modelIds: new Set((models ?? []).map(m => m.id)),
     scriptIds: new Set((scripts ?? []).map(s => s.id)),
     animationFieldIds: new Set((animationFields ?? []).map(f => f.id)),
+    tilesetIds: new Set((tilesets ?? []).map(t => t.id)),
     sceneIds: new Set((meta?.scenes ?? []).map(s => s.id)),
     sceneNames: new Set((meta?.scenes ?? []).map(s => s.name)),
     textures,
@@ -138,6 +141,7 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
   await append(libKey('models'), plan.models)
   await append(libKey('scripts'), plan.scripts)
   await append(libKey('animationFields'), plan.animationFields)
+  await append(libKey('tilesets'), plan.tilesets)
 
   // Scenes (project bundles): write each blob, append its meta.
   if (plan.scenes.length) {

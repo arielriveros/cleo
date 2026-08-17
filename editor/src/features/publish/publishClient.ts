@@ -1,5 +1,6 @@
 import { Logger } from 'cleo';
 import { extractScripts, buildScriptsSource } from './extractScripts';
+import { PLAYER_CONTRACT } from './pack';
 import { runPublishJob } from '../../workers/workerClient';
 import type { PublishFiles, PlayerTemplates } from '../../workers/projectJobs';
 
@@ -27,17 +28,42 @@ export function isDesktop(): boolean {
   return !!getDesktopBridge();
 }
 
+const STALE_PLAYER_HINT =
+  'Run "npm run build:player" (repo root), then reload the editor.';
+
 // Load the prebuilt player templates (produced by `npm run build:player` into public/player/,
 // so they are served same-origin by both the dev server and the production editor build).
+//
+// The contract check is not paranoia. public/player/ is git-ignored and no build step depended on it,
+// so the bundle drifted a month behind the packer and every publish in that window shipped a flat
+// landscape and dead animation fields — with nothing to see at publish time and nothing in the
+// player's console. A stale bundle now stops the publish instead of poisoning it. See pack.ts
+// PLAYER_CONTRACT.
 async function loadPlayerTemplates(): Promise<PlayerTemplates> {
-  let htmlRes: Response, jsRes: Response;
+  let htmlRes: Response, jsRes: Response, buildRes: Response;
   try {
-    [htmlRes, jsRes] = await Promise.all([fetch('player/index.html'), fetch('player/game.js')]);
+    [htmlRes, jsRes, buildRes] = await Promise.all([
+      fetch('player/index.html'), fetch('player/game.js'), fetch('player/build.json'),
+    ]);
   } catch (e) {
-    throw new Error('Player bundle not reachable. Run "npm run build:player" in the editor first.');
+    throw new Error(`Player bundle not reachable. ${STALE_PLAYER_HINT}`);
   }
   if (!htmlRes.ok || !jsRes.ok)
-    throw new Error('Player bundle not found. Run "npm run build:player" in the editor first.');
+    throw new Error(`Player bundle not found. ${STALE_PLAYER_HINT}`);
+
+  // No build.json at all means a bundle built before the guard existed — which is exactly the
+  // month-stale case, so it is treated as a mismatch rather than waved through.
+  let built: number | undefined;
+  if (buildRes.ok) {
+    try { built = (await buildRes.json())?.contract; } catch { /* treat as unstamped */ }
+  }
+  if (built !== PLAYER_CONTRACT)
+    throw new Error(
+      `Player bundle is out of date: it was built for game format v${built ?? 1}, but this editor ` +
+      `produces v${PLAYER_CONTRACT}. Publishing now would ship a game missing features the packer ` +
+      `emits (terrain shape, animation fields). ${STALE_PLAYER_HINT}`
+    );
+
   return { indexHtml: await htmlRes.text(), gameJs: await jsRes.text() };
 }
 

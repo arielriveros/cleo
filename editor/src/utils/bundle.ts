@@ -7,6 +7,7 @@ import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { ScriptAsset } from './scripts'
 import type { AnimationFieldAsset } from './animationFields'
+import type { TilesetAsset } from './tilesets'
 
 // The portable project/asset-pack bundle format (a .zip). A "project" bundle carries everything needed to
 // reconstruct the editor state elsewhere — every scene, all asset libraries, the folder layout (VFS) and
@@ -40,6 +41,7 @@ export interface BundleLibraries {
   models: ModelAsset[]
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
+  tilesets: TilesetAsset[]
 }
 
 /** One texture payload as it crosses the worker boundary and lives inside the zip (bytes, not base64). */

@@ -13,12 +13,13 @@
     "editor": "cd editor && npm run start",
     "build:dev": "webpack --mode=development",
     "build:player": "cd editor && npm run build:player",
+    "build:player:only": "cd editor && npm run build:player:only",
     "editor:install": "cd editor && npm ci",
-    "editor:dev": "npm run build:dev && concurrently \"npm run watch\" \"npm run editor\"",
-    "editor:build": "cd editor && npm run build",
+    "editor:dev": "npm run build:dev && npm run build:player:only && concurrently \"npm run watch\" \"npm run editor\"",
+    "editor:build": "npm run build:player && cd editor && npm run build",
     "desktop:install": "cd desktop && npm install",
     "desktop:dev": "concurrently \"npm run watch\" \"npm run editor\" \"cd desktop && npm run dev\"",
-    "desktop:build": "npm run build && npm run build:editor && npm run build:player && cd desktop && npm run dist"
+    "desktop:build": "npm run build && npm run editor:build && cd desktop && npm run dist"
   },
   "author": "Ariel Riveros",
   "license": "ISC",

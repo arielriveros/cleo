@@ -201,8 +201,14 @@ export default function SceneInspector() {
       spawnOnStart: node.spawnOnStart,
       templateId,
       scriptId: getScriptIdOf(node),
+      // A landscape is a normal, selectable row now (positioned with the ordinary gizmo), but the render
+      // chunks it subdivides itself into are an implementation detail — the unit of frustum culling and
+      // LOD, not something anyone authors. They are hidden by their name prefix and MUST keep it: the
+      // publish pass strips every node whose name contains '__editor__' or '__debug__' (buildGameData),
+      // so renaming them to reuse those prefixes would delete the terrain from every shipped build.
       children: templateId ? [] : node.children
-        .filter((child: Node) => !(child.name.includes('__debug__') || child.name.includes('__editor__') || child.nodeType === 'landscape'))
+        .filter((child: Node) => !(child.name.includes('__debug__') || child.name.includes('__editor__')
+          || child.name.startsWith('__terrain_chunk__')))
         .map((child: Node) => generateNodeList(child))
     }
   }

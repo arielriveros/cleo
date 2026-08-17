@@ -49,11 +49,20 @@ export class Raycaster {
             rayDirection[2] = -1.0;
             vec3.normalize(rayDirection, rayDirection);
         } else {
-            // For orthographic camera
-            rayOrigin[0] = x * (camera.right - camera.left) / 2;
-            rayOrigin[1] = y * (camera.top - camera.bottom) / 2;
+            // Orthographic: parallel rays offset across the view plane, not fanned out from a point.
+            //
+            // The horizontal extents MUST go through the same aspect scaling the projection applies —
+            // Camera.projectionMatrix multiplies left/right by `ratio` and leaves top/bottom alone. Without
+            // it the picked X came out short by exactly the aspect factor: correct on the vertical
+            // centre-line and drifting further out toward each edge, which is what made tile painting in a
+            // 2D scene land away from the cursor.
+            const left = camera.left * camera.ratio;
+            const right = camera.right * camera.ratio;
+            // Interpolated across the frustum rather than centred on 0, so an asymmetric one picks right too.
+            rayOrigin[0] = left + ((x + 1) / 2) * (right - left);
+            rayOrigin[1] = camera.bottom + ((y + 1) / 2) * (camera.top - camera.bottom);
             rayOrigin[2] = 0;
-            
+
             rayDirection[0] = 0;
             rayDirection[1] = 0;
             rayDirection[2] = -1.0;
@@ -185,12 +194,15 @@ export class Raycaster {
         for (const node of nodes) {
             if (!node.visible) continue;
 
-            // Skip editor/debug helper nodes (but keep gizmos raycastable) and terrain: terrain is
-            // never a selectable object — it has its own analytic picker (Terrain.raycast).
+            // Skip editor/debug helper nodes (but keep gizmos raycastable), terrain and tilemaps. Both
+            // of the latter are picked analytically by their own subsystems rather than by ray/AABB —
+            // and a tilemap's box spans everything it has ever painted, so without this skip it would
+            // swallow every click in a 2D scene.
             if ((node.name.startsWith('__editor__') && !node.name.includes('gizmo')) ||
                 node.name.startsWith('__debug__') ||
                 node.name.startsWith('__terrain_chunk__') ||
-                node.nodeType === 'landscape') {
+                node.nodeType === 'landscape' ||
+                node.nodeType === 'tilemap') {
                 continue;
             }
 

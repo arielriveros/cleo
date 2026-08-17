@@ -77,15 +77,16 @@ export default function SceneSettings() {
               <span className='text-muted'>{meta.updatedAt ? new Date(meta.updatedAt).toLocaleString() : 'Never'}</span>
             </PropertyRow>
             <PropertyRow label='Type' divider={false}>
-              {/* The camera rig: 2D is an orthographic pan/zoom, 3D is free-fly. Per scene, so a 2D level
-                  and a 3D level in one project each open the way they were authored. */}
+              {/* What the scene IS, not what you are looking through: it decides whether the top bar offers
+                  Landscape or Tilemap, and which of the two a published build keeps. Per scene, so a 2D
+                  level and a 3D level can live in one project. */}
               <SegmentedControl<'2D' | '3D'>
                 size='sm'
                 value={sceneDimension}
-                onChange={(v) => setSceneDimension(meta.id, v)}
+                onChange={(v) => { void setSceneDimension(meta.id, v) }}
                 options={[
-                  { value: '3D', label: '3D', title: 'Free-fly camera' },
-                  { value: '2D', label: '2D', title: 'Orthographic pan/zoom' },
+                  { value: '3D', label: '3D', title: 'Authored with landscapes' },
+                  { value: '2D', label: '2D', title: 'Authored with tilemaps' },
                 ]}
               />
             </PropertyRow>

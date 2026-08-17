@@ -26,13 +26,36 @@ export type ChangeKind =
   | 'environment'
   | 'component';
 
+/** Where a node sat in the tree, as carried by a `structure` change's `prev`/`next`. */
+export interface NodePlacement {
+  parentId: string;
+  index: number;
+}
+
+/**
+ * What a `structure` change did.
+ *
+ * `reparent-detach` is the detach half of a re-parent and exists to be IGNORED by a recorder: the
+ * `reparent` event that follows describes the same move in full, and treating both as edits would take
+ * two undos to reverse one drag — with the intermediate state leaving the node attached to nothing.
+ */
+export type StructureOp = 'add' | 'remove' | 'reparent' | 'reparent-detach' | 'spawn' | 'despawn' | 'sleep';
+
 /**
  * Payload of the unified `SCENE_CHANGED` event: "something of kind `kind` changed on `node`".
  *
  * Kept a single flat discriminated shape on purpose: one listener can handle every mutation uniformly
- * (the editor's dirty bridge, and a future undo/redo `HistoryManager` — the single subscriber that
- * would record inverse operations). `prop`/`prev`/`next` are optional detail a property edit can
- * supply so that a panel knows exactly what to refresh and a history recorder can build the inverse.
+ * (the editor's dirty bridge, and the undo/redo `HistoryManager` in ./history). `prop`/`prev`/`next`
+ * are optional detail so a panel knows exactly what to refresh and the recorder can build an inverse.
+ *
+ * How much detail arrives varies by kind, and the recorder is built around that:
+ *   * `structure` carries `prop: StructureOp` plus `prev`/`next` as {@link NodePlacement} — enough for
+ *     an exact inverse.
+ *   * `variable` and `component` carry the property name and its old/new value.
+ *   * `transform` carries which of position/rotation/scale changed, but no values: capturing them would
+ *     mean shadowing every node's transform on the hot path that physics and scripts drive every frame.
+ *   * The rest are emitted from the editor's inspectors and carry at most `{ kind, node }`.
+ * Anything without an explicit inverse is undone from a subtree snapshot instead.
  */
 export interface SceneChange {
   kind: ChangeKind;

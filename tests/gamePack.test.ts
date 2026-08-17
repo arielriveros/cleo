@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { packGameBin, PACK_HEADER_BYTES } from '../editor/src/features/publish/pack';
+import { packGameBin, PACK_HEADER_BYTES, PLAYER_CONTRACT } from '../editor/src/features/publish/pack';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData } from '../editor/src/player/unpack';
 
 /**
@@ -57,6 +57,15 @@ describe('game.bin round-trip', () => {
     expect(manifest.entry).toBe('main');
     expect(manifest.scenes.main.name).toBe('Main');
     expect(manifest.config.render.exposure).toBe(1);
+  });
+
+  // The stamp publishing checks against public/player/build.json before it ships a bundle, and the
+  // player re-checks at boot. Without it a player built before a packer change renders the game wrong
+  // in silence — which is exactly how a month-stale bundle published flat terrain and dead animation
+  // fields. Not asserting a literal: the point is that the number travels, not what it currently is.
+  it('stamps the player contract into the manifest', () => {
+    const { buffer } = packGameBin(gameWith([model(cube())]));
+    expect(unpackGameBin(buffer).manifest.contract).toBe(PLAYER_CONTRACT);
   });
 
   it('replaces inline geometry with a ref and puts it back on inflate', () => {

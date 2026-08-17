@@ -1,5 +1,29 @@
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const path = require("path");
+const webpack = require("webpack");
+const { contract } = require("./src/features/publish/playerContract.json");
+
+// Stamps public/player/build.json with the contract this bundle was built against, so publishing can
+// tell a fresh player from a stale one. Emitted through webpack rather than written by a side script
+// because `clean: true` below wipes the output directory on every build.
+//
+// Nothing forces a rebuild of this bundle — it is git-ignored, and `editor:dev` used to skip it — so
+// it once drifted a month behind the packer and quietly published games with flat terrain and dead
+// blend spaces. build.json is what makes that state loud instead of silent. See pack.ts
+// PLAYER_CONTRACT.
+class EmitPlayerBuildInfo {
+  apply(compiler) {
+    compiler.hooks.thisCompilation.tap("EmitPlayerBuildInfo", (compilation) => {
+      compilation.hooks.processAssets.tap(
+        { name: "EmitPlayerBuildInfo", stage: compilation.constructor.PROCESS_ASSETS_STAGE_ADDITIONAL },
+        () => {
+          const info = JSON.stringify({ contract, builtAt: new Date().toISOString() }, null, 2);
+          compilation.emitAsset("build.json", new webpack.sources.RawSource(info));
+        }
+      );
+    });
+  }
+}
 
 // Builds the standalone game player (engine + runtime) into editor/public/player/.
 // Output: index.html (CSS inlined) + game.js. These are the static, game-independent files
@@ -27,6 +51,7 @@ module.exports = {
       filename: "index.html",
       inject: "body",
     }),
+    new EmitPlayerBuildInfo(),
   ],
   resolve: {
     modules: [__dirname, "src", "node_modules"],

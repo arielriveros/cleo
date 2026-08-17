@@ -4,6 +4,8 @@ import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from
 import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig } from './models'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
+
+import { toRuntimeTileset } from './tilesets'
 import { getScriptIdOf, seedScriptFields, unlinkScript } from './scripts'
 import { hashAsset, assetHashKey, AssetLibs, hashesComparable } from './assetHash'
 import { captureAnimationState, restoreAnimationState, applyIkRig } from './placedAnimation'
@@ -97,7 +99,7 @@ export function resyncScene(
   // next save re-record hashes in the current format. (See hashesComparable for the legacy-blob case.)
   const comparable = hashesComparable(savedHashes, savedHashVersion)
 
-  const changedSince = (kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script', id: string, current: string): boolean =>
+  const changedSince = (kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script' | 'tileset', id: string, current: string): boolean =>
     comparable ? (!savedHashes || savedHashes[assetHashKey(kind, id)] !== current) : false
 
   const materialById = new Map(libs.materials.map(m => [m.id, m]))
@@ -105,6 +107,7 @@ export function resyncScene(
   const templateById = new Map(libs.templates.map(t => [t.id, t]))
   const terrainMatById = new Map(libs.terrainMaterials.map(t => [t.id, t]))
   const scriptById = new Map(libs.scripts.map(s => [s.id, s]))
+  const tilesetById = new Map((libs.tilesets ?? []).map(t => [t.id, t]))
 
   // Template/mesh instances are rebuilt from their stored subtree, so they must run BEFORE the material and
   // script passes: a subtree re-instantiated afterwards would never be visited by them and would keep
@@ -214,6 +217,24 @@ export function resyncScene(
       if (changedSince('terrainMaterial', layerMatId, hashAsset(asset))) {
         // skipAutoGenerate: keep scattered foliage instances, only swap prototypes/rules.
         applyTerrainMaterialToLayer(terrain, i, asset, { skipAutoGenerate: true })
+        changed = true
+      }
+    }
+  }
+
+  // --- Tilemap layers: refresh the embedded tileset copy each layer draws from ---
+  // The cells are the user's work and are never touched; only the tileset the layer resolves against is
+  // re-read. A layer whose tileset was deleted while the scene was closed is unlinked rather than left
+  // pointing at nothing, so it reads as broken (draws nothing) instead of drawing stale art.
+  for (const tn of Array.from(scene.tilemaps) as any[]) {
+    const tilemap = tn.tilemap
+    for (const layer of tilemap.layers) {
+      const id = layer.cfg.tilesetId
+      if (!id) continue
+      const asset = tilesetById.get(id)
+      if (!asset) { layer.cfg.tilesetId = null; layer.markAllMeshesDirty(); changed = true; continue }
+      if (changedSince('tileset', id, hashAsset(asset))) {
+        tilemap.registerTileset(toRuntimeTileset(asset))
         changed = true
       }
     }

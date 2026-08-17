@@ -7,12 +7,14 @@ export { registerTemplates, clearTemplates, getTemplate, templateNames } from ".
 export type { NodeTemplate } from "./core/scene/templates";
 export { parseNodeJson } from "./core/scene/node";
 export { cloneNodeJson, collectNodeIds, remapNodeRefs, regenerateNodeIds } from "./core/scene/nodeJson";
-export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, CameraRigNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, LodGroupNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
+export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, CameraRigNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, TilemapNode, LodGroupNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
 export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions, FollowSpace, AimMode } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { TypedEmitter, engineEventBus } from "./core/eventBus";
-export type { EngineEventMap, SceneChange, ChangeKind } from "./core/eventBus";
+export type { EngineEventMap, SceneChange, ChangeKind, StructureOp, NodePlacement } from "./core/eventBus";
+export { HistoryManager } from "./core/history";
+export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
 export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
@@ -96,6 +98,23 @@ export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES } from "./terrain/foliag
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
 export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS } from "./terrain/foliageColliders";
 export type { FoliageColliderSettings } from "./terrain/foliageColliders";
+export { Tilemap, DEFAULT_FILL_LIMIT } from "./tilemap/tilemap";
+export type { TileEdit, TileOrientation } from "./tilemap/tilemap";
+export { TilemapLayer, defaultLayerConfig } from "./tilemap/tilemapLayer";
+export type { TilemapLayerConfig, LayerBounds } from "./tilemap/tilemapLayer";
+export { Tileset } from "./tilemap/tileset";
+export type { TilesetConfig, TileMeta, TileAnimation, TerrainSet, VariantSet, WangKind } from "./tilemap/tileset";
+export {
+    cellToWorld, worldToCell, cellCorners, cellSortY, neighbours, neighbourCount, normalizeGrid,
+} from "./tilemap/cellMath";
+export type { GridSpec, GridKind, HexOrientation, HexOffset } from "./tilemap/cellMath";
+export {
+    CHUNK_SIZE, CELL_EMPTY, packCell, cellTile, cellFlags, cellFlipX, cellFlipY, cellRot90, withTile, chunkKey, chunkCoord,
+} from "./tilemap/chunk";
+export type { TileChunk } from "./tilemap/chunk";
+export { autoTileMask, resolveAutoTile, pickWeightedVariant, cellNoise } from "./tilemap/autotile";
+export { greedyMerge } from "./tilemap/tilemapCollision";
+export type { SolidBox } from "./tilemap/tilemapCollision";
 export { Raycaster } from "./core/raycaster";
 export type { Ray, RaycastHit } from "./core/raycaster";
 export { BVH, rayTriangleIntersection } from "./core/bvh";

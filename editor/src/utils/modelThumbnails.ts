@@ -6,6 +6,7 @@ import type { MaterialAsset } from './materials';
 import { ModelAsset } from './models';
 import { parseByType, regenerateIds } from './nodeSubtree';
 import { TerrainMaterialAsset, parseTerrainMaterialAsset } from './terrainMaterials';
+import { awaitTexturesReady } from './textureReady';
 
 const THUMB_SIZE = 256;
 
@@ -14,28 +15,6 @@ export function materialTextureIds(material: Material): string[] {
   const textures = (material.serialize() as any)?.textures;
   if (!textures || typeof textures !== 'object') return [];
   return Object.values(textures).filter((v): v is string => typeof v === 'string' && !!v);
-}
-
-/**
- * Wait until every referenced texture has finished decoding. TextureManager loads base64/file images
- * asynchronously (Texture.data is null until the image loads), so screenshotting too early captures an
- * untextured mesh. Polls the referenced textures with a hard timeout, then yields one frame so the GPU
- * upload lands before the render.
- */
-async function awaitTexturesReady(ids: string[], timeoutMs = 10000): Promise<void> {
-  const tm = TextureManager.Instance;
-  const ready = () => ids.every(id => {
-    const tex = tm.getTexture(id);
-    if (!tex) return true; // unknown id — nothing to wait for
-    const data: any = (tex as any).data;
-    if (!data) return false; // still loading (image not attached yet)
-    if (data instanceof HTMLImageElement) return data.complete && data.naturalWidth > 0;
-    return true; // data-backed texture (no image to decode)
-  });
-  const start = performance.now();
-  while (!ready() && performance.now() - start < timeoutMs)
-    await new Promise<void>(r => setTimeout(r, 50));
-  await new Promise<void>(r => requestAnimationFrame(() => r()));
 }
 
 /**
