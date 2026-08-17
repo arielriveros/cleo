@@ -33,7 +33,8 @@ import { InputManager, Logger, Node } from 'cleo'
 export default class ThirdPersonPlayableNode extends Node {
   /**
    * Animator input (Field X): the travel direction relative to the way the BODY is facing, in DEGREES.
-   * 0 = ahead (W), +90 = strafe right (D), -90 = strafe left (A), ±180 = back (S). Includes the body's
+   * 0 = ahead (W), **-90 = strafe right (D), +90 = strafe left (A)**, ±180 = back (S) — counter-clockwise,
+   * so it agrees exactly with the engine's own `planarAngle` and a field can bind to either. Includes the body's
    * catch-up offset while it is still turning to the camera, so the blend shows the right strafe even
    * mid-turn. Smoothed (see `directionSmoothing`) so the field probe glides rather than snapping.
    */
@@ -115,14 +116,19 @@ export default class ThirdPersonPlayableNode extends Node {
     const worldAim = pivot ? this._pivotYaw(pivot) : bodyYaw
     const yawRad = worldAim * Math.PI / 180
     const forward = [Math.sin(yawRad), 0, Math.cos(yawRad)]
-    const right = [Math.cos(yawRad), 0, -Math.sin(yawRad)]
+    // The character's RIGHT is `forward x up`, which is -X at yaw 0 — NOT +X. This used to hold +X under the
+    // name `right`, with the D/A keys negated to cancel it out. Movement came out correct, but `moveDir`
+    // below was computed from the axis rather than from the travel direction, so it reported the mirror image
+    // of where the character was actually going — and any blend space bound to the engine's own `planarAngle`
+    // instead played the opposite strafe.
+    const right = [-Math.cos(yawRad), 0, Math.sin(yawRad)]
 
     let axisForward = 0
     let axisRight = 0
     if (input.isKeyPressed('KeyW')) axisForward += 1
     if (input.isKeyPressed('KeyS')) axisForward -= 1
-    if (input.isKeyPressed('KeyD')) axisRight -= 1 // right is cross(forward, up), which points -X at yaw 0
-    if (input.isKeyPressed('KeyA')) axisRight += 1
+    if (input.isKeyPressed('KeyD')) axisRight += 1
+    if (input.isKeyPressed('KeyA')) axisRight -= 1
 
     const moving = axisForward !== 0 || axisRight !== 0
     const v = this.velocity
@@ -140,8 +146,13 @@ export default class ThirdPersonPlayableNode extends Node {
     this.turnRequest = 0
 
     // Strafe angle for the field: intent relative to the body's CURRENT facing (which may still be catching
-    // up to the aim). atan2(-axisRight, axisForward) is the intent relative to the aim; add the aim→body
+    // up to the aim). `atan2(-axisRight, axisForward)` is the intent relative to the aim; add the aim→body
     // offset to make it relative to the body. Smoothed so the probe glides between strafes.
+    //
+    // NEGATED because angles here are counter-clockwise, matching the engine's yaw (`atan2(x, z)`): moving
+    // RIGHT is a clockwise offset from forward and so reads NEGATIVE. This now agrees exactly with the
+    // built-in `planarAngle`, which measures the same thing from the body's actual travel — so a field can be
+    // bound to either without its strafes mirroring. Verify with: W → 0, D → -90, A → +90, S → 180.
     const intent = Math.atan2(-axisRight, axisForward) * 180 / Math.PI
     const target = this._shortestAngle(intent + this._shortestAngle(worldAim - bodyYaw))
     const a = this.directionSmoothing > 0 ? 1 - Math.exp(-delta / this.directionSmoothing) : 1
@@ -190,7 +201,22 @@ export default class ThirdPersonPlayableNode extends Node {
       if (Math.abs(diff) < this.turnThreshold) return
       this._turning = true
       const magnitude180 = Math.abs(diff) >= 135
-      const side = diff > 0 ? 1 : -1 // +yaw turns toward +X, i.e. to the character's right
+      // A POSITIVE diff needs a LEFT turn, so it asks for the left clip (a negative turnRequest).
+      //
+      // Work it through, because the intuition goes the other way: forward at yaw θ is `(sin θ, 0, cos θ)`,
+      // so raising θ swings forward from +Z toward +X — and the character's right is `forward x up` = -X.
+      // +X is therefore its LEFT, and `diff = aim - body > 0` means "increase yaw", i.e. turn left.
+      //
+      // Getting this backwards does not merely play the wrong clip: the turn clip's root motion then rotates
+      // the body AWAY from the camera, so `diff` grows instead of shrinking and the `|diff| < 10` release
+      // below never fires. The body keeps being driven round while the root motion's translation feeds
+      // planarSpeed, which trips the Idle->Locomotion gate, which cancels the turn, which lets it start
+      // again — a state ping-pong on one side of centre only.
+      //
+      // Note the sign here is the OPPOSITE of `moveDir`'s. That is deliberate: `moveDir` is an ANGLE and
+      // follows the engine's counter-clockwise convention (right is -90), while `turnRequest` is a clip
+      // SELECTOR whose contract, set by the README, is "+1/+2 right, -1/-2 left".
+      const side = diff > 0 ? -1 : 1
       this.turnRequest = side * (magnitude180 ? 2 : 1)
     } else if (Math.abs(diff) < 10) {
       // The root motion has brought the body within a few degrees of the aim — end the turn.

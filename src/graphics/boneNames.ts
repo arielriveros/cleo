@@ -90,13 +90,27 @@ const SIDE_TOKENS: { token: string; side: 'L' | 'R' }[] = [
     { token: 'l', side: 'L' }, { token: 'r', side: 'R' },
 ];
 
-/** Strip a leading or trailing side token, returning the core and the side (or null). */
-function splitSide(norm: string): { core: string; side: 'L' | 'R' | null } {
+/**
+ * Every way `norm` could be read as a sided name, in order of preference.
+ *
+ * ALL of them, rather than the first — which is the whole point. A single-letter side marker is ambiguous
+ * with the first letter of the bone's own name, and committing to the first reading loses real bones: `legl`
+ * ("leg" + trailing L) starts with `l`, so a prefix-first split eats it and asks the table for `egl`. That
+ * silently dropped `leg.L`, `leg.R`, `lowerleg.*`, `leglower.*`, `legupper.*`, `ring1.R` and `little1.L` —
+ * the standard Blender and Unreal leg naming, in a function whose entire job is recognizing legs.
+ *
+ * The caller resolves the ambiguity by asking which reading names a bone it knows.
+ */
+function sideCandidates(norm: string): { core: string; side: 'L' | 'R' }[] {
+    const out: { core: string; side: 'L' | 'R' }[] = [];
     for (const { token, side } of SIDE_TOKENS) {
-        if (norm.startsWith(token) && norm.length > token.length) return { core: norm.slice(token.length), side };
-        if (norm.endsWith(token) && norm.length > token.length) return { core: norm.slice(0, -token.length), side };
+        if (norm.length <= token.length) continue;
+        // Trailing first: `LeftLeg` is unambiguous either way, but `legl` is only correct read as a suffix,
+        // and a suffix marker is much the more common convention.
+        if (norm.endsWith(token)) out.push({ core: norm.slice(0, -token.length), side });
+        if (norm.startsWith(token)) out.push({ core: norm.slice(token.length), side });
     }
-    return { core: norm, side: null };
+    return out;
 }
 
 // Reverse lookup: normalized synonym -> slot, built once.
@@ -122,13 +136,12 @@ export function humanoidSlotOf(name: string): string | null {
     const center = CENTER_LOOKUP.get(norm);
     if (center) return center;
 
-    const { core, side } = splitSide(norm);
-    // A sided bone needs a side; without one it is not one of the paired limb bones.
-    if (side === null) {
-        // Some exporters leave the finger/limb name unsided on a centre-ish token; nothing to do here.
-        return null;
+    // A sided bone needs a side; without one it is not one of the paired limb bones. Each candidate reading
+    // is tried against the table and the first one that names a bone wins — so an `l` that is really part of
+    // the bone's name simply fails to resolve and the next reading gets its turn.
+    for (const { core, side } of sideCandidates(norm)) {
+        const slot = SIDED_LOOKUP.get(core);
+        if (slot) return `${slot}.${side}`;
     }
-    const slot = SIDED_LOOKUP.get(core);
-    if (!slot) return null;
-    return `${slot}.${side}`;
+    return null;
 }

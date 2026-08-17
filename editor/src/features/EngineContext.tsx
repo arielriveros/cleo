@@ -30,7 +30,7 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { AnimationFieldAsset, buildAnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { groupImportFiles } from "../utils/importGrouping";
@@ -116,7 +116,8 @@ import {
   deleteSceneData, migrateLegacyProject, createFreshProjectMeta,
 } from "../utils/sceneStorage";
 import { resyncScene } from "../utils/sceneResync";
-import { buildAssetHashes, AssetLibs } from "../utils/assetHash";
+import { captureAnimationState, restoreAnimationState } from "../utils/placedAnimation";
+import { buildAssetHashes, AssetLibs, ASSET_HASH_VERSION } from "../utils/assetHash";
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
@@ -512,6 +513,10 @@ const EngineContext = createContext<{
   // Animation import (into the Animation Editor's model)
   importAnimationFiles: (files: File[]) => Promise<void>;
   importSkeletonNames: (files: File[]) => Promise<void>;
+  /** Persist the IK rig for the model open in the Animation Editor, to the asset and every instance. */
+  commitIkRig: (rig: any | null) => void;
+  /** The IK rig currently on the Animation Editor's model, or null. */
+  currentIkRig: () => any | null;
   renameAnimationClip: (oldName: string, newName: string) => string;
   removeAnimationClip: (name: string) => void;
   setClipRootMotion: (name: string, on: boolean) => void;
@@ -653,6 +658,8 @@ const EngineContext = createContext<{
     resolveModelImport: () => {},
     importAnimationFiles: async () => {},
     importSkeletonNames: async () => {},
+    commitIkRig: () => {},
+    currentIkRig: () => null,
     renameAnimationClip: (o) => o,
     removeAnimationClip: () => {},
     setClipRootMotion: () => {},
@@ -1411,6 +1418,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // ASSET, which knows nothing about how this particular placement was configured.
         const spawnOnStart = inst.spawnOnStart;
         const wasSelected = inst.id === selectedNode;
+        // Animation state, restored only where the TEMPLATE has none of its own (see restoreAnimationState).
+        // The asymmetry matters here specifically: this runs on "Save Template", so a machine edited inside the
+        // template must reach its instances — but a template that carries no machine must not wipe one the
+        // instance was configured with directly.
+        const animation = captureAnimationState(inst as any);
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
         // Detach synchronously: Node.remove() only marks for removal, and the deferred sweep calls
@@ -1422,6 +1434,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (newNode) {
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
           newNode.spawnOnStart = spawnOnStart;
+          restoreAnimationState(newNode as any, animation);
         }
         if (wasSelected) reselectId = newId;
         count++;
@@ -1692,6 +1705,51 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-skeleton');
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     Logger.info(`Added bone names to ${matched} joints — animation import now matches by name. Save the project to keep them.`, 'Editor');
+  };
+
+  /**
+   * Persist the IK rig for the model being edited in the Animation Editor.
+   *
+   * Takes the same route bone names do, and for the same reason: a rig is joint indices into the SKELETON, so
+   * it belongs to the model asset rather than to whichever placement happened to be open. Writing only to the
+   * open node would mean re-assigning both legs for every copy of the character in the project.
+   *
+   * Order matters — the preview clone first (so the viewport updates this frame), then the source node, then
+   * the asset, then every other live instance. `Skin` is mutable and needs no GPU rebuild, exactly as
+   * `nodeNames` does, so nothing is re-instantiated.
+   */
+  const commitIkRig = (rig: any | null) => {
+    const rt = tabRuntimeRef.current.get(activeTabId);
+    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    const applyTo = (n: Node | null | undefined) => {
+      if (n instanceof ModelNode && n.model instanceof AnimatedModel && n.model.skin) {
+        n.model.skin.ikRig = rig ?? undefined;
+      }
+    };
+    applyTo(cloneNode);
+
+    const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
+    applyTo(src);
+
+    const link = animationSourceAsset(src);
+    if (link) {
+      updateModel(link.id, assetWithIkRig(link.asset, rig));
+      propagateModelClips(link.id, m => { if (m.skin) m.skin.ikRig = rig ?? undefined; }, src);
+    }
+
+    // No asset link means a hand-built skinned node: the edit stays local to it, which is the pre-existing
+    // behaviour for every other skeleton edit.
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-ik-rig');
+    eventEmitter.current.emit('ANIM_IK_CHANGED');
+  };
+
+  /** The IK rig currently on the Animation Editor's model, or null. */
+  const currentIkRig = (): any | null => {
+    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) {
+      return cloneNode.model.skin?.ikRig ?? null;
+    }
+    return null;
   };
 
   // Rename an animation clip on the Animation Editor's model (preview clone + source node so it persists).
@@ -2089,6 +2147,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // Per-instance node state the rebuild would otherwise drop — the subtree is reconstructed from the
         // ASSET, which knows nothing about how this particular placement was configured.
         const spawnOnStart = inst.spawnOnStart;
+        // The animation state machine is authored onto the PLACED node and never stored in the asset, so a
+        // rebuild would replace a configured character with a bare one. Same reasoning as spawnOnStart above.
+        const animation = captureAnimationState(inst);
         const wasSelected = inst.id === selectedNode;
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
@@ -2099,6 +2160,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (newNode) {
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
           newNode.spawnOnStart = spawnOnStart;
+          restoreAnimationState(newNode, animation);
         }
         if (wasSelected) reselectId = newId;
         count++;
@@ -2983,7 +3045,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         { materialIds: matSet, modelIds: modelSet, templateIds: tplSet, terrainMaterialIds: tmSet, scriptIds: scriptSet },
         currentLibs(),
       );
-      await saveSceneData(sceneId, { ...gameData, assetHashes, savedAt: now });
+      await saveSceneData(sceneId, { ...gameData, assetHashes, assetHashVersion: ASSET_HASH_VERSION, savedAt: now });
       await updateProjectMeta(m => ({
         ...m,
         // prefs.dimension is legacy (it was project-wide); the rig now belongs to the scene. Kept written
@@ -3291,7 +3353,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Cross-scene propagation: re-resolve the freshly-parsed scene's asset links against the current
     // libraries, so edits/deletes made to assets while this scene was closed take effect on open. Gated
     // by the hashes captured at the scene's last save (data.assetHashes) — unchanged assets are skipped.
-    resyncScene(scene, engineMaps(), currentLibs(), data.assetHashes);
+    resyncScene(scene, engineMaps(), currentLibs(), data.assetHashes, data.assetHashVersion);
     showBindPoseForSkinnedModels(scene);
 
     await updateProjectMeta(m => ({ ...m, openSceneId: sceneId }));
@@ -3772,7 +3834,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     extractNodeState(clone.scene, maps);
     const tmp = new Scene();
     tmp.parse({ scene: clone.scene, textures: [] }, true);
-    resyncScene(tmp, maps, currentLibs(), data.assetHashes);
+    resyncScene(tmp, maps, currentLibs(), data.assetHashes, data.assetHashVersion);
     const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, ui: clone.ui ?? { version: 1, elements: [] }, scriptAssets: scriptAssetsRef.current, templates: templatesRef.current, materials: materialsRef.current, useCache: true });
     const scene = new Scene();
     registerTemplates(gd.templates);
@@ -3959,7 +4021,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterMaterialEditor, createMaterialForNode, setActiveMaterialName,
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
     enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply,
-    importAnimationFiles, importSkeletonNames, renameAnimationClip, removeAnimationClip, resolveAnimationImport,
+    importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport,
     enterModelEditor, setActiveModelName, addModelLodFromAsset, removeModelLod,
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
     enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource,
@@ -4094,6 +4156,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       resolveModelImport,
       importAnimationFiles,
       importSkeletonNames,
+      commitIkRig,
+      currentIkRig,
       renameAnimationClip,
       removeAnimationClip,
       setClipRootMotion,

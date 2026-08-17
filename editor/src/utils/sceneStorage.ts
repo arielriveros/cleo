@@ -65,6 +65,8 @@ export interface SceneAssetData {
   config?: { graphics?: { clearColor?: number[] }; render?: RenderSettings };
   /** "kind:assetId" -> content hash of each referenced asset at save time (gates on-open resync). */
   assetHashes?: Record<string, string>;
+  /** Which hashAsset format `assetHashes` was produced by. Absent = 1. See ASSET_HASH_VERSION. */
+  assetHashVersion?: number;
   savedAt: number;
 }
 

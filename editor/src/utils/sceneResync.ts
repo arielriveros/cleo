@@ -1,11 +1,12 @@
 import { Scene, Node, CameraNode } from 'cleo'
 import { getMaterialIdOf, applyMaterialAsset, unlinkToFallback, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
-import { MODEL_ID_VAR, instantiateModelAsset } from './models'
+import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig } from './models'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
 import { getScriptIdOf, seedScriptFields, unlinkScript } from './scripts'
-import { hashAsset, assetHashKey, AssetLibs } from './assetHash'
+import { hashAsset, assetHashKey, AssetLibs, hashesComparable } from './assetHash'
+import { captureAnimationState, restoreAnimationState, applyIkRig } from './placedAnimation'
 
 // Pull-based cross-scene propagation. When a scene is opened, its stored node tree still carries the
 // asset links (__materialId / __modelId / __templateId, terrain layer.materialId, foliage rule.modelId)
@@ -37,10 +38,13 @@ function collectSubtreeIds(node: Node, out: string[] = []): string[] {
   return out
 }
 
-/** Re-instantiate a placed instance subtree in place, preserving its transform (mesh/template shared). */
-function reinstantiate(scene: Scene, inst: Node, maps: ResyncMaps, make: (parent: Node) => string): void {
+/**
+ * Re-instantiate a placed instance subtree in place, preserving its transform (mesh/template shared).
+ * Returns the rebuilt node, so callers keep working on the live one rather than the detached original.
+ */
+function reinstantiate(scene: Scene, inst: Node, maps: ResyncMaps, make: (parent: Node) => string): Node | null {
   const parent = inst.parent
-  if (!parent) return
+  if (!parent) return null
   const pos = Array.from(inst.position) as [number, number, number]
   const rot = Array.from(inst.rotation) as [number, number, number]
   const scl = Array.from(inst.scale) as [number, number, number]
@@ -48,6 +52,11 @@ function reinstantiate(scene: Scene, inst: Node, maps: ResyncMaps, make: (parent
   // knows nothing about how this particular placement was configured. Without this, a mesh instance flagged
   // dormant silently comes back spawning on start the next time its asset changes.
   const spawnOnStart = inst.spawnOnStart
+  const animation = captureAnimationState(inst)
+  // Same class again: `instantiateModelAsset` overwrites the clone's `variables` wholesale, so without this
+  // the rebuild takes the placement's script link (`__scriptId`), its template link (`__templateId`) and
+  // every variable the user authored on it with it.
+  const variables = new Map(inst.variables)
   // Drop the old subtree's out-of-band data so map entries don't leak (mirrors syncModelInstances).
   for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id) }
   // removeChild detaches synchronously; Node.remove() only marks and its deferred sweep mis-splices.
@@ -57,7 +66,15 @@ function reinstantiate(scene: Scene, inst: Node, maps: ResyncMaps, make: (parent
   if (newNode) {
     newNode.setPosition(pos).setRotation(rot).setScale(scl)
     newNode.spawnOnStart = spawnOnStart
+    // Only what the rebuild did NOT already set — the freshly stamped `__modelId`/`__templateId` point at the
+    // asset this node was just built from and must win over the old copy.
+    for (const [name, v] of variables) {
+      if (newNode.variables.has(name)) continue
+      newNode.setVariable(name, v.value, v.type, v.access)
+    }
+    restoreAnimationState(newNode, animation)
   }
+  return newNode ?? null
 }
 
 /**
@@ -70,10 +87,18 @@ export function resyncScene(
   maps: ResyncMaps,
   libs: AssetLibs,
   savedHashes: Record<string, string> | undefined,
+  savedHashVersion?: number,
 ): boolean {
   let changed = false
+
+  // Hashes written by a DIFFERENT version of hashAsset cannot be compared against ours — every one of them
+  // would read as "changed" and the whole scene would be rebuilt from its assets, losing per-placement
+  // configuration wholesale. "I cannot tell" is not "everything changed": leave the scene alone and let the
+  // next save re-record hashes in the current format. (See hashesComparable for the legacy-blob case.)
+  const comparable = hashesComparable(savedHashes, savedHashVersion)
+
   const changedSince = (kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script', id: string, current: string): boolean =>
-    !savedHashes || savedHashes[assetHashKey(kind, id)] !== current
+    comparable ? (!savedHashes || savedHashes[assetHashKey(kind, id)] !== current) : false
 
   const materialById = new Map(libs.materials.map(m => [m.id, m]))
   const modelById = new Map(libs.models.map(m => [m.id, m]))
@@ -105,10 +130,31 @@ export function resyncScene(
     if (!modelId) continue
     const asset = modelById.get(modelId)
     if (!asset) continue // a placed mesh with no source asset stays as-is (matches delete consequence)
-    if (changedSince('model', modelId, hashAsset(asset))) {
-      reinstantiate(scene, node, maps, parent => instantiateModelAsset(asset, parent, libs.materials, libs.models))
+
+    // A TEMPLATE instance belongs to the pass above, which has already rebuilt it from the template's own
+    // stored subtree. Rebuilding it again from the model asset would replace that subtree with a bare model —
+    // losing whatever the template arranged around the character — and `instantiateModelAsset` stamps a fresh
+    // `variables` object, so the node would also stop carrying `__templateId` and quietly cease to be a
+    // template instance at all. A node can legitimately carry both links, because a template made from a
+    // placed model keeps the model's.
+    let live = node
+    if (!node.getVariable(TEMPLATE_ID_VAR) && changedSince('model', modelId, hashAsset(asset))) {
+      live = reinstantiate(scene, node, maps,
+        parent => instantiateModelAsset(asset, parent, libs.materials, libs.models)) ?? node
       changed = true
     }
+    // The IK rig is skeleton data and the ASSET owns it, so it is re-applied here whatever the hash says.
+    //
+    // Ungated deliberately, unlike the rebuild above. A TEMPLATE stores its own serialized copy of the whole
+    // subtree — skin included — so a rig authored while a character was a template instance gets baked into
+    // the template and rebuilt from there forever. `commitIkRig` reaches the asset and live model instances
+    // but has no way to reach inside a template blob, which left a rig that could not be cleared from the
+    // panel that wrote it. Re-applying from the asset every time makes the asset the only source that
+    // matters — including when it says there is no rig at all, which is why `undefined` must be assigned
+    // rather than skipped.
+    //
+    // Applied to `live`, not `node`: after a rebuild `node` is a detached subtree that nothing renders.
+    applyIkRig(live, assetIkRig(asset))
   }
 
   // --- Class scripts on placed nodes ---

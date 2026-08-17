@@ -109,7 +109,10 @@ export function worldPositionOf(matrix: any): [number, number, number] {
 
 export type AccessGroup = 'Built-in' | 'Self' | 'Parent' | 'Scene'
 export interface AccessibleVariable {
-  nodeRef: 'self' | 'parent' | string // matches AnimationVariableBinding.nodeRef
+  // Matches AnimationVariableBinding.nodeRef. The three keywords are RELATIONSHIPS, resolved every frame, and
+  // are strongly preferred over a raw id: an id names an identity, and identities do not survive the
+  // delete/re-add and asset-rebuild cycles that re-instantiate a placement.
+  nodeRef: 'self' | 'parent' | 'bodied' | string
   group: AccessGroup
   nodeLabel: string
   varName: string
@@ -128,10 +131,12 @@ export interface AccessibleVariable {
 const BUILTIN_HINTS: Record<string, string> = {
   currentSpeed: 'How fast the node is ACTUALLY moving (units/s) — 0 when blocked by a wall, whatever its velocity was set to.',
   rawSpeed: 'Unsmoothed currentSpeed. Noisier; prefer currentSpeed for blending.',
-  planarSpeed: 'Actual speed across the ground plane, ignoring falling. The usual input for an idle/walk/run blend.',
+  planarSpeed: 'Actual speed across the ground plane, ignoring falling. The usual input for an idle/walk/run blend. NEVER NEGATIVE — it is a magnitude, so a blend sample at a negative speed can never be reached. Use forwardSpeed for that.',
+  forwardSpeed: 'Signed speed along the way the node is FACING: negative when backpedalling. The axis to bind if your blend space puts walk-backwards at a negative speed.',
+  lateralSpeed: 'Signed strafe speed across the node’s facing. Positive is LEFT, matching planarAngle’s counter-clockwise convention.',
   verticalSpeed: 'Actual speed along gravity — positive rising, negative falling. Good for jump/fall states.',
-  planarAngle: 'Travel direction relative to the node’s facing, in degrees: 0 ahead, ±90 strafing, ±180 backwards.',
-  worldPlanarAngle: 'Absolute travel heading in degrees, independent of facing.',
+  planarAngle: 'Travel direction relative to the node’s facing, in degrees: 0 ahead, −90 strafing RIGHT, +90 strafing LEFT, ±180 backwards. Angles are counter-clockwise, matching the engine’s yaw — place your strafe clips accordingly or they play mirrored.',
+  worldPlanarAngle: 'Absolute travel heading in degrees, independent of facing. Same convention as a node’s yaw, so it can be assigned straight to setRotation([0, a, 0]).',
   isGrounded: 'True while the body is resting on something solid.',
 
   planarAcceleration: 'How hard the node is speeding up (+) or slowing down (−) across the ground, units/s². This is what tells a start-run apart from a run.',
@@ -147,6 +152,27 @@ const BUILTIN_HINTS: Record<string, string> = {
   groundedTime: 'Seconds grounded continuously; 0 while airborne. Use it to stop a landing state firing again mid-run.',
   groundDistance: 'Distance from the collider to the ground below, or −1 when unknown. Needs a Ground Probe on the body (Physics panel).',
   slopeAngle: 'Tilt of the ground under the node, degrees from level. Reads 0 while airborne.',
+}
+
+/**
+ * Built-ins that can never be negative, mapped to the signed built-in to use instead (or undefined if there
+ * is none). Vector magnitudes and elapsed times.
+ *
+ * Named explicitly because the constraint is invisible at the point of binding: `planarSpeed` reads like a
+ * signed velocity and is not. A blend-space sample authored at a negative coordinate on an axis bound to one
+ * of these sits where the probe can never travel, the gradient band gives it weight exactly 0 at every
+ * reachable point, and its clip silently never plays — with nothing in the editor to say why.
+ */
+export const UNSIGNED_BUILTINS: Record<string, string | undefined> = {
+  currentSpeed: 'forwardSpeed',
+  rawSpeed: 'forwardSpeed',
+  planarSpeed: 'forwardSpeed',
+  angularSpeed: 'turnRate',
+  movingTime: undefined,
+  stillTime: undefined,
+  airTime: undefined,
+  groundedTime: undefined,
+  groundDistance: undefined,
 }
 
 /** Whether `requester` may bind to a class-script field of `access` declared on `owner`. Mirrors the legacy
@@ -246,9 +272,14 @@ export function accessibleNodeVariables(
   builtins('self', 'Self')
   const parent = sourceNode.parent
   if (parent) builtins('parent', `Parent (${parent.name})`)
-  // Listed by node id, so it keeps resolving even if the tree is rearranged between it and the model.
+  // Stored as the RELATIONSHIP 'bodied', not as that node's id. An id is an identity, and identities do not
+  // survive re-creation: deleting and re-adding a character, rebuilding a template instance or re-placing
+  // from an asset all regenerate node ids, after which the binding names a node that no longer exists and
+  // every built-in silently reads its default forever — a machine that poses its entry state correctly and
+  // never transitions, with nothing anywhere saying why. 'bodied' resolves per frame to whatever is actually
+  // moving, which is what this entry has always meant.
   const bodied = bodiedAncestor()
-  if (bodied && bodied !== sourceNode && bodied !== parent) builtins(bodied.id, `${bodied.name} (body)`)
+  if (bodied && bodied !== sourceNode && bodied !== parent) builtins('bodied', `${bodied.name} (body)`)
 
   collect(sourceNode, sourceNode, 'self', 'Self', 'Self')
   if (parent) collect(parent, sourceNode, 'parent', 'Parent', `Parent (${parent.name})`)

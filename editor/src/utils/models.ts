@@ -207,7 +207,7 @@ export function modelAssetHasLodBehavior(asset: ModelAsset): boolean {
 // (engine-free, so it can be unit-tested); re-exported here so call sites have one import for model assets.
 export {
   skinnedModelJsonOf, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved,
-  assetWithClipRootMotion, assetWithBoneNames, assetClipNames,
+  assetWithClipRootMotion, assetWithBoneNames, assetClipNames, assetWithIkRig, assetIkRig,
 } from './modelClips'
 
 /**

@@ -12,6 +12,7 @@ import AnimationPlayer from "./animation/AnimationPlayer";
 import AnimationFieldPlayer from "./animationField/AnimationFieldPlayer";
 import DebugVisibilityMenu from "./DebugVisibilityMenu";
 import DebugSkeletonOverlay from "./DebugSkeletonOverlay";
+import DebugAnimationOverlay from "./DebugAnimationOverlay";
 import { useStateMachine } from "./animation/StateMachineContext";
 import { SegmentedControl } from "../components/ui";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
@@ -403,6 +404,10 @@ export default function EngineViewport() {
                 Skeletons debug toggle is on (self-gates off in animation mode, where AnimationSkeletonTool
                 owns the overlay). Renders nothing itself. */}
             <DebugSkeletonOverlay />
+            {/* Live blend readout, bottom-right, behind the Animation blend toggle. Self-gates. Unlike the
+                State Machine inspector's copy this one runs in Play, which is the only place a blend driven
+                by measured motion has real inputs. */}
+            <DebugAnimationOverlay />
             {/* Floating top-right overlays: the debug-visibility menu + gizmo-mode toggle sit to the
                 left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead. */}
             <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>

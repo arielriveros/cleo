@@ -64,7 +64,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     extractNodeState(clone.scene, maps)
     const tmp = new Scene()
     tmp.parse({ scene: clone.scene, textures: [] }, true) // useCache: textures already live in TextureManager
-    resyncScene(tmp, maps, src.libs, data.assetHashes)
+    resyncScene(tmp, maps, src.libs, data.assetHashes, data.assetHashVersion)
     const gd = await buildGameData({
       scene: tmp,
       scripts: maps.scripts,

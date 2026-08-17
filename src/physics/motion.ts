@@ -259,6 +259,37 @@ export function signedAngleBetween(from: vec3, to: vec3, up: vec3): number {
 }
 
 /**
+ * Split a velocity into how fast it travels ALONG a facing and how fast it slides ACROSS it. Both signed.
+ *
+ * `forward` is negative when backpedalling — which is the point. Every other speed in this module is a vector
+ * MAGNITUDE (`vec3.length`), so it can never go below zero; a blend space that wants "walk backwards" to live
+ * at a negative speed has nothing else to bind to.
+ *
+ * The lateral axis is `up x forward`, chosen so that `atan2(lateral, forward)` in degrees is exactly
+ * {@link signedAngleBetween}`(forward, v, up)`. That identity is the reason for the choice: these two
+ * components and `planarAngle` are three descriptions of the same motion, and if they used opposite handedness
+ * a blend laid out with one would play mirrored against the other. It does mean positive lateral is LEFT under
+ * standard gravity — angles here are counter-clockwise, so the +90 side is the left one.
+ *
+ * Both vectors are flattened onto the plane first. Returns zeros if `forward` flattens to nothing: a node
+ * facing straight up has no heading to measure against, and 0 ("not moving relative to my facing") is the
+ * harmless answer for the locomotion blends this feeds.
+ */
+export function facingComponents(v: vec3, forward: vec3, up: vec3): { forward: number; lateral: number } {
+    const f = planarSplit(forward, up).planar;
+    if (vec3.length(f) < 1e-6) return { forward: 0, lateral: 0 };
+    vec3.normalize(f, f);
+
+    const l = vec3.create();
+    vec3.cross(l, up, f);
+    if (vec3.length(l) < 1e-6) return { forward: 0, lateral: 0 };
+    vec3.normalize(l, l);
+
+    const planar = planarSplit(v, up).planar;
+    return { forward: vec3.dot(planar, f), lateral: vec3.dot(planar, l) };
+}
+
+/**
  * Absolute heading of a direction in the plane perpendicular to gravity, in DEGREES.
  *
  * Same convention as a node's yaw: under standard gravity this is exactly `atan2(x, z)`, so the value can be

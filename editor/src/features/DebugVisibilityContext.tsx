@@ -23,6 +23,7 @@ export type DebugCategory =
   | 'probes'
   | 'boundingBoxes'
   | 'skeleton'
+  | 'animation'
   | 'grid';
 
 export type DebugChannel = 'editor' | 'runtime';
@@ -46,6 +47,9 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   { key: 'probes', label: 'Light probes', runtimeAvailable: true },
   { key: 'boundingBoxes', label: 'Bounding boxes', runtimeAvailable: true },
   { key: 'skeleton', label: 'Skeletons', runtimeAvailable: true },
+  // Runtime is the point of this one: a blend driven by MEASURED motion reads 0 everywhere in the editor,
+  // because the editor has no physics. Play is the only place its inputs are real.
+  { key: 'animation', label: 'Animation blend', runtimeAvailable: true },
   { key: 'grid', label: 'Reference grid', runtimeAvailable: false },
 ];
 

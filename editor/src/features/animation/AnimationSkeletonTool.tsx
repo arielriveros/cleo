@@ -11,6 +11,7 @@ import { getAnimationTarget, computeBindMatrices, computeJointWorldMatrices, wor
 
 const JOINT_COLOR: [number, number, number] = [0.25, 0.6, 1.0]
 const SELECTED_COLOR: [number, number, number] = [1.0, 0.85, 0.1]
+const IK_MARKER_COLOR: [number, number, number] = [0.2, 0.95, 0.45]
 const BONE_COLOR: [number, number, number] = [0.85, 0.85, 0.9]
 const JOINT_SCREEN_SIZE = 0.02 // sphere radius as a fraction of the distance metric (constant on screen)
 
@@ -27,6 +28,10 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
   const jointRadiusRef = useRef<Float32Array>(new Float32Array(0))
   const bindMatsRef = useRef<any[]>([])
   const selectedRef = useRef<number | null>(null)
+  // Joints the IK rig has given a role to. Rebuilt on ANIM_IK_CHANGED rather than polled: the rig only moves
+  // when someone edits it, and this loop already runs every frame doing real work.
+  const markerMatRef = useRef<Float32Array>(new Float32Array(0))
+  const ikJointsRef = useRef<number[]>([])
 
   const computeScale = (worldPos: ArrayLike<number>): number => {
     const cam = instance?.scene?.activeCamera?.camera
@@ -116,6 +121,20 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
           }
         }
 
+        // Mark the joints the IK rig uses, so the legs it will drive are visible on the skeleton itself.
+        const ikJoints = ikJointsRef.current
+        if (markerMatRef.current.length < ikJoints.length * 16) markerMatRef.current = new Float32Array(ikJoints.length * 16)
+        const mm = markerMatRef.current
+        let markerCount = 0
+        for (const j of ikJoints) {
+          if (j < 0 || j >= n) continue   // a rig can outlive the bone it names
+          const s = jrad[j] * 1.35
+          posv[0] = jpos[j * 3]; posv[1] = jpos[j * 3 + 1]; posv[2] = jpos[j * 3 + 2]
+          scl[0] = s; scl[1] = s; scl[2] = s
+          Vec.mat4.fromRotationTranslationScale(mm.subarray(markerCount * 16, markerCount * 16 + 16) as any, IDENT_Q as any, posv as any, scl as any)
+          markerCount++
+        }
+
         // Highlight the selected joint (scaled up a bit).
         const sel = selectedRef.current
         let highlight: Float32Array | null = null
@@ -130,6 +149,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
         instance.renderer.setSkeletonOverlay({
           jointMatrices: jm, jointCount: n, jointColor: JOINT_COLOR,
           boneMatrices: bm, boneCount: pairs.length, boneColor: BONE_COLOR,
+          markerMatrices: markerCount > 0 ? mm : null, markerCount, markerColor: IK_MARKER_COLOR,
           highlightMatrix: highlight, highlightColor: SELECTED_COLOR,
         })
       }
@@ -145,6 +165,30 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
     eventEmitter.on('SELECT_JOINT', onSelectJoint)
     return () => { eventEmitter.off('SELECT_JOINT', onSelectJoint) }
   }, [eventEmitter])
+
+  // Which joints the IK rig names. Recomputed when the rig changes and when the target does — never per
+  // frame, since it is a node-index lookup over the whole skeleton and the answer only moves when edited.
+  useEffect(() => {
+    const refresh = () => {
+      const target = getAnimationTarget(editorScene, animationTargetId)
+      const rig = target?.skin?.ikRig
+      if (!target || !rig) { ikJointsRef.current = []; return }
+      const jointOfNode = new Map<number, number>()
+      target.skin.joints.forEach((j, i) => jointOfNode.set(j.nodeIndex, i))
+      const out: number[] = []
+      const push = (node: number | undefined) => {
+        if (node === undefined || node < 0) return
+        const j = jointOfNode.get(node)
+        if (j !== undefined) out.push(j)
+      }
+      push(rig.hips)
+      for (const leg of rig.feet ?? []) { push(leg.thigh); push(leg.shin); push(leg.foot); push(leg.toe) }
+      ikJointsRef.current = out
+    }
+    refresh()
+    eventEmitter.on('ANIM_IK_CHANGED', refresh)
+    return () => { eventEmitter.off('ANIM_IK_CHANGED', refresh) }
+  }, [eventEmitter, editorScene, animationTargetId])
 
   // Click a joint: CPU ray-sphere test against the joint world positions; nearest along the ray wins.
   useEffect(() => {

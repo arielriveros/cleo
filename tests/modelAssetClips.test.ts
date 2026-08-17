@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     skinnedModelJsonOf, uniqueClipName, assetClipNames,
     assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames,
+    assetWithIkRig, assetIkRig,
 } from '../editor/src/utils/modelClips';
 
 // Patching a model asset's serialized clip list. This is the half of "clips belong to the asset" that has
@@ -196,5 +197,61 @@ describe('assetWithClipRootMotion', () => {
         const before = JSON.stringify(original);
         assetWithClipRootMotion(original, 'turn', true);
         expect(JSON.stringify(original)).toBe(before);
+    });
+});
+
+// The IK rig is joint indices into ONE skin, so it belongs with the skeleton and travels the same way clips
+// do — patch the asset, then propagate to live instances. These cover the asset half.
+describe('assetWithIkRig / assetIkRig', () => {
+    const rig = { hips: 0, feet: [{ thigh: 1, shin: 2, foot: 3, toe: 4 }], footHeight: 0.12 };
+
+    it('writes the rig into the nested skinned model, not the holder root', () => {
+        const next = assetWithIkRig(asset(['idle']), rig);
+        expect(skinnedModelJsonOf(next.nodeJson).skin.ikRig).toEqual(rig);
+        expect((next.nodeJson as any).skin).toBeUndefined();
+        expect(assetIkRig(next)).toEqual(rig);
+    });
+
+    it('leaves the clips alone', () => {
+        const next = assetWithIkRig(asset(['idle', 'walk']), rig);
+        expect(assetClipNames(next)).toEqual(['idle', 'walk']);
+    });
+
+    it('does not mutate the input — asset libraries are React state', () => {
+        const original = asset(['idle']);
+        const before = JSON.stringify(original);
+        assetWithIkRig(original, rig);
+        expect(JSON.stringify(original)).toBe(before);
+    });
+
+    /**
+     * A new-but-equal object marks the library dirty and triggers a full IndexedDB rewrite for a no-op, so
+     * "nothing changed" has to be answerable by identity.
+     */
+    it('returns the ORIGINAL object when nothing changed', () => {
+        const withRig = assetWithIkRig(asset(['idle']), rig);
+        expect(assetWithIkRig(withRig, rig)).toBe(withRig);
+        // Equal by value but a different object: still a no-op.
+        expect(assetWithIkRig(withRig, JSON.parse(JSON.stringify(rig)))).toBe(withRig);
+
+        const plain = asset(['idle']);
+        expect(assetWithIkRig(plain, null)).toBe(plain);
+    });
+
+    it('clears the rig with null, writing what the engine itself would write', () => {
+        const withRig = assetWithIkRig(asset(['idle']), rig);
+        const cleared = assetWithIkRig(withRig, null);
+        expect(skinnedModelJsonOf(cleared.nodeJson).skin.ikRig).toBeNull();
+        expect(assetIkRig(cleared)).toBeNull();
+    });
+
+    it('reports null for an asset that has never had one', () => {
+        expect(assetIkRig(asset(['idle']))).toBeNull();
+        expect(assetIkRig(undefined)).toBeNull();
+    });
+
+    it('leaves an asset with no skinned model untouched', () => {
+        const unskinned = { id: 'm2', name: 'Crate', nodeJson: { id: 'r', type: 'node', children: [] } };
+        expect(assetWithIkRig(unskinned, rig)).toBe(unskinned);
     });
 });

@@ -51,6 +51,28 @@ export default function AnimationFieldPanel() {
     }
   }
 
+  // A sample outside its axis range is the quietest failure this editor has. The plot draws it beyond the
+  // bordered box where it is easy to miss, every drag clamps back into the range so touching it destroys the
+  // value, and the probe cannot be dragged out to meet it — so the preview can never show the clip. At
+  // runtime the range is only a normalization basis and nothing clamps, so whether the clip ever plays comes
+  // down to whether the bound parameter reaches that far. For a negative coordinate it usually cannot: every
+  // speed built-in except forwardSpeed/lateralSpeed is a vector magnitude.
+  const outside = (v: number, axis: AnimationFieldAxis) =>
+    v < Math.min(axis.min, axis.max) || v > Math.max(axis.min, axis.max)
+
+  /** Widen an axis just past a sample that fell outside it, so the plot can draw and drag it again. */
+  const widenTo = (which: 'x' | 'y', v: number) => {
+    const axis = which === 'x' ? field.xAxis : field.yAxis
+    const lo = Math.min(axis.min, axis.max)
+    const hi = Math.max(axis.min, axis.max)
+    // Headroom, so the sample lands inside the plot rather than exactly on its border where it cannot be
+    // grabbed without also being clamped.
+    const pad = Math.max((hi - lo) * 0.1, Math.abs(v) * 0.1, 0.1)
+    const round = (n: number) => Number(n.toFixed(3))
+    if (v < lo) setAxis(which, { min: round(v - pad) })
+    else if (v > hi) setAxis(which, { max: round(v + pad) })
+  }
+
   return (
     <div className='flex h-full w-full flex-col overflow-y-auto bg-surface-raised text-white'>
       <div className='border-b border-border p-2'>
@@ -135,6 +157,8 @@ export default function AnimationFieldPanel() {
             const missing = !!s.clipName && !clips.includes(s.clipName)
             const length = clipDurations[s.clipName] ?? 0
             const outlier = isOutlier(length)
+            const offX = outside(s.x, field.xAxis)
+            const offY = is2D && outside(s.y ?? 0, field.yAxis)
             return (
               <div
                 key={i}
@@ -155,13 +179,17 @@ export default function AnimationFieldPanel() {
                 </div>
 
                 <div className='flex items-center gap-1 text-[10px]'>
+                  {/* `|| 0` here used to make a negative coordinate impossible to type: a number input reports
+                      "" for the partial value "-", so parseFloat gives NaN and the field snapped back to 0
+                      before the digits arrived. Ignoring an unparseable value instead leaves the browser
+                      holding the half-typed text, which is what lets "-1.5" be entered at all. */}
                   <span className='text-gray-400'>x</span>
                   <input className={input + ' w-[56px]'} type='number' step='any' value={s.x}
-                    onChange={e => setSample(i, { x: parseFloat(e.target.value) || 0 })} />
+                    onChange={e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) setSample(i, { x: v }) }} />
                   {is2D && <>
                     <span className='text-gray-400'>y</span>
                     <input className={input + ' w-[56px]'} type='number' step='any' value={s.y ?? 0}
-                      onChange={e => setSample(i, { y: parseFloat(e.target.value) || 0 })} />
+                      onChange={e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) setSample(i, { y: v }) }} />
                   </>}
                   {/* Rate scale changes what this clip contributes to the blended duration, which is what
                       keeps a differently-authored clip in step with the rest instead of sliding. */}
@@ -209,6 +237,33 @@ export default function AnimationFieldPanel() {
                     ⚠ {(median / length).toFixed(1)}× faster than the rest — slow it to match
                   </button>
                 )}
+                {(offX || offY) && (
+                  <div className='flex flex-col gap-1'>
+                    <p className='text-[10px] text-warning'>
+                      ⚠ Outside the {offX ? `${field.xAxis.name || 'X'} range (${field.xAxis.min}..${field.xAxis.max})` : ''}
+                      {offX && offY ? ' and ' : ''}
+                      {offY ? `${field.yAxis.name || 'Y'} range (${field.yAxis.min}..${field.yAxis.max})` : ''}
+                      {' '}— the plot clamps to the range, so this point cannot be dragged or previewed, and it only
+                      ever plays if the bound parameter reaches that far in Play.
+                      {((offX && s.x < 0) || (offY && (s.y ?? 0) < 0)) && (
+                        <> A negative coordinate usually never plays: every speed built-in except <b>forwardSpeed</b> and
+                        {' '}<b>lateralSpeed</b> is a magnitude and can never go below zero.</>
+                      )}
+                    </p>
+                    <div className='flex gap-1'>
+                      {offX && (
+                        <button className={ghost + ' border-warning text-warning'}
+                          title={`Widens the ${field.xAxis.name || 'X'} axis so this sample sits inside the plot again`}
+                          onClick={() => widenTo('x', s.x)}>Widen {field.xAxis.name || 'X'} to fit</button>
+                      )}
+                      {offY && (
+                        <button className={ghost + ' border-warning text-warning'}
+                          title={`Widens the ${field.yAxis.name || 'Y'} axis so this sample sits inside the plot again`}
+                          onClick={() => widenTo('y', s.y ?? 0)}>Widen {field.yAxis.name || 'Y'} to fit</button>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {coincidentWith[i] && (
                   <p className='text-[10px] text-warning'>
                     ⚠ Same point as {coincidentWith[i]} — they split one sample's weight between them.
@@ -239,10 +294,13 @@ function AxisRow({ label, axis, onChange }: {
         <span className='w-[42px] shrink-0 text-[10px] text-gray-400'>{label}</span>
         <input className={input + ' min-w-0 flex-1'} value={axis.name} title='Axis name'
           onChange={e => onChange({ name: e.target.value })} />
+        {/* Unparseable input is IGNORED rather than coerced to 0 — see the note on the sample coordinates.
+            Coercing is what made a negative minimum unreachable, and a negative minimum is exactly what an
+            axis bound to a signed speed needs. */}
         <input className={input + ' w-[52px]'} type='number' step='any' value={axis.min} title='Minimum'
-          onChange={e => onChange({ min: parseFloat(e.target.value) || 0 })} />
+          onChange={e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) onChange({ min: v }) }} />
         <input className={input + ' w-[52px]'} type='number' step='any' value={axis.max} title='Maximum'
-          onChange={e => onChange({ max: parseFloat(e.target.value) || 0 })} />
+          onChange={e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) onChange({ max: v }) }} />
       </div>
       {looksAngular(axis) && !axis.wrap && (
         <button

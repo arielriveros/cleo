@@ -149,6 +149,15 @@ export interface SkeletonOverlay {
     boneColor: [number, number, number];
     highlightMatrix?: Float32Array | null; // 16, the selected joint (drawn over the rest)
     highlightColor?: [number, number, number];
+    /**
+     * Additional joints to mark in their own colour — bones an editor feature has given a ROLE, such as the
+     * legs an IK rig is built from. Distinct from `highlightMatrix`, which is the transient selection: a
+     * marker says what a bone IS, the highlight says what you are pointing at, and both need to be visible
+     * at once. 16 floats per marker.
+     */
+    markerMatrices?: Float32Array | null;
+    markerCount?: number;
+    markerColor?: [number, number, number];
 }
 
 export class Renderer {
@@ -3530,9 +3539,12 @@ export class Renderer {
             mesh.teardownInstanceMatrixBuffer(5);
         };
 
-        // Bones first, joints over them, highlight on top (depth test is off in the gizmo pass).
+        // Bones first, joints over them, role markers above those, and the selection highlight last of all —
+        // depth test is off in the gizmo pass, so the later draw simply wins where they overlap, and the one
+        // thing you are pointing at should never be hidden by a label.
         drawSet(bone, o.boneMatrices, o.boneCount, o.boneColor);
         drawSet(sphere, o.jointMatrices, o.jointCount, o.jointColor);
+        if (o.markerMatrices && o.markerColor) drawSet(sphere, o.markerMatrices, o.markerCount ?? 0, o.markerColor);
         if (o.highlightMatrix && o.highlightColor) drawSet(sphere, o.highlightMatrix, 1, o.highlightColor);
     }
 }

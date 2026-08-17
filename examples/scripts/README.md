@@ -152,10 +152,10 @@ The script publishes three fields for the animator to read; speed comes straight
 
 | animator input | source | meaning |
 |---|---|---|
-| **Direction** | Variable → Parent → `moveDir` | Strafe angle in degrees: `0` ahead (W), `+90` right (D), `-90` left (A), `±180` back (S). The field's **X** axis. |
+| **Direction** | Variable → Parent → `moveDir` | Strafe angle in degrees: `0` ahead (W), **`-90` right (D)**, **`+90` left (A)**, `±180` back (S) — counter-clockwise, matching the engine's `planarAngle`. See the sign note under §1. The field's **X** axis. |
 | **Speed** | **Built-in → Parent → `planarSpeed`** | The character's **real** ground speed in world units (0…`runSpeed`). The field's **Y** axis, and the Idle⇄move gate. Measured, so a character jammed against a wall reads 0 and drops to idle instead of running on the spot. |
 | **Jumping** | Variable → Parent → `isJumping` | true from take-off until the feet land. |
-| **Turn** | Variable → Parent → `turnRequest` | `0` none, `+1`/`+2` turn 90°/180° right, `-1`/`-2` turn 90°/180° left. Held for the whole turn. |
+| **Turn** | Variable → Parent → `turnRequest` | `0` none, `+1`/`+2` turn 90°/180° right, `-1`/`-2` turn 90°/180° left. Held for the whole turn. **This is a clip selector, not an angle** — its sign is the opposite of `Direction`'s, which is counter-clockwise. Wire `Turn90R`/`Turn180R` to the positive side; wired the other way, the turn clip's root motion drives the body *away* from the camera and the turn never completes. |
 
 > Use **`planarSpeed`** (a Built-in), not a normalized script field, for Speed. It ignores falling, so a jump
 > never reads as a sprint, and it lets the field's Y axis be in real world units. The other built-ins in the
@@ -180,17 +180,23 @@ the **model asset** whose clips you're blending — a field can only place clips
 > The editor normalizes each axis by its own min/max before any distance math, so a 0…4 Speed axis and a
 > −180…180 Direction axis carry equal weight — you don't have to match their numeric scales.
 
-**Place the clips.** Drop each clip at its (Direction, Speed) coordinate. Ten samples: four directions × two
-gaits, plus the backward pair mirrored (see the wrap note):
+**Place the clips.** Drop each clip at its (Direction, Speed) coordinate. Eight samples: four directions × two
+gaits.
+
+> **RIGHT is `-90`, LEFT is `+90`.** Angles are counter-clockwise here, matching the engine's yaw
+> (`atan2(x, z)`): with forward `+Z` and up `+Y` a character's right is `forward x up` = `-X`, so turning
+> right is a negative rotation. Some engines label strafe-right `+90`; this one cannot, without contradicting
+> the yaw every other angle uses. Get it backwards and the character strafes the wrong way — which is easy to
+> miss, because forward and backward still look perfectly correct.
 
 | clip | X (Direction) | Y (Speed) |
 |---|---|---|
 | walk forward | `0` | `1.5` |
 | run forward | `0` | `4` |
-| walk right (strafe) | `90` | `1.5` |
-| run right | `90` | `4` |
-| walk left (strafe) | `-90` | `1.5` |
-| run left | `-90` | `4` |
+| walk right (strafe) | `-90` | `1.5` |
+| run right | `-90` | `4` |
+| walk left (strafe) | `90` | `1.5` |
+| run left | `90` | `4` |
 | walk backward | `180` | `1.5` |
 | run backward | `180` | `4` |
 
@@ -268,18 +274,37 @@ flags a clip much shorter than the field's median and sets `rateScale = length/m
 
 | from → to | conditions | blend |
 |---|---|---|
-| `Idle → Locomotion` | `Speed > 0.1` **AND** `Jumping is false` | |
-| `Locomotion → Idle` | `Speed < 0.1` | |
+| `Idle → Locomotion` | `Speed > 0.1` **± 0.1** **AND** `Jumping is false` | |
+| `Locomotion → Idle` | `Speed < 0.1` **± 0.1** | |
 | `Idle → Turn90R` | `Turn eq 1` | `0.15` |
 | `Idle → Turn180R` | `Turn eq 2` | `0.15` |
 | `Idle → Turn90L` | `Turn eq -1` | `0.15` |
 | `Idle → Turn180L` | `Turn eq -2` | `0.15` |
-| each `Turn* → Idle` | `Turn eq 0` **AND** `Speed < 0.1` | `0.15` |
-| each `Turn* → Locomotion` | `Speed > 0.1` | `0.15` |
+| each `Turn* → Idle` | `Turn eq 0` **AND** `Speed < 0.1` **± 0.1** | `0.15` |
+| each `Turn* → Locomotion` | `Speed > 0.1` **± 0.1** | `0.15` |
 | `Idle → Jump` | `Jumping is true` | `0.1` |
 | `Locomotion → Jump` | `Jumping is true` | `0.1` |
-| `Jump → Idle` | `Jumping is false` **AND** `Speed < 0.1` | `0.1` |
-| `Jump → Locomotion` | `Jumping is false` **AND** `Speed > 0.1` | `0.1` |
+| `Jump → Idle` | `Jumping is false` **AND** `Speed < 0.1` **± 0.1** | `0.1` |
+| `Jump → Locomotion` | `Jumping is false` **AND** `Speed > 0.1` **± 0.1** | `0.1` |
+
+> ### ⚠ The `± 0.1` on every Speed condition is not optional
+>
+> `Speed` is **measured**, so it is never perfectly still. A bare `> 0.1` leaving Idle and a bare `< 0.1`
+> leaving Locomotion are each obviously correct on their own — and together they are the single most common
+> way to make a character vibrate. A speed hovering at 0.1 satisfies both on alternating frames, so the
+> machine flips state every frame, re-arming a cross-fade from a pose that has barely moved and tearing the
+> locomotion field down and rebuilding it each time. **It looks like a blend problem, and it is not.**
+>
+> The `±` box next to a `>` / `<` condition is a latching band centred on the threshold: with `± 0.1`,
+> `> 0.1` does not engage until `0.15` and `< 0.1` not until `0.05`, so the signal has to genuinely swing
+> before the machine moves. The editor flags a `>`/`<` pair whose engage points do not separate, and the
+> runtime logs `Animation state machine is ping-ponging: …` naming the two states if one slips through.
+>
+> Anything measured that gates a transition wants the same treatment. `min dwell` on the transition is the
+> blunter alternative and also works.
+>
+> Root motion makes this sharper still: a turn clip's root motion physically moves the character, which feeds
+> `Speed`, which is what `Turn* → Locomotion` reads. Without the band, an idle turn can trip its own exit.
 
 That's the whole machine: Idle ⇄ Locomotion on speed, Idle → one of four turns on the `Turn` code (which the
 script holds while the turn clip's **root motion** rotates the body, then clears to `0` once the body has caught

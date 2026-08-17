@@ -1,6 +1,6 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../physics/body";
-import { MotionRecord, MotionConfig, motionConfig, planarSplit, signedAngleBetween, headingAngle } from "../../physics/motion";
+import { MotionRecord, MotionConfig, motionConfig, planarSplit, signedAngleBetween, headingAngle, facingComponents } from "../../physics/motion";
 import { Model } from "../../graphics/model";
 import { AnimatedModel } from "../../graphics/animatedModel";
 import { Animator, AnimationMapping, AnimationStateMachine } from "../../graphics/animator";
@@ -1773,8 +1773,14 @@ export class Node {
   }
 
   /**
-   * Where this node is travelling relative to where it is FACING, in degrees: `0` straight ahead, `+90`
-   * strafing, `±180` backpedalling.
+   * Where this node is travelling relative to where it is FACING, in degrees: `0` straight ahead,
+   * **`-90` strafing RIGHT, `+90` strafing LEFT**, `±180` backpedalling.
+   *
+   * **Mind the sign.** Angles here are counter-clockwise, because they share the engine's yaw convention
+   * (`atan2(x, z)`, see {@link worldPlanarAngle}) — and with forward `+Z` and up `+Y`, a node's right is
+   * `forward x up` = `-X`, so turning right is a NEGATIVE rotation. Several engines label strafe-right `+90`;
+   * this one cannot, without `planarAngle` contradicting the yaw that every other angle in the engine uses.
+   * Lay a strafe blend space out accordingly, or its left and right clips play mirrored.
    *
    * This is the axis a directional locomotion blend needs — it is what picks strafe-left vs strafe-right vs
    * walk-backwards, and it keeps meaning the same thing as the character turns.
@@ -1797,6 +1803,46 @@ export class Node {
     const m = this._motion;
     if (!m) return 0;
     return headingAngle(m.planarHeading, this._up);
+  }
+
+  /**
+   * Signed speed along the way this node is FACING: positive walking forward, **negative backpedalling**,
+   * ~0 while strafing dead sideways.
+   *
+   * This is the only speed that can go negative. {@link planarSpeed}, {@link currentSpeed} and
+   * {@link rawSpeed} are vector magnitudes, so a blend-space sample authored at a negative speed on one of
+   * those axes sits where the probe can never reach and its clip silently never plays — the gradient band
+   * gives it weight exactly 0 at every reachable point.
+   *
+   * There are two valid ways to lay out a locomotion blend space, and mixing them is the trap:
+   *
+   *   - `forwardSpeed` x {@link lateralSpeed} — signed on both axes, backwards at negative forward. Neither
+   *     axis wraps.
+   *   - {@link planarAngle} x `planarSpeed` — direction and magnitude, backwards at ±180 on a WRAPPING
+   *     direction axis (`AnimationFieldAxis.wrap`).
+   *
+   * Pick one. Combining `planarAngle` with a signed speed gives backwards two different coordinates, and the
+   * region between them is dead space no clip covers.
+   */
+  public get forwardSpeed(): number {
+    const m = this._motion;
+    if (!m) return 0;
+    return facingComponents(m.smooth, this.worldForward, this._up).forward;
+  }
+
+  /**
+   * Signed speed across this node's facing — the strafe axis. ~0 walking straight ahead or straight back.
+   *
+   * **Mind the sign: positive is LEFT.** It shares the counter-clockwise convention of {@link planarAngle}
+   * (see the sign note there), and deliberately so — `atan2(lateralSpeed, forwardSpeed)` in degrees is exactly
+   * `planarAngle`, so a blend laid out with these two axes and one laid out with angle-and-speed agree about
+   * which side is which. Several engines label strafe-right positive; this one cannot without contradicting
+   * the yaw every other angle in the engine uses.
+   */
+  public get lateralSpeed(): number {
+    const m = this._motion;
+    if (!m) return 0;
+    return facingComponents(m.smooth, this.worldForward, this._up).lateral;
   }
 
   // ---- Measured motion: change over time -------------------------------------------------------------

@@ -37,14 +37,17 @@ export { Model } from "./graphics/model";
 export { AnimatedModel } from "./graphics/animatedModel";
 export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
 export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget, humanoidRigOf } from "./graphics/animationRetarget";
-export { skeletonTopology } from "./graphics/skeletonTopology";
+export { skeletonTopology, isAncestorJoint, nearestCommonAncestor } from "./graphics/skeletonTopology";
 export type { SkeletonTopology } from "./graphics/skeletonTopology";
+export { solveTwoBone, applyTwoBone, ikTuning, validateIkRig, IK_DEFAULTS, DEFAULT_MAX_REACH } from "./graphics/ik";
+export type { IkRig, IkFootChain, IkRigTuning, IkRigProblem, IkRigValidation, TwoBoneSolve, TwoBoneResult } from "./graphics/ik";
 export type { AnimationCompatibility, HierarchyMismatch, BoneMapping, BoneMappingEntry, BoneMatchKind } from "./graphics/animationRetarget";
 export { normalizeBoneName, humanoidSlotOf } from "./graphics/boneNames";
+export { swingReleaseWeight } from "./graphics/ik";
 export { Animator, isConditionGroup, NODE_BUILTINS } from "./graphics/animator";
 export type { NodeBuiltinName } from "./graphics/animator";
 export {
-    createMotionRecord, sampleMotion, planarSplit, headingAngle, signedAngleBetween, wrapDegrees,
+    createMotionRecord, sampleMotion, planarSplit, facingComponents, headingAngle, signedAngleBetween, wrapDegrees,
     motionConfig, MOTION_DEFAULTS,
 } from "./physics/motion";
 export type { MotionRecord, MotionConfig } from "./physics/motion";

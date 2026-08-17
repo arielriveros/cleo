@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget, buildJointTree, jointLabel, JointTreeNode } from './skeleton'
+import IkRigPanel from './IkRigPanel'
 
 // Left-sidebar skeleton hierarchy for the Animation Editor. Mirrors the scene tree's recursive,
 // per-row-expanded pattern, but is built from the target model's Skin joints and drives a parallel
@@ -80,6 +81,11 @@ export default function SkeletonTree() {
         {roots.map(root => (
           <JointRow key={root.index} joint={root} depth={0} selected={selectedJoint} skin={target.skin} onSelect={select} />
         ))}
+      </div>
+      {/* Below the tree rather than in its own panel: assigning a bone to a role is a two-step gesture that
+          starts with a click in the tree above, so the two have to be visible at once. */}
+      <div className='shrink-0 border-t border-border'>
+        <IkRigPanel skin={target.skin} selectedJoint={selectedJoint} />
       </div>
     </div>
   )

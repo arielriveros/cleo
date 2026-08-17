@@ -5,7 +5,8 @@ import {
     axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
 } from './animationField';
 import { clamp, dampTime, dampWrapped, wrapSpan } from '../core/math';
-import { skeletonTopology, SkeletonTopology } from './skeletonTopology';
+import { skeletonTopology, SkeletonTopology, isAncestorJoint } from './skeletonTopology';
+import { solveTwoBone, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain, IkRig, IkRigValidation } from './ik';
 import { Node, ModelNode, canAccessVariable } from '../core/scene/node';
 import { InputManager } from '../input/inputManager';
 import { Logger } from '../core/logger';
@@ -56,25 +57,45 @@ export type AnimationParameterType = 'bool' | 'float' | 'trigger' | 'variable';
  * They are all MEASURED state (what the body actually did), which is exactly what an animation machine wants:
  * a character jammed against a wall should fall back to idle rather than keep running on the spot.
  */
-export const NODE_BUILTINS: Record<string, { type: 'number' | 'boolean'; read: (node: Node) => number | boolean }> = {
+export const NODE_BUILTINS: Record<string, {
+    type: 'number' | 'boolean';
+    /**
+     * True when this value can go below zero.
+     *
+     * Recorded here so consumers cannot drift from the getters. It matters wherever a negative reading means
+     * something other than "a small number": a state's Speed parameter clamps at 0 and freezes the clip (see
+     * _applyStateSpeed), and a blend-space axis authored only over non-negative coordinates leaves half a
+     * signed parameter's range unreachable.
+     */
+    signed?: boolean;
+    read: (node: Node) => number | boolean;
+}> = {
     currentSpeed:     { type: 'number',  read: n => n.currentSpeed },
     rawSpeed:         { type: 'number',  read: n => n.rawSpeed },
     planarSpeed:      { type: 'number',  read: n => n.planarSpeed },
-    verticalSpeed:    { type: 'number',  read: n => n.verticalSpeed },
-    planarAngle:      { type: 'number',  read: n => n.planarAngle },
-    worldPlanarAngle: { type: 'number',  read: n => n.worldPlanarAngle },
+    verticalSpeed:    { type: 'number',  signed: true, read: n => n.verticalSpeed },
+    planarAngle:      { type: 'number',  signed: true, read: n => n.planarAngle },
+    worldPlanarAngle: { type: 'number',  signed: true, read: n => n.worldPlanarAngle },
     isGrounded:       { type: 'boolean', read: n => n.isGrounded },
+
+    // The only SIGNED speeds. Every other speed above is a vector magnitude, so a blend-space sample authored
+    // at a negative speed on one of those axes is unreachable and its clip never plays; these are what make
+    // "walk backwards at -1.5" mean what it looks like it means. See Node.forwardSpeed for the two valid
+    // blend-space layouts and why mixing them leaves dead space.
+    forwardSpeed:     { type: 'number',  signed: true, read: n => n.forwardSpeed },
+    lateralSpeed:     { type: 'number',  signed: true, read: n => n.lateralSpeed },
 
     // Rate of change, not state. These are what make a START and a STOP expressible: speed alone cannot tell
     // a character breaking into a run from one already running at that speed, so a machine reading only
     // `planarSpeed` can pick a gait but can never play the transition into it.
-    planarAcceleration: { type: 'number',  read: n => n.planarAcceleration },
+    planarAcceleration: { type: 'number',  signed: true, read: n => n.planarAcceleration },
     isAccelerating:     { type: 'boolean', read: n => n.isAccelerating },
     isDecelerating:     { type: 'boolean', read: n => n.isDecelerating },
     isMoving:           { type: 'boolean', read: n => n.isMoving },
     movingTime:         { type: 'number',  read: n => n.movingTime },
     stillTime:          { type: 'number',  read: n => n.stillTime },
-    turnRate:           { type: 'number',  read: n => n.turnRate },
+    turnRate:           { type: 'number',  signed: true, read: n => n.turnRate },
+    // NOT signed: a hypot of the angular velocity, so it has no direction to be negative about.
     angularSpeed:       { type: 'number',  read: n => n.angularSpeed },
 
     // Air / ground, for jump and land states.
@@ -89,14 +110,22 @@ export const NODE_BUILTINS: Record<string, { type: 'number' | 'boolean'; read: (
 export type NodeBuiltinName = keyof typeof NODE_BUILTINS;
 
 /**
- * Binds a 'variable' parameter to a node value, read each frame. `nodeRef` resolves relative to the model
- * node running the machine: 'self', 'parent', or a specific node id in the scene.
+ * Binds a 'variable' parameter to a node value, read each frame.
+ *
+ * `nodeRef` resolves relative to the model node running the machine: `'self'`, `'parent'`, `'bodied'` (the
+ * nearest ancestor, or self, that owns a rigid body), or a specific node id in the scene.
+ *
+ * **Prefer a relative reference over an id.** An id is an identity, and identities do not survive being
+ * re-created: deleting and re-adding a character, rebuilding a template instance, or re-placing from an asset
+ * all regenerate node ids, and the binding then names a node that no longer exists. `'bodied'` names the
+ * RELATIONSHIP instead — "whatever is actually moving" — which is what the picker means when it offers a
+ * character's bodied ancestor, and it cannot dangle.
  *
  * Two sources: a node CUSTOM VARIABLE (the default, read through the access model —
  * [[node-variable-access]]), or one of the engine's {@link NODE_BUILTINS}.
  */
 export interface AnimationVariableBinding {
-    nodeRef: 'self' | 'parent' | string;
+    nodeRef: 'self' | 'parent' | 'bodied' | string;
     varName: string;
     /** Whether the bound variable reads as a number or boolean (decides which condition ops apply). */
     varType: 'number' | 'boolean';
@@ -146,6 +175,22 @@ export interface AnimationState {
      * parameter can drive the rate live (e.g. run faster the faster the character moves). Overrides `speed`.
      */
     speedParam?: string;
+    /**
+     * How strongly foot IK applies while this state plays, 0..1. Absent means 1 (fully on).
+     *
+     * On by default, and that is deliberate rather than lazy: a foot whose ground ray finds nothing fades its
+     * own contribution to zero, so a character in mid-air already looks right with no authoring at all. This
+     * is for the exceptions — a state whose animation should be trusted verbatim.
+     */
+    ikWeight?: number;
+    /**
+     * Parameter to read {@link ikWeight} from instead, re-read every frame. Overrides `ikWeight`.
+     *
+     * The values worth binding here already exist as built-ins: `isGrounded`, `isFalling`, `airTime`,
+     * `groundDistance`. A MISSING parameter keeps the static weight rather than reading 0, matching how
+     * `speedParam` behaves — a dangling reference should not silently switch a feature off.
+     */
+    ikWeightParam?: string;
     /** The state the machine starts in. Exactly one state should be the entry. */
     isEntry?: boolean;
     /** Graph-editor layout coordinates (authoring only — ignored at runtime). */
@@ -549,6 +594,16 @@ const WEIGHT_FADE_EPSILON = 1e-3;
 const DOMINANT_SWITCH_MARGIN = 0.05;
 
 /**
+ * State changes within one second that mean the machine is fighting itself rather than responding.
+ *
+ * Set above what real play produces: a burst through idle -> walk -> run -> turn while the player slams the
+ * controls is four in a second and legitimate. Sustained thrashing is an order of magnitude faster — a pair of
+ * transitions both satisfied around one threshold flips every frame, i.e. 60 — so six is comfortably clear of
+ * honest play while still catching a bounce long before it needs a stopwatch to see.
+ */
+const PING_PONG_FLIPS_PER_SEC = 6;
+
+/**
  * Animator class manages skeletal animation playback
  * Based on the LearnOpenGL skeletal animation approach
  */
@@ -556,7 +611,30 @@ export class Animator {
     private _currentAnimation: Animation | null = null;
     private _animatedModel: AnimatedModel | null = null;
     private _currentTime: number = 0;
+    /**
+     * Frame time scaled by playback speed. This is CLOCK time: it advances phase, clip time and cross-fades,
+     * which is exactly what a playback rate is supposed to affect.
+     */
     private _deltaTime: number = 0;
+    /**
+     * Frame time as the wall gives it, unscaled. This is FILTER time.
+     *
+     * The two must not be the same variable, because playback rate and filter response are unrelated
+     * quantities. Every damping time constant in here — axis smoothing, weight smoothing, IK foot weights — is
+     * authored in SECONDS, so feeding them a speed-scaled dt makes a state at speed 0.5 take twice as long to
+     * settle as it asked for.
+     *
+     * At speed 0 it is worse than a stretch: each filter reads `dt <= 0` as "do not filter" and returns its
+     * target raw. A state whose Speed parameter is bound to a signed value (`forwardSpeed`, `planarAngle`, …)
+     * pins `_speed` to 0 the moment that value goes negative — see _applyStateSpeed — so the clips freeze while
+     * the blend goes on being recomputed every frame from an unsmoothed, noisy probe. That reads on screen as
+     * the whole pose vibrating, and only ever on one side of the axis, because the clamp is what makes it
+     * asymmetric.
+     *
+     * Assigned in lockstep with `_deltaTime` so the two go stale together when `update` returns early: a
+     * scrubbing editor must still not advance any smoothing.
+     */
+    private _frameDelta: number = 0;
     private _finalBoneMatrices: mat4[] = [];
     private _bones: Map<string, Bone> = new Map();
     private _skin: Skin | null = null;
@@ -661,6 +739,17 @@ export class Animator {
     private _fieldSampleMeta: Map<string, { rateScale: number; phaseOffset: number }> = new Map();
     /** False until the first weight evaluation of a field, which snaps rather than fading up from nothing. */
     private _fieldWeightsSeeded: boolean = false;
+    /** Clip names already reported as missing, so the warning does not repeat every frame. */
+    private _warnedMissingClips: Set<string> = new Set();
+    /** Parameter names already reported as having a dangling node reference. Same reason. */
+    private _warnedBindings: Set<string> = new Set();
+    /** "state param" pairs already reported as driving playback negative. See _warnNegativeSpeed. */
+    private _warnedNegativeSpeed: Set<string> = new Set();
+    /** Recent state changes, for the ping-pong report. See _noteStateChange. */
+    private _stateFlips: { at: number; pair: string }[] = [];
+    private _warnedPingPong: boolean = false;
+    /** Accumulated frame time, purely so the ping-pong window has a clock that is not the wall. */
+    private _animatorClock: number = 0;
     /**
      * Clip currently treated as dominant, held with a margin.
      *
@@ -674,6 +763,28 @@ export class Animator {
     /** Cached skeleton hierarchy; see _topology(). */
     private _topologyCache: SkeletonTopology | null = null;
     private _topologySkin: Skin | null = null;
+
+    // ---- Foot IK state ----
+    //
+    // Both are damped across frames, which is the whole reason they are fields rather than locals: a foot
+    // crossing the lip of a ledge would otherwise snap between planted and free on consecutive frames.
+    /** Per foot (keyed by its ankle's node index): how much of the IK correction is currently applied. */
+    private _ikFootWeights: Map<number, number> = new Map();
+    /**
+     * Per foot: the last surface its ray found, in WORLD space, so a foot that loses its ground fades out
+     * instead of popping. Without it there is nothing to fade TOWARDS on the frame the ray first misses, and
+     * the correction simply vanishes for that frame however smoothly the weight is decaying.
+     *
+     * World, not model: a model-space memory would be carried along by the character, so a walking character's
+     * fading foot would be held at a stale point relative to its own body rather than to the ground it just
+     * left. Re-transformed through the current `worldToModel` each frame, which is already computed.
+     */
+    private _ikFootHits: Map<number, { point: vec3; normal: vec3 }> = new Map();
+    /** The last validated rig and its result, so validation and its warning happen once per rig, not per frame. */
+    private _validatedRigRef: IkRig | null = null;
+    private _rigValidation: IkRigValidation | null = null;
+    /** How far the pelvis is currently lowered, in model units along "up". Never positive. */
+    private _ikHipOffset: number = 0;
     /** The field being cross-faded OUT of, mirroring _previousBones for the single-clip path. */
     private _previousFieldEntries: FieldEntry[] | null = null;
     private _previousFieldPhase: number = 0;
@@ -860,21 +971,25 @@ export class Animator {
     private _buildBoneMap(animation: Animation): void {
         this._bones = this._buildBoneMapFor(animation);
 
-        Logger.info(`Built bone map with ${this._bones.size} bones for animation "${animation.name}"`, 'Animation');
-        Logger.info(`Skin has ${this._skin?.joints.length || 0} joints`, 'Animation');
-        Logger.print('info', ['Animation target node indices:', Array.from(this._bones.values()).map(b => b.id)], 'Animation');
-        
-        // Log which joints have animation
+        let animatedCount = 0;
         if (this._skin) {
-            let animatedCount = 0;
             for (let i = 0; i < this._skin.joints.length; i++) {
-                const nodeIndex = this._skin.joints[i].nodeIndex;
-                const boneName = `bone_${nodeIndex}`;
-                if (this._bones.has(boneName)) {
-                    animatedCount++;
-                }
+                if (this._bones.has(`bone_${this._skin.joints[i].nodeIndex}`)) animatedCount++;
             }
-            Logger.info(`${animatedCount} out of ${this._skin.joints.length} joints have animation data`, 'Animation');
+        }
+
+        // ONE line, and a FLUSH line: this runs on every state entry, and four rows per entry is 240 lines a
+        // second out of a machine that is thrashing — which evicts the whole 500-entry ring in two seconds and
+        // buries the very warnings (ping-pong, dangling binding, missing clip) that would explain the
+        // thrashing. A flush row is rewritten in place and is not mirrored to devtools, so the information
+        // stays available without being able to drown anything.
+        Logger.print('info', [
+            `Bound "${animation.name}": ${this._bones.size} bones, `
+            + `${animatedCount}/${this._skin?.joints.length ?? 0} skin joints animated.`,
+            Array.from(this._bones.values()).map(b => b.id),
+        ], 'Animation', { flush: 'animator:boneMap' });
+
+        if (this._skin) {
 
             // If no joints have animation data, this animation is likely invalid or targets the wrong nodes
             if (animatedCount === 0) {
@@ -901,6 +1016,7 @@ export class Animator {
         this._fieldWeightState.clear();
         this._fieldSampleMeta.clear();
         this._fieldWeightsSeeded = false;
+        this._warnedMissingClips.clear();
         this._fieldDominant = null;
         this._fieldProbeSeeded = false;
     }
@@ -978,6 +1094,7 @@ export class Animator {
             this._fieldWeightState.clear();
             this._fieldSampleMeta.clear();
             this._fieldWeightsSeeded = false;
+            this._warnedMissingClips.clear();
             this._fieldDominant = null;
             this._fieldProbeSeeded = false;
         }
@@ -1039,7 +1156,15 @@ export class Animator {
             if (weight === undefined) continue;   // damped out, or already emitted for a duplicated clip
             damped.delete(w.sample.clipName);
             const clip = this._fieldClip(w.sample.clipName);
-            if (!clip) continue; // sample points at a clip this model does not have — skip, don't break the pose
+            if (!clip) {
+                // The sample names a clip this model does not have. Skipping keeps the rest of the blend
+                // alive — but if EVERY sample is unresolvable the field ends up empty, its duration is 0, the
+                // phase never advances, and the character silently holds its bind pose with nothing anywhere
+                // saying why. That is the shape of almost every "my blend space stopped animating" report, so
+                // it gets named. Once per clip name, or it would be a per-frame flood.
+                this._warnMissingFieldClip(w.sample.clipName);
+                continue;
+            }
             const meta = { rateScale: rateScaleOf(w.sample), phaseOffset: phaseOffsetOf(w.sample) };
             this._fieldSampleMeta.set(w.sample.clipName, meta);
             entries.push({
@@ -1140,7 +1265,9 @@ export class Animator {
             return;
         }
 
-        const dt = this._deltaTime;
+        // Wall-clock, not playback-scaled: `smoothing` is authored in seconds, and a state running at half
+        // speed did not ask for twice the lag. See _frameDelta.
+        const dt = this._frameDelta;
         this._fieldX = this._dampAxis(this._fieldX, this._fieldTargetX, field.xAxis, spanX, dt);
         this._fieldY = this._dampAxis(this._fieldY, this._fieldTargetY, field.yAxis, spanY, dt);
     }
@@ -1170,7 +1297,7 @@ export class Animator {
         for (const w of weights) targets.set(w.sample.clipName, (targets.get(w.sample.clipName) ?? 0) + w.weight);
 
         const seconds = weightSmoothing(field);
-        const dt = this._deltaTime;
+        const dt = this._frameDelta;   // wall-clock; see _frameDelta
 
         // The FIRST evaluation of a field must snap. Damping from an empty state means damping up from zero,
         // and a zero-weight pose is the bind pose — the character would unfold into its blend over the
@@ -1217,6 +1344,23 @@ export class Animator {
 
         this._fieldDominant = best ? best.clipName : null;
         return best;
+    }
+
+    /**
+     * Name a field clip the model does not have, once per clip name.
+     *
+     * The set is cleared when the field changes, so re-importing the model and fixing the mismatch lets the
+     * warning fire again if it is still wrong — a diagnostic that only ever speaks once per session is one
+     * you cannot use to check whether you fixed it.
+     */
+    private _warnMissingFieldClip(clipName: string): void {
+        if (this._warnedMissingClips.has(clipName)) return;
+        this._warnedMissingClips.add(clipName);
+        const available = this._animatedModel?.animations.map(a => a.name).join(', ') || '(none)';
+        Logger.warn(
+            `Animation field references clip "${clipName}", which this model does not have. That sample is `
+            + `skipped; if every sample is missing the field holds the bind pose. Available clips: ${available}`,
+            'Animation');
     }
 
     /** Weighted duration of the active field: what one full cycle of the blended motion lasts. */
@@ -1444,6 +1588,17 @@ export class Animator {
         stateName: string | null;
         /** Seconds since the current state was entered — what a minDwell gate is measured against. */
         stateTime: number;
+        /**
+         * Every live machine parameter, whatever the current state plays.
+         *
+         * The field rows above only cover the two parameters bound to the AXES, and those are exactly the ones
+         * that are innocent when a machine is ping-ponging: what drives a state change is a parameter on a
+         * transition CONDITION, which may be none of them. Without these, a machine flipping in and out of its
+         * field state shows a flip counter with nothing to explain it.
+         */
+        params: { name: string; value: number | boolean }[];
+        /** True when the current state is meant to play a field — so "no field" can be told from "not a field state". */
+        stateWantsField: boolean;
     } {
         const raw = (name: string | undefined): number | null => {
             if (!name) return null;
@@ -1466,7 +1621,19 @@ export class Animator {
             duration: this._fieldDuration(this._fieldEntries),
             stateName: this._currentStateName,
             stateTime: this._stateTime,
+            params: (this._stateMachine?.parameters ?? []).map(p => ({
+                name: p.name,
+                value: this._paramValues.get(p.name) ?? p.default,
+            })),
+            stateWantsField: !!this._currentState?.fieldId || !!this._currentState?.field,
         };
+    }
+
+    /** The AnimationState the machine is currently in, or null. */
+    private get _currentState(): AnimationState | null {
+        const sm = this._stateMachine;
+        if (!sm || !this._currentStateName) return null;
+        return sm.states.find(s => s.name === this._currentStateName) ?? null;
     }
 
     /**
@@ -1483,6 +1650,9 @@ export class Animator {
         // _playing false — and the returns below would then freeze the clock a minDwell gate is waiting on,
         // locking the machine into that state permanently.
         if (deltaTime > 0) this._stateTime += deltaTime;
+        // Same reasoning, and the same placement: the ping-pong window must keep time even when the pose path
+        // below bails out, or a machine bouncing between two finished clips measures its own rate as infinite.
+        if (deltaTime > 0) this._animatorClock += deltaTime;
 
         // Calculate speed if node is available.
         //
@@ -1511,6 +1681,7 @@ export class Animator {
         }
 
         this._deltaTime = deltaTime * this._speed;
+        this._frameDelta = deltaTime;
 
         // Update blend time if blending
         if (this._isBlending) {
@@ -1805,6 +1976,12 @@ export class Animator {
         if (!this._topologyCache || this._topologySkin !== this._skin) {
             this._topologySkin = this._skin;
             this._topologyCache = skeletonTopology(this._skin!);
+            // A different skeleton means different joints, so the damped IK state describes bones that may no
+            // longer exist — including the remembered ground each of them last stood on. Keyed off the same
+            // identity check for the same reason the topology is.
+            this._ikFootWeights.clear();
+            this._ikFootHits.clear();
+            this._ikHipOffset = 0;
         }
         return this._topologyCache;
     }
@@ -1864,7 +2041,13 @@ export class Animator {
         const outsideSkin = (nodeIndex: number): mat4 => {
             let m = globalTransforms.get(nodeIndex);
             if (m) return m;
-            m = this._skin!.nodeTransforms?.get(nodeIndex) ?? mat4.create();
+            // CLONED, never the skin's own matrix. `globalTransforms` is written in place — by the
+            // re-accumulation loop and by the IK pass's _rotateGlobal — so caching the rest transform by
+            // reference would let a solve write into `nodeTransforms`, which is the bind-pose fallback for
+            // every unanimated joint and the source `_setTPose` reads. The corruption would accumulate every
+            // frame and survive as long as the model does.
+            const rest = this._skin!.nodeTransforms?.get(nodeIndex);
+            m = rest ? mat4.clone(rest) : mat4.create();
             globalTransforms.set(nodeIndex, m);
             return m;
         };
@@ -1888,12 +2071,428 @@ export class Animator {
             globalTransforms.set(nodeIndex, global);
         }
 
+        // Foot IK, if this skeleton has a rig and anything is holding it up. Placed HERE — after the pose is
+        // fully accumulated, before the bind matrices are folded in — because it needs to know where the feet
+        // actually ended up, and because writing corrected LOCALS lets the accumulation loop above be re-run
+        // verbatim to carry the change down to every descendant.
+        if (this._applyFootIk(localTransforms, globalTransforms, topo)) {
+            for (const jointIndex of topo.order) {
+                const joint = this._skin.joints[jointIndex];
+                const nodeIndex = joint.nodeIndex;
+                const local = localTransforms.get(nodeIndex)!;
+                const parentNode = topo.parentNode[jointIndex];
+                const global = globalTransforms.get(nodeIndex)!;
+                if (parentNode === undefined) {
+                    mat4.copy(global, local);
+                } else {
+                    const parentJoint = topo.parentJoint[jointIndex];
+                    const parentGlobal = parentJoint >= 0
+                        ? globalTransforms.get(this._skin.joints[parentJoint].nodeIndex)!
+                        : outsideSkin(parentNode);
+                    mat4.multiply(global, parentGlobal, local);
+                }
+            }
+        }
+
         // Calculate final bone matrices: finalMatrix = globalTransform × inverseBindMatrix
         for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
             const joint = this._skin.joints[jointIndex];
             const globalTransform = globalTransforms.get(joint.nodeIndex) ?? mat4.create();
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
         }
+    }
+
+    // ---- Foot IK ----------------------------------------------------------------------------------
+    //
+    // Plant each foot on whatever is under it, and lower the pelvis when a leg cannot reach. Runs against the
+    // MODEL-space pose inside _recomputePose; the ground query is a world-space raycast, so the hit comes back
+    // through inverse(node.worldTransform).
+    //
+    // Everything here is a no-op without a rig, without physics, or at zero weight — which is what makes this
+    // "runtime only" without needing a flag: an editor scene has no live physics, so the ray never hits and
+    // the pass costs one map lookup.
+
+    /**
+     * The IK weight this frame: the current state's, or the parameter it names.
+     *
+     * A missing parameter keeps the static weight rather than reading 0 — a dangling reference should not
+     * silently disable the feature, the same reasoning as _applyStateSpeed.
+     */
+    private _stateIkWeight(): number {
+        const sm = this._stateMachine;
+        const state = sm && this._currentStateName
+            ? sm.states.find(s => s.name === this._currentStateName)
+            : null;
+        if (!state) return 1;
+        if (state.ikWeightParam) {
+            const v = this._paramValues.get(state.ikWeightParam);
+            if (typeof v === 'number') return clamp(v, 0, 1);
+            if (typeof v === 'boolean') return v ? 1 : 0;
+        }
+        return typeof state.ikWeight === 'number' ? clamp(state.ikWeight, 0, 1) : 1;
+    }
+
+    /**
+     * The rig's usable chains, validated once per rig object and reported once.
+     *
+     * Keyed on the rig's identity rather than a dirty flag, for the same reason the topology is: a rig is
+     * replaced wholesale when it is edited, so identity IS the invalidation rule. The warning fires on the
+     * first frame a bad rig is seen and then stays quiet — a per-frame flood would bury the one line that
+     * says what is wrong.
+     */
+    private _validatedRig(rig: IkRig, topo: SkeletonTopology): IkRigValidation {
+        if (this._rigValidation && this._validatedRigRef === rig) return this._rigValidation;
+        this._validatedRigRef = rig;
+        this._rigValidation = validateIkRig(rig, topo, isAncestorJoint,
+            node => this._skin?.nodeNames?.get(node) ?? `node ${node}`);
+
+        for (const p of this._rigValidation.problems) {
+            const where = p.leg >= 0 ? `Foot IK leg ${p.leg + 1}` : 'Foot IK';
+            Logger.warn(`${where}: ${p.message}. That part of the rig is ignored.`, 'Animation');
+        }
+        return this._rigValidation;
+    }
+
+    /**
+     * Solve foot placement into `localTransforms`. Returns true when anything changed, which is the caller's
+     * signal to re-accumulate.
+     *
+     * The governing idea is a STANCE/SWING split: IK owns a foot that is on the ground and the animation owns
+     * one that is in the air. It is not "plant every foot on whatever the ray found" — the ray reaches further
+     * down than a stride lifts, so that would drag every swing back to the floor and fight the animation.
+     * Which feet count as planted is decided in pass 1b, and it needs every foot's clearance, which is why the
+     * work is split across passes rather than done per foot.
+     *
+     * Known limitation: during a true flight phase (both feet airborne but still within `traceDown`) the lower
+     * foot becomes the reference and keeps its correction. That is left to the two mechanisms that already
+     * exist for it — `traceDown`, and an `ikWeightParam` bound to a grounded flag — rather than a third knob.
+     */
+    private _applyFootIk(
+        localTransforms: Map<number, mat4>,
+        globalTransforms: Map<number, mat4>,
+        topo: SkeletonTopology,
+    ): boolean {
+        const rig = this._skin?.ikRig;
+        if (!rig || !rig.feet?.length || !this._node) return false;
+
+        const physics = this._node.scene?.physics;
+        if (!physics) return false;
+
+        // Only the chains the skeleton actually supports. A rig can name the right bones and still not
+        // describe a leg — three bones from unrelated parts of the rig solve to a pose with no relation to
+        // the character, which on screen is a thrash rather than an obvious error. Cached per rig object,
+        // since it is pure and the rig only changes when someone edits it.
+        const checked = this._validatedRig(rig, topo);
+        if (checked.feet.length === 0) return false;
+
+        const weight = this._stateIkWeight();
+        const tuning = ikTuning(rig);
+        // dt is 0 on a seek/scrub, which must not advance the smoothing — but the targets still resolve, so a
+        // scrubbed pose is the settled one rather than whatever the last played frame left behind.
+        //
+        // Wall-clock, not playback-scaled: a foot easing onto a step is reacting to the ground, not playing an
+        // animation, so a slowed-down (or speed-0) state must not slow down or freeze the ease. See _frameDelta.
+        const dt = this._frameDelta;
+
+        const nodeWorld = this._node.worldTransform;
+        const worldToModel = mat4.create();
+        // A degenerate world transform (a zero scale on some axis) has no inverse and nothing sensible to
+        // place a foot against.
+        if (!mat4.invert(worldToModel, nodeWorld)) return false;
+        // Gravity-up in MODEL space. Direction, not position, so translation is dropped — and it is
+        // renormalized because a scaled character's model space is not metric.
+        const upWorld = physics.up;
+        const up = vec3.transformMat4(vec3.create(), upWorld, worldToModel);
+        const originModel = vec3.transformMat4(vec3.create(), vec3.create(), worldToModel);
+        vec3.sub(up, up, originModel);
+        if (vec3.length(up) < 1e-8) return false;
+        vec3.normalize(up, up);
+
+        const ownBody = this._nearestBodiedNode()?.body ?? null;
+
+        // ---- Pass 1a: where does each foot want to be? -------------------------------------------------
+        //
+        // Only where it WANTS to be. Whether it should actually go there is pass 1b's job: a foot the
+        // animation has lifted mid-stride still finds ground under it (traceDown reaches further than a stride
+        // lifts), and planting it there would destroy the swing. That decision needs every foot's clearance,
+        // so it cannot be made inside this loop.
+        type FootPlan = {
+            chain: IkFootChain;
+            ankle: vec3;         // model space, as animated
+            target: vec3;        // model space, on the ground
+            normal: vec3;        // model space, of the surface
+            weight: number;      // this foot's damped contribution
+            /** Signed distance from the animated ankle to its target along `up`. Negative = the foot must drop. */
+            along: number;
+        };
+        const plans: FootPlan[] = [];
+
+        for (const chain of checked.feet) {
+            // A half-assigned chain is normal while authoring; skip it rather than throwing.
+            const ankleGlobal = globalTransforms.get(chain.foot);
+            if (!ankleGlobal || !globalTransforms.get(chain.thigh) || !globalTransforms.get(chain.shin)) continue;
+
+            const ankle = mat4.getTranslation(vec3.create(), ankleGlobal);
+            const ankleWorld = vec3.transformMat4(vec3.create(), ankle, nodeWorld);
+
+            const from = vec3.scaleAndAdd(vec3.create(), ankleWorld, upWorld, tuning.traceUp);
+            const to = vec3.scaleAndAdd(vec3.create(), ankleWorld, upWorld, -tuning.traceDown);
+            const hit = physics.raycast(from, to, { ignore: ownBody });
+
+            const key = chain.foot;
+            const prev = this._ikFootWeights.get(key) ?? 0;
+            // No ground under this foot: it fades out rather than switching off, or a foot crossing the lip
+            // of a ledge would snap between placed and un-placed on consecutive frames.
+            const target = hit ? weight : 0;
+            const next = tuning.smoothing > 0 && dt > 0 ? dampTime(prev, target, tuning.smoothing, dt) : target;
+            this._ikFootWeights.set(key, next);
+
+            // Fading OUT needs somewhere to fade to. The decaying weight above is not enough on its own —
+            // with no hit there is no target to ease towards, so the correction would simply be absent on the
+            // frame the ray first misses, which is the pop the damping exists to prevent. The remembered
+            // surface drifts as the character moves, but the drift is largest exactly where the weight is
+            // smallest, so their product stays negligible.
+            if (hit) {
+                this._ikFootHits.set(key, {
+                    point: vec3.clone(hit.point),
+                    normal: vec3.clone(hit.normal),
+                });
+            }
+            const ground = this._ikFootHits.get(key);
+            if (!ground || next <= 1e-3) {
+                // Spent: drop the memory rather than leave a stale point to be resurrected after a teleport.
+                this._ikFootHits.delete(key);
+                continue;
+            }
+
+            const hitModel = vec3.transformMat4(vec3.create(), ground.point, worldToModel);
+            const normalModel = vec3.transformMat4(vec3.create(), ground.normal, worldToModel);
+            vec3.sub(normalModel, normalModel, originModel);
+            if (vec3.length(normalModel) > 1e-8) vec3.normalize(normalModel, normalModel);
+
+            // The ankle sits a foot's height above the sole; without that the ankle itself lands on the
+            // ground and the whole foot sinks through it.
+            const desired = vec3.scaleAndAdd(vec3.create(), hitModel, up, tuning.footHeight);
+            const along = vec3.dot(vec3.sub(vec3.create(), desired, ankle), up);
+
+            plans.push({ chain, ankle, target: desired, normal: normalModel, weight: next, along });
+        }
+
+        // ---- Pass 1b: let go of the feet that are mid-swing --------------------------------------------
+        //
+        // `-along` is a foot's CLEARANCE: how far the animated ankle sits above where it would be planted.
+        // Measured against the lowest foot rather than absolutely, because absolutely it says nothing — a foot
+        // 0.3 above its ground is mid-stride if the other foot is down, and is a character standing on ground
+        // 0.3 lower than the animation assumed if the other foot is up there too. The first wants releasing,
+        // the second wants the whole pelvis lowered, and only the other foot distinguishes them.
+        //
+        // A one-legged rig, or a frame where only one foot has a plan, makes that foot its own reference and
+        // so keeps the full correction. That is the honest answer: with one foot there is no evidence about
+        // what "planted" means.
+        let ref = Infinity;
+        for (const plan of plans) ref = Math.min(ref, -plan.along);
+        // Clamped at 0 so a foot THROUGH the ground (negative clearance) cannot lift the reference and release
+        // the other leg, which is properly planted.
+        ref = plans.length ? Math.max(0, ref) : 0;
+
+        for (const plan of plans) {
+            plan.weight *= swingReleaseWeight(-plan.along - ref, tuning.swingRelease);
+        }
+        // A released foot must not merely be solved towards nothing — it must not be solved at all.
+        // `solveTwoBone` clamps the target distance to `maxReach`, so even an identity solve pulls a straight
+        // leg in by a couple of millimetres. Same reason the weight guard above exists.
+        const active = plans.filter(p => p.weight > 1e-3);
+
+        // The deepest a foot needs to go, in model units along -up, WEIGHTED by how much of that foot's
+        // correction is actually being applied. Unweighted, a swing foot dominates this — its clearance is the
+        // largest of any foot — and the pelvis dips by the stride's lift height once per step even though the
+        // foot it is dipping for has been let go.
+        let lowest = 0;
+        for (const plan of active) lowest = Math.min(lowest, Math.min(0, plan.along) * plan.weight);
+
+        // ---- Pass 2: lower the pelvis ------------------------------------------------------------------
+        //
+        // Only ever DOWN. A foot that needs to rise is a step the knee can bend for; a foot that needs to drop
+        // may be out of the leg's reach, and dropping the pelvis is the only way to keep it planted without
+        // the character doing the splits.
+        //
+        // With NO foot on the ground the target is 0 — and this deliberately does not return early, because
+        // the pelvis may still be lowered from when a foot was down. It has to RISE back over the smoothing
+        // time, which means going on applying the decaying offset below. Returning here instead would drop
+        // the character to its animated pose in one frame at the exact moment IK is meant to be invisible,
+        // and leave the stale offset to resume from on landing.
+        const hipTarget = active.length > 0 ? Math.max(-tuning.maxHipDrop, Math.min(0, lowest)) : 0;
+        this._ikHipOffset = tuning.smoothing > 0 && dt > 0
+            ? dampTime(this._ikHipOffset, hipTarget, tuning.smoothing, dt)
+            : hipTarget;
+        // Snap the tail of the exponential to zero so a released pelvis stops costing a re-accumulation.
+        if (Math.abs(this._ikHipOffset) < 1e-5) this._ikHipOffset = 0;
+
+        if (active.length === 0 && this._ikHipOffset === 0) return false;
+
+        const hipsLocal = checked.hips !== undefined ? localTransforms.get(checked.hips) : undefined;
+        if (hipsLocal && this._ikHipOffset !== 0) {
+            // Applied to the hips' LOCAL translation, in the parent's space — so it travels down the whole
+            // skeleton through the ordinary accumulation instead of needing every descendant patched.
+            const hipsJoint = topo.jointOfNode.get(checked.hips!);
+            const parentJoint = hipsJoint !== undefined ? topo.parentJoint[hipsJoint] : -1;
+            const shift = vec3.scale(vec3.create(), up, this._ikHipOffset);
+            if (parentJoint >= 0) {
+                const parentGlobal = globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex);
+                if (parentGlobal) {
+                    const inv = mat4.create();
+                    mat4.invert(inv, parentGlobal);
+                    // A direction, so the parent's translation must not come with it.
+                    const o = vec3.transformMat4(vec3.create(), vec3.create(), inv);
+                    vec3.transformMat4(shift, shift, inv);
+                    vec3.sub(shift, shift, o);
+                }
+            }
+            const moved = mat4.clone(hipsLocal);
+            moved[12] += shift[0]; moved[13] += shift[1]; moved[14] += shift[2];
+            localTransforms.set(checked.hips!, moved);
+
+            // Re-accumulate so the leg solve below sees where the feet actually are AFTER the drop.
+            this._reaccumulate(localTransforms, globalTransforms, topo);
+        }
+
+        // ---- Pass 3: solve each leg --------------------------------------------------------------------
+        for (const plan of active) {
+            this._solveLeg(plan.chain, plan.target, plan.normal, plan.weight, up, tuning,
+                localTransforms, globalTransforms, topo);
+        }
+        return true;
+    }
+
+    /** Re-run the parent-to-child accumulation in place. Cheap: one matrix multiply per joint. */
+    private _reaccumulate(
+        localTransforms: Map<number, mat4>,
+        globalTransforms: Map<number, mat4>,
+        topo: SkeletonTopology,
+    ): void {
+        for (const jointIndex of topo.order) {
+            const nodeIndex = this._skin!.joints[jointIndex].nodeIndex;
+            const local = localTransforms.get(nodeIndex);
+            const global = globalTransforms.get(nodeIndex);
+            if (!local || !global) continue;
+            const parentJoint = topo.parentJoint[jointIndex];
+            if (parentJoint < 0) {
+                const parentNode = topo.parentNode[jointIndex];
+                // A self-parented joint is a one-node cycle, which skeletonTopology reports as a root while
+                // leaving parentNode pointing at the joint itself. Multiplying its global by its own global
+                // SQUARES the transform — and a leg solve re-accumulates up to eight times a frame, so it
+                // compounds instead of merely being wrong once. _recomputePose's own loops dodge this by
+                // branching on `undefined`; this one has to check identity as well.
+                const parentGlobal = parentNode !== undefined && parentNode !== nodeIndex
+                    ? globalTransforms.get(parentNode)
+                    : undefined;
+                if (parentGlobal) mat4.multiply(global, parentGlobal, local);
+                else mat4.copy(global, local);
+            } else {
+                mat4.multiply(global, globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex)!, local);
+            }
+        }
+    }
+
+    /**
+     * Bend one leg onto its target and roll the foot onto the surface.
+     *
+     * Each step writes a LOCAL and re-accumulates before the next reads a global, so every stage sees the
+     * result of the one before it — the same discipline the skeleton itself uses.
+     */
+    private _solveLeg(
+        chain: IkFootChain,
+        target: vec3,
+        normal: vec3,
+        weight: number,
+        up: vec3,
+        tuning: ReturnType<typeof ikTuning>,
+        localTransforms: Map<number, mat4>,
+        globalTransforms: Map<number, mat4>,
+        topo: SkeletonTopology,
+    ): void {
+        const posOf = (node: number): vec3 | null => {
+            const g = globalTransforms.get(node);
+            return g ? mat4.getTranslation(vec3.create(), g) : null;
+        };
+
+        const hip = posOf(chain.thigh), knee = posOf(chain.shin), ankle = posOf(chain.foot);
+        if (!hip || !knee || !ankle) return;
+
+        // Ease towards the target by the foot's weight rather than snapping to it. This is where a partially
+        // faded foot lives, and where ikWeight = 0 becomes exactly the animated pose.
+        const eased = vec3.lerp(vec3.create(), ankle, target, weight);
+
+        const solve = solveTwoBone({ root: hip, mid: knee, tip: ankle, target: eased });
+        this._rotateGlobal(chain.thigh, solve.rootDelta, localTransforms, globalTransforms, topo);
+        this._reaccumulate(localTransforms, globalTransforms, topo);
+        this._rotateGlobal(chain.shin, solve.midDelta, localTransforms, globalTransforms, topo);
+        this._reaccumulate(localTransforms, globalTransforms, topo);
+
+        // Roll the foot onto the surface. Clamped: past maxSlope, matching the ground stops reading as
+        // contact and starts reading as a broken ankle, so the foot keeps its animated orientation instead.
+        const slope = Math.acos(clamp(vec3.dot(normal, up), -1, 1)) * 180 / Math.PI;
+        if (slope > 1e-3 && slope <= tuning.maxSlopeDeg) {
+            const align = quat.rotationTo(quat.create(), up, normal);
+            // Scaled by weight, so a fading foot un-rolls as smoothly as it un-plants.
+            const partial = quat.slerp(quat.create(), quat.create(), align, weight);
+            this._rotateGlobal(chain.foot, partial, localTransforms, globalTransforms, topo);
+            this._reaccumulate(localTransforms, globalTransforms, topo);
+
+            // The toe inherited the foot's roll; counter-rotate it so the ball stays flat on the surface
+            // rather than being levered off it by the ankle.
+            if (chain.toe !== undefined && globalTransforms.has(chain.toe)) {
+                const counter = quat.invert(quat.create(), partial);
+                const half = quat.slerp(quat.create(), quat.create(), counter, 0.5);
+                this._rotateGlobal(chain.toe, half, localTransforms, globalTransforms, topo);
+                this._reaccumulate(localTransforms, globalTransforms, topo);
+            }
+        }
+    }
+
+    /**
+     * Apply a MODEL-space rotation to one joint by rewriting its local transform.
+     *
+     * The delta is expressed in model space (that is the space the solver worked in), so it is applied to the
+     * joint's global and then brought back through the parent — `local = inverse(parentGlobal) * newGlobal`.
+     * Writing the local rather than the global is what lets one re-accumulation carry the change to every
+     * descendant instead of each caller patching its own subtree.
+     */
+    private _rotateGlobal(
+        nodeIndex: number,
+        delta: quat,
+        localTransforms: Map<number, mat4>,
+        globalTransforms: Map<number, mat4>,
+        topo: SkeletonTopology,
+    ): void {
+        const global = globalTransforms.get(nodeIndex);
+        if (!global) return;
+
+        // Rotate about the joint's own origin: translate to it, apply, translate back.
+        const origin = mat4.getTranslation(vec3.create(), global);
+        const rot = mat4.fromQuat(mat4.create(), delta);
+        const around = mat4.create();
+        mat4.fromTranslation(around, origin);
+        mat4.multiply(around, around, rot);
+        mat4.translate(around, around, vec3.negate(vec3.create(), origin));
+
+        const newGlobal = mat4.multiply(mat4.create(), around, global);
+
+        const jointIndex = topo.jointOfNode.get(nodeIndex);
+        const parentJoint = jointIndex !== undefined ? topo.parentJoint[jointIndex] : -1;
+        const parentNode = jointIndex !== undefined ? topo.parentNode[jointIndex] : undefined;
+        const parentGlobal = parentJoint >= 0
+            ? globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex)
+            : parentNode !== undefined ? globalTransforms.get(parentNode) : undefined;
+
+        const local = mat4.create();
+        if (parentGlobal) {
+            const inv = mat4.create();
+            mat4.invert(inv, parentGlobal);
+            mat4.multiply(local, inv, newGlobal);
+        } else mat4.copy(local, newGlobal);
+        localTransforms.set(nodeIndex, local);
+        mat4.copy(global, newGlobal);
     }
 
     /**
@@ -2050,6 +2649,14 @@ export class Animator {
         // Bands belong to the machine that authored them: a re-applied machine may have changed a threshold,
         // and a latch keyed on the old terms would keep a condition held past its new release point.
         this._condLatch.clear();
+        // Likewise the dangling-binding reports: different parameters, and a re-apply is exactly when someone
+        // has just fixed one and wants to know whether it took.
+        this._warnedBindings.clear();
+        this._warnedNegativeSpeed.clear();
+        // Re-arm the ping-pong report too: re-applying a machine is exactly when someone has just added the
+        // hysteresis it asked for and wants to know whether that took.
+        this._stateFlips.length = 0;
+        this._warnedPingPong = false;
         if (!sm) return;
         for (const p of sm.parameters) this._paramValues.set(p.name, p.default);
         this.resetStateMachine();
@@ -2082,12 +2689,102 @@ export class Animator {
     }
 
     /**
+     * Record a state change and report the machine if it is thrashing.
+     *
+     * A machine that changes state several times a second is fighting itself: two transitions are both
+     * satisfiable around one threshold, so it bounces. On screen that is not "the state machine is wrong", it
+     * is **the character vibrating** — every entry re-arms a cross-fade from a pose that has barely moved, and
+     * if one of the two states plays a field and the other a clip, the blend is torn down and rebuilt every
+     * frame. It reads as a blend problem, and people go looking in the blend.
+     *
+     * Reported with the PAIR named, because the count alone does not say which two transitions to go and fix.
+     * The clock is accumulated frame time rather than a wall clock: a stepped or slow-motion animator must
+     * measure its own time, and the engine has no business reading `Date.now()` in a per-frame path.
+     */
+    private _noteStateChange(from: string | null, to: string): void {
+        if (from === null || from === to) return;
+        this._stateFlips.push({ at: this._animatorClock, pair: `${from} -> ${to}` });
+        while (this._stateFlips.length && this._animatorClock - this._stateFlips[0].at > 1) this._stateFlips.shift();
+        if (this._stateFlips.length < PING_PONG_FLIPS_PER_SEC || this._warnedPingPong) return;
+
+        this._warnedPingPong = true;
+        // Most frequent pair in the window: with three states churning, the one that repeats is the culprit.
+        const counts = new Map<string, number>();
+        for (const f of this._stateFlips) counts.set(f.pair, (counts.get(f.pair) ?? 0) + 1);
+        let worst = '';
+        let worstN = 0;
+        for (const [pair, n] of counts) if (n > worstN) { worstN = n; worst = pair; }
+
+        const [a, b] = worst.split(' -> ');
+        Logger.warn(
+            `Animation state machine is ping-ponging: ${this._stateFlips.length} state changes in one second, `
+            + `mostly "${worst}". The pose is restarted every frame, which looks like the blend vibrating `
+            + `rather than like a state problem.\n`
+            + `  ${this._describeTransitions(a, b)}\n`
+            + `  parameters: ${this._describeParams()}\n`
+            + `  A transition with NO conditions always fires. Otherwise give the condition a hysteresis band `
+            + `(the ± box) or the transition a minimum dwell.`,
+            'Animation');
+    }
+
+    /**
+     * Both transitions between a pair of states, with every condition's live value and whether it is met.
+     *
+     * The count and the pair say WHERE; this says WHY, and without it the answer is a guessing game played
+     * against a machine nobody looking at the log can see. Two shapes account for almost every real
+     * ping-pong and both are obvious here and nowhere else: a transition with an empty condition list (which
+     * fires unconditionally, every frame), and a `>`/`<` pair whose values are both currently MET.
+     */
+    private _describeTransitions(from: string, to: string): string {
+        const sm = this._stateMachine;
+        if (!sm) return '';
+        const lines: string[] = [];
+        for (const [a, b] of [[from, to], [to, from]]) {
+            const t = sm.transitions.find(x => x.from === a && x.to === b)
+                ?? sm.transitions.find(x => x.from === '*' && x.to === b);
+            if (!t) { lines.push(`${a} -> ${b}: (no transition)`); continue; }
+            const parts: string[] = [];
+            this._forEachCondition(t, c => parts.push(this._describeCondition(c)));
+            const gates = [
+                t.minDwell ? `minDwell ${t.minDwell}s` : null,
+                t.hasExitTime ? `exitTime ${t.exitTime ?? 1}` : null,
+            ].filter(Boolean).join(', ');
+            lines.push(
+                `${a} -> ${b}: ${parts.length ? parts.join(' AND ') : '(NO CONDITIONS - fires unconditionally)'}`
+                + (gates ? ` | ${gates}` : ' | no dwell/exit-time gate'));
+        }
+        return lines.join('\n  ');
+    }
+
+    /** One condition as authored, with the value it is reading and whether it currently passes. */
+    private _describeCondition(c: AnimationCondition): string {
+        const v = this._paramValues.get(c.param);
+        const shown = typeof v === 'number' ? v.toFixed(3) : String(v);
+        const target = (c.op === 'gt' || c.op === 'lt' || c.op === 'eq' || c.op === 'neq') ? ` ${c.value ?? 0}` : '';
+        const band = c.hysteresis ? ` ±${c.hysteresis}` : '';
+        return `[${c.param} ${c.op}${target}${band} | ${c.param}=${shown} | ${this._conditionMet(c) ? 'MET' : 'not met'}]`;
+    }
+
+    /** Every parameter and its live value, so a condition reading a stale or defaulted one is visible. */
+    private _describeParams(): string {
+        const sm = this._stateMachine;
+        if (!sm) return '';
+        return sm.parameters
+            .map(p => {
+                const v = this._paramValues.get(p.name) ?? p.default;
+                return `${p.name}=${typeof v === 'number' ? v.toFixed(3) : String(v)}`;
+            })
+            .join(', ');
+    }
+
+    /**
      * Enter a state by name: make it current and play its bound clip. `blendOverride` is the firing
      * transition's own cross-fade duration, if it set one.
      */
     private _enterState(name: string, blendOverride?: number): void {
         if (!this._stateMachine) return;
         const state = this._stateMachine.states.find(s => s.name === name);
+        this._noteStateChange(this._currentStateName, name);
         this._currentStateName = name;
         this._prevEventTime = 0;
         this._stateTime = 0;
@@ -2104,7 +2801,17 @@ export class Animator {
         }
 
         if (!state || !state.clipName) {
-            // No clip bound: hold bind pose.
+            // Nothing to play: hold the bind pose. This is legitimate for a deliberately empty state, but it
+            // is ALSO where a field state lands when its embedded field has gone missing — `reembedFields`
+            // drops a state's `field` when its asset id no longer resolves, and a field state carries no
+            // `clipName` to fall back to. That path ends with _playing false and the character frozen in its
+            // bind pose, so it says so rather than looking like an empty state somebody meant.
+            if (state?.fieldId) {
+                Logger.warn(
+                    `Animation state "${name}" plays a blend field whose asset is missing, so it has nothing `
+                    + `to play and holds the bind pose. Re-pick the field on that state and Apply.`,
+                    'Animation');
+            }
             this._setTPose();
             return;
         }
@@ -2115,6 +2822,30 @@ export class Animator {
         this._loopsPlayed = 0;
         this._speed = state.speed ?? 1.0;
         this._applyStateSpeed(state);
+    }
+
+    /**
+     * Report a Speed parameter that has gone negative, once per state.
+     *
+     * The clamp below is correct — there is no reverse playback — but on its own it is invisible, and what it
+     * does is not small: playback pins to 0, so the clip FREEZES. Until this warning existed that read as "the
+     * animation vibrates when I move that way", because the pose goes on being re-blended every frame from an
+     * unsmoothed probe while the clips hold still (see {@link _frameDelta}).
+     *
+     * Signed built-ins are the usual source, and the trap is that they look like the obvious binding:
+     * `forwardSpeed` and `lateralSpeed` are signed BY DESIGN (that is what makes "walk backwards" reachable in
+     * a blend space), and `planarAngle` is negative across a whole half of its range.
+     */
+    private _warnNegativeSpeed(state: AnimationState, value: number): void {
+        const key = `${state.name} ${state.speedParam}`;
+        if (this._warnedNegativeSpeed.has(key)) return;
+        this._warnedNegativeSpeed.add(key);
+        Logger.warn(
+            `Animation state "${state.name}": its Speed parameter "${state.speedParam}" read ${value.toFixed(3)}. `
+            + `There is no reverse playback, so the rate is pinned to 0 and the clip freezes while that value `
+            + `stays negative. Bind Speed to a magnitude such as planarSpeed or currentSpeed, or remove the `
+            + `Speed parameter and set the rate per sample with the field's Rate column.`,
+            'Animation');
     }
 
     /**
@@ -2129,7 +2860,9 @@ export class Animator {
         if (v === undefined) return;
         // A bool reads as 1/0 so a flag can halt motion outright. The public setter's clamp is mirrored here
         // because this bypasses it; there is no reverse playback.
-        this._speed = Math.max(0, typeof v === 'number' ? v : (v ? 1 : 0));
+        const raw = typeof v === 'number' ? v : (v ? 1 : 0);
+        if (raw < 0) this._warnNegativeSpeed(state, raw);
+        this._speed = Math.max(0, raw);
     }
 
     /**
@@ -2151,7 +2884,26 @@ export class Animator {
     private _resolveVarNode(ref: string): Node | null {
         if (ref === 'self') return this._node;
         if (ref === 'parent') return this._node?.parent ?? null;
+        // A RELATIONSHIP rather than an identity, and that is the point: the character's rig is
+        // `Playable(body) -> holder -> ModelNode(animator)`, so the thing that actually moves is neither self
+        // nor parent, and naming it by node id breaks the moment the node is re-created. See the note on
+        // dangling references in _refreshVariableParams.
+        if (ref === 'bodied') return this._nearestBodiedNode();
         return this._node?.scene?.getNodeById(ref) ?? null;
+    }
+
+    /**
+     * Report a binding whose node has gone missing, once per parameter.
+     *
+     * This warning is the whole reason the bug below took so long to find: a parameter reading its default
+     * because its node vanished is indistinguishable, from the outside, from one legitimately reading zero.
+     * The machine keeps running, keeps posing its entry state, and never transitions — with nothing anywhere
+     * saying why.
+     */
+    private _warnDanglingBinding(paramName: string, message: string): void {
+        if (this._warnedBindings.has(paramName)) return;
+        this._warnedBindings.add(paramName);
+        Logger.warn(`Animation parameter "${paramName}": ${message}`, 'Animation');
     }
 
     /**
@@ -2169,8 +2921,35 @@ export class Animator {
         if (!sm || !this._node) return;
         for (const p of sm.parameters) {
             if (p.type !== 'variable' || !p.variable) continue;
-            const src = this._resolveVarNode(p.variable.nodeRef);
+            let src = this._resolveVarNode(p.variable.nodeRef);
             let val: number | boolean = p.default;
+
+            // A DANGLING REFERENCE. `nodeRef` may be a node id, and every re-instantiation regenerates ids —
+            // deleting and re-adding a character, rebuilding a template instance, re-placing from an asset.
+            // The binding then names a node that no longer exists and this whole loop quietly writes the
+            // default: every speed reads 0, no condition ever fires, and the character poses its entry state
+            // forever looking perfectly healthy.
+            //
+            // For a BUILT-IN there is exactly one sensible repair. The picker only ever offers built-ins for
+            // self, parent, or the nearest bodied ancestor, and the first two are relative and cannot dangle
+            // — so a dangling one meant the bodied ancestor, and that is a relationship we can re-derive.
+            // A user VARIABLE on an arbitrary scene node gets no such guess: driving a machine from the wrong
+            // object is worse than not driving it.
+            if (!src) {
+                const isId = p.variable.nodeRef !== 'self' && p.variable.nodeRef !== 'parent'
+                    && p.variable.nodeRef !== 'bodied';
+                if (isId && p.variable.source === 'builtin') src = this._nearestBodiedNode();
+                if (src) {
+                    this._warnDanglingBinding(p.name,
+                        `its node no longer exists (it was re-created, which changes node ids). Re-bound to `
+                        + `"${src.name}", the nearest parent with a rigid body. Re-pick it in the Variables `
+                        + `panel to make this permanent.`);
+                } else {
+                    this._warnDanglingBinding(p.name,
+                        `its node no longer exists, so it is stuck at its default (${String(p.default)}) and `
+                        + `no transition using it can ever fire. Re-pick it in the Variables panel.`);
+                }
+            }
 
             // Built-ins are engine state, not user data, so they skip the access model — there is no
             // variable record to carry an access modifier, and canAccessVariable would wave any unknown
@@ -2204,6 +2983,9 @@ export class Animator {
         const sm = this._stateMachine;
         if (!sm) return;
         this._refreshVariableParams(); // variable-bound params track their node variable each frame
+        this._refreshConditionLatches();
+        // Before any transition is considered, and for EVERY transition rather than just the ones leaving the
+        // current state — a hysteresis band that only advances while its own state is active does not work.
         if (!this._currentStateName) { this.resetStateMachine(); return; }
 
         // Re-read a parameter-driven playback rate: the state is already entered, so nothing else would.
@@ -2287,26 +3069,70 @@ export class Animator {
      * band pushes the two engage points apart instead — `> 1 ±0.4` fires at 1.2, `< 1 ±0.4` at 0.8 — so
      * nothing happens until the signal genuinely swings.
      *
-     * The latch is updated whenever the condition is evaluated, including for a transition that does not fire:
-     * it tracks the signal, not the transition. A band that only advanced on the frames some transition
-     * happened to be considered would mean nothing.
+     * The latch tracks the SIGNAL, not the transition, and {@link _refreshConditionLatches} is what makes that
+     * true — see the note there. It is not a detail: without it the band protects nothing.
      */
     private _thresholdMet(c: AnimationCondition, v: number, greater: boolean): boolean {
         const threshold = c.value ?? 0;
-        const h = typeof c.hysteresis === 'number' && c.hysteresis > 0 ? c.hysteresis : 0;
-        if (h === 0) return greater ? v > threshold : v < threshold;
+        if (!(typeof c.hysteresis === 'number' && c.hysteresis > 0)) {
+            return greater ? v > threshold : v < threshold;
+        }
+        // Idempotent, so calling it here as well as in the per-frame refresh is safe — and it keeps this
+        // correct for any caller that reaches a condition without having refreshed first.
+        this._updateLatch(c);
+        return this._condLatch.get(this._latchKey(c)) === true;
+    }
 
+    /** Identity of a condition's band: the terms it is asking about, so two identical conditions share one. */
+    private _latchKey(c: AnimationCondition): string {
+        return `${c.param}|${c.op}|${c.value ?? 0}|${c.hysteresis ?? 0}`;
+    }
+
+    /**
+     * Advance one hysteresis band by the parameter's current value.
+     *
+     * Idempotent within a frame: engaging is always the stricter test, so re-running it on the value it just
+     * produced cannot move the latch again.
+     */
+    private _updateLatch(c: AnimationCondition): void {
+        if (c.op !== 'gt' && c.op !== 'lt') return;
+        const h = typeof c.hysteresis === 'number' && c.hysteresis > 0 ? c.hysteresis : 0;
+        if (h === 0) return;
+        const v = this._paramValues.get(c.param);
+        if (typeof v !== 'number') return;
+
+        const greater = c.op === 'gt';
+        const threshold = c.value ?? 0;
         const half = h / 2;
         const engage = greater ? threshold + half : threshold - half;
         const release = greater ? threshold - half : threshold + half;
 
-        const key = `${c.param}|${c.op}|${threshold}|${h}`;
-        const latched = this._condLatch.get(key) === true;
-        const met = latched
+        const key = this._latchKey(c);
+        const met = this._condLatch.get(key) === true
             ? (greater ? v > release : v < release)
             : (greater ? v > engage : v < engage);
         this._condLatch.set(key, met);
-        return met;
+    }
+
+    /**
+     * Advance EVERY band in the machine, once per frame, whatever state is current.
+     *
+     * This is load-bearing, and its absence was a real bug. `_evaluateStateMachine` only walks transitions
+     * leaving the current state, so without this pass a band is only advanced while its own source state
+     * happens to be active — and the classic pair sits on two different states. `Speed > 0.1 ±0.1` lives on
+     * `Idle -> Locomotion` and `Speed < 0.1 ±0.1` on `Locomotion -> Idle`, so each was frozen exactly while the
+     * other was being consulted.
+     *
+     * Both could therefore be latched ON at once, and a latched condition tests its RELEASE point — which for
+     * a `>`/`<` pair overlaps across the entire band. `> 0.1` read true down to 0.05 while `< 0.1` read true up
+     * to 0.15, so anything in between satisfied both and the machine flipped every frame: a ping-pong at
+     * precisely the values the band was added to protect, which is a nasty thing to debug because the fix
+     * looks like it is already applied.
+     */
+    private _refreshConditionLatches(): void {
+        const sm = this._stateMachine;
+        if (!sm) return;
+        for (const t of sm.transitions) this._forEachCondition(t, c => this._updateLatch(c));
     }
 
     /** Fire event markers on the current clip whose time was crossed in (prev, cur]. */
@@ -2530,6 +3356,14 @@ export class Animator {
      */
     private _setTPose(): void {
         if (!this._skin) return;
+
+        // The bind pose is by definition un-IK'd, and this path writes the bone matrices by its own route
+        // without going through _recomputePose. Leaving the damped IK state behind would have the next real
+        // pose resume from a pelvis drop, foot weights and remembered ground that belong to a pose no longer
+        // on screen.
+        this._ikFootWeights.clear();
+        this._ikFootHits.clear();
+        this._ikHipOffset = 0;
 
         // Stop any playing animation
         this._playing = false;

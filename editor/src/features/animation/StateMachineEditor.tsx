@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import type { Animator, AnimationVariableBinding, AnimationParameterType } from 'cleo'
-import { AccessibleVariable } from './skeleton'
+import type { Animator, AnimationVariableBinding, AnimationParameterType, AnimationParameter } from 'cleo'
+import { NODE_BUILTINS, isConditionGroup } from 'cleo'
+import { AccessibleVariable, UNSIGNED_BUILTINS } from './skeleton'
+import FieldDebugReadout from './FieldDebugReadout'
+import type { AnimationFieldAsset } from '../../utils/animationFields'
 import { useStateMachine } from './StateMachineContext'
 import ConditionTree from './ConditionTree'
 import Collapsable from '../../components/Collapsable'
@@ -196,6 +199,19 @@ function SelectedState() {
   const speedFeedsAxis = speedByParamOnField
     && (s.speedParam === s.fieldInputs?.x || s.speedParam === s.fieldInputs?.y)
 
+  // The mirror of the UNSIGNED_BUILTINS check on a field axis, and a nastier failure. There is no reverse
+  // playback, so a Speed parameter that goes negative is clamped to exactly 0 — the clip FREEZES, and because
+  // the blend keeps being recomputed from an unsmoothed probe while it holds, what you see is the whole pose
+  // vibrating rather than an animation that stopped. Only on one side of the parameter's range, which is what
+  // makes it so hard to read as a speed problem at all.
+  //
+  // Read off NODE_BUILTINS rather than a list kept here: the engine's getters are the authority on which
+  // values are signed, and a second copy would drift the first time one is added.
+  const speedBuiltin = sm.parameters.find(p => p.name === s.speedParam)?.variable
+  const signedSpeed = speedBuiltin?.source === 'builtin' && !!NODE_BUILTINS[speedBuiltin.varName]?.signed
+    ? speedBuiltin.varName
+    : undefined
+
   return (
     <div className='flex flex-col gap-2'>
       <div className='flex items-center gap-1'>
@@ -238,10 +254,12 @@ function SelectedState() {
           {field && <>
             <FieldAxisBinding
               label={field.xAxis.name} params={speedParams} value={s.fieldInputs?.x}
+              minSample={minSampleOn(field, 'x')}
               onPick={name => setState(i, { fieldInputs: { ...s.fieldInputs, x: name } })} />
             {field.mode === '2d' && (
               <FieldAxisBinding
                 label={field.yAxis.name} params={speedParams} value={s.fieldInputs?.y}
+                minSample={minSampleOn(field, 'y')}
                 onPick={name => setState(i, { fieldInputs: { ...s.fieldInputs, y: name } })} />
             )}
             {/* An unbound axis holds whatever it was last set to, which reads as a blend that never
@@ -286,7 +304,16 @@ function SelectedState() {
           : <input className={input + ' w-[56px]'} type='number' step='0.1' min='0' value={s.speed}
               onChange={e => setState(i, { speed: Math.max(0, parseFloat(e.target.value) || 0) })} />}
       </div>
-      {byParam && !speedByParamOnField && <p className='text-[10px] text-gray-500 -mt-1'>Falls back to the fixed speed if the parameter goes missing.</p>}
+      {byParam && !speedByParamOnField && !signedSpeed && <p className='text-[10px] text-gray-500 -mt-1'>Falls back to the fixed speed if the parameter goes missing.</p>}
+      {byParam && signedSpeed && (
+        <p className='text-[10px] text-warning -mt-1'>
+          <b>“{signedSpeed}” goes negative</b> — and there is no reverse playback, so the rate is clamped to 0
+          and the clip freezes for that whole half of its range. With a blend field still re-mixing underneath,
+          that reads on screen as the pose vibrating rather than as an animation that stopped. Bind Speed to a
+          magnitude (<b>planarSpeed</b>, <b>currentSpeed</b>) instead, or set it to <b>#</b> and let the field’s
+          per-sample <b>Rate</b> column set the pace.
+        </p>
+      )}
       {speedByParamOnField && (
         <p className='text-[10px] text-warning -mt-1'>
           {speedFeedsAxis
@@ -297,6 +324,41 @@ function SelectedState() {
           is why this only shows up in Play.
         </p>
       )}
+
+      {/* Foot IK weight. On by default and usually left alone — a foot whose ground ray finds nothing fades
+          itself out, so mid-air already looks right with no authoring. This is for the exceptions: a state
+          whose animation should be trusted verbatim, or one gated on a grounded/falling parameter. */}
+      <div className='flex items-center gap-1 text-[10px]'
+        title={'How strongly foot IK applies during this state. 1 is fully on, 0 leaves the animation exactly as '
+          + 'authored. Feet with no ground under them fade out by themselves, so this is rarely needed.'}>
+        <span className='text-gray-400'>foot IK</span>
+        <SegmentedControl<'number' | 'param'>
+          size='sm'
+          value={s.ikWeightParam ? 'param' : 'number'}
+          onChange={mode => setState(i, mode === 'param'
+            ? { ikWeightParam: speedParams[0]?.name, ikWeight: undefined }
+            : { ikWeightParam: undefined })}
+          options={[
+            { value: 'number', label: '#', title: 'A fixed weight' },
+            { value: 'param', label: 'P', title: 'Read the weight from a parameter — bind isGrounded or isFalling to drop IK in mid-air' },
+          ]} />
+        {s.ikWeightParam
+          ? (speedParams.length === 0
+            ? <span className='text-warning'>no numeric parameters</span>
+            : <select className={input + ' w-[110px]'} value={s.ikWeightParam}
+                onChange={e => setState(i, { ikWeightParam: e.target.value })}>
+                {!speedParams.some(p => p.name === s.ikWeightParam) && <option value={s.ikWeightParam}>{s.ikWeightParam} — missing</option>}
+                {speedParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+              </select>)
+          : <input className={input + ' w-[56px]'} type='number' step='0.1' min='0' max='1'
+              value={s.ikWeight ?? 1}
+              onChange={e => {
+                const v = parseFloat(e.target.value)
+                setState(i, { ikWeight: Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : undefined })
+              }} />}
+        <span className='text-dim'>{!s.ikWeightParam && s.ikWeight === undefined ? '(on)' : ''}</span>
+      </div>
+      {s.ikWeightParam && <p className='text-[10px] text-gray-500 -mt-1'>Falls back to fully on if the parameter goes missing.</p>}
 
       <div className='text-[10px] uppercase tracking-wide text-gray-400 mt-1'>Links</div>
       {linked.length === 0
@@ -323,25 +385,117 @@ function SelectedState() {
  * the blend space's. Only numeric parameters are offered (a trigger is momentary and has no axis value);
  * a 'variable' parameter is in that set too, which is what lets an axis read a node variable live.
  */
-function FieldAxisBinding({ label, params, value, onPick }: {
+/** The lowest coordinate any sample occupies on one of a field's axes. 0 for a field with no samples. */
+function minSampleOn(field: AnimationFieldAsset, axis: 'x' | 'y'): number {
+  const vs = field.samples.map(s => (axis === 'x' ? s.x : s.y ?? 0)).filter(v => Number.isFinite(v))
+  return vs.length ? Math.min(...vs) : 0
+}
+
+function FieldAxisBinding({ label, params, value, onPick, minSample }: {
   label: string
-  params: { name: string }[]
+  params: AnimationParameter[]
   value?: string
   onPick: (name: string) => void
+  /** Lowest coordinate any sample occupies on this axis, so a negative one can be checked against the source. */
+  minSample: number
 }) {
   const missing = !!value && !params.some(p => p.name === value)
+
+  // The silent failure this catches: an axis with samples at negative coordinates driven by a parameter that
+  // reads a MAGNITUDE. The probe can then never enter the half of the field those samples live in, so their
+  // clips have weight exactly 0 forever — "the walk-backwards animation just never plays", with a field that
+  // looks correct and a binding that looks correct. Only reachable statically, which is why it is checked here
+  // rather than left to be discovered in Play.
+  const bound = params.find(p => p.name === value)
+  const builtin = bound?.variable?.source === 'builtin' ? bound.variable.varName : undefined
+  const unsigned = builtin !== undefined && builtin in UNSIGNED_BUILTINS
+  const suggestion = unsigned ? UNSIGNED_BUILTINS[builtin!] : undefined
+
   return (
-    <label className='flex items-center gap-1'>
-      <span className='text-[10px] text-gray-400 w-[42px] shrink-0 truncate' title={label}>{label}</span>
-      {params.length === 0
-        ? <span className='text-[10px] text-warning flex-1'>No numeric parameter to bind.</span>
-        : <select className={input + ' flex-1 min-w-0'} value={value ?? ''} onChange={e => onPick(e.target.value)}>
-            <option value=''>— pick parameter —</option>
-            {missing && <option value={value}>{value} — missing</option>}
-            {params.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-          </select>}
-    </label>
+    <>
+      <label className='flex items-center gap-1'>
+        <span className='text-[10px] text-gray-400 w-[42px] shrink-0 truncate' title={label}>{label}</span>
+        {params.length === 0
+          ? <span className='text-[10px] text-warning flex-1'>No numeric parameter to bind.</span>
+          : <select className={input + ' flex-1 min-w-0'} value={value ?? ''} onChange={e => onPick(e.target.value)}>
+              <option value=''>— pick parameter —</option>
+              {missing && <option value={value}>{value} — missing</option>}
+              {params.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+            </select>}
+      </label>
+      {unsigned && minSample < 0 && (
+        <p className='text-[10px] text-warning'>
+          ⚠ “{label}” has samples at negative values, but <b>{builtin}</b> is never negative — it is a magnitude.
+          Those clips can never play.
+          {suggestion
+            ? <> Rebind this parameter to <b>{suggestion}</b>, or move the samples to positive coordinates.</>
+            : <> Move those samples to positive coordinates.</>}
+        </p>
+      )}
+    </>
   )
+}
+
+/** Every leaf condition of a transition, whether it uses the flat list or a gate tree. */
+function leafConditions(t: any): any[] {
+  if (!t) return []
+  if (!t.condition) return t.conditions ?? []
+  const out: any[] = []
+  const walk = (n: any) => { if (isConditionGroup(n)) n.children.forEach(walk); else out.push(n) }
+  walk(t.condition)
+  return out
+}
+
+/**
+ * A `>` and a `<` on the same parameter whose engage points do not actually separate.
+ *
+ * This is THE way a locomotion machine ends up vibrating, and it is invisible in the editor because each
+ * transition looks perfectly reasonable on its own — you have to hold both directions in your head at once to
+ * see it. `Speed > 0.1` leaving Idle and `Speed < 0.1` leaving Locomotion are each obviously right; together
+ * they mean a speed hovering at 0.1 satisfies both on alternating frames and the machine flips every frame.
+ *
+ * The criterion is the real one rather than "thresholds are equal": a band of `h` moves an engage point by
+ * `h/2`, so what matters is whether `(gt + hGt/2)` ends up above `(lt - hLt/2)`. A genuine gap authored by
+ * separating the two thresholds counts just as much as one authored with hysteresis. A `minDwell` on either
+ * direction also settles it — bluntly, but it settles it — so that is taken as answered too.
+ */
+function chatteringPair(fwd: any, bwd: any): { param: string; gap: number } | null {
+  if ((fwd?.minDwell ?? 0) > 0 || (bwd?.minDwell ?? 0) > 0) return null
+  for (const a of [...leafConditions(fwd), ...leafConditions(bwd)]) {
+    if (a.op !== 'gt' || typeof a.value !== 'number') continue
+    for (const b of [...leafConditions(fwd), ...leafConditions(bwd)]) {
+      if (b.op !== 'lt' || b.param !== a.param || typeof b.value !== 'number') continue
+      const gap = (a.value + (a.hysteresis ?? 0) / 2) - (b.value - (b.hysteresis ?? 0) / 2)
+      if (gap <= 0) return { param: a.param, gap }
+    }
+  }
+  return null
+}
+
+/**
+ * A reciprocal pair whose two directions test entirely DIFFERENT parameters.
+ *
+ * Such a pair can never be mutually exclusive, because nothing links the two truths: `Idle -> Run` on
+ * `Speed > 1` and `Run -> Idle` on `Direction < 1` are both satisfied the whole time a character walks
+ * forward, so the machine bounces every frame for as long as that holds. It is almost always a mis-picked
+ * parameter in one dropdown — the intended condition was the MIRROR of the other direction, on the same
+ * signal — and the graph gives no hint, because each edge reads perfectly sensibly on its own.
+ *
+ * Worth a check of its own rather than folding into the threshold one: no hysteresis band can fix it, so the
+ * advice is different. Skipped when either direction uses a trigger (momentary and consumed, so it cannot
+ * sustain a bounce) or is gated by dwell/exit time.
+ */
+function disjointReciprocal(fwd: any, bwd: any): { fwd: string[]; bwd: string[] } | null {
+  if (!fwd || !bwd) return null
+  if ((fwd.minDwell ?? 0) > 0 || (bwd.minDwell ?? 0) > 0 || fwd.hasExitTime || bwd.hasExitTime) return null
+  const fc = leafConditions(fwd)
+  const bc = leafConditions(bwd)
+  if (fc.length === 0 || bc.length === 0) return null            // the empty case is reported on its own
+  if ([...fc, ...bc].some(c => c.op === 'trigger')) return null
+  const fp = [...new Set(fc.map(c => c.param))]
+  const bp = [...new Set(bc.map(c => c.param))]
+  if (fp.some(p => bp.includes(p))) return null
+  return { fwd: fp, bwd: bp }
 }
 
 // ---- Selected transition (a LINK: up to one transition each way) -------------------------------------
@@ -356,8 +510,40 @@ function SelectedTransition() {
     { from: link.b, to: link.a, t: link.backward },
   ]
 
+  const chatter = chatteringPair(link.forward, link.backward)
+  const disjoint = disjointReciprocal(link.forward, link.backward)
+  const unconditional = [
+    { t: link.forward, from: link.a, to: link.b },
+    { t: link.backward, from: link.b, to: link.a },
+  ].filter(d => d.t && leafConditions(d.t).length === 0)
+
   return (
     <div className='flex flex-col gap-2'>
+      {unconditional.length > 0 && (
+        <p className='text-[10px] text-warning border border-warning/40 rounded p-1'>
+          <b>{unconditional.map(d => `${d.from} → ${d.to}`).join(' and ')} has no conditions</b>, so it fires
+          the instant the machine enters {unconditional.length > 1 ? 'those states' : 'that state'}.
+          {link.forward && link.backward && ' With a transition both ways that is an unbreakable loop — the pose restarts every frame, which reads as the character vibrating.'}
+        </p>
+      )}
+      {disjoint && (
+        <p className='text-[10px] text-warning border border-warning/40 rounded p-1'>
+          <b>These two transitions test different parameters</b> — <code>{disjoint.fwd.join(', ')}</code> one
+          way and <code>{disjoint.bwd.join(', ')}</code> the other — so nothing stops both being true at once,
+          and while they are, the machine flips every frame. A hysteresis band cannot help here: it separates
+          two comparisons of the <i>same</i> signal.
+          {' '}The way back is usually meant to be the <b>mirror</b> of the way out, on the same parameter.
+        </p>
+      )}
+      {chatter && (
+        <p className='text-[10px] text-warning border border-warning/40 rounded p-1'>
+          <b>These two transitions will flip every frame.</b> “{chatter.param}” crosses <code>&gt;</code> and{' '}
+          <code>&lt;</code> with no gap between them, so a value sitting on the threshold satisfies both on
+          alternating frames — which shows up as the character vibrating, not as a state problem.
+          {' '}Give each condition a <b>±</b> hysteresis band (0.1 is plenty for a speed), separate the two
+          thresholds, or set a <b>min dwell</b> below.
+        </p>
+      )}
       {dirs.map(({ from, to, t }) => (
         <div key={`${from}->${to}`} className='border border-control rounded p-1.5 flex flex-col gap-1'>
           <div className='flex items-center gap-1'>
@@ -414,85 +600,6 @@ function SelectedTransition() {
   )
 }
 
-/**
- * Every link in the chain from a machine parameter to the pose, sampled live, with the spread each value has
- * covered over the last second.
- *
- * A blend that vibrates is one link in that chain moving, and the only useful question is WHICH. The spread
- * is what answers it: a value that has settled reads 0.000, and a value that is buzzing reads its amplitude
- * even though the instantaneous number looks calm. A restless RAW with a calm probe means the noise is in
- * whatever writes the parameter; a calm probe with restless WEIGHTS means the field's own layout; everything
- * calm while the character still shakes means the pose blend or the machine.
- *
- * Only mounted while `simulate` is on, and it polls rather than subscribing — a debug surface should not be
- * able to slow down what it is measuring.
- */
-function FieldDebug({ animator }: { animator: Animator }) {
-  const [, tick] = useState(0)
-  const historyRef = useRef(new Map<string, { min: number; max: number; at: number }[]>())
-
-  useEffect(() => {
-    let raf = 0
-    const loop = () => { tick(x => x + 1); raf = requestAnimationFrame(loop) }
-    raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
-  }, [])
-
-  const d = animator.fieldDebug
-  if (!d.active) return <p className='text-[10px] text-gray-500'>No animation field in the current state.</p>
-
-  // Spread over a rolling ~1s window. Entries are dropped by age rather than by count so the window means the
-  // same thing whatever frame rate the editor happens to be running at.
-  const now = performance.now()
-  const spread = (key: string, value: number): string => {
-    if (!Number.isFinite(value)) return '—'
-    const hist = historyRef.current
-    const list = hist.get(key) ?? []
-    list.push({ min: value, max: value, at: now })
-    while (list.length && now - list[0].at > 1000) list.shift()
-    hist.set(key, list)
-    let lo = Infinity, hi = -Infinity
-    for (const e of list) { if (e.min < lo) lo = e.min; if (e.max > hi) hi = e.max }
-    return (hi - lo).toFixed(3)
-  }
-
-  const Row = ({ label, value, k, hint }: { label: string; value: number | null; k: string; hint: string }) => (
-    <div className='flex items-center gap-2 text-[10px] tabular-nums' title={hint}>
-      <span className='w-[52px] shrink-0 text-gray-400'>{label}</span>
-      <span className='w-[64px] text-right'>{value === null ? 'unbound' : value.toFixed(3)}</span>
-      <span className='w-[56px] text-right text-dim'>±{value === null ? '—' : spread(k, value)}</span>
-    </div>
-  )
-
-  return (
-    <div className='mt-1 flex flex-col gap-0.5 rounded border border-control p-1.5'>
-      <div className='flex items-center justify-between text-[10px] text-gray-400'>
-        <span>field · value / 1s spread</span>
-        <span className='text-dim'>{d.stateName ?? '—'} · {d.stateTime.toFixed(2)}s</span>
-      </div>
-      <Row label='raw X' value={d.rawX} k='rx' hint='Straight off the machine parameter, before any filtering. Spread here means the noise is upstream — in the script or measurement feeding it.' />
-      <Row label='target X' value={d.targetX} k='tx' hint='After the axis deadband. If raw is noisy but this is not, the deadband is absorbing it.' />
-      <Row label='probe X' value={d.probeX} k='px' hint='After damping — where the field is actually sampled.' />
-      <Row label='raw Y' value={d.rawY} k='ry' hint='As raw X, for the second axis.' />
-      <Row label='target Y' value={d.targetY} k='ty' hint='As target X, for the second axis.' />
-      <Row label='probe Y' value={d.probeY} k='py' hint='As probe X, for the second axis.' />
-      <Row label='cycle' value={d.duration} k='dur' hint='Weighted cycle length in seconds. Moves as the blend shifts; a large spread means the mix is churning.' />
-      <div className='mt-0.5 border-t border-control pt-0.5'>
-        {d.weights.map(w => (
-          <div key={w.clipName} className='flex items-center gap-2 text-[10px] tabular-nums'
-            title={w.phaseOffset ? `phase offset ${w.phaseOffset.toFixed(2)}` : undefined}>
-            <span className={`w-[52px] shrink-0 truncate ${w.clipName === d.dominant ? 'text-highlight' : 'text-gray-400'}`}>
-              {w.clipName}
-            </span>
-            <span className='w-[64px] text-right'>{(w.weight * 100).toFixed(1)}%</span>
-            <span className='w-[56px] text-right text-dim'>±{spread('w:' + w.clipName, w.weight * 100)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ---- Live preview ------------------------------------------------------------------------------------
 // `simulate` runs the machine (checkTriggers each frame) instead of the raw clip. It lives here rather than
 // on the transport because everything it feeds — the parameter drivers below and the graph's active-state
@@ -526,7 +633,14 @@ function PreviewSection() {
           </div>
         ))}
         {sm.parameters.length === 0 && <p className='text-[11px] text-gray-400'>No parameters.</p>}
-        {simulate && hasMachine && <FieldDebug animator={target.animator} />}
+        {/* Built-in parameters read MEASURED motion, and the editor has no physics — so in here they are all
+            0 and this can only show a hand-driven blend. The same readout is on the viewport's Animation
+            blend debug toggle, which does run in Play, where those inputs are real. */}
+        {simulate && hasMachine && (
+          <div className='mt-1 rounded border border-control p-1.5'>
+            <FieldDebugReadout animator={target.animator} />
+          </div>
+        )}
       </div>
     </Collapsable>
   )

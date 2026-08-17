@@ -93,3 +93,51 @@ export function skeletonTopology(skin: Skin): SkeletonTopology {
 
     return { jointOfNode, parentJoint, parentNode, parentNodeOfNode, children, roots, order };
 }
+
+/**
+ * Whether `ancestor` is somewhere above `descendant` in the skeleton. STRICT: a joint is not its own ancestor.
+ *
+ * Both arguments are JOINT indices. Exists because a chain of bones is only a chain if the hierarchy says so
+ * — three bones can carry the right names, sit in the right slots, and belong to three unrelated parts of the
+ * rig, at which point solving them produces a pose with no relation to the character. Names cannot answer
+ * that question; only the parent links can.
+ *
+ * Bounded rather than trusting the data: a malformed skin can contain a cycle (skeletonTopology tolerates
+ * one), and an unbounded walk up would hang the render loop rather than report a bad rig.
+ */
+export function isAncestorJoint(topo: SkeletonTopology, ancestor: number, descendant: number): boolean {
+    if (ancestor < 0 || descendant < 0 || ancestor === descendant) return false;
+    let n = topo.parentJoint[descendant];
+    for (let guard = 0; n >= 0 && guard < 256; guard++) {
+        if (n === ancestor) return true;
+        n = topo.parentJoint[n];
+    }
+    return false;
+}
+
+/**
+ * The deepest joint that is an ancestor of every joint given, or -1 when they do not share one.
+ *
+ * This is how you find a pelvis without believing a name: the nearest common ancestor of the two thighs IS
+ * the pelvis, on every rig, whatever it is called and whatever else in the skeleton also answers to "hips".
+ */
+export function nearestCommonAncestor(topo: SkeletonTopology, joints: number[]): number {
+    const valid = joints.filter(j => j >= 0 && j < topo.parentJoint.length);
+    if (valid.length === 0) return -1;
+
+    /** The joint and everything above it, deepest first. */
+    const lineage = (j: number): number[] => {
+        const out = [j];
+        let n = topo.parentJoint[j];
+        for (let guard = 0; n >= 0 && guard < 256; guard++) { out.push(n); n = topo.parentJoint[n]; }
+        return out;
+    };
+
+    // Walk the first joint's lineage from the joint upwards and take the first entry every other joint also
+    // descends from — "first" from the bottom being the DEEPEST such joint, which is what "nearest" means.
+    const others = valid.slice(1).map(lineage).map(l => new Set(l));
+    for (const candidate of lineage(valid[0])) {
+        if (others.every(set => set.has(candidate))) return candidate;
+    }
+    return -1;
+}

@@ -21,9 +21,61 @@ function fnv1a(str: string): string {
   return h.toString(16).padStart(8, '0')
 }
 
-/** Deep-stringify `obj` with any `thumbnail` field omitted at every level, then hash it. */
+/**
+ * Fields that must NOT count as a content change.
+ *
+ * `thumbnail` is the obvious one — a re-render is not an edit. The two skeleton fields matter for a subtler
+ * reason: they are metadata ABOUT a skeleton rather than part of it, they are pushed to every live instance
+ * in place by propagateModelClips, and they also ride each placed node's own serialized skin. So a rebuild
+ * gains nothing — and costs everything, because re-instantiating a placement drops the per-node state the
+ * asset knows nothing about. Assigning an IK rig used to wipe every placed character's animation state
+ * machine through exactly this route.
+ *
+ * The bar for this list is "changing it cannot alter what instantiating the asset produces STRUCTURALLY".
+ * Geometry, materials, hierarchy and clip lists all fail that bar and must stay hashed.
+ */
+const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames'])
+
+/**
+ * Bump this whenever {@link hashAsset} changes what it hashes.
+ *
+ * A stored hash is only comparable against one produced by the SAME function. Change the function — add a key
+ * to the exclusion set above, say — and every hash in every saved scene stops matching, so `resyncScene`
+ * reads "every asset changed" and re-instantiates every placed template and character in the project at once.
+ * That is not a cosmetic churn: a rebuild reconstructs a placement from its asset, and the asset does not know
+ * how that placement was configured.
+ *
+ * Versioning turns that from a silent mass rebuild into a no-op: a scene saved under a different version has
+ * hashes we cannot interpret, and the honest reading of "I cannot tell whether this changed" is to leave the
+ * scene alone rather than to rebuild all of it.
+ *
+ * 1 = thumbnail only (original). 2 = thumbnail + ikRig + nodeNames.
+ */
+export const ASSET_HASH_VERSION = 2
+
+/**
+ * Whether a scene's stored hashes can be compared against ones produced by the CURRENT {@link hashAsset}.
+ *
+ * Three cases, and the middle one is the whole reason this exists:
+ *   - no hashes at all — a legacy blob from before hashing, which has never had the propagation applied and
+ *     genuinely does mean "resync everything". Comparable: `changedSince` has nothing to match and says yes.
+ *   - hashes from a different version — unreadable. Every lookup would miss and read as "changed", rebuilding
+ *     every placed template and character in the project at once. NOT comparable: leave the scene alone.
+ *   - hashes from this version — compare them.
+ *
+ * Absent version defaults to 1: scenes saved before the field existed were hashed by the original function.
+ */
+export function hashesComparable(
+  savedHashes: Record<string, string> | undefined,
+  savedVersion: number | undefined,
+): boolean {
+  if (!savedHashes) return true
+  return (savedVersion ?? 1) === ASSET_HASH_VERSION
+}
+
+/** Deep-stringify `obj` with the non-structural fields omitted at every level, then hash it. */
 export function hashAsset(obj: any): string {
-  const json = JSON.stringify(obj, (key, value) => (key === 'thumbnail' ? undefined : value))
+  const json = JSON.stringify(obj, (key, value) => (NON_STRUCTURAL_KEYS.has(key) ? undefined : value))
   return fnv1a(json ?? '')
 }
 

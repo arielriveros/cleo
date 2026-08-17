@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { vec3 } from 'gl-matrix';
 import {
-    createMotionRecord, sampleMotion, planarSplit, headingAngle, signedAngleBetween, wrapDegrees,
+    createMotionRecord, sampleMotion, planarSplit, facingComponents, headingAngle, signedAngleBetween, wrapDegrees,
     motionConfig, MOTION_DEFAULTS,
 } from '../src/physics/motion';
 
@@ -385,6 +385,125 @@ describe('motionConfig', () => {
     it('forces the exit threshold below the entry threshold', () => {
         const cfg = motionConfig({ moveEnter: 0.2, moveExit: 0.5 });
         expect(cfg.moveExit).toBeLessThan(cfg.moveEnter);
+    });
+});
+
+/**
+ * The sign convention, pinned.
+ *
+ * This is the one that actually shipped wrong: the example controller reported +90 for a strafe RIGHT while
+ * the character genuinely travelled to its right, which `planarAngle` correctly calls -90. A blend space
+ * bound to one and authored against the other plays its strafes mirrored — and nothing else looks wrong,
+ * because forward and backward are unaffected either way.
+ *
+ * The convention is forced, not chosen: angles here share the engine's yaw (`atan2(x, z)`), and with forward
+ * +Z and up +Y a node's right is `forward x up` = -X, so a right turn is a NEGATIVE rotation.
+ */
+describe('angle sign convention', () => {
+    const facing = (deg: number) =>
+        vec3.fromValues(Math.sin(deg * Math.PI / 180), 0, Math.cos(deg * Math.PI / 180));
+
+    it('reads strafe RIGHT as -90 and strafe LEFT as +90', () => {
+        const forward = facing(0);                       // +Z
+        // The character's right, derived rather than assumed: forward x up.
+        const right = vec3.cross(vec3.create(), forward, UP);
+        const left = vec3.negate(vec3.create(), right);
+
+        expect(right[0]).toBeCloseTo(-1);                // and it is -X, not +X
+        expect(signedAngleBetween(forward, right, UP)).toBeCloseTo(-90);
+        expect(signedAngleBetween(forward, left, UP)).toBeCloseTo(90);
+        expect(signedAngleBetween(forward, forward, UP)).toBeCloseTo(0);
+        expect(Math.abs(signedAngleBetween(forward, vec3.negate(vec3.create(), forward), UP))).toBeCloseTo(180);
+    });
+
+    it('holds at any facing, not just at yaw 0', () => {
+        for (const yaw of [-170, -90, -33, 0, 45, 90, 179]) {
+            const forward = facing(yaw);
+            const right = vec3.cross(vec3.create(), forward, UP);
+            expect(signedAngleBetween(forward, right, UP)).toBeCloseTo(-90, 4);
+        }
+    });
+
+    /**
+     * `headingAngle` must stay assignable straight to `setRotation([0, a, 0])` — that is its documented
+     * purpose, and it is why `planarAngle` cannot simply be negated to match other engines: the two would
+     * then disagree about which way round a turn goes.
+     */
+    it('keeps headingAngle equal to the yaw that produces that facing', () => {
+        for (const yaw of [-170, -90, -33, 0, 45, 90, 179]) {
+            expect(headingAngle(facing(yaw), UP)).toBeCloseTo(yaw, 4);
+        }
+    });
+
+    it('keeps planarAngle consistent with heading minus facing', () => {
+        // planarAngle is what a strafe blend reads; this identity is what lets a script compute it either way.
+        for (const yaw of [-120, -45, 0, 30, 150]) {
+            for (const travel of [-170, -90, 0, 60, 179]) {
+                const relative = signedAngleBetween(facing(yaw), facing(travel), UP);
+                expect(relative).toBeCloseTo(wrapDegrees(travel - yaw), 4);
+            }
+        }
+    });
+});
+
+/**
+ * `facingComponents` is the only SIGNED speed pair the engine exposes, and it exists so a blend space can put
+ * "walk backwards" at a negative coordinate. Every other speed is a `vec3.length` magnitude, so a sample
+ * authored below zero on an axis bound to one of those is unreachable and its clip never plays.
+ *
+ * The identity below is the load-bearing test: `atan2(lateral, forward)` must equal `planarAngle` exactly. If
+ * it did not, a field laid out on forward/lateral and one laid out on angle/speed would disagree about which
+ * side is which, and one of them would play its strafes mirrored.
+ */
+describe('facingComponents', () => {
+    const facing = (deg: number) =>
+        vec3.fromValues(Math.sin(deg * Math.PI / 180), 0, Math.cos(deg * Math.PI / 180));
+
+    it('signs forward travel positive and backpedalling negative', () => {
+        const forward = facing(0); // +Z
+        expect(facingComponents(vec3.fromValues(0, 0, 1.5), forward, UP).forward).toBeCloseTo(1.5);
+        expect(facingComponents(vec3.fromValues(0, 0, -1.5), forward, UP).forward).toBeCloseTo(-1.5);
+    });
+
+    it('puts positive lateral on the LEFT, matching planarAngle’s +90', () => {
+        const forward = facing(0);
+        const right = vec3.cross(vec3.create(), forward, UP); // -X, see the sign convention suite above
+        const left = vec3.negate(vec3.create(), right);
+
+        expect(facingComponents(left, forward, UP).lateral).toBeCloseTo(1);
+        expect(facingComponents(right, forward, UP).lateral).toBeCloseTo(-1);
+        // Pure strafe: no forward component at all.
+        expect(facingComponents(left, forward, UP).forward).toBeCloseTo(0);
+    });
+
+    it('keeps atan2(lateral, forward) equal to planarAngle at any facing and any travel', () => {
+        for (const yaw of [-170, -90, -33, 0, 45, 90, 179]) {
+            for (const travel of [-170, -90, 0, 60, 179]) {
+                for (const speed of [0.3, 1.5, 6]) {
+                    const v = vec3.scale(vec3.create(), facing(travel), speed);
+                    const { forward, lateral } = facingComponents(v, facing(yaw), UP);
+                    expect(Math.hypot(forward, lateral)).toBeCloseTo(speed, 4);
+                    const angle = Math.atan2(lateral, forward) * 180 / Math.PI;
+                    expect(wrapDegrees(angle - signedAngleBetween(facing(yaw), v, UP))).toBeCloseTo(0, 4);
+                }
+            }
+        }
+    });
+
+    it('ignores the vertical component and works under tilted gravity', () => {
+        const forward = facing(0);
+        // Falling while walking forward must not change the forward component.
+        expect(facingComponents(vec3.fromValues(0, -9, 1.5), forward, UP).forward).toBeCloseTo(1.5);
+
+        const up = vec3.normalize(vec3.create(), vec3.fromValues(0, 1, 1));
+        const c = facingComponents(vec3.fromValues(1, 0, 0), vec3.fromValues(0, 0, 1), up);
+        expect(Math.hypot(c.forward, c.lateral)).toBeGreaterThan(0);
+    });
+
+    it('returns zeros rather than NaN when there is no usable facing', () => {
+        // A node facing straight up has no heading in the ground plane to measure against.
+        expect(facingComponents(vec3.fromValues(1, 0, 0), UP, UP)).toEqual({ forward: 0, lateral: 0 });
+        expect(facingComponents(vec3.fromValues(1, 0, 0), vec3.create(), UP)).toEqual({ forward: 0, lateral: 0 });
     });
 });
 

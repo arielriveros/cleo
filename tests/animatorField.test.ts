@@ -499,3 +499,113 @@ describe('Animator — per-sample phase offset', () => {
         expect(fading!.phaseOffset).toBeCloseTo(0.5);
     });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Playback rate vs filter response.
+//
+// Two unrelated quantities that used to share one variable. `_deltaTime` is frame time scaled by the state's
+// playback speed, which is right for advancing phase and wrong for everything damped: axis smoothing, weight
+// smoothing and the IK foot weights are all authored in SECONDS, so scaling their dt made a state at half
+// speed take twice as long to settle.
+//
+// At speed 0 it stopped being a stretch and became a hole: each filter reads `dt <= 0` as "do not filter" and
+// returns its target raw. A Speed parameter bound to a SIGNED built-in — forwardSpeed, lateralSpeed,
+// planarAngle — clamps to exactly 0 the moment it goes negative, so the clips froze while the blend went on
+// being recomputed every frame from an unsmoothed probe. On screen: the whole pose vibrating, on one side of
+// the axis only, which is what made it read as anything but a playback-speed problem.
+// ---------------------------------------------------------------------------------------------------
+
+/** A machine whose field state reads its rate from a second parameter, the way a signed built-in would. */
+function ratedMachine(field: AnimationField) {
+    return {
+        parameters: [
+            { name: 'Speed', type: 'float', default: 0 } as AnimationParameter,
+            { name: 'Rate', type: 'float', default: 1 } as AnimationParameter,
+        ],
+        states: [{
+            name: 'Locomotion', clipName: '', loop: true, speed: 1, isEntry: true,
+            field, fieldInputs: { x: 'Speed' }, speedParam: 'Rate',
+        } as AnimationState],
+        transitions: [],
+        events: [],
+    } as AnimationStateMachine;
+}
+
+const smoothedField = (): AnimationField => ({
+    ...field1D(), xAxis: { name: 'Speed', min: 0, max: 100, smoothing: 0.2 },
+});
+
+describe('Animator — filtering is wall-clock, not playback-scaled', () => {
+    /** Probe position after `seconds` of a step input, with the state running at `playbackSpeed`. */
+    function probeAfter(playbackSpeed: number, seconds: number): number {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(speedMachine(smoothedField(), { speed: playbackSpeed }));
+        a.setFloat('Speed', 100);
+        step(a, seconds);
+        return a.fieldDebug.probeX;
+    }
+
+    it('closes the same fraction of the gap in the same wall-clock time at any playback speed', () => {
+        const atNormal = probeAfter(1, 0.2);
+        // A 0.2s time constant over 0.2s is ~63% of the way. Sanity, so the comparison below is not vacuous.
+        expect(atNormal).toBeGreaterThan(50);
+        expect(atNormal).toBeLessThan(80);
+
+        // Previously these were a factor of four apart: half speed halved the dt fed to the damp.
+        expect(probeAfter(0.5, 0.2)).toBeCloseTo(atNormal, 6);
+        expect(probeAfter(2, 0.2)).toBeCloseTo(atNormal, 6);
+        expect(probeAfter(0.25, 0.2)).toBeCloseTo(atNormal, 6);
+    });
+
+    /**
+     * The reported bug, reduced. A negative Speed parameter pins playback to 0; the probe must still ease.
+     * Before the fix `_dampAxis` saw `dt <= 0` and returned the target, so this read 100 on the first frame.
+     */
+    it('still eases the probe when a negative Speed parameter has frozen playback', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(ratedMachine(smoothedField()));
+        a.setFloat('Rate', -3);          // e.g. forwardSpeed while backpedalling
+        a.setFloat('Speed', 100);
+
+        a.checkTriggers();
+        a.update(1 / 60);
+        expect(a.speed).toBe(0);                         // the clamp still holds: no reverse playback
+        expect(a.fieldDebug.probeX).toBeGreaterThan(0);  // ...but the filter is still running
+        expect(a.fieldDebug.probeX).toBeLessThan(20);
+
+        step(a, 0.2);
+        expect(a.fieldDebug.probeX).toBeCloseTo(probeAfter(1, 0.2 + 1 / 60), 6);
+    });
+
+    it('still fades weights out when a negative Speed parameter has frozen playback', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(ratedMachine({
+            mode: '1d', xAxis: { name: 'Speed', min: 0, max: 100, smoothing: 0 },
+            samples: [{ clipName: 'walk', x: 0 }, { clipName: 'run', x: 100 }],
+            weightSmoothing: 0.15,
+        }));
+        a.setFloat('Speed', 100);
+        step(a, 1);
+        expect(weightOf(a, 'run')).toBeCloseTo(1);
+
+        a.setFloat('Rate', -3);
+        a.setFloat('Speed', 0);          // snap the probe; only the weight damping can soften this
+        a.checkTriggers();
+        a.update(1 / 60);
+
+        expect(a.speed).toBe(0);
+        // 'walk' is what the field now asks for; 'run' must still be fading rather than gone in one frame.
+        expect(weightOf(a, 'run')).toBeGreaterThan(0.5);
+        expect(weightOf(a, 'walk')).toBeLessThan(0.5);
+    });
+
+    it('leaves a state whose rate parameter is positive completely alone', () => {
+        const a = makeAnimator([walk(), run()]);
+        a.setStateMachine(ratedMachine(smoothedField()));
+        a.setFloat('Rate', 2);
+        a.setFloat('Speed', 100);
+        step(a, 0.2);
+        expect(a.speed).toBe(2);
+        expect(a.fieldDebug.probeX).toBeCloseTo(probeAfter(1, 0.2), 6);
+    });
+});

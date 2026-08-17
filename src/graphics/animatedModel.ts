@@ -3,6 +3,7 @@ import { Material } from './material';
 import { Geometry } from '../core/geometry';
 import { Logger } from '../core/logger';
 import { mat4 } from 'gl-matrix';
+import type { IkRig } from './ik';
 
 // Animation data structures based on GLTF specification
 export interface AnimationSampler {
@@ -44,6 +45,17 @@ export interface Skin {
     nodeParents?: Map<number, number>; // Map of node index to parent node index
     nodeTransforms?: Map<number, mat4>; // Initial transforms for each node from GLTF
     nodeNames?: Map<number, string>; // Map of node index to bone/node name (for cross-file retargeting)
+    /**
+     * Inverse-kinematics setup for this skeleton — which joints are the legs, and how foot placement is tuned.
+     *
+     * It lives here, on the skin, because it is joint indices INTO this skeleton: it cannot be meaningful for
+     * any other rig, and it is the same kind of thing as `nodeNames` — skeleton metadata rather than a
+     * property of any one placed character. That also puts it on the side of the line the editor already
+     * draws ("clips and skeleton belong to the model asset"), so it reaches every instance for free.
+     *
+     * Plain JSON, so it round-trips through serialize/parse below with no special handling.
+     */
+    ikRig?: IkRig;
 }
 
 // Options for loading animated models
@@ -239,7 +251,9 @@ export class AnimatedModel {
                 skeleton: data.skin.skeleton,
                 nodeParents,
                 nodeTransforms,
-                nodeNames
+                nodeNames,
+                // Plain JSON — joint indices and numbers — so it needs no reconstruction, only carrying.
+                ikRig: data.skin.ikRig ?? undefined
             };
         }
         
@@ -374,7 +388,8 @@ export class AnimatedModel {
                 skeleton: this._skin.skeleton,
                 nodeParents,
                 nodeTransforms,
-                nodeNames
+                nodeNames,
+                ikRig: this._skin.ikRig ?? null
             };
         }
         

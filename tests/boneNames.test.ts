@@ -92,3 +92,61 @@ describe('humanoidSlotOf', () => {
         expect(humanoidSlotOf('Head')).toBe('head');
     });
 });
+
+/**
+ * A single-letter side marker is ambiguous with the first letter of the bone's own name, and the split used
+ * to commit to the leading reading. That silently dropped an entire naming convention: `leg.L` starts with
+ * `l`, so the core became `egl`, matched nothing, and returned null — in the function whose job is
+ * recognizing legs. Blender's `leg.L` and Unreal's `calf_l` are the two most common leg names there are.
+ */
+describe('humanoidSlotOf — ambiguous single-letter side markers', () => {
+    it('reads a trailing side marker even when the bone name starts with l or r', () => {
+        expect(humanoidSlotOf('leg.L')).toBe('leg.L');
+        expect(humanoidSlotOf('leg.R')).toBe('leg.R');
+        expect(humanoidSlotOf('Leg_L')).toBe('leg.L');
+        expect(humanoidSlotOf('lowerleg.L')).toBe('leg.L');
+        expect(humanoidSlotOf('lowerleg.R')).toBe('leg.R');
+        expect(humanoidSlotOf('leglower.L')).toBe('leg.L');
+        expect(humanoidSlotOf('legupper.L')).toBe('upLeg.L');
+        expect(humanoidSlotOf('lowerarm.L')).toBe('foreArm.L');
+        expect(humanoidSlotOf('ring1.R')).toBe('ring1.R');
+        expect(humanoidSlotOf('little1.L')).toBe('pinky1.L');
+    });
+
+    // The other reading has to keep working: these are only correct as a LEADING marker.
+    it('still reads a leading side marker', () => {
+        expect(humanoidSlotOf('lThigh')).toBe('upLeg.L');
+        expect(humanoidSlotOf('rShin')).toBe('leg.R');
+        expect(humanoidSlotOf('l_foot')).toBe('foot.L');
+        expect(humanoidSlotOf('LeftLeg')).toBe('leg.L');
+        expect(humanoidSlotOf('RightUpLeg')).toBe('upLeg.R');
+    });
+
+    /**
+     * The regression table. This function is shared with retargeting, where a changed answer silently
+     * re-pairs bones between two skeletons — so every naming convention the codebase claims to support is
+     * pinned here rather than only the ones this change touched.
+     */
+    it('leaves every previously-recognized name on the same slot', () => {
+        const table: [string, string | null][] = [
+            // Mixamo
+            ['mixamorig:Hips', 'hips'], ['mixamorig:LeftUpLeg', 'upLeg.L'], ['mixamorig:LeftLeg', 'leg.L'],
+            ['mixamorig:LeftFoot', 'foot.L'], ['mixamorig:LeftToeBase', 'toe.L'],
+            ['mixamorig:RightForeArm', 'foreArm.R'], ['mixamorig:Spine', 'spine'],
+            // Unreal
+            ['pelvis', 'hips'], ['thigh_l', 'upLeg.L'], ['calf_l', 'leg.L'], ['foot_l', 'foot.L'],
+            ['ball_r', 'toe.R'], ['upperarm_r', 'upperArm.R'],
+            // Rigify (deform tier)
+            ['DEF-thigh.L', 'upLeg.L'], ['DEF-shin.L', 'leg.L'], ['DEF-foot.L', 'foot.L'], ['DEF-toe.L', 'toe.L'],
+            // 3ds Max Biped
+            ['Bip01 L Thigh', 'upLeg.L'], ['Bip01 L Calf', 'leg.L'], ['Bip01 L Foot', 'foot.L'],
+            // Centre bones, which must never lose a letter to the side split
+            ['Head', 'head'], ['Neck', 'neck'], ['chest', 'chest'], ['Root', 'hips'], ['COG', 'hips'],
+            // Still-unrecognized: a wrong slot drives the wrong joint, so these must stay null
+            ['WeaponSocket', null], ['IK_Target_L', null], ['twist_01', null], ['thigh_twist.L', null],
+            ['foot_ik.L', null], ['LeftLegRoll', null], ['Armature', null], ['toes.L', null],
+        ];
+        for (const [name, slot] of table) expect([name, humanoidSlotOf(name)]).toEqual([name, slot]);
+    });
+});
+

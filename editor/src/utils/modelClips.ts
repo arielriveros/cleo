@@ -122,3 +122,33 @@ export function assetClipNames(asset: ClipBearingAsset | undefined): string[] {
   const model = skinnedModelJsonOf(asset?.nodeJson)
   return (model?.animations ?? []).map((c: any) => c?.name).filter(Boolean)
 }
+
+/**
+ * Write an IK rig into an asset's serialized skin. `null` clears it.
+ *
+ * The rig belongs to the SKELETON — it is joint indices into this skin and cannot mean anything for another
+ * one — so it lands beside `nodeNames` rather than on any placed node, and reaches every instance of the
+ * model through the same propagation clips use.
+ *
+ * Unlike `nodeNames` this replaces rather than merges: a rig is one document that the editor edits whole,
+ * and merging a half-assigned chain into a complete one would produce a rig nobody authored.
+ */
+export function assetWithIkRig<T extends ClipBearingAsset>(asset: T, rig: any | null): T {
+  const current = assetIkRig(asset)
+  // Hand the ORIGINAL back on a no-op. Callers feed the result to updateModel, and a new-but-equal object
+  // marks the library dirty and triggers a full IndexedDB rewrite for nothing.
+  if (JSON.stringify(current ?? null) === JSON.stringify(rig ?? null)) return asset
+
+  const nodeJson = JSON.parse(JSON.stringify(asset.nodeJson))
+  const model = skinnedModelJsonOf(nodeJson)
+  if (!model?.skin) return asset
+  // `null` rather than `undefined`, matching what AnimatedModel.serialize writes for an absent rig — so a
+  // round-trip through the asset produces the JSON the engine itself would have.
+  model.skin.ikRig = rig ?? null
+  return { ...asset, nodeJson }
+}
+
+/** The IK rig an asset carries, or null. */
+export function assetIkRig(asset: ClipBearingAsset | undefined): any | null {
+  return skinnedModelJsonOf(asset?.nodeJson)?.skin?.ikRig ?? null
+}
