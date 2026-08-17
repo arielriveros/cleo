@@ -29,6 +29,8 @@ export interface BundleManifest {
   sceneMetas?: SceneMeta[]
   /** Project bundles only: project-wide prefs, so the whole ProjectMeta round-trips faithfully. */
   prefs?: ProjectPrefs
+  /** The exporting project's name, used to name the project an "import as new" creates. Purely additive. */
+  projectName?: string
 }
 
 export interface BundleLibraries {

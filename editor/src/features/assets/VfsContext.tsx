@@ -4,7 +4,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { idbGet, idbSet } from '../../utils/idb'
 import {
-  EMPTY_VFS, LibSnapshot, VfsEntry, VfsIndex, VFS_KEY,
+  EMPTY_VFS, LibSnapshot, VfsEntry, VfsIndex, vfsKey,
   AssetKind, indexByPath, reconcileVfs,
 } from '../../utils/vfs'
 import { AssetDeps, sizeOfAsset } from './assetKinds'
@@ -122,7 +122,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const stored = await idbGet<VfsIndex>(VFS_KEY)
+        const stored = await idbGet<VfsIndex>(vfsKey())
         if (stored?.entries) setVfs(stored)
       } catch (e) { console.warn('Failed to load the asset index:', e) }
       finally { vfsLoadedRef.current = true; setVfsLoaded(true) }
@@ -157,7 +157,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!vfsLoaded) return
     const timer = window.setTimeout(() => {
-      idbSet(VFS_KEY, vfs).catch(e => console.warn('Failed to persist the asset index:', e))
+      idbSet(vfsKey(), vfs).catch(e => console.warn('Failed to persist the asset index:', e))
     }, 300)
     return () => window.clearTimeout(timer)
   }, [vfs, vfsLoaded])

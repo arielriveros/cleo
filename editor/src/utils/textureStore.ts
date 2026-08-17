@@ -20,12 +20,44 @@
 
 import { TextureManager, parseBase64DataUri } from 'cleo'
 import { openDB, TEXTURE_STORE } from './idb'
+import { projectPrefix } from './projectScope'
 
 export type StoredTexture = {
   id: string
   blob: Blob
   mime: string
   config: any
+  /**
+   * Which project owns this payload. Redundant with the record's key, deliberately: it makes a record
+   * self-describing (so a repair pass can rebuild the keys) and it is what a bundle import stamps.
+   */
+  projectId?: string
+}
+
+// PROJECT SCOPING
+//
+// The store key is `p:<project>:<textureId>`. It has to be, because the bare ids are not globally unique —
+// they are minted per project and are baked into every serialized material, scene, template and foliage
+// rule, so they cannot be re-minted to disambiguate. Prefixing the KEY leaves every id in every asset
+// untouched while making two projects' "Rock" two different rows.
+//
+// A string prefix rather than a compound `[projectId, id]` key on purpose: an array key would need an
+// IndexedDB version bump (whose onblocked path is already a hard error across tabs) and would break the
+// string-prefix reasoning the rest of the storage layer is built on.
+//
+// Reads are always range queries, never getAll()-then-filter: storedTextureIds runs inside persistTextures,
+// which fires from a debounced effect on EVERY library change, and a full getAll there would deserialize
+// every project's image blobs on every material edit.
+
+/** Bound a cursor/getAll to one project's rows. '￿' sorts after any character a key can contain. */
+function projectRange(projectId?: string): IDBKeyRange {
+  const prefix = projectPrefix(projectId)
+  return IDBKeyRange.bound(prefix, prefix + '￿')
+}
+
+/** Recover the texture id from a store key. Slice, never split — a texture id may contain any character. */
+function idFromKey(key: string, prefix: string): string {
+  return key.slice(prefix.length)
 }
 
 /** Legacy embedded form: `{ id, data: <base64 data URL>, config }`, as still found in older assets. */
@@ -60,34 +92,82 @@ async function writeTx(run: (store: IDBObjectStore) => void): Promise<void> {
   })
 }
 
-/** Ids already in the store — used to skip re-writing payloads we already hold. */
+/** Ids the open project already has stored — used to skip re-writing payloads we already hold. */
 export async function storedTextureIds(): Promise<Set<string>> {
   try {
-    const keys = await request((await tx('readonly')).getAllKeys())
-    return new Set(keys as string[])
+    const prefix = projectPrefix()
+    const keys = await request((await tx('readonly')).getAllKeys(projectRange())) as string[]
+    return new Set(keys.map(k => idFromKey(k, prefix)))
   } catch (e) {
     console.warn('Failed to read texture ids:', e)
     return new Set()
   }
 }
 
-export async function putTextures(records: StoredTexture[]): Promise<void> {
+export async function putTextures(records: StoredTexture[], projectId?: string): Promise<void> {
   if (!records.length) return
-  await writeTx(store => { for (const r of records) store.put(r, r.id) })
+  const prefix = projectPrefix(projectId)
+  const owner = projectId ?? prefix.slice(2, -1)
+  await writeTx(store => { for (const r of records) store.put({ ...r, projectId: owner }, prefix + r.id) })
 }
 
-export async function getAllTextures(): Promise<StoredTexture[]> {
+export async function getAllTextures(projectId?: string): Promise<StoredTexture[]> {
   try {
-    return (await request((await tx('readonly')).getAll())) as StoredTexture[]
+    return (await request((await tx('readonly')).getAll(projectRange(projectId)))) as StoredTexture[]
   } catch (e) {
     console.warn('Failed to read the texture store:', e)
     return []
   }
 }
 
-export async function deleteTextures(ids: string[]): Promise<void> {
+export async function deleteTextures(ids: string[], projectId?: string): Promise<void> {
   if (!ids.length) return
-  await writeTx(store => { for (const id of ids) store.delete(id) })
+  const prefix = projectPrefix(projectId)
+  await writeTx(store => { for (const id of ids) store.delete(prefix + id) })
+}
+
+/** Drop every payload a project owns — the texture half of deleting a project. */
+export async function deleteProjectTextures(projectId: string): Promise<void> {
+  try {
+    const keys = await request((await tx('readonly')).getAllKeys(projectRange(projectId))) as string[]
+    if (!keys.length) return
+    await writeTx(store => { for (const key of keys) store.delete(key) })
+  } catch (e) {
+    console.warn('Failed to delete project textures:', e)
+  }
+}
+
+/**
+ * Re-key every pre-multi-project record under a project prefix. Part of the one-time workspace migration.
+ *
+ * A cursor rather than getAll + putTextures: the store holds every image in the workspace, and materializing
+ * all of those blobs at once to move them would be gratuitous. One readwrite transaction, awaited on
+ * `oncomplete` (see writeTx) because the boot path may reload immediately after.
+ */
+export async function migrateUnscopedTextures(prefix: string): Promise<number> {
+  const db = await openDB()
+  return new Promise<number>((resolve, reject) => {
+    const t = db.transaction(TEXTURE_STORE, 'readwrite')
+    const store = t.objectStore(TEXTURE_STORE)
+    const owner = prefix.slice(2, -1)
+    let moved = 0
+    const req = store.openCursor()
+    req.onsuccess = () => {
+      const cursor = req.result
+      if (!cursor) return
+      const key = String(cursor.key)
+      if (!key.startsWith('p:')) {
+        store.put({ ...(cursor.value as StoredTexture), projectId: owner }, prefix + key)
+        cursor.delete()
+        moved++
+      }
+      cursor.continue()
+    }
+    req.onerror = () => reject(req.error)
+    t.oncomplete = () => resolve(moved)
+    t.onerror = () => reject(t.error)
+    t.onabort = () => reject(t.error)
+  })
 }
 
 /**
@@ -97,6 +177,8 @@ export async function deleteTextures(ids: string[]): Promise<void> {
  * Omit `ids` to persist EVERY live texture. That is the right default: a texture can be referenced by the
  * scene without belonging to any asset library (a map dropped straight onto a node's material), and the
  * project blob no longer embeds textures — so anything only the scene knows about would otherwise be lost.
+ * It stays correct under project scoping because the TextureManager only ever holds the OPEN project's
+ * textures: preloadTextures fills it from one project's rows, and switching projects reloads the page.
  *
  * Textures with no retained source — the built-in 'Null', editor icons, anything loaded from a path — are
  * skipped on purpose: they are recreated at boot and were never the thing bloating storage.

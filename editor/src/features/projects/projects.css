@@ -1,0 +1,32 @@
+/* Project-browser tweaks on top of the shared file-manager skin (assets/filemanager.css).
+ *
+ * Every rule here is an extra class deep (.cleo-fm.cleo-projects …, 0-3-0) so it wins on SPECIFICITY rather
+ * than on source order — the two stylesheets are separate loader tags and their order across rebuilds is not
+ * guaranteed.
+ *
+ * The base skin budgets cards at 80px because the Assets tab lives in a ~30vh bottom bar where a taller card
+ * would push its own name below the fold. The project browser is a 720px modal, and a project's NAME is the
+ * only thing that identifies it, so cards get room to show it in full.
+ */
+.cleo-fm.cleo-projects .wx-cards .wx-item {
+  width: 148px !important;
+  height: 128px !important;
+  margin: 4px 8px 8px 0 !important;
+  cursor: pointer;
+}
+.cleo-fm.cleo-projects .wx-cards .wx-item .wx-preview {
+  height: 92px !important;
+}
+.cleo-fm.cleo-projects .wx-cards .wx-item .wx-name,
+.cleo-fm.cleo-projects .wx-cards .wx-item .wx-info {
+  font-size: 12px !important;
+  line-height: 16px !important;
+  white-space: normal !important;
+  text-align: center;
+}
+
+/* There is one flat list of projects, so the folder tree and the breadcrumb navigate nowhere. */
+.cleo-fm.cleo-projects .wx-sidebar,
+.cleo-fm.cleo-projects .wx-breadcrumbs {
+  display: none !important;
+}

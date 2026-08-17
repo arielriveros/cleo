@@ -4,6 +4,7 @@ import { idbGet, idbSet, idbDelete } from './idb';
 import { saveToStorage } from '../workers/workerClient';
 import { loadProject, ProjectPrefs } from './projectStorage';
 import { cryptoRandomId } from './UIModel';
+import { metaKey, sceneKey, scenePrefix } from './storageKeys';
 
 // Multi-scene project storage. The project is a small meta record (scene list + which scene is main
 // and which was last open) plus one kv blob per scene. Scenes are stored one-per-key rather than as
@@ -13,12 +14,9 @@ import { cryptoRandomId } from './UIModel';
 // The legacy single-scene format (one blob under 'cleo_project') is migrated on first boot; the
 // legacy key is intentionally left in place for one release as a rollback backstop.
 
-export const PROJECT_META_KEY = 'cleo_project_meta';
-export const SCENE_KEY_PREFIX = 'cleo_scene:';
-
-export function sceneKey(id: string): string {
-  return SCENE_KEY_PREFIX + id;
-}
+// Key names live in storageKeys.ts (the single registry) and are produced by functions, never constants —
+// see that file for why. Re-exported here so existing importers keep their import path.
+export { sceneKey, scenePrefix };
 
 /** Asset ids a scene references, captured at save time so delete warnings can see closed scenes. */
 export interface SceneRefs {
@@ -72,7 +70,7 @@ export interface SceneAssetData {
 
 export async function loadProjectMeta(): Promise<ProjectMeta | null> {
   try {
-    return await idbGet<ProjectMeta>(PROJECT_META_KEY);
+    return await idbGet<ProjectMeta>(metaKey());
   } catch {
     return null;
   }
@@ -80,7 +78,7 @@ export async function loadProjectMeta(): Promise<ProjectMeta | null> {
 
 /** Meta is tiny — write it directly, no need to round-trip through the worker. */
 export async function saveProjectMeta(meta: ProjectMeta): Promise<void> {
-  await idbSet(PROJECT_META_KEY, meta);
+  await idbSet(metaKey(), meta);
 }
 
 export async function loadSceneData(id: string): Promise<SceneAssetData | null> {

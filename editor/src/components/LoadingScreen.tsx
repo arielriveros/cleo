@@ -1,4 +1,6 @@
-import { LoadingProgress } from '../features/EngineContext';
+// `import type` so the pre-engine boot gate (app.tsx) can render this without pulling EngineContext — and
+// everything it constructs at module scope — into the bundle before a project has been opened.
+import type { LoadingProgress } from '../features/EngineContext';
 
 interface LoadingScreenProps {
   progress: LoadingProgress;

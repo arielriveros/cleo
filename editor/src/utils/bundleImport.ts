@@ -1,23 +1,16 @@
 import { Logger } from 'cleo'
 import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb'
-import { VfsIndex, VFS_KEY, EMPTY_VFS, withAncestors } from './vfs'
-import { ProjectMeta, PROJECT_META_KEY, sceneKey, SCENE_KEY_PREFIX } from './sceneStorage'
+import { VfsIndex, EMPTY_VFS, withAncestors } from './vfs'
+import { ProjectMeta } from './sceneStorage'
+import { libKey, metaKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
 import { getAllTextures, putTextures, deleteTextures, StoredTexture } from './textureStore'
 import { planMerge, LocalState } from './bundleMerge'
+import { createProject, openProject } from './projects'
 import type { BundleData } from './bundle'
 
 // Applies an imported bundle to local storage, then reloads. Both modes write straight to IndexedDB and
 // let the boot path rebuild all React/engine state — far safer than reconciling live state, and it
 // sidesteps the debounced library-persistence that could otherwise resurrect pre-import data.
-
-const LIB_KEYS = {
-  materials: 'cleo_materials',
-  terrainMaterials: 'cleo_terrain_materials',
-  templates: 'cleo_templates',
-  models: 'cleo_models',
-  scripts: 'cleo_scripts',
-  animationFields: 'cleo_animation_fields',
-} as const
 
 function texturesToRecords(textures: BundleData['textures']): StoredTexture[] {
   return textures.map(t => ({
@@ -33,22 +26,27 @@ function texturesToRecords(textures: BundleData['textures']): StoredTexture[] {
  * asset pack keeps the local scenes/meta but overwrites the asset libraries + textures, and swaps the
  * asset portion of the VFS while preserving local scene entries/folders.
  */
-export async function applyBundleReplace(bundle: BundleData): Promise<void> {
+export async function applyBundleReplace(bundle: BundleData, targetProjectId?: string): Promise<void> {
   const isProject = bundle.manifest.kind === 'project'
+  // `targetProjectId` writes into a project that is NOT open — the "import as a new project" flow. Threading
+  // the id through the key helpers is deliberate; briefly repointing the active project instead would send
+  // any in-flight debounced write from the open project into the new one.
+  const pid = targetProjectId
 
   // Libraries + VFS.
-  await idbSet(LIB_KEYS.materials, bundle.libraries.materials)
-  await idbSet(LIB_KEYS.terrainMaterials, bundle.libraries.terrainMaterials)
-  await idbSet(LIB_KEYS.templates, bundle.libraries.templates)
-  await idbSet(LIB_KEYS.models, bundle.libraries.models)
-  await idbSet(LIB_KEYS.scripts, bundle.libraries.scripts ?? [])
-  await idbSet(LIB_KEYS.animationFields, bundle.libraries.animationFields ?? [])
+  await idbSet(libKey('materials', pid), bundle.libraries.materials)
+  await idbSet(libKey('terrainMaterials', pid), bundle.libraries.terrainMaterials)
+  await idbSet(libKey('templates', pid), bundle.libraries.templates)
+  await idbSet(libKey('models', pid), bundle.libraries.models)
+  await idbSet(libKey('scripts', pid), bundle.libraries.scripts ?? [])
+  await idbSet(libKey('animationFields', pid), bundle.libraries.animationFields ?? [])
 
   if (isProject) {
-    // Drop every existing scene blob, then write the bundle's.
-    const stale = await idbKeysByPrefix(SCENE_KEY_PREFIX)
+    // Drop every existing scene blob, then write the bundle's. Scoped: an unscoped scan here would wipe
+    // every OTHER project's scenes too.
+    const stale = await idbKeysByPrefix(scenePrefix(pid))
     for (const key of stale) await idbDelete(key)
-    for (const [id, data] of Object.entries(bundle.scenes)) await idbSet(sceneKey(id), data)
+    for (const [id, data] of Object.entries(bundle.scenes)) await idbSet(sceneKey(id, pid), data)
 
     const metas = bundle.manifest.sceneMetas ?? Object.keys(bundle.scenes).map(id => ({ id, name: id, updatedAt: Date.now() }))
     const meta: ProjectMeta = {
@@ -58,39 +56,51 @@ export async function applyBundleReplace(bundle: BundleData): Promise<void> {
       scenes: metas,
       prefs: bundle.manifest.prefs,
     }
-    await idbSet(PROJECT_META_KEY, meta)
-    await idbSet(VFS_KEY, bundle.vfs)
+    await idbSet(metaKey(pid), meta)
+    await idbSet(vfsKey(pid), bundle.vfs)
   } else {
     // Asset pack: keep local scenes/meta; swap the asset entries of the VFS, keep local scene entries.
-    const localVfs = (await idbGet<VfsIndex>(VFS_KEY)) ?? EMPTY_VFS
+    const localVfs = (await idbGet<VfsIndex>(vfsKey(pid))) ?? EMPTY_VFS
     const merged: VfsIndex = {
       version: 1,
       folders: withAncestors([...localVfs.folders, ...bundle.vfs.folders]),
       entries: [...localVfs.entries.filter(e => e.kind === 'scene'), ...bundle.vfs.entries.filter(e => e.kind !== 'scene')],
     }
-    await idbSet(VFS_KEY, merged)
+    await idbSet(vfsKey(pid), merged)
   }
 
-  // Textures: wipe and rewrite from the bundle.
-  const existing = (await getAllTextures()).map(t => t.id)
-  await deleteTextures(existing)
-  await putTextures(texturesToRecords(bundle.textures))
+  // Textures: wipe and rewrite from the bundle (within this project only).
+  const existing = (await getAllTextures(pid)).map(t => t.id)
+  await deleteTextures(existing, pid)
+  await putTextures(texturesToRecords(bundle.textures), pid)
 
   Logger.info(`Imported ${isProject ? 'project' : 'asset pack'} (replace) — reloading`, 'Editor')
+  if (pid) { await openProject(pid); return }
   window.location.reload()
+}
+
+/**
+ * Import a bundle into a brand-new project, leaving the open one untouched, and switch to it.
+ *
+ * The natural default now that projects exist: "Replace" destroys a whole project's worth of work, which is
+ * rarely what someone dragging in a .zip wants.
+ */
+export async function applyBundleAsNewProject(bundle: BundleData, name?: string): Promise<void> {
+  const record = await createProject(name || bundle.manifest.projectName || 'Imported Project')
+  await applyBundleReplace(bundle, record.id)
 }
 
 /** Read the local state a merge needs to detect id/path/name collisions. */
 async function readLocalState(): Promise<LocalState> {
   const [materials, terrainMaterials, templates, models, scripts, animationFields, vfs, meta, storedTex] = await Promise.all([
-    idbGet<any[]>(LIB_KEYS.materials),
-    idbGet<any[]>(LIB_KEYS.terrainMaterials),
-    idbGet<any[]>(LIB_KEYS.templates),
-    idbGet<any[]>(LIB_KEYS.models),
-    idbGet<any[]>(LIB_KEYS.scripts),
-    idbGet<any[]>(LIB_KEYS.animationFields),
-    idbGet<VfsIndex>(VFS_KEY),
-    idbGet<ProjectMeta>(PROJECT_META_KEY),
+    idbGet<any[]>(libKey('materials')),
+    idbGet<any[]>(libKey('terrainMaterials')),
+    idbGet<any[]>(libKey('templates')),
+    idbGet<any[]>(libKey('models')),
+    idbGet<any[]>(libKey('scripts')),
+    idbGet<any[]>(libKey('animationFields')),
+    idbGet<VfsIndex>(vfsKey()),
+    idbGet<ProjectMeta>(metaKey()),
     getAllTextures(),
   ])
   const textures = new Map<string, { size: number; mime: string }>()
@@ -122,20 +132,20 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
     const existing = (await idbGet<any[]>(key)) ?? []
     await idbSet(key, [...existing, ...incoming])
   }
-  await append(LIB_KEYS.materials, plan.materials)
-  await append(LIB_KEYS.terrainMaterials, plan.terrainMaterials)
-  await append(LIB_KEYS.templates, plan.templates)
-  await append(LIB_KEYS.models, plan.models)
-  await append(LIB_KEYS.scripts, plan.scripts)
-  await append(LIB_KEYS.animationFields, plan.animationFields)
+  await append(libKey('materials'), plan.materials)
+  await append(libKey('terrainMaterials'), plan.terrainMaterials)
+  await append(libKey('templates'), plan.templates)
+  await append(libKey('models'), plan.models)
+  await append(libKey('scripts'), plan.scripts)
+  await append(libKey('animationFields'), plan.animationFields)
 
   // Scenes (project bundles): write each blob, append its meta.
   if (plan.scenes.length) {
     for (const s of plan.scenes) await idbSet(sceneKey(s.meta.id), s.data)
-    const meta = (await idbGet<ProjectMeta>(PROJECT_META_KEY))
+    const meta = (await idbGet<ProjectMeta>(metaKey()))
     if (meta) {
       meta.scenes = [...meta.scenes, ...plan.scenes.map(s => s.meta)]
-      await idbSet(PROJECT_META_KEY, meta)
+      await idbSet(metaKey(), meta)
     }
   }
 
@@ -143,13 +153,13 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
   await putTextures(texturesToRecords(plan.textures))
 
   // VFS: union folders, append remapped entries.
-  const vfs = (await idbGet<VfsIndex>(VFS_KEY)) ?? EMPTY_VFS
+  const vfs = (await idbGet<VfsIndex>(vfsKey())) ?? EMPTY_VFS
   const merged: VfsIndex = {
     version: 1,
     folders: withAncestors([...vfs.folders, ...plan.vfsFolders]),
     entries: [...vfs.entries, ...plan.vfsEntries],
   }
-  await idbSet(VFS_KEY, merged)
+  await idbSet(vfsKey(), merged)
 
   Logger.info(`Imported ${bundle.manifest.kind} (merge) — reloading`, 'Editor')
   window.location.reload()

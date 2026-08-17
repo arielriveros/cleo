@@ -6,7 +6,7 @@ import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
-import { applyBundleReplace, applyBundleMerge } from "../utils/bundleImport";
+import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject } from "../utils/bundleImport";
 import type { BundleData } from "../utils/bundle";
 import ImportBundleModal from "./dialogs/ImportBundleModal";
 import { startTask } from "./progress/progressStore";
@@ -15,9 +15,12 @@ import ModeSelector from "./ModeSelector";
 import { Button, buttonVariants, cn } from "../components/ui";
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
-  SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon,
+  SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon, ProjectsIcon,
   PlayGlyph, PauseGlyph, StopGlyph,
 } from "./topbarIcons";
+import ProjectsModal from "./projects/ProjectsModal";
+import { loadProjects } from "../utils/projects";
+import { activeProjectId } from "../utils/projectScope";
 
 // One playback control. Same shape as ModeSelector's Segment / the viewport's gizmo toggle — a 25px
 // segment in a bordered, rounded group — so the transport reads as part of the same toolbar family
@@ -71,6 +74,12 @@ export default function MenuBar() {
     ? 'Apply the state machine to the source model (Ctrl+S)'
     : `Save this ${KIND_LABEL[activeTab.kind].toLowerCase()} (Ctrl+S)`;
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
+  const [showProjects, setShowProjects] = useState(false);
+  // The open project's name, read once — it only ever changes by reloading into another project.
+  const [projectName, setProjectName] = useState('');
+  useEffect(() => {
+    void loadProjects().then(list => setProjectName(list.find(p => p.id === activeProjectId())?.name ?? ''));
+  }, [showProjects]);
   const [showPublish, setShowPublish] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const publishRef = useRef<HTMLDivElement>(null);
@@ -96,8 +105,8 @@ export default function MenuBar() {
     const task = startTask({ title: 'Exporting project', steps: ['Gathering & zipping'] });
     try {
       task.setStep(0, { status: 'running', detail: 'Bundling scenes, assets and textures' });
-      await exportBundle({ kind: 'project', meta: projectMeta(), libraries: libraries(), vfs });
-      task.setStep(0, { status: 'done', detail: 'Downloaded project.cleoproj.zip' });
+      await exportBundle({ kind: 'project', meta: projectMeta(), libraries: libraries(), vfs, projectName });
+      task.setStep(0, { status: 'done', detail: 'Downloaded the project bundle' });
     } catch (e: any) {
       task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });
       Logger.error(`Project export failed: ${e?.message ?? e}`, 'Editor');
@@ -193,6 +202,16 @@ export default function MenuBar() {
   return (
     <Topbar>
       <div className='flex items-center gap-1.5 h-full px-1.5'>
+        {/* Outermost scope first, so the row reads Projects → Save → Import/Export → Publish. Never gated by
+            the active tab: which project you are in is not an editing mode. */}
+        <Button
+          variant='subtle' size='sm' className='h-[25px] max-w-[180px]'
+          title='Switch, create or delete projects'
+          onClick={() => setShowProjects(true)}
+        >
+          <ProjectsIcon /> <span className='truncate'>{projectName || 'Projects'}</span>
+        </Button>
+        {showProjects && <ProjectsModal onClose={() => setShowProjects(false)} />}
         <Button
           variant={saveVariant} size='sm' className='h-[25px] w-[86px]'
           disabled={saving || !activeDirty}
@@ -225,6 +244,7 @@ export default function MenuBar() {
           <ImportBundleModal
             bundle={pendingBundle}
             onCancel={() => setPendingBundle(null)}
+            onNewProject={() => { const b = pendingBundle; setPendingBundle(null); void applyBundleAsNewProject(b); }}
             onReplace={() => { const b = pendingBundle; setPendingBundle(null); void applyBundleReplace(b); }}
             onMerge={() => { const b = pendingBundle; setPendingBundle(null); void applyBundleMerge(b); }}
           />
@@ -265,22 +285,24 @@ export default function MenuBar() {
       </div>
       <div className='flex items-center h-full'>
         <div className='flex items-center rounded overflow-hidden border border-control-hover my-[2px]'>
+          {/* Never gated by the active tab. Play runs the game scene from anywhere: startPlay switches to
+              the scene tab itself, and Stop returns to the tab you pressed it from. */}
           <Transport
-            title='Play' disabled={playState === 'playing' || libEdit}
+            title='Play' disabled={playState === 'playing'}
             active={playState === 'playing'} activeClass='bg-success text-white'
             accent='hover:text-success' onClick={() => onPlay()}
           >
             <PlayGlyph />
           </Transport>
           <Transport
-            title='Pause' disabled={playState === 'paused' || playState === 'stopped' || libEdit}
+            title='Pause' disabled={playState === 'paused' || playState === 'stopped'}
             active={playState === 'paused'} activeClass='bg-selected text-white'
             accent='hover:text-white' onClick={() => onPause()}
           >
             <PauseGlyph />
           </Transport>
           <Transport
-            title='Stop' disabled={playState === 'stopped' || libEdit}
+            title='Stop' disabled={playState === 'stopped'}
             active={false} activeClass=''
             accent='hover:text-danger' onClick={() => onStop()}
           >

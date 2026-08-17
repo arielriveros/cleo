@@ -54,7 +54,9 @@ export type VfsIndex = {
   entries: VfsEntry[]
 }
 
-export const VFS_KEY = 'cleo_vfs' // IndexedDB 'cleo'/'kv', alongside cleo_materials etc.
+// IndexedDB 'cleo'/'kv', alongside the asset libraries. The name comes from the key registry (storageKeys)
+// and is a function, not a constant, so it can gain a project scope without any call site changing.
+export { vfsKey } from './storageKeys'
 export const EMPTY_VFS: VfsIndex = { version: 1, folders: [], entries: [] }
 
 /** Snapshot of the five libraries, as seen by the reconciler. */

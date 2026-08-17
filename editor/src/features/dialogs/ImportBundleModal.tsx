@@ -2,16 +2,19 @@ import React from 'react'
 import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 import type { BundleData } from '../../utils/bundle'
 
-// Shown after a .zip project/asset-pack is parsed, before anything is written. Replace overwrites the
-// project (or, for a pack, the asset libraries) with the bundle; Merge appends it alongside the current
-// project, re-minting any colliding ids. Both reload the editor afterwards.
+// Shown after a .zip project/asset-pack is parsed, before anything is written.
+//
+// Three destinations, in increasing order of destructiveness: New project puts the bundle in a project of
+// its own and leaves everything you have alone; Merge appends it to the open project, re-minting colliding
+// ids; Replace discards the open project's contents. All three reload the editor afterwards.
 export default function ImportBundleModal(props: {
   bundle: BundleData
+  onNewProject: () => void
   onReplace: () => void
   onMerge: () => void
   onCancel: () => void
 }) {
-  const { bundle, onReplace, onMerge, onCancel } = props
+  const { bundle, onNewProject, onReplace, onMerge, onCancel } = props
   const isProject = bundle.manifest.kind === 'project'
   const sceneCount = Object.keys(bundle.scenes).length
   const { materials, terrainMaterials, templates, models } = bundle.libraries
@@ -31,16 +34,20 @@ export default function ImportBundleModal(props: {
         </div>
         <div className='space-y-2'>
           <p>
-            <span className='font-semibold text-white'>Replace</span> —{' '}
-            {isProject
-              ? 'discard the current project and load this one.'
-              : 'overwrite the asset libraries with this pack (scenes are kept).'}
+            <span className='font-semibold text-white'>New project</span> — put this in a project of its own.
+            Your current project is not touched.
           </p>
           <p>
             <span className='font-semibold text-white'>Merge</span> — add this {isProject ? 'project’s scenes and assets' : 'pack’s assets'} to
             the current project, renaming anything that collides.
           </p>
-          <p className='text-[11px] text-warning'>Either choice reloads the editor.</p>
+          <p>
+            <span className='font-semibold text-white'>Replace</span> —{' '}
+            {isProject
+              ? 'discard the current project’s contents and load this one in its place.'
+              : 'overwrite the current project’s asset libraries with this pack (its scenes are kept).'}
+          </p>
+          <p className='text-[11px] text-warning'>Every choice reloads the editor.</p>
         </div>
       </div>
 
@@ -48,6 +55,7 @@ export default function ImportBundleModal(props: {
         <button className='px-3 py-1.5 text-xs rounded bg-control hover:bg-control-hover' onClick={onCancel}>Cancel</button>
         <button className='px-3 py-1.5 text-xs rounded bg-control hover:bg-control-hover' onClick={onMerge}>Merge</button>
         <button className='px-3 py-1.5 text-xs rounded bg-danger hover:bg-danger-hover font-semibold' onClick={onReplace}>Replace</button>
+        <button className='px-3 py-1.5 text-xs rounded bg-primary hover:bg-primary-hover font-semibold' onClick={onNewProject}>New project</button>
       </ModalFooter>
     </Modal>
   )

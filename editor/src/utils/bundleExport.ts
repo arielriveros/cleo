@@ -31,15 +31,17 @@ export async function exportBundle(opts: {
   meta: ProjectMeta
   libraries: BundleLibraries
   vfs: VfsIndex
+  /** The open project's name — names the file, and the project an "import as new" creates. */
+  projectName?: string
 }): Promise<void> {
-  const { kind, meta, libraries, vfs } = opts
+  const { kind, meta, libraries, vfs, projectName } = opts
 
   const manifest: BundleManifest = {
     formatVersion: BUNDLE_FORMAT_VERSION,
     kind,
     createdAt: Date.now(),
     ...(kind === 'project'
-      ? { mainSceneId: meta.mainSceneId, openSceneId: meta.openSceneId, sceneMetas: meta.scenes, prefs: meta.prefs }
+      ? { mainSceneId: meta.mainSceneId, openSceneId: meta.openSceneId, sceneMetas: meta.scenes, prefs: meta.prefs, projectName }
       : {}),
   }
 
@@ -76,7 +78,8 @@ export async function exportBundle(opts: {
 
   const bundle: BundleData = { manifest, scenes, libraries, vfs: exportedVfs, textures }
   const zip = await exportBundleJob(bundle)
-  const filename = kind === 'project' ? 'project.cleoproj.zip' : 'assets.cleopack.zip'
+  const slug = (projectName || 'project').trim().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'project'
+  const filename = kind === 'project' ? `${slug}.cleoproj.zip` : 'assets.cleopack.zip'
   download(zip, filename)
   Logger.info(`Exported ${kind === 'project' ? 'project' : 'asset pack'} (${textures.length} textures)`, 'Editor')
 }
