@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "examples": [
+    {
+      "slug": "3d-example",
+      "name": "3D Example",
+      "order": 0,
+      "bytes": 215561794,
+      "sceneCount": 1,
+      "textureCount": 29,
+      "createdAt": 1787013290557
+    }
+  ]
+}

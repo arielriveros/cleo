@@ -93,15 +93,19 @@ export async function stringifyJson(data: any): Promise<ArrayBuffer> {
   return result.bytes;
 }
 
-/** Read + JSON.parse a file off the main thread. */
-export async function parseJsonFile(file: File): Promise<any> {
-  const buffer = await file.arrayBuffer();
+/** JSON.parse raw UTF-8 bytes off the main thread. */
+export async function parseJsonBuffer(buffer: ArrayBuffer): Promise<any> {
   // Deliberately NOT transferred: transferring detaches the buffer here, which would leave the inline
   // retry in getWorker().onerror holding an empty one. Copying the bytes is negligible next to the
   // JSON.parse we are offloading.
   const result = await dispatch({ kind: 'parse', buffer });
   if (result.kind !== 'parse') throw new Error('Unexpected job result');
   return result.data;
+}
+
+/** Read + JSON.parse a file off the main thread. */
+export async function parseJsonFile(file: File): Promise<any> {
+  return parseJsonBuffer(await file.arrayBuffer());
 }
 
 export interface PublishJobInput {

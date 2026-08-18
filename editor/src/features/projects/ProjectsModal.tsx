@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Modal, ModalHeader } from '../../components/ui'
-import ProjectsExplorer from './ProjectsExplorer'
+import ProjectsBrowser from './ProjectsBrowser'
 import { ProjectRecord, loadProjects } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 
@@ -37,7 +37,7 @@ export default function ProjectsModal({ onClose }: { onClose: () => void }) {
       </ModalHeader>
       <div className='h-[420px]'>
         {projects
-          ? <ProjectsExplorer projects={projects} onChanged={setProjects} />
+          ? <ProjectsBrowser projects={projects} onChanged={setProjects} />
           : <div className='w-full h-full flex items-center justify-center text-xs text-muted'>Loading projects…</div>}
       </div>
     </Modal>

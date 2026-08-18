@@ -14,7 +14,8 @@ import JSZip from 'jszip';
 import { packGameBin } from '../features/publish/pack';
 import { obfuscateScripts } from '../features/publish/obfuscate';
 import { idbSet } from '../utils/idb';
-import { BundleData, BundleManifest, BundleTexture, BundleTextureIndexRow, BUNDLE_PATHS } from '../utils/bundle';
+import { BundleData, BundleTextureIndexRow, BUNDLE_PATHS } from '../utils/bundle';
+import { BundleSource, readBundle } from '../utils/bundleRead';
 
 // The files that make up a published game: index.html + game.js + game.scripts.js + game.bin.
 //
@@ -127,52 +128,31 @@ async function runExportBundle(job: Extract<ProjectJob, { kind: 'exportBundle' }
 }
 
 // Unzip a bundle back into its structured data. Texture bytes come back as ArrayBuffers (transferred).
+//
+// Which files a bundle is made of — and how missing/legacy ones are tolerated — is readBundle's business,
+// not this function's: the bundled example projects read the very same layout straight off the server, and
+// two copies of that contract would drift. All this supplies is "how do I read one entry out of a zip".
 async function runImportBundle(job: Extract<ProjectJob, { kind: 'importBundle' }>): Promise<JobOutcome> {
   const archive = await JSZip.loadAsync(job.buffer);
-  const readJson = async (path: string, fallback: any): Promise<any> => {
-    const f = archive.file(path);
-    if (!f) return fallback;
-    return JSON.parse(await f.async('string'));
+
+  const source: BundleSource = {
+    async json(path) {
+      const f = archive.file(path);
+      return f ? JSON.parse(await f.async('string')) : null;
+    },
+    async bytes(path) {
+      const f = archive.file(path);
+      return f ? await f.async('arraybuffer') : null;
+    },
+    // A zip knows its own contents, so the manifest's scene list is not consulted here — globbing also
+    // recovers a scene whose meta went missing.
+    async scenePaths() {
+      return archive.file(new RegExp(`^${BUNDLE_PATHS.scenesDir}.+\\.json$`)).map(f => f.name);
+    },
   };
 
-  const manifest = await readJson(BUNDLE_PATHS.manifest, null) as BundleManifest | null;
-  if (!manifest || manifest.formatVersion !== 1) throw new Error('Unrecognized or unsupported bundle');
-
-  const libraries = {
-    materials: await readJson(`${BUNDLE_PATHS.librariesDir}materials.json`, []),
-    terrainMaterials: await readJson(`${BUNDLE_PATHS.librariesDir}terrainMaterials.json`, []),
-    templates: await readJson(`${BUNDLE_PATHS.librariesDir}templates.json`, []),
-    // Bundles exported before the mesh->model rename wrote this library as 'meshes.json'. The records
-    // themselves are unchanged, so falling back to the old filename is all that is needed to import them.
-    models: await readJson(
-      `${BUNDLE_PATHS.librariesDir}models.json`,
-      await readJson(`${BUNDLE_PATHS.librariesDir}meshes.json`, []),
-    ),
-    scripts: await readJson(`${BUNDLE_PATHS.librariesDir}scripts.json`, []),
-    animationFields: await readJson(`${BUNDLE_PATHS.librariesDir}animationFields.json`, []),
-    tilesets: await readJson(`${BUNDLE_PATHS.librariesDir}tilesets.json`, []),
-  };
-  const vfs = await readJson(BUNDLE_PATHS.vfs, { version: 1, folders: [], entries: [] });
-
-  const scenes: Record<string, any> = {};
-  const sceneFiles = archive.file(new RegExp(`^${BUNDLE_PATHS.scenesDir}.+\\.json$`));
-  for (const f of sceneFiles) {
-    const id = f.name.slice(BUNDLE_PATHS.scenesDir.length, -'.json'.length);
-    scenes[id] = JSON.parse(await f.async('string'));
-  }
-
-  const index = await readJson(BUNDLE_PATHS.texturesIndex, []) as BundleTextureIndexRow[];
-  const transfer: Transferable[] = [];
-  const textures: BundleTexture[] = [];
-  for (const row of index) {
-    const f = archive.file(row.file);
-    if (!f) continue;
-    const bytes = await f.async('arraybuffer');
-    transfer.push(bytes);
-    textures.push({ id: row.id, mime: row.mime, config: row.config, bytes });
-  }
-
-  return { result: { kind: 'importBundle', bundle: { manifest, scenes, libraries, vfs, textures } }, transfer };
+  const { bundle, transfer } = await readBundle(source);
+  return { result: { kind: 'importBundle', bundle }, transfer };
 }
 
 /** Execute one job. Safe to call on either thread. */

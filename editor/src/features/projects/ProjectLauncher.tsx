@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import ProjectsExplorer from './ProjectsExplorer'
+import ProjectsBrowser from './ProjectsBrowser'
 import { ProjectRecord } from '../../utils/projects'
 
 /**
@@ -22,10 +22,12 @@ export default function ProjectLauncher({ projects }: { projects: ProjectRecord[
         </div>
         <div className='flex flex-col gap-2'>
           <div className='text-sm text-slate-300'>
-            {list.length ? 'Open a project to continue.' : 'Create your first project to get started.'}
+            {list.length
+              ? 'Open a project to continue.'
+              : 'Create your first project, or start from one of the examples.'}
           </div>
           <div className='h-[380px] rounded-md border border-control overflow-hidden bg-surface-raised'>
-            <ProjectsExplorer projects={list} onChanged={setList} />
+            <ProjectsBrowser projects={list} onChanged={setList} />
           </div>
           <div className='text-[11px] text-dim'>
             A project owns its scenes, models, materials, scripts and textures. Nothing is shared between projects.

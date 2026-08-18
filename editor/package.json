@@ -11,7 +11,9 @@
     "start": "webpack serve  --hot --open",
     "build": "webpack --config webpack.config.js --mode development",
     "build:player": "webpack --config webpack.player.config.js",
-    "build:player:only": "webpack --config webpack.player.config.js"
+    "build:player:only": "webpack --config webpack.player.config.js",
+    "examples:add": "node tools/add-example.mjs",
+    "examples:list": "node tools/add-example.mjs --list"
   },
   "keywords": [],
   "author": "",
