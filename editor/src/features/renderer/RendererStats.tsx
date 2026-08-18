@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { TextureManager, sceneStatsDetail } from 'cleo';
+import { TextureManager, sceneStatsDetail, gpuProfiler, frameHistory } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
+import Sparkline from './Sparkline';
 
 // Live performance HUD shown top-right in renderer mode. Runs its own requestAnimationFrame loop to
 // measure FPS/frame-time (all rAF callbacks fire once per display frame, so the interval = real FPS),
@@ -19,6 +20,12 @@ type Display = {
   textures: number; textureMB: number; gpuMB: number;
   heapUsedMB: number | null; heapLimitMB: number | null;
   lights: number; sprites: number; width: number; height: number; pipeline: string;
+  renderWidth: number; renderHeight: number; renderScale: number;
+  fullscreenPasses: number; shadedMpx: number; culled: number;
+  gpuMs: number; gpuAvailable: boolean; gpuOn: boolean;
+  topPasses: { name: string; avgMs: number }[];
+  p50: number; p95: number; worst: number;
+  history: number[];
 };
 
 function Row(props: { label: string; value: string; hl?: boolean }) {
@@ -54,8 +61,24 @@ export default function RendererStats() {
         for (const t of map.values()) textureBytes += (t as any).byteSize ?? 0;
       } catch { /* ignore */ }
       const mem = (performance as any).memory;
+      // Top GPU passes by smoothed cost. `passes` is already sorted descending by avgMs.
+      const passes = gpuProfiler.enabled ? gpuProfiler.passes.slice(0, 5) : [];
       return {
         fps, frameMs, renderMs: stats?.frameMs ?? 0,
+        renderWidth: stats?.renderWidth ?? 0,
+        renderHeight: stats?.renderHeight ?? 0,
+        renderScale: stats?.renderScale ?? 1,
+        fullscreenPasses: stats?.fullscreenPasses ?? 0,
+        shadedMpx: stats?.shadedMpx ?? 0,
+        culled: stats?.culled ?? 0,
+        gpuMs: gpuProfiler.totalMs,
+        gpuAvailable: gpuProfiler.available,
+        gpuOn: gpuProfiler.enabled,
+        topPasses: passes.map(p => ({ name: p.name, avgMs: p.avgMs })),
+        p50: frameHistory.frame.percentile(0.5),
+        p95: frameHistory.frame.percentile(0.95),
+        worst: frameHistory.frame.max,
+        history: frameHistory.frame.toArray(),
         drawCalls: stats?.drawCalls ?? 0,
         instancedDrawCalls: stats?.instancedDrawCalls ?? 0,
         objects: stats?.objects ?? 0,
@@ -88,6 +111,9 @@ export default function RendererStats() {
     const tick = () => {
       const now = performance.now();
       acc += now - last; last = now; frames++;
+      // The history ring itself is filled by the engine's game loop (see CleoEngine._gameLoop), not
+      // here — this component unmounts outside renderer mode, and a history with holes in it makes
+      // the percentiles lie.
       if (acc >= 250) { // refresh the display ~4x/sec
         setD(sample((frames * 1000) / acc, acc / frames));
         frames = 0; acc = 0;
@@ -105,13 +131,33 @@ export default function RendererStats() {
         <>
           <Row label='FPS' value={fmt(d.fps)} hl />
           <Row label='Frame' value={`${fmt(d.frameMs, 1)} ms`} />
+          {/* p95 and worst next to the mean: a 12ms average with a 30ms p95 is a completely
+              different problem from a flat 12ms, and only one of them is a hitching problem. */}
+          <Row label='· p50 / p95' value={`${fmt(d.p50, 1)} / ${fmt(d.p95, 1)} ms`} />
+          <Row label='· worst' value={`${fmt(d.worst, 1)} ms`} />
+          <Sparkline values={d.history} height={32} budgetMs={1000 / 120} className='my-1' />
           <Row label='Render (CPU)' value={`${fmt(d.renderMs, 1)} ms`} />
+          {/* THE headline number for a fill-rate-bound frame. CPU render time returns as soon as the
+              commands are queued, so without this the GPU cost is invisible and lands in
+              "Unattributed" below. */}
+          {d.gpuOn
+            ? <Row label='Render (GPU)' value={`${fmt(d.gpuMs, 2)} ms`} hl={d.gpuMs > 1000 / 120} />
+            : <Row label='Render (GPU)' value={d.gpuAvailable ? 'off' : 'n/a'} />}
+          {d.gpuOn && d.topPasses.map(p => (
+            <Row key={p.name} label={`· ${p.name}`} value={`${fmt(p.avgMs, 2)} ms`} />
+          ))}
           <Divider />
           <Row label='Draw calls' value={fmt(d.drawCalls)} />
           <Row label='Instanced' value={fmt(d.instancedDrawCalls)} />
           <Row label='Objects' value={fmt(d.objects)} />
           <Row label='Instances' value={fmt(d.instances)} />
           <Row label='Triangles' value={fmt(d.triangles)} />
+          <Row label='Culled' value={fmt(d.culled)} />
+          {/* Fullscreen passes and the pixels they shade. `Fill` is the number that explains a frame
+              whose triangle count is trivial: it counts each pass at its own resolution, so a
+              half-res pass contributes a quarter as much as a full-res one. */}
+          <Row label='Screen passes' value={fmt(d.fullscreenPasses)} />
+          <Row label='Fill' value={`${fmt(d.shadedMpx, 1)} Mpx`} hl={d.shadedMpx > 40} />
           <Divider />
           {/* Split rather than one total on purpose: `step` is cannon's solver (the part a worker
               could take off this thread) while `write-back` is scene-graph sync that would stay
@@ -152,6 +198,8 @@ export default function RendererStats() {
           <Row label='Lights' value={fmt(d.lights)} />
           <Row label='Sprites' value={fmt(d.sprites)} />
           <Row label='Resolution' value={`${d.width}×${d.height}`} />
+          {d.renderScale < 1 &&
+            <Row label='· internal' value={`${d.renderWidth}×${d.renderHeight} (${fmt(d.renderScale * 100)}%)`} />}
           <Row label='Pipeline' value={d.pipeline} />
         </>
       )}

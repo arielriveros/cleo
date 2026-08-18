@@ -1,4 +1,5 @@
 import { gl } from "./renderer";
+import { GLState } from "./systems/glState";
 import { bytesToDataUrl } from "../core/base64";
 import { Logger } from "../core/logger";
 
@@ -50,6 +51,8 @@ export class Texture {
     private _minFilter: number;
     private _format: number;
     private _type: number;
+    // Unit this texture was last bound to, so `unbind()` releases that unit rather than assuming 0.
+    private _boundSlot: number = 0;
 
     constructor(options?: TextureConfig) {
         this._texture = gl.createTexture() as WebGLTexture;
@@ -90,17 +93,32 @@ export class Texture {
         }
     }
 
+    /**
+     * Bind for *sampling*, through the GL state cache — a rebind of the texture already on that unit
+     * costs nothing. This is the frame's hottest bind path (every material map on every draw), and it
+     * was the one hole left in the state cache: `GLState.bindTexture` existed but nothing called it.
+     */
     public bind(slot: number = 0): void {
-        gl.activeTexture(gl.TEXTURE0 + slot);
-        gl.bindTexture(this._target, this._texture);
+        this._boundSlot = slot;
+        GLState.bindTexture(slot, this._target, this._texture);
     }
 
+    /**
+     * Bind for *mutation* (texImage/texParameter/generateMipmap), which all act on the active unit —
+     * so this forces both the unit and the binding rather than letting the cache elide either.
+     */
+    private _bindForUpload(): void {
+        this._boundSlot = 0;
+        GLState.bindTextureForced(0, this._target, this._texture);
+    }
+
+    /** Release whichever unit this texture was last bound to. */
     public unbind(): void {
-        gl.bindTexture(this._target, null);
+        GLState.bindTexture(this._boundSlot, this._target, null);
     }
 
     public create(data: HTMLImageElement | CubemapFaces | null, width: number = 0, height: number = 0): void {
-        this.bind();
+        this._bindForUpload();
 
         this._data = data;
         this._width = width;
@@ -178,7 +196,7 @@ export class Texture {
      * data maps 1:1 to UVs, and it can be partially updated later with `updateRegion`.
      */
     public createFromData(data: Uint8Array, width: number, height: number, wrapping: 'clamp' | 'repeat' | 'mirror' = 'clamp'): void {
-        this.bind();
+        this._bindForUpload();
         this._data = null;
         this._width = width;
         this._height = height;
@@ -195,7 +213,7 @@ export class Texture {
 
     /** Upload a sub-rectangle of RGBA bytes (row-major, tightly packed) into an existing data texture. */
     public updateRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
-        this.bind();
+        this._bindForUpload();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         gl.texSubImage2D(this._target, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
         this.unbind();
@@ -206,7 +224,7 @@ export class Texture {
             Logger.error('Cannot update 2D texture with cubemap face', 'Texture');
             return;
         }
-        this.bind();
+        this._bindForUpload();
         this._data = data;
         if (data) {
             this._width = data.width;
@@ -232,7 +250,7 @@ export class Texture {
             return;
         }
         
-        this.bind(); // Bind the texture before updating the face
+        this._bindForUpload(); // Bind the texture before updating the face
         let target = 0;
         switch (face) {
             case 'posX':
@@ -277,7 +295,7 @@ export class Texture {
      * prefiltered specular) — render into a face/level with a framebuffer, then sample as a cubemap.
      */
     public createCubemapTarget(size: number, levels: number = 1): void {
-        this.bind();
+        this._bindForUpload();
         this._width = size;
         this._height = size;
         this._mipMap = levels > 1;
@@ -294,7 +312,7 @@ export class Texture {
 
     /** (Re)generate the mip chain for this texture — e.g. after rendering a captured cubemap. */
     public generateMipmaps(): void {
-        this.bind();
+        this._bindForUpload();
         gl.generateMipmap(this._target);
         this.unbind();
     }

@@ -4063,11 +4063,14 @@ export class VolumetricCloudsNode extends Node {
         this._windSpeed = options.windSpeed ?? 12.0;
         this._detailWindFactor = options.detailWindFactor ?? 2.0;
 
-        this._steps = options.steps ?? 48;
-        this._lightSteps = options.lightSteps ?? 6;
+        this._steps = options.steps ?? 40;
+        this._lightSteps = options.lightSteps ?? 5;
         this._maxDistance = options.maxDistance ?? 60000;
         this._jitter = options.jitter ?? true;
-        this._resolutionScale = options.resolutionScale ?? 1.0;
+        // Half resolution by default. The raymarch is the single most expensive pass in a cloudy
+        // frame and it produces a low-frequency image, so the full-res default was paying 4x the ray
+        // count for detail the upsample filter cannot even show. Raise it to 1.0 for a still capture.
+        this._resolutionScale = options.resolutionScale ?? 0.5;
 
         this._enabled = options.enabled ?? true;
         this._opacity = options.opacity ?? 1.0;

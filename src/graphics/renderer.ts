@@ -41,7 +41,10 @@ import ScreenVertex from './shaders/screen/screen.vs'
 import ScreenFragment from './shaders/screen/screen.fs'
 import PresentFragment from './shaders/screen/present.fs'
 import DebugViewFragment from './shaders/screen/debugView.fs'
+import OverdrawFragment from './shaders/screen/overdraw.fs'
 import Bloom from './shaders/screen/bloom.fs'
+import BloomDownsample from './shaders/screen/bloomDownsample.fs'
+import BloomUpsample from './shaders/screen/bloomUpsample.fs'
 import GaussianBlur from './shaders/screen/gaussianBlur.fs'
 import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
 import Composer from './shaders/screen/composer.fs'
@@ -83,7 +86,8 @@ import { Material, CustomMaterial } from './material';
 import { ensureCustomShader, customForwardTypes } from './systems/customShaders';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
-import { frameStats, resetFrameStats } from './renderStats';
+import { frameStats, resetFrameStats, countFullscreenPass, setViewportSize } from './renderStats';
+import { gpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { TerrainLodSettings } from '../terrain/terrain';
 import type { FoliageCell } from '../terrain/foliage';
 import { collectOrphanedFoliageBuffers } from '../terrain/foliage';
@@ -95,10 +99,53 @@ export let gl: WebGL2RenderingContext;
  *  forward materials are appended at runtime via `customForwardTypes()`. */
 const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned', 'terrainForward'];
 
+/**
+ * `FORWARD_SHADERS` plus whatever custom forward materials the scene has registered, rebuilt only
+ * when that set actually changes.
+ *
+ * The four per-frame call sites each spread both arrays into a fresh one — and `_setLighting` is
+ * called once per light, so a scene with eight lights allocated dozens of throwaway arrays per frame
+ * to iterate a list that changes only when a custom material is first compiled.
+ */
+/**
+ * Precomputed `u_pointLights[i].<field>` / `u_spotlights[i].<field>` uniform names.
+ *
+ * These were template literals evaluated inline, 7 per point light and 10 per spot light — and
+ * `_setLighting` runs once per light for EVERY forward shader, so a scene with a handful of lights
+ * built hundreds of identical short-lived strings each frame purely to look them up in a map. The
+ * index space is bounded by the shader's array sizes, so the whole table can be built once.
+ */
+const MAX_LIGHT_SLOTS = 32;
+const POINT_LIGHT_FIELDS = ['position', 'diffuse', 'specular', 'ambient', 'constant', 'linear', 'quadratic'] as const;
+const SPOT_LIGHT_FIELDS = ['position', 'direction', 'diffuse', 'specular', 'ambient', 'constant', 'linear', 'quadratic', 'cutOff', 'outerCutOff'] as const;
+
+function buildLightNames(arrayName: string, fields: readonly string[]): Record<string, string>[] {
+    const out: Record<string, string>[] = [];
+    for (let i = 0; i < MAX_LIGHT_SLOTS; i++) {
+        const entry: Record<string, string> = {};
+        for (const f of fields) entry[f] = `${arrayName}[${i}].${f}`;
+        out.push(entry);
+    }
+    return out;
+}
+const POINT_LIGHT_NAMES = buildLightNames('u_pointLights', POINT_LIGHT_FIELDS);
+const SPOT_LIGHT_NAMES = buildLightNames('u_spotlights', SPOT_LIGHT_FIELDS);
+
+let _forwardShaderCache: string[] = [...FORWARD_SHADERS];
+let _forwardShaderCustomCount = -1;
+function allForwardShaders(): string[] {
+    const custom = customForwardTypes();
+    if (custom.length !== _forwardShaderCustomCount) {
+        _forwardShaderCustomCount = custom.length;
+        _forwardShaderCache = [...FORWARD_SHADERS, ...custom];
+    }
+    return _forwardShaderCache;
+}
+
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom' | 'mask' | 'velocity';
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom' | 'mask' | 'velocity' | 'overdraw';
 
 interface RendererConfig {
     clearColor?: number[];
@@ -118,7 +165,24 @@ interface RendererConfig {
  * editor's Renderer panel — otherwise a freshly constructed renderer would fall back to defaults.
  * Excludes editor-only state (debugView, grid, selection outline) which never ships with a game.
  */
+/**
+ * Coarse quality tier. Sets the handful of knobs that actually dominate GPU cost — cloud march
+ * resolution and step counts, SSAO resolution and sample count, shadow-cascade resolution, bloom, and
+ * the internal render scale — in one move.
+ *
+ * `ultra` deliberately reproduces the engine's historical defaults exactly (full-res clouds at 48/6
+ * steps, 64-sample full-res SSAO, 4096px cascades), so nothing that was previously achievable has
+ * been taken away; those settings simply stopped being what you get without asking. `high` is the new
+ * default and targets a 120Hz frame on a mid-range GPU.
+ *
+ * `custom` is what the tier becomes as soon as any individual knob is changed by hand, so the UI can
+ * stop claiming a preset that no longer describes the state.
+ */
+export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra' | 'custom';
+
 export interface RenderSettings {
+    quality: QualityPreset;
+    renderScale: number;
     clearColor: number[];
     exposure: number;
     bloomThreshold: number;
@@ -140,7 +204,59 @@ export interface RenderSettings {
     terrainLodDistance2: number;
     terrainLodStep1: number;
     terrainLodStep2: number;
+    ssaoSamples: number;
+    ssaoResolutionScale: number;
+    shadowMapResolution: number;
+    bloomEnabled: boolean;
 }
+
+/** The knobs each quality tier sets. `custom` has no entry — it means "don't touch anything". */
+interface QualityTier {
+    renderScale: number;
+    /** Cloud raymarch resolution as a fraction of the render size. */
+    cloudResolutionScale: number;
+    cloudSteps: number;
+    cloudLightSteps: number;
+    ssaoEnabled: boolean;
+    ssaoSamples: number;
+    ssaoResolutionScale: number;
+    shadowMapResolution: number;
+    bloomEnabled: boolean;
+    motionBlurEnabled: boolean;
+}
+
+/**
+ * Tier definitions. The numbers here are the whole point of the preset system, so they are worth
+ * reading as a group: every step down the list roughly quarters the cost of the two passes that
+ * dominate a cloudy PBR frame (the cloud raymarch and SSAO), because both scale with resolution
+ * squared *and* with their step/sample count.
+ */
+const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier> = {
+    ultra: {
+        renderScale: 1.0,
+        cloudResolutionScale: 1.0, cloudSteps: 48, cloudLightSteps: 6,
+        ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0,
+        shadowMapResolution: 4096, bloomEnabled: true, motionBlurEnabled: true,
+    },
+    high: {
+        renderScale: 1.0,
+        cloudResolutionScale: 0.5, cloudSteps: 40, cloudLightSteps: 5,
+        ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5,
+        shadowMapResolution: 2048, bloomEnabled: true, motionBlurEnabled: true,
+    },
+    medium: {
+        renderScale: 1.0,
+        cloudResolutionScale: 0.35, cloudSteps: 28, cloudLightSteps: 4,
+        ssaoEnabled: true, ssaoSamples: 16, ssaoResolutionScale: 0.5,
+        shadowMapResolution: 1024, bloomEnabled: true, motionBlurEnabled: false,
+    },
+    low: {
+        renderScale: 0.75,
+        cloudResolutionScale: 0.25, cloudSteps: 20, cloudLightSteps: 3,
+        ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5,
+        shadowMapResolution: 1024, bloomEnabled: false, motionBlurEnabled: false,
+    },
+};
 
 /**
  * Editor-only skeleton overlay: joint spheres + bone connectors drawn instanced and always-on-top
@@ -203,6 +319,37 @@ export class Renderer {
     // Editor "Renderer" debug view: which buffer to blit to the screen ('final' = normal image).
     private _debugView: DebugView = 'final';
 
+    /**
+     * Per-pass kill switches for the profiler's A/B bisection. Every pass is on by default and this
+     * is editor tooling only — nothing in a published build flips it.
+     *
+     * It exists because GPU timer queries are not guaranteed: `EXT_disjoint_timer_query_webgl2` is
+     * gated by driver and browser flags, and when it is missing the only way left to attribute frame
+     * time is to switch a pass off and watch the frame-time graph. That measurement is also the more
+     * honest of the two — it captures the pass's true marginal cost including the bandwidth it saves
+     * downstream, which a timer around the draw call alone does not.
+     */
+    private _passEnabled: Record<RenderPass, boolean> =
+        Object.fromEntries(RENDER_PASSES.map(p => [p, true])) as Record<RenderPass, boolean>;
+
+    /**
+     * Which of `_compose_FBOs` currently holds the post-process image.
+     *
+     * Was implicit before: every stage hard-coded the index it read and wrote, which meant a stage
+     * could only ever be skipped by replacing it with a plain copy — the "disabled" chromatic
+     * aberration pass still cost a full-res round trip because `present` unconditionally read [1].
+     * Tracking the index instead lets any stage genuinely drop out of the chain at zero cost.
+     */
+    private _composeIndex: number = 0;
+
+    /**
+     * Internal render resolution as a fraction of the canvas (0.25–1.0). Every screen-space buffer is
+     * allocated at `canvas * renderScale` while the canvas itself stays at native size, so the final
+     * present upscales. The cheapest possible lever on a fill-rate-bound frame, and the quickest way
+     * to prove a frame *is* fill-rate bound: if halving this does not move the frame time, it isn't.
+     */
+    private _renderScale: number = 1.0;
+
     private _sceneFBO: Framebuffer;
     // Snapshot of _sceneFBO's depth (deferred blit + forward opaques), taken after the opaque forward
     // draw so fullscreen passes (fog, god rays, screen materials) can sample the full opaque depth
@@ -247,7 +394,15 @@ export class Renderer {
     // Post processing
     private _compose_FBOs: Framebuffer[];
     private _blur_FBOs: Framebuffer[];
-    private _bloomFBO: Framebuffer;
+    /**
+     * Bloom downsample/upsample pyramid. Level 0 is half the render size and each level halves again,
+     * so the whole chain costs about a third of one full-res pass — versus the 20 same-size blurs it
+     * replaced. Levels stop being allocated once a dimension would reach 1px.
+     */
+    private _bloomMips: Framebuffer[] = [];
+    private static readonly BLOOM_MIP_COUNT = 6;
+    // Upsample tent radius, in source-mip texels. ~2 gives a wide, soft falloff without ringing.
+    private static readonly BLOOM_FILTER_RADIUS = 2.0;
     // Reduced-resolution volumetric-clouds raymarch target (lazily sized to the node's resolutionScale;
     // upsampled + composited into the scene buffer). Only used when resolutionScale < 1.
     private _cloudsFBO: Framebuffer;
@@ -262,6 +417,46 @@ export class Renderer {
     private _ssaoBlurFBO: Framebuffer;
     private _ssaoEnabled: boolean;
     private _ssaoKernel: Float32Array = new Float32Array(64 * 3);
+    /** Kernel samples actually taken per pixel. 64 was the fixed value; the shader now breaks early. */
+    private _ssaoSamples: number = 24;
+    /**
+     * SSAO resolution as a fraction of the render size. AO is a low-frequency signal that then gets
+     * box-blurred anyway, so shading it at full resolution was paying 4x the fill rate to produce
+     * detail the very next pass throws away.
+     */
+    private _ssaoResolutionScale: number = 0.5;
+    /** Active quality tier; 'custom' once any individual knob has been changed by hand. */
+    private _quality: QualityPreset = 'high';
+    private _shadowMapResolution: number = 2048;
+    /** Accumulation target for the overdraw debug view. Allocated lazily — the channel is editor-only. */
+    private _overdrawFBO: Framebuffer | null = null;
+    /** Fragment count that saturates the heat map to red. 16 layers is deep enough to be alarming. */
+    private static readonly OVERDRAW_MAX = 16;
+    private get _ssaoWidth(): number { return Math.max(1, Math.round(this._renderWidth * this._ssaoResolutionScale)); }
+    private get _ssaoHeight(): number { return Math.max(1, Math.round(this._renderHeight * this._ssaoResolutionScale)); }
+    /**
+     * Frustum used to cull shadow casters against a cascade's light-space volume. Separate from
+     * `_frustum` (the camera's) because both are live during the shadow pass.
+     */
+    private _shadowFrustum: Frustum = new Frustum();
+    // Preallocated temporaries for _computeCascadeMatrix, which ran 3x per frame and allocated
+    // ~15 gl-matrix objects each time (a projection, an inverse, 8 corners, a centroid, two more
+    // matrices). All of it is scratch that never outlives the call.
+    private _csmProj: mat4 = mat4.create();
+    private _csmInvVP: mat4 = mat4.create();
+    private _csmLightView: mat4 = mat4.create();
+    private _csmLightProj: mat4 = mat4.create();
+    private _csmCorners: vec3[] = Array.from({ length: 8 }, () => vec3.create());
+    private _csmCentroid: vec3 = vec3.create();
+    private _csmLightDir: vec3 = vec3.create();
+    private _csmEye: vec3 = vec3.create();
+    private _csmUp: vec3 = vec3.create();
+    private _csmTmp: vec3 = vec3.create();
+    private _csmSplits: number[] = new Array(3).fill(0);
+    /** Frame counter used to stagger distant cascade updates (see _renderCascades). */
+    private _frameIndex: number = 0;
+    // Scratch for the clip->view matrix handed to ssao.fs (see viewPosFromUV).
+    private _invProjection: mat4 = mat4.create();
     private _ssaoNoise!: Texture;
     private _ssaoRadius: number = 0.5;
     private _ssaoBias: number = 0.025;
@@ -361,6 +556,9 @@ export class Renderer {
 
         // Get WebGL context
         gl = this._canvas.getContext('webgl2') as WebGL2RenderingContext;
+        // Resolve the timer-query extension while we have the fresh context. Cheap, and it means
+        // `gpuProfilingAvailable` is answerable before the first frame rather than after it.
+        if (gl) gpuProfiler.initialize(gl);
 
         // Create material system
         this._shaderManager = ShaderManager.Instance;
@@ -388,7 +586,8 @@ export class Renderer {
         this._gBufferFBO = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
-        this._bloomFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false, precision: 'high' } });
+        for (let i = 0; i < Renderer.BLOOM_MIP_COUNT; i++)
+            this._bloomMips.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }));
         this._blur_FBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }), new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } })];
         // Same config as the blur scratch buffers (LINEAR-filtered float) so the low-res clouds upsample smoothly.
         this._cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
@@ -482,6 +681,11 @@ export class Renderer {
         const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
         const bloomShader = new Shader().create(ScreenVertex, Bloom);
         const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
+        // Reuses the selection-mask vertex shader: it is the minimal MVP transform the mask pass
+        // already drives over these same meshes, so no new vertex path is introduced.
+        const overdrawShader = new Shader().create(OutlineVertex, OverdrawFragment);
+        const bloomDownsampleShader = new Shader().create(ScreenVertex, BloomDownsample);
+        const bloomUpsampleShader = new Shader().create(ScreenVertex, BloomUpsample);
         const chromaticAbShader = new Shader().create(ScreenVertex, ChromaticAberration);
         const composerShader = new Shader().create(ScreenVertex, Composer);
         // Editor infinite grid (fullscreen world-plane pass)
@@ -537,6 +741,9 @@ export class Renderer {
         this._shaderManager.addShader('debugView', debugViewShader);
         this._shaderManager.addShader('bloom', bloomShader);
         this._shaderManager.addShader('blur', blurShader);
+        this._shaderManager.addShader('overdraw', overdrawShader);
+        this._shaderManager.addShader('bloomDownsample', bloomDownsampleShader);
+        this._shaderManager.addShader('bloomUpsample', bloomUpsampleShader);
         this._shaderManager.addShader('chromaticAberration', chromaticAbShader);
         this._shaderManager.addShader('composer', composerShader);
         this._shaderManager.addShader('grid', gridShader);
@@ -547,32 +754,36 @@ export class Renderer {
         this._shaderManager.addShader('motionBlurNeighborMax', motionBlurNeighborMaxShader);
         this._shaderManager.addShader('motionBlur', motionBlurShader);
 
-        // Create framebuffers
-        this._sceneFBO.create(this._canvas.width, this._canvas.height);
-        this._gBufferFBO.create(this._canvas.width, this._canvas.height);
-        this._ssaoFBO.create(this._canvas.width, this._canvas.height);
-        this._ssaoBlurFBO.create(this._canvas.width, this._canvas.height);
-        this._outlineMaskFBO.create(this._canvas.width, this._canvas.height);
+        // Create framebuffers at the internal render size (canvas x renderScale), not the canvas size.
+        const rw = this._renderWidth, rh = this._renderHeight;
+        this._sceneFBO.create(rw, rh);
+        this._gBufferFBO.create(rw, rh);
+        this._ssaoFBO.create(this._ssaoWidth, this._ssaoHeight);
+        this._ssaoBlurFBO.create(this._ssaoWidth, this._ssaoHeight);
+        this._outlineMaskFBO.create(rw, rh);
         this._generateSSAOKernelAndNoise();
 
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
         this._instanceBuffer = gl.createBuffer();
 
-        const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || 4096;
+        // Config wins if given; otherwise the quality tier's value (2048 at the 'high' default),
+        // not the old hard-coded 4096 per cascade.
+        const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || this._shadowMapResolution;
+        this._shadowMapResolution = SHADOW_MAP_SIZE;
         this._shadowMapFBO.create(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
         for (const cascade of this._shadowCascades)
             cascade.create(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
 
-        this._blur_FBOs[0].create(this._canvas.width / 2, this._canvas.height / 2);
-        this._blur_FBOs[1].create(this._canvas.width / 2, this._canvas.height / 2);
-        this._compose_FBOs[0].create(this._canvas.width, this._canvas.height);
-        this._compose_FBOs[1].create(this._canvas.width, this._canvas.height);
-        this._bloomFBO.create(this._canvas.width, this._canvas.height);
+        this._blur_FBOs[0].create(rw / 2, rh / 2);
+        this._blur_FBOs[1].create(rw / 2, rh / 2);
+        this._compose_FBOs[0].create(rw, rh);
+        this._compose_FBOs[1].create(rw, rh);
+        this._createBloomMips(rw, rh);
 
         const mbK = Renderer.MOTION_BLUR_TILE;
-        this._velocityFBO.create(this._canvas.width, this._canvas.height);
-        this._velocityTileFBO.create(Math.ceil(this._canvas.width / mbK), Math.ceil(this._canvas.height / mbK));
-        this._velocityNeighborFBO.create(Math.ceil(this._canvas.width / mbK), Math.ceil(this._canvas.height / mbK));
+        this._velocityFBO.create(rw, rh);
+        this._velocityTileFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
+        this._velocityNeighborFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
         
         // Create screen quad to render framebuffer to
         this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
@@ -612,10 +823,13 @@ export class Renderer {
         this._updateModelLOD(scene);
 
         // Re-bake the sky atmosphere cubemap when the sun moves (before IBL, so probes capture the sky).
+        gpuProfiler.beginPass('sky.bake');
         this._updateSkyAtmosphere(scene);
 
         // Bake/refresh IBL (light probes + scene environment) before the main passes.
+        gpuProfiler.beginPass('ibl.bake');
         this._updateIBL(scene);
+        gpuProfiler.endPass();
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the stats.
         resetFrameStats();
@@ -632,8 +846,10 @@ export class Renderer {
             // Directional lights in the deferred path use cascaded shadow maps; everything else
             // (spot/point shadows, or the whole forward pipeline) uses the single shadow map.
             if (this._deferred && shadowLight.type === 'directional') {
-                this._renderCascades(scene.models, shadowLight);
-                this._useCSM = true;
+                if (this._beginPass('shadows.cascades')) {
+                    this._renderCascades(scene.models, shadowLight);
+                    this._useCSM = true;
+                }
                 // Forward-rendered objects (opaque Blinn-Phong + transparent) sample the single shadow
                 // map, not the cascades — render it too so they receive directional light/shadows
                 // (otherwise they read a stale map, come out fully shadowed, and lose directional light).
@@ -644,8 +860,8 @@ export class Renderer {
                     const m = n.model.material;
                     if (m.config.transparent || m.type === 'blinn_phong' || m.type === 'blinn_phongSkinned') { hasForward = true; break; }
                 }
-                if (hasForward) this._renderShadowMap(scene.models, shadowLight);
-            } else {
+                if (hasForward && this._beginPass('shadows.single')) this._renderShadowMap(scene.models, shadowLight);
+            } else if (this._beginPass('shadows.single')) {
                 this._renderShadowMap(scene.models, shadowLight);
             }
             this._shadowMapsDirty = true;
@@ -669,6 +885,19 @@ export class Renderer {
         mat4.copy(this._prevViewProj, this._viewProj);
         this._hasPrevViewProj = true;
 
+        // Sacrificial trailing scope. Whichever query is LAST in a frame absorbs the driver's
+        // end-of-frame pipeline drain — on ANGLE/D3D11 that can be several milliseconds, which made
+        // `present` (a single fullscreen blit) read as the most expensive pass in the frame by an
+        // order of magnitude. Giving the drain a scope of its own keeps every real pass honest and
+        // names the cost for what it is rather than hiding it.
+        gpuProfiler.beginPass('frameEnd');
+
+        // Close the last open GPU scope and read back whichever earlier frames have resolved. Must be
+        // the final thing in the frame: results are collected from frames already retired, never waited
+        // on, so this never blocks on the GPU.
+        gpuProfiler.endFrame();
+
+        this._frameIndex++;
         frameStats.frameMs = performance.now() - _statsT0;
     }
 
@@ -750,13 +979,13 @@ export class Renderer {
         this._shaderManager.setUniform('u_cube', 8);
         this._shaderManager.setUniform('u_exposure', probe.intensity);
         cube.bind(8);
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         const pixels = new Uint8Array(w * h * 4);
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
+        this._setViewport(this._renderWidth, this._renderHeight);
 
         // Flip Y (WebGL's origin is bottom-left) into the output canvas.
         const out = document.createElement('canvas');
@@ -788,7 +1017,7 @@ export class Renderer {
      * frame — even with zero lights — so deleting the last light actually darkens the scene.
      */
     private _resetForwardLighting(scene: Scene): void {
-        for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
+        for (const shaderName of allForwardShaders()) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_numPointLights', scene.numPointLights);
             this._shaderManager.setUniform('u_numSpotlights', scene.numSpotlights);
@@ -800,7 +1029,7 @@ export class Renderer {
     }
 
     private _bindShadowToForwardShaders(light: LightNode): void {
-        for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
+        for (const shaderName of allForwardShaders()) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_lightSpace', light.lightSpace);
             this._shaderManager.setUniform('u_shadowMap', 6);
@@ -818,7 +1047,7 @@ export class Renderer {
         const probe = scene.probeForPoint(this._activeCamera.position);
         const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
         const envCube = probeCube ?? scene.environmentMap;
-        for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
+        for (const shaderName of allForwardShaders()) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_useEnvMap', envCube ? true : false);
             this._shaderManager.setUniform('u_envMap', 7);
@@ -848,13 +1077,16 @@ export class Renderer {
 
     private _renderDeferred(scene: Scene, shadowLight: LightNode | null): void {
         // 1. Rasterize all opaque lit geometry into the G-buffer.
+        gpuProfiler.beginPass('geometry');
         this._geometryPass(scene);
         // 1b. Screen-space ambient occlusion from the G-buffer depth+normals.
-        if (this._ssaoEnabled) this._ssaoPass();
+        if (this._ssaoEnabled && this._beginPass('ssao')) this._ssaoPass();
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
+        gpuProfiler.beginPass('lighting');
         this._deferredLightingPass(scene, shadowLight);
         // 3. Forward passes (skybox, transparent, sprites, outlines, gizmos) into the scene FBO.
         this._renderForwardOverlay(scene, shadowLight);
+        gpuProfiler.endPass();
     }
 
     /**
@@ -882,7 +1114,9 @@ export class Renderer {
         // reference). A textureless material never rebinds those units, so drawing into the G-buffer
         // with them still bound is an INVALID_OPERATION and the draw is dropped (the object vanishes).
         // Clear the material sampler units so no G-buffer texture is bound while we write to it.
-        for (let u = 0; u < 8; u++) { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, null); }
+        // Must go through GLState, not raw gl calls: the cache would otherwise still believe last
+        // frame's textures are bound here and elide the rebinds that follow, sampling black.
+        for (let u = 0; u < 8; u++) GLState.bindTexture(u, gl.TEXTURE_2D, null);
 
         // Collect visible, opaque, non-gizmo models.
         const singles: ModelNode[] = [];
@@ -917,7 +1151,16 @@ export class Renderer {
         }
 
         // Sort singles by geometry shader to keep identical program/material binds consecutive.
-        singles.sort((a, b) => this._geometryShaderFor(a).localeCompare(this._geometryShaderFor(b)));
+        // Comparing with `<` on a key computed ONCE per node, not `localeCompare` on a key rebuilt
+        // inside the comparator: localeCompare runs full ICU collation, and the comparator ran
+        // O(n log n) times per frame calling _geometryShaderFor twice each. Locale-aware ordering is
+        // meaningless here anyway — the keys are ASCII shader names and only grouping matters.
+        const shaderKey = new Map<ModelNode, string>();
+        for (const node of singles) shaderKey.set(node, this._geometryShaderFor(node));
+        singles.sort((a, b) => {
+            const ka = shaderKey.get(a)!, kb = shaderKey.get(b)!;
+            return ka < kb ? -1 : ka > kb ? 1 : 0;
+        });
         for (const node of singles) this._drawGeometryNode(node);
 
         // Instanced groups (>=2 identical mesh+material), else fall back to a single draw.
@@ -927,7 +1170,8 @@ export class Renderer {
         }
 
         // Instanced foliage owned by landscapes (grass billboards + scattered mesh props).
-        this._foliagePass(scene);
+        if (this._beginPass('foliage')) this._foliagePass(scene);
+        gpuProfiler.endPass();
     }
 
     private _foliagePass(scene: Scene): void {
@@ -1254,7 +1498,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_ssao', 4);
         this._ssaoBlurFBO.colors[0].bind(4);
 
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
@@ -1304,27 +1548,31 @@ export class Renderer {
                     this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
                     this._shaderManager.setUniform('u_dirLight.direction', node.worldForward);
                     break;
-                case 'point':
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].position`, node.worldPosition);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].specular`, node.light.specular);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].ambient`, node.light.ambient);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
+                case 'point': {
+                    const PL = POINT_LIGHT_NAMES;
+                    this._shaderManager.setUniform(PL[node.index]['position'], node.worldPosition);
+                    this._shaderManager.setUniform(PL[node.index]['diffuse'], node.light.diffuse);
+                    this._shaderManager.setUniform(PL[node.index]['specular'], node.light.specular);
+                    this._shaderManager.setUniform(PL[node.index]['ambient'], node.light.ambient);
+                    this._shaderManager.setUniform(PL[node.index]['constant'], (node.light as PointLight).constant);
+                    this._shaderManager.setUniform(PL[node.index]['linear'], (node.light as PointLight).linear);
+                    this._shaderManager.setUniform(PL[node.index]['quadratic'], (node.light as PointLight).quadratic);
                     break;
-                case 'spotlight':
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].position`, node.worldPosition);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].direction`, node.worldForward);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].diffuse`, node.light.diffuse);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].specular`, node.light.specular);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].ambient`, node.light.ambient);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].constant`, (node.light as Spotlight).constant);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].linear`, (node.light as Spotlight).linear);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].quadratic`, (node.light as Spotlight).quadratic);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].cutOff`, (node.light as Spotlight).cutOff * Math.PI / 180);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].outerCutOff`, (node.light as Spotlight).outerCutOff * Math.PI / 180);
+                }
+                case 'spotlight': {
+                    const SL = SPOT_LIGHT_NAMES;
+                    this._shaderManager.setUniform(SL[node.index]['position'], node.worldPosition);
+                    this._shaderManager.setUniform(SL[node.index]['direction'], node.worldForward);
+                    this._shaderManager.setUniform(SL[node.index]['diffuse'], node.light.diffuse);
+                    this._shaderManager.setUniform(SL[node.index]['specular'], node.light.specular);
+                    this._shaderManager.setUniform(SL[node.index]['ambient'], node.light.ambient);
+                    this._shaderManager.setUniform(SL[node.index]['constant'], (node.light as Spotlight).constant);
+                    this._shaderManager.setUniform(SL[node.index]['linear'], (node.light as Spotlight).linear);
+                    this._shaderManager.setUniform(SL[node.index]['quadratic'], (node.light as Spotlight).quadratic);
+                    this._shaderManager.setUniform(SL[node.index]['cutOff'], (node.light as Spotlight).cutOff * Math.PI / 180);
+                    this._shaderManager.setUniform(SL[node.index]['outerCutOff'], (node.light as Spotlight).outerCutOff * Math.PI / 180);
                     break;
+                }
             }
         }
 
@@ -1389,11 +1637,13 @@ export class Renderer {
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
-        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-        this._shaderManager.setUniform('u_noiseScale', [this._renderWidth / 4, this._renderHeight / 4]);
+        mat4.invert(this._invProjection, this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_invProjection', this._invProjection);
+        this._shaderManager.setUniform('u_noiseScale', [this._ssaoWidth / 4, this._ssaoHeight / 4]);
         this._shaderManager.setUniform('u_radius', this._ssaoRadius);
         this._shaderManager.setUniform('u_bias', this._ssaoBias);
         this._shaderManager.setUniform('u_power', this._ssaoPower);
+        this._shaderManager.setUniform('u_sampleCount', this._ssaoSamples);
 
         // vec3 arrays are only reachable via their [0] location (see the cascade uniforms).
         const program = this._shaderManager.getShader('ssao').program;
@@ -1401,7 +1651,7 @@ export class Renderer {
             this._ssaoKernelLoc = gl.getUniformLocation(program, 'u_samples[0]');
         if (this._ssaoKernelLoc) gl.uniform3fv(this._ssaoKernelLoc, this._ssaoKernel);
 
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         // Blur to remove the tiled-noise pattern.
         this._ssaoBlurFBO.bind();
@@ -1409,7 +1659,7 @@ export class Renderer {
         this._shaderManager.bind('ssaoBlur');
         this._shaderManager.setUniform('u_ssao', 0);
         this._ssaoFBO.colors[0].bind(0);
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
@@ -1449,7 +1699,7 @@ export class Renderer {
         GLState.disable(gl.BLEND);
         gl.clear(gl.COLOR_BUFFER_BIT);
         this._shaderManager.bind('brdf');
-        this._screenQuad.draw();
+        this._drawFullscreen();
         this._brdfFBO.unbind();
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
@@ -1462,7 +1712,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_envMap', 0);
         sourceCube.bind(0);
         if (perFace) perFace();
-        gl.viewport(0, 0, size, size);
+        this._setViewport(size, size);
         for (let face = 0; face < 6; face++) {
             this._cubeFBO.bindFace(target, face, mip, false);
             this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
@@ -1496,7 +1746,7 @@ export class Renderer {
         }
 
         this._cubeFBO.unbind();
-        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
+        this._setViewport(this._renderWidth, this._renderHeight);
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
         return { irradiance, prefiltered };
@@ -1538,7 +1788,7 @@ export class Renderer {
             cam.up = up;
 
             this._cubeFBO.bindFace(sourceCube, face, 0, true, res);
-            gl.viewport(0, 0, res, res);
+            this._setViewport(res, res);
             GLState.enable(gl.DEPTH_TEST);
             GLState.depthMask(true);
             GLState.disable(gl.BLEND);
@@ -1585,7 +1835,7 @@ export class Renderer {
         const { irradiance, prefiltered } = this.bakeIBL(sourceCube, res);
         probe.setBakedMaps(sourceCube, irradiance, prefiltered);
 
-        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
+        this._setViewport(this._renderWidth, this._renderHeight);
         this._capturing = false;
     }
 
@@ -1709,17 +1959,20 @@ export class Renderer {
         } else if (hasShadow && this._shadowLight) {
             this._shaderManager.setUniform('u_lightSpace', this._shadowLight.lightSpace);
         }
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         // Pass B: additively upsample (LINEAR) into the pre-bloom scene buffer so the shafts bloom
         // and go through the single final tonemap like any other light.
-        this._compose_FBOs[0].bind(); // restores the full-res viewport
+        // Additive in place, so this reads and writes the SAME buffer the chain is currently on —
+        // follow `_composeIndex` rather than assuming [0], which only happens to be right today
+        // because god rays run immediately after the step that lands the image there.
+        this._compose_FBOs[this._composeIndex].bind(); // restores the full-res viewport
         GLState.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE); // additive
         this._shaderManager.bind('screen');
         this._shaderManager.setUniform('u_screenTexture', 0);
         this._blur_FBOs[0].colors[0].bind(0);
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         // Restore the default (straight-alpha) blend func so later passes and next frame's alpha-blended
         // sky/clouds/fog composite correctly.
@@ -1780,7 +2033,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_viewSteps', node.viewSteps);
         this._shaderManager.setUniform('u_lightSteps', node.lightSteps);
 
-        gl.viewport(0, 0, res, res);
+        this._setViewport(res, res);
         for (let face = 0; face < 6; face++) {
             this._cubeFBO.bindFace(cube, face, 0, false);
             this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
@@ -1789,7 +2042,7 @@ export class Renderer {
         }
         cube.generateMipmaps();
         this._cubeFBO.unbind();
-        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
+        this._setViewport(this._renderWidth, this._renderHeight);
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
 
@@ -1838,7 +2091,7 @@ export class Renderer {
         // showing through geometry). ~16px-per-face target regardless of the baked cubemap resolution.
         const res = node.cubemapResolution || node.resolution;
         this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 4));
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         // Restore the state the following overlay passes expect.
         GLState.disable(gl.BLEND);
@@ -1900,7 +2153,8 @@ export class Renderer {
         // sky pixels (a z-fighting-like shimmer). The background must stay at the clear depth (1.0).
         GLState.depthMask(false);
         const skyAtmo = scene.skyAtmosphere;
-        if (this._thumbnailMode) {
+        gpuProfiler.beginPass('sky');
+        if (this._thumbnailMode || !this._passEnabled['sky']) {
             // no background
         } else if (skyAtmo && skyAtmo.cubemap) {
             const prevType = this._activeCamera.type;
@@ -1926,12 +2180,13 @@ export class Renderer {
 
         // Volumetric clouds: raymarched fullscreen, composited over the sky and occluded by opaque
         // geometry (the shader reads the blitted scene depth to bound each ray).
-        if (!this._thumbnailMode) this._renderVolumetricClouds(scene);
+        if (!this._thumbnailMode && this._beginPass('clouds')) this._renderVolumetricClouds(scene);
 
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
         // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
         GLState.depthMask(true);
         GLState.disable(gl.BLEND);
+        gpuProfiler.beginPass('forwardOpaque');
         for (const node of opaqueForwardQueue) this._renderModel(node);
 
         // Snapshot the complete opaque depth (deferred + forward) for the fullscreen passes below
@@ -1940,33 +2195,40 @@ export class Renderer {
 
         // Atmospheric fog over the opaque scene (aerial perspective from the SkyAtmosphere node).
         // Drawn before the grid/transparents so editor overlays stay crisp.
-        if (!this._thumbnailMode) this._renderSkyFog(scene);
+        if (!this._thumbnailMode && this._beginPass('skyFog')) this._renderSkyFog(scene);
 
         // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
-        if (!this._thumbnailMode) this._renderGrid();
+        if (!this._thumbnailMode && this._beginPass('grid')) this._renderGrid();
 
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes.
         // Thumbnails are the exception: their coverage alpha is read back from the scene depth, so a
         // transparent asset that writes no depth would be cut out of its own thumbnail entirely. Writing
         // depth is safe here because the queue is already sorted back-to-front.
-        transparentQueue.sort((a, b) =>
-            vec3.distance(this._activeCamera.position, b.worldPosition) -
-            vec3.distance(this._activeCamera.position, a.worldPosition));
+        // Sort on a squared distance computed once per node. The comparator used to call
+        // vec3.distance (a sqrt) twice per comparison, recomputing the same values O(n log n) times;
+        // squared distance orders identically, so the sqrt was never needed at all.
+        const camPos = this._activeCamera.position;
+        const depthKey = new Map<ModelNode, number>();
+        for (const node of transparentQueue) depthKey.set(node, vec3.squaredDistance(camPos, node.worldPosition));
+        transparentQueue.sort((a, b) => depthKey.get(b)! - depthKey.get(a)!);
         GLState.depthMask(this._thumbnailMode);
-        for (const node of transparentQueue) this._renderModel(node);
+        if (this._beginPass('transparent'))
+            for (const node of transparentQueue) this._renderModel(node);
         GLState.depthMask(true);
 
         // Gizmos on top (also draws the editor skeleton overlay when set).
-        if (gizmoNodes.length > 0 || this._skeletonOverlay) this._renderGizmos(gizmoNodes);
+        if ((gizmoNodes.length > 0 || this._skeletonOverlay) && this._beginPass('gizmos'))
+            this._renderGizmos(gizmoNodes);
 
         // Tiles + sprites, depth-sorted together (always transparent, forward).
-        this._render2DPass(scene);
+        if (this._beginPass('2d')) this._render2DPass(scene);
 
         // Selection silhouette mask (consumed by the post-process outline pass).
         const selectedSprites: SpriteNode[] = [];
         if (this._selectedNodeId)
             for (const node of scene.sprites)
                 if (node.visible && node.id === this._selectedNodeId) selectedSprites.push(node);
+        gpuProfiler.beginPass('outlineMask');
         this._renderSelectionMask(selectedNodes, selectedSprites);
     }
 
@@ -1979,6 +2241,9 @@ export class Renderer {
     private _renderVolumetricClouds(scene: Scene): void {
         const node = scene.volumetricClouds;
         if (!node || !node.enabled || node.opacity <= 0) return;
+        // The clouds node is scene state, so the tier's cloud knobs are pushed here rather than in the
+        // quality setter — a preset can be chosen before any scene with clouds has been loaded.
+        this._applyQualityToClouds(node);
 
         // Fullscreen overlay: no depth test/write (occlusion handled via the depth texture), alpha blend.
         GLState.disable(gl.DEPTH_TEST);
@@ -2080,7 +2345,7 @@ export class Renderer {
         const scale = node.resolutionScale;
         if (scale >= 0.999) {
             // Full resolution: raymarch straight into the bound scene buffer (premultiplied "over" set above).
-            this._screenQuad.draw();
+            this._drawFullscreen();
         } else {
             // Reduced resolution: raymarch into a low-res target, then bilinear-upsample + composite. Fewer
             // rays (scale per axis) is the whole point — the raymarch is the pass's dominant GPU cost.
@@ -2092,7 +2357,7 @@ export class Renderer {
             GLState.disable(gl.BLEND);
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
-            this._screenQuad.draw();
+            this._drawFullscreen();
             // Pass B: LINEAR-upsample the low-res clouds and premultiplied-"over" composite them into the scene buffer.
             this._sceneFBO.bind();
             GLState.enable(gl.BLEND);
@@ -2100,7 +2365,7 @@ export class Renderer {
             this._shaderManager.bind('screen');
             this._shaderManager.setUniform('u_screenTexture', 0);
             this._cloudsFBO.colors[0].bind(0);
-            this._screenQuad.draw();
+            this._drawFullscreen();
         }
 
         // Restore the state the following opaque/transparent overlay passes expect (incl. the default
@@ -2150,7 +2415,7 @@ export class Renderer {
         }
         this._shaderManager.setUniform('u_fadeFar', fadeFar);
 
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         // Restore the default mask-preserving alpha blend for subsequent overlay passes.
         gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
@@ -2425,11 +2690,80 @@ export class Renderer {
     // Size the render path is currently targeting: the offscreen square while capturing a thumbnail,
     // the canvas otherwise. Everything in the frame (camera aspect, texel sizes) must read these rather
     // than the canvas, or a capture would be framed for the viewport it is deliberately bypassing.
-    private get _renderWidth(): number { return this._presentTarget ? this._presentTarget.width : this._canvas.width; }
-    private get _renderHeight(): number { return this._presentTarget ? this._presentTarget.height : this._canvas.height; }
+    private get _renderWidth(): number {
+        return this._presentTarget ? this._presentTarget.width
+                                   : Math.max(1, Math.round(this._canvas.width * this._renderScale));
+    }
+    private get _renderHeight(): number {
+        return this._presentTarget ? this._presentTarget.height
+                                   : Math.max(1, Math.round(this._canvas.height * this._renderScale));
+    }
 
     /** True while capturing an offscreen thumbnail: backgrounds are skipped and the present writes coverage alpha. */
     private get _thumbnailMode(): boolean { return this._presentTarget !== null; }
+
+    /**
+     * Set the GL viewport and keep the profiler's notion of it in sync. Every raw `gl.viewport` in the
+     * renderer goes through here so `countFullscreenPass` can charge each fullscreen quad the right
+     * pixel count without the call sites having to repeat the dimensions.
+     */
+    private _setViewport(width: number, height: number): void {
+        gl.viewport(0, 0, width, height);
+        setViewportSize(width, height);
+    }
+
+    /**
+     * (Re)size the bloom pyramid for a `width`x`height` render target. Level i is the render size
+     * halved i+1 times, floored at 1px — a small window would otherwise ask for 0-sized textures and
+     * leave the framebuffers incomplete.
+     */
+    private _createBloomMips(width: number, height: number): void {
+        let w = Math.max(1, Math.floor(width / 2));
+        let h = Math.max(1, Math.floor(height / 2));
+        for (const mip of this._bloomMips) {
+            if (mip.width !== w || mip.height !== h) mip.create(w, h);
+            w = Math.max(1, Math.floor(w / 2));
+            h = Math.max(1, Math.floor(h / 2));
+        }
+    }
+
+    /**
+     * Draw the shared fullscreen quad, counted against the fill-rate stats. Use this rather than
+     * `_screenQuad.draw()` for any screen-space pass — the resulting `shadedMpx` is what makes a
+     * fill-rate-bound frame legible (a 20-iteration half-res bloom and a single full-res present are
+     * indistinguishable in a raw draw-call count, and cost wildly different amounts).
+     */
+    private _drawFullscreen(): void {
+        countFullscreenPass();
+        this._screenQuad.draw();
+    }
+
+    /**
+     * True when this frame's camera transform differs from last frame's by more than float noise.
+     *
+     * Camera-reprojection motion blur has nothing to reconstruct from a stationary camera: every
+     * velocity is zero and the gather returns the source pixel. It was still costing four passes
+     * (two of them full-res) every frame, on by default, in a static editor viewport. Comparing the
+     * 16 matrix elements is a handful of subtractions against ~1-2ms of GPU work.
+     */
+    private _cameraMoved(): boolean {
+        if (!this._hasPrevViewProj) return false;
+        for (let i = 0; i < 16; i++)
+            if (Math.abs(this._viewProj[i] - this._prevViewProj[i]) > 1e-7) return true;
+        return false;
+    }
+
+    /**
+     * Open a GPU timing scope, and report whether the pass should run at all. Combining the two keeps
+     * every call site to a single `if (!this._beginPass('x')) return;` line, and guarantees a pass
+     * that is switched off is never also timed (which would report a misleading ~0ms rather than
+     * simply disappearing from the breakdown).
+     */
+    private _beginPass(name: RenderPass): boolean {
+        if (!this._passEnabled[name]) return false;
+        gpuProfiler.beginPass(name);
+        return true;
+    }
 
     public resize(): void {
         if (!this._viewport) return;
@@ -2437,9 +2771,10 @@ export class Renderer {
         this._canvas.height = this._viewport.clientHeight;
 
         if (!gl) return;
-        this._resizeBuffers(this._canvas.width, this._canvas.height);
+        // Internal buffers follow renderScale; the canvas stays native so the present pass upscales.
+        this._resizeBuffers(this._renderWidth, this._renderHeight);
 
-        Logger.info(`Resized to ${this._canvas.width}x${this._canvas.height}`, 'Runtime', { flush: true });
+        Logger.info(`Resized to ${this._canvas.width}x${this._canvas.height} (internal ${this._renderWidth}x${this._renderHeight})`, 'Runtime', { flush: true });
     }
 
     /**
@@ -2450,18 +2785,20 @@ export class Renderer {
      * independently of the viewport and are deliberately left alone.
      */
     private _resizeBuffers(width: number, height: number): void {
-        gl.viewport(0, 0, width, height);
+        this._setViewport(width, height);
 
         this._sceneFBO.resize(width, height);
         this._sceneDepthFBO.resize(width, height);
         this._gBufferFBO.resize(width, height);
-        this._ssaoFBO.resize(width, height);
-        this._ssaoBlurFBO.resize(width, height);
+        const aw = Math.max(1, Math.round(width * this._ssaoResolutionScale));
+        const ah = Math.max(1, Math.round(height * this._ssaoResolutionScale));
+        this._ssaoFBO.resize(aw, ah);
+        this._ssaoBlurFBO.resize(aw, ah);
         this._blur_FBOs[0].resize(width / 2, height / 2);
         this._blur_FBOs[1].resize(width / 2, height / 2);
         this._compose_FBOs[0].resize(width, height);
         this._compose_FBOs[1].resize(width, height);
-        this._bloomFBO.resize(width, height);
+        this._createBloomMips(width, height);
         this._outlineMaskFBO.resize(width, height);
         const mbK = Renderer.MOTION_BLUR_TILE;
         this._velocityFBO.resize(width, height);
@@ -2501,7 +2838,7 @@ export class Renderer {
 
     private _renderScene(scene: Scene): void {
         this._sceneFBO.bind();
-        gl.viewport(0, 0, this._renderWidth, this._renderHeight);
+        this._setViewport(this._renderWidth, this._renderHeight);
         // Thumbnails clear to transparent black (and skip the sky below) so only geometry ends up opaque.
         const fwdCC = this.clearColor;
         if (this._thumbnailMode) gl.clearColor(0, 0, 0, 0);
@@ -2826,6 +3163,11 @@ export class Renderer {
      */
     private _renderShadowCasters(models: Set<ModelNode>, lightSpace: mat4): void {
         let bound: 'shadowMap' | 'shadowMapSkinned' | null = null;
+        // Cull against the LIGHT's frustum, not the camera's. This pass used to walk every model in
+        // the scene once per cascade with no spatial test at all, while the colour pass did cull —
+        // so a large scene paid for its whole model set three or four times over in depth-only draws
+        // that mostly fell outside the cascade's tight ortho box.
+        this._shadowFrustum.setFromViewProjection(lightSpace);
         for (const node of models) {
             // LOD-hidden levels and user-hidden nodes must not cast shadows (user hides already force
             // castShadow=false via the visible setter, but the LOD flag never touches the material).
@@ -2833,6 +3175,10 @@ export class Renderer {
             if (!node.model.material.config.castShadow || node.model.material.config.wireframe) continue;
             // Skip gizmo/overlay nodes from shadow casting
             if ((node as any).isGizmo) continue;
+            if (this._frustumCulling) {
+                const s = node.getBoundingSphere();
+                if (!this._shadowFrustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
+            }
 
             const skinned = node.model instanceof AnimatedModel && (node.model as AnimatedModel).hasSkin && !!node.animator;
             const shaderType = skinned ? 'shadowMapSkinned' : 'shadowMap';
@@ -2874,8 +3220,17 @@ export class Renderer {
         for (let i = 0; i < this._cascadeCount; i++) {
             const nearD = i === 0 ? cam.near : splits[i - 1];
             const farD = splits[i];
+            // The split matrix must be recomputed every frame regardless of whether the cascade is
+            // re-rasterized: the lighting pass selects a cascade by view-space depth, so a stale
+            // split would send pixels to the wrong map.
             this._computeCascadeMatrix(light.worldForward, nearD, farD, this._cascadeMatrices[i]);
             this._cascadeSplits[i] = farD;
+
+            // Stagger the distant cascades: cascade 1 every other frame, cascade 2 every fourth.
+            // They cover the largest world area at the lowest angular resolution, so a one-to-three
+            // frame lag in their contents is invisible at the distances they shade, and skipping them
+            // removes two full depth rasterizations from most frames.
+            if (i > 0 && (this._frameIndex % (1 << i)) !== 0) continue;
 
             this._shadowCascades[i].bind();
             gl.clear(gl.DEPTH_BUFFER_BIT);
@@ -2888,52 +3243,54 @@ export class Renderer {
     /** Practical split scheme (blend of logarithmic and uniform) — returns the far distance of each cascade. */
     private _computeCascadeSplits(near: number, far: number): number[] {
         const lambda = 0.5;
-        const splits: number[] = [];
+        const splits = this._csmSplits; // reused; this runs every frame
         for (let i = 1; i <= this._cascadeCount; i++) {
             const p = i / this._cascadeCount;
             const logSplit = near * Math.pow(far / near, p);
             const uniformSplit = near + (far - near) * p;
-            splits.push(lambda * logSplit + (1 - lambda) * uniformSplit);
+            splits[i - 1] = lambda * logSplit + (1 - lambda) * uniformSplit;
         }
         return splits;
     }
 
     /** Fit a light-space ortho matrix around the camera sub-frustum [nearD, farD] (Gribb/LearnOpenGL CSM). */
     private _computeCascadeMatrix(lightForward: vec3, nearD: number, farD: number, out: mat4): mat4 {
+        // All temporaries below are preallocated fields: this runs once per cascade per frame, and
+        // the naive version allocated ~15 gl-matrix objects each time for values that never escape.
         const cam = this._activeCamera;
-        const proj = mat4.create();
+        const proj = this._csmProj;
         if (cam.type === 'perspective')
             mat4.perspective(proj, cam.fov * Math.PI / 180, this._renderWidth / this._renderHeight, nearD, farD);
         else
             mat4.ortho(proj, cam.left, cam.right, cam.bottom, cam.top, nearD, farD);
 
-        const invVP = mat4.create();
+        const invVP = this._csmInvVP;
         mat4.multiply(invVP, proj, cam.viewMatrix);
         mat4.invert(invVP, invVP);
 
         // 8 world-space corners of the sub-frustum + their centroid.
-        const corners: vec3[] = [];
-        const centroid = vec3.fromValues(0, 0, 0);
+        const corners = this._csmCorners;
+        const centroid = vec3.set(this._csmCentroid, 0, 0, 0);
+        let ci = 0;
         for (let x = 0; x < 2; x++)
             for (let y = 0; y < 2; y++)
                 for (let z = 0; z < 2; z++) {
-                    const corner = vec3.fromValues(2 * x - 1, 2 * y - 1, 2 * z - 1);
+                    const corner = vec3.set(corners[ci++], 2 * x - 1, 2 * y - 1, 2 * z - 1);
                     vec3.transformMat4(corner, corner, invVP); // gl-matrix divides by w
-                    corners.push(corner);
                     vec3.add(centroid, centroid, corner);
                 }
         vec3.scale(centroid, centroid, 1 / 8);
 
-        const lightDir = vec3.normalize(vec3.create(), lightForward);
-        const up: vec3 = Math.abs(lightDir[1]) > 0.99 ? vec3.fromValues(0, 0, 1) : vec3.fromValues(0, 1, 0);
+        const lightDir = vec3.normalize(this._csmLightDir, lightForward);
+        const up = Math.abs(lightDir[1]) > 0.99 ? vec3.set(this._csmUp, 0, 0, 1) : vec3.set(this._csmUp, 0, 1, 0);
         // Place the light camera on the source side (opposite the light's travel direction), looking
         // along +lightDir, matching the known-good single shadow map (LightNode.lightSpace).
-        const eye = vec3.subtract(vec3.create(), centroid, lightDir);
-        const lightView = mat4.lookAt(mat4.create(), eye, centroid, up);
+        const eye = vec3.subtract(this._csmEye, centroid, lightDir);
+        const lightView = mat4.lookAt(this._csmLightView, eye, centroid, up);
 
         let minX = Infinity, minY = Infinity, minZ = Infinity;
         let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        const tmp = vec3.create();
+        const tmp = this._csmTmp;
         for (const c of corners) {
             vec3.transformMat4(tmp, c, lightView);
             minX = Math.min(minX, tmp[0]); maxX = Math.max(maxX, tmp[0]);
@@ -2946,7 +3303,7 @@ export class Renderer {
         minZ = minZ < 0 ? minZ * zMult : minZ / zMult;
         maxZ = maxZ < 0 ? maxZ / zMult : maxZ * zMult;
 
-        const lightProj = mat4.ortho(mat4.create(), minX, maxX, minY, maxY, minZ, maxZ);
+        const lightProj = mat4.ortho(this._csmLightProj, minX, maxX, minY, maxY, minZ, maxZ);
         mat4.multiply(out, lightProj, lightView);
         return out;
     }
@@ -2962,32 +3319,36 @@ export class Renderer {
                     this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
                     this._shaderManager.setUniform('u_dirLight.direction', node.worldForward);
                     break;
-                case 'point':
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].position`, node.worldPosition);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].diffuse`, node.light.diffuse);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].specular`, node.light.specular);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].ambient`, node.light.ambient);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].constant`, (node.light as PointLight).constant);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].linear`, (node.light as PointLight).linear);
-                    this._shaderManager.setUniform(`u_pointLights[${node.index}].quadratic`, (node.light as PointLight).quadratic);
+                case 'point': {
+                    const PL = POINT_LIGHT_NAMES;
+                    this._shaderManager.setUniform(PL[node.index]['position'], node.worldPosition);
+                    this._shaderManager.setUniform(PL[node.index]['diffuse'], node.light.diffuse);
+                    this._shaderManager.setUniform(PL[node.index]['specular'], node.light.specular);
+                    this._shaderManager.setUniform(PL[node.index]['ambient'], node.light.ambient);
+                    this._shaderManager.setUniform(PL[node.index]['constant'], (node.light as PointLight).constant);
+                    this._shaderManager.setUniform(PL[node.index]['linear'], (node.light as PointLight).linear);
+                    this._shaderManager.setUniform(PL[node.index]['quadratic'], (node.light as PointLight).quadratic);
                     break;
-                case 'spotlight':
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].position`, node.worldPosition);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].direction`, node.worldForward);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].diffuse`, node.light.diffuse);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].specular`, node.light.specular);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].ambient`, node.light.ambient);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].constant`, (node.light as Spotlight).constant);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].linear`, (node.light as Spotlight).linear);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].quadratic`, (node.light as Spotlight).quadratic);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].cutOff`, (node.light as Spotlight).cutOff * Math.PI / 180);
-                    this._shaderManager.setUniform(`u_spotlights[${node.index}].outerCutOff`, (node.light as Spotlight).outerCutOff * Math.PI / 180);
+                }
+                case 'spotlight': {
+                    const SL = SPOT_LIGHT_NAMES;
+                    this._shaderManager.setUniform(SL[node.index]['position'], node.worldPosition);
+                    this._shaderManager.setUniform(SL[node.index]['direction'], node.worldForward);
+                    this._shaderManager.setUniform(SL[node.index]['diffuse'], node.light.diffuse);
+                    this._shaderManager.setUniform(SL[node.index]['specular'], node.light.specular);
+                    this._shaderManager.setUniform(SL[node.index]['ambient'], node.light.ambient);
+                    this._shaderManager.setUniform(SL[node.index]['constant'], (node.light as Spotlight).constant);
+                    this._shaderManager.setUniform(SL[node.index]['linear'], (node.light as Spotlight).linear);
+                    this._shaderManager.setUniform(SL[node.index]['quadratic'], (node.light as Spotlight).quadratic);
+                    this._shaderManager.setUniform(SL[node.index]['cutOff'], (node.light as Spotlight).cutOff * Math.PI / 180);
+                    this._shaderManager.setUniform(SL[node.index]['outerCutOff'], (node.light as Spotlight).outerCutOff * Math.PI / 180);
                     break;
+                }
             }
         }
 
         // Set lighting for both default shaders
-        for (const shaderName of [...FORWARD_SHADERS, ...customForwardTypes()]) {
+        for (const shaderName of allForwardShaders()) {
             try {
                 this._shaderManager.bind(shaderName);
                 this._shaderManager.setUniform('u_numPointLights', numPointLights);
@@ -3017,35 +3378,42 @@ export class Renderer {
 
         // First, bring the lit scene into _compose_FBOs[0]. Motion blur (when on) reconstructs the
         // image while doing so; otherwise it's a plain copy.
-        const motionBlurOn = this._motionBlurEnabled && this._hasPrevViewProj && this._motionBlurIntensity > 0.0;
+        const motionBlurOn = this._motionBlurEnabled && this._hasPrevViewProj && this._motionBlurIntensity > 0.0
+                             && this._passEnabled['motionBlur'] && this._cameraMoved();
         if (motionBlurOn) {
             this._motionBlurPass();
         } else {
             // Populate the velocity buffer anyway when the editor is inspecting the 'velocity' channel.
-            if (this._debugView === 'velocity' && this._hasPrevViewProj) this._velocityPass();
+            if (this._debugView === 'velocity' && this._hasPrevViewProj && this._beginPass('velocity'))
+                this._velocityPass();
+            gpuProfiler.beginPass('present');
             this._compose_FBOs[0].bind();
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             this._shaderManager.bind('screen');
             this._shaderManager.setUniform('u_screenTexture', 0);
             this._sceneFBO.colors[0].bind();
-            this._screenQuad.draw();
+            this._drawFullscreen();
         }
+        // Both branches above land the image in compose[0]; god rays and bloom keep it there.
+        this._composeIndex = 0;
 
         // God rays: additively composite the sun's light shafts into the scene BEFORE bloom, so the
         // shafts bloom and go through the single final tonemap like any other light.
-        this._renderGodRays(scene);
+        if (this._beginPass('godRays')) this._renderGodRays(scene);
 
         // Then, render the screen framebuffer to the bloom framebuffer
-        this._bloomPass(10);
+        this._bloomPass();
 
         // chromaticAberration
-        this._chromaticAberrationPass();
+        if (this._chromaticAberrationStrength > 0 && this._beginPass('chromatic'))
+            this._chromaticAberrationPass();
 
         // User-ordered screen-space custom materials from the active camera (still linear HDR,
         // before the final exposure/ACES/sRGB resolve below).
-        this._screenMaterialsPass(scene);
+        if (this._beginPass('screenMaterials')) this._screenMaterialsPass(scene);
 
         // Render to screen using default framebuffer
+        gpuProfiler.beginPass('present');
         this._sceneFBO.unbind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         if (this._debugView === 'final') {
@@ -3060,20 +3428,22 @@ export class Renderer {
                 // Opaque: GL uniforms persist across binds, so without this reset a preceding thumbnail
                 // capture would leave the flag on and punch the page background through the viewport.
                 this._shaderManager.setUniform('u_alphaFromDepth', 0.0);
-                this._compose_FBOs[1].colors[0].bind();
-                this._screenQuad.draw();
+                this._compose_FBOs[this._composeIndex].colors[0].bind();
+                this._drawFullscreen();
             }
         } else {
             // Editor Renderer-mode: blit one internal buffer instead of the composited image.
+            // Overdraw has no buffer of its own until it is asked for, so accumulate it first.
+            if (this._debugView === 'overdraw') this._overdrawPass(scene);
             this._blitDebugView();
         }
     }
 
     /**
      * Run the active camera's ordered screen-space custom materials as fullscreen passes, ping-ponging
-     * the compose buffers. Enters with the image in _compose_FBOs[1] (chromatic aberration's output)
-     * and guarantees it is back in _compose_FBOs[1] on exit (present/outline read from there). Passes
-     * run in linear HDR — the single exposure/ACES/sRGB resolve happens afterwards in 'present'.
+     * the compose buffers. Starts from whichever buffer `_composeIndex` names and leaves the index
+     * pointing at the result, so the chain stays correct however many upstream stages were skipped.
+     * Passes run in linear HDR — the single exposure/ACES/sRGB resolve happens afterwards in 'present'.
      * A material that failed to compile renders the magenta fallback (registered by ensureCustomShader).
      */
     private _screenMaterialsPass(scene: Scene): void {
@@ -3081,7 +3451,7 @@ export class Renderer {
         if (!mats || mats.length === 0) return;
 
         const sun = this._sunScreenInfo(scene);
-        let src = 1; // chromatic aberration left the image in _compose_FBOs[1]
+        let src = this._composeIndex;
         for (const mat of mats) {
             if (!(mat instanceof CustomMaterial) || mat.renderMode !== 'screen') continue;
             ensureCustomShader(mat); // idempotent; magenta fallback under the key on compile error
@@ -3100,19 +3470,13 @@ export class Renderer {
             this._shaderManager.setUniform('u_sunVisible', sun.visible);
             this._shaderManager.setUniform('u_exposure', this._exposure); // lets a pass invert the final present resolve
             this._applyCustomMaterial(mat); // u_time, u_viewPos + user uniforms (samplers from unit 9 up)
-            this._screenQuad.draw();
+            this._drawFullscreen();
             src = dst;
         }
 
-        // Present/outline read _compose_FBOs[1]; plain-copy back if an odd pass count ended in [0].
-        if (src === 0) {
-            this._compose_FBOs[1].bind();
-            gl.clear(gl.COLOR_BUFFER_BIT);
-            this._shaderManager.bind('screen');
-            this._shaderManager.setUniform('u_screenTexture', 0);
-            this._compose_FBOs[0].colors[0].bind(0);
-            this._screenQuad.draw();
-        }
+        // No copy-back needed: present/outline follow `_composeIndex` wherever the ping-pong ended,
+        // which removes a full-res blit that used to run on every odd-numbered screen-material count.
+        this._composeIndex = src;
     }
 
     /**
@@ -3140,7 +3504,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
         this._sceneFBO.colors[0].bind(0);
         this._sceneFBO.depth.bind(1);
-        this._screenQuad.draw();
+        this._drawFullscreen();
     }
 
     // Screen-space selection outline: draws a border just outside the silhouette mask over the
@@ -3153,9 +3517,65 @@ export class Renderer {
         this._shaderManager.setUniform('u_texelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
         this._shaderManager.setUniform('u_outlineColor', this._outlineColor);
         this._shaderManager.setUniform('u_outlineWidth', this._outlineWidth);
-        this._compose_FBOs[1].colors[0].bind(0);
+        this._compose_FBOs[this._composeIndex].colors[0].bind(0);
         this._outlineMaskFBO.colors[0].bind(1);
-        this._screenQuad.draw();
+        this._drawFullscreen();
+    }
+
+    /**
+     * Accumulate an overdraw heat map: re-rasterize every visible mesh with depth testing OFF and
+     * additive blending, so each pixel ends up holding how many fragments were shaded there.
+     *
+     * Runs only while the 'overdraw' debug channel is selected, and allocates its target on first use
+     * — it is a diagnostic, not part of the pipeline, and a published build never touches it.
+     *
+     * Depth test off is the whole point: a depth-tested count would report the final visible layer
+     * count, but the rasterizer shades the rejected fragments too, and it is that total the frame
+     * actually pays for.
+     */
+    private _overdrawPass(scene: Scene): void {
+        // The channel can be selected while the viewport is mid-relayout, when the canvas is still
+        // 0-sized; allocating against that produces an incomplete framebuffer (and a console error)
+        // for the frame or two before the resize lands.
+        const w = this._renderWidth, h = this._renderHeight;
+        if (w < 1 || h < 1) return;
+
+        if (!this._overdrawFBO) this._overdrawFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        if (this._overdrawFBO.width !== w || this._overdrawFBO.height !== h)
+            this._overdrawFBO.create(w, h);
+
+        this._overdrawFBO.bind();
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        const cc = this.clearColor;
+        gl.clearColor(cc[0], cc[1], cc[2], cc[3] ?? 1);
+
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthMask(false);
+        GLState.disable(gl.CULL_FACE);
+        GLState.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.blendEquation(gl.FUNC_ADD);
+
+        this._shaderManager.bind('overdraw');
+        this._shaderManager.setUniform('u_increment', 1 / Renderer.OVERDRAW_MAX);
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+
+        for (const node of scene.models) {
+            if (!node.visible || (node as any).isGizmo) continue;
+            if (!node.initialized) node.initializeModel();
+            this._shaderManager.setUniform('u_model', node.worldTransform);
+            node.model.mesh.draw();
+        }
+
+        GLState.disable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthMask(true);
+        GLState.enable(gl.CULL_FACE);
+
+        this._overdrawFBO.unbind();
     }
 
     // Draw a single intermediate buffer to the screen for the editor's Renderer debug channels.
@@ -3175,9 +3595,15 @@ export class Renderer {
             case 'depth':     tex = this._gBufferFBO.depth;        mode = 3; break;
             case 'ssao':      tex = this._ssaoBlurFBO.colors[0];   mode = 4; break;
             case 'shadow':    tex = this._shadowMapFBO.depth;      mode = 3; break;
-            case 'bloom':     tex = this._bloomFBO.colors[1];      mode = 6; break;
+            case 'bloom':     tex = this._bloomMips[0].colors[0];  mode = 6; break;
             case 'mask':      tex = this._outlineMaskFBO.colors[0]; mode = 0; break;
             case 'velocity':  tex = this._velocityFBO.colors[0];   mode = 5; break;
+            // Falls back to the lit scene if the overdraw target has not been allocated yet (the
+            // pass above bails on a degenerate viewport), rather than dereferencing null.
+            case 'overdraw':
+                if (!this._overdrawFBO || this._overdrawFBO.colors.length === 0) { tex = this._sceneFBO.colors[0]; mode = 6; }
+                else { tex = this._overdrawFBO.colors[0]; mode = 7; }
+                break;
             default:          tex = this._sceneFBO.colors[0];      mode = 0; break;
         }
         this._shaderManager.bind('debugView');
@@ -3185,69 +3611,109 @@ export class Renderer {
         this._shaderManager.setUniform('u_mode', mode);
         this._shaderManager.setUniform('u_exposure', this._exposure); // used by the tonemapped channels
         tex.bind();
-        this._screenQuad.draw();
+        this._drawFullscreen();
     }
 
-    private _bloomPass(iterations: number = 5): void {
-        this._bloomFBO.bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    /**
+     * HDR bloom via a downsample/upsample mip pyramid (Jimenez, "Next Generation Post Processing in
+     * Call of Duty: Advanced Warfare", SIGGRAPH 2014).
+     *
+     * REPLACED: 10 ping-pong iterations of a fixed 9-tap separable Gaussian at half resolution — 20
+     * fullscreen draws all at the SAME resolution, so the pass cost ~5x the base render area and the
+     * blur radius was still capped by the kernel width times the iteration count. The pyramid reaches
+     * a far wider radius in 12 draws over geometrically shrinking targets (total fill ~0.7x base
+     * area), which is both several times cheaper and a smoother, less banded falloff.
+     *
+     * Chain: bright-pass into mip 0, downsample to the smallest mip, then upsample back up with
+     * additive blending, and composite mip 0 over the scene.
+     */
+    private _bloomPass(): void {
+        // Nothing to add back: skip the whole chain rather than blurring an image no one will read.
+        if (this._bloomIntensity <= 0 || !this._passEnabled['bloom.bright']) return;
+
+        const src = this._composeIndex;
+
+        // 1. Bright pass into the largest mip (half res). Also writes the scene passthrough into
+        gpuProfiler.beginPass('bloom.bright');
+        const mip0 = this._bloomMips[0];
+        mip0.bind();
+        gl.clear(gl.COLOR_BUFFER_BIT);
         this._shaderManager.bind('bloom');
         // HDR bright-pass runs in linear scene space; threshold/knee are real luminance values.
         this._shaderManager.setUniform('u_bloomThreshold', this._bloomThreshold);
         this._shaderManager.setUniform('u_bloomKnee', this._bloomKnee);
         this._shaderManager.setUniform('u_screenTexture', 0);
-        this._compose_FBOs[0].colors[0].bind(0);
+        this._compose_FBOs[src].colors[0].bind(0);
         // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
         // read it from the scene FBO directly, not the post-processed copy on unit 0).
         this._shaderManager.setUniform('u_bloomMask', 1);
         this._sceneFBO.colors[0].bind(1);
-        this._screenQuad.draw();
-        // the bloom fbo contains 2 color textures: the original scene and the bright parts of the scene
+        this._drawFullscreen();
 
-        // blur the bright parts of the scene
-        for (let i = 0; i < iterations; i++) {
-            // blur horizontal
-            this._blur_FBOs[0].bind();
-            gl.viewport(0, 0, this._renderWidth / 2, this._renderHeight / 2);
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-            this._shaderManager.bind('blur');
-            this._shaderManager.setUniform('u_horizontal', true);
-            this._shaderManager.setUniform('u_screenTexture', 0);
-            if (i === 0) // for first pass use the bright parts of the scene
-                this._bloomFBO.colors[1].bind();
-            else // for the rest of the passes use the previous pass's result
-                this._blur_FBOs[1].colors[0].bind();
-            this._screenQuad.draw();
+        if (this._passEnabled['bloom.blur']) {
+            // 2. Downsample: each level reads the one above it at twice the resolution.
+            gpuProfiler.beginPass('bloom.blur');
+            this._shaderManager.bind('bloomDownsample');
+            this._shaderManager.setUniform('u_srcTexture', 0);
+            for (let i = 1; i < this._bloomMips.length; i++) {
+                const from = this._bloomMips[i - 1];
+                this._bloomMips[i].bind();
+                this._shaderManager.setUniform('u_srcTexelSize', [1 / from.width, 1 / from.height]);
+                // Karis average on the first step only — it tames fireflies but is not energy
+                // conserving, so applying it all the way down would visibly dim the bloom.
+                this._shaderManager.setUniform('u_karisAverage', i === 1);
+                from.colors[0].bind(0);
+                this._drawFullscreen();
+            }
 
-            // blur vertical
-            this._blur_FBOs[1].bind();
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-            this._shaderManager.bind('blur');
-            this._shaderManager.setUniform('u_horizontal', false);
-            this._shaderManager.setUniform('u_screenTexture', 0);
-            this._blur_FBOs[0].colors[0].bind();
-            this._screenQuad.draw();
+            // 3. Upsample: additively blend each level onto the next larger one. GL_ONE/GL_ONE means
+            //    the destination is accumulated in the blender rather than round-tripped through
+            //    another sampler and a second set of targets.
+            GLState.enable(gl.BLEND);
+            gl.blendFunc(gl.ONE, gl.ONE);
+            gl.blendEquation(gl.FUNC_ADD);
+            this._shaderManager.bind('bloomUpsample');
+            this._shaderManager.setUniform('u_srcTexture', 0);
+            for (let i = this._bloomMips.length - 1; i > 0; i--) {
+                const from = this._bloomMips[i];
+                const to = this._bloomMips[i - 1];
+                to.bind();
+                // Radius in the SOURCE mip's texels, so the spread is resolution-independent.
+                this._shaderManager.setUniform('u_filterRadius', Renderer.BLOOM_FILTER_RADIUS / from.width);
+                from.colors[0].bind(0);
+                this._drawFullscreen();
+            }
+            GLState.disable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); // restore the pipeline default
         }
 
-        this._compose_FBOs[0].bind();
+        // 4. Composite the accumulated bloom back over the scene, into the other compose buffer.
+        if (!this._passEnabled['bloom.composite']) return;
+        gpuProfiler.beginPass('bloom.composite');
+        const dst = 1 - src;
+        this._compose_FBOs[dst].bind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         this._shaderManager.bind('composer');
         this._shaderManager.setUniform('u_buffer1', 0);
-        this._bloomFBO.colors[0].bind();
+        this._compose_FBOs[src].colors[0].bind(0);
         this._shaderManager.setUniform('u_buffer2', 1);
         this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
-        this._blur_FBOs[1].colors[0].bind(1);
-        this._screenQuad.draw();
+        this._bloomMips[0].colors[0].bind(1);
+        this._drawFullscreen();
+        this._composeIndex = dst;
     }
 
     private _chromaticAberrationPass(): void {
-        this._compose_FBOs[1].bind();
+        const src = this._composeIndex;
+        const dst = 1 - src;
+        this._compose_FBOs[dst].bind();
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         this._shaderManager.bind('chromaticAberration');
         this._shaderManager.setUniform('u_screenTexture', 0);
-        this._compose_FBOs[0].colors[0].bind();
+        this._compose_FBOs[src].colors[0].bind();
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
-        this._screenQuad.draw();
+        this._drawFullscreen();
+        this._composeIndex = dst;
     }
 
     // Camera-reprojection velocity: reconstruct each pixel's world position from the G-buffer depth,
@@ -3265,7 +3731,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_maxVelocityPx', Renderer.MOTION_BLUR_TILE);
-        this._screenQuad.draw();
+        this._drawFullscreen();
     }
 
     // UE5-style tile reconstruction motion blur: velocity -> TileMax -> NeighborMax -> jittered
@@ -3276,7 +3742,9 @@ export class Renderer {
         const K = Renderer.MOTION_BLUR_TILE;
 
         // 1) Per-pixel velocity.
+        gpuProfiler.beginPass('velocity');
         this._velocityPass();
+        gpuProfiler.beginPass('motionBlur');
 
         // 2) TileMax: dominant velocity per KxK tile.
         this._velocityTileFBO.bind();
@@ -3286,7 +3754,7 @@ export class Renderer {
         this._velocityFBO.colors[0].bind(0);
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_tileSize', K);
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         // 3) NeighborMax: 3x3 dilation of the tile velocities.
         this._velocityNeighborFBO.bind();
@@ -3295,7 +3763,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_tileMax', 0);
         this._velocityTileFBO.colors[0].bind(0);
         this._shaderManager.setUniform('u_tileTexelSize', [1 / this._velocityTileFBO.width, 1 / this._velocityTileFBO.height]);
-        this._screenQuad.draw();
+        this._drawFullscreen();
 
         // 4) Gather: reconstruct the blurred image into _compose_FBOs[0].
         this._compose_FBOs[0].bind();
@@ -3314,7 +3782,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_samples', this._motionBlurSamples);
         this._shaderManager.setUniform('u_near', this._activeCamera.near);
         this._shaderManager.setUniform('u_far', this._activeCamera.far);
-        this._screenQuad.draw();
+        this._drawFullscreen();
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
@@ -3329,12 +3797,61 @@ export class Renderer {
             instances: frameStats.instances,
             triangles: frameStats.triangles,
             vertices: frameStats.vertices,
+            tilemapChunks: frameStats.tilemapChunks,
+            tilemapDraws: frameStats.tilemapDraws,
+            fullscreenPasses: frameStats.fullscreenPasses,
+            shadedMpx: frameStats.shadedMpx,
+            stateChanges: frameStats.stateChanges,
+            stateChangesSaved: frameStats.stateChangesSaved,
             frameMs: frameStats.frameMs,
             pipeline: this._deferred ? 'deferred' as const : 'forward' as const,
+            // Canvas size (what the display sees) and internal size (what the pipeline actually
+            // shades) are different numbers once renderScale is below 1, and the gap between them is
+            // exactly what the profiler panel is there to let you tune.
             width: this._canvas.width,
             height: this._canvas.height,
+            renderWidth: this._renderWidth,
+            renderHeight: this._renderHeight,
+            renderScale: this._renderScale,
             gpuBytes: this._estimateGpuBytes(),
         };
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Profiling / debug controls (editor tooling)
+    // ---------------------------------------------------------------------------------------------
+
+    /** Per-pass GPU timings. Enable with `renderer.gpuProfilingEnabled = true`. */
+    public get gpuProfiler() { return gpuProfiler; }
+
+    public get gpuProfilingEnabled(): boolean { return gpuProfiler.enabled; }
+    public set gpuProfilingEnabled(v: boolean) { gpuProfiler.enabled = v; }
+
+    /** True when the driver actually exposes `EXT_disjoint_timer_query_webgl2`. */
+    public get gpuProfilingAvailable(): boolean { return gpuProfiler.available; }
+
+    /** Live view of the per-pass kill switches. Mutate through `setPassEnabled`. */
+    public get passEnabled(): Readonly<Record<RenderPass, boolean>> { return this._passEnabled; }
+
+    public setPassEnabled(pass: RenderPass, enabled: boolean): void {
+        if (pass in this._passEnabled) this._passEnabled[pass] = enabled;
+    }
+
+    /** Turn every pass back on (the profiler panel's "reset" button). */
+    public resetPasses(): void {
+        for (const p of RENDER_PASSES) this._passEnabled[p] = true;
+    }
+
+    public get renderScale(): number { return this._renderScale; }
+    /**
+     * Set the internal render resolution as a fraction of the canvas. Reallocates every screen-space
+     * buffer, so this is a settings-change operation, not something to animate per frame.
+     */
+    public set renderScale(scale: number) {
+        const clamped = Math.min(1, Math.max(0.25, scale));
+        if (clamped === this._renderScale) return;
+        this._renderScale = clamped;
+        if (gl) this._resizeBuffers(this._renderWidth, this._renderHeight);
     }
 
     /** Rough GPU memory estimate: the renderer's own render-target framebuffers + registered asset
@@ -3347,8 +3864,9 @@ export class Renderer {
             if (fbo.depth) bytes += fbo.depth.byteSize;
         };
         addFbo(this._sceneFBO); addFbo(this._gBufferFBO); addFbo(this._shadowMapFBO);
-        addFbo(this._bloomFBO); addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
-        addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO);
+        for (const m of this._bloomMips) addFbo(m);
+        addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
+        addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
         for (const f of this._shadowCascades) addFbo(f);
         for (const f of this._blur_FBOs) addFbo(f);
@@ -3433,9 +3951,90 @@ export class Renderer {
         return [2, 4, 8].includes(Math.round(s)) ? Math.round(s) : 2;
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Quality presets
+    // ---------------------------------------------------------------------------------------------
+
+    public get quality(): QualityPreset { return this._quality; }
+
+    /**
+     * Apply a quality tier. Sets the handful of knobs that dominate GPU cost in one move; see
+     * QUALITY_TIERS for what each one is worth. `custom` is a no-op — it exists so the UI can report
+     * "these settings no longer match any preset" after an individual knob is nudged.
+     *
+     * The cloud settings live on the scene's VolumetricCloudsNode, not the renderer, so they are
+     * applied through `_activeCloudsNode` on the next frame that has one rather than being pushed
+     * from here: a preset can be chosen before a scene is even loaded.
+     */
+    public set quality(preset: QualityPreset) {
+        this._quality = preset;
+        if (preset === 'custom') return;
+        const t = QUALITY_TIERS[preset];
+        this._ssaoEnabled = t.ssaoEnabled;
+        this._ssaoSamples = t.ssaoSamples;
+        this._motionBlurEnabled = t.motionBlurEnabled;
+        this._bloomIntensity = t.bloomEnabled ? Math.max(this._bloomIntensity, 0.6) : 0;
+        if (this._ssaoResolutionScale !== t.ssaoResolutionScale || this._renderScale !== t.renderScale) {
+            this._ssaoResolutionScale = t.ssaoResolutionScale;
+            this._renderScale = t.renderScale;
+            if (gl) this._resizeBuffers(this._renderWidth, this._renderHeight);
+        }
+        this._setShadowMapResolution(t.shadowMapResolution);
+        // Re-applying the tier must not leave the label saying "custom" from an earlier manual tweak.
+        this._quality = preset;
+    }
+
+    /** Cloud knobs for the active tier, applied to the scene's clouds node each frame it exists. */
+    private _applyQualityToClouds(node: VolumetricCloudsNode): void {
+        if (this._quality === 'custom') return;
+        const t = QUALITY_TIERS[this._quality];
+        if (node.resolutionScale !== t.cloudResolutionScale) node.resolutionScale = t.cloudResolutionScale;
+        if (node.steps !== t.cloudSteps) node.steps = t.cloudSteps;
+        if (node.lightSteps !== t.cloudLightSteps) node.lightSteps = t.cloudLightSteps;
+    }
+
+    public get shadowMapResolution(): number { return this._shadowMapResolution; }
+    public set shadowMapResolution(size: number) { this._setShadowMapResolution(size); }
+
+    /**
+     * Reallocate the single shadow map and every cascade at `size`. Three 4096px cascades is 150MB of
+     * depth and ~50M texels rasterized per frame; 2048 is a quarter of that and, at the default
+     * 100-unit shadow distance, still resolves better than one texel per screen pixel in cascade 0.
+     */
+    private _setShadowMapResolution(size: number): void {
+        const clamped = Math.min(4096, Math.max(512, 1 << Math.round(Math.log2(size))));
+        if (clamped === this._shadowMapResolution) return;
+        this._shadowMapResolution = clamped;
+        if (!gl) return;
+        this._shadowMapFBO.create(clamped, clamped);
+        for (const cascade of this._shadowCascades) cascade.create(clamped, clamped);
+        this._shadowMapsDirty = true;
+    }
+
+    public get ssaoSamples(): number { return this._ssaoSamples; }
+    public set ssaoSamples(n: number) {
+        this._ssaoSamples = Math.min(64, Math.max(4, Math.round(n)));
+        this._quality = 'custom';
+    }
+
+    public get ssaoResolutionScale(): number { return this._ssaoResolutionScale; }
+    public set ssaoResolutionScale(scale: number) {
+        const clamped = Math.min(1, Math.max(0.25, scale));
+        if (clamped === this._ssaoResolutionScale) return;
+        this._ssaoResolutionScale = clamped;
+        this._quality = 'custom';
+        if (gl) this._resizeBuffers(this._renderWidth, this._renderHeight);
+    }
+
     /** Snapshot every runtime-tunable render setting (for persisting a scene's look / publishing). */
     public getRenderSettings(): RenderSettings {
         return {
+            quality: this._quality,
+            renderScale: this._renderScale,
+            ssaoSamples: this._ssaoSamples,
+            ssaoResolutionScale: this._ssaoResolutionScale,
+            shadowMapResolution: this._shadowMapResolution,
+            bloomEnabled: this._bloomIntensity > 0,
             clearColor: this.clearColor,
             exposure: this._exposure,
             bloomThreshold: this._bloomThreshold,
@@ -3467,6 +4066,13 @@ export class Renderer {
      */
     public applyRenderSettings(s: Partial<RenderSettings> | null | undefined): void {
         if (!s) return;
+        // Preset first: it is the coarse default that the individual keys below then refine, so
+        // applying it afterwards would silently overwrite settings the caller explicitly saved.
+        if (s.quality !== undefined) this.quality = s.quality;
+        if (s.renderScale !== undefined) this.renderScale = s.renderScale;
+        if (s.shadowMapResolution !== undefined) this.shadowMapResolution = s.shadowMapResolution;
+        if (s.ssaoSamples !== undefined) this.ssaoSamples = s.ssaoSamples;
+        if (s.ssaoResolutionScale !== undefined) this.ssaoResolutionScale = s.ssaoResolutionScale;
         if (s.clearColor) this.clearColor = s.clearColor;
         if (s.exposure !== undefined) this.exposure = s.exposure;
         if (s.bloomThreshold !== undefined) this.bloomThreshold = s.bloomThreshold;

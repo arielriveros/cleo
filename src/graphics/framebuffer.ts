@@ -1,6 +1,7 @@
 import { gl } from './renderer';
 import { Texture, TextureConfig } from './texture';
 import { Logger } from '../core/logger';
+import { setViewportSize } from './renderStats';
 
 interface FrameBufferOptions {
     usage?: 'color' | 'depth';
@@ -78,6 +79,7 @@ export class Framebuffer {
     public bind(): Framebuffer {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this._id);
         gl.viewport(0, 0, this._width, this._height);
+        setViewportSize(this._width, this._height);
 
         return this;
     }
@@ -85,6 +87,7 @@ export class Framebuffer {
     public unbind(): Framebuffer {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        setViewportSize(gl.canvas.width, gl.canvas.height);
 
         return this;
     }

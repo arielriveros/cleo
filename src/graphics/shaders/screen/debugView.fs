@@ -35,6 +35,22 @@ void main() {
     } else if (u_mode == 6) {
         // Linear-HDR channels (lit scene, bloom): resolve to display so the preview matches the image.
         outColor = vec4(tonemap(t.rgb, u_exposure), 1.0);
+    } else if (u_mode == 7) {
+        // OVERDRAW heat map. The overdraw pass accumulates OVERDRAW_INCREMENT per fragment with
+        // additive blending, so .r is (fragments shaded at this pixel) / OVERDRAW_MAX. Ramped
+        // black -> blue -> green -> yellow -> red, which is the convention every GPU profiler uses,
+        // so the reading transfers.
+        //
+        // This is the view that makes a fill-rate problem legible: draw-call and triangle counts say
+        // nothing about how many times each pixel was shaded, and on a deferred renderer with a lot
+        // of alpha-blended overlays that number is exactly what costs the frame.
+        float n = clamp(t.r, 0.0, 1.0);
+        vec3 heat;
+        if (n < 0.25)      heat = mix(vec3(0.0, 0.0, 0.0), vec3(0.0, 0.2, 1.0), n / 0.25);
+        else if (n < 0.5)  heat = mix(vec3(0.0, 0.2, 1.0), vec3(0.0, 1.0, 0.3), (n - 0.25) / 0.25);
+        else if (n < 0.75) heat = mix(vec3(0.0, 1.0, 0.3), vec3(1.0, 1.0, 0.0), (n - 0.5) / 0.25);
+        else               heat = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), (n - 0.75) / 0.25);
+        outColor = vec4(heat, 1.0);
     } else {
         // Passthrough RGB (albedo, emissive, …).
         outColor = vec4(t.rgb, 1.0);

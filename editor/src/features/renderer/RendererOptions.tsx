@@ -18,6 +18,10 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'shadow',    label: 'Shadow' },
   { key: 'bloom',     label: 'Bloom' },
   { key: 'velocity',  label: 'Velocity' },
+  // Overdraw re-rasterizes the scene with additive blending into its own target, so unlike every
+  // other channel here it costs an extra pass — but it is the only view that shows how many times
+  // each pixel was shaded, which is what a fill-rate-bound frame is actually spending its time on.
+  { key: 'overdraw',  label: 'Overdraw' },
 ];
 
 // Terrain LOD detail steps: the grid stride a level draws with (triangles scale by 1/step²).

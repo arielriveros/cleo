@@ -245,8 +245,16 @@ export class Scene {
             // something else next happens to read a node list. This loop owns the removal sweep and every
             // onUpdate: running it against a stale set silently skips a node that was just added, and leaves
             // one marked for removal in the tree until an unrelated reader triggers the re-traversal.
+            // Light indices are a function of the node set, not of anything the loop does, so one
+            // pass over the lights answers for the whole frame. This used to run INSIDE the loop,
+            // once per LightNode, and each call walked every node in the scene — O(lights x nodes)
+            // per frame, recomputing an identical result every time.
+            let assignedLightIndices = false;
             for (const node of this.nodes) {
-                if (node instanceof LightNode) this._asignLightIndices();
+                if (!assignedLightIndices && node instanceof LightNode) {
+                    this._asignLightIndices();
+                    assignedLightIndices = true;
+                }
 
                 if (node.markForRemoval) {
                     this.removeNode(node);

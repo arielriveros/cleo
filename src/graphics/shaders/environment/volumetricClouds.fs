@@ -244,13 +244,51 @@ void main() {
     float transmittance = 1.0;
     vec3 scatteredLight = vec3(0.0);
 
+    // ---------------------------------------------------------------------------------------
+    // Two-speed march.
+    //
+    // Clouds are mostly empty sky: for a typical coverage the great majority of samples along a ray
+    // return zero density, and the expensive work (detail-erosion FBM, plus a whole secondary march
+    // toward the sun) only happens where density > 0. Marching at the fine step everywhere therefore
+    // spends most of its samples proving that nothing is there.
+    //
+    // So: step at CHEAP_STEP_SCALE x the fine step using the cheap density (no detail erosion) until
+    // something is hit, then back up one coarse step and switch to fine stepping with the full
+    // density. After MISSES_BEFORE_COARSE consecutive empty fine samples, drop back to coarse.
+    //
+    // The step budget below counts coarse and fine samples against the same `steps` allowance, so the
+    // worst case (a ray entirely inside dense cloud) costs exactly what it did before, while the
+    // common case gets much cheaper. Backing up before the fine march is what keeps the cloud
+    // boundary in the same place — without it, silhouettes would visibly snap to the coarse stride.
+    // ---------------------------------------------------------------------------------------
+    const float CHEAP_STEP_SCALE = 3.0;
+    const int MISSES_BEFORE_COARSE = 8;
+
+    bool coarse = true;
+    int misses = 0;
+
     for (int i = 0; i < MAX_STEPS; i++) {
-        if (i >= steps || transmittance < 0.01) break;
+        if (i >= steps || transmittance < 0.01 || t > tExit) break;
         vec3 pos = u_viewPos + rd * t;
         float h = clamp((pos.y - slabBottom) * invSlab, 0.0, 1.0);
+
+        if (coarse) {
+            // Cheap probe: base shape only. A hit rewinds one coarse step so the fine march starts
+            // just OUTSIDE the cloud and the edge lands where a fine-only march would have put it.
+            if (sampleDensity(pos, h, true) > 0.0) {
+                coarse = false;
+                misses = 0;
+                t = max(tEnter, t - stepLen * CHEAP_STEP_SCALE);
+                continue;
+            }
+            t += stepLen * CHEAP_STEP_SCALE;
+            continue;
+        }
+
         float density = sampleDensity(pos, h, false);
 
         if (density > 0.001) {
+            misses = 0;
             // Secondary march toward the sun for self-shadowing (cheap density).
             float lightOpticalDepth = 0.0;
             for (int j = 0; j < MAX_LIGHT_STEPS; j++) {
@@ -274,6 +312,9 @@ void main() {
             vec3 Sint = (S - S * tr) / max(sigmaT, 1e-5);
             scatteredLight += transmittance * Sint;
             transmittance *= tr;
+        } else {
+            misses++;
+            if (misses >= MISSES_BEFORE_COARSE) { coarse = true; misses = 0; }
         }
 
         t += stepLen;

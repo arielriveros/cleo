@@ -25,11 +25,15 @@ const OLD_LAYOUT_KEY = 'cleo_project_layout';
 //
 // v5 changes the SHAPE rather than the panel set: one layout per editor mode instead of a single tree that
 // was hidden and reconstituted (see LayoutStore).
+//
+// v7 adds the Profiler panel. Unlike every other panel it is deliberately absent from CHROME_PANELS,
+// so it stays visible in renderer mode and during Play — a profiler that hides itself the moment you
+// start running the game cannot measure the thing you actually ship.
 const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
-  'cleo_dock_layout_v5',
+  'cleo_dock_layout_v5', 'cleo_dock_layout_v6',
 ];
-const LAYOUT_VERSION = 6;
+const LAYOUT_VERSION = 7;
 
 /**
  * One saved arrangement per editor mode.
@@ -115,6 +119,7 @@ const PANEL_TITLES: Record<string, string> = {
   animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
   animField: 'Blend Space',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
+  profiler: 'Profiler',
 };
 
 function panelTitle(id: string, mode: EditorMode): string {
@@ -178,6 +183,13 @@ function buildDefaultLayout(api: DockviewApi) {
       position: { referencePanel: 'properties', direction: 'within' },
     });
   }
+  // Docked with Properties on the right rail: it is a tall column of sections, which suits that
+  // rail's proportions, and it is NOT in CHROME_PANELS so it survives into Play and renderer mode
+  // where the rest of that tab strip is hidden.
+  api.addPanel({
+    id: 'profiler', component: 'profiler', title: PANEL_TITLES['profiler'],
+    position: { referencePanel: 'properties', direction: 'within' },
+  });
   scene.api.setActive();
   properties.api.setActive();
   // Logger and Assets keep renderer:'always' so the hidden tab stays in the DOM: unmounting the

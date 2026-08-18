@@ -24,6 +24,7 @@ import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
 import ConsolePanel from '../logger/ConsolePanel';
+import ProfilerPanel from '../renderer/ProfilerPanel';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine } from '../EngineContext';
 
@@ -163,6 +164,16 @@ function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachin
 // The tilemap editor's two panels. Shown only in tilemap mode — see hiddenPanelIds.
 function TilePalettePanel(_: IDockviewPanelProps) { return <TilePalette />; }
 function TilemapLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><TilemapLayersPanel /></SidePanel>; }
+// Render profiler. Owns its own scrolling (it is a long column of sections), so no SidePanel wrapper.
+// Unlike the compact HUD it is available in scene mode and during Play, which is where the real
+// frame budget matters — a viewport-only profiler cannot measure the thing you actually ship.
+function ProfilerDockPanel(_: IDockviewPanelProps) {
+  return (
+    <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
+      <ProfilerPanel />
+    </div>
+  );
+}
 
 // Panels are movable but not closable — a lost panel would need Reset Layout, so the tab renders
 // the title only (dockview's tab wrapper still owns drag behavior and colors).
@@ -189,4 +200,5 @@ export const dockComponents = {
   animField: AnimFieldPanel,
   tilePalette: TilePalettePanel,
   tilemapLayers: TilemapLayersDockPanel,
+  profiler: ProfilerDockPanel,
 };

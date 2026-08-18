@@ -15,22 +15,31 @@ uniform sampler2D u_noise;            // 4x4 tiled rotation noise (xy in [0,1])
 
 uniform mat4 u_view;
 uniform mat4 u_projection;
-uniform mat4 u_invViewProj;
+uniform mat4 u_invProjection;         // clip -> view, directly (see viewPosFromUV)
 uniform vec2 u_noiseScale;            // screenSize / noiseSize, tiles the 4x4 noise
 uniform float u_radius;
 uniform float u_bias;
 uniform float u_power;
 
-const int KERNEL_SIZE = 64;
-uniform vec3 u_samples[KERNEL_SIZE];
+// Upper bound on the kernel. The number of samples ACTUALLY taken is u_sampleCount, set from the
+// quality preset — the loop breaks early rather than the shader being recompiled per tier.
+const int MAX_KERNEL_SIZE = 64;
+uniform int u_sampleCount;
+uniform vec3 u_samples[MAX_KERNEL_SIZE];
 
-// View-space position of the geometry sampled at a screen UV, reconstructed from depth.
+/**
+ * View-space position of the geometry sampled at a screen UV, reconstructed from depth.
+ *
+ * Goes clip -> view in ONE matrix multiply. It used to go clip -> world with u_invViewProj and then
+ * world -> view with u_view, which is two mat4 transforms per sample — and this function runs once
+ * per kernel sample per pixel, so at the old 64 samples that was 128 mat4 multiplies for every pixel
+ * on screen, to arrive at exactly the same view-space point.
+ */
 vec3 viewPosFromUV(vec2 uv) {
     float d = texture(u_gDepth, uv).r;
     vec4 clip = vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-    vec4 world = u_invViewProj * clip;
-    world /= world.w;
-    return (u_view * vec4(world.xyz, 1.0)).xyz;
+    vec4 view = u_invProjection * clip;
+    return view.xyz / view.w;
 }
 
 void main() {
@@ -50,7 +59,8 @@ void main() {
     mat3 TBN = mat3(tangent, bitangent, normal);
 
     float occlusion = 0.0;
-    for (int i = 0; i < KERNEL_SIZE; ++i) {
+    for (int i = 0; i < MAX_KERNEL_SIZE; ++i) {
+        if (i >= u_sampleCount) break;
         vec3 samplePos = fragPos + (TBN * u_samples[i]) * u_radius;
 
         vec4 offset = u_projection * vec4(samplePos, 1.0);
@@ -65,6 +75,6 @@ void main() {
         occlusion += (sampleDepth >= samplePos.z + u_bias ? 1.0 : 0.0) * rangeCheck;
     }
 
-    occlusion = 1.0 - (occlusion / float(KERNEL_SIZE));
+    occlusion = 1.0 - (occlusion / float(u_sampleCount));
     fragColor = vec4(vec3(pow(occlusion, u_power)), 1.0);
 }

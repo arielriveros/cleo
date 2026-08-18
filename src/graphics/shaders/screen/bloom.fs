@@ -13,12 +13,14 @@ uniform float u_bloomKnee;         // soft-knee width around the threshold (0 = 
 
 in vec2 fragTexCoord;
 
-layout(location = 0) out vec4 fragColor;   // scene passthrough (kept for the composite step)
-layout(location = 1) out vec4 brightColor; // extracted bright part
+// Single output: the extracted bright part, which seeds the bloom mip pyramid. This used to also
+// emit a scene passthrough on location 1 so the composite step had something to read; the composite
+// now reads the compose buffer directly, so carrying a second full-size attachment through every
+// pyramid level would be pure bandwidth for a copy of an image we already have.
+layout(location = 0) out vec4 brightColor;
 
 void main() {
     vec3 color = texture(u_screenTexture, fragTexCoord).rgb;
-    fragColor = vec4(color, 1.0);
 
     // Only lit PBR-model / Blinn-Phong surfaces feed bloom. The scene buffer's alpha is 1 on those and
     // 0 on sky / unlit "basic" / clouds / sprites / grid / gizmos, so gate the bright-pass on it.

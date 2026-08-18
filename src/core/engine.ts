@@ -4,6 +4,8 @@ import { PhysicsSystem } from "../physics/physicsSystem";
 import { Logger } from "./logger";
 import { Scene } from "./scene/scene";
 import { engineEventBus } from "./eventBus";
+import { frameHistory, gpuProfiler } from "../graphics/gpuProfiler";
+import { frameStats } from "../graphics/renderStats";
 
 interface CleoConfig {
   graphics?: {
@@ -162,6 +164,17 @@ export class CleoEngine {
 
       this.onUpdate(deltaTime, this._timeSinceStart);
   
+      // Record the frame for the profiler's rolling history. Done HERE, in the loop that owns the
+      // clock, rather than in an editor component: the panels that read this history are dock tabs
+      // that unmount when hidden, so anything sampled from their own rAF would be missing exactly
+      // when you switched to the panel to look at it. Unclamped wall-clock on purpose — MAX_DELTA
+      // exists to protect the simulation, but a 300ms hitch is precisely what a p95 should show.
+      frameHistory.push({
+        frameMs: currentTimestamp - this._lastTimestamp,
+        cpuRenderMs: frameStats.frameMs,
+        gpuMs: gpuProfiler.totalMs,
+      });
+
       this._lastTimestamp = currentTimestamp;
       InputManager.instance.resetMouseVelocity();
       requestAnimationFrame(this._gameLoop.bind(this));
