@@ -93,6 +93,10 @@ uniform samplerCube u_envMap;
 // Screen-space ambient occlusion
 uniform bool u_ssaoEnabled;
 uniform sampler2D u_ssao;
+/** One AO texel in this pass's UV space; (0,0) means the AO buffer is full resolution. */
+uniform vec2 u_ssaoTexelSize;
+/** Relative depth difference beyond which an AO neighbour is treated as a different surface. */
+const float AO_DEPTH_TOLERANCE = 0.02;
 
 const float PI = 3.14159265359;
 const float MAX_REFLECTION_LOD = 4.0;
@@ -206,6 +210,57 @@ vec3 probeIBL(samplerCube irr, samplerCube pref, vec3 N, vec3 V, vec3 albedo, fl
     return kD * diffuseIBL + specularIBL;
 }
 
+/**
+ * Fetch ambient occlusion, upsampling depth-aware when the AO buffer is smaller than this pass.
+ *
+ * A plain `texture()` fetch bilinearly blends the four nearest AO texels regardless of what geometry
+ * they belong to. At half resolution that blends a foreground silhouette's AO into the background
+ * behind it and vice versa, which reads as a halo hugging every object edge. Weighting each tap by
+ * how close its depth is to this pixel's confines the blend to texels that are actually on the same
+ * surface; where none are (a hard depth discontinuity) it falls back to the single nearest tap, which
+ * is aliased but correct rather than smeared.
+ *
+ * Skipped entirely when the AO buffer is already full resolution — there is nothing to reconstruct,
+ * and the hardware bilinear fetch is exact.
+ */
+float sampleAO(float centerDepth) {
+    if (!u_ssaoEnabled) return 1.0;
+    if (u_ssaoTexelSize.x <= 0.0) return texture(u_ssao, fragTexCoord).r; // full-res: nothing to do
+
+    // The four AO texels surrounding this pixel, and the depths they were computed from.
+    vec2 offsets[4];
+    offsets[0] = vec2(-0.5, -0.5);
+    offsets[1] = vec2( 0.5, -0.5);
+    offsets[2] = vec2(-0.5,  0.5);
+    offsets[3] = vec2( 0.5,  0.5);
+
+    float total = 0.0;
+    float weightSum = 0.0;
+    float nearest = 1.0;
+    float nearestDelta = 1e9;
+
+    for (int i = 0; i < 4; i++) {
+        vec2 uv = fragTexCoord + offsets[i] * u_ssaoTexelSize;
+        float ao = texture(u_ssao, uv).r;
+        // Compare in linear-ish terms: raw device depth is wildly non-linear, so a fixed epsilon on
+        // it would be far too strict near the camera and far too loose in the distance. Dividing by
+        // the centre depth makes the tolerance relative, which behaves at both ends.
+        float d = texture(u_gDepth, uv).r;
+        float delta = abs(d - centerDepth) / max(centerDepth, 1e-5);
+
+        if (delta < nearestDelta) { nearestDelta = delta; nearest = ao; }
+
+        float w = 1.0 - smoothstep(0.0, AO_DEPTH_TOLERANCE, delta);
+        total += ao * w;
+        weightSum += w;
+    }
+
+    // Every neighbour rejected: this pixel sits on a depth discontinuity, so take the closest match
+    // rather than averaging across the edge.
+    if (weightSum < 1e-4) return nearest;
+    return total / weightSum;
+}
+
 void main() {
     float depth = texture(u_gDepth, fragTexCoord).r;
     // Background (no geometry) — leave for the skybox pass.
@@ -228,8 +283,7 @@ void main() {
     // Indirect lighting. When a light probe / environment is available, use full split-sum IBL
     // (diffuse irradiance + prefiltered specular + BRDF LUT); otherwise fall back to flat ambient.
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    float ssao = 1.0;
-    if (u_ssaoEnabled) ssao = texture(u_ssao, fragTexCoord).r;
+    float ssao = sampleAO(depth);
 
     // Fallback indirect term used where no probe volume applies: the directional light's ambient as
     // a simple fill floor (matches the forward Blinn-Phong path; zeroed when the light is removed so

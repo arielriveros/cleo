@@ -11,6 +11,12 @@ export interface TextureConfig {
     mipMapFilter?: 'nearest' | 'linear';
     precision?: 'low' | 'high';
     target?: 'texture2D' | 'cubemap' | 'texture3D';
+    /**
+     * Number of colour channels. Defaults to RGBA; 'r' allocates a single-channel target, for buffers
+     * that hold one scalar (ambient occlusion, masks) and would otherwise pay 4x the bandwidth and
+     * memory to store three copies of nothing.
+     */
+    channels?: 'rgba' | 'r';
 }
 
 /**
@@ -33,6 +39,8 @@ export class Texture {
     private readonly _texture: WebGLTexture;
     private _width: number = 0;
     private _height: number = 0;
+    // Colour channels actually allocated (1 for an R8/R16F target, 4 otherwise). Only affects byteSize.
+    private _channels: number = 4;
     // Third dimension, only ever non-zero for a TEXTURE_3D volume. Kept as a plain field rather than
     // a separate subclass so `byteSize`, `bind`/`unbind` and `delete` stay single implementations.
     private _depth: number = 0;
@@ -73,14 +81,17 @@ export class Texture {
         // Check for floating point texture support before using high precision
         const hasFloatTextureSupport = gl.getExtension('EXT_color_buffer_float') && gl.getExtension('OES_texture_float_linear');
         
-        this._internalFormat = this._usage === 'depth' ? gl.DEPTH_COMPONENT24 : 
+        const singleChannel = options?.channels === 'r' && this._usage !== 'depth';
+        this._internalFormat = this._usage === 'depth' ? gl.DEPTH_COMPONENT24 :
+                              singleChannel ? (this._precision === 'high' && hasFloatTextureSupport ? gl.R16F : gl.R8) :
                               (this._precision === 'high' && hasFloatTextureSupport ? gl.RGBA16F : gl.RGBA8);
 
         this._minFilter = this._mipMap ? 
             (options?.mipMapFilter === 'nearest' ? gl.NEAREST_MIPMAP_NEAREST : gl.LINEAR_MIPMAP_LINEAR) :
             (options?.mipMapFilter === 'nearest' ? gl.NEAREST : gl.LINEAR);
 
-        this._format = this._usage === 'depth' ? gl.DEPTH_COMPONENT : gl.RGBA;
+        this._format = this._usage === 'depth' ? gl.DEPTH_COMPONENT : (singleChannel ? gl.RED : gl.RGBA);
+        this._channels = singleChannel ? 1 : 4;
         this._type = this._usage === 'depth' ? gl.UNSIGNED_INT : 
                      (this._precision === 'low' || !hasFloatTextureSupport ? gl.UNSIGNED_BYTE : gl.FLOAT);
     }
@@ -431,7 +442,8 @@ export class Texture {
      *  mirrors the constructor's internalFormat choice (depth=4 / RGBA16F=8 / RGBA8=4). Used by the
      *  perf HUD. Without the depth term a 128³ volume would report as 64 KB rather than 8 MB. */
     public get byteSize(): number {
-        const bpp = this._usage === 'depth' ? 4 : (this._precision === 'high' ? 8 : 4);
+        const bytesPerChannel = this._precision === 'high' ? 2 : 1;
+        const bpp = this._usage === 'depth' ? 4 : this._channels * bytesPerChannel;
         const faces = this._target === gl.TEXTURE_CUBE_MAP ? 6 : 1;
         const slices = this._target === gl.TEXTURE_3D ? Math.max(1, this._depth) : 1;
         // 4/3 is the 2D mip series; a 3D chain converges to 8/7 instead.

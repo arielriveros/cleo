@@ -90,6 +90,7 @@ import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats, countFullscreenPass, setViewportSize } from './renderStats';
 import { gpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
+import { buildSSAOKernel } from './ssaoKernel';
 import { TerrainLodSettings } from '../terrain/terrain';
 import type { FoliageCell } from '../terrain/foliage';
 import { collectOrphanedFoliageBuffers } from '../terrain/foliage';
@@ -477,6 +478,12 @@ export class Renderer {
     // SSAO (deferred path). Raw pass -> blur pass, consumed in the deferred lighting pass.
     private _ssaoFBO: Framebuffer;
     private _ssaoBlurFBO: Framebuffer;
+    /**
+     * Whichever AO buffer holds the result the lighting pass should read. Normally the blurred one;
+     * the raw one when the blur is switched off. A pointer rather than a hardcoded reference so the
+     * consumer does not have to know how many filtering passes ran.
+     */
+    private _ssaoResult!: Framebuffer;
     private _ssaoEnabled: boolean;
     private _ssaoKernel: Float32Array = new Float32Array(64 * 3);
     /** Kernel samples actually taken per pixel. 64 was the fixed value; the shader now breaks early. */
@@ -660,9 +667,12 @@ export class Renderer {
         this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._velocityTileFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._velocityNeighborFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-        // SSAO is a low-precision single-channel-ish (grayscale) occlusion buffer.
-        this._ssaoFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
-        this._ssaoBlurFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
+        // SSAO is one 8-bit scalar per pixel. R8 rather than RGBA8 (the shader only ever writes and
+        // reads .r), and no depth attachment — both passes are fullscreen with depth testing off, so
+        // the DEPTH_COMPONENT24 texture every Framebuffer used to allocate here was never touched.
+        const aoOptions = { colorTextureOptions: { mipMap: false, channels: 'r' as const }, depth: false };
+        this._ssaoFBO = new Framebuffer(aoOptions);
+        this._ssaoBlurFBO = new Framebuffer(aoOptions);
         // BRDF integration LUT (computed once) — high precision, no mipmaps.
         this._brdfFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Selection outline silhouette mask (low precision, no mipmaps).
@@ -1148,7 +1158,13 @@ export class Renderer {
         gpuProfiler.beginPass('geometry');
         this._geometryPass(scene);
         // 1b. Screen-space ambient occlusion from the G-buffer depth+normals.
-        if (this._ssaoEnabled && this._beginPass('ssao')) this._ssaoPass();
+        // Nothing in the G-buffer means every AO pixel would early-out to white and the lighting pass
+        // discards those pixels anyway — so the whole pass is two draws producing an unread buffer.
+        // Both counters, not just `objects`: the geometry pass also draws instanced foliage, which
+        // bumps `instances` alone, and a landscape whose only deferred geometry is grass would
+        // otherwise lose its AO entirely.
+        const gBufferHasGeometry = frameStats.objects > 0 || frameStats.instances > 0;
+        if (this._ssaoEnabled && gBufferHasGeometry && this._beginPass('ssao')) this._ssaoPass();
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
         gpuProfiler.beginPass('lighting');
         this._deferredLightingPass(scene, shadowLight);
@@ -1564,7 +1580,11 @@ export class Renderer {
         // reads it when u_ssaoEnabled is true.
         this._shaderManager.setUniform('u_ssaoEnabled', this._ssaoEnabled);
         this._shaderManager.setUniform('u_ssao', 4);
-        this._ssaoBlurFBO.colors[0].bind(4);
+        (this._ssaoResult ?? this._ssaoBlurFBO).colors[0].bind(4);
+        // Texel size drives the depth-aware upsample. Zero when the AO buffer is already full
+        // resolution, which tells the shader to take the plain (and then exact) bilinear fetch.
+        this._shaderManager.setUniform('u_ssaoTexelSize',
+            this._ssaoResolutionScale >= 0.999 ? [0, 0] : [1 / this._ssaoWidth, 1 / this._ssaoHeight]);
 
         this._drawFullscreen();
 
@@ -1659,21 +1679,9 @@ export class Renderer {
     // Build the hemisphere sample kernel (biased toward the origin) and a small tiled rotation-noise
     // texture. Done once; the kernel is uploaded to the SSAO shader each frame.
     private _generateSSAOKernelAndNoise(): void {
-        for (let i = 0; i < 64; i++) {
-            let x = Math.random() * 2 - 1;
-            let y = Math.random() * 2 - 1;
-            let z = Math.random(); // hemisphere: z >= 0
-            const len = Math.hypot(x, y, z) || 1;
-            x /= len; y /= len; z /= len;
-            const r = Math.random();
-            x *= r; y *= r; z *= r;
-            // Accelerating interpolation so more samples sit close to the origin.
-            let scale = i / 64;
-            scale = 0.1 + 0.9 * scale * scale;
-            this._ssaoKernel[i * 3 + 0] = x * scale;
-            this._ssaoKernel[i * 3 + 1] = y * scale;
-            this._ssaoKernel[i * 3 + 2] = z * scale;
-        }
+        // The kernel's distribution lives in ssaoKernel.ts, free of GL, so the ramp invariant it
+        // depends on (the last sample must reach the full radius at ANY sample count) is unit-tested.
+        buildSSAOKernel(this._ssaoKernel, this._ssaoSamples);
 
         const noiseData = new Uint8Array(4 * 4 * 4);
         for (let i = 0; i < 16; i++) {
@@ -1717,17 +1725,28 @@ export class Renderer {
         const program = this._shaderManager.getShader('ssao').program;
         if (this._ssaoKernelLoc === undefined)
             this._ssaoKernelLoc = gl.getUniformLocation(program, 'u_samples[0]');
-        if (this._ssaoKernelLoc) gl.uniform3fv(this._ssaoKernelLoc, this._ssaoKernel);
+        // Upload only the samples in use — the tail is zeroed and never read, so sending all 64
+        // floats at 16 or 24 samples is pure transfer.
+        if (this._ssaoKernelLoc)
+            gl.uniform3fv(this._ssaoKernelLoc, this._ssaoKernel.subarray(0, this._ssaoSamples * 3));
 
         this._drawFullscreen();
 
-        // Blur to remove the tiled-noise pattern.
-        this._ssaoBlurFBO.bind();
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        this._shaderManager.bind('ssaoBlur');
-        this._shaderManager.setUniform('u_ssao', 0);
-        this._ssaoFBO.colors[0].bind(0);
-        this._drawFullscreen();
+        // Blur to remove the tiled-noise pattern. Timed separately from the kernel pass above: the
+        // two do very different work (a scattered dependent-fetch loop versus a small coherent box
+        // filter) and one `ssao` scope covering both cannot say which is expensive. Separately
+        // toggleable for the same reason — switching it off is the cleanest read on its marginal
+        // cost, since a timer around a draw misses the FBO round trip that goes with it.
+        this._ssaoResult = this._ssaoFBO;
+        if (this._beginPass('ssao.blur')) {
+            this._ssaoBlurFBO.bind();
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._shaderManager.bind('ssaoBlur');
+            this._shaderManager.setUniform('u_ssao', 0);
+            this._ssaoFBO.colors[0].bind(0);
+            this._drawFullscreen();
+            this._ssaoResult = this._ssaoBlurFBO;
+        }
 
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
@@ -4296,7 +4315,12 @@ export class Renderer {
         if (preset === 'custom') return;
         const t = QUALITY_TIERS[preset];
         this._ssaoEnabled = t.ssaoEnabled;
-        this._ssaoSamples = t.ssaoSamples;
+        if (this._ssaoSamples !== t.ssaoSamples) {
+            this._ssaoSamples = t.ssaoSamples;
+            // The kernel's ramp is sized to the sample count, so the samples must be rebuilt or the
+            // new tier inherits the previous tier's radius.
+            if (gl) this._generateSSAOKernelAndNoise();
+        }
         this._motionBlurEnabled = t.motionBlurEnabled;
         this._bloomIntensity = t.bloomEnabled ? Math.max(this._bloomIntensity, 0.6) : 0;
         if (this._ssaoResolutionScale !== t.ssaoResolutionScale || this._renderScale !== t.renderScale) {
@@ -4356,7 +4380,11 @@ export class Renderer {
 
     public get ssaoSamples(): number { return this._ssaoSamples; }
     public set ssaoSamples(n: number) {
-        this._ssaoSamples = Math.min(64, Math.max(4, Math.round(n)));
+        const clamped = Math.min(64, Math.max(4, Math.round(n)));
+        if (clamped !== this._ssaoSamples) {
+            this._ssaoSamples = clamped;
+            if (gl) this._generateSSAOKernelAndNoise(); // ramp is sized to the count — see the generator
+        }
         this._quality = 'custom';
     }
 

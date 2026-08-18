@@ -7,6 +7,12 @@ interface FrameBufferOptions {
     usage?: 'color' | 'depth';
     colorAttachments?: number;
     colorTextureOptions?: TextureConfig;
+    /**
+     * Allocate a depth attachment. Default true. Set false for targets that only ever receive
+     * fullscreen passes with depth testing off — every framebuffer used to get a
+     * DEPTH_COMPONENT24 texture whether or not anything could possibly read or write it.
+     */
+    depth?: boolean;
 }
 
 export class Framebuffer {
@@ -24,7 +30,8 @@ export class Framebuffer {
         this._options = {
             usage: options?.usage || 'color',
             colorAttachments: options?.colorAttachments || 1,
-            colorTextureOptions: options?.colorTextureOptions || undefined
+            colorTextureOptions: options?.colorTextureOptions || undefined,
+            depth: options?.depth !== false
         };
         this._colors = [];
         this._depth = new Texture({usage: 'depth', mipMap: false});
@@ -59,8 +66,10 @@ export class Framebuffer {
             gl.drawBuffers(colorAttachments);
         }
 
-        this._depth.create(null, width, height);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this._depth.texture, 0);
+        if (this._options.depth !== false) {
+            this._depth.create(null, width, height);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this._depth.texture, 0);
+        }
 
         if (usage === 'depth') {
             gl.drawBuffers([gl.NONE]);
