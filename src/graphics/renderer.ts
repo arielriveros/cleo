@@ -33,6 +33,8 @@ import ShadowMapSkinnedVertex from './shaders/environment/shadowMapSkinned.vs'
 import SkyboxVertex from './shaders/environment/skybox.vs'
 import SkyboxFragment from './shaders/environment/skybox.fs'
 import VolumetricCloudsFragment from './shaders/environment/volumetricClouds.fs'
+import CloudNoiseBakeFragment from './shaders/environment/cloudNoiseBake.fs'
+import CloudTemporalResolveFragment from './shaders/environment/cloudTemporalResolve.fs'
 import SkyAtmosphereFragment from './shaders/environment/skyAtmosphere.fs'
 import ProbePreviewFragment from './shaders/environment/probePreview.fs'
 import SkyFogFragment from './shaders/screen/skyFog.fs'
@@ -407,6 +409,66 @@ export class Renderer {
     // upsampled + composited into the scene buffer). Only used when resolutionScale < 1.
     private _cloudsFBO: Framebuffer;
 
+    // ---------------------------------------------------------------------------------------------
+    // Volumetric cloud noise volumes + temporal reprojection state
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Baked tileable 3D noise, standing in for the multi-octave hash FBM the cloud raymarch used to
+     * evaluate per sample. Built lazily on the first frame a scene actually has enabled clouds, so a
+     * project without clouds never pays the ~8MB or the bake.
+     */
+    private _cloudBaseNoise: Texture | null = null;
+    private _cloudDetailNoise: Texture | null = null;
+    private _cloudNoiseBaked: boolean = false;
+
+    /** Base volume edge, and how many noise cells span it (the tiling period in lattice space). */
+    private static readonly CLOUD_BASE_NOISE_SIZE = 128;
+    private static readonly CLOUD_BASE_NOISE_PERIOD = 8;
+    private static readonly CLOUD_DETAIL_NOISE_SIZE = 32;
+    private static readonly CLOUD_DETAIL_NOISE_PERIOD = 4;
+
+    /**
+     * Temporal reprojection targets. `_cloudHistoryFBOs` ping-pong at the cloud render resolution;
+     * `_cloudTraceFBO` holds the newly traced samples at 1/4 per axis, i.e. 1/16 of the pixels.
+     */
+    private _cloudHistoryFBOs: Framebuffer[] = [];
+    private _cloudTraceFBO: Framebuffer;
+    private _cloudHistoryIndex: number = 0;
+    /**
+     * False whenever the history cannot be trusted: first frame, a resize (Framebuffer.create
+     * reallocates into uninitialized memory), a resolution/quality change, or a camera cut. The next
+     * frame then traces at full cloud resolution to reseed rather than showing 15/16 garbage.
+     */
+    private _cloudHistoryValid: boolean = false;
+    /** Cloud-space dimensions the history was last built at, so a change can invalidate it. */
+    private _cloudHistoryW: number = 0;
+    private _cloudHistoryH: number = 0;
+    /** Bayer subset traced this frame, and the size of the pattern (4x4). */
+    private static readonly CLOUD_BAYER_SIZE = 4;
+    /** Tier (and node) the cloud settings were last pushed for — see _applyQualityToClouds. */
+    private _cloudsTierApplied: QualityPreset | null = null;
+    private _cloudsTierNode: VolumetricCloudsNode | null = null;
+    /** cos of the largest view-direction change treated as motion rather than a cut (~60 degrees). */
+    private static readonly TEMPORAL_CUT_COS_ANGLE = 0.5;
+    /** Fraction of the distance-to-cloud-layer a camera may move in one frame before it counts as a cut. */
+    private static readonly TEMPORAL_CUT_MOVE_FRACTION = 0.5;
+    /** The camera the temporal history belongs to; a different one is a cut by definition. */
+    private _lastTemporalCamera: Camera | null = null;
+    private _prevTemporalCamPos: vec3 = vec3.create();
+    private _prevTemporalCamFwd: vec3 = vec3.create();
+    /**
+     * 4x4 ordered-dither ranks. Frame N traces the cell whose rank is N%16, and consecutive ranks sit
+     * far apart in the block — so the reconstructed image fills in evenly instead of a visible band
+     * sweeping across every block.
+     */
+    private static readonly CLOUD_BAYER_ORDER = [
+         0,  8,  2, 10,
+        12,  4, 14,  6,
+         3, 11,  1,  9,
+        15,  7, 13,  5,
+    ];
+
     // Motion blur: full-res per-pixel velocity + TileMax/NeighborMax (both tile-res).
     private _velocityFBO!: Framebuffer;
     private _velocityTileFBO!: Framebuffer;
@@ -591,6 +653,8 @@ export class Renderer {
         this._blur_FBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }), new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } })];
         // Same config as the blur scratch buffers (LINEAR-filtered float) so the low-res clouds upsample smoothly.
         this._cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        // Same float/LINEAR config: the resolve reads it with bilinear taps for its neighbourhood bounds.
+        this._cloudTraceFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._compose_FBOs = [new Framebuffer({ colorTextureOptions: {precision: 'high'}}), new Framebuffer({ colorTextureOptions: {precision: 'high'}})];
         // Motion blur velocity buffers (signed velocity -> float precision).
         this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
@@ -667,6 +731,8 @@ export class Renderer {
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
         // Volumetric clouds (fullscreen raymarch, runs on the screen vertex shader)
         const volumetricCloudsShader = new Shader().create(ScreenVertex, VolumetricCloudsFragment);
+        const cloudNoiseBakeShader = new Shader().create(ScreenVertex, CloudNoiseBakeFragment);
+        const cloudTemporalResolveShader = new Shader().create(ScreenVertex, CloudTemporalResolveFragment);
         // Sky atmosphere (per-direction Nishita scattering, baked into a cubemap via the IBL cube VS)
         const skyAtmosphereShader = new Shader().create(CubeVertex, SkyAtmosphereFragment);
         // Probe preview: equirectangular unwrap of a probe's captured cube for the editor thumbnail.
@@ -732,6 +798,8 @@ export class Renderer {
         this._shaderManager.addShader('shadowMapSkinned', shadowMapSkinnedShader);
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('volumetricClouds', volumetricCloudsShader);
+        this._shaderManager.addShader('cloudNoiseBake', cloudNoiseBakeShader);
+        this._shaderManager.addShader('cloudTemporalResolve', cloudTemporalResolveShader);
         this._shaderManager.addShader('skyAtmosphere', skyAtmosphereShader);
         this._shaderManager.addShader('probePreview', probePreviewShader);
         this._shaderManager.addShader('skyFog', skyFogShader);
@@ -2245,6 +2313,15 @@ export class Renderer {
         // quality setter — a preset can be chosen before any scene with clouds has been loaded.
         this._applyQualityToClouds(node);
 
+        // A teleport or camera switch this frame makes last frame's cloud image an invalid
+        // predecessor. Checked here rather than at the top of render() because the test needs the
+        // cloud layer's altitude as its reference scale.
+        this._detectCameraCut(node);
+
+        // Lazy one-time bake, so only a project that actually has clouds pays for the volumes.
+        this._bakeCloudNoise();
+        if (!this._cloudBaseNoise || !this._cloudDetailNoise) return;
+
         // Fullscreen overlay: no depth test/write (occlusion handled via the depth texture), alpha blend.
         GLState.disable(gl.DEPTH_TEST);
         GLState.depthMask(false);
@@ -2261,6 +2338,14 @@ export class Renderer {
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
         this._shaderManager.setUniform('u_gDepth', 0);
         this._gBufferFBO.depth.bind(0);
+        // Baked noise volumes. The inverse periods convert a lattice-space coordinate into the
+        // volume's [0,1] UVW, and must match the periods the bake used or the field changes scale.
+        this._shaderManager.setUniform('u_baseNoise', 1);
+        this._cloudBaseNoise.bind(1);
+        this._shaderManager.setUniform('u_detailNoise', 2);
+        this._cloudDetailNoise.bind(2);
+        this._shaderManager.setUniform('u_baseNoiseInvPeriod', 1 / Renderer.CLOUD_BASE_NOISE_PERIOD);
+        this._shaderManager.setUniform('u_detailNoiseInvPeriod', 1 / Renderer.CLOUD_DETAIL_NOISE_PERIOD);
 
         // Sun: scene directional light (direction + color) by default, else the node's override.
         let sunDir: any = node.sunDirection;
@@ -2343,28 +2428,31 @@ export class Renderer {
         this._shaderManager.setUniform('u_opacity', node.opacity);
 
         const scale = node.resolutionScale;
+        // Temporal reprojection is bypassed at full resolution (nothing to reconstruct), while
+        // capturing a thumbnail (a one-shot offscreen render has no history to draw on), and when the
+        // node/quality tier turns it off.
+        const temporal = node.temporalUpscale && scale < 0.999 && !this._thumbnailMode;
+
         if (scale >= 0.999) {
             // Full resolution: raymarch straight into the bound scene buffer (premultiplied "over" set above).
+            this._shaderManager.setUniform('u_temporal', false);
             this._drawFullscreen();
         } else {
             // Reduced resolution: raymarch into a low-res target, then bilinear-upsample + composite. Fewer
             // rays (scale per axis) is the whole point — the raymarch is the pass's dominant GPU cost.
             const w = Math.max(1, Math.round(this._renderWidth * scale));
             const h = Math.max(1, Math.round(this._renderHeight * scale));
-            // Pass A: raymarch over transparent black (blend off — the shader's premultiplied output is written directly).
-            if (this._cloudsFBO.width !== w || this._cloudsFBO.height !== h) this._cloudsFBO.resize(w, h);
-            this._cloudsFBO.bind();
-            GLState.disable(gl.BLEND);
-            gl.clearColor(0, 0, 0, 0);
-            gl.clear(gl.COLOR_BUFFER_BIT);
-            this._drawFullscreen();
+
+            const source = temporal ? this._traceCloudsTemporal(node, w, h)
+                                    : this._traceCloudsDirect(w, h);
+
             // Pass B: LINEAR-upsample the low-res clouds and premultiplied-"over" composite them into the scene buffer.
             this._sceneFBO.bind();
             GLState.enable(gl.BLEND);
             gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
             this._shaderManager.bind('screen');
             this._shaderManager.setUniform('u_screenTexture', 0);
-            this._cloudsFBO.colors[0].bind(0);
+            source.bind(0);
             this._drawFullscreen();
         }
 
@@ -2374,6 +2462,176 @@ export class Renderer {
         GLState.disable(gl.BLEND);
         GLState.enable(gl.DEPTH_TEST);
         GLState.depthMask(true);
+    }
+
+    /**
+     * Bake the tileable 3D noise volumes the cloud raymarch samples. Idempotent and lazy — called from
+     * the cloud pass, so a project without clouds never allocates the ~8MB or pays the bake.
+     *
+     * Rendered rather than computed on the CPU: a 128³ RGBA field is 2M voxels, and filling it in JS
+     * with a multi-octave FBM per channel is on the order of 10^8 hash evaluations — seconds of
+     * blocked startup. As slice-by-slice draws it is ~2M fragments in total, i.e. about one frame.
+     *
+     * Uses a private framebuffer with `framebufferTextureLayer` rather than the `Framebuffer` class:
+     * that class owns a fixed set of 2D attachments and reallocates them on resize, which is the
+     * opposite of what attaching successive layers of one immutable volume needs.
+     */
+    private _bakeCloudNoise(): void {
+        if (this._cloudNoiseBaked) return;
+        this._cloudNoiseBaked = true; // set first: a failed bake must not retry every frame
+
+        const bakeFbo = gl.createFramebuffer();
+        if (!bakeFbo) { Logger.error('Could not create cloud noise bake framebuffer', 'Renderer'); return; }
+
+        // Volumes are RGBA8 (the default `precision: 'low'`): the fields are 0..1 scalars that then
+        // get remapped and smoothstepped, so 8 bits per channel sits below the noise floor of the
+        // result, and float would quadruple an already sizeable allocation.
+        const bake = (tex: Texture, size: number, period: number, octaves: number, detail: boolean) => {
+            tex.createVolume(size, size, size, 'repeat');
+            this._shaderManager.bind('cloudNoiseBake');
+            this._shaderManager.setUniform('u_period', period);
+            this._shaderManager.setUniform('u_octaves', octaves);
+            this._shaderManager.setUniform('u_detail', detail);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, bakeFbo);
+            this._setViewport(size, size);
+            for (let z = 0; z < size; z++) {
+                gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, tex.texture, 0, z);
+                if (z === 0) {
+                    // Check once per volume rather than per slice. Worth checking at all because the
+                    // failure is silent: an incomplete framebuffer drops every draw, and the volume
+                    // keeps whatever texStorage3D left in it (undefined, typically zero) — which
+                    // reads back as "no clouds anywhere" with no error raised.
+                    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+                    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+                        Logger.print('error', ['Cloud noise bake framebuffer incomplete:', status], 'Renderer');
+                        return;
+                    }
+                }
+                // Texel centre, so the baked value lands at the point a LINEAR fetch will sample.
+                this._shaderManager.setUniform('u_slice', (z + 0.5) / size);
+                this._screenQuad.draw(); // not _drawFullscreen: a one-off bake is not a per-frame pass
+            }
+        };
+
+        GLState.disable(gl.DEPTH_TEST);
+        GLState.disable(gl.BLEND);
+        GLState.depthMask(false);
+
+        this._cloudBaseNoise = new Texture({ target: 'texture3D', mipMap: false, wrapping: 'repeat' });
+        bake(this._cloudBaseNoise, Renderer.CLOUD_BASE_NOISE_SIZE, Renderer.CLOUD_BASE_NOISE_PERIOD, 4, false);
+
+        this._cloudDetailNoise = new Texture({ target: 'texture3D', mipMap: false, wrapping: 'repeat' });
+        bake(this._cloudDetailNoise, Renderer.CLOUD_DETAIL_NOISE_SIZE, Renderer.CLOUD_DETAIL_NOISE_PERIOD, 3, true);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.deleteFramebuffer(bakeFbo);
+        GLState.depthMask(true);
+        Logger.info('Baked cloud noise volumes', 'Renderer');
+    }
+
+    /** Non-temporal reduced-resolution trace: every pixel, straight into `_cloudsFBO`. */
+    private _traceCloudsDirect(w: number, h: number): Texture {
+        if (this._cloudsFBO.width !== w || this._cloudsFBO.height !== h) this._cloudsFBO.resize(w, h);
+        this._shaderManager.setUniform('u_temporal', false);
+        this._cloudsFBO.bind();
+        GLState.disable(gl.BLEND);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        this._drawFullscreen();
+        // Whatever setting change routed us here also makes the accumulated history meaningless.
+        this._cloudHistoryValid = false;
+        return this._cloudsFBO.colors[0];
+    }
+
+    /**
+     * Bayer-subset temporal trace + resolve. Traces 1/16 of the cloud-resolution pixels into a
+     * quarter-size buffer, then reconstructs the full image from reprojected history.
+     *
+     * Returns the texture holding this frame's resolved clouds.
+     */
+    private _traceCloudsTemporal(node: VolumetricCloudsNode, w: number, h: number): Texture {
+        // Trace target: one pixel per 4x4 block of the cloud image. Ceil so the blocks cover the
+        // whole image when w/h are not multiples of 4 (the resolve clamps its reads at the edges).
+        const tw = Math.max(1, Math.ceil(w / Renderer.CLOUD_BAYER_SIZE));
+        const th = Math.max(1, Math.ceil(h / Renderer.CLOUD_BAYER_SIZE));
+
+        this._ensureCloudTemporalTargets(w, h, tw, th);
+
+        // --- Trace: 1/16 of the rays ---
+        const bayerIndex = this._frameIndex % 16;
+        const cell = Renderer.CLOUD_BAYER_ORDER.indexOf(bayerIndex);
+        this._shaderManager.setUniform('u_temporal', true);
+        this._shaderManager.setUniform('u_traceResolution', [tw, th]);
+        this._shaderManager.setUniform('u_bayerOffset', [cell % 4, Math.floor(cell / 4)]);
+
+        this._cloudTraceFBO.bind();
+        GLState.disable(gl.BLEND);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        this._drawFullscreen();
+
+        // --- Resolve: reconstruct full cloud resolution from history + the new samples ---
+        gpuProfiler.beginPass('clouds.resolve');
+        const dst = this._cloudHistoryIndex ^ 1;
+        const prev = this._cloudHistoryFBOs[this._cloudHistoryIndex];
+        this._cloudHistoryFBOs[dst].bind();
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        this._shaderManager.bind('cloudTemporalResolve');
+        this._shaderManager.setUniform('u_trace', 0);
+        this._cloudTraceFBO.colors[0].bind(0);
+        this._shaderManager.setUniform('u_history', 1);
+        prev.colors[0].bind(1);
+        this._shaderManager.setUniform('u_gDepth', 2);
+        this._gBufferFBO.depth.bind(2);
+        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_prevViewProj', this._prevViewProj);
+        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_resolution', [w, h]);
+        this._shaderManager.setUniform('u_traceResolution', [tw, th]);
+        this._shaderManager.setUniform('u_bayerIndex', bayerIndex);
+        // History needs BOTH a seeded buffer and a previous camera to reproject through; the two are
+        // invalidated by different things (a resize kills the first, the first frame the second).
+        this._shaderManager.setUniform('u_historyValid', this._cloudHistoryValid && this._hasPrevViewProj);
+        this._shaderManager.setUniform('u_slabMid', node.baseAltitude + node.thickness * 0.5);
+        this._drawFullscreen();
+
+        this._cloudHistoryIndex = dst;
+        this._cloudHistoryValid = true;
+        return this._cloudHistoryFBOs[dst].colors[0];
+    }
+
+    /**
+     * Size the temporal targets, invalidating history whenever they change.
+     *
+     * The invalidation is not optional: `Framebuffer.resize` deletes and reallocates its attachments,
+     * and the replacements hold uninitialized memory rather than zeros — reprojecting into that shows
+     * garbage, not merely a stale image.
+     */
+    private _ensureCloudTemporalTargets(w: number, h: number, tw: number, th: number): void {
+        if (this._cloudHistoryFBOs.length === 0) {
+            for (let i = 0; i < 2; i++)
+                this._cloudHistoryFBOs.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }));
+        }
+        if (this._cloudHistoryW !== w || this._cloudHistoryH !== h) {
+            for (const fbo of this._cloudHistoryFBOs) fbo.resize(w, h);
+            this._cloudHistoryW = w;
+            this._cloudHistoryH = h;
+            this._cloudHistoryValid = false;
+        }
+        if (this._cloudTraceFBO.width !== tw || this._cloudTraceFBO.height !== th) {
+            this._cloudTraceFBO.resize(tw, th);
+            this._cloudHistoryValid = false;
+        }
+    }
+
+    /**
+     * Drop any accumulated temporal history. Call on a camera cut, scene change, or anything else
+     * that makes last frame's image meaningless — otherwise the accumulation buffer smears the old
+     * view across the new one for the ~16 frames it takes to refresh every Bayer slot.
+     */
+    public invalidateTemporalHistory(): void {
+        this._cloudHistoryValid = false;
     }
 
     /**
@@ -2754,6 +3012,62 @@ export class Renderer {
     }
 
     /**
+     * Detect a camera CUT — a teleport or a switch to a different camera node — and drop the cloud
+     * temporal history when one happens.
+     *
+     * Motion blur has never needed this: a one-frame smear across a cut is invisible. A Bayer-subset
+     * accumulation buffer is a different matter, because 15/16 of the image would be reprojected from
+     * a view that no longer exists and it takes 16 frames to refresh every slot.
+     *
+     * The test is deliberately NOT a comparison of view-projection matrix elements. Those scale with
+     * the camera's world position, so the same threshold that catches a teleport near the origin also
+     * fires on an ordinary fast dolly far from it — measured here at ~49 for a 50-unit/frame move
+     * versus ~1.2e4 for a genuine teleport, with no stable constant between them. Instead it asks two
+     * scale-free questions:
+     *
+     *   - did the view direction jump further than any real turn would in one frame?
+     *   - did the camera move a large fraction of its distance to the cloud layer?
+     *
+     * The second is the meaningful one for reprojection: parallax error depends on how far the camera
+     * moved *relative to how far away the content is*, which is exactly this ratio.
+     */
+    private _detectCameraCut(node: VolumetricCloudsNode): void {
+        if (this._activeCamera !== this._lastTemporalCamera) {
+            this._lastTemporalCamera = this._activeCamera;
+            this._cloudHistoryValid = false;
+            this._captureTemporalCameraState();
+            return;
+        }
+
+        const pos = this._activeCamera.position;
+        const view = this._activeCamera.viewMatrix;
+        // Camera forward is the negated third row of the view matrix (it is the inverse rotation).
+        const fx = -view[2], fy = -view[6], fz = -view[10];
+
+        const prev = this._prevTemporalCamPos;
+        const prevF = this._prevTemporalCamFwd;
+        const moved = Math.hypot(pos[0] - prev[0], pos[1] - prev[1], pos[2] - prev[2]);
+        const facing = fx * prevF[0] + fy * prevF[1] + fz * prevF[2];
+
+        // Distance to the cloud layer, as the reference scale for "did we move a lot".
+        const slabMid = node.baseAltitude + node.thickness * 0.5;
+        const layerDistance = Math.max(1, Math.abs(slabMid - pos[1]));
+
+        if (facing < Renderer.TEMPORAL_CUT_COS_ANGLE ||
+            moved > layerDistance * Renderer.TEMPORAL_CUT_MOVE_FRACTION)
+            this._cloudHistoryValid = false;
+
+        this._captureTemporalCameraState();
+    }
+
+    private _captureTemporalCameraState(): void {
+        const pos = this._activeCamera.position;
+        const view = this._activeCamera.viewMatrix;
+        vec3.set(this._prevTemporalCamPos, pos[0], pos[1], pos[2]);
+        vec3.set(this._prevTemporalCamFwd, -view[2], -view[6], -view[10]);
+    }
+
+    /**
      * Open a GPU timing scope, and report whether the pass should run at all. Combining the two keeps
      * every call site to a single `if (!this._beginPass('x')) return;` line, and guarantees a pass
      * that is switched off is never also timed (which would report a misleading ~0ms rather than
@@ -2804,8 +3118,11 @@ export class Renderer {
         this._velocityFBO.resize(width, height);
         this._velocityTileFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
         this._velocityNeighborFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
-        // A resize invalidates the previous-frame camera transform; skip blur for one frame.
+        // A resize invalidates the previous-frame camera transform; skip blur for one frame. It also
+        // reallocates every attachment (Framebuffer.create deletes and recreates), so the cloud
+        // temporal history now points at uninitialized memory — not merely a stale image.
         this._hasPrevViewProj = false;
+        this._cloudHistoryValid = false;
     }
 
     public set viewport(viewport: HTMLElement) {
@@ -3865,6 +4182,12 @@ export class Renderer {
         };
         addFbo(this._sceneFBO); addFbo(this._gBufferFBO); addFbo(this._shadowMapFBO);
         for (const m of this._bloomMips) addFbo(m);
+        // Previously missing from this list, and now joined by the cloud temporal targets and the
+        // baked noise volumes — an 8MB volume silently absent from the estimate defeats its purpose.
+        addFbo(this._sceneDepthFBO); addFbo(this._cloudsFBO); addFbo(this._cloudTraceFBO);
+        for (const f of this._cloudHistoryFBOs) addFbo(f);
+        if (this._cloudBaseNoise) bytes += this._cloudBaseNoise.byteSize;
+        if (this._cloudDetailNoise) bytes += this._cloudDetailNoise.byteSize;
         addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
         addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
@@ -3968,6 +4291,8 @@ export class Renderer {
      */
     public set quality(preset: QualityPreset) {
         this._quality = preset;
+        // Re-arm the one-shot cloud push so the new tier's cloud settings actually land.
+        this._cloudsTierApplied = null;
         if (preset === 'custom') return;
         const t = QUALITY_TIERS[preset];
         this._ssaoEnabled = t.ssaoEnabled;
@@ -3987,10 +4312,28 @@ export class Renderer {
     /** Cloud knobs for the active tier, applied to the scene's clouds node each frame it exists. */
     private _applyQualityToClouds(node: VolumetricCloudsNode): void {
         if (this._quality === 'custom') return;
+        // Push the tier's values ONCE per (tier, node) rather than every frame. Re-asserting them
+        // continuously would silently overwrite anything the user changed by hand a frame later —
+        // including the inspector's own Temporal Upscale checkbox, which would appear to do nothing.
+        if (this._cloudsTierApplied === this._quality && this._cloudsTierNode === node) return;
+        this._cloudsTierApplied = this._quality;
+        this._cloudsTierNode = node;
         const t = QUALITY_TIERS[this._quality];
-        if (node.resolutionScale !== t.cloudResolutionScale) node.resolutionScale = t.cloudResolutionScale;
-        if (node.steps !== t.cloudSteps) node.steps = t.cloudSteps;
-        if (node.lightSteps !== t.cloudLightSteps) node.lightSteps = t.cloudLightSteps;
+        // Any of these changes what the traced image looks like, so the accumulated history stops
+        // being a valid predecessor for it.
+        if (node.resolutionScale !== t.cloudResolutionScale) {
+            node.resolutionScale = t.cloudResolutionScale;
+            this._cloudHistoryValid = false;
+        }
+        if (node.steps !== t.cloudSteps) { node.steps = t.cloudSteps; this._cloudHistoryValid = false; }
+        if (node.lightSteps !== t.cloudLightSteps) { node.lightSteps = t.cloudLightSteps; this._cloudHistoryValid = false; }
+        // Ultra traces every pixel every frame: it is the reference/still-capture tier, so it trades
+        // the 16x ray saving for zero reprojection artifacts.
+        const wantTemporal = this._quality !== 'ultra';
+        if (node.temporalUpscale !== wantTemporal) {
+            node.temporalUpscale = wantTemporal;
+            this._cloudHistoryValid = false;
+        }
     }
 
     public get shadowMapResolution(): number { return this._shadowMapResolution; }

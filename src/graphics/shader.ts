@@ -185,7 +185,11 @@ export class Shader {
             case 'samplerCube':
                 gl.uniform1i(location, value);
                 break;
-    
+
+            case 'sampler3D':
+                gl.uniform1i(location, value);
+                break;
+
             default:
                 throw new Error(`Unknown uniform type ${type}`);
         }
@@ -278,6 +282,36 @@ export class Shader {
                 case 'samplerCube':
                     defaultValue = 0;
                     break;
+                case 'sampler3D':
+                    defaultValue = 0;
+                    break;
+                // These are all already handled by _setUniform and named by getTypeName; only this
+                // switch was missing them, so declaring e.g. an ivec2 uniform threw at link time
+                // even though setting one would have worked fine.
+                case 'ivec2':
+                    defaultValue = [0, 0];
+                    break;
+                case 'ivec3':
+                    defaultValue = [0, 0, 0];
+                    break;
+                case 'ivec4':
+                    defaultValue = [0, 0, 0, 0];
+                    break;
+                case 'bvec2':
+                    defaultValue = [0, 0];
+                    break;
+                case 'bvec3':
+                    defaultValue = [0, 0, 0];
+                    break;
+                case 'bvec4':
+                    defaultValue = [0, 0, 0, 0];
+                    break;
+                case 'mat2':
+                    defaultValue = [1, 0, 0, 1];
+                    break;
+                case 'mat3':
+                    defaultValue = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+                    break;
                 default:
                     throw new Error(`Uniform type ${type} not supported`);
             }
@@ -313,6 +347,7 @@ export class Shader {
             case gl.BOOL_VEC4: return 'bvec4';
             case gl.SAMPLER_2D: return 'sampler2D';
             case gl.SAMPLER_CUBE: return 'samplerCube';
+            case gl.SAMPLER_3D: return 'sampler3D';
             default: return 'unknown';
         }
     }

@@ -10,7 +10,7 @@ export interface TextureConfig {
     mipMap?: boolean;
     mipMapFilter?: 'nearest' | 'linear';
     precision?: 'low' | 'high';
-    target?: 'texture2D' | 'cubemap';
+    target?: 'texture2D' | 'cubemap' | 'texture3D';
 }
 
 /**
@@ -33,6 +33,9 @@ export class Texture {
     private readonly _texture: WebGLTexture;
     private _width: number = 0;
     private _height: number = 0;
+    // Third dimension, only ever non-zero for a TEXTURE_3D volume. Kept as a plain field rather than
+    // a separate subclass so `byteSize`, `bind`/`unbind` and `delete` stay single implementations.
+    private _depth: number = 0;
     private _data: HTMLImageElement | CubemapFaces | null = null;
     // The compressed bytes this texture was decoded from (PNG/JPEG/…), kept so it can be serialized
     // without re-encoding it through a canvas. Import decodes from a Blob URL, so the image has no data:
@@ -61,7 +64,9 @@ export class Texture {
         this._precision = options?.precision || 'low';
         this._mipMap = options?.mipMap === undefined ? true : options.mipMap;
 
-        this._target = options?.target === 'cubemap' ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D;
+        this._target = options?.target === 'cubemap' ? gl.TEXTURE_CUBE_MAP
+                     : options?.target === 'texture3D' ? gl.TEXTURE_3D
+                     : gl.TEXTURE_2D;
 
         this._wrapping = this._getWrappingValue(options?.wrapping) || gl.CLAMP_TO_EDGE;
 
@@ -310,6 +315,41 @@ export class Texture {
         this.unbind();
     }
 
+    /**
+     * Allocate an empty renderable 3D volume with immutable storage. Requires `target: 'texture3D'`.
+     *
+     * Immutable storage (`texStorage3D` rather than `texImage3D`) is deliberate: it is what makes the
+     * texture's layers valid attachment targets for `gl.framebufferTextureLayer`, which is how the
+     * volume gets filled — one fullscreen draw per z-slice. Generating a 128³ field on the CPU would
+     * be tens of millions of noise evaluations in JS; on the GPU it is one frame's work, once.
+     *
+     * Wrapping defaults to REPEAT on all three axes, including WRAP_R (which the 2D path never sets),
+     * because the only consumer so far is a *tileable* noise field whose whole purpose is to repeat.
+     */
+    public createVolume(width: number, height: number, depth: number,
+                        wrapping: 'clamp' | 'repeat' | 'mirror' = 'repeat'): void {
+        if (this._target !== gl.TEXTURE_3D) {
+            Logger.error('createVolume requires a texture created with target: "texture3D"', 'Texture');
+            return;
+        }
+        this._bindForUpload();
+        this._width = width;
+        this._height = height;
+        this._depth = depth;
+        this._mipMap = false; // a tiling noise field wants a single level; mips would blur the tile seams
+
+        gl.texStorage3D(gl.TEXTURE_3D, 1, this._internalFormat, width, height, depth);
+
+        const wrap = this._getWrappingValue(wrapping);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, wrap);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, wrap);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, wrap);
+        this.checkForErrors();
+        this.unbind();
+    }
+
     /** (Re)generate the mip chain for this texture — e.g. after rendering a captured cubemap. */
     public generateMipmaps(): void {
         this._bindForUpload();
@@ -379,16 +419,23 @@ export class Texture {
             mipMap: this._mipMap,
             mipMapFilter: this._minFilter === gl.NEAREST_MIPMAP_NEAREST ? 'nearest' : 'linear',
             precision: this._precision,
-            target: this._target === gl.TEXTURE_2D ? 'texture2D' : 'cubemap'
+            target: this._target === gl.TEXTURE_2D ? 'texture2D'
+                  : this._target === gl.TEXTURE_3D ? 'texture3D' : 'cubemap'
         }
     }
 
-    /** Rough VRAM footprint in bytes (width*height * bytes-per-pixel * faces * mip factor). bpp mirrors
-     *  the constructor's internalFormat choice (depth=4 / RGBA16F=8 / RGBA8=4). Used by the perf HUD. */
+    /** Depth of a 3D volume; 0 for 2D and cubemap textures. */
+    public get depth(): number { return this._depth; }
+
+    /** Rough VRAM footprint in bytes (width*height*depth * bytes-per-pixel * faces * mip factor). bpp
+     *  mirrors the constructor's internalFormat choice (depth=4 / RGBA16F=8 / RGBA8=4). Used by the
+     *  perf HUD. Without the depth term a 128³ volume would report as 64 KB rather than 8 MB. */
     public get byteSize(): number {
         const bpp = this._usage === 'depth' ? 4 : (this._precision === 'high' ? 8 : 4);
         const faces = this._target === gl.TEXTURE_CUBE_MAP ? 6 : 1;
-        const mip = this._mipMap ? 4 / 3 : 1;
-        return this._width * this._height * bpp * faces * mip;
+        const slices = this._target === gl.TEXTURE_3D ? Math.max(1, this._depth) : 1;
+        // 4/3 is the 2D mip series; a 3D chain converges to 8/7 instead.
+        const mip = this._mipMap ? (this._target === gl.TEXTURE_3D ? 8 / 7 : 4 / 3) : 1;
+        return this._width * this._height * slices * bpp * faces * mip;
     }
 }

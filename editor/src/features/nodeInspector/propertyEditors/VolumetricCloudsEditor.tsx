@@ -21,6 +21,7 @@ interface CloudsState {
   powderStrength: number; absorption: number;
   windDirection: Vec3; windSpeed: number; detailWindFactor: number;
   steps: number; lightSteps: number; maxDistance: number; jitter: boolean; resolutionScale: number;
+  temporalUpscale: boolean;
   enabled: boolean; opacity: number;
 }
 
@@ -38,6 +39,7 @@ function readNode(node: VolumetricCloudsNode): CloudsState {
     windDirection: node.windDirection, windSpeed: node.windSpeed, detailWindFactor: node.detailWindFactor,
     steps: node.steps, lightSteps: node.lightSteps, maxDistance: node.maxDistance, jitter: node.jitter,
     resolutionScale: node.resolutionScale,
+    temporalUpscale: node.temporalUpscale,
     enabled: node.enabled, opacity: node.opacity
   }
 }
@@ -139,6 +141,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {slider('Light Steps', 'lightSteps', 2, 12, 1, 0)}
         {slider('Max Distance', 'maxDistance', 1000, 120000, 500, 0)}
         {check('Jitter (reduce banding)', 'jitter')}
+        {check('Temporal Upscale (1/16 rays per frame)', 'temporalUpscale')}
       </div>
     </Collapsable>
   )

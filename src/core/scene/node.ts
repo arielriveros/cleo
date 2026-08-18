@@ -3982,6 +3982,7 @@ export interface VolumetricCloudsOptions {
     maxDistance?: number;     // max ray length
     jitter?: boolean;         // dither the march start to hide banding
     resolutionScale?: number; // 0.25..1 — rays per screen axis (1 = one ray/pixel, 0.5 = one ray per 2x2 block)
+    temporalUpscale?: boolean; // trace 1/16 of pixels per frame, reconstruct the rest from history
     // Render
     enabled?: boolean;
     opacity?: number;         // 0..1 — final composite opacity
@@ -4028,6 +4029,7 @@ export class VolumetricCloudsNode extends Node {
     private _maxDistance: number;
     private _jitter: boolean;
     private _resolutionScale: number;
+    private _temporalUpscale: boolean;
     // Render
     private _enabled: boolean;
     private _opacity: number;
@@ -4071,6 +4073,11 @@ export class VolumetricCloudsNode extends Node {
         // frame and it produces a low-frequency image, so the full-res default was paying 4x the ray
         // count for detail the upsample filter cannot even show. Raise it to 1.0 for a still capture.
         this._resolutionScale = options.resolutionScale ?? 0.5;
+        // Bayer-subset temporal reprojection: trace 1/16 of the pixels per frame and reconstruct the
+        // rest from reprojected history. On by default because the raymarch dominates a cloudy frame;
+        // the cost is some ghosting under fast camera or wind motion, which is why it can be turned
+        // off (and is, at the Ultra tier and during thumbnail capture).
+        this._temporalUpscale = options.temporalUpscale ?? true;
 
         this._enabled = options.enabled ?? true;
         this._opacity = options.opacity ?? 1.0;
@@ -4145,6 +4152,8 @@ export class VolumetricCloudsNode extends Node {
     public set jitter(v: boolean) { this._jitter = v; }
     public get resolutionScale(): number { return this._resolutionScale; }
     public set resolutionScale(v: number) { this._resolutionScale = Math.min(1, Math.max(0.25, v)); }
+    public get temporalUpscale(): boolean { return this._temporalUpscale; }
+    public set temporalUpscale(v: boolean) { this._temporalUpscale = v; }
 
     // --- Render ---
     public get enabled(): boolean { return this._enabled; }

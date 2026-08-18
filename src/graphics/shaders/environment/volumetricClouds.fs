@@ -9,6 +9,9 @@
 // occludes the clouds. Output is straight-alpha (composited with SRC_ALPHA, ONE_MINUS_SRC_ALPHA).
 
 precision highp float;
+// GLSL ES 3.00 predeclares default precision for sampler2D/samplerCube in the fragment language but
+// NOT for sampler3D, so this qualifier is mandatory — without it the shader fails to compile.
+precision highp sampler3D;
 
 in vec2 fragTexCoord;
 
@@ -56,6 +59,11 @@ uniform int   u_lightSteps;
 uniform float u_maxDistance;
 uniform bool  u_jitter;
 
+// Temporal (Bayer-subset) mode — see traceUV().
+uniform bool  u_temporal;
+uniform vec2  u_traceResolution; // size of the reduced trace target, in pixels
+uniform ivec2 u_bayerOffset;     // sub-position within the 4x4 block traced this frame
+
 // Render
 uniform float u_opacity;
 
@@ -64,65 +72,29 @@ const int   MAX_STEPS = 192;
 const int   MAX_LIGHT_STEPS = 12;
 
 // ---------------------------------------------------------------------------
-// Hash-based value noise (self-contained, no textures)
+// Noise: sampled from baked tileable 3D volumes (see cloudNoiseBake.fs)
+//
+// These replace the multi-octave hash FBM this shader used to evaluate inline. The old version cost
+// ~32 hash+lerp taps for the base field and ~24 more for detail, PER SAMPLE — and the secondary
+// sun-march re-evaluated the base field at every one of its steps too. Two trilinear fetches now
+// return the same fields.
+//
+// The volumes tile, so the world-space field repeats every (period / scale) units. With the default
+// baseScale that is ~20km for the base shape, far past any view distance; the detail volume repeats
+// much sooner but is only ever an erosion modulation on top of the base, which hides it.
 // ---------------------------------------------------------------------------
+
+uniform sampler3D u_baseNoise;    // R = shape, G/B = finer bands, A = warp source
+uniform sampler3D u_detailNoise;  // RGB = high-frequency erosion bands
+uniform float u_baseNoiseInvPeriod;   // 1 / lattice cells across the base volume
+uniform float u_detailNoiseInvPeriod; // 1 / lattice cells across the detail volume
+
+// Kept for the per-frame ray-start dither only: that one WANTS fresh randomness every frame (it is
+// what temporal accumulation converges away), so it must not come from a cached field.
 float hash13(vec3 p) {
     p = fract(p * 0.1031);
     p += dot(p, p.zyx + 31.32);
     return fract((p.x + p.y) * p.z);
-}
-
-vec3 hash33(vec3 p) {
-    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
-    p += dot(p, p.yxz + 33.33);
-    return fract((p.xxy + p.yxx) * p.zyx);
-}
-
-float valueNoise(vec3 x) {
-    vec3 i = floor(x);
-    vec3 f = fract(x);
-    f = f * f * (3.0 - 2.0 * f);
-    float n000 = hash13(i + vec3(0.0, 0.0, 0.0));
-    float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
-    float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
-    float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
-    float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
-    float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
-    float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
-    float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
-    float nx00 = mix(n000, n100, f.x);
-    float nx10 = mix(n010, n110, f.x);
-    float nx01 = mix(n001, n101, f.x);
-    float nx11 = mix(n011, n111, f.x);
-    float nxy0 = mix(nx00, nx10, f.y);
-    float nxy1 = mix(nx01, nx11, f.y);
-    return mix(nxy0, nxy1, f.z);
-}
-
-float fbm(vec3 p) {
-    float sum = 0.0;
-    float amp = 0.5;
-    float norm = 0.0;
-    for (int i = 0; i < 4; i++) {
-        sum += amp * valueNoise(p);
-        norm += amp;
-        p *= 2.02;
-        amp *= 0.5;
-    }
-    return sum / norm;
-}
-
-float fbm3(vec3 p) {
-    float sum = 0.0;
-    float amp = 0.5;
-    float norm = 0.0;
-    for (int i = 0; i < 3; i++) {
-        sum += amp * valueNoise(p);
-        norm += amp;
-        p *= 2.03;
-        amp *= 0.5;
-    }
-    return sum / norm;
 }
 
 float remap(float v, float inMin, float inMax, float outMin, float outMax) {
@@ -146,8 +118,8 @@ vec3 g_wind;
 float sampleDensity(vec3 pos, float h, bool cheap) {
     vec3 p = pos + g_wind;
 
-    // Low-frequency base shape.
-    float base = fbm(p * u_baseScale);
+    // Low-frequency base shape, from the baked volume.
+    float base = texture(u_baseNoise, p * u_baseScale * u_baseNoiseInvPeriod).r;
 
     // Coverage remaps the base so higher coverage lets more of the field through; anvilBias
     // widens the effective coverage near the top for spreading cumulonimbus caps.
@@ -161,11 +133,15 @@ float sampleDensity(vec3 pos, float h, bool cheap) {
         // Curl-ish domain warp for wispy edges, then erode with high-frequency detail.
         vec3 dp = pos + g_wind * u_detailWindFactor;
         if (u_curlStrength > 0.0) {
-            vec3 warp = hash33(floor(pos * u_baseScale * 4.0)) - 0.5;
+            // Curl-ish domain warp. The warp vector comes from the base volume's spare channels
+            // rather than a hash: it is smooth (so the warp is coherent rather than per-cell noise)
+            // and it is a fetch we can afford next to the ones already happening here.
+            vec4 warpSample = texture(u_baseNoise, pos * u_baseScale * 4.0 * u_baseNoiseInvPeriod);
+            vec3 warp = warpSample.gba - 0.5;
             dp += warp * u_curlStrength * (1.0 / max(u_detailScale, 1e-5)) * 0.15
-                  + vec3(fbm3(pos * u_detailScale * 0.5)) * u_curlStrength * 50.0;
+                  + vec3(warpSample.a) * u_curlStrength * 50.0;
         }
-        float detail = fbm3(dp * u_detailScale);
+        float detail = texture(u_detailNoise, dp * u_detailScale * u_detailNoiseInvPeriod).r;
         density = remap(density, detail * u_detailStrength, 1.0, 0.0, 1.0);
     }
 
@@ -177,8 +153,8 @@ float henyeyGreenstein(float cosAngle, float g) {
     return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cosAngle, 1.5));
 }
 
-vec3 reconstructWorldPos(float depth) {
-    vec4 clip = vec4(fragTexCoord * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+vec3 reconstructWorldPos(float depth, vec2 uv) {
+    vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     vec4 world = u_invViewProj * clip;
     return world.xyz / world.w;
 }
@@ -188,18 +164,40 @@ vec3 acesFilm(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
+/**
+ * The UV this fragment should trace.
+ *
+ * In temporal mode this shader renders into a buffer 1/4 the size per axis, where each pixel owns one
+ * 4x4 block of the full-resolution cloud image and traces ONE sub-position within it — the one
+ * u_bayerIndex selects this frame. So 1/16 of the rays are cast, and cloudTemporalResolve.fs
+ * reconstructs the rest from reprojected history.
+ *
+ * Doing the selection here, by remapping the UV, rather than by rendering full-size and discarding,
+ * means the saved rays are genuinely never rasterized.
+ */
+vec2 traceUV() {
+    if (!u_temporal) return fragTexCoord;
+    // Block index this fragment stands for, from its position in the reduced-size target.
+    vec2 block = floor(fragTexCoord * u_traceResolution);
+    vec2 sub = vec2(u_bayerOffset);
+    // Centre of the chosen sub-pixel, in full cloud-resolution UV space.
+    return (block * 4.0 + sub + 0.5) / (u_traceResolution * 4.0);
+}
+
 void main() {
+    vec2 uv = traceUV();
+
     // 1. World-space view ray (near -> far), origin at the camera.
-    vec2 ndc = fragTexCoord * 2.0 - 1.0;
+    vec2 ndc = uv * 2.0 - 1.0;
     vec4 nW = u_invViewProj * vec4(ndc, -1.0, 1.0);
     vec4 fW = u_invViewProj * vec4(ndc,  1.0, 1.0);
     vec3 ro = nW.xyz / nW.w;
     vec3 rd = normalize(fW.xyz / fW.w - ro);
 
     // 2. Occlusion bound: distance to solid geometry (background depth == 1.0 => infinite).
-    float depth = texture(u_gDepth, fragTexCoord).r;
+    float depth = texture(u_gDepth, uv).r;
     float sceneDist = u_maxDistance;
-    if (depth < 1.0) sceneDist = min(sceneDist, length(reconstructWorldPos(depth) - u_viewPos));
+    if (depth < 1.0) sceneDist = min(sceneDist, length(reconstructWorldPos(depth, uv) - u_viewPos));
 
     // 3. Intersect the horizontal cloud slab.
     float slabBottom = u_baseAltitude;
