@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { TextureManager, Material } from 'cleo';
+import { TextureManager, Material, isDerivedTextureId } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { cn, TextInput, Button } from '../../../components/ui';
 import ImportIcon from '../../../icons/import.png';
@@ -30,8 +30,10 @@ export default function TextureInspector(props: { tex: string, material: Materia
 
   useEffect(() => {
     const refresh = () => setTexturesIds(
+      // '__packed__' ids are engine-derived channel packs (metallic+roughness+occlusion combined into
+      // one texture); they are not assignable — the source maps in the slots above them are.
       Array.from(TextureManager.Instance.textures.keys())
-        .filter(key => !(key.includes('__editor__') || key.includes('__debug__')))
+        .filter(key => !(key.includes('__editor__') || key.includes('__debug__') || isDerivedTextureId(key)))
     );
     refresh();
     const handleTexturesChanged = () => {
@@ -76,10 +78,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
 
   const deleteTexture = () => {
     props.material.textures.delete(props.tex);
-    if (props.tex === 'baseTexture')
-      props.material.properties.set('hasBaseTexture', false)
-    else
-      props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, false)
+    props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, false)
 
     setTexture(null);
     eventEmitter.emit('TEXTURES_CHANGED');

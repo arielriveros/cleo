@@ -39,10 +39,19 @@ interface PBRProperties {
     emissiveFactor?: number[];
     textures?: {
         baseColorTexture?: string;
-        metallicRoughnessTexture?: string; // b=metallic, g=roughness
-        normalMap?: string;
+        /**
+         * Authored source maps. They are never bound directly: `systems/texturePacker.ts` combines them
+         * into one ORM texture (r=occlusion, g=roughness, b=metallic) in the derived `ormTexture` slot,
+         * which is what the shaders sample. Assigning one texture to several of these slots marks it as
+         * pre-packed, and the packer reuses it as-is.
+         */
+        metallicMap?: string;
+        roughnessMap?: string;
         occlusionMap?: string;
+        normalMap?: string;
         emissiveMap?: string;
+        /** Legacy/glTF input only: a pre-packed map, fanned out to metallicMap + roughnessMap. Never written back. */
+        metallicRoughnessTexture?: string;
     }
 }
 
@@ -159,8 +168,17 @@ export class Material {
         material.properties.set('hasBaseColorTexture', tex.baseColorTexture ? true : false);
         if (tex.baseColorTexture) material.textures.set('baseColorTexture', tex.baseColorTexture);
 
-        material.properties.set('hasMetallicRoughnessTexture', tex.metallicRoughnessTexture ? true : false);
-        if (tex.metallicRoughnessTexture) material.textures.set('metallicRoughnessTexture', tex.metallicRoughnessTexture);
+        // A pre-packed map (glTF, or a scene saved before the slots were split) fans out to both source
+        // slots. Two slots on one texture is what tells the packer it is already ORM-packed, so it takes
+        // the identity path and hands the very same texture straight back.
+        const metallicId = tex.metallicMap ?? tex.metallicRoughnessTexture;
+        const roughnessId = tex.roughnessMap ?? tex.metallicRoughnessTexture;
+
+        material.properties.set('hasMetallicMap', metallicId ? true : false);
+        if (metallicId) material.textures.set('metallicMap', metallicId);
+
+        material.properties.set('hasRoughnessMap', roughnessId ? true : false);
+        if (roughnessId) material.textures.set('roughnessMap', roughnessId);
 
         material.properties.set('hasNormalMap', tex.normalMap ? true : false);
         if (tex.normalMap) material.textures.set('normalMap', tex.normalMap);
@@ -237,9 +255,12 @@ export class Material {
                 roughness: this.properties.get('roughness'),
                 opacity: this.properties.get('opacity'),
                 emissiveFactor: this.properties.get('emissiveFactor'),
+                // Source maps only. Enumerating fixed keys (rather than dumping the map) is what keeps
+                // the packer's derived `ormTexture` out of every asset, template and publish.
                 textures: {
                     baseColorTexture: this.textures.get('baseColorTexture'),
-                    metallicRoughnessTexture: this.textures.get('metallicRoughnessTexture'),
+                    metallicMap: this.textures.get('metallicMap'),
+                    roughnessMap: this.textures.get('roughnessMap'),
                     normalMap: this.textures.get('normalMap'),
                     occlusionMap: this.textures.get('occlusionMap'),
                     emissiveMap: this.textures.get('emissiveMap')
@@ -301,8 +322,13 @@ export class Material {
                 roughness: m.roughness ?? 1.0,
                 opacity: m.opacity ?? 1.0,
                 emissiveFactor: m.emissiveFactor || [0, 0, 0],
+                // `metallicRoughnessTexture` is the pre-split key. Material.PBR fans it out to both
+                // source slots, so a scene saved before the split reloads onto the identity path and
+                // renders identically; it is then re-serialized under the new keys.
                 textures: {
                     baseColorTexture: m.textures?.baseColorTexture,
+                    metallicMap: m.textures?.metallicMap,
+                    roughnessMap: m.textures?.roughnessMap,
                     metallicRoughnessTexture: m.textures?.metallicRoughnessTexture,
                     normalMap: m.textures?.normalMap,
                     occlusionMap: m.textures?.occlusionMap,
@@ -520,8 +546,9 @@ function toPlainValue(v: any): any {
     return v;
 }
 
-/** cyrb53 — small, stable, non-crypto string hash. Used to derive a unique-but-dedupable shader key. */
-function cyrb53(str: string, seed = 0): string {
+/** cyrb53 — small, stable, non-crypto string hash. Used to derive a unique-but-dedupable shader key
+ *  (and, in `systems/texturePacker.ts`, a packed-texture key from its source spec). */
+export function cyrb53(str: string, seed = 0): string {
     let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
     for (let i = 0; i < str.length; i++) {
         const ch = str.charCodeAt(i);

@@ -23,9 +23,9 @@ uniform int u_layerCount;
 uniform vec3 u_baseColor;
 uniform vec3 u_viewPos; // camera world position (parallax view vector + specular V)
 
+// u_normalN is packed: rgb = tangent-space normal, a = displacement height (see geometryTerrain.fs).
 uniform sampler2D u_albedo0; uniform sampler2D u_albedo1; uniform sampler2D u_albedo2; uniform sampler2D u_albedo3;
 uniform sampler2D u_normal0; uniform sampler2D u_normal1; uniform sampler2D u_normal2; uniform sampler2D u_normal3;
-uniform sampler2D u_disp0; uniform sampler2D u_disp1; uniform sampler2D u_disp2; uniform sampler2D u_disp3;
 uniform vec3 u_color0; uniform vec3 u_color1; uniform vec3 u_color2; uniform vec3 u_color3;
 uniform float u_metallic0; uniform float u_metallic1; uniform float u_metallic2; uniform float u_metallic3;
 uniform float u_roughness0; uniform float u_roughness1; uniform float u_roughness2; uniform float u_roughness3;
@@ -42,10 +42,11 @@ uniform vec2 u_hRange0; uniform vec2 u_hRange1; uniform vec2 u_hRange2; uniform 
 uniform vec2 u_sRange0; uniform vec2 u_sRange1; uniform vec2 u_sRange2; uniform vec2 u_sRange3;
 
 // --- Lighting uniforms (subset of pbr.fs, populated by _setLighting) -----------------------------------
-// NOTE: intentionally NO u_shadowMap / u_envMap here. The terrain layer samplers already occupy texture
-// units 0..12 (unit 6 = disp1, unit 7 = albedo2, ...), which would collide with the forward shadow (unit 6)
+// NOTE: intentionally NO u_shadowMap / u_envMap here. The terrain layer samplers occupy texture units
+// 0..8 (unit 6 = normal2, unit 7 = albedo3, ...), which would collide with the forward shadow (unit 6)
 // and env cube (unit 7) — and a samplerCube + sampler2D on the same unit is a GLES draw error. Terrain is
 // rough/diffuse, so dropping specular IBL and probe-capture shadows costs almost nothing here.
+// (It was 0..12 before each layer's height moved into its normal map's alpha; the collision remains.)
 uniform int u_numPointLights;
 uniform int u_numSpotlights;
 
@@ -159,10 +160,11 @@ void main() {
     vec2 uv1 = fragTexCoord * u_tiling1;
     vec2 uv2 = fragTexCoord * u_tiling2;
     vec2 uv3 = fragTexCoord * u_tiling3;
-    float h0 = (u_hasDisp0 == 1) ? texture(u_disp0, uv0).r : 0.0;
-    float h1 = (u_hasDisp1 == 1) ? texture(u_disp1, uv1).r : 0.0;
-    float h2 = (u_hasDisp2 == 1) ? texture(u_disp2, uv2).r : 0.0;
-    float h3 = (u_hasDisp3 == 1) ? texture(u_disp3, uv3).r : 0.0;
+    // Height comes out of the normal map's alpha, read at the UN-offset uv (it is what produces the offset).
+    float h0 = (u_hasDisp0 == 1) ? texture(u_normal0, uv0).a : 0.0;
+    float h1 = (u_hasDisp1 == 1) ? texture(u_normal1, uv1).a : 0.0;
+    float h2 = (u_hasDisp2 == 1) ? texture(u_normal2, uv2).a : 0.0;
+    float h3 = (u_hasDisp3 == 1) ? texture(u_normal3, uv3).a : 0.0;
     if (u_hasDisp0 == 1) uv0 -= pdir * (h0 * u_dispScale0);
     if (u_hasDisp1 == 1) uv1 -= pdir * (h1 * u_dispScale1);
     if (u_hasDisp2 == 1) uv2 -= pdir * (h2 * u_dispScale2);

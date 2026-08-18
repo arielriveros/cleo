@@ -23,13 +23,17 @@ uniform int u_layerCount;
 uniform vec3 u_baseColor;
 uniform vec3 u_viewPos; // camera world position (for the parallax view vector)
 
-// Per-layer surface. Albedo/normal/displacement textures are sampled only when their u_hasXxxN flag is 1
-// (a uniform, so the branch is uniform control flow — derivatives stay valid); otherwise the scalar/vector
-// factors below are used. Metallic/roughness are scalar-only for terrain. u_colorN multiplies the albedo
-// (it is the base color / diffuse for Basic/Blinn). u_dispN.r is the height in 0..1.
+// Per-layer surface. Albedo/normal textures are sampled only when their u_hasXxxN flag is 1 (a uniform,
+// so the branch is uniform control flow — derivatives stay valid); otherwise the scalar/vector factors
+// below are used. Metallic/roughness are scalar-only for terrain. u_colorN multiplies the albedo (it is
+// the base color / diffuse for Basic/Blinn).
+//
+// u_normalN is a PACKED texture built by systems/texturePacker.ts: rgb = tangent-space normal,
+// a = displacement height in 0..1 (which drives both the parallax offset and the height-aware blend).
+// A layer with a height map but no normal map still binds one here, with a flat normal in rgb. Folding
+// height into the normal's unused alpha is what takes terrain from 13 bound texture units down to 9.
 uniform sampler2D u_albedo0; uniform sampler2D u_albedo1; uniform sampler2D u_albedo2; uniform sampler2D u_albedo3;
 uniform sampler2D u_normal0; uniform sampler2D u_normal1; uniform sampler2D u_normal2; uniform sampler2D u_normal3;
-uniform sampler2D u_disp0; uniform sampler2D u_disp1; uniform sampler2D u_disp2; uniform sampler2D u_disp3;
 uniform vec3 u_color0; uniform vec3 u_color1; uniform vec3 u_color2; uniform vec3 u_color3;
 uniform float u_metallic0; uniform float u_metallic1; uniform float u_metallic2; uniform float u_metallic3;
 uniform float u_roughness0; uniform float u_roughness1; uniform float u_roughness2; uniform float u_roughness3;
@@ -94,10 +98,11 @@ void main() {
     vec2 uv1 = fragTexCoord * u_tiling1;
     vec2 uv2 = fragTexCoord * u_tiling2;
     vec2 uv3 = fragTexCoord * u_tiling3;
-    float h0 = (u_hasDisp0 == 1) ? texture(u_disp0, uv0).r : 0.0;
-    float h1 = (u_hasDisp1 == 1) ? texture(u_disp1, uv1).r : 0.0;
-    float h2 = (u_hasDisp2 == 1) ? texture(u_disp2, uv2).r : 0.0;
-    float h3 = (u_hasDisp3 == 1) ? texture(u_disp3, uv3).r : 0.0;
+    // Height comes out of the normal map's alpha, read at the UN-offset uv (it is what produces the offset).
+    float h0 = (u_hasDisp0 == 1) ? texture(u_normal0, uv0).a : 0.0;
+    float h1 = (u_hasDisp1 == 1) ? texture(u_normal1, uv1).a : 0.0;
+    float h2 = (u_hasDisp2 == 1) ? texture(u_normal2, uv2).a : 0.0;
+    float h3 = (u_hasDisp3 == 1) ? texture(u_normal3, uv3).a : 0.0;
     if (u_hasDisp0 == 1) uv0 -= pdir * (h0 * u_dispScale0);
     if (u_hasDisp1 == 1) uv1 -= pdir * (h1 * u_dispScale1);
     if (u_hasDisp2 == 1) uv2 -= pdir * (h2 * u_dispScale2);

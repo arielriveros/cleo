@@ -86,6 +86,7 @@ import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial } from './material';
 import { ensureCustomShader, customForwardTypes } from './systems/customShaders';
+import { TexturePacker } from './systems/texturePacker';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats, countFullscreenPass, setViewportSize } from './renderStats';
@@ -886,6 +887,10 @@ export class Renderer {
         // Compile+register any custom-material programs before any pass calls initializeModel/getShader.
         this._ensureCustomShaders(scene);
 
+        // Combine each material's separate metallic/roughness/occlusion (and specular/reflectivity) maps
+        // into the single packed texture the shaders sample. Before any pass binds a material.
+        this._ensurePackedTextures(scene);
+
         // Cache view/projection/inverse and update the culling frustum for this frame
         const view = this._activeCamera.viewMatrix;
         const proj = this._activeCamera.projectionMatrix;
@@ -1147,6 +1152,22 @@ export class Renderer {
         // Screen-space post-process materials live on the active camera, not on meshes.
         const screenMats = scene.activeCamera?.screenMaterials;
         if (screenMats) for (const mat of screenMats) ensureCustomShader(mat);
+    }
+
+    /**
+     * Keep every material's derived (channel-packed) texture slots in step with its authored source
+     * maps. Idempotent and cheap — the common path is a few map reads and a string compare per material.
+     *
+     * Per frame rather than on assignment because source textures decode asynchronously: a map assigned
+     * this frame may not have uploaded yet, and a pack that can't resolve is simply retried on the next
+     * pass through here. Sprites are skipped (Basic materials have nothing to combine) and terrain
+     * composites sync their own layer slots, which they own.
+     */
+    private _ensurePackedTextures(scene: Scene): void {
+        const packer = TexturePacker.Instance;
+        for (const node of scene.models) packer.sync(node.model.material, this._frameIndex);
+        for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._frameIndex);
+        packer.sweep(this._frameIndex);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -2862,19 +2883,34 @@ export class Renderer {
     private _textureSlot(name: string): number {
         switch (name) {
             case 'texture': case 'baseTexture': case 'baseColorTexture': return 0;
-            case 'specularMap': case 'metallicRoughnessTexture': return 1;
+            case 'ormTexture': case 'specularReflectivityMap': return 1;
             case 'emissiveMap': return 2;
             case 'normalMap': return 3;
-            case 'maskMap': case 'occlusionMap': return 4;
-            case 'reflectivityMap': return 5;
+            case 'maskMap': return 4;
             default: return 0;
         }
     }
+
+    /**
+     * Slots a material carries as authoring inputs but never binds: `systems/texturePacker.ts` combines
+     * them into a derived slot (`ormTexture`, `specularReflectivityMap`) and the shader samples that.
+     *
+     * Skipping them is not tidiness. `_textureSlot` falls through to unit 0, and while `setUniform`
+     * no-ops on a uniform the shader doesn't declare, `texture.bind` does not — so a source slot left in
+     * the loop binds straight over the base-colour texture and silently blackens the material. That is
+     * also a pre-existing bug for `displacementMap`, which a TerrainMaterial rendered through this path
+     * (the terrain-material inspector's preview) has always had.
+     */
+    private static readonly _SOURCE_SLOTS = new Set([
+        'metallicMap', 'roughnessMap', 'occlusionMap', 'metallicRoughnessTexture',
+        'specularMap', 'reflectivityMap', 'displacementMap'
+    ]);
 
     private _applyMaterial(material: Material): void {
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(`u_material.${name}`, value);
         for (const [name, tex] of material.textures) {
+            if (Renderer._SOURCE_SLOTS.has(name)) continue;
             const slot = this._textureSlot(name);
             this._shaderManager.setUniform(`u_material.${name}`, slot);
             const texture = TextureManager.Instance.getTexture(tex);
@@ -2910,9 +2946,11 @@ export class Renderer {
 
     private _applyTerrainMaterial(material: Material): void {
         // Fixed slot layout so every sampler in the terrain shader references a valid texture (a
-        // shared fallback fills unassigned layer slots): 0 = splat, then per layer i albedo/normal/mr.
-        // 13 units total. The scalar/vector blend uniforms (u_color*, u_metallic*, u_tiling*, u_has*,
-        // u_baseColor, u_layerCount, u_useAuto, ...) already match the shader by name.
+        // shared fallback fills unassigned layer slots): 0 = splat, then per layer i albedo/normal.
+        // 9 units total — the per-layer displacement map used to be a tenth-through-thirteenth, before
+        // Terrain packed each layer's height into its normal map's alpha. The scalar/vector blend
+        // uniforms (u_color*, u_metallic*, u_tiling*, u_has*, u_baseColor, u_layerCount, u_useAuto, ...)
+        // already match the shader by name.
         const fallback = TextureManager.Instance.getTexture('Null');
         const bindAt = (name: string, slot: number) => {
             const texId = material.textures.get(name);
@@ -2922,10 +2960,9 @@ export class Renderer {
         };
         bindAt('u_splat', 0);
         for (let i = 0; i < 4; i++) {
-            const base = 1 + i * 3;
+            const base = 1 + i * 2;
             bindAt(`u_albedo${i}`, base);
             bindAt(`u_normal${i}`, base + 1);
-            bindAt(`u_disp${i}`, base + 2);
         }
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(name, value);

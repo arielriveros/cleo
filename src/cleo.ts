@@ -32,6 +32,11 @@ export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
 export { InputManager } from "./input/inputManager";
 export { TextureManager } from "./graphics/systems/textureManager";
+// Channel packing: separate metallic/roughness/occlusion (and specular/reflectivity) source maps are
+// combined into one texture before the shaders sample them. `isDerivedTextureId` identifies the
+// results, which are engine-owned — never assignable, listable or serializable.
+export { TexturePacker, isDerivedTextureId, PACKED_ID_PREFIX } from "./graphics/systems/texturePacker";
+export type { PackSpec, ChannelSource } from "./graphics/systems/texturePacker";
 export { RigidBody as Body, Trigger } from "./physics/body";
 export { Ragdoll, RAGDOLL_DEFAULTS } from "./physics/ragdoll";
 export type { RagdollOptions } from "./physics/ragdoll";

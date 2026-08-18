@@ -176,8 +176,12 @@ export class AnimatedModel {
                 roughness: m.roughness ?? 1.0,
                 opacity: m.opacity ?? 1.0,
                 emissiveFactor: m.emissiveFactor || [0,0,0],
+                // metallicRoughnessTexture is the pre-split key; Material.PBR fans it out to the
+                // metallicMap/roughnessMap source slots so older saves reload unchanged.
                 textures: {
                     baseColorTexture: m.textures?.baseColorTexture,
+                    metallicMap: m.textures?.metallicMap,
+                    roughnessMap: m.textures?.roughnessMap,
                     metallicRoughnessTexture: m.textures?.metallicRoughnessTexture,
                     normalMap: m.textures?.normalMap,
                     occlusionMap: m.textures?.occlusionMap,
@@ -321,9 +325,11 @@ export class AnimatedModel {
                 roughness: this._material.properties.get('roughness'),
                 opacity: this._material.properties.get('opacity'),
                 emissiveFactor: this._material.properties.get('emissiveFactor'),
+                // Source maps only — the engine's derived (channel-packed) slots are never serialized.
                 textures: {
                     baseColorTexture: this._material.textures.get('baseColorTexture'),
-                    metallicRoughnessTexture: this._material.textures.get('metallicRoughnessTexture'),
+                    metallicMap: this._material.textures.get('metallicMap'),
+                    roughnessMap: this._material.textures.get('roughnessMap'),
                     normalMap: this._material.textures.get('normalMap'),
                     occlusionMap: this._material.textures.get('occlusionMap'),
                     emissiveMap: this._material.textures.get('emissiveMap')

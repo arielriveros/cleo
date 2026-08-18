@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { TextureManager } from 'cleo'
+import { TextureManager, isDerivedTextureId } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { idbGet, idbSet } from '../../utils/idb'
@@ -16,9 +16,11 @@ import { AssetDeps, sizeOfAsset } from './assetKinds'
 // hidden (renderer mode collapses the whole bottom bar) — otherwise an import made from the left sidebar
 // wouldn't be indexed until the user happened to look at the explorer.
 
-// Built-in textures the explorer must never show.
+// Built-in textures the explorer must never show. `__packed__` ids are engine-derived channel packs
+// (e.g. metallic + roughness + occlusion combined into one texture): they are rebuilt from the source
+// maps on demand, so they are not assets and have no bytes to store.
 function isUserTexture(id: string): boolean {
-  return !(id.includes('__editor__') || id.includes('__debug__') || id === 'Null')
+  return !(id.includes('__editor__') || id.includes('__debug__') || isDerivedTextureId(id) || id === 'Null')
 }
 
 type VfsContextValue = {

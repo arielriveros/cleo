@@ -19,16 +19,18 @@ uniform struct PBRMaterial {
     bool hasBaseColorTexture;
     sampler2D baseColorTexture;
 
-    float metallic;            // fallback if no metallicRoughnessTexture
+    float metallic;            // fallback if the ORM texture has no metallic channel
     float roughness;
-    bool hasMetallicRoughnessTexture;
-    sampler2D metallicRoughnessTexture; // b=metallic, g=roughness (glTF layout)
+    // Occlusion, roughness and metallic are authored as separate maps and combined into ONE texture by
+    // systems/texturePacker.ts before they get here (glTF layout: r=AO, g=roughness, b=metallic). Each
+    // flag says whether its channel was actually authored; the others fall back to the scalars above.
+    bool hasMetallicMap;
+    bool hasRoughnessMap;
+    bool hasOcclusionMap;
+    sampler2D ormTexture;
 
     bool hasNormalMap;
     sampler2D normalMap;
-
-    bool hasOcclusionMap;
-    sampler2D occlusionMap;
 
     bool hasEmissiveMap;
     vec3 emissiveFactor;
@@ -186,12 +188,16 @@ void main() {
         albedo *= tex;
     }
 
+    // One fetch for all three surface scalars. This used to be two — a metallic/roughness sample here
+    // and an occlusion sample further down — on textures that are now the same texture.
     float metallic = u_material.metallic;
     float roughness = u_material.roughness;
-    if (u_material.hasMetallicRoughnessTexture) {
-        vec3 mrg = texture(u_material.metallicRoughnessTexture, fragTexCoord).rgb;
-        metallic = mrg.b;
-        roughness = mrg.g;
+    float ao = 1.0;
+    if (u_material.hasMetallicMap || u_material.hasRoughnessMap || u_material.hasOcclusionMap) {
+        vec3 orm = texture(u_material.ormTexture, fragTexCoord).rgb;
+        if (u_material.hasOcclusionMap) ao = orm.r;
+        if (u_material.hasRoughnessMap) roughness = orm.g;
+        if (u_material.hasMetallicMap) metallic = orm.b;
     }
 
     vec3 N = getNormal();
@@ -245,12 +251,7 @@ void main() {
         accumulateLight(N, V, albedo, metallic, roughness, L, rad, Lo);
     }
 
-    // Occlusion
-    float ao = 1.0;
-    if (u_material.hasOcclusionMap) {
-        ao = texture(u_material.occlusionMap, fragTexCoord).r;
-    }
-
+    // Occlusion came out of the ORM fetch at the top of main().
     vec3 color = ambient * ao + Lo;
 
     // Emission (sRGB-decoded map). Output stays LINEAR HDR — tonemap/gamma happen at the final present.

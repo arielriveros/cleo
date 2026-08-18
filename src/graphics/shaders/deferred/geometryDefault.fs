@@ -22,8 +22,12 @@ uniform struct Material {
 
     vec3 ambient;
     vec3 specular;
+    // Declared to mirror the forward `default.fs` struct, but never sampled here: the deferred path
+    // derives roughness from `shininess` and metallic from the scalar `reflectivity` below, since the
+    // G-buffer has nowhere to put a specular colour.
     bool hasSpecularMap;
-    sampler2D specularMap;
+    bool hasReflectivityMap;
+    sampler2D specularReflectivityMap;
     float shininess;
 
     vec3 emissive;
@@ -39,8 +43,6 @@ uniform struct Material {
     float opacity;
 
     float reflectivity;
-    bool hasReflectivityMap;
-    sampler2D reflectivityMap;
 } u_material;
 
 void main() {

@@ -17,8 +17,12 @@ uniform struct Material {
 
     vec3 ambient;
     vec3 specular;
+    // Specular colour (rgb) and reflectivity (a) are authored as two maps and combined into ONE texture
+    // by systems/texturePacker.ts before they get here. Each flag says whether its part was authored;
+    // the others fall back to the scalars.
     bool hasSpecularMap;
-    sampler2D specularMap;
+    bool hasReflectivityMap;
+    sampler2D specularReflectivityMap;
     float shininess;
     
     vec3 emissive;
@@ -34,8 +38,6 @@ uniform struct Material {
     float opacity;
 
     float reflectivity;
-    bool hasReflectivityMap;
-    sampler2D reflectivityMap;
 } u_material;
 
 // Lighting
@@ -193,9 +195,16 @@ void main() {
     vec3 matAmbient  = u_material.ambient * baseTex;
     vec3 matDiffuse  = u_material.diffuse * baseTex;
 
+    // One fetch for both: specular tint in rgb (still sRGB — the pack is a raw byte copy), reflectivity
+    // in alpha. Hoisted out of the env-map branch below so the two maps that are now one texture are
+    // also one sample.
     vec3 matSpecular = u_material.specular;
-    if (u_material.hasSpecularMap)
-        matSpecular *= toLinear(texture(u_material.specularMap, fragTexCoord).rgb);
+    float reflectivity = u_material.reflectivity;
+    if (u_material.hasSpecularMap || u_material.hasReflectivityMap) {
+        vec4 specRefl = texture(u_material.specularReflectivityMap, fragTexCoord);
+        if (u_material.hasSpecularMap) matSpecular *= toLinear(specRefl.rgb);
+        if (u_material.hasReflectivityMap) reflectivity = specRefl.a;
+    }
 
     // Single ambient term (from the directional light's ambient); zeroed when there is no dir light.
     vec3 result = u_dirLight.ambient * matAmbient;
@@ -215,10 +224,6 @@ void main() {
         vec3 R = reflect(I, normal);
         vec3 envC = vec3(texture(u_envMap, R));
         vec3 reflection = (u_envMapLinear ? envC : toLinear(envC)) * matSpecular;
-        float reflectivity = u_material.reflectivity;
-        if (u_material.hasReflectivityMap)
-            reflectivity = texture(u_material.reflectivityMap, fragTexCoord).b; // b channel if using roughmetal workflow
-
         result = mix(result, reflection, reflectivity / 2.0);
     }
 

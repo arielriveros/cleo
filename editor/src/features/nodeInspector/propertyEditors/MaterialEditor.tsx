@@ -126,7 +126,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
       if (!material.properties.get('emissiveFactor')) material.properties.set('emissiveFactor', material.properties.get('emissive') || [0,0,0]);
       if (material.properties.get('hasBaseColorTexture') === undefined) material.properties.set('hasBaseColorTexture', false);
-      if (material.properties.get('hasMetallicRoughnessTexture') === undefined) material.properties.set('hasMetallicRoughnessTexture', false);
+      if (material.properties.get('hasMetallicMap') === undefined) material.properties.set('hasMetallicMap', false);
+      if (material.properties.get('hasRoughnessMap') === undefined) material.properties.set('hasRoughnessMap', false);
       if (material.properties.get('hasNormalMap') === undefined) material.properties.set('hasNormalMap', false);
       if (material.properties.get('hasOcclusionMap') === undefined) material.properties.set('hasOcclusionMap', false);
       if (material.properties.get('hasEmissiveMap') === undefined) material.properties.set('hasEmissiveMap', false);
@@ -252,8 +253,13 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             </Section>
             <Section title='Textures'>
               <div className='flex flex-wrap gap-3'>
+                {/* Metallic/Roughness/Occlusion are authored separately and combined into one packed
+                    texture by the engine before they reach the shader (see systems/texturePacker.ts).
+                    Assigning the SAME map to several of these marks it pre-packed (glTF ORM order),
+                    and it is then reused as-is instead of being re-combined. */}
                 {texSlot('Base Color', 'baseColorTexture')}
-                {texSlot('Metal+Rough', 'metallicRoughnessTexture')}
+                {texSlot('Metallic', 'metallicMap')}
+                {texSlot('Roughness', 'roughnessMap')}
                 {texSlot('Normal', 'normalMap')}
                 {texSlot('Occlusion', 'occlusionMap')}
                 {texSlot('Emissive', 'emissiveMap')}

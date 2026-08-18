@@ -8,6 +8,7 @@ import { Model } from '../graphics/model';
 import { Material, TerrainMaterial, TerrainFoliageRule } from '../graphics/material';
 import { Texture } from '../graphics/texture';
 import { TextureManager } from '../graphics/systems/textureManager';
+import { TexturePacker } from '../graphics/systems/texturePacker';
 import { Loader } from '../graphics/loader';
 import { Logger } from '../core/logger';
 import { FoliageLayer } from './foliage';
@@ -657,6 +658,48 @@ export class Terrain {
         };
     }
 
+    /**
+     * Combine a layer's normal map and displacement (height) map into the single packed texture bound at
+     * `u_normal{index}`: rgb = tangent-space normal, a = height. Height only ever needed one channel and
+     * normal maps never used their alpha, so this is a free saving — it takes the terrain shader from 13
+     * bound texture units down to 9, and one fewer fetch per layer per fragment.
+     *
+     * Source textures decode asynchronously, so a pack that cannot resolve yet leaves the layer with no
+     * normal/height this frame (flat shading, no parallax) and is retried by {@link syncPackedLayers}.
+     * Clearing the slot is safe here — unlike a standard material, `Renderer._applyTerrainMaterial` binds
+     * a shared fallback texture to every layer sampler, so an empty slot cannot leave one unbound.
+     */
+    private _syncLayerPack(index: number, L: TerrainLayer, frame: number): void {
+        const m = this._material;
+        const clear = () => {
+            m.textures.delete(`u_normal${index}`);
+            m.properties.set(`u_hasNormal${index}`, 0);
+            m.properties.set(`u_hasDisp${index}`, 0);
+        };
+        if (!L.normalId && !L.dispId) { clear(); return; }
+
+        const id = TexturePacker.Instance.resolve({
+            // A flat tangent-space normal where there is no normal map. Marked ignored, so a layer with
+            // only a normal map takes the packer's identity path and reuses that texture untouched.
+            r: L.normalId ? { textureId: L.normalId, channel: 0 } : { constant: 0.5, ignored: true },
+            g: L.normalId ? { textureId: L.normalId, channel: 1 } : { constant: 0.5, ignored: true },
+            b: L.normalId ? { textureId: L.normalId, channel: 2 } : { constant: 1.0, ignored: true },
+            a: L.dispId ? { textureId: L.dispId, channel: 0 } : { constant: 0.0, ignored: true }
+        }, frame);
+
+        if (!id) { clear(); return; }
+        m.textures.set(`u_normal${index}`, id);
+        m.properties.set(`u_hasNormal${index}`, L.normalId ? 1 : 0);
+        m.properties.set(`u_hasDisp${index}`, L.dispId ? 1 : 0);
+    }
+
+    /** Re-resolve every layer's packed normal+height texture. Called once per frame by the renderer;
+     *  this is what picks up a layer whose maps had not finished decoding when it was assigned. */
+    public syncPackedLayers(frame: number): void {
+        for (let i = 0; i < this._layers.length && i < 4; i++)
+            this._syncLayerPack(i, this._layers[i], frame);
+    }
+
     /** Push a resolved layer's surface + blend uniforms into the composite terrain material. */
     private _writeLayerUniforms(index: number, L: TerrainLayer): void {
         const m = this._material;
@@ -665,8 +708,9 @@ export class Terrain {
             else { m.textures.delete(key); m.properties.set(hasKey, 0); }
         };
         setTex(`u_albedo${index}`, L.albedoId, `u_hasAlbedo${index}`);
-        setTex(`u_normal${index}`, L.normalId, `u_hasNormal${index}`);
-        setTex(`u_disp${index}`, L.dispId, `u_hasDisp${index}`);
+        // Normal and displacement share one packed texture; it may not be bakeable yet (its sources
+        // decode asynchronously), so syncPackedLayers owns both slots and retries per frame.
+        this._syncLayerPack(index, L, 0);
         m.properties.set(`u_color${index}`, [L.color[0], L.color[1], L.color[2]]);
         m.properties.set(`u_metallic${index}`, L.metallic);
         m.properties.set(`u_roughness${index}`, L.roughness);

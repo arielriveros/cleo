@@ -1,4 +1,4 @@
-import { Scene, CameraNode } from 'cleo'
+import { Scene, CameraNode, isDerivedTextureId } from 'cleo'
 import { getNodeMaterial, getMaterialIdOf, MaterialAsset } from './materials'
 import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
@@ -35,10 +35,15 @@ export function collectReferencedTextureIds(
     for (const ln of scene.landscapes) {
       const terrain: any = (ln as any).terrain
       if (!terrain) continue
-      if (terrain.material?.textures) for (const id of terrain.material.textures.values()) set.add(id)
+      // These read LIVE material.textures maps, which — unlike the serialized ones the walks below
+      // use — also hold the engine's derived channel-packed slots. Those are rebuilt from the source
+      // maps at render time and have no stored bytes, so counting one as "referenced" would mark a
+      // phantom asset in the explorer and try to publish a texture that cannot be serialized.
+      if (terrain.material?.textures)
+        for (const id of terrain.material.textures.values()) if (!isDerivedTextureId(id as string)) set.add(id)
       for (const layer of terrain.layers ?? []) {
         const lm = layer?.material
-        if (lm?.textures) for (const id of lm.textures.values()) set.add(id) // base + displacementMap
+        if (lm?.textures) for (const id of lm.textures.values()) if (!isDerivedTextureId(id as string)) set.add(id) // base + displacementMap
         collectFoliageRuleTextureIds(lm?.foliageInclude, set)
       }
       collectFoliageLayerTextureIds(terrain.foliage, set)
