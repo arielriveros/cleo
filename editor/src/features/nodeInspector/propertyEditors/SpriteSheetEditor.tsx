@@ -1,103 +1,168 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AnimatedSpriteNode } from 'cleo';
+import { AnimatedSpriteNode, SpriteFrameSource } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
-import TextureInspector from './TextureInspector';
+import TilesetSlot, { tilesetAssetOf } from './TilesetSlot';
+import SpriteAppearance from './SpriteAppearance';
+import TileGrid from '../../tileset/TileGrid';
 import { useCleoEngine } from '../../EngineContext';
-import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint, Button } from '../../../components/ui';
 import { SpriteIcon } from '../sectionIcons';
 
+// An animated sprite is a tileset plus an ordered list of tiles.
+//
+// The old editor asked for columns/rows and a frame range over a sheet the user had to count cells in by
+// hand. Now the atlas is on screen: dragging a rectangle over it produces the frame list directly, since
+// TileGrid already emits its selection row-major in exactly that order.
+//
+// The alternative source is the tile's own animation, authored once in the tileset editor
+// (TileMeta.animation) and shared by every sprite that picks that tile.
+
 export default function SpriteSheetEditor() {
-  const { editorScene, selectedNode, eventEmitter } = useCleoEngine();
+  const { editorScene, selectedNode, tilesets, eventEmitter, enterTilesetEditor } = useCleoEngine();
   const [node, setNode] = useState<AnimatedSpriteNode | null>(null);
-  const animatedNode = node;
 
   useEffect(() => {
-    if (!editorScene || !selectedNode) return;
+    if (!editorScene || !selectedNode) { setNode(null); return; }
     const n = editorScene.getNodeById(selectedNode);
-    if (n && (n as any).nodeType === 'animatedSprite') setNode(n as AnimatedSpriteNode);
+    setNode(n && (n as any).nodeType === 'animatedSprite' ? n as AnimatedSpriteNode : null);
   }, [editorScene, selectedNode]);
 
-  const [columns, setColumns] = useState(4);
-  const [rows, setRows] = useState(4);
+  const [frameSource, setFrameSource] = useState<SpriteFrameSource>('node');
+  const [frames, setFrames] = useState<number[]>([]);
+  const [framesText, setFramesText] = useState('');
+  const [tileIndex, setTileIndex] = useState(0);
   const [fps, setFps] = useState(12);
   const [loop, setLoop] = useState(true);
-  const [startFrame, setStartFrame] = useState(0);
-  const [endFrame, setEndFrame] = useState(15);
-  const [sequenceText, setSequenceText] = useState('');
+  const [zoom, setZoom] = useState(2);
+  // The tileset lives on the engine node, which React cannot observe. `revision` is bumped whenever the
+  // slot reassigns it, and is a memo dependency — without it the lookup below stays stale and the frame
+  // picker keeps saying "assign a tileset" after one has been assigned.
+  const [revision, bump] = useState(0);
 
   useEffect(() => {
-    if (!animatedNode) return;
-    setColumns(animatedNode.columns);
-    setRows(animatedNode.rows);
-    setFps(animatedNode.fps);
-    setLoop(animatedNode.loop);
-    setStartFrame(animatedNode.startFrame);
-    setEndFrame(animatedNode.endFrame);
-    setSequenceText(animatedNode.sequence ? animatedNode.sequence.join(',') : '');
-  }, [animatedNode]);
+    if (!node) return;
+    setFrameSource(node.frameSource);
+    setFrames([...node.frames]);
+    setFramesText(node.frames.join(','));
+    setTileIndex(node.tileIndex);
+    setFps(node.fps);
+    setLoop(node.loop);
+  }, [node]);
 
-  const maxFrames = useMemo(() => columns * rows, [columns, rows]);
+  const asset = useMemo(() => node ? tilesetAssetOf(node, tilesets) : undefined, [node, tilesets, revision]);
+  const tileAnimation = asset && frameSource === 'tile' ? asset.tiles[tileIndex]?.animation : undefined;
 
-  const applySequence = (text: string) => {
-    setSequenceText(text);
-    if (!animatedNode) return;
-    const clean = text.replace(/\s/g, '');
-    if (clean.length === 0) { animatedNode.sequence = null; return; }
-    const arr = clean.split(',').map(n => parseInt(n)).filter(n => !isNaN(n) && n >= 0 && n < maxFrames);
-    animatedNode.sequence = arr.length > 0 ? arr : null;
+  if (!node) return null;
+
+  const changed = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node });
+
+  const applyFrames = (next: number[]) => {
+    node.frames = next;
+    setFrames(next);
+    setFramesText(next.join(','));
+    changed();
   };
 
-  if (!animatedNode) return null;
-
-  const material = animatedNode.sprite.material;
+  // The text field is the escape hatch for a non-rectangular order (a ping-pong, a held frame). It is
+  // parsed leniently and only pushed to the node when it yields something usable.
+  const applyFramesText = (text: string) => {
+    setFramesText(text);
+    const max = asset ? asset.columns * asset.rows : Infinity;
+    const parsed = text.split(',').map(t => parseInt(t.trim(), 10)).filter(n => !isNaN(n) && n >= 0 && n < max);
+    node.frames = parsed;
+    setFrames(parsed);
+    changed();
+  };
 
   return (
-    <Collapsable title='Animated Sprite' icon={<SpriteIcon />} persistKey='animatedSprite'>
-      <div className='w-full p-2'>
-        <Section title='Sprite Sheet Texture'>
-          <TextureInspector tex='texture' material={material} />
-        </Section>
+    <>
+      <TilesetSlot node={node} onChange={() => { setTileIndex(node.tileIndex); bump(x => x + 1) }} />
 
-        <Section title='Frames'>
-          <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Columns'>
-              <NumberInput min={1} value={columns} onChange={(v) => { const c = Math.max(1, Math.round(v)); setColumns(c); animatedNode.columns = c; setEndFrame(Math.min(endFrame, c * rows - 1)); }} />
-            </PropertyRow>
-            <PropertyRow label='Rows'>
-              <NumberInput min={1} value={rows} onChange={(v) => { const r = Math.max(1, Math.round(v)); setRows(r); animatedNode.rows = r; setEndFrame(Math.min(endFrame, columns * r - 1)); }} />
-            </PropertyRow>
-            <PropertyRow label='FPS'>
-              <NumberInput min={0.01} step={0.01} value={fps} onChange={(v) => { const f = Math.max(0.01, v); setFps(f); animatedNode.fps = f; }} />
-            </PropertyRow>
-            <PropertyRow label='Loop'>
-              <Toggle checked={loop} onChange={(c) => { setLoop(c); animatedNode.loop = c; }} />
-            </PropertyRow>
-            <PropertyRow label='Start Frame'>
-              <NumberInput min={0} max={maxFrames - 1} value={startFrame} onChange={(v) => { const f = Math.max(0, Math.min(Math.round(v), maxFrames - 1)); setStartFrame(f); animatedNode.startFrame = f; }} />
-            </PropertyRow>
-            <PropertyRow label='End Frame' divider={false}>
-              <NumberInput min={0} max={maxFrames - 1} value={endFrame} onChange={(v) => { const f = Math.max(0, Math.min(Math.round(v), maxFrames - 1)); setEndFrame(f); animatedNode.endFrame = f; }} />
-            </PropertyRow>
-          </PropertyTable>
-        </Section>
+      <Collapsable title='Animated Sprite' icon={<SpriteIcon />} persistKey='animatedSprite'>
+        <div className='w-full p-2'>
+          <Field label='Frames from'>
+            <Select value={frameSource} onChange={(e) => {
+              const v = e.target.value as SpriteFrameSource;
+              node.frameSource = v; setFrameSource(v); changed();
+            }}>
+              <option value='node'>This sprite’s frame list</option>
+              <option value='tile'>The tile’s own animation</option>
+            </Select>
+          </Field>
 
-        <Section title='Custom Sequence'>
-          <Hint className='mb-1'>Comma-separated frame indices. Leave empty to use range.</Hint>
-          <TextInput value={sequenceText} onChange={applySequence} placeholder='e.g. 0,1,2,3,2,1' />
-        </Section>
+          {!asset ? (
+            <Hint className='mt-2'>Assign a tileset above to choose this sprite’s frames.</Hint>
+          ) : frameSource === 'node' ? (
+            <Section title='Frames'>
+              <Hint className='mb-1'>Drag a rectangle over the atlas to set the frames, in reading order.</Hint>
+              <TileGrid
+                className='max-h-[280px]'
+                asset={asset}
+                selection={frames}
+                zoom={zoom}
+                onZoomChange={setZoom}
+                onSelect={(indices) => applyFrames(indices)}
+                markerOf={(index) => asset.tiles[index]?.animation ? '#f2c14b' : null}
+              />
+              <Hint className='mt-1'>Order ({frames.length} frame{frames.length === 1 ? '' : 's'}):</Hint>
+              <TextInput value={framesText} onChange={applyFramesText} placeholder='e.g. 0,1,2,3,2,1' />
+            </Section>
+          ) : (
+            <Section title='Tile'>
+              <Hint className='mb-1'>Pick the tile whose animation this sprite plays.</Hint>
+              <TileGrid
+                className='max-h-[280px]'
+                asset={asset}
+                selection={[tileIndex]}
+                rectSelect={false}
+                zoom={zoom}
+                onZoomChange={setZoom}
+                onSelect={(indices) => {
+                  node.tileIndex = indices[0] ?? 0;
+                  setTileIndex(node.tileIndex);
+                  changed();
+                }}
+                markerOf={(index) => asset.tiles[index]?.animation ? '#f2c14b' : null}
+              />
+              {tileAnimation ? (
+                <Hint className='mt-1'>Plays {tileAnimation.frames.join(', ')} at {tileAnimation.fps} fps.</Hint>
+              ) : (
+                <Hint className='mt-1 text-warning'>Tile {tileIndex} has no animation — it will hold still.</Hint>
+              )}
+              <Button size='sm' variant='ghost' className='mt-1' onClick={() => enterTilesetEditor(asset.id)}>
+                Edit in tileset…
+              </Button>
+            </Section>
+          )}
 
-        <Section title='Constraints'>
-          <Field label='Mode'>
-            <Select value={animatedNode.constraints} onChange={(e) => { animatedNode.constraints = e.target.value as any; }}>
+          {frameSource === 'node' && (
+            <Section title='Playback'>
+              <PropertyTable columns={['45%', '55%']}>
+                <PropertyRow label='FPS'>
+                  <NumberInput min={0.01} step={0.01} value={fps} onChange={(v) => {
+                    const f = Math.max(0.01, v); node.fps = f; setFps(f); changed();
+                  }} />
+                </PropertyRow>
+                <PropertyRow label='Loop' divider={false}>
+                  <Toggle checked={loop} onChange={(c) => { node.loop = c; setLoop(c); changed() }} />
+                </PropertyRow>
+              </PropertyTable>
+            </Section>
+          )}
+
+          <Field label='Constraints' className='mt-2'>
+            <Select value={node.constraints} onChange={(e) => {
+              node.constraints = e.target.value as any; changed(); bump(x => x + 1);
+            }}>
               <option value='free'>Free</option>
               <option value='spherical'>Spherical</option>
               <option value='cylindrical'>Cylindrical</option>
             </Select>
           </Field>
-        </Section>
+        </div>
+      </Collapsable>
 
-        <Hint>Frames: {maxFrames} (0..{maxFrames - 1})</Hint>
-      </div>
-    </Collapsable>
+      <SpriteAppearance node={node} />
+    </>
   )
 }

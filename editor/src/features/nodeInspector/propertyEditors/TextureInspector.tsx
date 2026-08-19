@@ -85,9 +85,13 @@ export default function TextureInspector(props: { tex: string, material: Materia
     eventEmitter.emit('SCENE_CHANGED', { kind: 'texture' });
   }
 
-  const onTextureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onTextureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.item(0);
     if (file) {
+      // The compressed bytes, kept so the texture survives a reload: addTextureFromData retains no
+      // source, and the texture store persists only textures that have one.
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const mime = file.type || 'image/png';
       const reader = new FileReader();
       reader.onload = (e) => {
         const data = e.target?.result;
@@ -101,7 +105,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
             texName = `${file.name.split('.')[0]}_${i}.${file.name.split('.')[1]}`;
             i++;
           }
-          TextureManager.Instance.addTextureFromData(img, { wrapping: 'repeat' }, texName);
+          TextureManager.Instance.addTextureFromData(img, { wrapping: 'repeat' }, texName, { bytes, mime });
           onTextureSelect(texName);
           eventEmitter.emit("TEXTURES_CHANGED");
         }

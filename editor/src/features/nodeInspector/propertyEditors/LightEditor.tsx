@@ -74,7 +74,7 @@ export default function LightEditor(props: {node: LightNode}) {
   useEffect(() => {
     const editorSprite = props.node.getChildByName('__editor__LightSprite');
     if (editorSprite[0])
-      (editorSprite[0] as SpriteNode).sprite.material.properties.set('color', light.diffuse);
+      (editorSprite[0] as SpriteNode).tint = [light.diffuse[0], light.diffuse[1], light.diffuse[2]];
   }, [props.node, diffuse])
 
   const set = (patch: Partial<typeof properties>) => {

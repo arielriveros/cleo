@@ -119,6 +119,7 @@ import {
   deleteSceneData, migrateLegacyProject, createFreshProjectMeta,
 } from "../utils/sceneStorage";
 import { resyncScene } from "../utils/sceneResync";
+import { migrateSceneSprites } from "../utils/spriteMigration";
 import { captureAnimationState, restoreAnimationState } from "../utils/placedAnimation";
 import { buildAssetHashes, AssetLibs, ASSET_HASH_VERSION } from "../utils/assetHash";
 import {
@@ -434,6 +435,7 @@ const EngineContext = createContext<{
   saveAll: () => Promise<void>;
   /** StateMachineProvider publishes the live animation session's Apply here (see saveTabById). */
   registerAnimationApply: (reg: { tabId: string; apply: () => void } | null) => void;
+  registerTilesetApply: (reg: { tabId: string; apply: () => void } | null) => void;
   // Template editor
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
@@ -524,7 +526,7 @@ const EngineContext = createContext<{
 /** Open (or focus) a Tileset asset's edit tab. Creates a fresh, atlas-less one when given no id. */
   enterTilesetEditor: (tilesetId?: string) => void;
   /** Import an image file as an atlas, build a tileset sliced around it, and open it. */
-  createTilesetFromImage: (file: File) => Promise<string | null>;
+  createTilesetFromImage: (file: File) => Promise<TilesetAsset | null>;
   /** The tileset asset the active tileset tab edits, or null. */
   editingTilesetId: string | null;
   /** Save a tileset asset and push it into every tilemap that embedded a copy. */
@@ -647,6 +649,7 @@ const EngineContext = createContext<{
     saveActiveTab: async () => false,
     saveAll: async () => {},
     registerAnimationApply: () => {},
+    registerTilesetApply: () => {},
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -1317,6 +1320,30 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    */
   const initialAssetHashesRef = useRef<{ hashes: Record<string, string> | undefined } | null>(null);
   const initialResyncDoneRef = useRef(false);
+
+  /**
+   * One-shot upgrade of legacy sprites in every live scene: an inline tileset (synthesized by
+   * `Sprite.parse` from a raw texture id) becomes a real tileset asset the user can reslice and annotate.
+   *
+   * Runs after the startup resync, once per session. Sprites it cannot migrate — an atlas that never
+   * decoded, or a sheet whose pixel size does not divide into its old grid — are left inline and still
+   * draw correctly, so a partial pass is safe to repeat.
+   */
+  const spriteMigrationDoneRef = useRef(false);
+  const migrateSprites = async (): Promise<void> => {
+    if (spriteMigrationDoneRef.current) return;
+    spriteMigrationDoneRef.current = true;
+    const fresh: TilesetAsset[] = [];
+    for (const scene of liveScenes()) {
+      const result = await migrateSceneSprites(scene, [...tilesetsRef.current, ...fresh]);
+      fresh.push(...result.created);
+    }
+    if (!fresh.length) return;
+    tilesetsRef.current = [...tilesetsRef.current, ...fresh];
+    setTilesets(prev => [...prev, ...fresh]);
+    Logger.info(`Migrated ${fresh.length} sprite sheet${fresh.length === 1 ? '' : 's'} to tileset assets`, 'Editor');
+    eventEmitter.current.emit('SCENE_CHANGED');
+  };
   useEffect(() => {
     if (initialResyncDoneRef.current || !assetsLoaded || !isSceneReady) return;
     const stashed = initialAssetHashesRef.current;
@@ -1354,6 +1381,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         eventEmitter.current.emit('SELECT_NODE', null); // a reinstantiated subtree invalidates the selection
       }
     });
+    // Pre-tileset sprites already draw (Sprite.parse gives them an inline tileset); this promotes those
+    // to real library assets so they can actually be edited. Async because it waits on atlas decodes, and
+    // deliberately not awaited here — it is an upgrade, not a precondition for showing the scene.
+    void migrateSprites();
     // The libraries are deps so the skip-when-empty branch above is recoverable: if this fires before they
     // arrive, the commit that delivers them runs it again. initialResyncDoneRef keeps it to one real pass.
   }, [assetsLoaded, isSceneReady, materials, models, templates, terrainMaterials, scriptAssets]);
@@ -2956,7 +2987,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * wrong when it isn't (the grid draws over the atlas). Returns null when the file could not be decoded,
    * in which case importAtlasImage has already logged why.
    */
-  const createTilesetFromImage = async (file: File): Promise<string | null> => {
+  const createTilesetFromImage = async (file: File): Promise<TilesetAsset | null> => {
     const imported = await importAtlasImage(file, (event) => eventEmitter.current.emit(event as any));
     if (!imported) return null;
     const tile = guessTileSize(imported.width, imported.height);
@@ -2972,7 +3003,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // The library update lands in the next commit, so seed the ref directly — enterTilesetEditor reads it.
     tilesetsRef.current = [...tilesetsRef.current, asset];
     enterTilesetEditor(asset.id);
-    return asset.id;
+    // The asset itself, not just its id: a caller that wants to reference it immediately (a sprite's
+    // tileset slot) cannot find it in `tilesets` yet — that state update lands a commit later.
+    return asset;
   };
 
   /** Persist an edited tileset and push it into every tilemap already drawing from a copy of it. */
@@ -3514,6 +3547,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const animationApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerAnimationApply = (reg: { tabId: string; apply: () => void } | null) => { animationApplyRef.current = reg; };
 
+  // Same arrangement for the tileset session: TilesetProvider keeps the working copy as its own React
+  // state, so saving a tileset tab from here means calling back into it.
+  const tilesetApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
+  const registerTilesetApply = (reg: { tabId: string; apply: () => void } | null) => { tilesetApplyRef.current = reg; };
+
   /**
    * Save one tab, whichever kind it is. Returns whether the tab came out clean — each save path clears the
    * tab's dirty flag on success and logs + returns early on failure, so the flag is the honest signal.
@@ -3528,6 +3566,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'material': saveMaterialTab(tabId); break;
       case 'terrainMaterial': saveTerrainMaterialTab(tabId); break;
       case 'script': saveScriptTab(tabId); break;
+      case 'tileset': {
+        // Without this the tab fell through still dirty, so Ctrl+S / Save All / the close prompt all
+        // reported "Save failed" even though the tileset's own Save button worked.
+        const session = tilesetApplyRef.current;
+        if (!session || session.tabId !== tabId) return false;
+        session.apply();
+        break;
+      }
       case 'animation':
       case 'animationField': {
         const reg = animationApplyRef.current;
@@ -4582,7 +4628,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterTemplateEditor,
     enterMaterialEditor, createMaterialForNode, setActiveMaterialName,
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
-    enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply,
+    enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
     importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport,
     enterModelEditor, setActiveModelName, addModelLodFromAsset, removeModelLod,
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
@@ -4634,6 +4680,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       saveActiveTab,
       saveAll,
       registerAnimationApply,
+      registerTilesetApply,
       enterTemplateEditor,
       editingTemplateName,
       templateRootId,

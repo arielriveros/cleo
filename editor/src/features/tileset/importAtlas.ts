@@ -35,7 +35,12 @@ function uniqueTextureId(filename: string): string {
  * Emits `TEXTURES_CHANGED` on success so the Assets explorer indexes the new texture — an atlas imported
  * here is a normal texture asset like any other, reusable by other tilesets and by materials.
  */
-export function importAtlasImage(file: File, emit: (event: string) => void): Promise<ImportedAtlas | null> {
+export async function importAtlasImage(file: File, emit: (event: string) => void): Promise<ImportedAtlas | null> {
+  // Read the compressed bytes up front and hand them to the TextureManager alongside the decoded image.
+  // `addTextureFromData` retains no source of its own, and a texture with no source bytes is skipped by
+  // the editor's texture store — the atlas would draw this session and be missing after a reload.
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const mime = file.type || 'image/png'
   return new Promise(resolve => {
     const reader = new FileReader()
     reader.onerror = () => {
@@ -53,7 +58,7 @@ export function importAtlasImage(file: File, emit: (event: string) => void): Pro
           return
         }
         const textureId = uniqueTextureId(file.name)
-        TextureManager.Instance.addTextureFromData(image, { wrapping: 'repeat' }, textureId)
+        TextureManager.Instance.addTextureFromData(image, { wrapping: 'repeat' }, textureId, { bytes, mime })
         emit('TEXTURES_CHANGED')
         resolve({ textureId, width: image.naturalWidth, height: image.naturalHeight })
       }

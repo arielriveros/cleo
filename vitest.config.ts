@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
 
 // The engine is overwhelmingly WebGL2-bound and not testable without a GL context. What IS testable is
 // the pure math/data core — BVH traversal, ray-triangle intersection, convex hull generation, base64 —
@@ -19,6 +20,12 @@ export default defineConfig({
             return { code: `export default ${JSON.stringify(readFileSync(file, 'utf-8'))};`, map: null };
         },
     }],
+    // Editor modules under test import the engine as `cleo`, which only resolves inside editor/ (where
+    // the package points at the built dist). Aliasing it to the engine SOURCE keeps the suite independent
+    // of a build step, and — more importantly — gives a test one set of class identities rather than two.
+    resolve: {
+        alias: { cleo: fileURLToPath(new URL('./src/cleo.ts', import.meta.url)) },
+    },
     test: {
         include: ['tests/**/*.test.ts'],
         environment: 'node',

@@ -66,7 +66,10 @@ export async function exportBundle(opts: {
   // belong to a scene without any library referencing it); an asset pack narrows to referenced textures.
   const wanted = kind === 'project'
     ? undefined
-    : referencedTextureIds(libraries.materials, libraries.terrainMaterials, libraries.templates, libraries.models)
+    // Tilesets belong in this list: their atlas is reached only through `TilesetAsset.textureIds`, which
+    // is mirrored from `textureId` for exactly this call. Leaving them out shipped tilesets with no image.
+    : referencedTextureIds(libraries.materials, libraries.terrainMaterials, libraries.templates,
+                           libraries.models, libraries.tilesets)
   const textures: BundleTexture[] = TextureManager.Instance.serializeTextureBytes(wanted).map(t => ({
     id: t.id,
     mime: t.mime,

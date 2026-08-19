@@ -346,7 +346,7 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'model': return 'placed copies stay in the scene'
     case 'script': return 'nodes using it lose their script and its variables'
     case 'animationField': return 'animation states playing it fall back to no clip'
-    case 'tileset': return 'tilemap layers painted with it are cleared'
+    case 'tileset': return 'tilemap layers painted with it, and sprites drawing from it, are cleared'
     case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials and tilesets using it show no texture'
   }

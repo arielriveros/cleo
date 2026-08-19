@@ -202,15 +202,13 @@ export async function createDemoScene(params: {
 
   // Directional light with icon sprite (texture is added later by EngineContext)
   const lightNode = new LightNode('light', new DirectionalLight({}));
-  const debugLightIcon = new SpriteNode('__editor__LightSprite', new Sprite(Material.Basic({ color: [1, 1, 1], texture: '__editor__light_icon' })));
+  const debugLightIcon = new SpriteNode('__editor__LightSprite', Sprite.fromTexture('__editor__light_icon'));
   debugLightIcon.setUniformScale(0.5);
   lightNode.addChild(debugLightIcon);
   lightNode.setPosition([0, 1, 0]).setRotation([100, 25, 0]);
   lightNode.castShadows = true;
 
-  const spriteNode = new SpriteNode('sprite', new Sprite(Material.Basic({
-    texture: 'dinosaur.png'
-  })));
+  const spriteNode = new SpriteNode('sprite', Sprite.fromTexture('dinosaur.png'));
 
   const plane = new Node('plane');
   plane.setPosition([0, -1, 0]).setRotation([-90, 0, 0]).setScale([10, 10, 1]);
@@ -222,10 +220,12 @@ export async function createDemoScene(params: {
   step('Loading fire effects…');
   try {
     // Lazy-load fire.png texture if not already present
-    const { TextureManager, PointLight, AnimatedSpriteNode } = await import('cleo');
+    const { TextureManager, PointLight, AnimatedSpriteNode, Sprite, gridTileset } = await import('cleo');
     if (!TextureManager.Instance.getTexture('fire.png')) {
       TextureManager.Instance.addTextureFromPath('/assets/fire.png', { mipMap: true }, 'fire.png');
     }
+
+    const fireTileset = gridTileset('@demo:fire', 'fire.png', 8, 4);
 
     const firePositions: Array<[number, number, number]> = [
       [-4.3, 1.67, -9.76],
@@ -250,14 +250,12 @@ export async function createDemoScene(params: {
       }));
       group.addChild(light);
 
-      // Animated fire sprite (8x4, 60 fps, cylindrical, endFrame: 31)
-      const fireSpriteMat = Material.Basic({ color: [1,1,1], texture: 'fire.png', opacity: 1 }, { transparent: true, side: 'double', castShadow: false });
-      const fireSprite = new AnimatedSpriteNode(`fire_sprite_${i+1}`, new Sprite(fireSpriteMat), {
-        columns: 8,
-        rows: 4,
+      // Animated fire sprite: the 8x4 sheet as a tileset, played top-left to bottom-right.
+      const fireSprite = new AnimatedSpriteNode(`fire_sprite_${i+1}`,
+        new Sprite({ tileset: fireTileset, transparent: true, side: 'double' }), {
+        frames: Array.from({ length: 32 }, (_, f) => f),
         fps: 60,
         loop: true,
-        endFrame: 31,
         constraints: 'cylindrical'
       });
       // Slight scale up for visibility

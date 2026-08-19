@@ -152,12 +152,14 @@ export const ADD_ITEMS: AddItem[] = [
 
   {
     id: 'sprite', label: 'Static', icon: SpriteIcon, category: 'sprites',
-    create: async () => new SpriteNode('sprite', new Sprite(Material.Basic({})), 'spherical'),
+    // No tileset yet: a fresh sprite draws nothing until one is assigned in the inspector, the same
+    // way a tilemap layer with no tileset does.
+    create: async () => new SpriteNode('sprite', new Sprite(), 'spherical'),
   },
   {
     id: 'animatedSprite', label: 'Animated', icon: AnimatedSpriteIcon, category: 'sprites',
-    create: async () => new AnimatedSpriteNode('animated sprite', new Sprite(Material.Basic({})),
-      { columns: 4, rows: 4, fps: 12, loop: true, constraints: 'spherical' }),
+    create: async () => new AnimatedSpriteNode('animated sprite', new Sprite(),
+      { frames: [], fps: 12, loop: true, constraints: 'spherical' }),
   },
 
   {

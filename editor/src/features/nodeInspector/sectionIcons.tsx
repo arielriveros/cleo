@@ -12,6 +12,9 @@ export const MaterialIcon = () => (<S><circle cx='12' cy='12' r='9' /><path d='M
 export const LightIcon = () => (<S><circle cx='12' cy='12' r='4' /><path d='M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19' /></S>);
 export const CameraIcon = () => (<S><path d='M3 8.5A1.5 1.5 0 0 1 4.5 7H8l1.5-2h5L16 7h3.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5Z' /><circle cx='12' cy='13' r='3.2' /></S>);
 export const SpriteIcon = () => (<S><rect x='3' y='4' width='18' height='16' rx='2' /><circle cx='8.5' cy='9' r='1.6' /><path d='M21 16l-5-4-8 6' /></S>);
+export const TilesetIcon = () => (<S><rect x='3' y='3' width='18' height='18' rx='2' /><path d='M9 3v18M15 3v18M3 9h18M3 15h18' /><rect x='9' y='9' width='6' height='6' fill='currentColor' stroke='none' /></S>);
+export const FramesIcon = () => (<S><rect x='3' y='6' width='12' height='12' rx='1.5' /><path d='M18 8v8M21 10v4' /></S>);
+export const AppearanceIcon = () => (<S><circle cx='12' cy='12' r='9' /><path d='M12 12l6-6' /><circle cx='12' cy='12' r='2' fill='currentColor' stroke='none' /></S>);
 export const PhysicsIcon = () => (<S><circle cx='7' cy='7' r='3.2' /><rect x='13' y='13' width='7.5' height='7.5' rx='1' /><path d='M9.2 9.2l3.6 3.6' /></S>);
 export const ShapeIcon = () => (<S><path d='M12 3l8 4.5v9L12 21l-8-4.5v-9Z' /><path d='M12 3v18M4 7.5l8 4.5 8-4.5' /></S>);
 export const VariablesIcon = () => (<S><path d='M8 4c-2.5 1.5-2.5 14.5 0 16M16 4c2.5 1.5 2.5 14.5 0 16' /><path d='M9.5 12h5' /></S>);

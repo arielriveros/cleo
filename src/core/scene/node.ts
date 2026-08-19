@@ -5,7 +5,7 @@ import { Model } from "../../graphics/model";
 import { AnimatedModel } from "../../graphics/animatedModel";
 import { Animator, AnimationMapping, AnimationStateMachine } from "../../graphics/animator";
 import type { RagdollOptions } from "../../physics/ragdoll";
-import { Sprite } from "../../graphics/sprite";
+import { Sprite, legacySheetTileset, remapLegacyFrame } from "../../graphics/sprite";
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../graphics/lighting";
 import { Material, CustomMaterial } from "../../graphics/material";
 import { Skybox } from "../../graphics/skybox";
@@ -20,6 +20,7 @@ import { Logger } from "../logger";
 import { compileScript, createScriptImporter, resolveNodeScript, ScriptFactory, SCRIPT_HANDLERS } from "../scripting/scriptRuntime";
 import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
 import { Tilemap } from "../../tilemap/tilemap";
+import { Tileset } from "../../tilemap/tileset";
 import type { BVH } from "../bvh";
 import type { ChangeKind } from "../eventBus";
 import { clamp, dampAngleDeg, dampTime, dampVec3Time, eulerFromQuatDeg, wrapDegrees, RAD2DEG } from "../math";
@@ -4682,32 +4683,24 @@ export class SpriteNode extends Node {
         this._initialized = true;
     }
 
-    public serialize(): Promise<any> {
-        return new Promise((resolve, reject) => {
-            const sprite = {
-                constraints: this._constraints,
-                material: this._sprite.serialize()
-            }
-            Promise.all(this._children.map(child => child.serialize())).then(children => {
-                resolve({
-                    name: this._name,
-                    id: this._id,
-                    type: this._nodeType,
-                    position: [this._position[0], this._position[1], this._position[2]],
-                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
-                    scale: [this._scale[0], this._scale[1], this._scale[2]],
-                    children: children,
-                    variables: this._serializeVariables(),
-                    spawnOnStart: this._spawnOnStart,
-                    sprite: sprite
-                });
-            });
-        });
+    public async serialize(): Promise<any> {
+        const children = await Promise.all(this._children.map(child => child.serialize()));
+        return {
+            name: this._name,
+            id: this._id,
+            type: this._nodeType,
+            position: [this._position[0], this._position[1], this._position[2]],
+            rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
+            scale: [this._scale[0], this._scale[1], this._scale[2]],
+            children: children,
+            variables: this._serializeVariables(),
+            spawnOnStart: this._spawnOnStart,
+            sprite: { constraints: this._constraints, ...this._sprite.serialize() },
+        };
     }
 
     public static parse(parent: Node, json: any) {
-        const sprite = new SpriteNode(json.name, Sprite.parse(json.sprite.material), json.sprite.constraints, json.id);
-        sprite.constraints = json.sprite.constraints;
+        const sprite = new SpriteNode(json.name, Sprite.parse(spritePayload(json)), json.sprite?.constraints, json.id);
         Node._commonParse(sprite, parent, json);
         parent.addChild(sprite);
     }
@@ -4716,6 +4709,22 @@ export class SpriteNode extends Node {
     public get initialized(): boolean { return this._initialized; }
     public get constraints(): 'free' | 'spherical' | 'cylindrical' { return this._constraints; }
     public set constraints(value: 'free' | 'spherical' | 'cylindrical') { this._constraints = value; }
+
+    /** The tileset this sprite draws from. Assigning replaces the embedded copy. */
+    public get tileset(): Tileset | null { return this._sprite.tileset; }
+    public set tileset(tileset: Tileset | null) { this._sprite.tileset = tileset; }
+    public get tileIndex(): number { return this._sprite.tileIndex; }
+    public set tileIndex(index: number) { this._sprite.tileIndex = index; }
+    public get tint(): [number, number, number] { return this._sprite.tint; }
+    public set tint(tint: [number, number, number]) { this._sprite.tint = tint; }
+    public get opacity(): number { return this._sprite.opacity; }
+    public set opacity(opacity: number) { this._sprite.opacity = opacity; }
+
+    /**
+     * Texture-space rect [u0, v0, u1, v1] the renderer turns into `u_uvOffset`/`u_uvScale`.
+     * Overridden by AnimatedSpriteNode to follow the playing frame.
+     */
+    public uvRect(): [number, number, number, number] { return this._sprite.uvRect(); }
 
     /**
      * Get bounding box for SpriteNode - returns a small sphere bounding box
@@ -4742,163 +4751,185 @@ export class SpriteNode extends Node {
     }
 }
 
+/**
+ * Where an animated sprite's frames come from.
+ *
+ * - `node`: the ordered `frames` list on the node — one tileset, many different animations.
+ * - `tile`: the selected tile's own `TileMeta.animation`, resolved through `Tileset.frameOf`. Authored
+ *   once in the tileset editor and reusable by every sprite that picks that tile.
+ */
+export type SpriteFrameSource = 'node' | 'tile';
+
 export class AnimatedSpriteNode extends SpriteNode {
-    private _columns: number;
-    private _rows: number;
+    private _frames: number[];
+    private _frameSource: SpriteFrameSource;
     private _fps: number;
     private _loop: boolean;
-    private _startFrame: number;
-    private _endFrame: number;
+    /** Index INTO `_frames`, not a tile index. */
     private _currentFrame: number;
     private _accumulator: number;
-    private _sequence: number[] | null;
-    private _seqIndex: number;
+    /** Scene time, for the `tile` source — `Tileset.frameOf` is a pure function of it. */
+    private _elapsed: number;
 
     constructor(
         name: string,
         sprite: Sprite,
         options?: {
-            columns?: number,
-            rows?: number,
+            frames?: number[],
+            frameSource?: SpriteFrameSource,
             fps?: number,
             loop?: boolean,
-            startFrame?: number,
-            endFrame?: number,
-            sequence?: number[] | null,
             constraints?: 'free' | 'spherical' | 'cylindrical',
             id?: string
         }
     ) {
         super(name, sprite, options?.constraints || 'spherical', options?.id || uuidv4(), 'animatedSprite');
-        this._columns = Math.max(1, options?.columns ?? 1);
-        this._rows = Math.max(1, options?.rows ?? 1);
+        this._frames = [...(options?.frames ?? [])];
+        this._frameSource = options?.frameSource ?? 'node';
         this._fps = Math.max(0.0001, options?.fps ?? 12);
         this._loop = options?.loop ?? true;
-        this._startFrame = Math.max(0, options?.startFrame ?? 0);
-        const maxFrames = this._columns * this._rows;
-        this._endFrame = Math.min(maxFrames - 1, options?.endFrame ?? (maxFrames - 1));
-        this._currentFrame = this._startFrame;
+        this._currentFrame = 0;
         this._accumulator = 0;
-        this._sequence = options?.sequence ?? null;
-        this._seqIndex = 0;
+        this._elapsed = 0;
     }
 
     public update(delta: number, time: number): void {
         super.update(delta, time);
+        this._elapsed += delta;
+        // The `tile` source is a pure function of elapsed time (see uvRect) — nothing to step.
+        if (this._frameSource === 'tile') return;
+        if (this._frames.length === 0) return;
+
         const frameTime = 1.0 / this._fps;
         this._accumulator += delta;
         while (this._accumulator >= frameTime) {
             this._accumulator -= frameTime;
-            if (this._sequence && this._sequence.length > 0) {
-                if (this._seqIndex < this._sequence.length - 1) {
-                    this._seqIndex++;
-                } else if (this._loop) {
-                    this._seqIndex = 0;
-                }
-                this._currentFrame = this._sequence[this._seqIndex];
-            } else {
-                if (this._currentFrame < this._endFrame) {
-                    this._currentFrame++;
-                } else if (this._loop) {
-                    this._currentFrame = this._startFrame;
-                } else {
-                    // stop at last frame
-                    this._currentFrame = this._endFrame;
-                }
-            }
+            if (this._currentFrame < this._frames.length - 1) this._currentFrame++;
+            else if (this._loop) this._currentFrame = 0;
+            // Non-looping holds on the last frame.
         }
     }
 
-    public getUVTransform(): [number, number, number, number] {
-        const total = this._columns * this._rows;
-        if (total <= 0) return [0, 0, 1, 1];
-        const scaleX = 1 / this._columns;
-        const scaleY = 1 / this._rows;
-        const idx = Math.max(0, Math.min(this._currentFrame, total - 1));
-        const col = idx % this._columns;
-        const row = Math.floor(idx / this._columns);
-        const offsetX = col * scaleX;
-        const offsetY = row * scaleY;
-        return [offsetX, offsetY, scaleX, scaleY];
+    /** The tile index actually on screen this instant. */
+    public get currentTile(): number {
+        if (this._frameSource === 'tile') {
+            const tileset = this.sprite.tileset;
+            return tileset ? tileset.frameOf(this.tileIndex, this._elapsed) : this.tileIndex;
+        }
+        if (this._frames.length === 0) return this.tileIndex;
+        const i = Math.max(0, Math.min(this._currentFrame, this._frames.length - 1));
+        return this._frames[i];
     }
 
-    public serialize(): Promise<any> {
-        return new Promise((resolve) => {
-            const sprite = {
-                constraints: this._constraints,
-                material: this._sprite.serialize()
-            };
-            Promise.all(this._children.map(child => child.serialize())).then(children => {
-                resolve({
-                    name: this._name,
-                    id: this._id,
-                    type: this._nodeType,
-                    position: [this._position[0], this._position[1], this._position[2]],
-                    rotation: [this.rotation[0], this.rotation[1], this.rotation[2]],
-                    scale: [this._scale[0], this._scale[1], this._scale[2]],
-                    children: children,
-                    variables: this._serializeVariables(),
-                    spawnOnStart: this._spawnOnStart,
-                    sprite: sprite,
-                    animation: {
-                        columns: this._columns,
-                        rows: this._rows,
-                        fps: this._fps,
-                        loop: this._loop,
-                        startFrame: this._startFrame,
-                        endFrame: this._endFrame,
-                        sequence: this._sequence
-                    }
-                });
-            });
-        });
+    public uvRect(): [number, number, number, number] { return this.sprite.uvRectOf(this.currentTile); }
+
+    public async serialize(): Promise<any> {
+        const base = await super.serialize();
+        return {
+            ...base,
+            animation: {
+                frames: [...this._frames],
+                frameSource: this._frameSource,
+                fps: this._fps,
+                loop: this._loop,
+            },
+        };
     }
 
     public static parse(parent: Node, json: any) {
-        const spriteNode = new AnimatedSpriteNode(
-            json.name,
-            Sprite.parse(json.sprite.material),
-            {
-                id: json.id,
-                constraints: json.sprite.constraints,
-                columns: json.animation?.columns ?? 1,
-                rows: json.animation?.rows ?? 1,
-                fps: json.animation?.fps ?? 12,
-                loop: json.animation?.loop ?? true,
-                startFrame: json.animation?.startFrame ?? 0,
-                endFrame: json.animation?.endFrame ?? ((json.animation?.columns ?? 1) * (json.animation?.rows ?? 1) - 1),
-                sequence: json.animation?.sequence ?? null
-            }
-        );
+        const sprite = Sprite.parse(spritePayload(json));
+        const animation = migrateLegacyAnimation(json, sprite);
+        const spriteNode = new AnimatedSpriteNode(json.name, sprite, {
+            id: json.id,
+            constraints: json.sprite?.constraints,
+            frames: animation.frames,
+            frameSource: animation.frameSource,
+            fps: animation.fps,
+            loop: animation.loop,
+        });
         Node._commonParse(spriteNode, parent, json);
         parent.addChild(spriteNode);
     }
 
-    public get columns(): number { return this._columns; }
-    public set columns(v: number) { this._columns = Math.max(1, Math.floor(v)); this._resetFrameBounds(); }
-    public get rows(): number { return this._rows; }
-    public set rows(v: number) { this._rows = Math.max(1, Math.floor(v)); this._resetFrameBounds(); }
+    /** Ordered tile indices this sprite cycles through. */
+    public get frames(): number[] { return this._frames; }
+    public set frames(frames: number[]) {
+        this._frames = [...(frames ?? [])];
+        this._currentFrame = 0;
+        this._accumulator = 0;
+    }
+    public get frameSource(): SpriteFrameSource { return this._frameSource; }
+    public set frameSource(source: SpriteFrameSource) { this._frameSource = source; this.reset(); }
     public get fps(): number { return this._fps; }
     public set fps(v: number) { this._fps = Math.max(0.0001, v); }
     public get loop(): boolean { return this._loop; }
     public set loop(v: boolean) { this._loop = v; }
-    public get startFrame(): number { return this._startFrame; }
-    public set startFrame(v: number) { this._startFrame = Math.max(0, Math.floor(v)); this._currentFrame = this._startFrame; this._seqIndex = 0; }
-    public get endFrame(): number { return this._endFrame; }
-    public set endFrame(v: number) { this._endFrame = Math.max(this._startFrame, Math.floor(v)); }
+    /** Position within `frames`. Clamped, and resets the sub-frame accumulator. */
     public get currentFrame(): number { return this._currentFrame; }
-    public set currentFrame(v: number) { this._currentFrame = Math.max(this._startFrame, Math.min(Math.floor(v), this._endFrame)); this._accumulator = 0; }
-    public get sequence(): number[] | null { return this._sequence; }
-    public set sequence(seq: number[] | null) { this._sequence = (seq && seq.length > 0) ? seq : null; this._seqIndex = 0; if (this._sequence) this._currentFrame = this._sequence[0]; }
-
-    private _resetFrameBounds(): void {
-        const maxFrames = this._columns * this._rows;
-        this._startFrame = Math.min(this._startFrame, Math.max(0, maxFrames - 1));
-        this._endFrame = Math.min(this._endFrame, Math.max(0, maxFrames - 1));
-        if (this._startFrame > this._endFrame) this._endFrame = this._startFrame;
-        this._currentFrame = this._startFrame;
-        this._seqIndex = 0;
+    public set currentFrame(v: number) {
+        const last = Math.max(0, this._frames.length - 1);
+        this._currentFrame = Math.max(0, Math.min(Math.floor(v), last));
+        this._accumulator = 0;
     }
+
+    /** Restart from the first frame. */
+    public reset(): void {
+        this._currentFrame = 0;
+        this._accumulator = 0;
+        this._elapsed = 0;
+    }
+}
+
+/**
+ * The sprite payload to hand `Sprite.parse`, across both formats.
+ *
+ * Legacy nodes nested one level deeper than they looked: `Sprite.serialize` returned `{material}`, and
+ * `SpriteNode.serialize` stored THAT under `sprite.material` — so the legacy material object is at
+ * `json.sprite.material.material`. Unwrapping one level here hands `Sprite.parse` a `{material}` in both
+ * eras and keeps the double-nesting quirk contained to this function.
+ */
+function spritePayload(json: any): any {
+    const sprite = json?.sprite ?? {};
+    return 'tileset' in sprite ? sprite : (sprite.material ?? {});
+}
+
+/**
+ * A legacy animated sprite's columns x rows grid, as an explicit frame list.
+ *
+ * The old model walked `startFrame..endFrame` (or an explicit `sequence`) over a bottom-up grid. Expanding
+ * that range through `remapLegacyFrame` produces tile indices into the synthesized sheet tileset that
+ * sample exactly the same cells in the same order — so a migrated animation is visually unchanged.
+ *
+ * Assigning the sheet tileset is done here too: `Sprite.parse` only sees the material payload and cannot
+ * know the sheet was columns x rows rather than a single image.
+ */
+function migrateLegacyAnimation(json: any, sprite: Sprite): {
+    frames: number[]; frameSource: SpriteFrameSource; fps: number; loop: boolean;
+} {
+    const animation = json?.animation ?? {};
+    const fps = animation.fps ?? 12;
+    const loop = animation.loop ?? true;
+
+    if (Array.isArray(animation.frames)) {
+        return { frames: animation.frames, frameSource: animation.frameSource ?? 'node', fps, loop };
+    }
+
+    const columns = Math.max(1, animation.columns ?? 1);
+    const rows = Math.max(1, animation.rows ?? 1);
+    const textureId = sprite.tileset?.textureId;
+    if (textureId) sprite.tileset = legacySheetTileset(textureId, columns, rows);
+
+    const legacy: number[] = Array.isArray(animation.sequence) && animation.sequence.length > 0
+        ? animation.sequence
+        : (() => {
+            const start = Math.max(0, animation.startFrame ?? 0);
+            const end = Math.min(columns * rows - 1, animation.endFrame ?? (columns * rows - 1));
+            const out: number[] = [];
+            for (let i = start; i <= end; i++) out.push(i);
+            return out;
+        })();
+
+    return { frames: legacy.map(i => remapLegacyFrame(i, columns, rows)), frameSource: 'node', fps, loop };
 }
 /**
  * Reconstruct a serialized subtree under `parent`, dispatching on its `type`.

@@ -49,7 +49,7 @@ const SLICING_KEYS: (keyof TilesetAsset)[] = [
 ]
 
 export function TilesetProvider({ children }: { children: React.ReactNode }) {
-  const { editingTilesetId, tilesets, saveTileset, activeTab, eventEmitter } = useCleoEngine()
+  const { editingTilesetId, tilesets, saveTileset, activeTab, eventEmitter, registerTilesetApply } = useCleoEngine()
   const { markTabDirty, dirtyTabs } = useDocument()
 
   const [asset, setAsset] = useState<TilesetAsset | null>(null)
@@ -119,6 +119,14 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
   }, [eventEmitter, patch])
 
   const save = useCallback(() => { if (asset) saveTileset(asset) }, [asset, saveTileset])
+
+  // Hand the save back to EngineContext so Ctrl+S, Save All and the close-tab prompt can reach the
+  // working copy — they only know tab ids, and it lives in this provider's state.
+  useEffect(() => {
+    if (!tabId) return
+    registerTilesetApply({ tabId, apply: save })
+    return () => registerTilesetApply(null)
+  }, [tabId, save, registerTilesetApply])
 
   const value = useMemo<TilesetContextValue>(() => ({
     asset, patch, importAtlas, setTileMeta, tileMeta, selection, setSelection, save,

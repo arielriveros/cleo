@@ -8,7 +8,7 @@ export type { NodeTemplate } from "./core/scene/templates";
 export { parseNodeJson } from "./core/scene/node";
 export { cloneNodeJson, collectNodeIds, remapNodeRefs, regenerateNodeIds } from "./core/scene/nodeJson";
 export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, CameraRigNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, TilemapNode, LodGroupNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
-export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions, FollowSpace, AimMode } from "./core/scene/node";
+export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions, FollowSpace, AimMode, SpriteFrameSource } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { TypedEmitter, engineEventBus } from "./core/eventBus";
@@ -84,7 +84,8 @@ export type {
     AnimationVariableBinding,
     AnimationEventMarker,
 } from "./graphics/animator";
-export { Sprite } from "./graphics/sprite";
+export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTilesetId, INLINE_TILESET_PREFIX } from "./graphics/sprite";
+export type { SpriteOptions, SpriteSide } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
 // Scene.physics is a public field of this type and scripts already reach through it (startRagdoll,

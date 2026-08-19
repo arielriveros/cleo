@@ -47,9 +47,24 @@ export class TextureManager {
         return identifier;
     }
 
-    public addTextureFromData(data: HTMLImageElement, config?: TextureConfig, id?: string): string {
+    /**
+     * Register an ALREADY-DECODED image. Unlike the base64/bytes paths this is ready the instant it
+     * returns, which is what anything reading the image's pixel dimensions needs.
+     *
+     * Pass `source` whenever the caller still has the file's compressed bytes. Without them
+     * `getSource` returns null, and anything that persists or re-shares textures by their original
+     * bytes — the editor's texture store, asset-pack export — skips the texture silently, so the image
+     * is simply gone after a reload.
+     */
+    public addTextureFromData(
+        data: HTMLImageElement,
+        config?: TextureConfig,
+        id?: string,
+        source?: { bytes: Uint8Array; mime: string },
+    ): string {
         const texture = new Texture(config);
         texture.create(data, data.width, data.height);
+        if (source) texture.setSource(source.bytes, source.mime);
         const identifier = id || uuidv4();
         return this.addTexture(texture, identifier);
     }

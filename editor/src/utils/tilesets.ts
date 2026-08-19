@@ -1,4 +1,4 @@
-import { Tileset, TilemapNode } from 'cleo'
+import { Tileset, TilemapNode, isInlineTilesetId } from 'cleo'
 import type { Scene, TileMeta, TerrainSet, VariantSet, TilesetConfig } from 'cleo'
 import { cryptoRandomId } from './UIModel'
 
@@ -193,10 +193,21 @@ export function reembedTilesets(scene: Scene | null | undefined, tilesets: Tiles
       changed = true
     }
   }
+  // Sprites embed one tileset each, for the same reason and with the same staleness problem.
+  for (const sprite of scene.sprites) {
+    const current = sprite.tileset
+    if (!current || isInlineTilesetId(current.id)) continue
+    const asset = tilesets.find(t => t.id === current.id)
+    if (!asset) continue
+    const next = toRuntimeTileset(asset)
+    if (JSON.stringify(current.serialize()) === JSON.stringify(next.serialize())) continue
+    sprite.tileset = next
+    changed = true
+  }
   return changed
 }
 
-/** Clear every reference to a deleted tileset, so a layer degrades to "nothing to draw" rather than a husk. */
+/** Clear every reference to a deleted tileset, so a layer or sprite degrades to "nothing to draw". */
 export function detachTileset(scene: Scene | null | undefined, tilesetId: string): boolean {
   if (!scene) return false
   let changed = false
@@ -208,14 +219,23 @@ export function detachTileset(scene: Scene | null | undefined, tilesetId: string
       changed = true
     }
   }
+  for (const sprite of scene.sprites) {
+    if (sprite.tileset?.id !== tilesetId) continue
+    sprite.tileset = null
+    changed = true
+  }
   return changed
 }
 
-/** Tileset ids a live scene's tilemaps reference. */
+/** Tileset ASSET ids a live scene references, from tilemap layers and sprites alike. */
 export function tilesetIdsInScene(scene: Scene | null | undefined): string[] {
   const ids = new Set<string>()
   for (const node of scene?.tilemaps ?? []) {
     for (const layer of node.tilemap.layers) if (layer.cfg.tilesetId) ids.add(layer.cfg.tilesetId)
+  }
+  for (const sprite of scene?.sprites ?? []) {
+    const id = sprite.tileset?.id
+    if (id && !isInlineTilesetId(id)) ids.add(id)
   }
   return [...ids]
 }

@@ -2,7 +2,7 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
-import { LightNode, ModelNode, SkyboxNode, SpriteNode, AnimatedSpriteNode, LightProbeNode, TilemapNode, VolumetricCloudsNode, SkyAtmosphereNode } from '../core/scene/node';
+import { LightNode, ModelNode, SkyboxNode, SpriteNode, LightProbeNode, TilemapNode, VolumetricCloudsNode, SkyAtmosphereNode } from '../core/scene/node';
 import { Tilemap } from '../tilemap/tilemap';
 import { TilemapLayer } from '../tilemap/tilemapLayer';
 import { TileMesh } from '../tilemap/tileMesh';
@@ -3418,17 +3418,12 @@ export class Renderer {
 
         this._shaderManager.bind(node.sprite.material.type);
 
-        // If node is an AnimatedSpriteNode, set UV transform uniforms
-        if (node instanceof AnimatedSpriteNode) {
-            const [ox, oy, sx, sy] = node.getUVTransform();
-            // Note: our UVs origin is top-left vs GL bottom-left? Keep as-is; users can invert rows.
-            this._shaderManager.setUniform('u_uvOffset', [ox, oy]);
-            this._shaderManager.setUniform('u_uvScale', [sx, sy]);
-        } else {
-            // Defaults
-            this._shaderManager.setUniform('u_uvOffset', [0, 0]);
-            this._shaderManager.setUniform('u_uvScale', [1, 1]);
-        }
+        // The sprite's tile, as a sub-rect of the atlas. `basic.vs` does
+        // `fragTexCoord = a_texCoord * u_uvScale + u_uvOffset` over the quad's baked 0..1 UVs, and
+        // `Tileset.uvOf` already applies the V flip, so static and animated sprites share one path.
+        const [u0, v0, u1, v1] = node.uvRect();
+        this._shaderManager.setUniform('u_uvOffset', [u0, v0]);
+        this._shaderManager.setUniform('u_uvScale', [u1 - u0, v1 - v0]);
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);

@@ -21,24 +21,26 @@ export function getMaterialIdOf(node: Node | null | undefined): string | undefin
   return node?.getVariable(MATERIAL_ID_VAR)
 }
 
-/** The live Material carried by a node's mesh (model or sprite), or null for non-material nodes. */
+// Sprites are deliberately absent from all three of these. A sprite's image comes from its tileset and
+// its tint/opacity/blending are plain fields on the node; the Material it still holds internally is an
+// implementation detail of the renderer, not something a material asset may be linked to.
+
+/** The live Material carried by a node's mesh, or null for non-material nodes. */
 export function getNodeMaterial(node: Node): Material | null {
   const n = node as any
   if (node.nodeType === 'model') return n.model?.material ?? null
-  if (node.nodeType === 'sprite' || node.nodeType === 'animatedSprite') return n.sprite?.material ?? null
   return null
 }
 
-/** True if this node type carries an editable material (model or sprite). */
+/** True if this node type carries an editable material. */
 export function nodeSupportsMaterial(node: Node | null | undefined): boolean {
-  return !!node && (node.nodeType === 'model' || node.nodeType === 'sprite' || node.nodeType === 'animatedSprite')
+  return !!node && node.nodeType === 'model'
 }
 
-/** Replace the live Material on a node's mesh (model or sprite). No-op for non-material nodes. */
+/** Replace the live Material on a node's mesh. No-op for non-material nodes. */
 function setNodeMaterial(node: Node, material: Material): void {
   const n = node as any
   if (node.nodeType === 'model' && n.model) n.model.material = material
-  else if ((node.nodeType === 'sprite' || node.nodeType === 'animatedSprite') && n.sprite) n.sprite.material = material
 }
 
 // Collect the texture ids referenced by a serialized material's flat `textures` map.
@@ -121,7 +123,6 @@ export function resolveMaterialRefs(json: any, materials: MaterialAsset[]): void
     // Deep-copy: the asset's serialized material is shared library state, and Material.parse must not be
     // handed something a later edit could mutate under it.
     if (asset && json.model) json.model.material = JSON.parse(JSON.stringify(asset.material))
-    else if (asset && json.sprite) json.sprite.material = JSON.parse(JSON.stringify(asset.material))
   }
   for (const child of json.children ?? []) resolveMaterialRefs(child, materials)
 }

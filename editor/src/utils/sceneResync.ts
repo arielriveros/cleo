@@ -1,4 +1,4 @@
-import { Scene, Node, CameraNode } from 'cleo'
+import { Scene, Node, CameraNode, isInlineTilesetId } from 'cleo'
 import { getMaterialIdOf, applyMaterialAsset, unlinkToFallback, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
 import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig } from './models'
@@ -237,6 +237,20 @@ export function resyncScene(
         tilemap.registerTileset(toRuntimeTileset(asset))
         changed = true
       }
+    }
+  }
+
+  // --- Sprites: the same refresh, one embedded tileset each ---
+  // Inline tilesets are skipped: they are synthesized (a helper icon's 1x1 wrapper, a migrated sheet)
+  // and have no library asset, so the "asset is gone -> unlink" branch would wrongly blank them.
+  for (const sprite of Array.from(scene.sprites) as any[]) {
+    const id = sprite.tileset?.id
+    if (!id || isInlineTilesetId(id)) continue
+    const asset = tilesetById.get(id)
+    if (!asset) { sprite.tileset = null; changed = true; continue }
+    if (changedSince('tileset', id, hashAsset(asset))) {
+      sprite.tileset = toRuntimeTileset(asset)
+      changed = true
     }
   }
 

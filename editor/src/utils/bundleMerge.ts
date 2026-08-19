@@ -52,7 +52,7 @@ export interface MergeResult {
   vfsEntries: VfsEntry[]
 }
 
-type Remaps = {
+export type Remaps = {
   tex: Map<string, string>
   mat: Map<string, string>
   tmat: Map<string, string>
@@ -71,7 +71,7 @@ const sub = (m: Map<string, string>, v: any): any => (typeof v === 'string' && m
  * `materialId` (terrain layer → terrain-material), `materialIds[]` (model → materials), `modelId` (foliage),
  * and node `variables` links (__materialId/__modelId/__templateId/__screenMaterialIds).
  */
-function remapDeep(obj: any, r: Remaps): void {
+export function remapDeep(obj: any, r: Remaps): void {
   if (!obj || typeof obj !== 'object') return
   if (Array.isArray(obj)) { obj.forEach(o => remapDeep(o, r)); return }
 
@@ -95,6 +95,14 @@ function remapDeep(obj: any, r: Remaps): void {
     if (key === 'tilesetId') { obj[key] = sub(r.tileset, val); continue }
     if (key === 'tilesets' && Array.isArray(val)) {
       for (const ts of val) if (ts && typeof ts === 'object') { ts.id = sub(r.tileset, ts.id); remapDeep(ts, r) }
+      continue
+    }
+    // A sprite embeds ONE tileset, under the singular key — the array branch above never matches it.
+    // Missing this is silent: the sprite's `tilesetId` would be remapped while its embedded copy kept
+    // the old id, and the sprite would draw nothing.
+    if (key === 'tileset' && val && typeof val === 'object') {
+      ;(val as any).id = sub(r.tileset, (val as any).id)
+      remapDeep(val, r)
       continue
     }
     if (key === 'variables' && val && typeof val === 'object') {

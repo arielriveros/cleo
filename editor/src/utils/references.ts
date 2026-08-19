@@ -1,4 +1,4 @@
-import { Scene, CameraNode, isDerivedTextureId } from 'cleo'
+import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId } from 'cleo'
 import { getNodeMaterial, getMaterialIdOf, MaterialAsset } from './materials'
 import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
@@ -51,6 +51,12 @@ export function collectReferencedTextureIds(
     // Live tilemaps: each layer's tileset draws from one atlas texture.
     for (const tn of scene.tilemaps)
       for (const ts of tn.tilemap.tilesets.values()) if (ts.textureId) set.add(ts.textureId)
+    // Live sprites: same story, one embedded tileset each. Sprites carry no material asset, so the
+    // getNodeMaterial pass above sees nothing of theirs.
+    for (const sn of scene.sprites) {
+      const id = sn.tileset?.textureId
+      if (id) set.add(id)
+    }
   }
   for (const m of materials) collectTextureIds(m.material, set)
   for (const m of models) collectTextureIds(m.nodeJson, set)
@@ -88,11 +94,15 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
 
   // A serialized tilemap's atlas ids sit on its embedded tilesets, NOT inside a `textures` map, so the
   // generic walk above cannot see them — exactly like terrain's displacementMap.
-  const walkTilemap = (n: any): void => {
+  // Sprites embed a single tileset under `sprite.tileset` rather than a `tilesets` array, so they need
+  // their own line here for the same reason.
+  const walkTilesets = (n: any): void => {
     for (const ts of n?.tilemap?.tilesets ?? []) if (ts?.textureId) set.add(ts.textureId)
-    for (const child of n?.children ?? []) walkTilemap(child)
+    const spriteTileset = n?.sprite?.tileset
+    if (spriteTileset?.textureId) set.add(spriteTileset.textureId)
+    for (const child of n?.children ?? []) walkTilesets(child)
   }
-  walkTilemap(node)
+  walkTilesets(node)
 
   const walkTerrain = (n: any): void => {
     const terrain = n?.terrain
@@ -186,7 +196,7 @@ export function collectReferencedAnimationFieldIds(scene: Scene | null | undefin
   return set
 }
 
-/** Tileset asset ids referenced by any live tilemap layer. */
+/** Tileset asset ids referenced by any live tilemap layer or sprite. */
 export function collectReferencedTilesetIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()
   if (scene) {
@@ -194,6 +204,12 @@ export function collectReferencedTilesetIds(scene: Scene | null | undefined): Se
       for (const layer of tn.tilemap.layers) {
         if (layer.cfg.tilesetId) set.add(layer.cfg.tilesetId)
       }
+    }
+    // Inline tilesets (a helper icon's 1x1 wrapper, a migrated sheet) have no library asset behind
+    // them and must not be reported as references to one.
+    for (const sn of scene.sprites) {
+      const id = sn.tileset?.id
+      if (id && !isInlineTilesetId(id)) set.add(id)
     }
   }
   return set

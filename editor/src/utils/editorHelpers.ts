@@ -258,10 +258,11 @@ function shapesSignature(shapes: ShapeDescription[], scale: Vec.vec3): string {
 function ensureLightIcon(light: LightNode) {
   if (light.getChildByName(LIGHT_ICON).length) return;
   const d = light.light.diffuse;
-  const icon = new SpriteNode(LIGHT_ICON, new Sprite(Material.Basic({
-    color: [d[0], d[1], d[2]],
-    texture: '__editor__light_icon',
-  })));
+  // Icons are whole-image sprites, so they go through the synthetic 1x1 tileset rather than the
+  // tileset library — there is no asset for them and none should show up in the explorer.
+  const icon = new SpriteNode(LIGHT_ICON, Sprite.fromTexture('__editor__light_icon', {
+    tint: [d[0], d[1], d[2]],
+  }));
   icon.setUniformScale(0.5);
   light.addChild(icon);
 }
@@ -288,10 +289,9 @@ function ensureCameraGizmo(camera: CameraNode) {
 // the light icon: a camera-facing sprite rather than a wireframe sphere.
 function ensureProbeHelper(probe: LightProbeNode) {
   if (probe.getChildByName(PROBE_HELPER).length) return;
-  const icon = new SpriteNode(PROBE_HELPER, new Sprite(Material.Basic({
-    color: [0.4, 0.8, 1],
-    texture: '__editor__probe_icon',
-  })));
+  const icon = new SpriteNode(PROBE_HELPER, Sprite.fromTexture('__editor__probe_icon', {
+    tint: [0.4, 0.8, 1],
+  }));
   icon.setUniformScale(0.5);
   probe.addChild(icon);
 }

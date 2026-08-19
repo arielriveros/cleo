@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_TILE_SIZE, buildTilesetAsset, gridOf, guessTileSize, resliceTileset, toRuntimeTileset,
+  reembedTilesets, detachTileset, tilesetIdsInScene,
 } from '../editor/src/utils/tilesets';
+import { Scene, SpriteNode, Sprite } from 'cleo';
 
 // The pure half of the tileset asset: how an atlas is cut into a grid, and what happens to per-tile
 // metadata when that grid changes underneath it.
@@ -135,5 +137,59 @@ describe('toRuntimeTileset', () => {
     expect(ts.isSolid(2)).toBe(true);
     expect(ts.frameOf(2, 0.3)).toBe(3);
     expect(ts.terrainSet(1)?.tiles[0]).toEqual([4]);
+  });
+});
+
+// --- Sprites as tileset consumers -----------------------------------------------------------------
+// Sprites embed a tileset the same way tilemaps do, so the same three reconciliation paths have to see
+// them: refresh on library edit, unlink on library delete, and report as a reference. The wrinkle is the
+// INLINE tileset — a helper icon's 1x1 wrapper or a migrated sheet — which has no library asset and must
+// be left strictly alone by all three, or the editor's own light icons blank out on the first scene open.
+
+describe('sprites and the tileset library', () => {
+  const sheet = () => buildTilesetAsset('Sheet', 'sheet.png', 64, 64, { tileWidth: 16, tileHeight: 16 });
+
+  const sceneWith = (...sprites: SpriteNode[]) => {
+    const scene = new Scene();
+    for (const s of sprites) scene.addNode(s);
+    return scene;
+  };
+
+  it('reembeds an edited tileset into placed sprites', () => {
+    const asset = sheet();
+    const sprite = new SpriteNode('s', new Sprite({ tileset: toRuntimeTileset(asset) }));
+    const scene = sceneWith(sprite);
+
+    const edited = { ...asset, tiles: { 3: { solid: true } } };
+    expect(reembedTilesets(scene, [edited])).toBe(true);
+    expect(sprite.tileset?.metaOf(3)?.solid).toBe(true);
+    // Idempotent: an unchanged library must not report a change and force a pointless save.
+    expect(reembedTilesets(scene, [edited])).toBe(false);
+  });
+
+  it('unlinks sprites whose tileset was deleted', () => {
+    const asset = sheet();
+    const sprite = new SpriteNode('s', new Sprite({ tileset: toRuntimeTileset(asset) }));
+    const scene = sceneWith(sprite);
+
+    expect(detachTileset(scene, asset.id)).toBe(true);
+    expect(sprite.tileset).toBeNull();
+  });
+
+  it('reports a sprite’s tileset as referenced', () => {
+    const asset = sheet();
+    const scene = sceneWith(new SpriteNode('s', new Sprite({ tileset: toRuntimeTileset(asset) })));
+    expect(tilesetIdsInScene(scene)).toEqual([asset.id]);
+  });
+
+  it('leaves inline tilesets out of the library entirely', () => {
+    const icon = new SpriteNode('icon', Sprite.fromTexture('__editor__light_icon'));
+    const scene = sceneWith(icon);
+
+    expect(tilesetIdsInScene(scene)).toEqual([]);
+    // Neither an unrelated library edit nor a delete may touch it — this is the light-icon regression.
+    expect(reembedTilesets(scene, [sheet()])).toBe(false);
+    expect(detachTileset(scene, icon.tileset!.id)).toBe(true); // an explicit id still detaches
+    expect(icon.tileset).toBeNull();
   });
 });

@@ -22,6 +22,19 @@ describe('published texture references', () => {
     })).toEqual(['a', 'b']);
   });
 
+  it('finds a tilemap’s and a sprite’s embedded atlases', () => {
+    // Both hide their atlas id on an embedded tileset rather than in a `textures` map, so the generic
+    // deep walk cannot see them. A tilemap embeds an ARRAY; a sprite embeds a single object — missing
+    // either one publishes a game whose tiles or sprites render untextured.
+    expect(ids({
+      children: [
+        { nodeType: 'tilemap', tilemap: { tilesets: [{ textureId: 'atlas.png' }] }, children: [] },
+        { nodeType: 'sprite', sprite: { tileset: { textureId: 'hero.png' } }, children: [] },
+        { nodeType: 'animatedSprite', sprite: { tileset: { textureId: 'fire.png' } }, children: [] },
+      ],
+    })).toEqual(['atlas.png', 'fire.png', 'hero.png']);
+  });
+
   it('finds a camera’s inline screen-material textures', () => {
     // screenMaterials serialize inline on the CameraNode (node.ts CameraNode.serialize), so they are
     // only reachable through the generic deep walk — there is no node.model here at all.
