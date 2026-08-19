@@ -63,6 +63,9 @@ uniform bool  u_jitter;
 uniform bool  u_temporal;
 uniform vec2  u_traceResolution; // size of the reduced trace target, in pixels
 uniform ivec2 u_bayerOffset;     // sub-position within the 4x4 block traced this frame
+// Which slot of the 16-frame Bayer cycle this frame is, used to advance the ray-start dither. Also
+// set on the non-temporal paths (from the raw frame counter) so they still get a moving dither.
+uniform int   u_jitterSlot;
 
 // Render
 uniform float u_opacity;
@@ -89,12 +92,17 @@ uniform sampler3D u_detailNoise;  // RGB = high-frequency erosion bands
 uniform float u_baseNoiseInvPeriod;   // 1 / lattice cells across the base volume
 uniform float u_detailNoiseInvPeriod; // 1 / lattice cells across the detail volume
 
-// Kept for the per-frame ray-start dither only: that one WANTS fresh randomness every frame (it is
-// what temporal accumulation converges away), so it must not come from a cached field.
-float hash13(vec3 p) {
-    p = fract(p * 0.1031);
-    p += dot(p, p.zyx + 31.32);
-    return fract((p.x + p.y) * p.z);
+/**
+ * Interleaved gradient noise (Jimenez, "Next Generation Post Processing in Call of Duty"), the
+ * spatial dither for the ray start.
+ *
+ * It has to be SPATIAL rather than per-frame random. The temporal resolve accumulates over a
+ * 16-frame Bayer cycle, so a pixel that draws an uncorrelated offset every frame never averages —
+ * the noise is simply frozen into history and reads as grain. Keyed to the pixel and stepped once
+ * per Bayer slot, each pixel instead sees the same 16 offsets every cycle and converges.
+ */
+float ign(vec2 p) {
+    return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
 }
 
 float remap(float v, float inMin, float inMax, float outMin, float outMax) {
@@ -224,8 +232,14 @@ void main() {
     float marchLen = tExit - tEnter;
     float stepLen = marchLen / float(steps);
 
-    // Dither the start to trade banding for noise.
-    float jitter = u_jitter ? hash13(vec3(gl_FragCoord.xy, u_time)) : 0.0;
+    // Dither the start to trade banding for noise, advanced by the golden ratio each Bayer slot so
+    // the 16 offsets a pixel sees over a cycle are well spread.
+    //
+    // The dither MUST be keyed to the full-resolution pixel this ray reconstructs, not to
+    // gl_FragCoord: in temporal mode gl_FragCoord is the trace buffer's coordinate, so a given
+    // full-res pixel drew an unrelated offset every time its block came up.
+    vec2 jitterPx = u_temporal ? floor(uv * u_traceResolution * 4.0) : gl_FragCoord.xy;
+    float jitter = u_jitter ? fract(ign(jitterPx) + float(u_jitterSlot) * 0.6180339887) : 0.0;
     float t = tEnter + stepLen * jitter;
 
     // Sun setup (direction *toward* the sun) + phase.

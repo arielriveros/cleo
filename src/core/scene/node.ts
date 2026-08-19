@@ -4215,6 +4215,7 @@ export class VolumetricCloudsNode extends Node {
                         maxDistance: this._maxDistance,
                         jitter: this._jitter,
                         resolutionScale: this._resolutionScale,
+                        temporalUpscale: this._temporalUpscale,
                         enabled: this._enabled,
                         opacity: this._opacity
                     }

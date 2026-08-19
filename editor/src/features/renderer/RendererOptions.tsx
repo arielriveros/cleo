@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { engineEventBus } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import { OverlayPanel, Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Hint } from '../../components/ui';
 
@@ -17,6 +18,7 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'ssao',      label: 'SSAO' },
   { key: 'shadow',    label: 'Shadow' },
   { key: 'bloom',     label: 'Bloom' },
+  { key: 'bloomMask', label: 'Bloom Mask' },
   { key: 'velocity',  label: 'Velocity' },
   // Overdraw re-rasterizes the scene with additive blending into its own target, so unlike every
   // other channel here it costs an extra pass — but it is the only view that shows how many times
@@ -48,6 +50,7 @@ export default function RendererOptions() {
   const [bloomThreshold, setBloomThreshold] = useState<number>(() => renderer?.bloomThreshold ?? 1.0);
   const [bloomKnee, setBloomKnee] = useState<number>(() => renderer?.bloomKnee ?? 0.5);
   const [bloomIntensity, setBloomIntensity] = useState<number>(() => renderer?.bloomIntensity ?? 0.6);
+  const [bloomMask, setBloomMask] = useState<boolean>(() => renderer?.bloomMaskEnabled ?? false);
   const [chromatic, setChromatic] = useState<number>(() => renderer?.chromaticAberrationStrength ?? 0);
   const [ssaoEnabled, setSsaoEnabled] = useState<boolean>(() => renderer?.ssaoEnabled ?? true);
   const [ssaoRadius, setSsaoRadius] = useState<number>(() => renderer?.ssaoRadius ?? 0.5);
@@ -70,10 +73,26 @@ export default function RendererOptions() {
   // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => { if (renderer) renderer.debugView = 'final'; }, [renderer]);
 
-  // Play/stop resets debugView and toggles the grid on the renderer directly — re-sync the mirror.
-  useEffect(() => {
+  // Pull every mirrored value back off the renderer.
+  //
+  // Everything the renderer can change behind this panel's back belongs here, not just what play/stop
+  // touches: selecting a quality preset (from the Profiler panel) rewrites bloom, SSAO, motion blur
+  // and render scale in one move. Bloom used to be left out, so choosing the `low` tier — which
+  // switches bloom off — left the Intensity slider reading 0.6 while the renderer held 0, and bloom
+  // looked broken rather than switched off.
+  const syncFromRenderer = useCallback(() => {
     if (!renderer) return;
     setDebugViewState(renderer.debugView);
+    setExposure(renderer.exposure);
+    setBloomThreshold(renderer.bloomThreshold);
+    setBloomKnee(renderer.bloomKnee);
+    setBloomIntensity(renderer.bloomIntensity);
+    setBloomMask(renderer.bloomMaskEnabled);
+    setChromatic(renderer.chromaticAberrationStrength);
+    setSsaoEnabled(renderer.ssaoEnabled);
+    setSsaoRadius(renderer.ssaoRadius);
+    setSsaoPower(renderer.ssaoPower);
+    setSsaoBias(renderer.ssaoBias);
     setGridVisible(renderer.gridVisible);
     setGridPlane(renderer.gridPlane);
     setFrustumCulling(renderer.frustumCulling);
@@ -87,7 +106,29 @@ export default function RendererOptions() {
     setMotionBlur(renderer.motionBlurEnabled);
     setMotionBlurIntensity(renderer.motionBlurIntensity);
     setMotionBlurSamples(renderer.motionBlurSamples);
-  }, [isPlayMode, renderer]);
+  }, [renderer]);
+
+  // Play/stop resets debugView and toggles the grid on the renderer directly.
+  useEffect(() => { syncFromRenderer(); }, [isPlayMode, syncFromRenderer]);
+
+  // A quality preset moves a dozen knobs at once, from a different panel. Without this the mirror
+  // only refreshes when this panel remounts, so the two panels can sit side by side disagreeing.
+  useEffect(() => {
+    engineEventBus.on('RENDER_SETTINGS_CHANGED', syncFromRenderer);
+    return () => { engineEventBus.off('RENDER_SETTINGS_CHANGED', syncFromRenderer); };
+  }, [syncFromRenderer]);
+
+  // Bloom has kill switches this panel does not own — the Profiler panel's per-pass toggles, and the
+  // quality preset, which zeroes the intensity on tiers without bloom. Say so here rather than letting
+  // the sliders imply bloom is on when nothing can reach the screen.
+  const bloomOff = (() => {
+    if (!renderer) return null;
+    if (renderer.bloomIntensity <= 0) return 'intensity is 0 (the Low quality preset switches bloom off).';
+    const passes = renderer.passEnabled;
+    const dead = (['bloom.bright', 'bloom.blur', 'bloom.composite'] as const).filter((p) => !passes[p]);
+    if (dead.length > 0) return `${dead.join(', ')} switched off in the Profiler panel's pass switches.`;
+    return null;
+  })();
 
   if (!renderer) {
     return (
@@ -171,7 +212,13 @@ export default function RendererOptions() {
           onChange={(v) => { renderer.bloomKnee = v; setBloomKnee(v); }} />
         <Slider label='Intensity' value={bloomIntensity} min={0} max={3} step={0.05}
           onChange={(v) => { renderer.bloomIntensity = v; setBloomIntensity(v); }} />
-        <Hint>HDR bright-pass (linear). Threshold is a luminance cutoff; knee softens the ramp.</Hint>
+        <Toggle label='Restrict to lit surfaces' checked={bloomMask}
+          onChange={(v) => { renderer.bloomMaskEnabled = v; setBloomMask(v); }} />
+        <Hint>HDR bright-pass. Threshold is a luminance cutoff measured after exposure, so it means
+          &quot;bloom what would clip on screen&quot;; knee softens the ramp. Restricting to lit surfaces
+          uses the scene buffer&apos;s alpha mask — sprites, tilemaps, transparents and unlit materials
+          cannot set it, so they never bloom while it is on (see the Bloom Mask channel).</Hint>
+        {bloomOff && <Hint>Bloom is currently inactive: {bloomOff}</Hint>}
       </Section>
 
       <Section title='Motion Blur'>

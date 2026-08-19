@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // The cloud temporal/noise work is GL-bound and so mostly out of scope for this DOM-free suite (see
@@ -73,12 +73,24 @@ describe('cloud noise sampling', () => {
         expect(cloudShader).not.toMatch(/\bhash33\s*\(/);
     });
 
-    it('keeps hash13 for the per-frame ray-start dither only', () => {
-        // That one must stay procedural: it wants fresh randomness every frame, which is exactly
-        // what a cached field cannot provide.
-        expect(cloudShader).toMatch(/float hash13\(/);
-        const uses = cloudShader.match(/hash13\(/g) ?? [];
-        expect(uses.length).toBe(2); // the definition and the single dither call site
+    it('dithers the ray start spatially, stepped per Bayer slot', () => {
+        // The dither must NOT redraw at random every frame. The temporal resolve accumulates over a
+        // 16-frame Bayer cycle, so a per-frame random offset never averages out — it is simply frozen
+        // into history and reads as grain over everything, including the meshes underneath.
+        expect(cloudShader).toMatch(/float ign\(vec2 p\)/);
+        expect(cloudShader).toMatch(/uniform int\s+u_jitterSlot/);
+        expect(cloudShader).toMatch(/ign\(jitterPx\)/);
+        expect(cloudShader).toMatch(/u_jitterSlot/);
+        // u_time drives the wind, and must not creep back into the dither.
+        expect(cloudShader).not.toMatch(/jitter\s*=[^;]*u_time/);
+        expect(cloudShader).not.toMatch(/hash13\s*\(/);
+    });
+
+    it('keys the dither to the reconstructed full-resolution pixel, not gl_FragCoord', () => {
+        // In temporal mode gl_FragCoord is the TRACE buffer's coordinate (1/4 per axis), so keying
+        // off it gives one full-res pixel an unrelated offset every time its block comes up — the
+        // exact thing the accumulation cannot converge.
+        expect(cloudShader).toMatch(/jitterPx\s*=\s*u_temporal\s*\?\s*floor\(uv \* u_traceResolution \* 4\.0\)/);
     });
 
     it('samples both baked volumes', () => {
@@ -108,5 +120,124 @@ describe('noise volume periods', () => {
             expect(size).toBeGreaterThan(0);
             expect(Math.log2(size) % 1).toBe(0);
         }
+    });
+});
+
+describe('temporal resolve depth rejection', () => {
+    it('actually samples u_gDepth', () => {
+        // This shipped as a dead uniform: declared with a comment promising disocclusion rejection,
+        // bound by the renderer, and never read. The result was cloud radiance reprojected onto mesh
+        // pixels and held there for up to 16 frames. A declaration alone must not pass again.
+        expect(resolveShader).toMatch(/uniform sampler2D u_gDepth/);
+        const reads = resolveShader.match(/texture\(u_gDepth/g) ?? [];
+        expect(reads.length).toBeGreaterThan(0);
+    });
+
+    it('rejects history where geometry occludes the cloud slab', () => {
+        // The load-bearing comparison: the slab-anchor distance against the distance to solid
+        // geometry. Without it the reprojection has no idea a mesh moved in front of the clouds.
+        expect(resolveShader).toMatch(/reachesSlab\s*=\s*slabT < sceneDist/);
+        expect(resolveShader).toMatch(/if \(!reachesSlab\)/);
+    });
+
+    it('bounds the neighbourhood clamp by slab reachability, not a depth epsilon', () => {
+        // At 1/16 density the 3x3 block neighbourhood spans ~24x24 screen pixels, so an unfiltered
+        // min/max happily admits full cloud coverage from sky blocks next to a silhouette and then
+        // "clamps" stale cloud on the mesh to itself.
+        //
+        // The filter must not be a device-depth epsilon either: depth is so compressed toward 1.0
+        // that a mesh 20m out and the sky behind it differ by a few thousandths, so any usable
+        // epsilon still admits the sky. Compare whether each ray reached the cloud layer instead.
+        expect(resolveShader).toMatch(/nbReaches\s*=\s*slabT < geometryDistance/);
+        expect(resolveShader).toMatch(/if \(nbReaches != reachesSlab\) continue/);
+    });
+
+    it('accumulates on traced pixels instead of replacing', () => {
+        // Pure replacement is why the march dither never converged. A traced pixel must mix its new
+        // sample over the clamped history.
+        expect(resolveShader).toMatch(/TRACE_BLEND/);
+        expect(resolveShader).toMatch(/mix\(history, traced, TRACE_BLEND\)/);
+    });
+
+    it('reconstructs traced-sample UVs against u_traceResolution, not u_resolution', () => {
+        // The renderer sizes the trace buffer with ceil(w/4), so u_resolution is NOT
+        // u_traceResolution * 4. Dividing by the wrong one puts every depth fetch a fraction of a
+        // block away from the sample it describes, and the depth test then rejects valid neighbours
+        // along every edge — the same trap the u_traceResolution uniform comment warns about.
+        const fn = /vec2 traceSampleUV\([^)]*\)\s*\{([\s\S]*?)\}/.exec(resolveShader);
+        expect(fn, 'traceSampleUV not found').not.toBeNull();
+        expect(fn![1]).toContain('u_traceResolution * 4.0');
+        expect(fn![1]).not.toMatch(/u_resolution/);
+    });
+});
+
+describe('cloud composite upsample', () => {
+    const upsampleShader = readFileSync(join(SRC, 'graphics', 'shaders', 'environment', 'cloudUpsample.fs'), 'utf8');
+
+    it('decides occlusion at full resolution, not from the low-res alpha', () => {
+        // One cloud texel covers a 2x2 screen block at scale 0.5 (4x4 at the low tiers) and its
+        // occlusion came from a single depth sample at its centre. No filter can recover a silhouette
+        // from that, so the composite re-runs the slab test per full-res pixel and hard-zeroes the
+        // occluded ones. Without this the cloud halos every mesh and its edge crawls on the cloud grid.
+        expect(upsampleShader).toMatch(/bool reachesSlab\(vec2 uv\)/);
+        expect(upsampleShader).toMatch(/if \(!reachesSlab\(fragTexCoord\)\) \{ fragColor = vec4\(0\.0\); return; \}/);
+    });
+
+    it('gathers discrete texels and rejects the occluded ones', () => {
+        // texelFetch, not texture(): the cloud targets are LINEAR-filtered, so a UV fetch would have
+        // already blended neighbouring texels together before any weighting could reject them.
+        expect(upsampleShader).toMatch(/texelFetch\(u_clouds/);
+        expect(upsampleShader).not.toMatch(/texture\(u_clouds/);
+        // Renormalising over the surviving texels is what stops a dark notch hugging each silhouette.
+        expect(upsampleShader).toMatch(/sum \/ weightSum/);
+    });
+
+    it('carries no device-depth epsilon and no shared upsample include', () => {
+        // The epsilon approach was removed: device depth is compressed so hard toward 1.0 that
+        // separating a mesh from the sky behind it is not expressible as a relative tolerance. See the
+        // same argument in cloudTemporalResolve.fs.
+        expect(upsampleShader).not.toMatch(/TOLERANCE/);
+        expect(upsampleShader).not.toMatch(/#include/);
+        expect(existsSync(join(SRC, 'graphics', 'shaders', 'screen', 'depthAwareUpsample.glsl'))).toBe(false);
+    });
+
+    it('is the shader the renderer composites the low-res clouds with', () => {
+        expect(renderer).toContain("this._shaderManager.addShader('cloudUpsample'");
+        expect(renderer).toContain("this._shaderManager.bind('cloudUpsample')");
+        // The slab test needs the layer bounds and the camera, or it silently always passes.
+        expect(renderer).toContain("setUniform('u_slabBottom'");
+        expect(renderer).toContain("setUniform('u_slabTop'");
+    });
+});
+
+describe('premultiplied alpha in the temporal resolve', () => {
+    it('clamps colour and coverage in unpremultiplied space', () => {
+        // GLSL clamp on a vec4 is per-component, so clamping a premultiplied sample can raise rgb
+        // toward hi while dropping a toward lo, leaving rgb > a — a colour its own alpha cannot
+        // represent, which composites as a bright fringe along every cloud edge.
+        expect(resolveShader).toMatch(/vec4 clampSample\(vec4 s\)/);
+        expect(resolveShader).toMatch(/vec3 unpremultiply\(vec4 s\)/);
+        expect(resolveShader).toMatch(/return vec4\(c \* a, a\);/);
+        // No raw vec4 clamp against premultiplied bounds may remain.
+        expect(resolveShader).not.toMatch(/clamp\([^)]*,\s*lo,\s*hi\)/);
+    });
+});
+
+describe('bloom mask blend state', () => {
+    it('never restores the blend func with the non-separate form', () => {
+        // The scene buffer's alpha is the bloom-eligibility mask, preserved by the SEPARATE default
+        // blendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ZERO, ONE). Three passes used to "restore
+        // the pipeline default" with a bare gl.blendFunc, which also overwrites the ALPHA factors —
+        // and since all three run in post-processing, the wrong state survived into the next frame and
+        // sky fog / transparents / sprites / gizmos then eroded the mask instead of preserving it.
+        expect(renderer).not.toMatch(/gl\.blendFunc\(gl\.SRC_ALPHA/);
+        expect(renderer).toMatch(/private _restoreDefaultBlend\(\): void \{\s*gl\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
+    });
+
+    it('does not let a quality tier destroy the authored bloom intensity', () => {
+        // Tier `low` disables bloom, which zeroes the live intensity; re-selecting a tier with bloom
+        // used to restore a hardcoded 0.6 and silently discard whatever the user had set.
+        expect(renderer).toContain('_bloomIntensityUser');
+        expect(renderer).not.toMatch(/Math\.max\(this\._bloomIntensity, 0\.6\)/);
     });
 });

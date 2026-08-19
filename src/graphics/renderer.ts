@@ -1,4 +1,5 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
+import { engineEventBus } from '../core/eventBus';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
@@ -35,6 +36,7 @@ import SkyboxFragment from './shaders/environment/skybox.fs'
 import VolumetricCloudsFragment from './shaders/environment/volumetricClouds.fs'
 import CloudNoiseBakeFragment from './shaders/environment/cloudNoiseBake.fs'
 import CloudTemporalResolveFragment from './shaders/environment/cloudTemporalResolve.fs'
+import CloudUpsampleFragment from './shaders/environment/cloudUpsample.fs'
 import SkyAtmosphereFragment from './shaders/environment/skyAtmosphere.fs'
 import ProbePreviewFragment from './shaders/environment/probePreview.fs'
 import SkyFogFragment from './shaders/screen/skyFog.fs'
@@ -149,7 +151,7 @@ function allForwardShaders(): string[] {
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom' | 'mask' | 'velocity' | 'overdraw';
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' | 'overdraw';
 
 interface RendererConfig {
     clearColor?: number[];
@@ -192,6 +194,7 @@ export interface RenderSettings {
     bloomThreshold: number;
     bloomKnee: number;
     bloomIntensity: number;
+    bloomMaskEnabled: boolean;
     chromaticAberrationStrength: number;
     ssaoEnabled: boolean;
     ssaoRadius: number;
@@ -304,6 +307,23 @@ export class Renderer {
     private _bloomThreshold: number = 1.0;
     private _bloomKnee: number = 0.5;
     private _bloomIntensity: number = 0.6;
+    /**
+     * The intensity the USER asked for, remembered across quality changes.
+     *
+     * The tier switch zeroes `_bloomIntensity` on tiers that disable bloom; without this it then had
+     * nothing to restore and came back as a hardcoded 0.6, silently discarding a hand-set value the
+     * inspector still displayed.
+     */
+    private _bloomIntensityUser: number = 0.6;
+    /**
+     * Restrict bloom to surfaces that set the scene buffer's alpha mask.
+     *
+     * Off by default, which is the conventional behaviour: bloom applies to the whole image. On, only
+     * deferred-lit geometry, a baked atmosphere sky and clouds are eligible — sprites, tilemaps,
+     * transparents and unlit "basic" materials draw under a mask-preserving blend and so cannot set
+     * the mask at all, which made this a silent "bloom does nothing" trap rather than a useful default.
+     */
+    private _bloomMaskEnabled: boolean = false;
     private _chromaticAberrationStrength: number = 0.0;
     private _selectedNodeId: string | null = null;
 
@@ -439,8 +459,9 @@ export class Renderer {
     private _cloudHistoryIndex: number = 0;
     /**
      * False whenever the history cannot be trusted: first frame, a resize (Framebuffer.create
-     * reallocates into uninitialized memory), a resolution/quality change, or a camera cut. The next
-     * frame then traces at full cloud resolution to reseed rather than showing 15/16 garbage.
+     * reallocates into uninitialized memory), a resolution/quality change, or a camera cut. That
+     * frame then traces at full cloud resolution to reseed the history (see _traceCloudsTemporal)
+     * rather than showing a 4x-upscaled 1/16 sample set for the next ~16 frames.
      */
     private _cloudHistoryValid: boolean = false;
     /** Cloud-space dimensions the history was last built at, so a change can invalidate it. */
@@ -687,10 +708,7 @@ export class Renderer {
         GLState.enable(gl.DEPTH_TEST);
         GLState.enable(gl.BLEND);
         gl.depthFunc(gl.LEQUAL);
-        // Standard alpha blend for RGB, but leave the destination ALPHA untouched (src factor ZERO,
-        // dst factor ONE). The scene buffer's alpha is repurposed as a "bloom eligibility" mask written
-        // only by opaque lit surfaces; blended overlays (sky/clouds/sprites/grid/gizmos) must not clobber it.
-        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+        this._restoreDefaultBlend();
         gl.drawingBufferColorSpace = 'srgb';
         if (!gl.getExtension('EXT_color_buffer_float')) {
             const msg = 'Rendering to floating point textures is not supported on this platform';
@@ -744,6 +762,7 @@ export class Renderer {
         const volumetricCloudsShader = new Shader().create(ScreenVertex, VolumetricCloudsFragment);
         const cloudNoiseBakeShader = new Shader().create(ScreenVertex, CloudNoiseBakeFragment);
         const cloudTemporalResolveShader = new Shader().create(ScreenVertex, CloudTemporalResolveFragment);
+        const cloudUpsampleShader = new Shader().create(ScreenVertex, CloudUpsampleFragment);
         // Sky atmosphere (per-direction Nishita scattering, baked into a cubemap via the IBL cube VS)
         const skyAtmosphereShader = new Shader().create(CubeVertex, SkyAtmosphereFragment);
         // Probe preview: equirectangular unwrap of a probe's captured cube for the editor thumbnail.
@@ -811,6 +830,7 @@ export class Renderer {
         this._shaderManager.addShader('volumetricClouds', volumetricCloudsShader);
         this._shaderManager.addShader('cloudNoiseBake', cloudNoiseBakeShader);
         this._shaderManager.addShader('cloudTemporalResolve', cloudTemporalResolveShader);
+        this._shaderManager.addShader('cloudUpsample', cloudUpsampleShader);
         this._shaderManager.addShader('skyAtmosphere', skyAtmosphereShader);
         this._shaderManager.addShader('probePreview', probePreviewShader);
         this._shaderManager.addShader('skyFog', skyFogShader);
@@ -1509,6 +1529,24 @@ export class Renderer {
         mesh.teardownInstanceMatrixBuffer(5);
     }
 
+    /**
+     * Put the blend function back to the pipeline default.
+     *
+     * The default is deliberately a SEPARATE function: standard alpha blend for RGB, but destination
+     * ALPHA untouched (src ZERO, dst ONE). The scene buffer's alpha is repurposed as the "bloom
+     * eligibility" mask, written only by opaque lit surfaces, and blended overlays
+     * (sky/clouds/sprites/grid/gizmos) must not clobber it.
+     *
+     * It exists as a method because three passes used to restore it with the NON-separate
+     * `gl.blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)` under a comment claiming that was the default.
+     * That also overwrites the alpha factors, and because all three run in post-processing the wrong
+     * state survived into the following frame, where sky fog / transparents / sprites / gizmos then
+     * eroded the bloom mask instead of preserving it. One definition means it cannot drift again.
+     */
+    private _restoreDefaultBlend(): void {
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+    }
+
     private _deferredLightingPass(scene: Scene, shadowLight: LightNode | null): void {
         const w = this._renderWidth, h = this._renderHeight;
 
@@ -2082,10 +2120,11 @@ export class Renderer {
         this._blur_FBOs[0].colors[0].bind(0);
         this._drawFullscreen();
 
-        // Restore the default (straight-alpha) blend func so later passes and next frame's alpha-blended
-        // sky/clouds/fog composite correctly.
+        // Restore the pipeline default so later passes and next frame's alpha-blended sky/clouds/fog
+        // composite correctly — including the mask-preserving ALPHA factors, which a plain
+        // gl.blendFunc here would silently overwrite for the rest of the frame and the next one.
         GLState.disable(gl.BLEND);
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        this._restoreDefaultBlend();
     }
 
     // Re-bake the SkyAtmosphere cubemap when needed: on first use / parameter change (needsBake) or
@@ -2287,7 +2326,8 @@ export class Renderer {
         }
 
         // Volumetric clouds: raymarched fullscreen, composited over the sky and occluded by opaque
-        // geometry (the shader reads the blitted scene depth to bound each ray).
+        // geometry (the shader reads the G-buffer depth to bound each ray — this runs before
+        // _copySceneDepth below, so the blitted copy does not exist yet).
         if (!this._thumbnailMode && this._beginPass('clouds')) this._renderVolumetricClouds(scene);
 
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
@@ -2476,6 +2516,7 @@ export class Renderer {
         if (scale >= 0.999) {
             // Full resolution: raymarch straight into the bound scene buffer (premultiplied "over" set above).
             this._shaderManager.setUniform('u_temporal', false);
+            this._shaderManager.setUniform('u_jitterSlot', this._frameIndex % 16);
             this._drawFullscreen();
         } else {
             // Reduced resolution: raymarch into a low-res target, then bilinear-upsample + composite. Fewer
@@ -2486,19 +2527,36 @@ export class Renderer {
             const source = temporal ? this._traceCloudsTemporal(node, w, h)
                                     : this._traceCloudsDirect(w, h);
 
-            // Pass B: LINEAR-upsample the low-res clouds and premultiplied-"over" composite them into the scene buffer.
+            // Pass B: composite the low-res clouds into the scene buffer, premultiplied "over".
+            //
+            // Not a plain bilinear blit (which is what this was): one cloud texel covers a 2x2 screen
+            // block at scale 0.5, and its occlusion was decided by a single depth sample at its
+            // centre, so ANY filter smears cloud onto the meshes in front of it and quantises every
+            // silhouette to the cloud grid. cloudUpsample.fs instead re-decides occlusion per
+            // full-resolution pixel and uses the low-res buffer only for colour — hence the slab and
+            // camera uniforms below.
+            //
+            // Depth is the G-buffer's, the same buffer the raymarch bounded its rays against, so the
+            // composite and the trace agree about what is in front of what.
             this._sceneFBO.bind();
             GLState.enable(gl.BLEND);
             gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-            this._shaderManager.bind('screen');
-            this._shaderManager.setUniform('u_screenTexture', 0);
+            this._shaderManager.bind('cloudUpsample');
+            this._shaderManager.setUniform('u_clouds', 0);
             source.bind(0);
+            this._shaderManager.setUniform('u_gDepth', 1);
+            this._gBufferFBO.depth.bind(1);
+            this._shaderManager.setUniform('u_cloudResolution', [w, h]);
+            this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+            this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+            this._shaderManager.setUniform('u_slabBottom', node.baseAltitude);
+            this._shaderManager.setUniform('u_slabTop', node.baseAltitude + node.thickness);
             this._drawFullscreen();
         }
 
         // Restore the state the following opaque/transparent overlay passes expect (incl. the default
         // mask-preserving alpha blend so later overlays don't clobber the bloom mask).
-        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+        this._restoreDefaultBlend();
         GLState.disable(gl.BLEND);
         GLState.enable(gl.DEPTH_TEST);
         GLState.depthMask(true);
@@ -2573,6 +2631,7 @@ export class Renderer {
     private _traceCloudsDirect(w: number, h: number): Texture {
         if (this._cloudsFBO.width !== w || this._cloudsFBO.height !== h) this._cloudsFBO.resize(w, h);
         this._shaderManager.setUniform('u_temporal', false);
+        this._shaderManager.setUniform('u_jitterSlot', this._frameIndex % 16);
         this._cloudsFBO.bind();
         GLState.disable(gl.BLEND);
         gl.clearColor(0, 0, 0, 0);
@@ -2595,7 +2654,33 @@ export class Renderer {
         const tw = Math.max(1, Math.ceil(w / Renderer.CLOUD_BAYER_SIZE));
         const th = Math.max(1, Math.ceil(h / Renderer.CLOUD_BAYER_SIZE));
 
+        // Must run BEFORE the reseed test below: a resize reallocates the targets and clears
+        // _cloudHistoryValid, which is exactly the case the reseed exists for.
         this._ensureCloudTemporalTargets(w, h, tw, th);
+
+        // --- Reseed: no usable history, so trace the WHOLE cloud image once ---
+        //
+        // The alternative (tracing 1/16 anyway and letting the resolve substitute its bilinear
+        // fallback) shows a soft, blocky 4x upscale that only converges over the following ~16
+        // frames — very visible on the first frame of play, after a resize, and after any camera cut.
+        // Cuts are rare by construction (_detectCameraCut only fires on a camera switch or a move of
+        // a large fraction of the distance to the cloud layer), so paying one full-resolution cloud
+        // frame for a correct image at each is the right trade.
+        if (!this._cloudHistoryValid || !this._hasPrevViewProj) {
+            const seed = this._cloudHistoryIndex ^ 1;
+            // The raymarch shader is still bound by the caller; u_temporal false makes traceUV() the
+            // identity, so this writes one ray per pixel of the history target.
+            this._shaderManager.setUniform('u_temporal', false);
+            this._shaderManager.setUniform('u_jitterSlot', this._frameIndex % 16);
+            this._cloudHistoryFBOs[seed].bind();
+            GLState.disable(gl.BLEND);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._drawFullscreen();
+            this._cloudHistoryIndex = seed;
+            this._cloudHistoryValid = true;
+            return this._cloudHistoryFBOs[seed].colors[0];
+        }
 
         // --- Trace: 1/16 of the rays ---
         const bayerIndex = this._frameIndex % 16;
@@ -2603,6 +2688,9 @@ export class Renderer {
         this._shaderManager.setUniform('u_temporal', true);
         this._shaderManager.setUniform('u_traceResolution', [tw, th]);
         this._shaderManager.setUniform('u_bayerOffset', [cell % 4, Math.floor(cell / 4)]);
+        // Advance the ray-start dither once per Bayer slot, so a pixel sees the same 16 offsets every
+        // cycle and the resolve's accumulation averages them away instead of freezing in grain.
+        this._shaderManager.setUniform('u_jitterSlot', bayerIndex);
 
         this._cloudTraceFBO.bind();
         GLState.disable(gl.BLEND);
@@ -2632,6 +2720,10 @@ export class Renderer {
         this._shaderManager.setUniform('u_bayerIndex', bayerIndex);
         // History needs BOTH a seeded buffer and a previous camera to reproject through; the two are
         // invalidated by different things (a resize kills the first, the first frame the second).
+        // Since the reseed above returns early on exactly that condition, this is always true today —
+        // it stays because the shader's no-history path is the correct behaviour if the reseed ever
+        // becomes conditional (e.g. skipped on a slow frame), and an unset uniform would silently be
+        // read as false.
         this._shaderManager.setUniform('u_historyValid', this._cloudHistoryValid && this._hasPrevViewProj);
         this._shaderManager.setUniform('u_slabMid', node.baseAltitude + node.thickness * 0.5);
         this._drawFullscreen();
@@ -2716,7 +2808,7 @@ export class Renderer {
         this._drawFullscreen();
 
         // Restore the default mask-preserving alpha blend for subsequent overlay passes.
-        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+        this._restoreDefaultBlend();
         GLState.depthMask(true);
     }
 
@@ -3164,8 +3256,13 @@ export class Renderer {
         const ah = Math.max(1, Math.round(height * this._ssaoResolutionScale));
         this._ssaoFBO.resize(aw, ah);
         this._ssaoBlurFBO.resize(aw, ah);
-        this._blur_FBOs[0].resize(width / 2, height / 2);
-        this._blur_FBOs[1].resize(width / 2, height / 2);
+        // Floor, don't divide raw: Framebuffer.resize stores the value verbatim and reports it back as
+        // `width`, so an odd render width left these at e.g. 645.5 — a viewport truncated to 645 with a
+        // texel size computed from 645.5, i.e. every consumer sampling on a subtly wrong grid.
+        const hw = Math.max(1, Math.floor(width / 2));
+        const hh = Math.max(1, Math.floor(height / 2));
+        this._blur_FBOs[0].resize(hw, hh);
+        this._blur_FBOs[1].resize(hw, hh);
         this._compose_FBOs[0].resize(width, height);
         this._compose_FBOs[1].resize(width, height);
         this._createBloomMips(width, height);
@@ -3938,7 +4035,7 @@ export class Renderer {
         }
 
         GLState.disable(gl.BLEND);
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        this._restoreDefaultBlend();
         GLState.enable(gl.DEPTH_TEST);
         GLState.depthMask(true);
         GLState.enable(gl.CULL_FACE);
@@ -3964,6 +4061,10 @@ export class Renderer {
             case 'ssao':      tex = this._ssaoBlurFBO.colors[0];   mode = 4; break;
             case 'shadow':    tex = this._shadowMapFBO.depth;      mode = 3; break;
             case 'bloom':     tex = this._bloomMips[0].colors[0];  mode = 6; break;
+            // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
+            // black cannot. Exists because "bloom does nothing" is otherwise indistinguishable between
+            // an empty mask and a threshold no pixel clears, and there was no way to look at it.
+            case 'bloomMask': tex = this._sceneFBO.colors[0];      mode = 2; break;
             case 'mask':      tex = this._outlineMaskFBO.colors[0]; mode = 0; break;
             case 'velocity':  tex = this._velocityFBO.colors[0];   mode = 5; break;
             // Falls back to the lit scene if the overdraw target has not been allocated yet (the
@@ -4007,9 +4108,17 @@ export class Renderer {
         mip0.bind();
         gl.clear(gl.COLOR_BUFFER_BIT);
         this._shaderManager.bind('bloom');
-        // HDR bright-pass runs in linear scene space; threshold/knee are real luminance values.
+        // The bright pass reads pre-exposure linear radiance, so it needs the exposure to decide what
+        // counts as bright — without it the threshold is compared against radiance ~3x darker than what
+        // reaches the screen, and at the default 1.0 nothing in an ordinary scene ever clears it.
         this._shaderManager.setUniform('u_bloomThreshold', this._bloomThreshold);
         this._shaderManager.setUniform('u_bloomKnee', this._bloomKnee);
+        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_bloomMaskEnabled', this._bloomMaskEnabled);
+        // The bright pass halves the resolution, so it needs both grids to box-filter rather than
+        // point-sample (see sourceBlockUV in bloom.fs).
+        this._shaderManager.setUniform('u_srcTexelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
+        this._shaderManager.setUniform('u_dstResolution', [mip0.width, mip0.height]);
         this._shaderManager.setUniform('u_screenTexture', 0);
         this._compose_FBOs[src].colors[0].bind(0);
         // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
@@ -4027,6 +4136,9 @@ export class Renderer {
                 const from = this._bloomMips[i - 1];
                 this._bloomMips[i].bind();
                 this._shaderManager.setUniform('u_srcTexelSize', [1 / from.width, 1 / from.height]);
+                // Both grids: the mips halve with floor(), so an odd level is not exactly 2x the next
+                // and the kernel has to be snapped to the source grid rather than assuming the ratio.
+                this._shaderManager.setUniform('u_dstResolution', [this._bloomMips[i].width, this._bloomMips[i].height]);
                 // Karis average on the first step only — it tames fireflies but is not energy
                 // conserving, so applying it all the way down would visibly dim the bloom.
                 this._shaderManager.setUniform('u_karisAverage', i === 1);
@@ -4046,13 +4158,15 @@ export class Renderer {
                 const from = this._bloomMips[i];
                 const to = this._bloomMips[i - 1];
                 to.bind();
-                // Radius in the SOURCE mip's texels, so the spread is resolution-independent.
-                this._shaderManager.setUniform('u_filterRadius', Renderer.BLOOM_FILTER_RADIUS / from.width);
+                // Radius in the SOURCE mip's texels, so the spread is resolution-independent. Per axis:
+                // one value off the width alone is short by the aspect ratio vertically.
+                this._shaderManager.setUniform('u_filterRadius',
+                    [Renderer.BLOOM_FILTER_RADIUS / from.width, Renderer.BLOOM_FILTER_RADIUS / from.height]);
                 from.colors[0].bind(0);
                 this._drawFullscreen();
             }
             GLState.disable(gl.BLEND);
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); // restore the pipeline default
+            this._restoreDefaultBlend();
         }
 
         // 4. Composite the accumulated bloom back over the scene, into the other compose buffer.
@@ -4266,7 +4380,13 @@ export class Renderer {
     public set bloomKnee(v: number) { this._bloomKnee = Math.max(0, v); }
 
     public get bloomIntensity(): number { return this._bloomIntensity; }
-    public set bloomIntensity(v: number) { this._bloomIntensity = Math.max(0, v); }
+    public set bloomIntensity(v: number) {
+        this._bloomIntensity = Math.max(0, v);
+        this._bloomIntensityUser = this._bloomIntensity;
+    }
+
+    public get bloomMaskEnabled(): boolean { return this._bloomMaskEnabled; }
+    public set bloomMaskEnabled(v: boolean) { this._bloomMaskEnabled = v; }
 
     public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
     public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
@@ -4354,7 +4474,9 @@ export class Renderer {
             if (gl) this._generateSSAOKernelAndNoise();
         }
         this._motionBlurEnabled = t.motionBlurEnabled;
-        this._bloomIntensity = t.bloomEnabled ? Math.max(this._bloomIntensity, 0.6) : 0;
+        // Restore what the user authored rather than a hardcoded default: a tier without bloom has to
+        // zero the live value, and re-selecting a tier with bloom must give back the same setting.
+        this._bloomIntensity = t.bloomEnabled ? this._bloomIntensityUser : 0;
         if (this._ssaoResolutionScale !== t.ssaoResolutionScale || this._renderScale !== t.renderScale) {
             this._ssaoResolutionScale = t.ssaoResolutionScale;
             this._renderScale = t.renderScale;
@@ -4363,6 +4485,8 @@ export class Renderer {
         this._setShadowMapResolution(t.shadowMapResolution);
         // Re-applying the tier must not leave the label saying "custom" from an earlier manual tweak.
         this._quality = preset;
+        // A preset moves a dozen knobs at once; tell any panel mirroring them to re-read.
+        engineEventBus.emit('RENDER_SETTINGS_CHANGED');
     }
 
     /** Cloud knobs for the active tier, applied to the scene's clouds node each frame it exists. */
@@ -4443,6 +4567,7 @@ export class Renderer {
             bloomThreshold: this._bloomThreshold,
             bloomKnee: this._bloomKnee,
             bloomIntensity: this._bloomIntensity,
+            bloomMaskEnabled: this._bloomMaskEnabled,
             chromaticAberrationStrength: this._chromaticAberrationStrength,
             ssaoEnabled: this._ssaoEnabled,
             ssaoRadius: this._ssaoRadius,
@@ -4481,6 +4606,7 @@ export class Renderer {
         if (s.bloomThreshold !== undefined) this.bloomThreshold = s.bloomThreshold;
         if (s.bloomKnee !== undefined) this.bloomKnee = s.bloomKnee;
         if (s.bloomIntensity !== undefined) this.bloomIntensity = s.bloomIntensity;
+        if (s.bloomMaskEnabled !== undefined) this._bloomMaskEnabled = s.bloomMaskEnabled;
         if (s.chromaticAberrationStrength !== undefined) this.chromaticAberrationStrength = s.chromaticAberrationStrength;
         if (s.ssaoEnabled !== undefined) this.ssaoEnabled = s.ssaoEnabled;
         if (s.ssaoRadius !== undefined) this.ssaoRadius = s.ssaoRadius;

@@ -75,6 +75,16 @@ export interface EngineEventMap {
   LOG_UPDATE: LogEntry;
   /** The console was cleared. */
   LOG_CLEAR: void;
+  /**
+   * The renderer rewrote its own settings, rather than a UI control setting one.
+   *
+   * Emitted by the quality-preset setter, which moves bloom, SSAO, motion blur, shadow resolution and
+   * render scale in one go. Panels that mirror renderer state into React state have no other way to
+   * learn about it, and a stale mirror is worse than no mirror: after selecting the `low` tier the
+   * Renderer panel's Bloom Intensity slider read 0.6 while the renderer held 0, so bloom looked
+   * broken rather than switched off.
+   */
+  RENDER_SETTINGS_CHANGED: void;
 }
 
 type Listener<T> = (payload: T) => void;

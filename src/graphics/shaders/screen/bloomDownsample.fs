@@ -18,9 +18,29 @@ precision highp float;
 uniform sampler2D u_srcTexture;
 uniform vec2 u_srcTexelSize;   // 1 / source resolution
 uniform bool u_karisAverage;   // true only for the first downsample (see above)
+uniform vec2 u_dstResolution;  // size of this target, in texels
 
 in vec2 fragTexCoord;
 out vec4 outColor;
+
+/**
+ * UV of the exact centre of the 2x2 source block this destination texel stands for.
+ *
+ * Sampling at `fragTexCoord` instead looks right but is only correct when the source is EXACTLY twice
+ * the destination. Viewport sizes are arbitrary, and the pyramid halves with floor(), so any odd
+ * dimension gives src = 2*dst + 1: the naive mapping then drifts by (j + 0.5) / dst source texels,
+ * reaching a full texel by the far edge. That drift beats against the source grid — sample points
+ * land alternately on texel centres (bilinear returns one texel, aliased) and on texel boundaries
+ * (bilinear averages two) — which reads as vertical/horizontal banding that worsens toward the right
+ * and bottom of the frame, with dark lines wherever a bright column is skipped entirely.
+ *
+ * Snapping to (2j + 1) source texels removes the drift completely and makes the bilinear fetch an
+ * exact 2x2 box, at any parity. The last source column/row of an odd dimension is dropped rather than
+ * smeared across the whole image, which is the right trade.
+ */
+vec2 sourceBlockUV(vec2 uv, vec2 dstResolution, vec2 srcTexelSize) {
+    return (floor(uv * dstResolution) * 2.0 + 1.0) * srcTexelSize;
+}
 
 float karisWeight(vec3 c) {
     // Weight by inverse luma so bright outliers cannot dominate the average.
@@ -31,7 +51,10 @@ float karisWeight(vec3 c) {
 void main() {
     float x = u_srcTexelSize.x;
     float y = u_srcTexelSize.y;
-    vec2 uv = fragTexCoord;
+    // Centre the kernel on the 2x2 source block this texel stands for, not on the raw UV — see
+    // sourceBlockUV. The 13 taps below are placed in SOURCE texels around that centre, which is only
+    // meaningful if the centre itself is on the source grid.
+    vec2 uv = sourceBlockUV(fragTexCoord, u_dstResolution, u_srcTexelSize);
 
     // Outer ring (corners), at +/- 2 texels.
     vec3 a = texture(u_srcTexture, vec2(uv.x - 2.0 * x, uv.y + 2.0 * y)).rgb;
