@@ -14,6 +14,12 @@ import golden from './fixtures/geometryGolden.json';
  * `getData` is the important one. It is what `Mesh.create` uploads to the GPU, so a wrong interleave
  * is a silently corrupted mesh rather than a crash — exactly the kind of break that would otherwise
  * only show up as garbled geometry on screen.
+ *
+ * ONE ENTRY IS NOT PRE-CHANGE: `cylinder` was re-captured when its caps were rebuilt around a real centre
+ * vertex (36 -> 38 vertices; the triangle count is unchanged, the fan simply hubs on the centre instead of
+ * on a rim vertex). That was a deliberate topology change, so the old capture could not be kept. Its bounds
+ * and index count were unaffected, which is the part this fixture was guarding. Property-based coverage for
+ * every primitive — including the cap-centre invariant — lives in `geometryPrimitives.test.ts`.
  */
 
 // Normalises -0 to 0. The trig in the sphere/cylinder/capsule factories produces -0, but the fixture

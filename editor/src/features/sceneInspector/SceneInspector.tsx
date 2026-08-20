@@ -3,16 +3,11 @@ import { NodeRendererProps, Tree, TreeApi } from 'react-arborist'
 import { useCleoEngine } from '../EngineContext'
 import { Logger, Node, isUINodeType } from 'cleo';
 import type { SceneChange } from 'cleo';
-import CameraIcon from '../../icons/camera.png'
-import CameraRigIcon from '../../icons/camera-rig.png'
-import ModelIcon from '../../icons/model.png'
-import LightIcon from '../../icons/light.png'
-import SkyboxIcon from '../../icons/skybox.png'
-import CloudsIcon from '../../icons/clouds.png'
-import SpriteIcon from '../../icons/sprite.png'
 import { SkyIcon } from '../nodeInspector/sectionIcons'
-import VisibleIcon from '../../icons/visible.png'
-import HiddenIcon from '../../icons/hidden.png'
+import {
+  CameraIcon, CameraRigIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, CloudsIcon,
+  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon,
+} from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
 import { getScriptIdOf } from '../../utils/scripts';
@@ -25,7 +20,19 @@ import {
   ButtonIcon, ProgressIcon, SliderIcon, ToggleIcon, TextInputIcon,
 } from './uiIcons';
 
-/** Glyph per UI node type, so a HUD reads as a HUD in the tree rather than a run of identical rows. */
+/**
+ * Glyph per node type. A table rather than a run of `type === 'x' && <icon>` conditionals: as PNGs they
+ * had drifted (a light probe was drawn with the skybox icon, an animated sprite with the static one), and
+ * the row rendered every branch on every node just to have ten of them evaluate false.
+ */
+const TYPE_ICONS: Record<string, () => JSX.Element> = {
+  camera: CameraIcon, cameraRig: CameraRigIcon, model: ModelIcon,
+  sprite: SpriteIcon, animatedSprite: AnimatedSpriteIcon, tilemap: TilemapIcon,
+  light: LightIcon, lightProbe: LightProbeIcon,
+  skybox: SkyboxIcon, volumetricClouds: CloudsIcon, skyAtmosphere: SkyIcon, landscape: LandscapeIcon,
+};
+
+/** UI node types, kept separate because `isUINodeType` also gates the inspector and picking. */
 const UI_ICONS: Record<string, () => JSX.Element> = {
   uiRoot: CanvasIcon, uiPanel: PanelIcon, uiText: TextIcon, uiImage: ImageIcon,
   uiButton: ButtonIcon, uiStack: StackIcon, uiSpacer: SpacerIcon,
@@ -151,7 +158,7 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
   // row drops the tint for the standard indigo fill and white text: selection is the one signal that must
   // never be ambiguous, so it wins outright rather than blending with the type colour.
   const isUI = isUINodeType(data.type);
-  const UIIcon = isUI ? UI_ICONS[data.type] : undefined;
+  const TypeIcon = isUI ? UI_ICONS[data.type] : TYPE_ICONS[data.type];
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     // react-dnd carries the move *within* the tree; these are for everything outside it — the Assets
@@ -189,17 +196,7 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
           interactive — it is still authored here, and the only way to select it. */}
       <div className={`flex items-center min-w-0 flex-1 ${data.spawnOnStart === false ? 'opacity-50' : ''}`}
            title={data.spawnOnStart === false ? 'Dormant until a script spawns it' : undefined}>
-        { data.type === 'camera' && <img src={CameraIcon} alt='camera' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'cameraRig' && <img src={CameraRigIcon} alt='camera rig' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'model' && <img src={ModelIcon} alt='model' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'sprite' && <img src={SpriteIcon} alt='sprite' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'animatedSprite' && <img src={SpriteIcon} alt='animated sprite' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'light' && <img src={LightIcon} alt='light' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'lightProbe' && <img src={SkyboxIcon} alt='light probe' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'volumetricClouds' && <img src={CloudsIcon} alt='volumetric clouds' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
-        { data.type === 'skyAtmosphere' && <span className='inline-block w-4 h-4 mr-1.5 align-middle text-white'><SkyIcon /></span> }
-        { UIIcon && <span className='inline-flex w-4 h-4 mr-1.5 align-middle items-center justify-center'><UIIcon /></span> }
+        { TypeIcon && <span className='inline-flex w-4 h-4 mr-1.5 align-middle items-center justify-center'><TypeIcon /></span> }
         { node.isEditing ? <RenameInput node={node} /> : <span className='truncate'>{data.name}</span> }
       </div>
       {/* The row's own controls. They fade in with the row rather than sitting there permanently, so a deep
@@ -224,12 +221,16 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
             <PenIcon />
           </button>
         }
-        <img
+        {/* A button rather than the <img onClick> this used to be: it is a control, so it should be
+            focusable and activate on Enter like the script and template buttons beside it. */}
+        <button
+          type='button'
           onClick={toggleVisibility}
-          src={data.visible ? VisibleIcon : HiddenIcon} alt='visible'
           title={data.visible ? 'Hide' : 'Show'}
-          className={`inline-block w-4 h-4 align-middle transition-opacity ${
-            data.visible ? 'opacity-0 group-hover:opacity-60 hover:!opacity-100' : 'opacity-70 hover:opacity-100'}`} />
+          className={`inline-flex items-center justify-center w-4 h-4 transition-opacity ${
+            data.visible ? 'opacity-0 group-hover:opacity-60 hover:!opacity-100 focus-visible:opacity-100' : 'opacity-70 hover:opacity-100'}`}>
+          {data.visible ? <VisibleIcon /> : <HiddenIcon />}
+        </button>
       </div>
     </div>
   );

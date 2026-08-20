@@ -38,7 +38,7 @@ export interface DebugCategoryMeta {
   runtimeAvailable: boolean;
 }
 
-/** Menu order + labels. Existing helpers first, then the newer overlays, grid last (editor-only). */
+/** Menu order + labels. Existing helpers first, then the newer overlays, grid last. */
 export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   { key: 'colliders', label: 'Collision wireframes', runtimeAvailable: true },
   { key: 'triggers', label: 'Trigger volumes', runtimeAvailable: true },
@@ -50,7 +50,9 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   // Runtime is the point of this one: a blend driven by MEASURED motion reads 0 everywhere in the editor,
   // because the editor has no physics. Play is the only place its inputs are real.
   { key: 'animation', label: 'Animation blend', runtimeAvailable: true },
-  { key: 'grid', label: 'Reference grid', runtimeAvailable: false },
+  // Runtime-capable even though the grid is renderer chrome rather than a scene node: EngineContext's
+  // reconcile asserts `setGridVisible` from whichever channel is in force, so Play honours this switch.
+  { key: 'grid', label: 'Reference grid', runtimeAvailable: true },
 ];
 
 // The overlays the editor drew before this menu existed default to Editor-on (so nothing visibly changes

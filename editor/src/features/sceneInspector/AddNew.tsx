@@ -3,7 +3,6 @@ import { SegmentedControl } from '../../components/ui';
 import { useCleoEngine } from '../EngineContext';
 import { isWithinTemplateInstance } from '../../utils/templates';
 import { ADD_CATEGORIES, ADD_ITEMS, UI_CATEGORIES, AddCategory, AddContext, AddItem, NEW_NODE_MIME, addItemTo } from './addCatalog';
-import ImportIcon from '../../icons/import.png';
 
 /** Which half of the catalog a palette shows. Two panels, one component. */
 export type AddScope = 'scene' | 'ui';
@@ -30,35 +29,14 @@ function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAd
       }}
       onClick={() => onAdd(item)}
     >
-      {typeof item.icon === 'string'
-        ? <img className='w-[28px] h-[28px] shrink-0 pointer-events-none' src={item.icon} alt='' />
-        : <span className='w-[28px] h-[28px] shrink-0 pointer-events-none flex items-center justify-center'><item.icon /></span>}
+      <span className='w-[28px] h-[28px] shrink-0 pointer-events-none flex items-center justify-center'><item.icon /></span>
       <span className={CELL_LABEL}>{item.label}</span>
     </button>
   );
 }
 
-// Import / Folder are file pickers, not node factories: they import into the Models library rather than
-// the scene, so they stay out of the catalog and aren't draggable.
-function ImportCell({ id, label, folder, onFiles }: { id: string, label: string, folder?: boolean, onFiles: (files: FileList | null) => void }) {
-  return (
-    <>
-      <label className={CELL} htmlFor={id} title={label}>
-        <img className='w-[28px] h-[28px] shrink-0 pointer-events-none' src={ImportIcon} alt='' />
-        <span className={CELL_LABEL}>{label}</span>
-      </label>
-      <input
-        className='hidden' type='file' id={id} name={id}
-        {...(folder
-          ? ({ webkitdirectory: '', directory: '' } as any)
-          : { multiple: true, accept: '.obj, .mtl, .gltf, .glb, .png, .jpg, .jpeg, .bmp, .tga, .tiff' })}
-        onChange={(e) => { onFiles(e.target.files); e.target.value = ''; }} />
-    </>
-  );
-}
-
 export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
-  const { editorScene, selectedNode, editorMode, eventEmitter, triggers, importModelFiles } = useCleoEngine();
+  const { editorScene, selectedNode, editorMode, eventEmitter, triggers } = useCleoEngine();
 
   // The palette's OWN scope decides its categories, not the editor mode. Deriving it from the mode made the
   // two halves mutually exclusive by construction, which is exactly what stopped them being shown side by
@@ -105,16 +83,6 @@ export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
     addItemTo(item, parent, ctx).catch(err => console.error(err));
   };
 
-  // Imports land in the Models library (each file becomes a reusable model asset with a thumbnail);
-  // drag a card from the Assets panel into the viewport to place it. A folder pick (webkitdirectory) lets
-  // a .gltf with an external textures/ folder resolve (the browser hands us every file with its
-  // webkitRelativePath).
-  const onPickFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    eventEmitter.emit('FOCUS_BOTTOM_TAB', 'Assets'); // surface the library so the new cards are visible
-    importModelFiles(Array.from(files)).catch((err: unknown) => console.error(err));
-  };
-
   const items = ADD_ITEMS.filter(item => item.category === category);
 
   return (
@@ -122,19 +90,18 @@ export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
       {locked && <div className='text-[11px] text-warning bg-warning/15 px-2 py-1'>Template instance — edit the template to add nodes.</div>}
       <fieldset disabled={locked} className={`border-0 m-0 p-0 min-w-0 ${locked ? 'opacity-50' : ''}`}>
         <div className='flex flex-col gap-1.5 p-1.5'>
+          {/* Two columns in the scene palette: it has seven categories and two of them are two-word
+              labels, which clip at three-up in a narrow panel. The UI palette has three short ones. */}
           <SegmentedControl
             size='sm'
-            className='grid grid-cols-3 gap-1 w-full'
+            className={`grid gap-1 w-full ${scope === 'ui' ? 'grid-cols-3' : 'grid-cols-2'}`}
+            itemClassName='text-center leading-tight'
             options={categories}
             value={category}
             onChange={selectCategory}
           />
           <div className='grid grid-cols-[repeat(auto-fill,minmax(64px,1fr))] gap-1'>
             {items.map(item => <AddCell key={item.id} item={item} locked={locked} onAdd={onAdd} />)}
-            {category === 'primitives' && <>
-              <ImportCell id='file' label='Import' onFiles={onPickFiles} />
-              <ImportCell id='folder' label='Folder' folder onFiles={onPickFiles} />
-            </>}
           </div>
         </div>
       </fieldset>

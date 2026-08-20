@@ -402,6 +402,10 @@ export class Geometry {
         );
     }
 
+    /**
+     * Flat disc on the XY plane (+Z normal), centred on the origin — a triangle fan around a real centre
+     * vertex at index 0, with `segments + 1` rim vertices so the UV seam is duplicated rather than folded.
+     */
     public static Circle(diameter: number = 1, segments: number = 32): Geometry {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];
@@ -411,6 +415,10 @@ export class Geometry {
         const angle = 2 * Math.PI / segments;
         const radius = diameter / 2;
 
+        positions.push([0.0, 0.0, 0.0]);
+        normals.push([0.0, 0.0, 1.0]);
+        uvs.push([0.5, 0.5]);
+
         for (let i = 0; i <= segments; i++) {
             const x = radius * Math.cos(angle * i);
             const y = radius * Math.sin(angle * i);
@@ -418,11 +426,12 @@ export class Geometry {
             positions.push([x, y, 0.0]);
             normals.push([0.0, 0.0, 1.0]);
             uvs.push([0.5 + x / radius / 2, 0.5 + y / radius / 2]);
-
-            indices.push(0);
-            indices.push(i + 1);
-            indices.push(i + 2);
         }
+
+        // i + 2 is in range because the rim runs to index `segments + 1`. The previous loop ran to
+        // i === segments and referenced segments + 2, i.e. two triangles pointed past the last vertex.
+        for (let i = 0; i < segments; i++)
+            indices.push(0, i + 1, i + 2);
 
         return new Geometry(positions, normals, uvs, [], [], indices);
     }
@@ -631,43 +640,35 @@ export class Geometry {
             }
         }
 
-        // top vertices
+        // Caps. Each is a triangle fan around a real CENTRE vertex at (0, +/-halfHeight, 0). Previously the
+        // fan was hubbed on a rim vertex, which triangulates the disc but leaves it with no centre point:
+        // sliver triangles at the hub, and a UV layout that cannot place the middle of the cap texture.
         const angle = 2 * Math.PI / segments;
-        for (let i = 0; i <= segments; i++) {
-            const x = radius * Math.cos(angle * i);
-            const y = halfHeight;
-            const z = radius * Math.sin(angle * i);
+        for (const sign of [1, -1]) {
+            const centre = positions.length;
+            positions.push([0.0, sign * halfHeight, 0.0]);
+            normals.push([0.0, sign, 0.0]);
+            uvs.push([0.5, 0.5]);
 
-            positions.push([x, y, z]);
-            normals.push([0.0, 1.0, 0.0]);
-            uvs.push([0.5 + x / radius / 2, 0.5 + z / radius / 2]);
+            // segments + 1 rim vertices: the seam is duplicated so u wraps cleanly rather than folding back.
+            for (let i = 0; i <= segments; i++) {
+                const x = radius * Math.cos(angle * i);
+                const z = radius * Math.sin(angle * i);
+
+                positions.push([x, sign * halfHeight, z]);
+                normals.push([0.0, sign, 0.0]);
+                // Mirror v on the bottom cap, otherwise the two faces read as mirror images of each other.
+                uvs.push([0.5 + x / radius / 2, 0.5 + sign * z / radius / 2]);
+            }
+
+            // Wind CCW as seen from outside the cap, so the two faces front-face in opposite directions.
+            for (let i = 0; i < segments; i++) {
+                const a = centre + 1 + i;
+                const b = centre + 2 + i;
+                if (sign > 0) indices.push(centre, b, a);
+                else indices.push(centre, a, b);
+            }
         }
-
-        // top indices
-        for (let i = 0; i < segments; i++) {
-            indices.push(positions.length - 1);
-            indices.push(positions.length - i - 2);
-            indices.push(positions.length - i - 3);
-        }
-
-        // bottom vertices
-        for (let i = 0; i <= segments; i++) {
-            const x = radius * Math.cos(angle * i);
-            const y = -halfHeight;
-            const z = radius * Math.sin(angle * i);
-
-            positions.push([x, y, z]);
-            normals.push([0.0, -1.0, 0.0]);
-            uvs.push([0.5 + x / radius / 2, 0.5 + z / radius / 2]);
-        }
-
-        // bottom indices
-        for (let i = 0; i < segments; i++) {
-            indices.push(positions.length - 1);
-            indices.push(positions.length - i - 3);
-            indices.push(positions.length - i - 2);
-        }
-
 
         return new Geometry(positions, normals, uvs, [], [], indices);
     }
@@ -734,6 +735,153 @@ export class Geometry {
     }
 
     /**
+     * Y-aligned cone centred on the origin: apex at +height/2, base cap at -height/2.
+     *
+     * The apex is duplicated PER SEGMENT rather than shared, so each side triangle carries its own normal
+     * and UV. A single shared apex would have to average every side normal into one straight-up vector,
+     * which reads as a pinched, over-bright tip. The base reuses Cylinder's centre-vertex fan.
+     */
+    public static Cone(segments: number = 32, radius: number = 0.5, height: number = 1): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const halfHeight = height / 2;
+        const angle = 2 * Math.PI / segments;
+
+        // Side. The slope normal tilts by the cone's half-angle: for a profile running (radius, -h/2) to
+        // (0, +h/2), the outward normal is proportional to (cos * height, radius, sin * height).
+        for (let i = 0; i < segments; i++) {
+            // Apex normal is the MIDPOINT of the segment it caps, so the shading stays symmetric about it.
+            for (const [t, y, r] of [[i + 0.5, halfHeight, 0], [i, -halfHeight, radius], [i + 1, -halfHeight, radius]] as const) {
+                const theta = angle * t;
+                const cosTheta = Math.cos(theta), sinTheta = Math.sin(theta);
+                const normal = vec3.normalize(vec3.create(), vec3.fromValues(cosTheta * height, radius, sinTheta * height));
+
+                positions.push([cosTheta * r, y, sinTheta * r]);
+                normals.push([normal[0], normal[1], normal[2]]);
+                uvs.push([t / segments, r === 0 ? 1 : 0]);
+            }
+            const base = i * 3;
+            indices.push(base, base + 2, base + 1);
+        }
+
+        // Base cap: centre vertex + duplicated-seam rim, wound CCW seen from below.
+        const centre = positions.length;
+        positions.push([0.0, -halfHeight, 0.0]);
+        normals.push([0.0, -1.0, 0.0]);
+        uvs.push([0.5, 0.5]);
+
+        for (let i = 0; i <= segments; i++) {
+            const x = radius * Math.cos(angle * i);
+            const z = radius * Math.sin(angle * i);
+
+            positions.push([x, -halfHeight, z]);
+            normals.push([0.0, -1.0, 0.0]);
+            uvs.push([0.5 + x / radius / 2, 0.5 - z / radius / 2]);
+        }
+
+        for (let i = 0; i < segments; i++)
+            indices.push(centre, centre + 1 + i, centre + 2 + i);
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Torus lying in the XZ plane (Y up), centred on the origin. `radius` is the distance from the origin to
+     * the centre of the tube; `tube` is the tube's own radius, so the outer extent is `radius + tube`.
+     *
+     * Both rings carry a duplicated seam vertex (hence the `<=` bounds), which is what lets u and v each run
+     * a clean 0..1 instead of wrapping back onto themselves.
+     */
+    public static Torus(radialSegments: number = 32, tubularSegments: number = 16, radius: number = 0.5, tube: number = 0.2): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        radialSegments = Math.max(3, Math.floor(radialSegments));
+        tubularSegments = Math.max(3, Math.floor(tubularSegments));
+
+        for (let i = 0; i <= radialSegments; i++) {
+            const u = (i / radialSegments) * 2 * Math.PI;
+            const cosU = Math.cos(u), sinU = Math.sin(u);
+
+            for (let j = 0; j <= tubularSegments; j++) {
+                const v = (j / tubularSegments) * 2 * Math.PI;
+                const cosV = Math.cos(v), sinV = Math.sin(v);
+
+                // The normal is the offset from the tube's centre circle, which is already unit length.
+                const nx = cosV * cosU, ny = sinV, nz = cosV * sinU;
+
+                positions.push([(radius + tube * cosV) * cosU, tube * sinV, (radius + tube * cosV) * sinU]);
+                normals.push([nx, ny, nz]);
+                uvs.push([i / radialSegments, j / tubularSegments]);
+            }
+        }
+
+        for (let i = 0; i < radialSegments; i++)
+            for (let j = 0; j < tubularSegments; j++) {
+                const k1 = i * (tubularSegments + 1) + j;
+                const k2 = k1 + tubularSegments + 1;
+
+                indices.push(k1, k1 + 1, k2);
+                indices.push(k1 + 1, k2 + 1, k2);
+            }
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Square-based pyramid centred on the origin: apex at +height/2, base at -height/2.
+     *
+     * Every face owns its vertices. The four sides meet at hard creases and the base is perpendicular to
+     * all of them, so sharing corners would average unrelated normals and round off edges that should be
+     * sharp — the same reason `Cube` does not share its eight corners.
+     */
+    public static Pyramid(base: number = 1, height: number = 1): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const h = height / 2;
+        const b = base / 2;
+        const apex: [number, number, number] = [0, h, 0];
+        // Base corners, counter-clockwise seen from ABOVE.
+        const corners: [number, number, number][] = [[-b, -h, b], [b, -h, b], [b, -h, -b], [-b, -h, -b]];
+
+        for (let i = 0; i < 4; i++) {
+            const c0 = corners[i];
+            const c1 = corners[(i + 1) % 4];
+
+            // Flat face normal from the edge cross product, so it is exact rather than approximated.
+            const e0 = vec3.sub(vec3.create(), vec3.fromValues(...c1), vec3.fromValues(...c0));
+            const e1 = vec3.sub(vec3.create(), vec3.fromValues(...apex), vec3.fromValues(...c0));
+            const n = vec3.normalize(vec3.create(), vec3.cross(vec3.create(), e0, e1));
+
+            const start = positions.length;
+            positions.push([...c0], [...c1], [...apex]);
+            normals.push([n[0], n[1], n[2]], [n[0], n[1], n[2]], [n[0], n[1], n[2]]);
+            uvs.push([0, 0], [1, 0], [0.5, 1]);
+            indices.push(start, start + 1, start + 2);
+        }
+
+        const start = positions.length;
+        for (const c of corners) {
+            positions.push([...c]);
+            normals.push([0.0, -1.0, 0.0]);
+            uvs.push([0.5 + c[0] / base, 0.5 - c[2] / base]);
+        }
+        // Reversed relative to the CCW-from-above corner order, so the base front-faces downward.
+        indices.push(start, start + 2, start + 1);
+        indices.push(start, start + 3, start + 2);
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
      * Flat horizontal grid on the XZ plane (Y up), centred on the origin. `cols`/`rows` are the number of
      * quads along X/Z, producing (cols+1)*(rows+1) vertices. Intended as the base mesh for terrain that is
      * then sculpted by mutating the Y of each vertex. UVs span 0..1 across the whole plane.
@@ -773,6 +921,355 @@ export class Geometry {
                 indices.push(tr, bl, br);
             }
         }
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Complex / structural geometries.
+    //
+    // These are level-blockout shapes rather than mathematical solids, and several of them are unions of
+    // flat faces. The two helpers below exist so that winding, per-face normals and the quad triangulation
+    // are written ONCE: an inverted face is invisible under backface culling and passes every count and
+    // bounds check, which is exactly how `Torus` shipped inside-out. `tests/geometryPrimitives.test.ts`
+    // asserts the winding of every factory against its authored normal.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Append one flat quad. `a b c d` must run counter-clockwise as seen from the `normal` side; the quad
+     * is split into (a,b,c) + (a,c,d), so it must also be planar and convex.
+     */
+    private static _pushQuad(
+        positions: [number, number, number][], normals: [number, number, number][],
+        uvs: [number, number][], indices: number[],
+        a: [number, number, number], b: [number, number, number],
+        c: [number, number, number], d: [number, number, number],
+        normal: [number, number, number],
+    ): void {
+        const base = positions.length;
+        positions.push(a, b, c, d);
+        normals.push(normal, normal, normal, normal);
+        uvs.push([0, 0], [1, 0], [1, 1], [0, 1]);
+        indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+
+    /** Append one flat triangle. `a b c` counter-clockwise as seen from the `normal` side. */
+    private static _pushTri(
+        positions: [number, number, number][], normals: [number, number, number][],
+        uvs: [number, number][], indices: number[],
+        a: [number, number, number], b: [number, number, number], c: [number, number, number],
+        normal: [number, number, number],
+    ): void {
+        const base = positions.length;
+        positions.push(a, b, c);
+        normals.push(normal, normal, normal);
+        uvs.push([0, 0], [1, 0], [0.5, 1]);
+        indices.push(base, base + 1, base + 2);
+    }
+
+    /**
+     * Append an axis-aligned box, optionally yawed about +Y. Every face owns its four vertices, matching
+     * `Cube` — a box has six hard creases, so sharing corners would average unrelated normals.
+     *
+     * `centre` is in final coordinates and `yaw` rotates the box about ITS OWN centre. A yaw is a rotation
+     * (determinant +1), so it carries the winding and the normals along with it and cannot flip a face.
+     */
+    private static _pushBox(
+        positions: [number, number, number][], normals: [number, number, number][],
+        uvs: [number, number][], indices: number[],
+        centre: [number, number, number], half: [number, number, number], yaw: number = 0,
+    ): void {
+        const [hx, hy, hz] = half;
+        const cos = Math.cos(yaw), sin = Math.sin(yaw);
+        // Rotation about +Y, applied to corner offsets and face normals alike.
+        const spin = (v: [number, number, number]): [number, number, number] =>
+            yaw === 0 ? [v[0], v[1], v[2]] : [v[0] * cos + v[2] * sin, v[1], -v[0] * sin + v[2] * cos];
+        const at = (v: [number, number, number]): [number, number, number] => {
+            const r = spin(v);
+            return [r[0] + centre[0], r[1] + centre[1], r[2] + centre[2]];
+        };
+
+        const c = [
+            at([-hx, -hy, hz]), at([hx, -hy, hz]), at([hx, hy, hz]), at([-hx, hy, hz]),
+            at([-hx, -hy, -hz]), at([hx, -hy, -hz]), at([hx, hy, -hz]), at([-hx, hy, -hz]),
+        ];
+        const faces = [[0, 1, 2, 3], [1, 5, 6, 2], [5, 4, 7, 6], [4, 0, 3, 7], [3, 2, 6, 7], [4, 5, 1, 0]];
+        const faceNormals: [number, number, number][] = [
+            [0, 0, 1], [1, 0, 0], [0, 0, -1], [-1, 0, 0], [0, 1, 0], [0, -1, 0]];
+
+        for (let i = 0; i < faces.length; ++i) {
+            const f = faces[i];
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                c[f[0]], c[f[1]], c[f[2]], c[f[3]], spin(faceNormals[i]));
+        }
+    }
+
+    /**
+     * Wedge / triangular prism, centred on the origin: a slope rising toward +Z, from `-height/2` at the
+     * `-Z` edge up to `+height/2` at the `+Z` edge. The building block of a blockout ramp.
+     */
+    public static Ramp(width: number = 1, height: number = 1, depth: number = 1): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const w = width / 2, h = height / 2, d = depth / 2;
+        const A: [number, number, number] = [-w, -h, -d];
+        const B: [number, number, number] = [w, -h, -d];
+        const C: [number, number, number] = [w, -h, d];
+        const D: [number, number, number] = [-w, -h, d];
+        const E: [number, number, number] = [-w, h, d];
+        const F: [number, number, number] = [w, h, d];
+
+        Geometry._pushQuad(positions, normals, uvs, indices, A, B, C, D, [0, -1, 0]);
+        Geometry._pushQuad(positions, normals, uvs, indices, D, C, F, E, [0, 0, 1]);
+        // Slope. Its normal leans back toward the low end: (0, depth, -height), normalised.
+        const sl = Math.hypot(depth, height);
+        Geometry._pushQuad(positions, normals, uvs, indices, A, E, F, B, [0, depth / sl, -height / sl]);
+        Geometry._pushTri(positions, normals, uvs, indices, A, D, E, [-1, 0, 0]);
+        Geometry._pushTri(positions, normals, uvs, indices, B, F, C, [1, 0, 0]);
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Quarter-pyramid corner piece, centred on the origin: a rectangular base at `-height/2` with the apex
+     * directly above the `(+X, +Z)` corner. Mates with `Ramp` at a 90-degree turn.
+     */
+    public static CornerRamp(width: number = 1, height: number = 1, depth: number = 1): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const w = width / 2, h = height / 2, d = depth / 2;
+        const A: [number, number, number] = [-w, -h, -d];
+        const B: [number, number, number] = [w, -h, -d];
+        const C: [number, number, number] = [w, -h, d];
+        const D: [number, number, number] = [-w, -h, d];
+        const P: [number, number, number] = [w, h, d];
+
+        Geometry._pushQuad(positions, normals, uvs, indices, A, B, C, D, [0, -1, 0]);
+        Geometry._pushTri(positions, normals, uvs, indices, B, P, C, [1, 0, 0]);
+        Geometry._pushTri(positions, normals, uvs, indices, D, C, P, [0, 0, 1]);
+        // The two slopes, meeting along the A-P diagonal.
+        const sz = Math.hypot(depth, height), sx = Math.hypot(width, height);
+        Geometry._pushTri(positions, normals, uvs, indices, A, P, B, [0, depth / sz, -height / sz]);
+        Geometry._pushTri(positions, normals, uvs, indices, A, D, P, [-height / sx, width / sx, 0]);
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Straight flight of stairs ascending toward +Z, centred on the origin, solid down to the ground.
+     *
+     * Built as ONE extruded stepped profile rather than a stack of boxes: no internal faces, no coplanar
+     * overlap, and 4n+2 quads instead of 6n. Each side is tiled by n full-height columns, which exactly
+     * triangulates the (non-convex) staircase profile without needing a general polygon routine.
+     */
+    public static Stairs(steps: number = 8, width: number = 1, height: number = 1, depth: number = 1): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const n = Math.max(1, Math.floor(steps));
+        const w = width / 2, h = height / 2, d = depth / 2;
+        const rise = height / n, run = depth / n;
+
+        for (let i = 0; i < n; ++i) {
+            const z0 = -d + i * run, z1 = z0 + run;
+            const y0 = -h + i * rise, y1 = y0 + rise;
+
+            // Riser, facing the approach (-Z).
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                [w, y0, z0], [-w, y0, z0], [-w, y1, z0], [w, y1, z0], [0, 0, -1]);
+            // Tread, facing up.
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                [-w, y1, z0], [-w, y1, z1], [w, y1, z1], [w, y1, z0], [0, 1, 0]);
+            // Side columns run from the ground to this step's tread, so consecutive columns tile the
+            // profile edge to edge with no overlap.
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                [-w, -h, z0], [-w, -h, z1], [-w, y1, z1], [-w, y1, z0], [-1, 0, 0]);
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                [w, -h, z0], [w, y1, z0], [w, y1, z1], [w, -h, z1], [1, 0, 0]);
+        }
+
+        Geometry._pushQuad(positions, normals, uvs, indices,
+            [-w, -h, d], [w, -h, d], [w, h, d], [-w, h, d], [0, 0, 1]);        // back wall
+        Geometry._pushQuad(positions, normals, uvs, indices,
+            [-w, -h, -d], [w, -h, -d], [w, -h, d], [-w, -h, d], [0, -1, 0]);   // underside
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Spiral staircase: `steps` rectangular treads swept around the Y axis, centred on the origin.
+     *
+     * The treads are straight boxes rather than curved wedges — what a blockout kit uses, and what keeps
+     * every face flat. Each tread is `rise` thick so consecutive ones stack flush into a continuous helix;
+     * `sweep` is the total turn in radians.
+     */
+    public static SpiralStairs(
+        steps: number = 12, innerRadius: number = 0.15, outerRadius: number = 0.6,
+        height: number = 1, sweep: number = Math.PI * 2,
+    ): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const n = Math.max(1, Math.floor(steps));
+        const inner = Math.max(0, Math.min(innerRadius, outerRadius));
+        const rise = height / n;
+        const mid = (inner + outerRadius) / 2;
+        const radial = Math.max(1e-4, (outerRadius - inner) / 2);
+        // Tread width from the arc length at the mid radius, so treads meet without a visible gap.
+        const tread = Math.max(1e-4, Math.abs(sweep) / n * mid);
+
+        for (let i = 0; i < n; ++i) {
+            const angle = sweep * i / n;
+            // The tread's centre, orbited to `angle` by the same rotation _pushBox applies to its corners.
+            const centre: [number, number, number] = [
+                mid * Math.cos(angle), -height / 2 + (i + 0.5) * rise, -mid * Math.sin(angle)];
+            Geometry._pushBox(positions, normals, uvs, indices,
+                centre, [radial, rise / 2, tread / 2], angle);
+        }
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Hollow open-top box — a room shell: a floor slab plus four walls of `thickness`, centred on the
+     * origin. The walls stand ON the floor and the X walls are inset between the Z walls, so the pieces
+     * meet face to face without interpenetrating. Coplanar contact faces are safe here because they carry
+     * opposite normals: backface culling only ever draws one of the pair.
+     */
+    public static HollowBox(
+        width: number = 1, height: number = 1, depth: number = 1, thickness: number = 0.1,
+    ): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        // Clamped so an oversized thickness cannot invert a wall, which would flip its winding.
+        const t = Math.max(1e-4, Math.min(thickness, Math.min(width, depth) / 2 - 1e-4, height - 1e-4));
+        const w = width / 2, h = height / 2, d = depth / 2;
+        const wallH = (height - t) / 2;
+        const wallY = -h + t + wallH;
+        const box = (centre: [number, number, number], half: [number, number, number]) =>
+            Geometry._pushBox(positions, normals, uvs, indices, centre, half);
+
+        box([0, -h + t / 2, 0], [w, t / 2, d]);                 // floor
+        box([0, wallY, -d + t / 2], [w, wallH, t / 2]);          // -Z wall
+        box([0, wallY, d - t / 2], [w, wallH, t / 2]);           // +Z wall
+        box([-w + t / 2, wallY, 0], [t / 2, wallH, d - t]);      // -X wall, inset between the others
+        box([w - t / 2, wallY, 0], [t / 2, wallH, d - t]);       // +X wall
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Hollow cylinder (pipe), Y-aligned and centred on the origin: an outer wall, an inward-facing inner
+     * wall, and two annular caps. The caps are rings rather than discs, so unlike `Cylinder` there is no
+     * centre vertex — there is no centre to have.
+     */
+    public static Tube(
+        segments: number = 32, outerRadius: number = 0.5, innerRadius: number = 0.3, height: number = 1,
+    ): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const seg = Math.max(3, Math.floor(segments));
+        const outer = Math.max(outerRadius, innerRadius);
+        // Kept strictly inside the outer wall: equal radii would collapse every cap quad to zero area.
+        const inner = Math.max(1e-4, Math.min(innerRadius, outer - 1e-4));
+        const hh = height / 2;
+        const step = 2 * Math.PI / seg;
+
+        for (let i = 0; i < seg; ++i) {
+            const a0 = step * i, a1 = step * (i + 1);
+            const c0 = Math.cos(a0), s0 = Math.sin(a0);
+            const c1 = Math.cos(a1), s1 = Math.sin(a1);
+
+            const oTop0: [number, number, number] = [c0 * outer, hh, s0 * outer];
+            const oTop1: [number, number, number] = [c1 * outer, hh, s1 * outer];
+            const oBot0: [number, number, number] = [c0 * outer, -hh, s0 * outer];
+            const oBot1: [number, number, number] = [c1 * outer, -hh, s1 * outer];
+            const iTop0: [number, number, number] = [c0 * inner, hh, s0 * inner];
+            const iTop1: [number, number, number] = [c1 * inner, hh, s1 * inner];
+            const iBot0: [number, number, number] = [c0 * inner, -hh, s0 * inner];
+            const iBot1: [number, number, number] = [c1 * inner, -hh, s1 * inner];
+
+            // Flat-shaded per segment: one normal at the segment's mid angle keeps each quad planar-exact.
+            const am = (a0 + a1) / 2;
+            const outN: [number, number, number] = [Math.cos(am), 0, Math.sin(am)];
+            const inN: [number, number, number] = [-outN[0], 0, -outN[2]];
+
+            Geometry._pushQuad(positions, normals, uvs, indices, oBot0, oTop0, oTop1, oBot1, outN);
+            Geometry._pushQuad(positions, normals, uvs, indices, iBot1, iTop1, iTop0, iBot0, inN);
+            Geometry._pushQuad(positions, normals, uvs, indices, iTop0, iTop1, oTop1, oTop0, [0, 1, 0]);
+            Geometry._pushQuad(positions, normals, uvs, indices, oBot0, oBot1, iBot1, iBot0, [0, -1, 0]);
+        }
+
+        return new Geometry(positions, normals, uvs, [], [], indices);
+    }
+
+    /**
+     * Archway: an annular sector in the XY plane, extruded along Z. With the default half turn it is a
+     * semicircular arch spanning `2 * radius` and rising `radius`.
+     *
+     * The AABB is re-centred on the origin like every other factory, so for a half turn the springing line
+     * sits at `y = -radius / 2` rather than at y = 0.
+     */
+    public static Arch(
+        segments: number = 24, radius: number = 0.5, thickness: number = 0.15,
+        depth: number = 0.3, sweep: number = Math.PI,
+    ): Geometry {
+        const positions: [number, number, number][] = [];
+        const normals: [number, number, number][] = [];
+        const uvs: [number, number][] = [];
+        const indices: number[] = [];
+
+        const seg = Math.max(2, Math.floor(segments));
+        const outer = radius;
+        const band = Math.max(1e-4, Math.min(thickness, outer - 1e-4));
+        const innerR = outer - band;
+        const hd = depth / 2;
+        // A half turn spans y in [0, outer]; shift so the bounds straddle the origin like the other shapes.
+        const yShift = -outer / 2;
+        const step = sweep / seg;
+        const at = (r: number, a: number, z: number): [number, number, number] =>
+            [Math.cos(a) * r, Math.sin(a) * r + yShift, z];
+
+        for (let i = 0; i < seg; ++i) {
+            const a0 = step * i, a1 = step * (i + 1);
+            const am = (a0 + a1) / 2;
+            const outN: [number, number, number] = [Math.cos(am), Math.sin(am), 0];
+            const inN: [number, number, number] = [-outN[0], -outN[1], 0];
+
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                at(outer, a0, -hd), at(outer, a1, -hd), at(outer, a1, hd), at(outer, a0, hd), outN);
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                at(innerR, a1, -hd), at(innerR, a0, -hd), at(innerR, a0, hd), at(innerR, a1, hd), inN);
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                at(outer, a0, hd), at(outer, a1, hd), at(innerR, a1, hd), at(innerR, a0, hd), [0, 0, 1]);
+            Geometry._pushQuad(positions, normals, uvs, indices,
+                at(innerR, a0, -hd), at(innerR, a1, -hd), at(outer, a1, -hd), at(outer, a0, -hd), [0, 0, -1]);
+        }
+
+        // The two cut ends. Their outward normals are tangential: -theta at the start, +theta at the end.
+        const endN = (a: number, sign: number): [number, number, number] =>
+            [Math.sin(a) * sign, -Math.cos(a) * sign, 0];
+        Geometry._pushQuad(positions, normals, uvs, indices,
+            at(innerR, 0, -hd), at(outer, 0, -hd), at(outer, 0, hd), at(innerR, 0, hd), endN(0, 1));
+        Geometry._pushQuad(positions, normals, uvs, indices,
+            at(outer, sweep, -hd), at(innerR, sweep, -hd), at(innerR, sweep, hd), at(outer, sweep, hd),
+            endN(sweep, -1));
 
         return new Geometry(positions, normals, uvs, [], [], indices);
     }

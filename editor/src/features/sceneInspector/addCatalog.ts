@@ -40,44 +40,40 @@ import {
 } from 'cleo'
 import type EventEmitter from 'events'
 import type { ShapeDescription } from '../EngineContext'
-import CameraIcon from '../../icons/camera.png'
-import CameraRigIcon from '../../icons/camera-rig.png'
-import SkyboxIcon from '../../icons/skybox.png'
-import CubeIcon from '../../icons/cube.png'
-import PlaneIcon from '../../icons/plane.png'
-import SphereIcon from '../../icons/sphere.png'
-import CylinderIcon from '../../icons/cylinder.png'
-import EmptyIcon from '../../icons/empty.png'
-import TriggerIcon from '../../icons/trigger.png'
-import PointLightIcon from '../../icons/point-light.png'
-import DirectionalLightIcon from '../../icons/directional-light.png'
-import SpotlightIcon from '../../icons/spotlight.png'
-import SpriteIcon from '../../icons/static-sprite.png'
-import AnimatedSpriteIcon from '../../icons/animated-sprite.png'
-import CloudsIcon from '../../icons/clouds.png'
-import SkyAtmosphereIcon from '../../icons/sky-atmosphere.png'
-import TilemapIcon from '../../icons/tilemap.png'
-import LandscapeIcon from '../../icons/landscape.png'
 import {
   CanvasIcon, WorldUIIcon, PanelIcon, StackIcon, SpacerIcon, TextIcon, ImageIcon,
   ButtonIcon, ProgressIcon, SliderIcon, ToggleIcon, TextInputIcon,
 } from './uiIcons'
+import {
+  CubeIcon, SphereIcon, CylinderIcon, CapsuleIcon, ConeIcon, TorusIcon, PyramidIcon,
+  QuadIcon, CircleIcon, TriangleIcon,
+  RampIcon, CornerRampIcon, StairsIcon, SpiralStairsIcon, ArchIcon, TubeIcon, HollowBoxIcon,
+} from './primitiveIcons'
+import {
+  EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon,
+  DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
+  SpriteIcon, AnimatedSpriteIcon, TilemapIcon,
+  SkyboxIcon, SkyAtmosphereIcon, CloudsIcon, LandscapeIcon,
+} from './nodeIcons'
 
 // The catalog of addable node types. It is data rather than a set of closures inside AddNew because the
 // same item can now be created from three places: the Add grid's click, a drop on the scene tree, and a
 // drop into the viewport — the latter two only receive the item's `id` through a DataTransfer.
 export const NEW_NODE_MIME = 'text/cleo-new-node';
 
-export type AddCategory = 'common' | 'cameras' | 'lights' | 'sprites' | 'primitives' | 'environment'
-  | 'uiLayout' | 'uiCore' | 'uiWidgets';
+export type AddCategory = 'common' | 'cameras' | 'lights' | 'sprites' | 'primitives' | 'complex'
+  | 'environment' | 'uiLayout' | 'uiCore' | 'uiWidgets';
 
 export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
   { value: 'common', label: 'Common' },
   { value: 'cameras', label: 'Cameras' },
   { value: 'lights', label: 'Lights' },
   { value: 'sprites', label: 'Sprites' },
-  { value: 'primitives', label: 'Primitives' },
-  { value: 'environment', label: 'Environ.' },
+  // The values are internal and stay short; only the labels are user-facing. Renaming a value would
+  // invalidate the stored cleo.addnew.category preference for no gain.
+  { value: 'primitives', label: 'Primitive Geometries' },
+  { value: 'complex', label: 'Complex Geometries' },
+  { value: 'environment', label: 'Environment' },
   // UI categories. Shown only in `ui` mode (see AddNew) — a HUD element dropped into a scene-mode
   // session would be authored with no way to see what it looks like.
   { value: 'uiLayout', label: 'Layout' },
@@ -97,8 +93,8 @@ export interface AddContext {
 export interface AddItem {
   id: string;
   label: string;
-  /** A PNG import, or an inline SVG component — the house style for new chrome (see ModeSelector). */
-  icon: string | React.ComponentType;
+  /** An inline SVG glyph. Components rather than image URLs so an icon tints with its cell's text colour. */
+  icon: React.ComponentType;
   category: AddCategory;
   /** False for nodes a world position is meaningless for (sky, clouds) — a viewport drop won't place them. */
   placeable?: boolean;
@@ -189,6 +185,12 @@ export const ADD_ITEMS: AddItem[] = [
       { frames: [], fps: 12, loop: true, constraints: 'spherical' }),
   },
 
+  // Primitives. Solids first, then the flat shapes (which are double-sided, since a single-sided flat
+  // shape vanishes when you orbit past it and reads as a bug).
+  //
+  // Cube/Sphere/Cylinder keep their original geometry arguments and node scales so existing muscle memory
+  // holds; the ones added later are authored at unit size with an identity transform instead, which is the
+  // better default for a new primitive.
   {
     id: 'cube', label: 'Cube', icon: CubeIcon, category: 'primitives',
     create: async () => new ModelNode('cube', new Model(Geometry.Cube(), Material.Default({}))),
@@ -202,6 +204,12 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
   {
+    id: 'capsule', label: 'Capsule', icon: CapsuleIcon, category: 'primitives',
+    // radius 0.25 + a 0.5 straight section = 1 unit tall overall (Capsule's height argument is the
+    // straight section only, matching Shape.Capsule).
+    create: async () => new ModelNode('capsule', new Model(Geometry.Capsule(24, 0.25, 0.5), Material.Default({}))),
+  },
+  {
     id: 'cylinder', label: 'Cylinder', icon: CylinderIcon, category: 'primitives',
     create: async () => {
       const cylinderNode = new ModelNode('cylinder', new Model(Geometry.Cylinder(16), Material.Default({})));
@@ -210,8 +218,61 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
   {
-    id: 'plane', label: 'Plane', icon: PlaneIcon, category: 'primitives',
-    create: async () => new ModelNode('plane', new Model(Geometry.Quad(), Material.Default({}, { side: 'double' }))),
+    id: 'cone', label: 'Cone', icon: ConeIcon, category: 'primitives',
+    create: async () => new ModelNode('cone', new Model(Geometry.Cone(24, 0.5, 1), Material.Default({}))),
+  },
+  {
+    id: 'torus', label: 'Torus', icon: TorusIcon, category: 'primitives',
+    create: async () => new ModelNode('torus', new Model(Geometry.Torus(32, 16, 0.35, 0.15), Material.Default({}))),
+  },
+  {
+    id: 'pyramid', label: 'Pyramid', icon: PyramidIcon, category: 'primitives',
+    create: async () => new ModelNode('pyramid', new Model(Geometry.Pyramid(1, 1), Material.Default({}))),
+  },
+  {
+    id: 'quad', label: 'Quad', icon: QuadIcon, category: 'primitives',
+    create: async () => new ModelNode('quad', new Model(Geometry.Quad(), Material.Default({}, { side: 'double' }))),
+  },
+  {
+    id: 'circle', label: 'Circle', icon: CircleIcon, category: 'primitives',
+    create: async () => new ModelNode('circle', new Model(Geometry.Circle(1, 32), Material.Default({}, { side: 'double' }))),
+  },
+  {
+    id: 'triangle', label: 'Triangle', icon: TriangleIcon, category: 'primitives',
+    create: async () => new ModelNode('triangle', new Model(Geometry.Triangle(), Material.Default({}, { side: 'double' }))),
+  },
+
+  // Complex geometries: parametric level-blockout pieces. All are authored at unit size with an identity
+  // transform, and all are solid single-sided shells, so scaling the node is the intended way to fit one
+  // to a space. Like every other primitive they are created as a bare ModelNode — the Physics panel fits
+  // a collider on demand, and its Add Convex Hull covers the sloped ones exactly.
+  {
+    id: 'ramp', label: 'Ramp', icon: RampIcon, category: 'complex',
+    create: async () => new ModelNode('ramp', new Model(Geometry.Ramp(1, 1, 1), Material.Default({}))),
+  },
+  {
+    id: 'cornerRamp', label: 'Corner Ramp', icon: CornerRampIcon, category: 'complex',
+    create: async () => new ModelNode('cornerRamp', new Model(Geometry.CornerRamp(1, 1, 1), Material.Default({}))),
+  },
+  {
+    id: 'stairs', label: 'Stairs', icon: StairsIcon, category: 'complex',
+    create: async () => new ModelNode('stairs', new Model(Geometry.Stairs(8, 1, 1, 1), Material.Default({}))),
+  },
+  {
+    id: 'spiralStairs', label: 'Spiral Stairs', icon: SpiralStairsIcon, category: 'complex',
+    create: async () => new ModelNode('spiralStairs', new Model(Geometry.SpiralStairs(12, 0.12, 0.5, 1), Material.Default({}))),
+  },
+  {
+    id: 'arch', label: 'Arch', icon: ArchIcon, category: 'complex',
+    create: async () => new ModelNode('arch', new Model(Geometry.Arch(24, 0.5, 0.15, 0.3), Material.Default({}))),
+  },
+  {
+    id: 'tube', label: 'Tube', icon: TubeIcon, category: 'complex',
+    create: async () => new ModelNode('tube', new Model(Geometry.Tube(32, 0.5, 0.35, 1), Material.Default({}))),
+  },
+  {
+    id: 'hollowBox', label: 'Hollow Box', icon: HollowBoxIcon, category: 'complex',
+    create: async () => new ModelNode('hollowBox', new Model(Geometry.HollowBox(1, 1, 1, 0.1), Material.Default({}))),
   },
 
   {
@@ -235,7 +296,7 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
   {
-    id: 'lightProbe', label: 'Light Probe', icon: SphereIcon, category: 'environment',
+    id: 'lightProbe', label: 'Light Probe', icon: LightProbeIcon, category: 'environment',
     // New probes get a bounded influence volume out of the box; probes from legacy scenes
     // deserialize size [0,0,0] = unbounded (whole scene).
     create: async () => new LightProbeNode('light probe', { size: [10, 10, 10] }),

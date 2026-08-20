@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import { TextureManager, Material, isDerivedTextureId } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { cn, TextInput, Button } from '../../../components/ui';
-import ImportIcon from '../../../icons/import.png';
+import { ImportIcon } from '../../topbarIcons';
 import NullImage from '../../../images/null.png';
 
 const thumbSrc = (id: string): string | undefined => {
@@ -215,7 +215,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
               aria-label='Upload texture'
               onClick={() => fileInputRef.current?.click()}
             >
-              <img src={ImportIcon} alt='' className='w-4 h-4 object-contain inline-block align-middle' />
+              <span className='inline-flex items-center justify-center w-4 h-4 align-middle'><ImportIcon /></span>
             </button>
           </div>
 

@@ -16,7 +16,6 @@ import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../ut
 import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates } from "cleo";
 import type { AnimationCompatibility, BoneMapping, HullQuality, SceneChange } from "cleo";
 import NullImage from '../images/null.png';
-import LightIcon from '../icons/light.png';
 import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
@@ -151,6 +150,32 @@ function buildProbeIconDataURL(): string {
   ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke();
   ctx.setLineDash([4, 6]);
   ctx.beginPath(); ctx.arc(cx, cy, 24, 0, Math.PI * 2); ctx.stroke();
+  return canvas.toDataURL('image/png');
+}
+
+// Rasterise the light glyph (a filled core with eight rays, matching the inspector's LightIcon) to a
+// white-on-transparent PNG data URL, for the light's viewport billboard. Same reason as the probe icon
+// above: a sprite needs a raster texture, so this is the one editor glyph that cannot simply be a
+// component. A sprite Material.Basic tints the white icon to the light's own colour.
+function buildLightIconDataURL(): string {
+  const size = 64, c = size / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.strokeStyle = 'white';
+  ctx.fillStyle = 'white';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(c, c, 11, 0, Math.PI * 2); ctx.fill();
+  for (let i = 0; i < 8; ++i) {
+    const a = (i / 8) * Math.PI * 2;
+    const cos = Math.cos(a), sin = Math.sin(a);
+    ctx.beginPath();
+    ctx.moveTo(c + cos * 18, c + sin * 18);
+    ctx.lineTo(c + cos * 27, c + sin * 27);
+    ctx.stroke();
+  }
   return canvas.toDataURL('image/png');
 }
 
@@ -3374,7 +3399,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const runtime = tab.kind !== 'scene' ? tabRuntimeRef.current.get(tab.id) : undefined;
     instance.setScene(runtime ? runtime.scene : editorSceneRef.current);
     // Hide the editor ground grid in (terrain-)material tabs so the preview sphere + its thumbnail stay clean.
-    instance.renderer.setGridVisible(tab.kind !== 'material' && tab.kind !== 'terrainMaterial');
+    // Elsewhere defer to the debug-visibility channel in force rather than forcing it on -- this also runs on
+    // the two-phase "Play from an asset tab" path, which would otherwise show the grid over the play session.
+    instance.renderer.setGridVisible(
+      tab.kind !== 'material' && tab.kind !== 'terrainMaterial'
+      && (isPlayModeRef.current ? debugVisibilityRef.current.grid.runtime : debugVisibilityRef.current.grid.editor));
     requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
     // Template scenes are authored in 3D; the Main tab restores its own remembered dimension. (Terrain-)
     // material tabs are skipped: their preview camera uses a self-contained orbit rig
@@ -3954,7 +3983,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             engine.renderer.clearColor = [...EDITOR_CLEAR_COLOR];
 
           TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
-          TextureManager.Instance.addTextureFromBase64(LightIcon, {
+          TextureManager.Instance.addTextureFromBase64(buildLightIconDataURL(), {
             mipMap: false
           }, '__editor__light_icon');
           // Light-probe viewport billboard icon — the concentric-circles probe glyph (matching the
@@ -3980,8 +4009,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
           engine.run();
 
-          // Enable the editor infinite-grid overlay (ground/XZ plane by default).
-          engine.renderer.setGridVisible(true);
+          // Enable the editor infinite-grid overlay (ground/XZ plane by default), unless it is toggled off.
+          engine.renderer.setGridVisible(debugVisibilityRef.current.grid.editor);
           engine.renderer.setGridPlane('xz');
 
           eventEmitter.current.emit('TEXTURES_CHANGED');
@@ -4007,12 +4036,23 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // to one rAF, and a suppress flag ignores the SCENE_CHANGED the reconciler's own edits emit.
   const reconcileScheduledRef = useRef(false);
   const suppressReconcileRef = useRef(false);
+  // The pending rAF handle, so the effect's cleanup can drop a reconcile queued by the OUTGOING closure.
+  // Without this a scene parse (which emits structural changes) queues a run with the old isPlayMode, and
+  // that run lands a frame into Play with the editor channel's values. See the cleanup below.
+  const reconcileRafRef = useRef(0);
   useEffect(() => {
     const runReconcile = () => {
       reconcileScheduledRef.current = false;
       // (Terrain-)material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
       if (editorMode === 'material' || editorMode === 'terrainMaterial') return;
       const vis = debugVisibilityRef.current;
+      // The reference grid is editor CHROME -- global renderer state, not a scene node -- so it is the one
+      // overlay whose visibility survives a scene swap and where the last writer wins outright. Assert it on
+      // EVERY reconcile from whichever channel is in force, rather than once at the play/stop transition:
+      // that makes it self-healing (and live-togglable mid-Play), the same shape DebugSkeletonOverlay uses.
+      // Skipped in renderer mode, where the Renderer panel owns its own grid switch.
+      if (editorMode !== 'renderer')
+        instanceRef.current?.renderer.setGridVisible(isPlayMode ? vis.grid.runtime : vis.grid.editor);
       suppressReconcileRef.current = true;
       try {
         if (isPlayMode) {
@@ -4027,9 +4067,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // node edit and would otherwise read as unsaved work. They are editor bookkeeping, never the user's
           // change, so they must not dirty the tab at any time — not merely inside an opening settle window.
           withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current, vis, 'editor'));
-          // The reference grid is editor chrome (not a scene node), driven straight off its Editor toggle.
-          // Skipped in renderer mode, where the Renderer panel owns its own grid switch.
-          if (editorMode !== 'renderer') instanceRef.current?.renderer.setGridVisible(vis.grid.editor);
         }
       } finally { suppressReconcileRef.current = false; }
     };
@@ -4039,7 +4076,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
       if (suppressReconcileRef.current || reconcileScheduledRef.current) return;
       reconcileScheduledRef.current = true;
-      requestAnimationFrame(runReconcile);
+      reconcileRafRef.current = requestAnimationFrame(runReconcile);
     };
     const emitter = eventEmitter.current;
     emitter.on('SCENE_CHANGED', schedule);
@@ -4047,6 +4084,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     emitter.on('DEBUG_VISIBILITY_CHANGED', schedule);
     schedule(); // initial reconcile for the current scene / mode
     return () => {
+      // Drop any reconcile this closure queued. Entering Play parses a whole scene, and those structural
+      // events schedule a run while isPlayMode is still false; it would fire one frame later and reassert
+      // the EDITOR channel over the play session. Clearing the flag as well as the handle is the
+      // load-bearing half -- cleanup runs before the next effect body, so without the reset the re-run's
+      // own schedule() below would see `true` and bail, dropping the play-mode reconcile entirely.
+      cancelAnimationFrame(reconcileRafRef.current);
+      reconcileScheduledRef.current = false;
       emitter.off('SCENE_CHANGED', schedule);
       emitter.off('PHYSICS_CHANGED', schedule);
       emitter.off('DEBUG_VISIBILITY_CHANGED', schedule);
@@ -4207,8 +4251,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         setSelectedNode(null);
         if (instanceRef.current && instanceRef.current.renderer) {
           instanceRef.current.renderer.setSelectedNode(null);
-          // Hide the editor grid while in game mode
-          instanceRef.current.renderer.setGridVisible(false);
+          // The grid follows its Runtime toggle in game mode (off by default).
+          instanceRef.current.renderer.setGridVisible(debugVisibilityRef.current.grid.runtime);
           // Never render a debug channel in the running game (in case Play is pressed in Renderer mode).
           instanceRef.current.renderer.debugView = 'final';
         }
