@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { Node, attachScriptFactory } from '../src/core/scene/node';
+import { Node } from '../src/core/scene/nodes/node';
+import { attachScriptFactory } from '../src/core/scene/nodes/nodeScripting';
 import { compileScript } from '../src/core/scripting/scriptRuntime';
 import '../src/cleo';   // registers the 'cleo' module a script's `import ... from 'cleo'` resolves to
 import { Scene } from '../src/core/scene/scene';

@@ -7,7 +7,9 @@ import {
 import { clamp, dampTime, dampWrapped, wrapSpan } from '../core/math';
 import { skeletonTopology, SkeletonTopology, isAncestorJoint } from './skeletonTopology';
 import { solveTwoBone, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain, IkRig, IkRigValidation } from './ik';
-import { Node, ModelNode, canAccessVariable } from '../core/scene/node';
+import { Node } from '../core/scene/nodes/node';
+import { ModelNode } from '../core/scene/nodes/modelNode';
+import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
 import { InputManager } from '../input/inputManager';
 import { Logger } from '../core/logger';
 

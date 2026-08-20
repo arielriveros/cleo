@@ -1,4 +1,4 @@
-import { gl } from "./renderer";
+import { gl } from "./glContext";
 import { GLState } from "./systems/glState";
 import { bytesToDataUrl } from "../core/base64";
 import { Logger } from "../core/logger";

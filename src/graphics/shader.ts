@@ -1,5 +1,5 @@
 import { mat4, vec2, vec3, vec4 } from 'gl-matrix';
-import { gl } from './renderer';
+import { gl } from './glContext';
 import { Loader } from './loader';
 import { GLState } from './systems/glState';
 

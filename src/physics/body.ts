@@ -1,7 +1,7 @@
 import { Body as CannonBody, Vec3, Quaternion} from 'cannon-es'
 import { quat, vec3 } from 'gl-matrix';
 import { Shape } from './shape';
-import { Node } from '../core/scene/node';
+import type { Node } from '../core/scene/nodes/node';
 
 
 // Internal — the shape RigidBody/Trigger pass down to CBody, not the public config. Unlike

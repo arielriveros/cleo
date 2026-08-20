@@ -1,5 +1,20 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, TilemapNode, UINode, UIRootNode, VolumetricCloudsNode, SkyAtmosphereNode, parseNodeJson } from "./node";
+import { Node } from "./nodes/node";
+import { ModelNode } from "./nodes/modelNode";
+import { LodGroupNode } from "./nodes/lodGroupNode";
+import { CameraRigNode } from "./nodes/cameraRigNode";
+import { LandscapeNode } from "./nodes/landscapeNode";
+import { TilemapNode } from "./nodes/tilemapNode";
+import { LightNode } from "./nodes/lightNode";
+import { LightProbeNode } from "./nodes/lightProbeNode";
+import { SkyboxNode } from "./nodes/skyboxNode";
+import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
+import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
+import { CameraNode } from "./nodes/cameraNode";
+import { SpriteNode } from "./nodes/spriteNode";
+import { UINode } from "./nodes/ui/uiNode";
+import { UIRootNode } from "./nodes/ui/uiRoot";
+import { parseNodeJson } from "./nodes/parseNodeJson";
 import { mat4, vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";

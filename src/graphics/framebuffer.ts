@@ -1,4 +1,4 @@
-import { gl } from './renderer';
+import { gl } from './glContext';
 import { Texture, TextureConfig } from './texture';
 import { Logger } from '../core/logger';
 import { setViewportSize } from './renderStats';

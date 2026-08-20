@@ -9,6 +9,7 @@ const config = {
     },
     output: {
         path: path.resolve(__dirname, 'dist'),
+        clean: true,
         library: 'cleo',
         libraryTarget: 'umd',
         globalObject: 'this'

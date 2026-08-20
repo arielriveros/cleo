@@ -2,7 +2,7 @@ import { Body, Sphere, Vec3, Quaternion, PointToPointConstraint, ConeTwistConstr
 import { mat4, vec3, quat } from 'gl-matrix';
 import { AnimatedModel } from '../graphics/animatedModel';
 import type { Animator } from '../graphics/animator';
-import type { ModelNode } from '../core/scene/node';
+import type { ModelNode } from '../core/scene/nodes/modelNode';
 import type { PhysicsSystem } from './physicsSystem';
 
 export interface RagdollOptions {

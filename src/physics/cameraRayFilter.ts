@@ -1,4 +1,4 @@
-import type { Node } from "../core/scene/node";
+import type { Node } from "../core/scene/nodes/node";
 
 /**
  * The subset of a cannon `Body` the camera probe's filter looks at. Structural rather than the real

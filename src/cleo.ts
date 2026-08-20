@@ -5,24 +5,47 @@ export { Scene } from "./core/scene/scene";
 export type { InstantiateOptions } from "./core/scene/scene";
 export { registerTemplates, clearTemplates, getTemplate, templateNames } from "./core/scene/templates";
 export type { NodeTemplate } from "./core/scene/templates";
-export { parseNodeJson } from "./core/scene/node";
+export { parseNodeJson } from "./core/scene/nodes/parseNodeJson";
 export { cloneNodeJson, collectNodeIds, remapNodeRefs, regenerateNodeIds } from "./core/scene/nodeJson";
-export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, CameraRigNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, TilemapNode, LodGroupNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
+export { Node } from "./core/scene/nodes/node";
+export type { NodeType } from "./core/scene/nodes/nodeType";
+export { ModelNode } from "./core/scene/nodes/modelNode";
+export { LodGroupNode } from "./core/scene/nodes/lodGroupNode";
+export { CameraRigNode } from "./core/scene/nodes/cameraRigNode";
+export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
+export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
+export { TilemapNode } from "./core/scene/nodes/tilemapNode";
+export { LightNode } from "./core/scene/nodes/lightNode";
+export { LightProbeNode } from "./core/scene/nodes/lightProbeNode";
+export { SkyboxNode } from "./core/scene/nodes/skyboxNode";
+export { VolumetricCloudsNode } from "./core/scene/nodes/volumetricCloudsNode";
+export type { VolumetricCloudsOptions } from "./core/scene/nodes/volumetricCloudsNode";
+export { SkyAtmosphereNode } from "./core/scene/nodes/skyAtmosphereNode";
+export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
+export { CameraNode } from "./core/scene/nodes/cameraNode";
+export { SpriteNode } from "./core/scene/nodes/spriteNode";
+export { AnimatedSpriteNode } from "./core/scene/nodes/animatedSpriteNode";
+export type { SpriteFrameSource } from "./core/scene/nodes/animatedSpriteNode";
+export { getData, setData, bindDataAccessors, canAccessVariable } from "./core/scene/nodes/nodeVariables";
+export { attachScriptFactory, unwrapScriptNode } from "./core/scene/nodes/nodeScripting";
 // UI nodes. Every class is exported individually (rather than the base alone) because a script's base
 // type is resolved by CLASS NAME -- `class HealthBar extends UIProgressBarNode` is what gives the script
 // a typed `this.value`, and the editor's script library matches the same names.
-export {
-    UINode, UIRootNode, UIPanelNode, UITextNode, UIImageNode, UIButtonNode, UIStackNode, UISpacerNode,
-    UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode, isUINodeType,
-} from "./core/scene/node";
-export type { UIImageFit, UIFillDirection, UITextAlign, UITextVAlign, UISizing, UIColor } from "./core/scene/node";
+export { UINode } from "./core/scene/nodes/ui/uiNode";
+export { UIRootNode } from "./core/scene/nodes/ui/uiRoot";
+export { UIPanelNode, UIStackNode, UISpacerNode } from "./core/scene/nodes/ui/uiContainers";
+export { UITextNode, UIImageNode } from "./core/scene/nodes/ui/uiContent";
+export { UIButtonNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode } from "./core/scene/nodes/ui/uiWidgets";
+export { isUINodeType } from "./core/scene/nodes/nodeType";
+export type { UIImageFit, UIFillDirection, UITextAlign, UITextVAlign, UISizing, UIColor } from "./core/scene/nodes/ui/uiNode";
 export {
     setRect as uiSetRect, solveRect as uiSolveRect, rootScale as uiRootScale,
     projectToScreen as uiProjectToScreen, worldUIScale, intersectRect as uiIntersectRect,
     rectOffscreen as uiRectOffscreen, stackLayout as uiStackLayout,
 } from "./core/uiLayout";
 export type { UIRect, UIScaleMode, UISpace, StackJustify, StackItem, ScreenProjection } from "./core/uiLayout";
-export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions, FollowSpace, AimMode, SpriteFrameSource } from "./core/scene/node";
+export type { NodeVariable, NodeVariableType, NodeVariableAccess } from "./core/scene/nodes/nodeVariables";
+
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { TypedEmitter, engineEventBus } from "./core/eventBus";

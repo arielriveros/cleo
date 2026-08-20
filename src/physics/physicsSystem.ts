@@ -1,6 +1,8 @@
 import { Logger } from "../cleo";
 import { Scene } from "../core/scene/scene";
-import { ModelNode, Node, unwrapScriptNode } from "../core/scene/node";
+import { Node } from "../core/scene/nodes/node";
+import { ModelNode } from "../core/scene/nodes/modelNode";
+import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
 import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase } from 'cannon-es';
 import { vec3 } from "gl-matrix";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";

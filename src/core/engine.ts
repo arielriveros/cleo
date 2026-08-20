@@ -3,7 +3,7 @@ import { InputManager } from "../input/inputManager";
 import { PhysicsSystem } from "../physics/physicsSystem";
 import { Logger } from "./logger";
 import { Scene } from "./scene/scene";
-import { engineEventBus } from "./eventBus";
+import { engineEventBus, authoring } from "./eventBus";
 import { frameHistory, gpuProfiler } from "../graphics/gpuProfiler";
 import { frameStats } from "../graphics/renderStats";
 
@@ -72,7 +72,10 @@ export class CleoEngine {
   // run every frame from scripts and physics, and their changes must not allocate a payload, walk the
   // bus, or mark the editor "unsaved". The editor flips this true only while editing and false on Play.
   // STRUCTURAL changes (add/remove/visible) ignore this flag — the Scene relies on them for correctness.
-  public static authoringMode = false;
+  // Delegates to `authoring.enabled` in eventBus.ts — see there for why the flag lives in a leaf module.
+  // Kept as a static so every existing `CleoEngine.authoringMode` reader and writer is unaffected.
+  public static get authoringMode(): boolean { return authoring.enabled; }
+  public static set authoringMode(value: boolean) { authoring.enabled = value; }
 
   // The one engine running in this process — the editor reuses a single instance for both the edit-time
   // viewport and Play mode, and a published build only ever constructs one. Lets a script-facing facade

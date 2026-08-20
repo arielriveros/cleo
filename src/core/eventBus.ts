@@ -1,7 +1,7 @@
 // Type-only imports — erased at compile time, so this module stays dependency-free at runtime and
 // Logger can still reach the bus without transitively importing the renderer graph (see engineEventBus).
 import type { LogEntry } from './logger';
-import type { Node } from './scene/node';
+import type { Node } from './scene/nodes/node';
 
 /**
  * What kind of mutation a `SCENE_CHANGED` event describes.
@@ -146,3 +146,17 @@ export class TypedEmitter<Events extends Record<string, any>> {
  * isolated unit tests. Importing this one-line module keeps `Logger` cheap.
  */
 export const engineEventBus = new TypedEmitter<EngineEventMap>();
+
+/**
+ * Authoring gate for property-level SCENE_CHANGED events (transform/material/variable/… — the kinds fired
+ * from every setter). Default false so a published game and Play mode pay nothing: those setters run every
+ * frame from scripts and physics, and their changes must not allocate a payload, walk the bus, or mark the
+ * editor "unsaved". The editor flips it true only while editing, and false on Play. STRUCTURAL changes
+ * (add/remove/visible) ignore it — the Scene relies on them for correctness.
+ *
+ * Lives here rather than on `CleoEngine` for the same reason the bus does: it is read by `Node`, which
+ * every node subclass extends at module-evaluation time. An import from there to engine.ts reaches
+ * scene.ts and back to the subclasses, which is a cycle through a class that has to be defined first.
+ * `CleoEngine.authoringMode` still works — it delegates to this.
+ */
+export const authoring = { enabled: false };

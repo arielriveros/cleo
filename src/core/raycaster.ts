@@ -1,5 +1,6 @@
 import { vec3, mat4 } from "gl-matrix";
-import { Node, isUINodeType } from "./scene/node";
+import { Node } from "./scene/nodes/node";
+import { isUINodeType } from "./scene/nodes/nodeType";
 import { Camera } from "./camera";
 import { BVH } from "./bvh";
 

@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { Sprite, legacySheetTileset, remapLegacyFrame } from '../src/graphics/sprite';
-import { Node, SpriteNode, AnimatedSpriteNode, parseNodeJson } from '../src/core/scene/node';
+import { Node } from '../src/core/scene/nodes/node';
+import { SpriteNode } from '../src/core/scene/nodes/spriteNode';
+import { AnimatedSpriteNode } from '../src/core/scene/nodes/animatedSpriteNode';
+import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { Tileset } from '../src/graphics/tilemap/tileset';
 
 // Sprites draw one TILE of a tileset. Two things are worth pinning down: that the UV rect a sprite hands

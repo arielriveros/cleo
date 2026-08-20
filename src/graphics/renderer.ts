@@ -3,7 +3,14 @@ import { engineEventBus } from '../core/eventBus';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
-import { LightNode, ModelNode, SkyboxNode, SpriteNode, LightProbeNode, TilemapNode, VolumetricCloudsNode, SkyAtmosphereNode } from '../core/scene/node';
+import { ModelNode } from '../core/scene/nodes/modelNode';
+import { TilemapNode } from '../core/scene/nodes/tilemapNode';
+import { LightNode } from '../core/scene/nodes/lightNode';
+import { LightProbeNode } from '../core/scene/nodes/lightProbeNode';
+import { SkyboxNode } from '../core/scene/nodes/skyboxNode';
+import { VolumetricCloudsNode } from '../core/scene/nodes/volumetricCloudsNode';
+import { SkyAtmosphereNode } from '../core/scene/nodes/skyAtmosphereNode';
+import { SpriteNode } from '../core/scene/nodes/spriteNode';
 import { Tilemap } from '../graphics/tilemap/tilemap';
 import { TilemapLayer } from '../graphics/tilemap/tilemapLayer';
 import { TileMesh } from '../graphics/tilemap/tileMesh';
@@ -98,8 +105,10 @@ import { TerrainLodSettings } from '../terrain/terrain';
 import type { FoliageCell } from '../terrain/foliage';
 import { collectOrphanedFoliageBuffers } from '../terrain/foliage';
 
-// gl is a global variable that will be used throughout the application
-export let gl: WebGL2RenderingContext;
+// The context now lives in its own leaf module (see glContext.ts); re-exported here so every existing
+// `import { gl } from './renderer'` keeps working.
+export { gl } from './glContext';
+import { gl, setGLContext } from './glContext';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
@@ -646,7 +655,7 @@ export class Renderer {
             throw new Error('WebGL context not available');
 
         // Get WebGL context
-        gl = this._canvas.getContext('webgl2') as WebGL2RenderingContext;
+        setGLContext(this._canvas.getContext('webgl2') as WebGL2RenderingContext);
         // Resolve the timer-query extension while we have the fresh context. Cheap, and it means
         // `gpuProfilingAvailable` is answerable before the first frame rather than after it.
         if (gl) gpuProfiler.initialize(gl);

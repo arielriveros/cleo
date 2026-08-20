@@ -3,8 +3,10 @@
 // live scene, so the editor's asset tooling and the engine's runtime instantiation share one implementation
 // rather than each carrying its own copy that can drift.
 
-// The type dispatch that materializes a subtree lives in node.ts (`parseNodeJson`), where every node class
-// is already in scope — importing them here would close a cycle, since node.ts uses these helpers.
+// The type dispatch that materializes a subtree lives in nodes/parseNodeJson.ts, the one module that
+// imports every node class. The base class reaches it through the one-slot hook in nodes/childParser.ts
+// rather than importing it, because every subclass extends `Node` at module-evaluation time and a direct
+// import would close a cycle through a class that has to exist first.
 
 import { v4 as uuidv4 } from 'uuid';
 

@@ -50,9 +50,12 @@ const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames'])
  * hashes we cannot interpret, and the honest reading of "I cannot tell whether this changed" is to leave the
  * scene alone rather than to rebuild all of it.
  *
- * 1 = thumbnail only (original). 2 = thumbnail + ikRig + nodeNames.
+ * 1 = thumbnail only (original). 2 = thumbnail + ikRig + nodeNames. 3 = node.ts was split into
+ * core/scene/nodes/, which moved every subclass onto one shared serialize template; ten of them had been
+ * emitting `name, id, type` and now emit `id, name, type`. The JSON is equivalent, but JSON.stringify is
+ * key-order sensitive, so every embedded node subtree hashes differently.
  */
-export const ASSET_HASH_VERSION = 2
+export const ASSET_HASH_VERSION = 3
 
 /**
  * Whether a scene's stored hashes can be compared against ones produced by the CURRENT {@link hashAsset}.

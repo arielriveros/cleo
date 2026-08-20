@@ -1,4 +1,4 @@
-import { gl } from '../renderer';
+import { gl } from '../glContext';
 import { frameStats } from '../renderStats';
 
 /**

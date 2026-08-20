@@ -2,11 +2,15 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { CleoEngine } from '../src/core/engine';
 import { Scene } from '../src/core/scene/scene';
 import { Camera } from '../src/core/camera';
-import {
-    Node, CameraNode, parseNodeJson,
-    UINode, UIRootNode, UIPanelNode, UITextNode, UIImageNode, UIButtonNode, UIStackNode,
-    UISpacerNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode, isUINodeType,
-} from '../src/core/scene/node';
+import { Node } from '../src/core/scene/nodes/node';
+import { CameraNode } from '../src/core/scene/nodes/cameraNode';
+import { UINode } from '../src/core/scene/nodes/ui/uiNode';
+import { UIRootNode } from '../src/core/scene/nodes/ui/uiRoot';
+import { UIPanelNode, UIStackNode, UISpacerNode } from '../src/core/scene/nodes/ui/uiContainers';
+import { UITextNode, UIImageNode } from '../src/core/scene/nodes/ui/uiContent';
+import { UIButtonNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode } from '../src/core/scene/nodes/ui/uiWidgets';
+import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
+import { isUINodeType } from '../src/core/scene/nodes/nodeType';
 
 // Every UI type, with a mutation that must survive a serialize/parse round trip.
 const TYPES: { make: () => UINode, type: string, mutate?: (n: any) => void, check?: (n: any) => void }[] = [
