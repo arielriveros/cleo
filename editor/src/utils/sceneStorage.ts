@@ -3,7 +3,7 @@ import { Logger } from 'cleo';
 import { idbGet, idbSet, idbDelete } from './idb';
 import { saveToStorage } from '../workers/workerClient';
 import { loadProject, ProjectPrefs } from './projectStorage';
-import { cryptoRandomId } from './UIModel';
+import { cryptoRandomId } from './ids';
 import { metaKey, sceneKey, scenePrefix } from './storageKeys';
 
 // Multi-scene project storage. The project is a small meta record (scene list + which scene is main

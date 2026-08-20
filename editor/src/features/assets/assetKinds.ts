@@ -10,7 +10,7 @@ import type { SceneMeta } from '../../utils/sceneStorage'
 import {
   renderMaterialAssetThumbnail, renderModelAssetThumbnail, renderTerrainMaterialAssetThumbnail,
 } from '../../utils/modelThumbnails'
-import { cryptoRandomId } from '../../utils/UIModel'
+import { cryptoRandomId } from '../../utils/ids'
 import { deleteTextures } from '../../utils/textureStore'
 import { AssetKind, KIND_LABEL } from '../../utils/vfs'
 

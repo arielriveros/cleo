@@ -10,7 +10,7 @@ import { loadSceneData } from '../../utils/sceneStorage'
 import type { SceneMeta } from '../../utils/sceneStorage'
 import type { AssetLibs } from '../../utils/assetHash'
 import type { BodyDescription, ShapeDescription } from '../EngineContext'
-import type { UIState } from '../../utils/UIModel'
+import { migrateLegacyUI } from '../../utils/uiMigration'
 import type { ScriptAsset } from '../../utils/scripts'
 
 // game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts can call
@@ -31,7 +31,6 @@ export interface MultiSceneSources {
   liveScripts: Map<string, string>
   liveBodies: Map<string, BodyDescription>
   liveTriggers: Map<string, { shapes: ShapeDescription[] }>
-  liveUi: UIState
   libs: AssetLibs
   scriptAssets?: ScriptAsset[]
   settings?: RenderSettings
@@ -40,7 +39,7 @@ export interface MultiSceneSources {
 }
 
 export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<any> {
-  const scenes: Record<string, { name: string; scene: any; ui: any }> = {}
+  const scenes: Record<string, { name: string; scene: any }> = {}
 
   for (const meta of src.scenes) {
     if (meta.id === src.openSceneId) {
@@ -51,10 +50,9 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
         scriptAssets: src.scriptAssets,
         bodies: src.liveBodies,
         triggers: src.liveTriggers,
-        ui: src.liveUi,
         useCache: true, // textures are embedded once below, not per scene
       })
-      scenes[meta.id] = { name: meta.name, scene: gd.scene, ui: gd.ui }
+      scenes[meta.id] = { name: meta.name, scene: gd.scene }
       continue
     }
 
@@ -63,6 +61,9 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     const data = await loadSceneData(meta.id)
     if (!data) continue
     const clone = JSON.parse(JSON.stringify({ scene: data.scene, ui: data.ui }))
+    // A scene that was never opened in this build still carries its UI as the legacy blob. Missing this
+    // is the silent failure mode: the game publishes and runs, and that scene simply has no HUD.
+    migrateLegacyUI(clone.scene, clone.ui)
     const maps = { scripts: new Map<string, string>(), bodies: new Map<string, any>(), triggers: new Map<string, any>() }
     extractNodeState(clone.scene, maps)
     const tmp = new Scene()
@@ -74,10 +75,9 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
       scriptAssets: src.scriptAssets,
       bodies: maps.bodies,
       triggers: maps.triggers,
-      ui: clone.ui ?? { version: 1, elements: [] },
       useCache: true,
     })
-    scenes[meta.id] = { name: meta.name, scene: gd.scene, ui: gd.ui }
+    scenes[meta.id] = { name: meta.name, scene: gd.scene }
   }
 
   // Discard the authoring each scene's dimension does not use — a landscape in a 2D scene, a tilemap in

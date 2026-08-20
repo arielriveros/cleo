@@ -16,8 +16,9 @@ module.exports = {
   },
   target: "web",
   output: {
-    filename: "bundle.[hash].js",
+    filename: "bundle.[contenthash].js",
     path: path.resolve(__dirname, "dist"),
+    clean: true,
   },
   plugins: [
     new HtmlWebpackPlugin({

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     GridSpec, cellCorners, cellSortY, cellToWorld, neighbours, normalizeGrid, worldToCell,
-} from '../src/tilemap/cellMath';
+} from '../src/graphics/tilemap/cellMath';
 
 const ORTHO: GridSpec = { kind: 'orthogonal', cellWidth: 1, cellHeight: 1 };
 const ORTHO_WIDE: GridSpec = { kind: 'orthogonal', cellWidth: 2.5, cellHeight: 1.25 };

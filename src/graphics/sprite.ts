@@ -1,7 +1,7 @@
 import { Geometry } from '../core/geometry';
 import { Mesh } from './mesh';
 import { Material } from './material';
-import { Tileset } from '../tilemap/tileset';
+import { Tileset } from '../graphics/tilemap/tileset';
 
 // A sprite is a unit quad textured from ONE TILE of a Tileset.
 //

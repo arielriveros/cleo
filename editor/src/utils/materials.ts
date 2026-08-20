@@ -1,5 +1,5 @@
 import { Node, Material, TextureManager } from 'cleo'
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 
 // Node variable that links a node's mesh material to a shared material asset (mirrors TEMPLATE_ID_VAR).
 export const MATERIAL_ID_VAR = '__materialId'

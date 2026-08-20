@@ -23,8 +23,7 @@ import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewSce
 import { createAnimationEditorScene } from './demoScene/createAnimationEditorScene';
 import { createAssetEditScene } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
-import { UIElement, UIState, cryptoRandomId } from "../utils/UIModel";
-import { UIRuntime, GameActions } from "./uiInspector/uiRuntime";
+import { cryptoRandomId } from "../utils/ids";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback, resolveMaterialRefs } from "../utils/materials";
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
@@ -114,6 +113,7 @@ export type PendingAnimationImportView = {
 export type AnimationImportDecision = { include: boolean[]; mapping: BoneMapping };
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
+import { migrateLegacyUI } from "../utils/uiMigration";
 import {
   ProjectMeta, SceneMeta, SceneRefs, loadProjectMeta, saveProjectMeta, loadSceneData, saveSceneData,
   deleteSceneData, migrateLegacyProject, createFreshProjectMeta,
@@ -291,7 +291,7 @@ function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefO
   }, [key, value, loaded]);
 }
 
-export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
+export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -464,11 +464,6 @@ const EngineContext = createContext<{
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[]; }>;
   // UI overlay state (outside 3D scene)
-  ui: UIState;
-  setUI: (next: UIState) => void;
-  addUIElement: (el: UIElement, parentId?: string) => void;
-  updateUIElement: (el: UIElement) => void;
-  removeUIElement: (id: string) => void;
   // Play lifecycle
   startPlay: () => void;
   stopPlay: () => void;
@@ -673,11 +668,6 @@ const EngineContext = createContext<{
     scripts: new Map(),
     bodies: new Map(),
     triggers: new Map(),
-    ui: { version: 1, elements: [] },
-    setUI: () => {},
-    addUIElement: () => {},
-    updateUIElement: () => {},
-    removeUIElement: () => {},
     startPlay: () => {},
     stopPlay: () => {},
     pausePlay: () => {},
@@ -948,10 +938,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const scriptsRef = useRef(new Map<string, string>());
   const bodiesRef = useRef(new Map<string, BodyDescription>());
   const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
-  const [uiState, setUiState] = useState<UIState>({ version: 1, elements: [] });
-  const uiStateRef = useRef(uiState);
   const startedRef = useRef(false);
-  useEffect(() => { uiStateRef.current = uiState; }, [uiState]);
 
   // Debug-overlay visibility (collider wireframes, light icons, …), per Editor/Runtime channel. The
   // reconcilers read the ref (they run in rAF/event callbacks, not render), and toggling emits
@@ -1771,7 +1758,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Public mode switch — only the Main tab's sub-mode (scene/landscape/renderer). Template/material/
   // animation editing are tabs now (opened via enter*Editor), not modes, so they aren't accepted here.
   const setEditorMode = (mode: EditorMode) => {
-    if (mode === 'scene' || mode === 'landscape' || mode === 'tilemap' || mode === 'renderer') setMainMode(mode);
+    if (mode === 'scene' || mode === 'landscape' || mode === 'tilemap' || mode === 'ui' || mode === 'renderer') setMainMode(mode);
   };
 
   // Force skinned models to their bind (T) pose. Used to keep the editor showing the default pose
@@ -3481,7 +3468,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         scriptAssets: scriptAssetsRef.current,
         bodies: bodiesRef.current,
         triggers: triggersRef.current,
-        ui: uiStateRef.current,
         settings: instanceRef.current?.renderer.getRenderSettings(),
         // Texture payloads live in the texture store; scene blobs never embed them.
         useCache: true,
@@ -3694,7 +3680,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       scripts: new Map(),
       bodies: new Map(),
       triggers: new Map(),
-      ui: { version: 1, elements: [] },
       useCache: true,
     });
   };
@@ -3860,7 +3845,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     dirtyArmedRef.current = false;
     const scene = editorSceneRef.current;
     scene.environmentMap = null; // parse only sets it when the JSON has one — don't leak the old scene's
-    applyGameData(data, { ...engineMaps(), scene, setUI: setUiState, renderer: instanceRef.current?.renderer });
+    applyGameData(data, { ...engineMaps(), scene, renderer: instanceRef.current?.renderer });
     ensureEditorCamera(scene);
     // Cross-scene propagation: re-resolve the freshly-parsed scene's asset links against the current
     // libraries, so edits/deletes made to assets while this scene was closed take effect on open. Gated
@@ -3923,7 +3908,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         }
       }
       if (data) {
-        applyGameData(data, { ...engineMaps(), scene: editorSceneRef.current, setUI: setUiState, renderer: instanceRef.current?.renderer });
+        applyGameData(data, { ...engineMaps(), scene: editorSceneRef.current, renderer: instanceRef.current?.renderer });
         ensureEditorCamera(editorSceneRef.current);
         // Stash the hashes for the deferred initial resync — the libraries have not been read yet, so it
         // cannot happen here. See the initial-resync effect.
@@ -4289,68 +4274,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   }, [eventEmitter]);
 
-  // UI element tree helpers
-  const addUIElement = (el: UIElement, parentId?: string) => {
-    setUiState(prev => {
-      const withId: UIElement = { ...(el as any), id: (el as any).id ?? cryptoRandomId() };
-      const clone = (arr: UIElement[]): UIElement[] => arr.map(e => ({ ...(e as any), children: (e as any).children ? clone((e as any).children) : undefined }) as any);
-      let elements = clone(prev.elements);
-      if (!parentId) {
-        elements.push(withId);
-      } else {
-        const attach = (arr: UIElement[]): boolean => {
-          for (let i = 0; i < arr.length; i++) {
-            const item = arr[i] as any;
-            if (item.id === parentId && item.type === 'container') {
-              item.children = [...(item.children || []), withId];
-              return true;
-            }
-            if (item.children && attach(item.children)) return true;
-          }
-          return false;
-        };
-        if (!attach(elements)) elements.push(withId);
-      }
-      eventEmitter.current.emit('UI_CHANGED');
-      return { ...prev, elements };
-    });
-  };
-
-  const updateUIElement = (el: UIElement) => {
-    setUiState(prev => {
-      const replace = (arr: UIElement[]): UIElement[] => arr.map(item => {
-        if (item.id === el.id) return { ...item, ...el } as UIElement;
-        const anyItem = item as any;
-        if (anyItem.children) return { ...anyItem, children: replace(anyItem.children) } as UIElement;
-        return item;
-      });
-      const elements = replace(prev.elements);
-      eventEmitter.current.emit('UI_CHANGED');
-      return { ...prev, elements };
-    });
-  };
-
-  const removeUIElement = (id: string) => {
-    setUiState(prev => {
-      const prune = (arr: UIElement[]): UIElement[] => arr
-        .filter(item => item.id !== id)
-        .map(item => {
-          const anyItem = item as any;
-          if (anyItem.children) return { ...anyItem, children: prune(anyItem.children) } as UIElement;
-          return item;
-        });
-      const elements = prune(prev.elements);
-      eventEmitter.current.emit('UI_CHANGED');
-      return { ...prev, elements };
-    });
-  };
-
-  // --- Play lifecycle (builds the play scene, drives the UI runtime) ---------------------------
+  // --- Play lifecycle (builds the play scene) ---------------------------
   // The scene the play session started on (what Reset returns to) and the one currently running, plus
   // the running scene's UI elements — a runtime Game.loadScene switch updates the latter two.
   const playEntrySceneIdRef = useRef<string>('');
   const currentPlaySceneIdRef = useRef<string>('');
-  const playSceneUiRef = useRef<any[]>([]);
 
   const buildPlayScene = async (): Promise<Scene> => {
     // useCache: true — textures already live in TextureManager for in-editor play, so skip re-embedding.
@@ -4360,7 +4288,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       scriptAssets: scriptAssetsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
-      ui: uiStateRef.current,
       templates: templatesRef.current,
       materials: materialsRef.current,
       useCache: true,
@@ -4376,29 +4303,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Build a runnable play Scene for any scene id. The play-session entry (the scene open when Play was
   // pressed) uses the live editor scene so unsaved edits play; every other scene is loaded from its blob,
   // re-resolved against the current libraries, then parsed with its scripts compiled.
-  const buildPlaySceneById = async (id: string): Promise<{ scene: Scene; ui: any[] }> => {
-    if (id === playEntrySceneIdRef.current) return { scene: await buildPlayScene(), ui: uiStateRef.current.elements };
+  const buildPlaySceneById = async (id: string): Promise<Scene> => {
+    if (id === playEntrySceneIdRef.current) return buildPlayScene();
     const data = await loadSceneData(id);
-    if (!data) return { scene: new Scene(), ui: [] };
+    if (!data) return new Scene();
     const clone = JSON.parse(JSON.stringify({ scene: data.scene, ui: data.ui }));
+    // A scene never opened in this session still carries its UI as the legacy blob — same reason the
+    // publish path migrates here: without it, loading that scene at runtime gives it no HUD, silently.
+    migrateLegacyUI(clone.scene, clone.ui);
     const maps = { scripts: new Map<string, string>(), bodies: new Map<string, any>(), triggers: new Map<string, any>() };
     extractNodeState(clone.scene, maps);
     const tmp = new Scene();
     tmp.parse({ scene: clone.scene, textures: [] }, true);
     resyncScene(tmp, maps, currentLibs(), data.assetHashes, data.assetHashVersion);
-    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, ui: clone.ui ?? { version: 1, elements: [] }, scriptAssets: scriptAssetsRef.current, templates: templatesRef.current, materials: materialsRef.current, useCache: true });
+    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, scriptAssets: scriptAssetsRef.current, templates: templatesRef.current, materials: materialsRef.current, useCache: true });
     const scene = new Scene();
     registerTemplates(gd.templates);
     scene.parse(gd, true); // gd injects scripts into nodes → compiled here
-    return { scene, ui: gd.ui?.elements ?? [] };
-  };
-
-  const startUIRuntime = () => {
-    UIRuntime.start(playSceneUiRef.current, {
-      emit: (n) => eventEmitter.current.emit(n),
-      getScene: () => instanceRef.current?.scene,
-      game,
-    });
+    return scene;
   };
 
   // Runtime scene switch (Game.loadScene from a script). Swaps the engine's scene, resetting UI/physics/
@@ -4409,15 +4331,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const meta = projectMetaRef.current;
     const target = meta?.scenes.find(s => s.id === nameOrId) ?? meta?.scenes.find(s => s.name === nameOrId);
     if (!target) { Logger.warn(`loadScene: no scene "${nameOrId}"`, 'Editor'); return; }
-    const { scene, ui } = await buildPlaySceneById(target.id);
-    UIRuntime.stop();
+    const scene = await buildPlaySceneById(target.id);
     instance.input.clear();
     instance.physics.clear();
     instance.setScene(scene);
     currentPlaySceneIdRef.current = target.id;
-    playSceneUiRef.current = ui;
     instance.isPaused = false;
-    setTimeout(() => { instance.scene.start(); startUIRuntime(); }, 50);
+    setTimeout(() => { instance.scene.start(); }, 50);
     // The new play scene starts with no runtime debug helpers; rebuild them for it (isPlayMode is
     // already true, so the reconcile effect won't re-fire on its own).
     eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED');
@@ -4486,7 +4406,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     reembedSceneFields(editorSceneRef.current);
     playEntrySceneIdRef.current = openSceneIdRef.current;
     currentPlaySceneIdRef.current = openSceneIdRef.current;
-    playSceneUiRef.current = uiStateRef.current.elements;
     const newScene = await buildPlayScene();
     instance.setScene(newScene);
     instance.isPaused = false;
@@ -4494,14 +4413,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Rebuild runtime debug helpers AFTER scene.start() — the reconcile the isPlayMode flip triggers runs
     // before start(), which resets the scene and drops those just-added nodes. Emitting here mirrors the
     // live-toggle path, so Runtime toggles are honoured from the first frame of Play.
-    setTimeout(() => { instance.scene.start(); startUIRuntime(); eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED'); }, 100);
+    setTimeout(() => { instance.scene.start(); eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED'); }, 100);
     eventEmitter.current.emit('SET_PLAY_STATE', 'play');
     startedRef.current = true;
   };
   const stopPlay = () => {
     startedRef.current = false;
     const instance = instanceRef.current;
-    UIRuntime.stop();
     setGameHost(null);
     if (!instance) return;
     instance.setScene(editorSceneRef.current);
@@ -4514,23 +4432,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const resetPlay = async () => {
     const instance = instanceRef.current;
     if (!instance) return;
-    UIRuntime.stop();
     // Clear input/physics so key bindings and bodies from the previous run don't stack.
     instance.input.clear();
     instance.physics.clear();
     // Reset returns to the play-session entry scene (where Play was pressed), not the last-loaded one.
     currentPlaySceneIdRef.current = playEntrySceneIdRef.current;
     const newScene = await buildPlayScene();
-    playSceneUiRef.current = uiStateRef.current.elements;
     instance.setScene(newScene);
     instance.isPaused = false;
     // Reconcile runtime debug helpers after start() (see startPlay) — reset stays in play mode, so the
     // isPlayMode effect won't re-fire on its own.
-    setTimeout(() => { instance.scene.start(); startUIRuntime(); eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED'); }, 50);
+    setTimeout(() => { instance.scene.start(); eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED'); }, 50);
     startedRef.current = true;
     eventEmitter.current.emit('SET_PLAY_STATE', 'play');
   };
-  const game: GameActions = { reset: () => { resetPlay(); }, exit: () => { stopPlay(); }, pause: () => { pausePlay(); } };
 
   // Second half of the two-phase Play switch above: the tab and mode are now committed, so the engine's
   // scene is settled and startPlay can install the play scene without racing anything.
@@ -4705,11 +4620,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
-      ui: uiState,
-      setUI: setUiState,
-      addUIElement,
-      updateUIElement,
-      removeUIElement,
       startPlay,
       stopPlay,
       pausePlay,

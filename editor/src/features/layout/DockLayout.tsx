@@ -26,14 +26,22 @@ const OLD_LAYOUT_KEY = 'cleo_project_layout';
 // v5 changes the SHAPE rather than the panel set: one layout per editor mode instead of a single tree that
 // was hidden and reconstituted (see LayoutStore).
 //
-// v7 adds the Profiler panel. Unlike every other panel it is deliberately absent from CHROME_PANELS,
-// so it stays visible in renderer mode and during Play — a profiler that hides itself the moment you
-// start running the game cannot measure the thing you actually ship.
+// v7 adds the Profiler panel, kept out of CHROME_PANELS so it survived into renderer mode and Play.
+// SUPERSEDED by v9, which makes it renderer-mode-only — see hiddenPanelIds.
+//
+// v8 replaces the old 'ui' panel (the legacy DOM-overlay inspector) with 'uiAdd', the UI element palette
+// for the new `ui` mode. UI elements are scene nodes now, so the Scene tree and the ordinary Properties
+// inspector cover everything the old panel did.
+//
+// v9 splits the Add palette out of the Scene panel into its own group: the left rail is now a
+// `Scene Elements | UI Elements` tab pair above a Scene panel that holds the tree alone. It also makes the
+// Profiler renderer-mode-only (see hiddenPanelIds), deliberately dropping the v7 arrangement that kept
+// it visible during Play.
 const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
-  'cleo_dock_layout_v5', 'cleo_dock_layout_v6',
+  'cleo_dock_layout_v5', 'cleo_dock_layout_v6', 'cleo_dock_layout_v7', 'cleo_dock_layout_v8',
 ];
-const LAYOUT_VERSION = 7;
+const LAYOUT_VERSION = 9;
 
 /**
  * One saved arrangement per editor mode.
@@ -106,15 +114,24 @@ const ANIMATION_FIELD_PANELS = ['animField'] as const;
 /** Tilemap-editor panels: the tile palette and the layer stack. Shown only in tilemap mode. */
 const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
 
+/**
+ * The two Add palettes, stacked as tabs above the Scene tree.
+ *
+ * Unlike the mode-specific groups above, these are ordinary chrome: both are available wherever the tree
+ * is, so a HUD element and a mesh are added from the same place rather than one being reachable only from
+ * `ui` mode.
+ */
+const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
+
 const CHROME_PANELS = [
-  'scene', 'ui', 'properties', 'scripts', 'physics', 'logger', 'assets',
-  ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS,
+  'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
+  ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS, ...ADD_PANELS,
 ] as const;
 
 // The Scene panel hosts the mode-specific tree (there is no separate dock panel for it), so its tab label
 // follows the mode. The animation editor's own panels are real panels with fixed titles.
 const PANEL_TITLES: Record<string, string> = {
-  viewport: 'Viewport', scene: 'Scene', ui: 'UI', properties: 'Properties',
+  viewport: 'Viewport', scene: 'Scene', sceneAdd: 'Scene Elements', uiAdd: 'UI Elements', properties: 'Properties',
   scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
   animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
   animField: 'Blend Space',
@@ -158,9 +175,17 @@ function buildDefaultLayout(api: DockviewApi) {
     position: { referencePanel: 'viewport', direction: 'left' },
     initialWidth: Math.round(width * 0.20),
   });
+  // The palettes sit in their own group ABOVE the tree, as a `Scene Elements | UI Elements` tab pair, so
+  // the tree stays visible while either palette is in use — the whole point of UI elements being nodes.
+  // This is the only place a non-viewport panel is split rather than tabbed.
   api.addPanel({
-    id: 'ui', component: 'ui', title: 'UI',
-    position: { referencePanel: 'scene', direction: 'within' },
+    id: 'sceneAdd', component: 'sceneAdd', title: PANEL_TITLES['sceneAdd'],
+    position: { referencePanel: 'scene', direction: 'above' },
+    initialHeight: Math.round(height * 0.34),
+  });
+  api.addPanel({
+    id: 'uiAdd', component: 'uiAdd', title: PANEL_TITLES['uiAdd'],
+    position: { referencePanel: 'sceneAdd', direction: 'within' },
   });
   const properties = api.addPanel({
     id: 'properties', component: 'properties', title: 'Properties',
@@ -264,40 +289,76 @@ function relayout(api: DockviewApi) {
   });
 }
 
-// Which panels a mode/play-state hides. Modes that take a host panel over (Properties shows the state
-// machine / material editors, Scene shows the skeleton tree) hide the panels that no longer apply.
+/**
+ * Which panels a given mode / play state hides.
+ *
+ * Accumulated into a Set rather than returned from per-mode branches. The branch form carried a standing
+ * hazard its own comment warned about: the fallthrough showed everything, so a mode-specific group had to
+ * be spread into EVERY hand-built branch or it leaked into unrelated modes — which it did, three times,
+ * when the UI panels were added. Here a group is hidden once, by default, and a mode opts out.
+ */
 function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
-  if (playing || mode === 'renderer') return CHROME_PANELS;
+  // Renderer mode is the Profiler's one home, so it is the only branch that does not hide it.
+  if (mode === 'renderer') return CHROME_PANELS;
+  // Play strips the chrome AND the Profiler. This deliberately reverses the v7 arrangement (which kept the
+  // Profiler through Play so it could measure the running game) — renderer mode is now its only home.
+  if (playing) return [...CHROME_PANELS, 'profiler'];
 
-  // The animation panels are the inverse of every other panel: hidden by default, shown in one mode. They
-  // are prepended to every branch below rather than added to each list, because the fallthrough is
-  // `return []` ("show everything") — miss one branch and Clips leaks into scene mode.
-  const anim: readonly string[] = mode === 'animation' ? [] : ANIMATION_PANELS;
-  const field: readonly string[] = mode === 'animationField' ? [] : ANIMATION_FIELD_PANELS;
-  const tile: readonly string[] = mode === 'tilemap' ? [] : TILEMAP_PANELS;
-  const extra: readonly string[] = [...anim, ...field, ...tile];
+  const hidden = new Set<string>(['profiler']);
 
-  // Landscape and tilemap both keep Scene AND Properties: props are placed alongside the terrain/tiles,
-  // and the node inspector is where the terrain's size, resolution and heightmap now live.
-  if (mode === 'landscape' || mode === 'tilemap') return [...anim, ...field, 'ui', 'scripts', 'physics'];
-  // A tileset tab is a 2D atlas editor rendered over the viewport; Properties hosts its inspector.
-  if (mode === 'tileset') return [...extra, 'scene', 'ui', 'scripts', 'physics'];
-  if (mode === 'material' || mode === 'terrainMaterial') return [...extra, 'scene', 'ui', 'scripts', 'physics'];
-  // Animation brings its own three panels, so Properties has nothing left to host.
-  if (mode === 'animation') return [...field, 'ui', 'scripts', 'physics', 'properties'];
-  // A field tab previews one model and edits one asset: its own panel is the only inspector that applies,
-  // and there is no scene tree to browse.
-  if (mode === 'animationField') return [...anim, 'scene', 'ui', 'scripts', 'physics', 'properties'];
-  if (mode === 'template') return [...extra, 'ui']; // the UI layer is irrelevant while authoring a template
-  // A mesh tab is a read-only preview: keep Scene + Properties to inspect the subtree, drop the rest.
-  if (mode === 'model') return [...extra, 'ui', 'scripts', 'physics'];
-  // A script tab is a pure code editor (rendered over the viewport): drop every node/scene chrome panel.
-  if (mode === 'script') return [...extra, 'scene', 'ui', 'properties', 'scripts', 'physics'];
-  return extra;
+  // Mode-specific panels: hidden everywhere, revealed by the single mode that owns them.
+  if (mode !== 'animation') for (const id of ANIMATION_PANELS) hidden.add(id);
+  if (mode !== 'animationField') for (const id of ANIMATION_FIELD_PANELS) hidden.add(id);
+  if (mode !== 'tilemap') for (const id of TILEMAP_PANELS) hidden.add(id);
+
+  const hide = (...ids: readonly string[]) => { for (const id of ids) hidden.add(id); };
+
+  switch (mode) {
+    // The scene tab and a template both author a node tree: everything applies.
+    case 'scene':
+    case 'template':
+      break;
+    // A screen rect has no rigid body.
+    case 'ui':
+      hide('physics');
+      break;
+    // Landscape and tilemap keep the tree and Properties — props are placed alongside the terrain/tiles,
+    // and the node inspector is where a terrain's size and heightmap live.
+    case 'landscape':
+    case 'tilemap':
+      hide('scripts', 'physics');
+      break;
+    // A mesh tab is a read-only preview: keep the tree + Properties to inspect the subtree, but there is
+    // nothing to add to it.
+    case 'model':
+      hide(...ADD_PANELS, 'scripts', 'physics');
+      break;
+    // Animation brings its own three panels, so Properties has nothing left to host and the Scene panel
+    // becomes the skeleton tree (retitled by panelTitle).
+    case 'animation':
+      hide(...ADD_PANELS, 'scripts', 'physics', 'properties');
+      break;
+    // A field tab previews one model and edits one asset: its own panel is the only inspector that applies.
+    case 'animationField':
+      hide(...ADD_PANELS, 'scene', 'scripts', 'physics', 'properties');
+      break;
+    // Asset editors: Properties hosts the asset's own inspector, and there is no scene to browse.
+    case 'material':
+    case 'terrainMaterial':
+    case 'tileset':
+      hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
+      break;
+    // A script tab is a pure code editor rendered over the viewport.
+    case 'script':
+      hide(...ADD_PANELS, 'scene', 'properties', 'scripts', 'physics');
+      break;
+  }
+
+  return [...hidden];
 }
 
 export default function DockLayout() {
-  const { eventEmitter, editorMode, isPlayMode, withoutDirty } = useCleoEngine();
+  const { eventEmitter, editorMode, isPlayMode } = useCleoEngine();
   const [api, setApi] = useState<DockviewApi | null>(null);
   // Which mode's arrangement the live tree currently IS, and whether it is a play restriction. Both are the
   // controller's own memory of the last commit, not derived state: the effect needs the OUTGOING mode to
@@ -427,27 +488,6 @@ export default function DockLayout() {
     const disposables = [api.onDidLayoutChange(sync), api.onDidActivePanelChange(sync)];
     return () => { disposables.forEach(d => d.dispose()); };
   }, [api]);
-
-  // The in-viewport UI overlay only draws while the user is editing UI. Now that Scene and UI are
-  // separate panels, "the UI tab is active" becomes "the UI panel is visible" — which also covers the
-  // user splitting Scene and UI side by side (both visible: the overlay correctly stays on).
-  useEffect(() => {
-    if (!api) return;
-    let last: 'Scene' | 'UI' | null = null;
-    const sync = () => {
-      const tab = api.getPanel('ui')?.api.isVisible ? 'UI' : 'Scene';
-      if (tab === last) return;
-      last = tab;
-      eventEmitter.emit('EXPLORER_TAB', tab);
-      // A re-render nudge so the newly-visible inspector rebuilds — nothing in the scene actually changed.
-      // withoutDirty because SCENE_CHANGED doubles as the unsaved-edits signal: switching to an asset tab
-      // rearranges panels, which fires this, which would otherwise mark the tab being LEFT as dirty.
-      withoutDirty(() => eventEmitter.emit(tab === 'UI' ? 'UI_CHANGED' : 'SCENE_CHANGED'));
-    };
-    sync();
-    const disposables = [api.onDidLayoutChange(sync), api.onDidActivePanelChange(sync)];
-    return () => { disposables.forEach(d => d.dispose()); };
-  }, [api, eventEmitter]);
 
   // "New asset" flows focus the Assets tab (legacy per-kind tab names all meant Assets).
   useEffect(() => {

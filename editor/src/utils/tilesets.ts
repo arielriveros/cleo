@@ -1,6 +1,6 @@
 import { Tileset, TilemapNode, isInlineTilesetId } from 'cleo'
 import type { Scene, TileMeta, TerrainSet, VariantSet, TilesetConfig } from 'cleo'
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 
 // A reusable, named Tileset asset — an atlas image sliced into a grid, plus the per-tile metadata that
 // makes tiles solid, animated, tinted or depth-anchored (mirrors MaterialAsset / AnimationFieldAsset).

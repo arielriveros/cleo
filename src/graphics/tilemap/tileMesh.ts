@@ -13,9 +13,9 @@
 // tile's resolved sort depth (row + anchorRow, plus zBias) rather than by its grid row is what makes a
 // two-cell-tall tree sort as one object at its trunk.
 
-import { gl } from '../graphics/renderer';
-import { GLState } from '../graphics/systems/glState';
-import { frameStats } from '../graphics/renderStats';
+import { gl } from '../../graphics/renderer';
+import { GLState } from '../../graphics/systems/glState';
+import { frameStats } from '../../graphics/renderStats';
 import { GridSpec, cellSortY, cellToWorld } from './cellMath';
 import { CELL_EMPTY, CHUNK_SIZE, TileChunk, cellFlipX, cellFlipY, cellRot90, cellTile } from './chunk';
 import type { TilemapLayer } from './tilemapLayer';

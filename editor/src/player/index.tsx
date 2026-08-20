@@ -1,16 +1,17 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import EventEmitter from 'events';
 import { CleoEngine, Scene, TextureManager, setGameHost, setScriptProvider, registerTemplates, Logger } from 'cleo';
-import { UIRuntime } from '../features/uiInspector/uiRuntime';
-import PlayerUI from './PlayerUI';
+import UILayer from '../features/gameUi/UILayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
 
 // Standalone, data-driven runtime for a published Cleo game. It loads game.bin — the single binary
 // holding every scene, mesh and texture (built by the editor via buildMultiSceneGameData + pack.ts) —
 // and runs it outside the editor, mirroring the editor's play lifecycle
-// (Scene.parse -> setScene -> run -> scene.start + UIRuntime.start).
+// (Scene.parse -> setScene -> run -> scene.start).
+//
+// The UI is scene nodes: the engine lays it out as part of Scene.update and UILayer paints it into
+// #ui-root. There is no separate UI runtime or lifecycle any more.
 
 function showError(err: unknown): void {
   const pre = document.createElement('pre');
@@ -79,20 +80,20 @@ async function boot(): Promise<void> {
   engine.setViewport(viewport);
   engine.input.preventDefault();
 
-  // UI overlay + runtime, bridged by a local event emitter for re-renders.
-  const emitter = new EventEmitter();
+  // The UI overlay. `getScene` is a FUNCTION because Game.loadScene replaces engine.scene wholesale —
+  // a captured reference would keep painting the scene that was just torn down.
   const uiRoot = document.getElementById('ui-root');
-  if (uiRoot) ReactDOM.createRoot(uiRoot).render(<PlayerUI emitter={emitter} />);
-
-  const game = {
-    reset: () => window.location.reload(),
-    exit: () => { try { window.close(); } catch { /* ignore */ } },
-    pause: () => { engine.isPaused = !engine.isPaused; },
-  };
-  const startUI = (elements: any) => {
-    if (Array.isArray(elements) && elements.length > 0)
-      UIRuntime.start(elements, { emit: (name: string) => emitter.emit(name), getScene: () => engine.scene, game });
-  };
+  if (uiRoot) {
+    ReactDOM.createRoot(uiRoot).render(<UILayer getScene={() => engine.scene} interactive />);
+    // The layout pass anchors to this element, not to the canvas: #ui-root is the box the UI actually
+    // occupies, and the canvas may be render-scaled.
+    const pushViewport = () => {
+      const rect = uiRoot.getBoundingClientRect();
+      engine.scene?.setUIViewport(rect.width, rect.height, window.devicePixelRatio || 1);
+    };
+    pushViewport();
+    new ResizeObserver(pushViewport).observe(uiRoot);
+  }
 
   engine.isPaused = false;
   engine.run();
@@ -139,14 +140,17 @@ async function boot(): Promise<void> {
     scene.parse({ scene: entry.scene, textures: [] }, true); // textures already registered
     Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
     engine.setScene(scene);
-    setTimeout(() => { scene.start(); startUI(entry.ui?.elements); }, 100);
+    // The new scene needs the viewport before its first layout, or the HUD resolves against whatever the
+    // previous scene left behind (or the 1920x1080 default) for one frame.
+    const uiBox = document.getElementById('ui-root')?.getBoundingClientRect();
+    if (uiBox) scene.setUIViewport(uiBox.width, uiBox.height, window.devicePixelRatio || 1);
+    setTimeout(() => { scene.start(); }, 100);
   };
 
   setGameHost({
     loadScene: (nameOrId: string) => {
       const id = resolve(nameOrId);
       if (!id) { Logger.warn(`loadScene: unknown scene "${nameOrId}"`, 'Player'); return; }
-      UIRuntime.stop();
       engine.physics.clear();
       engine.input.clear();
       void startScene(id).catch(showError);

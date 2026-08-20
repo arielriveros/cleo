@@ -1,5 +1,5 @@
 import { Node, ModelNode, AnimatedModel, TextureManager } from 'cleo'
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, applyMaterialAsset, serializedVar, MATERIAL_ID_VAR, MaterialAsset } from './materials'
 import { skinnedModelJsonOf as skinnedJson } from './modelClips'

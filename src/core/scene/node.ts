@@ -19,14 +19,36 @@ import { CleoEngine, Shape } from "../../cleo";
 import { Logger } from "../logger";
 import { compileScript, createScriptImporter, resolveNodeScript, ScriptFactory, SCRIPT_HANDLERS } from "../scripting/scriptRuntime";
 import { Terrain, TerrainLodSettings } from "../../terrain/terrain";
-import { Tilemap } from "../../tilemap/tilemap";
-import { Tileset } from "../../tilemap/tileset";
+import { Tilemap } from "../../graphics/tilemap/tilemap";
+import { Tileset } from "../../graphics/tilemap/tileset";
 import type { BVH } from "../bvh";
 import type { ChangeKind } from "../eventBus";
 import { clamp, dampAngleDeg, dampTime, dampVec3Time, eulerFromQuatDeg, wrapDegrees, RAD2DEG } from "../math";
 import { aimFromDirection, boomOffset, collisionRatio, shakeOffsets } from "../cameraRigMath";
+import {
+    UIRect, UIScaleMode, UISpace, StackJustify, StackItem,
+    setRect, copyRect, rectsEqual, solveRect, rootScale, projectToScreen, worldUIScale,
+    intersectRect, stackLayout, edgeClamp, quadHomography,
+} from "../uiLayout";
 
-type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup' | 'cameraRig';
+type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup' | 'cameraRig'
+  | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
+  | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
+
+/** The UI node family — every type whose layout is resolved by the scene's UI pass. */
+const UI_NODE_TYPES: ReadonlySet<string> = new Set<NodeType>([
+  'uiRoot', 'uiPanel', 'uiText', 'uiImage', 'uiButton', 'uiStack', 'uiSpacer',
+  'uiProgressBar', 'uiSlider', 'uiToggle', 'uiTextInput',
+]);
+
+/**
+ * Whether a serialized `type` string belongs to the UI family.
+ *
+ * Backed by a Set rather than a `startsWith('ui')` test on purpose: the prefix would also claim any
+ * future non-UI type that happens to begin with those two letters, and this predicate gates publish
+ * stripping, picking and the editor's inspector routing.
+ */
+export function isUINodeType(type: string): boolean { return UI_NODE_TYPES.has(type); }
 
 /**
  * Downward speed (units/s, gravity-relative) past which {@link Node.isFalling} reports true.
@@ -364,6 +386,15 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
     node.onCollision = guard('onCollision');
     node.onTrigger = guard('onTrigger');
     node.onDespawn = guard('onDespawn');
+
+    // The UI handlers exist only on the UI classes that declare them (a Button has onPress, a Slider has
+    // onValueChanged). Installed through a lookup rather than named individually so a legacy script on the
+    // wrong node type cannot bind a handler nothing will ever call. The class-script path needs no
+    // equivalent: attachClassScript already tests SCRIPT_HANDLERS membership.
+    for (const name of ['onPress', 'onValueChanged', 'onSubmit']) {
+        if (typeof (node as any)[name] === 'function' && typeof handlers[name] === 'function')
+            (node as any)[name] = guard(name);
+    }
 }
 
 /**
@@ -1511,7 +1542,7 @@ export class Node {
    * `prop`/`prev`/`next` are optional detail (e.g. a variable name and its old/new value) — enough for a
    * panel to refresh precisely and for a future undo/redo recorder to build the inverse edit.
    */
-  private _notifyChange(kind: ChangeKind, prop?: string, prev?: unknown, next?: unknown): void {
+  protected _notifyChange(kind: ChangeKind, prop?: string, prev?: unknown, next?: unknown): void {
     if (CleoEngine.authoringMode)
       CleoEngine.eventEmitter.emit('SCENE_CHANGED', { kind, node: this, prop, prev, next });
   }
@@ -4943,6 +4974,1353 @@ function migrateLegacyAnimation(json: any, sprite: Sprite): {
  *
  * Declared last in this module because it needs every node class above it in scope.
  */
+
+// ============================================================================================
+// UI NODES
+//
+// A UI element is a Node. That is the whole design: parenting, `visible`, spawn/despawn,
+// serialization, templates, undo/redo, dirty-tracking and the class-based script system all come
+// from the base class rather than being reimplemented against a parallel element tree.
+//
+// Layout is resolved once per frame by the scene's UI late pass (see `Scene.update`), never during
+// render. The resolved rects are plain derived fields that deliberately do NOT emit SCENE_CHANGED —
+// a solve that notified would mark the tab permanently unsaved and push sixty undo entries per
+// second. The AUTHORED fields do notify, which is what makes a UI edit dirty the tab and be
+// undoable — neither of which the legacy overlay ever managed.
+//
+// The layout math lives in `src/core/uiLayout.ts` so the unit suite can reach it (node.ts
+// transitively needs a GL context) — the same split `cameraRigMath.ts` uses for the camera rig.
+// ============================================================================================
+
+/** How an image fills its element's rect. */
+export type UIImageFit = 'fill' | 'contain' | 'cover' | 'tile';
+/** Which end a progress bar fills from. */
+export type UIFillDirection = 'ltr' | 'rtl' | 'btt' | 'ttb';
+/** Horizontal text alignment. */
+export type UITextAlign = 'left' | 'center' | 'right';
+/** Vertical text alignment within the element's rect. */
+export type UITextVAlign = 'top' | 'middle' | 'bottom';
+/** Whether an element's size is authored, or measured from its content by the DOM layer. */
+export type UISizing = 'fixed' | 'content';
+
+/**
+ * RGBA in 0..1, **sRGB** — deliberately not the linear convention materials use.
+ *
+ * UI is composited by the browser, entirely outside the engine's linear lighting and tonemapping
+ * pipeline, so a colour here goes straight to CSS. Treating it as linear would mean every colour picked
+ * in the inspector came out visibly wrong on screen.
+ */
+export type UIColor = [number, number, number, number];
+
+const rgba = (r: number, g: number, b: number, a: number): UIColor => [r, g, b, a];
+const emptyRect = (): UIRect => ({ x: 0, y: 0, width: 0, height: 0 });
+
+/** Coerce serialized JSON into a fixed-length numeric tuple, tolerating absent or malformed input. */
+function numTuple<N extends number[]>(value: any, fallback: N): N {
+    const out = fallback.slice() as N;
+    if (!Array.isArray(value)) return out;
+    for (let i = 0; i < out.length; i++)
+        if (typeof value[i] === 'number' && isFinite(value[i])) out[i] = value[i];
+    return out;
+}
+
+/**
+ * Base class for every UI element.
+ *
+ * Rect authoring follows `RectTransform`: an anchor PAIR plus two offsets, which makes pinning and
+ * stretching the same data rather than two modes (see {@link solveRect}). Screen-space UI nodes ignore
+ * `Node.position`/`rotation`/`scale` entirely — 3D transform state has no meaning in a screen rect, and
+ * the editor hides the transform panel for them so nobody edits a silent no-op. The one exception is a
+ * world-space {@link UIRootNode}, whose `Node.position` IS the proxy point it projects from.
+ */
+export class UINode extends Node {
+    protected _anchorMin: [number, number] = [0, 0];
+    protected _anchorMax: [number, number] = [0, 0];
+    protected _offsetMin: [number, number] = [0, 0];
+    protected _offsetMax: [number, number] = [100, 100];
+    protected _pivot: [number, number] = [0, 0];
+    protected _rotationDeg: number = 0;
+    protected _scale2d: [number, number] = [1, 1];
+
+    protected _opacity: number = 1;
+    protected _tint: UIColor = rgba(1, 1, 1, 1);
+    protected _zOrder: number = 0;
+    protected _interactive: boolean = false;
+    protected _clip: boolean = false;
+    protected _sizing: UISizing = 'fixed';
+    protected _padding: [number, number, number, number] = [0, 0, 0, 0];
+    protected _borderRadius: number = 0;
+    protected _borderWidth: number = 0;
+    protected _borderColor: UIColor = rgba(0, 0, 0, 1);
+
+    // --- Resolved by the UI pass. Derived state: assigned directly, never through _notifyChange. ---
+    protected _rect: UIRect = emptyRect();        // absolute, in the root's reference units
+    protected _localRect: UIRect = emptyRect();   // relative to the parent's rect — what the DOM writes
+    protected _screenRect: UIRect = emptyRect();  // absolute, viewport CSS pixels — hit-tests + gizmos
+    protected _clipRect: UIRect = emptyRect();
+    protected _resolvedOpacity: number = 1;
+    protected _resolvedVisible: boolean = true;
+    protected _onScreen: boolean = true;
+    protected _layoutVersion: number = 0;
+    /**
+     * Bumped by EVERY authored setter. The DOM layer re-reads a node whenever this moves.
+     *
+     * One counter with one rule, because the alternative failed: when only "content" setters bumped a
+     * counter, every appearance and 2D-transform property on this class silently never reached the DOM —
+     * a colour edit did nothing, and pivot/rotation/scale only appeared once something else happened to
+     * move the rect. `tests/uiNode.test.ts` asserts reflectively that every setter still bumps this.
+     */
+    protected _revision: number = 0;
+
+    /** Content size measured by the DOM layer for `sizing: 'content'`, consumed by the NEXT solve. */
+    protected _measured: [number, number] = [0, 0];
+
+    /** Previous rect, so `layoutVersion` bumps only on an actual change rather than every frame. */
+    private readonly _prevRect: UIRect = emptyRect();
+
+    constructor(name: string, type: NodeType = 'uiPanel', id?: string) {
+        super(name, type, id);
+    }
+
+    // --- Rect ---
+    public get anchorMin(): [number, number] { return this._anchorMin; }
+    public set anchorMin(v: [number, number]) { const p = this._anchorMin; this._anchorMin = numTuple(v, [0, 0]); this._touch(); this._notifyChange('component', 'anchorMin', p, this._anchorMin); }
+    public get anchorMax(): [number, number] { return this._anchorMax; }
+    public set anchorMax(v: [number, number]) { const p = this._anchorMax; this._anchorMax = numTuple(v, [0, 0]); this._touch(); this._notifyChange('component', 'anchorMax', p, this._anchorMax); }
+    public get offsetMin(): [number, number] { return this._offsetMin; }
+    public set offsetMin(v: [number, number]) { const p = this._offsetMin; this._offsetMin = numTuple(v, [0, 0]); this._touch(); this._notifyChange('component', 'offsetMin', p, this._offsetMin); }
+    public get offsetMax(): [number, number] { return this._offsetMax; }
+    public set offsetMax(v: [number, number]) { const p = this._offsetMax; this._offsetMax = numTuple(v, [0, 0]); this._touch(); this._notifyChange('component', 'offsetMax', p, this._offsetMax); }
+    public get pivot(): [number, number] { return this._pivot; }
+    public set pivot(v: [number, number]) { const p = this._pivot; this._pivot = numTuple(v, [0, 0]); this._touch(); this._notifyChange('component', 'pivot', p, this._pivot); }
+    public get rotationDeg(): number { return this._rotationDeg; }
+    public set rotationDeg(v: number) { const p = this._rotationDeg; this._rotationDeg = v; this._touch(); this._notifyChange('component', 'rotationDeg', p, v); }
+    public get scale2d(): [number, number] { return this._scale2d; }
+    public set scale2d(v: [number, number]) { const p = this._scale2d; this._scale2d = numTuple(v, [1, 1]); this._touch(); this._notifyChange('component', 'scale2d', p, this._scale2d); }
+
+    /**
+     * Set position + size, the reading the inspector shows on a PINNED axis (`anchorMin === anchorMax`).
+     *
+     * Convenience over writing the offset pair, which is what a script actually wants:
+     * `bar.setRect(20, 20, 200, 24)` rather than two coupled writes whose second value depends on the first.
+     */
+    public setRect(x: number, y: number, width: number, height: number): UINode {
+        this.offsetMin = [x, y];
+        this.offsetMax = [x + width, y + height];
+        return this;
+    }
+
+    /** Pin both axes to one anchor point (0..1 of the parent), e.g. `(1, 0)` for the top-right corner. */
+    public setAnchor(x: number, y: number): UINode {
+        this.anchorMin = [x, y];
+        this.anchorMax = [x, y];
+        return this;
+    }
+
+    /** Stretch to fill the parent, inset by the given margins. */
+    public stretch(left: number = 0, top: number = 0, right: number = 0, bottom: number = 0): UINode {
+        this.anchorMin = [0, 0];
+        this.anchorMax = [1, 1];
+        this.offsetMin = [left, top];
+        this.offsetMax = [-right, -bottom];
+        return this;
+    }
+
+    // --- Appearance ---
+    public get opacity(): number { return this._opacity; }
+    public set opacity(v: number) { const p = this._opacity; this._opacity = clamp(v, 0, 1); this._touch(); this._notifyChange('component', 'opacity', p, this._opacity); }
+    public get tint(): UIColor { return this._tint; }
+    public set tint(v: UIColor) { const p = this._tint; this._tint = numTuple(v, rgba(1, 1, 1, 1)); this._touch(); this._notifyChange('component', 'tint', p, this._tint); }
+    public get zOrder(): number { return this._zOrder; }
+    public set zOrder(v: number) { const p = this._zOrder; this._zOrder = v; this._touch(); this._notifyChange('component', 'zOrder', p, v); }
+    public get interactive(): boolean { return this._interactive; }
+    public set interactive(v: boolean) { const p = this._interactive; this._interactive = v; this._touch(); this._notifyChange('component', 'interactive', p, v); }
+    public get clip(): boolean { return this._clip; }
+    public set clip(v: boolean) { const p = this._clip; this._clip = v; this._touch(); this._notifyChange('component', 'clip', p, v); }
+    public get sizing(): UISizing { return this._sizing; }
+    public set sizing(v: UISizing) { const p = this._sizing; this._sizing = v; this._touch(); this._notifyChange('component', 'sizing', p, v); }
+    public get padding(): [number, number, number, number] { return this._padding; }
+    public set padding(v: [number, number, number, number]) { const p = this._padding; this._padding = numTuple(v, [0, 0, 0, 0]); this._touch(); this._notifyChange('component', 'padding', p, this._padding); }
+    public get borderRadius(): number { return this._borderRadius; }
+    public set borderRadius(v: number) { const p = this._borderRadius; this._borderRadius = Math.max(0, v); this._touch(); this._notifyChange('component', 'borderRadius', p, this._borderRadius); }
+    public get borderWidth(): number { return this._borderWidth; }
+    public set borderWidth(v: number) { const p = this._borderWidth; this._borderWidth = Math.max(0, v); this._touch(); this._notifyChange('component', 'borderWidth', p, this._borderWidth); }
+    public get borderColor(): UIColor { return this._borderColor; }
+    public set borderColor(v: UIColor) { const p = this._borderColor; this._borderColor = numTuple(v, rgba(0, 0, 0, 1)); this._touch(); this._notifyChange('component', 'borderColor', p, this._borderColor); }
+
+    // --- Resolved layout (read-only; LIVE objects reused across frames, never copies) ---
+    /** Absolute rect in the root's reference units. */
+    public get rect(): UIRect { return this._rect; }
+    /** Rect relative to the parent element — what the DOM layer positions with. */
+    public get localRect(): UIRect { return this._localRect; }
+    /** Absolute rect in viewport CSS pixels, post root-scale. Hit-testing and editor gizmos use this. */
+    public get screenRect(): UIRect { return this._screenRect; }
+    /** Intersection of every clipping ancestor's rect, in reference units. */
+    public get clipRect(): UIRect { return this._clipRect; }
+    /** This node's opacity multiplied down the ancestor chain. */
+    public get resolvedOpacity(): number { return this._resolvedOpacity; }
+    /** This node's `visible` AND every ancestor's. */
+    public get resolvedVisible(): boolean { return this._resolvedVisible; }
+    /** False when a world-space ancestor is behind the camera or fully outside the viewport. */
+    public get onScreen(): boolean { return this._onScreen; }
+    /** Bumped only when the resolved geometry actually changed — the DOM layer's skip check. */
+    public get layoutVersion(): number { return this._layoutVersion; }
+    /** Bumped by every authored setter — the DOM layer's other skip check. */
+    public get revision(): number { return this._revision; }
+
+    /** Mark this node's authored state changed. EVERY setter must call it. */
+    protected _touch(): void { this._revision++; }
+
+    /**
+     * Report the content size the DOM measured, for `sizing: 'content'`.
+     *
+     * Consumed by the NEXT frame's solve, not this one: the measurement can only exist after the DOM has
+     * laid the element out, which is necessarily after the solve that positioned it. That is one frame of
+     * lag on a size that only changes when the content does.
+     */
+    public setMeasuredContentSize(width: number, height: number): void {
+        this._measured[0] = width;
+        this._measured[1] = height;
+    }
+
+    /** Last measurement reported by the DOM layer, so it can tell whether anything actually changed. */
+    public get measuredContentSize(): readonly [number, number] { return this._measured; }
+
+    /** The main-axis size this node contributes to a parent {@link UIStackNode}. */
+    protected _stackItem(horizontal: boolean): StackItem {
+        const authored = horizontal
+            ? this._offsetMax[0] - this._offsetMin[0]
+            : this._offsetMax[1] - this._offsetMin[1];
+        const measured = horizontal ? this._measured[0] : this._measured[1];
+        return { size: this._sizing === 'content' && measured > 0 ? measured : Math.max(0, authored), flex: 0 };
+    }
+
+    /**
+     * Resolve this node and its descendants.
+     *
+     * `parentRect` is absolute in reference units; `origin`/`scale` convert that space into viewport
+     * pixels for {@link screenRect}. Hidden subtrees are still solved — the editor has to be able to show
+     * a rect for a hidden-but-selected element — so visibility is carried as a flag rather than used to
+     * prune the walk. Dormant subtrees ARE pruned, matching `updateTransforms`.
+     */
+    public solveUI(
+        parentRect: UIRect,
+        parentClip: UIRect,
+        parentOpacity: number,
+        parentVisible: boolean,
+        parentOnScreen: boolean,
+        origin: { x: number, y: number },
+        scale: number,
+    ): void {
+        copyRect(this._prevRect, this._rect);
+
+        solveRect(this._rect, parentRect, this._anchorMin, this._anchorMax, this._offsetMin, this._offsetMax);
+        this._applyContentSize();
+
+        setRect(this._localRect,
+            this._rect.x - parentRect.x, this._rect.y - parentRect.y, this._rect.width, this._rect.height);
+        setRect(this._screenRect,
+            origin.x + this._rect.x * scale, origin.y + this._rect.y * scale,
+            this._rect.width * scale, this._rect.height * scale);
+
+        if (this._clip) intersectRect(this._clipRect, parentClip, this._rect);
+        else copyRect(this._clipRect, parentClip);
+
+        this._resolvedOpacity = parentOpacity * this._opacity;
+        this._resolvedVisible = parentVisible && this._visible;
+        this._onScreen = parentOnScreen;
+
+        if (!rectsEqual(this._prevRect, this._rect)) this._layoutVersion++;
+
+        this._solveChildren(origin, scale);
+    }
+
+    /**
+     * Resolve this node into a slot a {@link UIStackNode} assigned it.
+     *
+     * The stack owns the MAIN axis, so the slot rect is used verbatim there; the cross axis still goes
+     * through the ordinary anchor solve unless `align` overrides it. That is what makes "stretch to the
+     * stack's width" and "fixed width, centred" the same mechanism rather than two special cases.
+     */
+    public solveUIInSlot(
+        slot: UIRect,
+        stackRect: UIRect,
+        parentClip: UIRect,
+        parentOpacity: number,
+        parentVisible: boolean,
+        parentOnScreen: boolean,
+        origin: { x: number, y: number },
+        scale: number,
+        horizontal: boolean,
+        align: 'start' | 'center' | 'end' | 'stretch',
+    ): void {
+        copyRect(this._prevRect, this._rect);
+
+        // Cross-axis size: authored unless the stack stretches it.
+        const crossMeasured = horizontal ? this._measured[1] : this._measured[0];
+        const crossAuthored = this._sizing === 'content' && crossMeasured > 0
+            ? crossMeasured
+            : (horizontal
+                ? this._offsetMax[1] - this._offsetMin[1]
+                : this._offsetMax[0] - this._offsetMin[0]);
+        const crossAvail = horizontal ? slot.height : slot.width;
+        const crossSize = align === 'stretch' ? crossAvail : Math.max(0, crossAuthored);
+        const crossOffset = align === 'center' ? (crossAvail - crossSize) / 2
+            : align === 'end' ? crossAvail - crossSize
+                : 0;
+
+        if (horizontal) setRect(this._rect, slot.x, slot.y + crossOffset, slot.width, crossSize);
+        else setRect(this._rect, slot.x + crossOffset, slot.y, crossSize, slot.height);
+
+        // The DOM nests a stack's children inside the STACK element, so local coordinates are measured
+        // from the stack's rect rather than from the slot the layout handed out. `stackRect` is that
+        // origin, passed down because the slot alone cannot recover it.
+        setRect(this._localRect,
+            this._rect.x - stackRect.x, this._rect.y - stackRect.y, this._rect.width, this._rect.height);
+
+        setRect(this._screenRect,
+            origin.x + this._rect.x * scale, origin.y + this._rect.y * scale,
+            this._rect.width * scale, this._rect.height * scale);
+
+        if (this._clip) intersectRect(this._clipRect, parentClip, this._rect);
+        else copyRect(this._clipRect, parentClip);
+
+        this._resolvedOpacity = parentOpacity * this._opacity;
+        this._resolvedVisible = parentVisible && this._visible;
+        this._onScreen = parentOnScreen;
+
+        if (!rectsEqual(this._prevRect, this._rect)) this._layoutVersion++;
+
+        this._solveChildren(origin, scale);
+    }
+
+    /**
+     * Replace the solved extent with the measured content size, on any PINNED axis, when `sizing` asks.
+     *
+     * Only pinned axes: a stretched axis is sized by the distance between its anchors, and letting content
+     * override that would silently ignore the layout the user authored. The measurement itself comes from
+     * the DOM one frame earlier (see `setMeasuredContentSize`) — it cannot exist sooner, since it is the
+     * result of laying out the very element this is sizing.
+     */
+    protected _applyContentSize(): void {
+        if (this._sizing !== 'content') return;
+        if (this._anchorMin[0] === this._anchorMax[0] && this._measured[0] > 0) this._rect.width = this._measured[0];
+        if (this._anchorMin[1] === this._anchorMax[1] && this._measured[1] > 0) this._rect.height = this._measured[1];
+    }
+
+    /** Solve every live UI child against this node's rect. {@link UIStackNode} overrides it. */
+    protected _solveChildren(origin: { x: number, y: number }, scale: number): void {
+        for (const child of this._children)
+            if (child instanceof UINode && child.spawned)
+                child.solveUI(this._rect, this._clipRect, this._resolvedOpacity, this._resolvedVisible,
+                    this._onScreen, origin, scale);
+    }
+
+    /** Live UI children in paint order: `zOrder` ascending, ties broken by tree order. */
+    public get uiChildren(): UINode[] {
+        const kids: UINode[] = [];
+        for (const child of this._children) if (child instanceof UINode) kids.push(child);
+        // Array.prototype.sort is stable, so equal zOrders keep tree order — which is what authoring expects.
+        return kids.sort((a, b) => a._zOrder - b._zOrder);
+    }
+
+    protected _serializeUIBase(): any {
+        return {
+            anchorMin: [...this._anchorMin], anchorMax: [...this._anchorMax],
+            offsetMin: [...this._offsetMin], offsetMax: [...this._offsetMax],
+            pivot: [...this._pivot], rotationDeg: this._rotationDeg, scale2d: [...this._scale2d],
+            opacity: this._opacity, tint: [...this._tint], zOrder: this._zOrder,
+            interactive: this._interactive, clip: this._clip, sizing: this._sizing,
+            padding: [...this._padding], borderRadius: this._borderRadius,
+            borderWidth: this._borderWidth, borderColor: [...this._borderColor],
+        };
+    }
+
+    /**
+     * Per-type payload.
+     *
+     * Subclasses override this rather than copy-pasting the whole base serialize block, which is the
+     * duplication every other node family in this file carries thirteen times over.
+     */
+    protected _serializePayload(): any { return {}; }
+
+    public serialize(): Promise<any> {
+        return new Promise((resolve) => {
+            Promise.all(this._children.map(child => child.serialize())).then(children => {
+                resolve({
+                    id: this._id, name: this._name, type: this._nodeType,
+                    position: [this._position[0], this._position[1], this._position[2]],
+                    rotation: [this._euler[0], this._euler[1], this._euler[2]],
+                    scale: [this._scale[0], this._scale[1], this._scale[2]],
+                    children,
+                    variables: this._serializeVariables(),
+                    spawnOnStart: this._spawnOnStart,
+                    // Unlike every other node family, UI persists `visible`. A hidden mesh is a mistake
+                    // you see instantly; a UI panel authored hidden and revealed by a script (game over,
+                    // pause menu, damage vignette) is the single most common thing anyone builds here,
+                    // and the legacy overlay losing it on every save was a standing bug.
+                    visible: this._visible,
+                    ui: { ...this._serializeUIBase(), ...this._serializePayload() },
+                });
+            });
+        });
+    }
+
+    /** Restore the shared UI block. Subclasses read their payload from the same `json.ui` object. */
+    protected _parseUIBase(ui: any): void {
+        if (!ui) return;
+        this._anchorMin = numTuple(ui.anchorMin, [0, 0]);
+        this._anchorMax = numTuple(ui.anchorMax, [0, 0]);
+        this._offsetMin = numTuple(ui.offsetMin, [0, 0]);
+        this._offsetMax = numTuple(ui.offsetMax, [100, 100]);
+        this._pivot = numTuple(ui.pivot, [0, 0]);
+        if (typeof ui.rotationDeg === 'number') this._rotationDeg = ui.rotationDeg;
+        this._scale2d = numTuple(ui.scale2d, [1, 1]);
+        if (typeof ui.opacity === 'number') this._opacity = clamp(ui.opacity, 0, 1);
+        this._tint = numTuple(ui.tint, rgba(1, 1, 1, 1));
+        if (typeof ui.zOrder === 'number') this._zOrder = ui.zOrder;
+        if (typeof ui.interactive === 'boolean') this._interactive = ui.interactive;
+        if (typeof ui.clip === 'boolean') this._clip = ui.clip;
+        if (ui.sizing === 'content' || ui.sizing === 'fixed') this._sizing = ui.sizing;
+        this._padding = numTuple(ui.padding, [0, 0, 0, 0]);
+        if (typeof ui.borderRadius === 'number') this._borderRadius = Math.max(0, ui.borderRadius);
+        if (typeof ui.borderWidth === 'number') this._borderWidth = Math.max(0, ui.borderWidth);
+        this._borderColor = numTuple(ui.borderColor, rgba(0, 0, 0, 1));
+    }
+
+    /**
+     * The shared parse tail for every UI type.
+     *
+     * Ends at `Node._commonParse`, which already calls `parent.addChild(node)` — deliberately NOT
+     * followed by a second `addChild` the way `SpriteNode.parse` and friends do, since that fires a
+     * spurious detach/reparent SCENE_CHANGED pair per node on every scene load.
+     */
+    protected static _parseUI(node: UINode, parent: Node, json: any): void {
+        node._parseUIBase(json?.ui);
+        node._parsePayload(json?.ui ?? {});
+        // Assigned to the field, not through the setter: the setter emits a visibility SCENE_CHANGED,
+        // and a scene load is not an edit. Absent in a subtree written before this was persisted, which
+        // correctly leaves the constructor's default of visible.
+        if (json?.visible === false) node._visible = false;
+        Node._commonParse(node, parent, json);
+    }
+
+    /** Per-type payload restore. Mirrors {@link _serializePayload}. */
+    protected _parsePayload(_ui: any): void { /* no payload on the base */ }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UINode(json.name, json.type, json.id), parent, json);
+    }
+}
+
+/**
+ * A UI element's root: the bridge between the scene and a screen (or world) rectangle.
+ *
+ * Two spaces, one solve. A `screen` root maps the whole viewport into its reference resolution, so a HUD
+ * authored at 1920x1080 lays out identically on any display. A `world` root projects `Node.position` (or
+ * a pinned target node) to the screen and scales by camera distance — the "proxy element in the scene"
+ * that lets a health bar sit above a monster while its children are authored in the same units as a HUD's.
+ *
+ * A root is itself a {@link UINode}, so it can be nested under another root, tinted, hidden and despawned
+ * like anything else — but its own anchors are ignored, since its rect comes from the viewport or the
+ * projection rather than from a parent.
+ */
+export class UIRootNode extends UINode {
+    private _space: UISpace = 'screen';
+    private _referenceResolution: [number, number] = [1920, 1080];
+    private _scaleMode: UIScaleMode = 'scaleWithScreen';
+    private _matchWidthOrHeight: number = 0.5;
+    private _referenceDpr: number = 1;
+
+    // --- World-space only ---
+    private _uiTargetId: string | null = null;
+    private _referenceDistance: number = 10;
+    private _minScale: number = 0.1;
+    private _maxScale: number = 4;
+    private _billboard: boolean = true;
+    private _clampToScreen: boolean = false;
+    private _hideBehindCamera: boolean = true;
+
+    /** Root scale applied by the DOM as a single `transform: scale()`. */
+    private _scaleFactor: number = 1;
+    private _offscreen: boolean = false;
+    private _edgeAngleDeg: number = 0;
+    private _planeMatrix: number[] | null = null;
+    private readonly _origin: { x: number, y: number } = { x: 0, y: 0 };
+    /** Previous resolved geometry, so a root's layoutVersion bumps only on a real change. */
+    private readonly _prevRootRect: UIRect = emptyRect();
+    private _prevOriginX: number = NaN;
+    private _prevOriginY: number = NaN;
+    private _prevScaleFactor: number = NaN;
+
+    constructor(name: string = 'UI', space: UISpace = 'screen', id?: string) {
+        super(name, 'uiRoot', id);
+        this._space = space;
+        if (space === 'world') {
+            // A world label is anchored at its own point, so it wants a centred pivot and a modest
+            // default size rather than the screen root's full-viewport rect.
+            this._referenceResolution = [200, 60];
+            this._pivot = [0.5, 0.5];
+            this._scaleMode = 'constantPixel';
+        }
+    }
+
+    public get space(): UISpace { return this._space; }
+    public set space(v: UISpace) { const p = this._space; this._space = v; this._touch(); this._notifyChange('component', 'space', p, v); }
+    public get referenceResolution(): [number, number] { return this._referenceResolution; }
+    public set referenceResolution(v: [number, number]) { const p = this._referenceResolution; this._referenceResolution = numTuple(v, [1920, 1080]); this._touch(); this._notifyChange('component', 'referenceResolution', p, this._referenceResolution); }
+    public get scaleMode(): UIScaleMode { return this._scaleMode; }
+    public set scaleMode(v: UIScaleMode) { const p = this._scaleMode; this._scaleMode = v; this._touch(); this._notifyChange('component', 'scaleMode', p, v); }
+    public get matchWidthOrHeight(): number { return this._matchWidthOrHeight; }
+    public set matchWidthOrHeight(v: number) { const p = this._matchWidthOrHeight; this._matchWidthOrHeight = clamp(v, 0, 1); this._touch(); this._notifyChange('component', 'matchWidthOrHeight', p, this._matchWidthOrHeight); }
+    public get referenceDpr(): number { return this._referenceDpr; }
+    public set referenceDpr(v: number) { const p = this._referenceDpr; this._referenceDpr = Math.max(0.01, v); this._touch(); this._notifyChange('component', 'referenceDpr', p, this._referenceDpr); }
+
+    /** Node whose world position this root follows, instead of its own. */
+    public get uiTargetId(): string | null { return this._uiTargetId; }
+    public set uiTargetId(v: string | null) { const p = this._uiTargetId; this._uiTargetId = v || null; this._touch(); this._notifyChange('component', 'uiTargetId', p, this._uiTargetId); }
+    public get referenceDistance(): number { return this._referenceDistance; }
+    public set referenceDistance(v: number) { const p = this._referenceDistance; this._referenceDistance = Math.max(0.001, v); this._touch(); this._notifyChange('component', 'referenceDistance', p, this._referenceDistance); }
+    public get minScale(): number { return this._minScale; }
+    public set minScale(v: number) { const p = this._minScale; this._minScale = Math.max(0, v); this._touch(); this._notifyChange('component', 'minScale', p, this._minScale); }
+    public get maxScale(): number { return this._maxScale; }
+    public set maxScale(v: number) { const p = this._maxScale; this._maxScale = Math.max(0, v); this._touch(); this._notifyChange('component', 'maxScale', p, this._maxScale); }
+    public get billboard(): boolean { return this._billboard; }
+    public set billboard(v: boolean) { const p = this._billboard; this._billboard = v; this._touch(); this._notifyChange('component', 'billboard', p, v); }
+    public get clampToScreen(): boolean { return this._clampToScreen; }
+    public set clampToScreen(v: boolean) { const p = this._clampToScreen; this._clampToScreen = v; this._touch(); this._notifyChange('component', 'clampToScreen', p, v); }
+    public get hideBehindCamera(): boolean { return this._hideBehindCamera; }
+    public set hideBehindCamera(v: boolean) { const p = this._hideBehindCamera; this._hideBehindCamera = v; this._touch(); this._notifyChange('component', 'hideBehindCamera', p, v); }
+
+    /** The scale the DOM layer applies to this root's element. */
+    public get scaleFactor(): number { return this._scaleFactor; }
+    /** Where this root's rect starts in viewport CSS pixels. */
+    public get origin(): { x: number, y: number } { return this._origin; }
+
+    /**
+     * True when a world-space anchor is outside the viewport (or behind the camera) and `clampToScreen`
+     * pinned it to an edge. Meaningless for a screen-space root, which is always on screen.
+     */
+    public get offscreen(): boolean { return this._offscreen; }
+
+    /**
+     * Direction from the viewport centre toward a clamped world anchor: degrees, 0 = right, growing
+     * CLOCKWISE, so it can be fed straight to a CSS `rotate()` on a marker glyph.
+     */
+    public get edgeAngleDeg(): number { return this._edgeAngleDeg; }
+
+    /**
+     * The `matrix3d` that lays this root flat in the world, or null when it is billboarded (the usual
+     * case) or cannot be projected. Set only when `billboard` is false — see {@link quadHomography}.
+     */
+    public get planeMatrix(): number[] | null { return this._planeMatrix; }
+
+    /**
+     * Resolve this root and its whole subtree.
+     *
+     * Called by the scene's UI pass, not by {@link solveUI} — a root's rect comes from the viewport or a
+     * projection rather than from a parent rect, so it does not participate in the ordinary anchor solve.
+     *
+     * @param viewProj `projection * view` for the active camera, or null when there is no camera (an
+     *                 empty editor scene) — world roots then simply do not resolve.
+     */
+    public solveRoot(
+        viewportWidth: number,
+        viewportHeight: number,
+        dpr: number,
+        viewProj: mat4 | null,
+        cameraOrthographic: boolean,
+        orthoVerticalExtent: number,
+    ): void {
+        copyRect(this._prevRootRect, this._rect);
+
+        if (this._space === 'world')
+            this._solveWorldRoot(viewportWidth, viewportHeight, viewProj, cameraOrthographic, orthoVerticalExtent);
+        else
+            this._solveScreenRoot(viewportWidth, viewportHeight, dpr);
+
+        copyRect(this._localRect, this._rect);
+        setRect(this._screenRect,
+            this._origin.x, this._origin.y,
+            this._rect.width * this._scaleFactor, this._rect.height * this._scaleFactor);
+        copyRect(this._clipRect, this._rect);
+
+        this._resolvedOpacity = this._opacity;
+        this._resolvedVisible = this._visible;
+
+        // Origin and scale, not just the rect. A WORLD-space root's rect is constant — it is always its
+        // reference resolution — and only the origin and scale move as the camera does. Comparing the rect
+        // alone meant a world-space HUD resolved correctly and then never moved on screen again, because
+        // the DOM layer skips any node whose layoutVersion has not changed.
+        if (!rectsEqual(this._prevRootRect, this._rect)
+            || this._origin.x !== this._prevOriginX
+            || this._origin.y !== this._prevOriginY
+            || this._scaleFactor !== this._prevScaleFactor) {
+            this._layoutVersion++;
+        }
+        this._prevOriginX = this._origin.x;
+        this._prevOriginY = this._origin.y;
+        this._prevScaleFactor = this._scaleFactor;
+
+        this._solveChildren(this._origin, this._scaleFactor);
+    }
+
+    private _solveScreenRoot(viewportWidth: number, viewportHeight: number, dpr: number): void {
+        this._scaleFactor = rootScale(
+            this._scaleMode, viewportWidth, viewportHeight,
+            this._referenceResolution[0], this._referenceResolution[1],
+            this._matchWidthOrHeight, dpr, this._referenceDpr);
+
+        // The root's rect is the viewport expressed in reference units, so every descendant lays out in
+        // those units and the DOM applies one scale at the top. That is what makes a HUD authored at
+        // 1920x1080 land identically on a 1280x720 display.
+        const s = this._scaleFactor > 0 ? this._scaleFactor : 1;
+        setRect(this._rect, 0, 0, viewportWidth / s, viewportHeight / s);
+        this._origin.x = 0;
+        this._origin.y = 0;
+        this._onScreen = true;
+    }
+
+    private _solveWorldRoot(
+        viewportWidth: number,
+        viewportHeight: number,
+        viewProj: mat4 | null,
+        orthographic: boolean,
+        orthoVerticalExtent: number,
+    ): void {
+        setRect(this._rect, 0, 0, this._referenceResolution[0], this._referenceResolution[1]);
+
+        this._planeMatrix = null;
+        this._offscreen = false;
+
+        if (!viewProj) {
+            // No active camera: nothing to project against. Resolve to a hidden zero-scale rect rather
+            // than leaving last frame's values, which would freeze the label mid-air.
+            this._scaleFactor = 0;
+            this._origin.x = this._origin.y = 0;
+            this._onScreen = false;
+            return;
+        }
+
+        const anchorNode = this._uiTargetId ? this._scene?.getNodeById(this._uiTargetId) ?? null : null;
+        const world = anchorNode ? anchorNode.worldPosition : this.worldPosition;
+        const p = projectToScreen(viewProj, world, viewportWidth, viewportHeight);
+
+        this._scaleFactor = worldUIScale(orthographic, p.distance, this._referenceDistance,
+            this._minScale, this._maxScale, viewportHeight, orthoVerticalExtent);
+
+        // The pivot is what actually anchors the element to the projected point: a (0.5, 1) pivot hangs
+        // the rect ABOVE the point, which is what a nameplate wants.
+        const w = this._rect.width * this._scaleFactor;
+        const h = this._rect.height * this._scaleFactor;
+        let ox = p.x - this._pivot[0] * w;
+        let oy = p.y - this._pivot[1] * h;
+
+        if (this._clampToScreen) {
+            // edgeClamp also reports which way the anchor lies, and mirrors a behind-camera projection
+            // through the centre — a projection from behind lands on the opposite side of the screen from
+            // the object, so an unmirrored marker points exactly backwards.
+            const pinned = edgeClamp(ox, oy, w, h, viewportWidth, viewportHeight, 0, !p.inFront);
+            ox = pinned.x;
+            oy = pinned.y;
+            this._offscreen = pinned.offscreen;
+            this._edgeAngleDeg = pinned.angleDeg;
+        }
+
+        this._origin.x = ox;
+        this._origin.y = oy;
+        // A clamped label is deliberately kept ON screen even when the anchor is behind the camera: that
+        // is the entire point of an offscreen marker, so hideBehindCamera does not apply to one.
+        this._onScreen = p.inFront || this._clampToScreen || !this._hideBehindCamera;
+
+        if (!this._billboard) this._solvePlaneMatrix(viewProj, viewportWidth, viewportHeight);
+    }
+
+    /**
+     * Project the reference rect's four world corners and solve the transform that lays this root flat in
+     * the world — a poster on a wall rather than a label facing the camera.
+     *
+     * The rect is planar, so its image under a perspective camera is exactly a homography; solving for
+     * that from four projected corners avoids reconstructing the camera as a CSS `perspective` chain, and
+     * keeps the DOM layer free of any camera knowledge at all.
+     *
+     * The corners are laid out on the node's own XY plane, scaled so the reference resolution spans one
+     * world unit per {@link referenceDistance} — i.e. the node's scale controls its physical size — with
+     * the pivot deciding where the node's origin sits within the quad.
+     */
+    private _solvePlaneMatrix(viewProj: mat4, viewportWidth: number, viewportHeight: number): void {
+        const world = this.worldTransform;
+        const w = this._rect.width;
+        const h = this._rect.height;
+        // One reference unit maps to 1/referenceDistance world units, so referenceDistance reads as
+        // "reference pixels per world unit" here — the same knob that scales a billboarded root.
+        const s = this._referenceDistance > 0 ? 1 / this._referenceDistance : 1;
+
+        const corners: ([number, number] | null)[] = [];
+        for (const [cx, cy] of [[0, 0], [w, 0], [w, h], [0, h]]) {
+            // UI space is Y-down; the world plane is Y-up, hence the negated Y.
+            const lx = (cx - this._pivot[0] * w) * s;
+            const ly = -(cy - this._pivot[1] * h) * s;
+            const wp = vec3.transformMat4(vec3.create(), vec3.fromValues(lx, ly, 0), world);
+            const p = projectToScreen(viewProj, wp, viewportWidth, viewportHeight);
+            corners.push(p.inFront ? [p.x, p.y] : null);
+        }
+
+        this._planeMatrix = quadHomography(corners, w, h);
+        // A quad with a corner behind the camera has no valid 2D image, so there is nothing sensible to
+        // draw; treat it as offscreen rather than showing a wildly sheared panel.
+        if (!this._planeMatrix) this._onScreen = false;
+    }
+
+    protected _serializePayload(): any {
+        return {
+            space: this._space,
+            referenceResolution: [...this._referenceResolution],
+            scaleMode: this._scaleMode,
+            matchWidthOrHeight: this._matchWidthOrHeight,
+            referenceDpr: this._referenceDpr,
+            uiTargetId: this._uiTargetId,
+            referenceDistance: this._referenceDistance,
+            minScale: this._minScale,
+            maxScale: this._maxScale,
+            billboard: this._billboard,
+            clampToScreen: this._clampToScreen,
+            hideBehindCamera: this._hideBehindCamera,
+        };
+    }
+
+    protected _parsePayload(ui: any): void {
+        if (ui.space === 'world' || ui.space === 'screen') this._space = ui.space;
+        this._referenceResolution = numTuple(ui.referenceResolution, this._referenceResolution);
+        if (ui.scaleMode === 'constantPixel' || ui.scaleMode === 'scaleWithScreen' || ui.scaleMode === 'constantPhysical')
+            this._scaleMode = ui.scaleMode;
+        if (typeof ui.matchWidthOrHeight === 'number') this._matchWidthOrHeight = clamp(ui.matchWidthOrHeight, 0, 1);
+        if (typeof ui.referenceDpr === 'number') this._referenceDpr = Math.max(0.01, ui.referenceDpr);
+        this._uiTargetId = typeof ui.uiTargetId === 'string' ? ui.uiTargetId : null;
+        if (typeof ui.referenceDistance === 'number') this._referenceDistance = Math.max(0.001, ui.referenceDistance);
+        if (typeof ui.minScale === 'number') this._minScale = Math.max(0, ui.minScale);
+        if (typeof ui.maxScale === 'number') this._maxScale = Math.max(0, ui.maxScale);
+        if (typeof ui.billboard === 'boolean') this._billboard = ui.billboard;
+        if (typeof ui.clampToScreen === 'boolean') this._clampToScreen = ui.clampToScreen;
+        if (typeof ui.hideBehindCamera === 'boolean') this._hideBehindCamera = ui.hideBehindCamera;
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UIRootNode(json.name, 'screen', json.id), parent, json);
+    }
+}
+
+/** A styled box. The plainest element there is, and the one containers are usually built from. */
+export class UIPanelNode extends UINode {
+    constructor(name: string = 'panel', id?: string) {
+        super(name, 'uiPanel', id);
+        this._tint = rgba(0, 0, 0, 0.4);
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UIPanelNode(json.name, json.id), parent, json);
+    }
+}
+
+/** A run of text. `tint` is the text colour here, not a background. */
+export class UITextNode extends UINode {
+    private _text: string = 'Text';
+    private _fontSize: number = 16;
+    private _fontFamily: string = '';
+    private _fontWeight: number = 400;
+    private _align: UITextAlign = 'left';
+    private _vAlign: UITextVAlign = 'top';
+    private _wrap: boolean = true;
+    private _lineHeight: number = 1.2;
+
+    constructor(name: string = 'text', id?: string) {
+        super(name, 'uiText', id);
+        this._offsetMax = [200, 24];
+    }
+
+    public get text(): string { return this._text; }
+    public set text(v: string) {
+        const next = String(v ?? '');
+        if (next === this._text) return;   // scripts rewrite this every frame; only a real change counts
+        const p = this._text;
+        this._text = next;
+        this._touch();
+        this._notifyChange('component', 'text', p, next);
+    }
+    public get fontSize(): number { return this._fontSize; }
+    public set fontSize(v: number) { const p = this._fontSize; this._fontSize = Math.max(1, v); this._touch(); this._notifyChange('component', 'fontSize', p, this._fontSize); }
+    public get fontFamily(): string { return this._fontFamily; }
+    public set fontFamily(v: string) { const p = this._fontFamily; this._fontFamily = v ?? ''; this._touch(); this._notifyChange('component', 'fontFamily', p, this._fontFamily); }
+    public get fontWeight(): number { return this._fontWeight; }
+    public set fontWeight(v: number) { const p = this._fontWeight; this._fontWeight = v; this._touch(); this._notifyChange('component', 'fontWeight', p, v); }
+    public get align(): UITextAlign { return this._align; }
+    public set align(v: UITextAlign) { const p = this._align; this._align = v; this._touch(); this._notifyChange('component', 'align', p, v); }
+    public get vAlign(): UITextVAlign { return this._vAlign; }
+    public set vAlign(v: UITextVAlign) { const p = this._vAlign; this._vAlign = v; this._touch(); this._notifyChange('component', 'vAlign', p, v); }
+    public get wrap(): boolean { return this._wrap; }
+    public set wrap(v: boolean) { const p = this._wrap; this._wrap = v; this._touch(); this._notifyChange('component', 'wrap', p, v); }
+    public get lineHeight(): number { return this._lineHeight; }
+    public set lineHeight(v: number) { const p = this._lineHeight; this._lineHeight = Math.max(0, v); this._touch(); this._notifyChange('component', 'lineHeight', p, this._lineHeight); }
+
+    protected _serializePayload(): any {
+        return {
+            text: this._text, fontSize: this._fontSize, fontFamily: this._fontFamily,
+            fontWeight: this._fontWeight, align: this._align, vAlign: this._vAlign,
+            wrap: this._wrap, lineHeight: this._lineHeight,
+        };
+    }
+
+    protected _parsePayload(ui: any): void {
+        if (typeof ui.text === 'string') this._text = ui.text;
+        if (typeof ui.fontSize === 'number') this._fontSize = Math.max(1, ui.fontSize);
+        if (typeof ui.fontFamily === 'string') this._fontFamily = ui.fontFamily;
+        if (typeof ui.fontWeight === 'number') this._fontWeight = ui.fontWeight;
+        if (ui.align === 'left' || ui.align === 'center' || ui.align === 'right') this._align = ui.align;
+        if (ui.vAlign === 'top' || ui.vAlign === 'middle' || ui.vAlign === 'bottom') this._vAlign = ui.vAlign;
+        if (typeof ui.wrap === 'boolean') this._wrap = ui.wrap;
+        if (typeof ui.lineHeight === 'number') this._lineHeight = Math.max(0, ui.lineHeight);
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UITextNode(json.name, json.id), parent, json);
+    }
+}
+
+/**
+ * A textured quad.
+ *
+ * `textureId` references the engine's texture store, deliberately NOT a raw URL or data URI the way the
+ * legacy overlay's `src` did — that is what makes a UI image participate in asset hashing, resync and
+ * (critically) the publish pass that packs referenced textures into the shipped bundle.
+ */
+export class UIImageNode extends UINode {
+    private _textureId: string | null = null;
+    private _fit: UIImageFit = 'fill';
+    private _uvRect: [number, number, number, number] = [0, 0, 1, 1];
+
+    constructor(name: string = 'image', id?: string) {
+        super(name, 'uiImage', id);
+        this._offsetMax = [64, 64];
+    }
+
+    public get textureId(): string | null { return this._textureId; }
+    public set textureId(v: string | null) { const p = this._textureId; this._textureId = v || null; this._touch(); this._notifyChange('component', 'textureId', p, this._textureId); }
+    public get fit(): UIImageFit { return this._fit; }
+    public set fit(v: UIImageFit) { const p = this._fit; this._fit = v; this._touch(); this._notifyChange('component', 'fit', p, v); }
+    public get uvRect(): [number, number, number, number] { return this._uvRect; }
+    public set uvRect(v: [number, number, number, number]) { const p = this._uvRect; this._uvRect = numTuple(v, [0, 0, 1, 1]); this._touch(); this._notifyChange('component', 'uvRect', p, this._uvRect); }
+
+    protected _serializePayload(): any {
+        return { textureId: this._textureId, fit: this._fit, uvRect: [...this._uvRect] };
+    }
+
+    protected _parsePayload(ui: any): void {
+        this._textureId = typeof ui.textureId === 'string' ? ui.textureId : null;
+        if (ui.fit === 'fill' || ui.fit === 'contain' || ui.fit === 'cover' || ui.fit === 'tile') this._fit = ui.fit;
+        this._uvRect = numTuple(ui.uvRect, [0, 0, 1, 1]);
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UIImageNode(json.name, json.id), parent, json);
+    }
+}
+
+/**
+ * A clickable button.
+ *
+ * `onPress` is a real script handler (it is in `SCRIPT_HANDLERS`), so a class script overriding it gets
+ * the same throw-guard and async-rejection handling every other handler does. The DOM layer calls
+ * {@link press} rather than the handler directly, which is what keeps `disabled` enforced in one place.
+ */
+export class UIButtonNode extends UINode {
+    private _label: string = 'Button';
+    private _disabled: boolean = false;
+    private _hoverTint: UIColor = rgba(1, 1, 1, 0.15);
+    private _pressedTint: UIColor = rgba(0, 0, 0, 0.2);
+    private _disabledTint: UIColor = rgba(0.5, 0.5, 0.5, 0.4);
+
+    constructor(name: string = 'button', id?: string) {
+        super(name, 'uiButton', id);
+        this._offsetMax = [120, 36];
+        this._tint = rgba(0.2, 0.4, 0.8, 1);
+        this._interactive = true;   // a button nobody can click is never what was meant
+        this._borderRadius = 4;
+    }
+
+    public get label(): string { return this._label; }
+    public set label(v: string) { const p = this._label; this._label = String(v ?? ''); this._touch(); this._notifyChange('component', 'label', p, this._label); }
+    public get disabled(): boolean { return this._disabled; }
+    public set disabled(v: boolean) { const p = this._disabled; this._disabled = v; this._touch(); this._notifyChange('component', 'disabled', p, v); }
+    public get hoverTint(): UIColor { return this._hoverTint; }
+    public set hoverTint(v: UIColor) { const p = this._hoverTint; this._hoverTint = numTuple(v, rgba(1, 1, 1, 0.15)); this._touch(); this._notifyChange('component', 'hoverTint', p, this._hoverTint); }
+    public get pressedTint(): UIColor { return this._pressedTint; }
+    public set pressedTint(v: UIColor) { const p = this._pressedTint; this._pressedTint = numTuple(v, rgba(0, 0, 0, 0.2)); this._touch(); this._notifyChange('component', 'pressedTint', p, this._pressedTint); }
+    public get disabledTint(): UIColor { return this._disabledTint; }
+    public set disabledTint(v: UIColor) { const p = this._disabledTint; this._disabledTint = numTuple(v, rgba(0.5, 0.5, 0.5, 0.4)); this._touch(); this._notifyChange('component', 'disabledTint', p, this._disabledTint); }
+
+    /**
+     * Called when this button is activated.
+     *
+     * A real script handler (it is in `SCRIPT_HANDLERS`), so a class script overriding it gets the same
+     * throw-guard and async-rejection handling every other handler does.
+     */
+    public onPress(): void {}
+
+    /**
+     * Fire this button, honouring `disabled`.
+     *
+     * The DOM layer's click handler goes through here rather than calling {@link onPress} directly, so the
+     * disabled rule lives in the engine and applies equally to a script that presses a button itself.
+     */
+    public press(): void {
+        if (this._disabled) return;
+        this.onPress();
+    }
+
+    protected _serializePayload(): any {
+        return {
+            label: this._label, disabled: this._disabled,
+            hoverTint: [...this._hoverTint], pressedTint: [...this._pressedTint],
+            disabledTint: [...this._disabledTint],
+        };
+    }
+
+    protected _parsePayload(ui: any): void {
+        if (typeof ui.label === 'string') this._label = ui.label;
+        if (typeof ui.disabled === 'boolean') this._disabled = ui.disabled;
+        this._hoverTint = numTuple(ui.hoverTint, this._hoverTint);
+        this._pressedTint = numTuple(ui.pressedTint, this._pressedTint);
+        this._disabledTint = numTuple(ui.disabledTint, this._disabledTint);
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UIButtonNode(json.name, json.id), parent, json);
+    }
+}
+
+/**
+ * A row or column that positions its children in flow instead of by anchors.
+ *
+ * Children keep their cross-axis anchors, so a column of full-width rows is `stretch` on X plus a height
+ * on Y — the stack only owns the main axis. A child with a {@link UISpacerNode}'s `flex` absorbs slack.
+ */
+export class UIStackNode extends UINode {
+    private _direction: 'row' | 'column' = 'column';
+    private _gap: number = 4;
+    private _justify: StackJustify = 'start';
+    private _align: 'start' | 'center' | 'end' | 'stretch' = 'stretch';
+    private _reverse: boolean = false;
+
+    /** Reused across frames so the layout pass allocates nothing per stack. */
+    private readonly _slots: { offset: number, size: number }[] = [];
+    private readonly _items: StackItem[] = [];
+
+    constructor(name: string = 'stack', direction: 'row' | 'column' = 'column', id?: string) {
+        super(name, 'uiStack', id);
+        this._direction = direction;
+        this._offsetMax = [200, 200];
+    }
+
+    public get direction(): 'row' | 'column' { return this._direction; }
+    public set direction(v: 'row' | 'column') { const p = this._direction; this._direction = v; this._touch(); this._notifyChange('component', 'direction', p, v); }
+    public get gap(): number { return this._gap; }
+    public set gap(v: number) { const p = this._gap; this._gap = v; this._touch(); this._notifyChange('component', 'gap', p, v); }
+    public get justify(): StackJustify { return this._justify; }
+    public set justify(v: StackJustify) { const p = this._justify; this._justify = v; this._touch(); this._notifyChange('component', 'justify', p, v); }
+    public get align(): 'start' | 'center' | 'end' | 'stretch' { return this._align; }
+    public set align(v: 'start' | 'center' | 'end' | 'stretch') { const p = this._align; this._align = v; this._touch(); this._notifyChange('component', 'align', p, v); }
+    public get reverse(): boolean { return this._reverse; }
+    public set reverse(v: boolean) { const p = this._reverse; this._reverse = v; this._touch(); this._notifyChange('component', 'reverse', p, v); }
+
+    /**
+     * Lay children out along the main axis, then solve each one against the slot it was given.
+     *
+     * Each child is solved against a one-child parent rect representing its slot, so its own anchors and
+     * offsets still apply on the CROSS axis — which is how `align: 'stretch'` and a fixed cross size end
+     * up being the same mechanism rather than two.
+     */
+    protected _solveChildren(origin: { x: number, y: number }, scale: number): void {
+        const kids: UINode[] = [];
+        for (const child of this._children)
+            if (child instanceof UINode && child.spawned) kids.push(child);
+        if (kids.length === 0) return;
+
+        const horizontal = this._direction === 'row';
+        const [padL, padT, padR, padB] = this._padding;
+        const innerX = this._rect.x + padL;
+        const innerY = this._rect.y + padT;
+        const innerW = Math.max(0, this._rect.width - padL - padR);
+        const innerH = Math.max(0, this._rect.height - padT - padB);
+
+        this._items.length = kids.length;
+        for (let i = 0; i < kids.length; i++)
+            this._items[i] = kids[i] instanceof UISpacerNode
+                ? { size: 0, flex: (kids[i] as UISpacerNode).flex }
+                : (kids[i] as any)._stackItem(horizontal);
+
+        stackLayout(this._slots, this._items, horizontal ? innerW : innerH,
+            this._gap, this._justify, this._reverse);
+
+        const slotRect: UIRect = { x: 0, y: 0, width: 0, height: 0 };
+        for (let i = 0; i < kids.length; i++) {
+            const slot = this._slots[i];
+            if (horizontal) setRect(slotRect, innerX + slot.offset, innerY, slot.size, innerH);
+            else setRect(slotRect, innerX, innerY + slot.offset, innerW, slot.size);
+
+            const child = kids[i];
+            // Inside a stack the main axis is owned by the layout, so the child's own main-axis anchors
+            // are overridden to "fill the slot"; the cross axis keeps whatever it was authored with.
+            child.solveUIInSlot(slotRect, this._rect, this._clipRect, this._resolvedOpacity,
+                this._resolvedVisible, this._onScreen, origin, scale, horizontal, this._align);
+        }
+    }
+
+    protected _serializePayload(): any {
+        return {
+            direction: this._direction, gap: this._gap, justify: this._justify,
+            align: this._align, reverse: this._reverse,
+        };
+    }
+
+    protected _parsePayload(ui: any): void {
+        if (ui.direction === 'row' || ui.direction === 'column') this._direction = ui.direction;
+        if (typeof ui.gap === 'number') this._gap = ui.gap;
+        if (['start', 'center', 'end', 'spaceBetween', 'spaceAround'].includes(ui.justify)) this._justify = ui.justify;
+        if (['start', 'center', 'end', 'stretch'].includes(ui.align)) this._align = ui.align;
+        if (typeof ui.reverse === 'boolean') this._reverse = ui.reverse;
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UIStackNode(json.name, 'column', json.id), parent, json);
+    }
+}
+
+/** Flexible empty space inside a {@link UIStackNode}. Draws nothing. */
+export class UISpacerNode extends UINode {
+    private _flex: number = 1;
+
+    constructor(name: string = 'spacer', id?: string) {
+        super(name, 'uiSpacer', id);
+    }
+
+    public get flex(): number { return this._flex; }
+    public set flex(v: number) { const p = this._flex; this._flex = Math.max(0, v); this._touch(); this._notifyChange('component', 'flex', p, this._flex); }
+
+    protected _serializePayload(): any { return { flex: this._flex }; }
+    protected _parsePayload(ui: any): void { if (typeof ui.flex === 'number') this._flex = Math.max(0, ui.flex); }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UISpacerNode(json.name, json.id), parent, json);
+    }
+}
+
+/**
+ * A filled bar showing `value` between `min` and `max`.
+ *
+ * This exists so a health bar is a data binding rather than a script rewriting a width every frame —
+ * which is what the legacy overlay forced, and the reason its HUD scripts were mostly layout arithmetic.
+ */
+export class UIProgressBarNode extends UINode {
+    private _min: number = 0;
+    private _max: number = 1;
+    private _value: number = 1;
+    private _fillTint: UIColor = rgba(0.2, 0.8, 0.3, 1);
+    private _direction: UIFillDirection = 'ltr';
+    private _smoothing: number = 0;
+
+    /** Displayed fill, which chases `value` when `smoothing > 0`. */
+    private _displayed: number = 1;
+
+    constructor(name: string = 'progress bar', id?: string) {
+        super(name, 'uiProgressBar', id);
+        this._offsetMax = [200, 16];
+        this._tint = rgba(0, 0, 0, 0.5);
+        this._borderRadius = 3;
+    }
+
+    public get min(): number { return this._min; }
+    public set min(v: number) { const p = this._min; this._min = v; this._touch(); this._notifyChange('component', 'min', p, v); }
+    public get max(): number { return this._max; }
+    public set max(v: number) { const p = this._max; this._max = v; this._touch(); this._notifyChange('component', 'max', p, v); }
+    public get value(): number { return this._value; }
+    public set value(v: number) {
+        if (v === this._value) return;   // written every frame by gameplay scripts
+        const p = this._value;
+        this._value = v;
+        if (this._smoothing <= 0) this._displayed = v;
+        this._touch();
+        this._notifyChange('component', 'value', p, v);
+    }
+    public get fillTint(): UIColor { return this._fillTint; }
+    public set fillTint(v: UIColor) { const p = this._fillTint; this._fillTint = numTuple(v, rgba(0.2, 0.8, 0.3, 1)); this._touch(); this._notifyChange('component', 'fillTint', p, this._fillTint); }
+    public get direction(): UIFillDirection { return this._direction; }
+    public set direction(v: UIFillDirection) { const p = this._direction; this._direction = v; this._touch(); this._notifyChange('component', 'direction', p, v); }
+    public get smoothing(): number { return this._smoothing; }
+    public set smoothing(v: number) { const p = this._smoothing; this._smoothing = Math.max(0, v); this._touch(); this._notifyChange('component', 'smoothing', p, this._smoothing); }
+
+    /** Fill fraction in 0..1, after smoothing. What the DOM layer sizes the fill element with. */
+    public get fraction(): number {
+        const span = this._max - this._min;
+        if (span === 0) return 0;
+        return clamp((this._displayed - this._min) / span, 0, 1);
+    }
+
+    /**
+     * Advance the smoothed fill.
+     *
+     * Runs from the ordinary node update (not the UI layout pass) because it is simulation, not layout:
+     * it must be frozen while the game is paused, which the layout pass deliberately is not.
+     */
+    public update(delta: number, time: number): void {
+        super.update(delta, time);
+        if (this._smoothing > 0 && this._displayed !== this._value) {
+            const next = dampTime(this._displayed, this._value, this._smoothing, delta);
+            // Snap once inside a hair of the target, or the fill creeps forever and the DOM layer
+            // re-writes a style every frame for a difference nobody can see.
+            this._displayed = Math.abs(next - this._value) < 1e-4 ? this._value : next;
+            this._touch();
+        }
+    }
+
+    protected _serializePayload(): any {
+        return {
+            min: this._min, max: this._max, value: this._value,
+            fillTint: [...this._fillTint], direction: this._direction, smoothing: this._smoothing,
+        };
+    }
+
+    protected _parsePayload(ui: any): void {
+        if (typeof ui.min === 'number') this._min = ui.min;
+        if (typeof ui.max === 'number') this._max = ui.max;
+        if (typeof ui.value === 'number') { this._value = ui.value; this._displayed = ui.value; }
+        this._fillTint = numTuple(ui.fillTint, this._fillTint);
+        if (['ltr', 'rtl', 'btt', 'ttb'].includes(ui.direction)) this._direction = ui.direction;
+        if (typeof ui.smoothing === 'number') this._smoothing = Math.max(0, ui.smoothing);
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UIProgressBarNode(json.name, json.id), parent, json);
+    }
+}
+
+/** A draggable value between `min` and `max`. Reports through `onValueChanged`. */
+export class UISliderNode extends UINode {
+    private _min: number = 0;
+    private _max: number = 1;
+    private _step: number = 0;
+    private _value: number = 0.5;
+    private _fillTint: UIColor = rgba(0.2, 0.5, 0.9, 1);
+    private _handleTint: UIColor = rgba(1, 1, 1, 1);
+    private _vertical: boolean = false;
+
+    constructor(name: string = 'slider', id?: string) {
+        super(name, 'uiSlider', id);
+        this._offsetMax = [200, 24];
+        this._tint = rgba(0, 0, 0, 0.5);
+        this._interactive = true;
+    }
+
+    public get min(): number { return this._min; }
+    public set min(v: number) { const p = this._min; this._min = v; this._touch(); this._notifyChange('component', 'min', p, v); }
+    public get max(): number { return this._max; }
+    public set max(v: number) { const p = this._max; this._max = v; this._touch(); this._notifyChange('component', 'max', p, v); }
+    public get step(): number { return this._step; }
+    public set step(v: number) { const p = this._step; this._step = Math.max(0, v); this._touch(); this._notifyChange('component', 'step', p, this._step); }
+    public get value(): number { return this._value; }
+    public set value(v: number) {
+        const next = this._quantize(v);
+        if (next === this._value) return;
+        const p = this._value;
+        this._value = next;
+        this._touch();
+        this._notifyChange('component', 'value', p, next);
+    }
+    public get fillTint(): UIColor { return this._fillTint; }
+    public set fillTint(v: UIColor) { const p = this._fillTint; this._fillTint = numTuple(v, rgba(0.2, 0.5, 0.9, 1)); this._touch(); this._notifyChange('component', 'fillTint', p, this._fillTint); }
+    public get handleTint(): UIColor { return this._handleTint; }
+    public set handleTint(v: UIColor) { const p = this._handleTint; this._handleTint = numTuple(v, rgba(1, 1, 1, 1)); this._touch(); this._notifyChange('component', 'handleTint', p, this._handleTint); }
+    public get vertical(): boolean { return this._vertical; }
+    public set vertical(v: boolean) { const p = this._vertical; this._vertical = v; this._touch(); this._notifyChange('component', 'vertical', p, v); }
+
+    /** Position in 0..1, for the DOM layer to place the fill and the handle. */
+    public get fraction(): number {
+        const span = this._max - this._min;
+        return span === 0 ? 0 : clamp((this._value - this._min) / span, 0, 1);
+    }
+
+    private _quantize(v: number): number {
+        const lo = Math.min(this._min, this._max);
+        const hi = Math.max(this._min, this._max);
+        const c = clamp(v, lo, hi);
+        if (this._step <= 0) return c;
+        return clamp(this._min + Math.round((c - this._min) / this._step) * this._step, lo, hi);
+    }
+
+    /** Called when the user moves the slider. Not fired when a script assigns `value`. */
+    public onValueChanged(_value: number): void {}
+
+    /**
+     * Apply a drag from the DOM layer, in 0..1 along the slider's track.
+     *
+     * Separate from the `value` setter so the handler only fires for USER input — a script setting
+     * `value` should not re-enter its own `onValueChanged` and loop.
+     */
+    public setValueFromFraction(fraction: number): void {
+        const before = this._value;
+        this.value = this._min + clamp(fraction, 0, 1) * (this._max - this._min);
+        if (this._value !== before) this.onValueChanged(this._value);
+    }
+
+    protected _serializePayload(): any {
+        return {
+            min: this._min, max: this._max, step: this._step, value: this._value,
+            fillTint: [...this._fillTint], handleTint: [...this._handleTint], vertical: this._vertical,
+        };
+    }
+
+    protected _parsePayload(ui: any): void {
+        if (typeof ui.min === 'number') this._min = ui.min;
+        if (typeof ui.max === 'number') this._max = ui.max;
+        if (typeof ui.step === 'number') this._step = Math.max(0, ui.step);
+        if (typeof ui.value === 'number') this._value = ui.value;
+        this._fillTint = numTuple(ui.fillTint, this._fillTint);
+        this._handleTint = numTuple(ui.handleTint, this._handleTint);
+        if (typeof ui.vertical === 'boolean') this._vertical = ui.vertical;
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UISliderNode(json.name, json.id), parent, json);
+    }
+}
+
+/** An on/off switch. Reports through `onValueChanged`. */
+export class UIToggleNode extends UINode {
+    private _checked: boolean = false;
+    private _label: string = 'Toggle';
+    private _onTint: UIColor = rgba(0.2, 0.7, 0.4, 1);
+    private _offTint: UIColor = rgba(0.3, 0.3, 0.3, 1);
+
+    constructor(name: string = 'toggle', id?: string) {
+        super(name, 'uiToggle', id);
+        this._offsetMax = [160, 24];
+        this._interactive = true;
+    }
+
+    public get checked(): boolean { return this._checked; }
+    public set checked(v: boolean) {
+        if (v === this._checked) return;
+        const p = this._checked;
+        this._checked = v;
+        this._touch();
+        this._notifyChange('component', 'checked', p, v);
+    }
+    public get label(): string { return this._label; }
+    public set label(v: string) { const p = this._label; this._label = String(v ?? ''); this._touch(); this._notifyChange('component', 'label', p, this._label); }
+    public get onTint(): UIColor { return this._onTint; }
+    public set onTint(v: UIColor) { const p = this._onTint; this._onTint = numTuple(v, rgba(0.2, 0.7, 0.4, 1)); this._touch(); this._notifyChange('component', 'onTint', p, this._onTint); }
+    public get offTint(): UIColor { return this._offTint; }
+    public set offTint(v: UIColor) { const p = this._offTint; this._offTint = numTuple(v, rgba(0.3, 0.3, 0.3, 1)); this._touch(); this._notifyChange('component', 'offTint', p, this._offTint); }
+
+    /** Called when the user flips the switch. Not fired when a script assigns `checked`. */
+    public onValueChanged(_checked: boolean): void {}
+
+    /** Flip the switch as a USER action, firing `onValueChanged`. The DOM layer calls this. */
+    public toggle(): void {
+        this.checked = !this._checked;
+        this.onValueChanged(this._checked);
+    }
+
+    protected _serializePayload(): any {
+        return { checked: this._checked, label: this._label, onTint: [...this._onTint], offTint: [...this._offTint] };
+    }
+
+    protected _parsePayload(ui: any): void {
+        if (typeof ui.checked === 'boolean') this._checked = ui.checked;
+        if (typeof ui.label === 'string') this._label = ui.label;
+        this._onTint = numTuple(ui.onTint, this._onTint);
+        this._offTint = numTuple(ui.offTint, this._offTint);
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UIToggleNode(json.name, json.id), parent, json);
+    }
+}
+
+/** A single-line text field. Reports through `onValueChanged` while typing and `onSubmit` on Enter. */
+export class UITextInputNode extends UINode {
+    private _value: string = '';
+    private _placeholder: string = '';
+    private _maxLength: number = 0;
+    private _password: boolean = false;
+    private _readOnly: boolean = false;
+    private _fontSize: number = 14;
+
+    constructor(name: string = 'text input', id?: string) {
+        super(name, 'uiTextInput', id);
+        this._offsetMax = [200, 28];
+        this._tint = rgba(1, 1, 1, 0.9);
+        this._interactive = true;
+        this._borderWidth = 1;
+        this._borderColor = rgba(0, 0, 0, 0.4);
+    }
+
+    public get value(): string { return this._value; }
+    public set value(v: string) {
+        const next = String(v ?? '');
+        if (next === this._value) return;
+        const p = this._value;
+        this._value = this._maxLength > 0 ? next.slice(0, this._maxLength) : next;
+        this._touch();
+        this._notifyChange('component', 'value', p, this._value);
+    }
+    public get placeholder(): string { return this._placeholder; }
+    public set placeholder(v: string) { const p = this._placeholder; this._placeholder = String(v ?? ''); this._touch(); this._notifyChange('component', 'placeholder', p, this._placeholder); }
+    public get maxLength(): number { return this._maxLength; }
+    public set maxLength(v: number) { const p = this._maxLength; this._maxLength = Math.max(0, Math.floor(v)); this._touch(); this._notifyChange('component', 'maxLength', p, this._maxLength); }
+    public get password(): boolean { return this._password; }
+    public set password(v: boolean) { const p = this._password; this._password = v; this._touch(); this._notifyChange('component', 'password', p, v); }
+    public get readOnly(): boolean { return this._readOnly; }
+    public set readOnly(v: boolean) { const p = this._readOnly; this._readOnly = v; this._touch(); this._notifyChange('component', 'readOnly', p, v); }
+    public get fontSize(): number { return this._fontSize; }
+    public set fontSize(v: number) { const p = this._fontSize; this._fontSize = Math.max(1, v); this._touch(); this._notifyChange('component', 'fontSize', p, this._fontSize); }
+
+    /** Called while the user types. Not fired when a script assigns `value`. */
+    public onValueChanged(_value: string): void {}
+    /** Called when the user commits the field (Enter). */
+    public onSubmit(_value: string): void {}
+
+    /** Apply typing from the DOM layer, firing `onValueChanged` only for genuine user edits. */
+    public setValueFromInput(next: string): void {
+        if (this._readOnly) return;
+        const before = this._value;
+        this.value = next;
+        if (this._value !== before) this.onValueChanged(this._value);
+    }
+
+    /** Commit the field (Enter), firing `onSubmit`. */
+    public submit(): void { this.onSubmit(this._value); }
+
+    protected _serializePayload(): any {
+        return {
+            value: this._value, placeholder: this._placeholder, maxLength: this._maxLength,
+            password: this._password, readOnly: this._readOnly, fontSize: this._fontSize,
+        };
+    }
+
+    protected _parsePayload(ui: any): void {
+        if (typeof ui.value === 'string') this._value = ui.value;
+        if (typeof ui.placeholder === 'string') this._placeholder = ui.placeholder;
+        if (typeof ui.maxLength === 'number') this._maxLength = Math.max(0, Math.floor(ui.maxLength));
+        if (typeof ui.password === 'boolean') this._password = ui.password;
+        if (typeof ui.readOnly === 'boolean') this._readOnly = ui.readOnly;
+        if (typeof ui.fontSize === 'number') this._fontSize = Math.max(1, ui.fontSize);
+    }
+
+    public static parse(parent: Node, json: any): void {
+        UINode._parseUI(new UITextInputNode(json.name, json.id), parent, json);
+    }
+}
+
 export function parseNodeJson(parent: Node, json: any): void {
   switch (json?.type) {
     case 'model': ModelNode.parse(parent, json); break;
@@ -4958,6 +6336,17 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'skyAtmosphere': SkyAtmosphereNode.parse(parent, json); break;
     case 'lodGroup': LodGroupNode.parse(parent, json); break;
     case 'cameraRig': CameraRigNode.parse(parent, json); break;
+    case 'uiRoot': UIRootNode.parse(parent, json); break;
+    case 'uiPanel': UIPanelNode.parse(parent, json); break;
+    case 'uiText': UITextNode.parse(parent, json); break;
+    case 'uiImage': UIImageNode.parse(parent, json); break;
+    case 'uiButton': UIButtonNode.parse(parent, json); break;
+    case 'uiStack': UIStackNode.parse(parent, json); break;
+    case 'uiSpacer': UISpacerNode.parse(parent, json); break;
+    case 'uiProgressBar': UIProgressBarNode.parse(parent, json); break;
+    case 'uiSlider': UISliderNode.parse(parent, json); break;
+    case 'uiToggle': UIToggleNode.parse(parent, json); break;
+    case 'uiTextInput': UITextInputNode.parse(parent, json); break;
     default: Node.parse(parent, json);
   }
 }

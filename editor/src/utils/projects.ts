@@ -14,7 +14,7 @@ import { MIGRATABLE_LS_KEYS, lsKey, projectLsKeys } from './lsScope';
 import { deleteProjectTextures, migrateUnscopedTextures } from './textureStore';
 import { createFreshProjectMeta } from './sceneStorage';
 import { EMPTY_VFS } from './vfs';
-import { cryptoRandomId } from './UIModel';
+import { cryptoRandomId } from './ids';
 
 export type ProjectRecord = {
   id: string;

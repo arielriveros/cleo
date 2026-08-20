@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Logger, ModelNode, Node } from 'cleo';
+import { Logger, ModelNode, Node, isUINodeType } from 'cleo';
 import type { SceneChange } from 'cleo';
 import CameraIcon from '../../icons/camera.png'
 import CameraRigIcon from '../../icons/camera-rig.png'
@@ -12,12 +12,22 @@ import SpriteIcon from '../../icons/sprite.png'
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import VisibleIcon from '../../icons/visible.png'
 import HiddenIcon from '../../icons/hidden.png'
-import Collapsable from '../../components/Collapsable';
-import AddNew from './AddNew';
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
 import { SCRIPT_ID_VAR, getScriptIdOf } from '../../utils/scripts';
 import { hoveredScriptStore, useHoveredScript } from './hoveredScriptStore';
+import {
+  CanvasIcon, PanelIcon, StackIcon, SpacerIcon, TextIcon, ImageIcon,
+  ButtonIcon, ProgressIcon, SliderIcon, ToggleIcon, TextInputIcon,
+} from './uiIcons';
+
+/** Glyph per UI node type, so a HUD reads as a HUD in the tree rather than a run of identical rows. */
+const UI_ICONS: Record<string, () => JSX.Element> = {
+  uiRoot: CanvasIcon, uiPanel: PanelIcon, uiText: TextIcon, uiImage: ImageIcon,
+  uiButton: ButtonIcon, uiStack: StackIcon, uiSpacer: SpacerIcon,
+  uiProgressBar: ProgressIcon, uiSlider: SliderIcon, uiToggle: ToggleIcon,
+  uiTextInput: TextInputIcon,
+};
 
 interface NodeDescription {
   id: string;
@@ -68,6 +78,11 @@ function SceneNodeItem(props: SceneNodeItemProps) {
   // but stays clickable. Highlight this node's glyph when its script is the one being hovered anywhere.
   const scriptGrey = !!props.templateId;
   const scriptHot = !!props.scriptId && props.scriptId === hoveredScript;
+  // UI elements are tinted so a HUD subtree is distinguishable from world geometry at a glance. The
+  // SELECTED row deliberately keeps the standard blue-and-white treatment: selection is the one signal
+  // that must never be ambiguous, so it wins over the type tint rather than blending with it.
+  const isUI = isUINodeType(props.nodeType ?? '');
+  const UIIcon = isUI ? UI_ICONS[props.nodeType ?? ''] : undefined;
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     // Dedicated MIME so drop targets can tell a scene node from other text/plain drags (dock tabs,
@@ -79,7 +94,10 @@ function SceneNodeItem(props: SceneNodeItemProps) {
   return (
     <div
       id={props.nodeId}
-      className={`scene-item group flex w-[90%] h-[24px] py-[1px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between ${selected ? 'bg-selected border border-white cursor-default' : 'border border-control hover:bg-control-hover cursor-pointer'}`}
+      className={`scene-item group flex w-[90%] h-[24px] py-[1px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between ${
+        selected ? 'bg-selected border border-white cursor-default'
+          : isUI ? 'border border-node-ui/40 text-node-ui hover:bg-control-hover cursor-pointer'
+            : 'border border-control hover:bg-control-hover cursor-pointer'}`}
       onClick={() => props.onSelect(props.nodeId)}
       draggable={true}
       onDragStart={handleDragStart} >
@@ -96,6 +114,7 @@ function SceneNodeItem(props: SceneNodeItemProps) {
         { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'volumetricClouds' && <img src={CloudsIcon} alt='volumetric clouds' className='inline-block w-4 h-4 mr-1 align-middle' /> }
         { props.nodeType === 'skyAtmosphere' && <span className='inline-block w-4 h-4 mr-1 align-middle text-white'><SkyIcon /></span> }
+        { UIIcon && <span className='inline-flex w-4 h-4 mr-1 align-middle items-center justify-center'><UIIcon /></span> }
         { props.nodeName }
       </div>
       <div className='flex flex-row items-center'>
@@ -317,15 +336,11 @@ export default function SceneInspector() {
   }
 
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full'>
-      <AddNew />
-      {/* The drop target is the tree, not the whole panel: the panel also contains the Add section, and a
-          drag released back over Add must not register as a drop into the scene. */}
-      <Collapsable title='Scene'>
-        <div className='min-h-[40px]' onDragOver={handleDragOver} onDrop={handleDrop}>
-          { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode} handleSetVisibility={handleSetVisibility} /> }
-        </div>
-      </Collapsable>
+    // The tree alone: the Add palettes are their own dock panels above this one, so there is no longer a
+    // second section here for a drag to be released over by mistake.
+    <div className='flex flex-col text-white bg-surface-raised w-full h-full min-h-[40px]'
+         onDragOver={handleDragOver} onDrop={handleDrop}>
+      { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode} handleSetVisibility={handleSetVisibility} /> }
     </div>
   )
 }

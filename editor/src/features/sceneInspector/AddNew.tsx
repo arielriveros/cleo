@@ -1,12 +1,14 @@
-import { useState } from 'react';
-import Collapsable from '../../components/Collapsable';
+import { useEffect, useMemo, useState } from 'react';
 import { SegmentedControl } from '../../components/ui';
 import { useCleoEngine } from '../EngineContext';
 import { isWithinTemplateInstance } from '../../utils/templates';
-import { ADD_CATEGORIES, ADD_ITEMS, AddCategory, AddContext, AddItem, NEW_NODE_MIME, addItemTo } from './addCatalog';
+import { ADD_CATEGORIES, ADD_ITEMS, UI_CATEGORIES, AddCategory, AddContext, AddItem, NEW_NODE_MIME, addItemTo } from './addCatalog';
 import ImportIcon from '../../icons/import.png';
 
-const CATEGORY_KEY = 'cleo.addnew.category';
+/** Which half of the catalog a palette shows. Two panels, one component. */
+export type AddScope = 'scene' | 'ui';
+
+const categoryKey = (scope: AddScope) => `cleo.addnew.category${scope === 'ui' ? '.ui' : ''}`;
 
 // One grid cell. The grid sizes the cell, so a long label wraps to two lines instead of widening its
 // column — which is what used to shove the whole section around in a narrow panel.
@@ -28,7 +30,9 @@ function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAd
       }}
       onClick={() => onAdd(item)}
     >
-      <img className='w-[28px] h-[28px] shrink-0 pointer-events-none' src={item.icon} alt='' />
+      {typeof item.icon === 'string'
+        ? <img className='w-[28px] h-[28px] shrink-0 pointer-events-none' src={item.icon} alt='' />
+        : <span className='w-[28px] h-[28px] shrink-0 pointer-events-none flex items-center justify-center'><item.icon /></span>}
       <span className={CELL_LABEL}>{item.label}</span>
     </button>
   );
@@ -53,18 +57,34 @@ function ImportCell({ id, label, folder, onFiles }: { id: string, label: string,
   );
 }
 
-export default function AddNew() {
+export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
   const { editorScene, selectedNode, editorMode, eventEmitter, triggers, importModelFiles } = useCleoEngine();
-  // Validated against the current catalog, not trusted verbatim: a category renamed since the value was
-  // stored ('meshes' -> 'primitives') would otherwise restore a tab that matches no items and looks empty.
+
+  // The palette's OWN scope decides its categories, not the editor mode. Deriving it from the mode made the
+  // two halves mutually exclusive by construction, which is exactly what stopped them being shown side by
+  // side; the panel that hosts this component picks the half instead.
+  const categories = useMemo(
+    () => ADD_CATEGORIES.filter(c => UI_CATEGORIES.includes(c.value) === (scope === 'ui')),
+    [scope]);
+
+  // Validated against the VISIBLE list, not the whole catalog: a stored value can be valid for the other
+  // palette and match nothing here, which renders an empty grid. Also covers a category renamed since the
+  // value was stored ('meshes' -> 'primitives').
   const [category, setCategory] = useState<AddCategory>(() => {
-    const stored = localStorage.getItem(CATEGORY_KEY) as AddCategory | null;
-    return stored && ADD_CATEGORIES.some(c => c.value === stored) ? stored : 'common';
+    const stored = localStorage.getItem(categoryKey(scope)) as AddCategory | null;
+    return stored && categories.some(c => c.value === stored) ? stored : categories[0].value;
   });
+
+  useEffect(() => {
+    if (!categories.some(c => c.value === category)) {
+      const stored = localStorage.getItem(categoryKey(scope)) as AddCategory | null;
+      setCategory(stored && categories.some(c => c.value === stored) ? stored : categories[0].value);
+    }
+  }, [categories, category, scope]);
 
   const selectCategory = (next: AddCategory) => {
     setCategory(next);
-    try { localStorage.setItem(CATEGORY_KEY, next); } catch { /* ignore */ }
+    try { localStorage.setItem(categoryKey(scope), next); } catch { /* ignore */ }
   };
 
   // A placed template instance (and its children) is read-only in Scene mode; adding nodes would parent
@@ -75,9 +95,14 @@ export default function AddNew() {
   const ctx: AddContext = { editorScene, eventEmitter, triggers };
 
   // Clicking still parents onto the selection (drag onto the tree or the viewport to choose a parent).
+  //
+  // With no selection the fallback is the scene root rather than doing nothing. That matters most in ui
+  // mode, where the very first click is necessarily made with nothing selected — `addItemTo` retargets a
+  // UI element to (or creates) a UI root anyway, so the root is only ever a routing hop.
   const onAdd = (item: AddItem) => {
-    if (!selectedNodeObj) return;
-    addItemTo(item, selectedNodeObj, ctx).catch(err => console.error(err));
+    const parent = selectedNodeObj ?? editorScene?.root;
+    if (!parent) return;
+    addItemTo(item, parent, ctx).catch(err => console.error(err));
   };
 
   // Imports land in the Models library (each file becomes a reusable model asset with a thumbnail);
@@ -93,14 +118,14 @@ export default function AddNew() {
   const items = ADD_ITEMS.filter(item => item.category === category);
 
   return (
-    <Collapsable title='Add' persistKey='add'>
+    <>
       {locked && <div className='text-[11px] text-warning bg-warning/15 px-2 py-1'>Template instance — edit the template to add nodes.</div>}
       <fieldset disabled={locked} className={`border-0 m-0 p-0 min-w-0 ${locked ? 'opacity-50' : ''}`}>
         <div className='flex flex-col gap-1.5 p-1.5'>
           <SegmentedControl
             size='sm'
             className='grid grid-cols-3 gap-1 w-full'
-            options={ADD_CATEGORIES}
+            options={categories}
             value={category}
             onChange={selectCategory}
           />
@@ -113,6 +138,6 @@ export default function AddNew() {
           </div>
         </div>
       </fieldset>
-    </Collapsable>
+    </>
   );
 }

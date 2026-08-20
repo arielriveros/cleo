@@ -1,4 +1,4 @@
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 import { regenerateIds } from './nodeSubtree'
 import { VfsEntry, VfsIndex, withAncestors, uniquePath, dirOf, stemOf, extOf } from './vfs'
 import type { SceneMeta, SceneAssetData } from './sceneStorage'

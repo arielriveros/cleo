@@ -1,6 +1,6 @@
 import { Node } from 'cleo'
 import type { NodeVariableType, NodeVariableAccess } from 'cleo'
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 
 // A reusable, class-based Script asset (mirrors MaterialAsset / Template). Authored once, referenced by many
 // nodes via the SCRIPT_ID_VAR node variable — editing the script updates every node that uses it.
@@ -19,6 +19,8 @@ export const SCRIPT_ID_VAR = '__scriptId'
 export type ScriptBaseType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'cameraRig'
   | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup'
+  | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
+  | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput'
 
 /** The exported base class name for each script base type (what the generated class extends). */
 export const BASE_CLASS: Record<ScriptBaseType, string> = {
@@ -35,12 +37,29 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
   volumetricClouds: 'VolumetricCloudsNode',
   skyAtmosphere: 'SkyAtmosphereNode',
   lodGroup: 'LodGroupNode',
+  // UI. Concrete classes rather than a single UINode base, so `class HealthBar extends UIProgressBarNode`
+  // gives the script a typed `this.value` in Monaco instead of an untyped payload.
+  uiRoot: 'UIRootNode',
+  uiPanel: 'UIPanelNode',
+  uiText: 'UITextNode',
+  uiImage: 'UIImageNode',
+  uiButton: 'UIButtonNode',
+  uiStack: 'UIStackNode',
+  uiSpacer: 'UISpacerNode',
+  uiProgressBar: 'UIProgressBarNode',
+  uiSlider: 'UISliderNode',
+  uiToggle: 'UIToggleNode',
+  uiTextInput: 'UITextInputNode',
 }
 
 export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   node: 'Node', model: 'Model', light: 'Light', lightProbe: 'Light Probe', skybox: 'Skybox',
   camera: 'Camera', cameraRig: 'Camera Rig', sprite: 'Sprite', animatedSprite: 'Animated Sprite', landscape: 'Landscape',
   volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', lodGroup: 'LOD Group',
+  uiRoot: 'UI Canvas', uiPanel: 'UI Panel', uiText: 'UI Text', uiImage: 'UI Image',
+  uiButton: 'UI Button', uiStack: 'UI Stack', uiSpacer: 'UI Spacer',
+  uiProgressBar: 'UI Progress Bar', uiSlider: 'UI Slider', uiToggle: 'UI Toggle',
+  uiTextInput: 'UI Text Input',
 }
 
 /** One reflected script variable, parsed from a class field declaration. */
@@ -225,9 +244,61 @@ export function scriptClassName(name: string): string {
 
 /** The starter class source for a new script of `name` extending `baseType`. Handlers are method overrides;
  *  fields are the node's variables (public shows in the inspector, a leading _ stays internal). */
+/** Handler stubs that actually apply to a given UI base type. */
+const UI_STARTERS: Partial<Record<ScriptBaseType, string>> = {
+  uiButton: `  onPress() {
+    Logger.log(this.name + ' pressed', 'Script')
+  }`,
+  uiToggle: `  onValueChanged(checked: boolean) {
+    Logger.log(this.name + ' = ' + checked, 'Script')
+  }`,
+  uiSlider: `  onValueChanged(value: number) {
+    Logger.log(this.name + ' = ' + value, 'Script')
+  }`,
+  uiTextInput: `  onValueChanged(value: string) {
+    Logger.log(this.name + ' = ' + value, 'Script')
+  }
+
+  onSubmit(value: string) {
+    Logger.log('submitted: ' + value, 'Script')
+  }`,
+  uiProgressBar: `  onUpdate(delta: number, time: number) {
+    // Bind the bar to whatever it reports on; the layout pass runs AFTER every onUpdate, so a value
+    // written here lands on screen the same frame.
+    const player = this.findNode('player')
+    if (player) this.value = (player as any).health ?? this.value
+  }`,
+  uiText: `  onUpdate(delta: number, time: number) {
+    // Assigning the same string is a no-op, so this is safe to run every frame.
+    this.text = 'Time: ' + time.toFixed(1)
+  }`,
+}
+
 export function defaultScriptClass(name: string, baseType: ScriptBaseType): string {
   const base = BASE_CLASS[baseType]
   const className = scriptClassName(name)
+
+  // UI scripts get a starter built from the handlers that actually exist on their base class. The generic
+  // stub below moves the node and reacts to collisions, neither of which a screen rectangle can do.
+  if (base.startsWith('UI')) {
+    const body = UI_STARTERS[baseType] ?? `  onStart() {
+    Logger.log('Started: ' + this.name, 'Script')
+  }`
+    return `import { Logger, ${base} } from 'cleo'
+
+// ${className} runs on the UI element this script is attached to. Handlers are method overrides; class
+// fields become the node's variables (public/private/protected controls inspector visibility, and a leading
+// underscore hides a field from the inspector).
+//
+// The node already exists, so this class is never CONSTRUCTED — its methods are bound onto the live node.
+// UI layout is resolved once per frame AFTER every onUpdate, so anything written here is on screen the
+// same frame rather than one behind.
+export default class ${className} extends ${base} {
+${body}
+}
+`
+  }
+
   const imports = base === 'Node' ? 'Logger, InputManager, Node' : `Logger, InputManager, Node, ${base}`
   return `import { ${imports} } from 'cleo'
 

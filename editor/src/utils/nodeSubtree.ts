@@ -1,5 +1,5 @@
 import { parseNodeJson, collectNodeIds, regenerateNodeIds, remapNodeRefs as engineRemapNodeRefs } from 'cleo'
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 
 // Shared helpers for serialized node subtrees, used by both the Template and Mesh asset systems.
 // Kept here (rather than duplicated) so template instances and imported meshes reconstruct identically.

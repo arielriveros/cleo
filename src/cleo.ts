@@ -8,6 +8,20 @@ export type { NodeTemplate } from "./core/scene/templates";
 export { parseNodeJson } from "./core/scene/node";
 export { cloneNodeJson, collectNodeIds, remapNodeRefs, regenerateNodeIds } from "./core/scene/nodeJson";
 export { Node, ModelNode, LightNode, LightProbeNode, SkyboxNode, CameraNode, CameraRigNode, SpriteNode, AnimatedSpriteNode, LandscapeNode, TilemapNode, LodGroupNode, VolumetricCloudsNode, SkyAtmosphereNode, getData, setData, bindDataAccessors, canAccessVariable, attachScriptFactory, unwrapScriptNode } from "./core/scene/node";
+// UI nodes. Every class is exported individually (rather than the base alone) because a script's base
+// type is resolved by CLASS NAME -- `class HealthBar extends UIProgressBarNode` is what gives the script
+// a typed `this.value`, and the editor's script library matches the same names.
+export {
+    UINode, UIRootNode, UIPanelNode, UITextNode, UIImageNode, UIButtonNode, UIStackNode, UISpacerNode,
+    UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode, isUINodeType,
+} from "./core/scene/node";
+export type { UIImageFit, UIFillDirection, UITextAlign, UITextVAlign, UISizing, UIColor } from "./core/scene/node";
+export {
+    setRect as uiSetRect, solveRect as uiSolveRect, rootScale as uiRootScale,
+    projectToScreen as uiProjectToScreen, worldUIScale, intersectRect as uiIntersectRect,
+    rectOffscreen as uiRectOffscreen, stackLayout as uiStackLayout,
+} from "./core/uiLayout";
+export type { UIRect, UIScaleMode, UISpace, StackJustify, StackItem, ScreenProjection } from "./core/uiLayout";
 export type { NodeVariable, NodeVariableType, NodeVariableAccess, VolumetricCloudsOptions, SkyAtmosphereOptions, FollowSpace, AimMode, SpriteFrameSource } from "./core/scene/node";
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
@@ -108,23 +122,23 @@ export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES } from "./terrain/foliag
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
 export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS } from "./terrain/foliageColliders";
 export type { FoliageColliderSettings } from "./terrain/foliageColliders";
-export { Tilemap, DEFAULT_FILL_LIMIT } from "./tilemap/tilemap";
-export type { TileEdit, TileOrientation } from "./tilemap/tilemap";
-export { TilemapLayer, defaultLayerConfig } from "./tilemap/tilemapLayer";
-export type { TilemapLayerConfig, LayerBounds } from "./tilemap/tilemapLayer";
-export { Tileset } from "./tilemap/tileset";
-export type { TilesetConfig, TileMeta, TileAnimation, TerrainSet, VariantSet, WangKind } from "./tilemap/tileset";
+export { Tilemap, DEFAULT_FILL_LIMIT } from "./graphics/tilemap/tilemap";
+export type { TileEdit, TileOrientation } from "./graphics/tilemap/tilemap";
+export { TilemapLayer, defaultLayerConfig } from "./graphics/tilemap/tilemapLayer";
+export type { TilemapLayerConfig, LayerBounds } from "./graphics/tilemap/tilemapLayer";
+export { Tileset } from "./graphics/tilemap/tileset";
+export type { TilesetConfig, TileMeta, TileAnimation, TerrainSet, VariantSet, WangKind } from "./graphics/tilemap/tileset";
 export {
     cellToWorld, worldToCell, cellCorners, cellSortY, neighbours, neighbourCount, normalizeGrid,
-} from "./tilemap/cellMath";
-export type { GridSpec, GridKind, HexOrientation, HexOffset } from "./tilemap/cellMath";
+} from "./graphics/tilemap/cellMath";
+export type { GridSpec, GridKind, HexOrientation, HexOffset } from "./graphics/tilemap/cellMath";
 export {
     CHUNK_SIZE, CELL_EMPTY, packCell, cellTile, cellFlags, cellFlipX, cellFlipY, cellRot90, withTile, chunkKey, chunkCoord,
-} from "./tilemap/chunk";
-export type { TileChunk } from "./tilemap/chunk";
-export { autoTileMask, resolveAutoTile, pickWeightedVariant, cellNoise } from "./tilemap/autotile";
-export { greedyMerge } from "./tilemap/tilemapCollision";
-export type { SolidBox } from "./tilemap/tilemapCollision";
+} from "./graphics/tilemap/chunk";
+export type { TileChunk } from "./graphics/tilemap/chunk";
+export { autoTileMask, resolveAutoTile, pickWeightedVariant, cellNoise } from "./graphics/tilemap/autotile";
+export { greedyMerge } from "./graphics/tilemap/tilemapCollision";
+export type { SolidBox } from "./graphics/tilemap/tilemapCollision";
 export { Raycaster } from "./core/raycaster";
 export type { Ray, RaycastHit } from "./core/raycaster";
 export { BVH, rayTriangleIntersection } from "./core/bvh";

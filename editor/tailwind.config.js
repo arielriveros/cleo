@@ -49,6 +49,9 @@ module.exports = {
           hover: rgbVar('--success-hover'),
         },
         warning: rgbVar('--warning'),
+        node: {
+          ui: rgbVar('--node-ui'),
+        },
         axis: {
           x: rgbVar('--axis-x'),
           y: rgbVar('--axis-y'),

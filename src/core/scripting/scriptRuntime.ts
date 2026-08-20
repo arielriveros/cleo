@@ -20,7 +20,12 @@ import { transform } from 'sucrase';
 export type ScriptModule = Record<string, any>;
 
 /** Handlers a script may export. Anything else it exports is ignored. */
-export const SCRIPT_HANDLERS = ['onConstruct', 'onStart', 'onSpawn', 'onUpdate', 'onCollision', 'onTrigger', 'onDespawn'] as const;
+export const SCRIPT_HANDLERS = [
+    'onConstruct', 'onStart', 'onSpawn', 'onUpdate', 'onCollision', 'onTrigger', 'onDespawn',
+    // UI. Listed here rather than special-cased so a class script overriding one gets exactly the same
+    // throw-guard and async-rejection handling as onUpdate — see attachClassScript in node.ts.
+    'onPress', 'onValueChanged', 'onSubmit',
+] as const;
 
 const modules = new Map<string, ScriptModule>();
 

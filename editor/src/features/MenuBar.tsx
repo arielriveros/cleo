@@ -51,7 +51,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, ui, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, tilesets, sceneDimension } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, tilesets, sceneDimension } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -159,7 +159,7 @@ export default function MenuBar() {
         // switch scenes at runtime via Game.loadScene.
         data = await buildMultiSceneGameData({
           mainSceneId, openSceneId, scenes: sceneList,
-          liveScene: editorScene, liveScripts: scripts, liveBodies: bodies, liveTriggers: triggers, liveUi: ui,
+          liveScene: editorScene, liveScripts: scripts, liveBodies: bodies, liveTriggers: triggers,
           libs: { materials, models, templates, terrainMaterials, scripts: scriptAssets, tilesets },
           scriptAssets,
           liveDimension: sceneDimension,

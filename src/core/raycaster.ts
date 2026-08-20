@@ -1,5 +1,5 @@
 import { vec3, mat4 } from "gl-matrix";
-import { Node } from "./scene/node";
+import { Node, isUINodeType } from "./scene/node";
 import { Camera } from "./camera";
 import { BVH } from "./bvh";
 
@@ -194,15 +194,22 @@ export class Raycaster {
         for (const node of nodes) {
             if (!node.visible) continue;
 
-            // Skip editor/debug helper nodes (but keep gizmos raycastable), terrain and tilemaps. Both
-            // of the latter are picked analytically by their own subsystems rather than by ray/AABB —
-            // and a tilemap's box spans everything it has ever painted, so without this skip it would
-            // swallow every click in a 2D scene.
+            // Skip editor/debug helper nodes (but keep gizmos raycastable), terrain, tilemaps and UI.
+            // Terrain and tilemaps are picked analytically by their own subsystems rather than by
+            // ray/AABB — and a tilemap's box spans everything it has ever painted, so without this skip
+            // it would swallow every click in a 2D scene.
+            //
+            // UI nodes are skipped because they are picked in SCREEN space, against their resolved rect,
+            // by the UI layer. They are not merely irrelevant to a world ray: `Node.getBoundingBox`
+            // falls back to a unit cube at the node's world position, so an entire HUD would otherwise
+            // be a stack of 1x1x1 boxes sitting at the origin — exactly where new nodes are created,
+            // swallowing clicks meant for whatever is actually there.
             if ((node.name.startsWith('__editor__') && !node.name.includes('gizmo')) ||
                 node.name.startsWith('__debug__') ||
                 node.name.startsWith('__terrain_chunk__') ||
                 node.nodeType === 'landscape' ||
-                node.nodeType === 'tilemap') {
+                node.nodeType === 'tilemap' ||
+                isUINodeType(node.nodeType)) {
                 continue;
             }
 

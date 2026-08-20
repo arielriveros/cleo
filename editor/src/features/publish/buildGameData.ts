@@ -11,7 +11,6 @@ export interface GameDataSources {
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[] }>;
-  ui: { version: number; elements: any[] };
   // The shared script asset library. Given it, buildGameData resolves each node's __scriptId link to the
   // asset's source (into `scripts`) and injects the node's native script-field values as `scriptVars`.
   scriptAssets?: ScriptAsset[];
@@ -159,7 +158,6 @@ export async function buildGameData(sources: GameDataSources): Promise<any> {
   // interned against the scene's in packGameBin, so identical meshes cost nothing extra.
   if (sources.templates?.length)
     json.templates = bakeTemplates(sources.templates, sources.materials, sources.scriptAssets);
-  json.ui = { version: sources.ui.version, elements: sources.ui.elements };
   // Persist the renderer look. `graphics` seeds the engine constructor (clear color from frame one);
   // `render` is the full snapshot the player re-applies to its renderer after boot. Scene.parse ignores
   // `config`, so it's inert for in-editor play (which reuses the live renderer anyway).

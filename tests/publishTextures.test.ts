@@ -22,6 +22,21 @@ describe('published texture references', () => {
     })).toEqual(['a', 'b']);
   });
 
+  it('finds a UI image’s texture, which hangs off its `ui` payload', () => {
+    // A uiImage holds a bare texture id on `ui.textureId` — no material, no tileset — so the generic
+    // walk cannot see it. Missing it publishes a game whose HUD images are blank.
+    expect(ids({
+      children: [
+        { type: 'uiRoot', ui: { textureId: null }, children: [
+          { type: 'uiImage', ui: { textureId: 'hud-icon' }, children: [] },
+          { type: 'uiPanel', ui: {}, children: [
+            { type: 'uiImage', ui: { textureId: 'nested-icon' }, children: [] },
+          ] },
+        ] },
+      ],
+    })).toEqual(['hud-icon', 'nested-icon']);
+  });
+
   it('finds a tilemap’s and a sprite’s embedded atlases', () => {
     // Both hide their atlas id on an embedded tileset rather than in a `textures` map, so the generic
     // deep walk cannot see them. A tilemap embeds an ARRAY; a sprite embeds a single object — missing

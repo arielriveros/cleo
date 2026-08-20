@@ -1,4 +1,4 @@
-import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode } from 'cleo'
+import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import ModelSlot from './ModelSlot'
@@ -16,6 +16,7 @@ import CameraRigEditor from './CameraRigEditor'
 import TilemapEditor from './TilemapEditor'
 import LandscapeEditor from './LandscapeEditor'
 import SceneSettings from './SceneSettings'
+import UIEditor from './UIEditor'
 import { isRootNode } from '../useSelectedNode'
 import { useCleoEngine } from '../../EngineContext'
 
@@ -23,6 +24,11 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
   const { activeTab } = useCleoEngine();
   const root = isRootNode(props.node);
   const ro = !!props.readOnly;
+  // A screen-space UI element has no meaningful world transform — the anchor solve owns its position
+  // entirely — so offering the Transform panel would be offering an edit that silently does nothing.
+  // A WORLD-space canvas is the exception: its `position` is precisely the point it projects from.
+  const isUI = isUINodeType(props.node.nodeType);
+  const showTransform = !root && (!isUI || (props.node instanceof UIRootNode && props.node.space === 'world'));
 
   // Selecting the scene tab's root means "the scene itself" — show its settings rather than an all-but-empty
   // node inspector. Gated on the tab kind: a template/mesh tab's throwaway scene has a root named 'root'
@@ -33,7 +39,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
     <>
         {/* NodeInfo (name locked, Delete kept) and Transform stay editable for instances. */}
         <NodeInfo node={props.node} readOnly={ro} />
-        {!root && <TransformEditor node={props.node} />}
+        {showTransform && <TransformEditor node={props.node} />}
 
         {/* Which model asset this subtree came from. Outside the fieldset below on purpose: it is a label
             and a navigation button, not an edit, and jumping to the asset is exactly what you want from a
@@ -57,6 +63,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'landscape' && <LandscapeEditor key={props.node.id} node={props.node as LandscapeNode} /> }
           { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }
+          { isUI && <UIEditor node={props.node as UINode} /> }
         </fieldset>
     </>
   )

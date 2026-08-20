@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 import { useCleoEngine } from "../EngineContext";
 import { Raycaster, ModelNode, Model, Geometry, Material, LandscapeNode } from "cleo";
 
-type Vec3Like = Float32Array | number[];
+// ArrayLike, not `Float32Array | number[]`: gl-matrix's `vec3` is `[number, number, number] |
+// IndexedCollection`, and IndexedCollection is assignable to neither of those.
+type Vec3Like = ArrayLike<number>;
 
 interface Props {
     viewportRef: React.RefObject<HTMLDivElement>;
@@ -73,7 +75,7 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             const node = activeLandscape();
             if (!node) return null;
             const p = node.terrain.raycast(ray.origin, ray.direction);
-            return p ? { node, point: p as Vec3Like } : null;
+            return p ? { node, point: p } : null;
         };
 
         const showCursor = (point: Vec3Like) => {

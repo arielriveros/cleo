@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Sprite, legacySheetTileset, remapLegacyFrame } from '../src/graphics/sprite';
 import { Node, SpriteNode, AnimatedSpriteNode, parseNodeJson } from '../src/core/scene/node';
-import { Tileset } from '../src/tilemap/tileset';
+import { Tileset } from '../src/graphics/tilemap/tileset';
 
 // Sprites draw one TILE of a tileset. Two things are worth pinning down: that the UV rect a sprite hands
 // the renderer is the tileset's own (so margin/spacing atlases work at all), and that pre-tileset scenes

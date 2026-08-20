@@ -57,6 +57,11 @@ export function collectReferencedTextureIds(
       const id = sn.tileset?.textureId
       if (id) set.add(id)
     }
+    // UI images hold a bare texture id — no material, no tileset — so nothing above sees them either.
+    for (const un of scene.uiNodes) {
+      const id = (un as any).textureId
+      if (typeof id === 'string' && id) set.add(id)
+    }
   }
   for (const m of materials) collectTextureIds(m.material, set)
   for (const m of models) collectTextureIds(m.nodeJson, set)
@@ -100,6 +105,10 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
     for (const ts of n?.tilemap?.tilesets ?? []) if (ts?.textureId) set.add(ts.textureId)
     const spriteTileset = n?.sprite?.tileset
     if (spriteTileset?.textureId) set.add(spriteTileset.textureId)
+    // A uiImage's texture id sits on its `ui` payload, not in a `textures` map — same blind spot as the
+    // tilemap and sprite cases above. Miss it and a published game's UI images come back blank with
+    // nothing logged, because the texture was simply never packed into the bundle.
+    if (typeof n?.ui?.textureId === 'string' && n.ui.textureId) set.add(n.ui.textureId)
     for (const child of n?.children ?? []) walkTilesets(child)
   }
   walkTilesets(node)

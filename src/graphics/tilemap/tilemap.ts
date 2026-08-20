@@ -8,7 +8,7 @@
 // Aliased because `Material` is not imported here but the physics one reads better named for what it is.
 import { Body, Box, ConvexPolyhedron, Vec3, World, Material as PhysicsMaterial } from 'cannon-es';
 import { vec3 } from 'gl-matrix';
-import { Logger } from '../core/logger';
+import { Logger } from '../../core/logger';
 import {
     GridSpec, cellCorners, cellToWorld, neighbours, normalizeGrid, worldToCell,
 } from './cellMath';

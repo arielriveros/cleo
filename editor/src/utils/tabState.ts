@@ -15,8 +15,8 @@ const tabStateKey = () => lsKey(LS_KEYS.editorTabs);
 // 'landscape' and 'tilemap' are the two dimension-specific sculpting modes: the mode selector offers
 // whichever one matches the open scene's 2D/3D setting. Both are stored here, so a session restores into
 // the mode it left — and a mode missing from MAIN_MODES silently resets to 'scene' on every reload.
-export type MainMode = 'scene' | 'landscape' | 'tilemap' | 'renderer';
-const MAIN_MODES: readonly MainMode[] = ['scene', 'landscape', 'tilemap', 'renderer'];
+export type MainMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'renderer';
+const MAIN_MODES: readonly MainMode[] = ['scene', 'landscape', 'tilemap', 'ui', 'renderer'];
 
 export type TabState = {
   version: 1;

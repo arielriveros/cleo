@@ -1,5 +1,5 @@
 import { Node, TextureManager } from 'cleo'
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectIds, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, MaterialAsset } from './materials'
 

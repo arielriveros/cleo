@@ -1,12 +1,12 @@
 import { IDockviewPanelProps, IDockviewPanelHeaderProps } from 'dockview-react';
 import { ModelNode } from 'cleo';
 import EngineViewport from '../EngineViewport';
-import UIOverlay from '../uiInspector/UIOverlay';
+import UIEditorLayer from '../gameUi/UIEditorLayer';
 import StateGraph from '../animation/StateGraph';
 import FieldGraph from '../animationField/FieldGraph';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
-import UIInspector from '../uiInspector/UIInspector';
+import AddNew from '../sceneInspector/AddNew';
 import SkeletonTree from '../animation/SkeletonTree';
 import { ClipsPanel as AnimClips, VariablesPanel as AnimVariables, StateMachinePanel as AnimStateMachine } from '../animation/StateMachineEditor';
 import TerrainMaterialInspector from '../terrainMaterials/TerrainMaterialInspector';
@@ -36,8 +36,8 @@ function ViewportPanel(_: IDockviewPanelProps) {
   return (
     <div className="relative h-full w-full overflow-hidden">
       <EngineViewport />
-      {/* UI overlay sits on top of the WebGL canvas */}
-      <UIOverlay />
+      {/* Game UI: real scene nodes, laid out by the engine and painted as DOM over the canvas */}
+      <UIEditorLayer />
       {/* Animation-mode node graph overlays the viewport when Graph view is active */}
       <StateGraph />
       {/* Animation-field mode: the blend-space plot overlays the viewport, with the 3D preview showing
@@ -64,8 +64,14 @@ function ScenePanel(_: IDockviewPanelProps) {
   return <SidePanel>{editorMode === 'animation' ? <SkeletonTree /> : <SceneInspector />}</SidePanel>;
 }
 
-function UIPanel(_: IDockviewPanelProps) {
-  return <SidePanel><UIInspector /></SidePanel>;
+// The two Add palettes. Both are the same `AddNew` grid over the same catalog and the same drop handlers;
+// `scope` picks which half of the categories each shows. Two panels rather than one mode-switched panel so
+// they can sit next to each other as tabs — a UI element and a mesh are added the same way.
+function SceneAddPanel(_: IDockviewPanelProps) {
+  return <SidePanel><AddNew scope='scene' /></SidePanel>;
+}
+function UIAddPanel(_: IDockviewPanelProps) {
+  return <SidePanel><AddNew scope='ui' /></SidePanel>;
 }
 
 // Material editor mode: the panel focuses on the preview sphere's material only (name + controls).
@@ -165,8 +171,8 @@ function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachin
 function TilePalettePanel(_: IDockviewPanelProps) { return <TilePalette />; }
 function TilemapLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><TilemapLayersPanel /></SidePanel>; }
 // Render profiler. Owns its own scrolling (it is a long column of sections), so no SidePanel wrapper.
-// Unlike the compact HUD it is available in scene mode and during Play, which is where the real
-// frame budget matters — a viewport-only profiler cannot measure the thing you actually ship.
+// Renderer mode only, alongside the compact RendererStats HUD: the HUD answers "is the frame fast", this
+// answers "which pass is spending the time".
 function ProfilerDockPanel(_: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
@@ -188,7 +194,8 @@ export function PanelTab(props: IDockviewPanelHeaderProps) {
 export const dockComponents = {
   viewport: ViewportPanel,
   scene: ScenePanel,
-  ui: UIPanel,
+  sceneAdd: SceneAddPanel,
+  uiAdd: UIAddPanel,
   properties: PropertiesPanel,
   scripts: ScriptsPanel,
   physics: PhysicsPanel,

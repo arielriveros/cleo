@@ -36,7 +36,7 @@ export function collectNodeIds(json: any, out: string[] = []): string[] {
 }
 
 /** Fields that store ANOTHER node's id and so must be rewritten alongside it. */
-const NODE_REF_KEYS = ['followId', 'lookAtId', 'cameraNodeId'];
+const NODE_REF_KEYS = ['followId', 'lookAtId', 'cameraNodeId', 'uiTargetId'];
 
 /**
  * Rewrite node-reference fields (CameraRigNode's follow/lookAt/camera pins) through an id map.

@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { Tilemap } from '../src/tilemap/tilemap';
-import { Tileset } from '../src/tilemap/tileset';
-import { TilemapLayer } from '../src/tilemap/tilemapLayer';
+import { Tilemap } from '../src/graphics/tilemap/tilemap';
+import { Tileset } from '../src/graphics/tilemap/tileset';
+import { TilemapLayer } from '../src/graphics/tilemap/tilemapLayer';
 import {
     CELL_EMPTY, CHUNK_SIZE, cellFlipX, cellRot90, cellTile, chunkCoord, chunkKey, packCell,
-} from '../src/tilemap/chunk';
-import { greedyMerge } from '../src/tilemap/tilemapCollision';
-import { autoTileMask, cellNoise, pickWeightedVariant } from '../src/tilemap/autotile';
+} from '../src/graphics/tilemap/chunk';
+import { greedyMerge } from '../src/graphics/tilemap/tilemapCollision';
+import { autoTileMask, cellNoise, pickWeightedVariant } from '../src/graphics/tilemap/autotile';
 import { bytesToBase64 } from '../src/core/base64';
 
 function tileset(id = 'ts'): Tileset {

@@ -24,6 +24,14 @@ const TilemapIcon = () => (
     <rect x="9" y="9" width="6" height="6" fill="currentColor" stroke="none" />
   </svg>
 );
+// Nested frames with a corner handle: an anchored rectangle inside a screen, which is what the mode edits.
+const UIIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2.5" y="4" width="19" height="16" rx="1.5" />
+    <rect x="6" y="7.5" width="8" height="6" rx="1" fill="currentColor" stroke="none" opacity="0.55" />
+    <path d="M17 16.5h1.5V18" />
+  </svg>
+);
 const RendererIcon = () => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <line x1="4" y1="7" x2="20" y2="7" /><circle cx="9" cy="7" r="2" fill="currentColor" stroke="none" />
@@ -86,6 +94,10 @@ export default function ModeSelector() {
             <LandscapeIcon /> Landscape
           </Segment>
         )}
+        {/* Not dimension-gated, unlike the Landscape/Tilemap slot: a HUD applies equally to 2D and 3D. */}
+        <Segment active={editorMode === 'ui'} disabled={isPlayMode} title='UI layout & anchoring' onClick={() => select('ui')}>
+          <UIIcon /> UI
+        </Segment>
         <Segment active={editorMode === 'renderer'} disabled={isPlayMode} title='Renderer options & debug channels' onClick={() => select('renderer')}>
           <RendererIcon /> Renderer
         </Segment>

@@ -23,7 +23,9 @@ interface RigState {
   shakePositionAmplitude: Vec3; shakeRotationAmplitude: Vec3; shakeFrequency: number; shakeDecay: number
 }
 
-const toVec3 = (v: Float32Array | number[]): Vec3 => [v[0], v[1], v[2]]
+// ArrayLike, not `Float32Array | number[]`: gl-matrix's `vec3` is `[number, number, number] |
+// IndexedCollection`, and IndexedCollection is assignable to neither of those.
+const toVec3 = (v: ArrayLike<number>): Vec3 => [v[0], v[1], v[2]]
 
 function readNode(node: CameraRigNode): RigState {
   return {

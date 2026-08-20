@@ -1,5 +1,5 @@
 import { TerrainMaterial, Terrain, TextureManager } from 'cleo'
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 
 // A reusable, named terrain material saved to the global terrain-material library, with a rendered
 // preview thumbnail. Mirrors MaterialAsset, but its serialized `material` is a TerrainMaterial (a base

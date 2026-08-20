@@ -196,7 +196,7 @@ export default function EngineViewport() {
             // In landscape/tilemap/renderer modes the viewport is not a selection surface. In material mode
             // the preview sphere stays selected (it drives the material inspector), so clicks must not change
             // it. Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
-            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
+            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
             
             // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
@@ -485,7 +485,7 @@ export default function EngineViewport() {
                     </select>
                 )}
             </div>
-            {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
+            {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'ui' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}

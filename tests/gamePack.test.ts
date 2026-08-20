@@ -27,7 +27,7 @@ const cube = () => ({
 const gameWith = (children: any[], textureBytes: any[] = []) => ({
   version: 2,
   entry: 'main',
-  scenes: { main: { name: 'Main', scene: { name: 'root', children }, ui: { version: 1, elements: [] } } },
+  scenes: { main: { name: 'Main', scene: { name: 'root', children } } },
   config: { graphics: { clearColor: [0, 0, 0, 1] }, render: { exposure: 1 } },
   textureBytes,
 });

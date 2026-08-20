@@ -1,6 +1,6 @@
 import { Node, ModelNode, AnimatedModel } from 'cleo'
 import type { AnimationField, AnimationFieldMode, AnimationFieldAxis, AnimationFieldSample } from 'cleo'
-import { cryptoRandomId } from './UIModel'
+import { cryptoRandomId } from './ids'
 import type { ModelAsset } from './models'
 
 // A reusable, named Animation Field asset — the editor's blend space (mirrors MaterialAsset / ScriptAsset).

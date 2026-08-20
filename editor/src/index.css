@@ -56,6 +56,10 @@ body { font-size: var(--text-ui); }
   --success-hover:       53 133 53;   /* #358535 */
   --warning:             255 210 122; /* #ffd27a  caution text */
 
+  /* Scene-tree node accent. Cyan deliberately: the selection accent is indigo (--selected/--highlight),
+     so an indigo UI row would read as "selected" at a glance in the one place that must stay unambiguous. */
+  --node-ui: 110 214 235;  /* #6ed6eb  UI element rows in the scene tree */
+
   /* Axis colors (vector inputs) */
   --axis-x: 255 125 125;   /* #ff7d7d */
   --axis-y: 125 255 125;   /* #7dff7d */

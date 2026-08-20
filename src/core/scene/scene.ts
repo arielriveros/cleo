@@ -1,6 +1,6 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
-import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, TilemapNode, VolumetricCloudsNode, SkyAtmosphereNode, parseNodeJson } from "./node";
-import { vec3 } from "gl-matrix";
+import { CameraNode, CameraRigNode, LandscapeNode, LightNode, LightProbeNode, LodGroupNode, ModelNode, Node, SkyboxNode, SpriteNode, TilemapNode, UINode, UIRootNode, VolumetricCloudsNode, SkyAtmosphereNode, parseNodeJson } from "./node";
+import { mat4, vec3 } from "gl-matrix";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
@@ -43,6 +43,13 @@ export class Scene {
     private _lodGroups: Set<LodGroupNode> = new Set();
     private _cameraRigs: Set<CameraRigNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
+    private _uiRoots: Set<UIRootNode> = new Set();
+    private _uiNodes: Set<UINode> = new Set();
+    // Container size for the UI layout pass, in CSS pixels. See setUIViewport for why this is pushed in
+    // rather than read from the canvas or from currentViewport.
+    private _uiViewport: { width: number, height: number, dpr: number } = { width: 1920, height: 1080, dpr: 1 };
+    // Reused across frames: the UI pass must not allocate a matrix per world-space root per frame.
+    private readonly _uiViewProj: mat4 = mat4.create();
     // Built alongside _nodes so getNodesByName/getNodeById (called from scripts, sometimes per-frame)
     // are an O(1) map lookup instead of a scan over every node in the scene.
     private _nodesByName: Map<string, Node[]> = new Map();
@@ -309,12 +316,93 @@ export class Scene {
                 sceneStats.rigMs = performance.now() - rigStart;
             }
 
+            this._solveUI();
+
             sceneStats.nodes = this._nodes.size;
             sceneStats.frameMs = performance.now() - frameStart;
         } catch (e) {
             Logger.error(e);
         }
     }
+
+    /**
+     * Resolve every UI root's subtree into screen rects.
+     *
+     * Runs LAST in the update, after every onUpdate and after the camera-rig pass. Both orderings matter:
+     *  - after onUpdate, because a script writing `bar.value = hp / maxHp` must land the same frame;
+     *    solving from a node's own update() would leave the HUD one frame behind whatever it displays.
+     *  - after the rig pass, because a world-space root projects through the active camera, and a rig
+     *    writes its camera child's transform in that pass — projecting first pins world UI to the
+     *    PREVIOUS frame's camera, which reads as the label swimming during fast movement.
+     *
+     * Deliberately not gated on `_hasStarted`/`paused`, exactly like the rig pass: the editor has to
+     * preview the resting layout while it is being authored, which is what makes `ui` mode work at all.
+     *
+     * Cheaper than the rig pass in one important way: it needs NO extra `updateTransforms()`. Screen-space
+     * UI never reads a world transform, and a world root reads `worldPosition`, which the frame's earlier
+     * passes already refreshed.
+     */
+    private _solveUI(): void {
+        const roots = this.uiRoots;
+        if (roots.size === 0) return;
+
+        const uiStart = performance.now();
+        const { width, height, dpr } = this._uiViewport;
+
+        const camera = this.activeCamera?.camera ?? null;
+        let viewProj: mat4 | null = null;
+        let orthographic = false;
+        let orthoVerticalExtent = 0;
+        if (camera) {
+            mat4.multiply(this._uiViewProj, camera.projectionMatrix, camera.viewMatrix);
+            viewProj = this._uiViewProj;
+            orthographic = camera.type === 'orthographic';
+            orthoVerticalExtent = camera.top - camera.bottom;
+        }
+
+        // The solve writes derived state on every UI node, sixty times a second. None of those writes are
+        // the user's edit, so they must not reach the editor as authoring changes — the scene would read
+        // as permanently unsaved and HistoryContext would record an undo entry per frame. The resolved
+        // fields are plain assignments that never call _notifyChange, and this is the second line of
+        // defence around that; same intent and same shape as the rig pass above.
+        const authoring = CleoEngine.authoringMode;
+        CleoEngine.authoringMode = false;
+        try {
+            for (const root of roots) {
+                // A nested root is resolved by its own iteration here, not by its parent's subtree walk,
+                // so its rect always comes from the viewport or its projection rather than from an
+                // enclosing rect. Iterating the flat set is what makes that fall out for free.
+                root.solveRoot(width, height, dpr, viewProj, orthographic, orthoVerticalExtent);
+            }
+        } finally {
+            CleoEngine.authoringMode = authoring;
+        }
+
+        sceneStats.uiNodes = this._uiNodes.size;
+        sceneStats.uiMs = performance.now() - uiStart;
+    }
+
+    /**
+     * Tell the UI layout pass how large its container is, in CSS pixels.
+     *
+     * Deliberately NOT read from `currentViewport` or the canvas:
+     *  - `currentViewport` is the INTERNAL render size (canvas x renderScale), so a HUD would shrink
+     *    whenever the user dropped render scale — the one thing a UI must never do.
+     *  - the canvas is the wrong box anyway: the editor's overlay is the viewport panel and the player's
+     *    is `#ui-root`, neither of which is guaranteed to match the canvas element.
+     *
+     * Written by the DOM host from a ResizeObserver on its own container. A scene that never has one
+     * (a headless test, a code-only game) falls back to whatever was last set, defaulting to 1920x1080
+     * so layouts still resolve to something sane rather than collapsing to zero.
+     */
+    public setUIViewport(width: number, height: number, dpr: number = 1): void {
+        this._uiViewport.width = Math.max(0, width);
+        this._uiViewport.height = Math.max(0, height);
+        this._uiViewport.dpr = dpr > 0 ? dpr : 1;
+    }
+
+    /** The container size the UI pass lays out against. See {@link setUIViewport}. */
+    public get uiViewport(): { width: number, height: number, dpr: number } { return this._uiViewport; }
 
     /**
      * Per-frame timings for the last completed update. Mirrors `renderer.stats` / `physics.stats`;
@@ -409,6 +497,8 @@ export class Scene {
      */
     private _filterByType(visited: Set<Node> = this._nodes): void {
         // This seems unoptimized, TODO: Fix later
+        this._uiRoots = new Set();
+        this._uiNodes = new Set();
         this._cameras = new Set();
         this._lights = new Set();
         this._models = new Set();
@@ -448,6 +538,12 @@ export class Scene {
                 this._skyAtmosphere = node;
             if (node instanceof CameraNode)
                 this._cameras.add(node);
+            // A root is also a UINode, so it deliberately lands in both sets: _uiRoots drives the layout
+            // pass, _uiNodes is what the DOM layer and the editor enumerate.
+            if (node instanceof UINode)
+                this._uiNodes.add(node);
+            if (node instanceof UIRootNode)
+                this._uiRoots.add(node);
         }
 
         for (const node of visited) {
@@ -618,6 +714,26 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._cameraRigs;
+    }
+
+    /**
+     * Every UI root in the scene. Drives the UI layout pass.
+     *
+     * A root can be nested under another root (a world-space nameplate parented into a HUD, say), so this
+     * is a flat set rather than a tree — each root resolves its own rect from the viewport or a projection
+     * and then walks its own subtree.
+     */
+    public get uiRoots(): Set<UIRootNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._uiRoots;
+    }
+
+    /** Every UI element in the scene, roots included. What the DOM layer enumerates. */
+    public get uiNodes(): Set<UINode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._uiNodes;
     }
 
     public get sprites(): Set<SpriteNode> {

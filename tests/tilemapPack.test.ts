@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { packGameBin } from '../editor/src/features/publish/pack';
 import { unpackGameBin, inflateTilemapData } from '../editor/src/player/unpack';
-import { Tilemap } from '../src/tilemap/tilemap';
-import { Tileset } from '../src/tilemap/tileset';
-import { CHUNK_SIZE } from '../src/tilemap/chunk';
+import { Tilemap } from '../src/graphics/tilemap/tilemap';
+import { Tileset } from '../src/graphics/tilemap/tileset';
+import { CHUNK_SIZE } from '../src/graphics/tilemap/chunk';
 import { compressTilemapData } from '../editor/src/features/publish/terrainImages';
 
 // The publish round-trip for a tilemap's cell grids: base64 in the editor's blob, DEFLATE in game.bin,
@@ -39,7 +39,7 @@ describe('tilemap publish round-trip', () => {
     expect(chunkJson.data).toBeUndefined();
     expect(chunkJson.dataBytes).toBeInstanceOf(Uint8Array);
 
-    const game = { version: 2, entry: 's', scenes: { s: { name: 's', scene, ui: {} } }, textureBytes: [] };
+    const game = { version: 2, entry: 's', scenes: { s: { name: 's', scene } }, textureBytes: [] };
     const pack = unpackGameBin(packGameBin(game).buffer);
 
     const outScene = pack.manifest.scenes.s.scene;
@@ -61,7 +61,7 @@ describe('tilemap publish round-trip', () => {
   it('leaves a tilemap with only base64 payloads untouched, so an older game.bin still loads', async () => {
     const json = JSON.parse(JSON.stringify(mapWithTiles().serialize()));
     const scene = sceneWith(json);
-    const game = { version: 2, entry: 's', scenes: { s: { name: 's', scene, ui: {} } }, textureBytes: [] };
+    const game = { version: 2, entry: 's', scenes: { s: { name: 's', scene } }, textureBytes: [] };
     const pack = unpackGameBin(packGameBin(game).buffer);
     const outScene = pack.manifest.scenes.s.scene;
 
@@ -78,7 +78,7 @@ describe('tilemap publish round-trip', () => {
     const scene = sceneWith(json);
     await compressTilemapData(scene);
     const pack = unpackGameBin(packGameBin(
-      { version: 2, entry: 's', scenes: { s: { name: 's', scene, ui: {} } }, textureBytes: [] },
+      { version: 2, entry: 's', scenes: { s: { name: 's', scene } }, textureBytes: [] },
     ).buffer);
     const outScene = pack.manifest.scenes.s.scene;
     await inflateTilemapData(outScene, pack);
@@ -92,7 +92,7 @@ describe('tilemap publish round-trip', () => {
     const scene = sceneWith(JSON.parse(JSON.stringify(tm.serialize())));
     await compressTilemapData(scene);
     const pack = unpackGameBin(packGameBin(
-      { version: 2, entry: 's', scenes: { s: { name: 's', scene, ui: {} } }, textureBytes: [] },
+      { version: 2, entry: 's', scenes: { s: { name: 's', scene } }, textureBytes: [] },
     ).buffer);
     const outScene = pack.manifest.scenes.s.scene;
     await inflateTilemapData(outScene, pack);

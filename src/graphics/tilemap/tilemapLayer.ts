@@ -1,7 +1,7 @@
 // One layer of a tilemap: a sparse grid of chunks plus the draw/collision settings that apply to all
 // of them. A tilemap is an ordered stack of these.
 
-import { bytesToBase64, base64ToBytes } from "../core/base64";
+import { bytesToBase64, base64ToBytes } from "../../core/base64";
 import {
     CELL_EMPTY, CHUNK_SIZE, TileChunk, chunkCoord, chunkKey, createChunk, localIndex, MAX_CHUNK_COORD,
 } from "./chunk";

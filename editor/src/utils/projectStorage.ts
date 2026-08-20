@@ -5,7 +5,7 @@ import type { ScriptAsset } from './scripts';
 import { idbGet, idbSet, idbDelete } from './idb';
 import { saveToStorage } from '../workers/workerClient';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
-import type { UIState } from './UIModel';
+import { migrateGameDataUI } from './uiMigration';
 
 // Storage keys. The project blob lives in IndexedDB (scenes embed base64 textures and exceed the
 // ~5MB localStorage quota). The dock layout lives in localStorage under its own key — see
@@ -18,10 +18,14 @@ export interface ProjectPrefs {
   selectedNode?: string | null;
 }
 
-// The stored blob = the runtime game data ({ scene, textures?, ui, config? }) plus editor prefs.
+// The stored blob = the runtime game data ({ scene, textures?, config? }) plus editor prefs.
 export interface SavedProject {
   scene: any;
   textures?: any;
+  /**
+   * LEGACY, read-only. UI is scene nodes now; nothing writes this any more, but `migrateGameDataUI` still
+   * reads it out of blobs saved before the change. Removing it would make those projects load with no HUD.
+   */
   ui?: { version: number; elements: any[] };
   config?: { graphics?: { clearColor?: number[] }; render?: RenderSettings };
   prefs?: ProjectPrefs;
@@ -36,7 +40,7 @@ type EngineMaps = {
 };
 
 /**
- * Persist the whole project (scene + scripts/bodies/triggers + UI + editor prefs) to IndexedDB.
+ * Persist the whole project (scene + scripts/bodies/triggers + editor prefs) to IndexedDB.
  * Uses the same buildGameData path as Export so textures are embedded (useCache=false).
  * Returns true on success; warns (and returns false) on failure.
  *
@@ -50,7 +54,6 @@ export async function saveProject(params: {
   scriptAssets?: ScriptAsset[];
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[] }>;
-  ui: { version: number; elements: any[] };
   settings?: RenderSettings;
   prefs?: ProjectPrefs;
 }): Promise<boolean> {
@@ -61,7 +64,6 @@ export async function saveProject(params: {
       scriptAssets: params.scriptAssets,
       bodies: params.bodies,
       triggers: params.triggers,
-      ui: params.ui,
       settings: params.settings,
       // The texture payloads live in the texture store, so the project blob does NOT embed them. It used
       // to base64 every texture in the project on every save. Export and Publish still embed (useCache
@@ -123,11 +125,11 @@ export function extractNodeState(root: any, maps: Pick<EngineMaps, 'scripts' | '
   visit(root);
 }
 
-export function applyGameData(json: any, deps: EngineMaps & { setUI: (s: UIState) => void; renderer?: Renderer }): void {
+export function applyGameData(json: any, deps: EngineMaps & { renderer?: Renderer }): void {
   if (!json) return;
-  // UI (top-level `ui`, or legacy `scene.ui`).
-  if (json.ui) deps.setUI({ version: json.ui.version ?? 1, elements: json.ui.elements ?? [] });
-  else if (json.scene?.ui) deps.setUI({ version: json.scene.ui.version ?? 1, elements: json.scene.ui.elements ?? [] });
+  // Fold any legacy UI blob into real nodes BEFORE the tree is read, and drop the key. UI elements are
+  // scene nodes now; `ui` survives only as something old saves may still carry.
+  migrateGameDataUI(json);
 
   // Restore the saved renderer look so the editor (and its Play mode) matches what was last saved.
   if (deps.renderer && json.config?.render) deps.renderer.applyRenderSettings(json.config.render);

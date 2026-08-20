@@ -20,8 +20,12 @@ export interface SceneStats {
     animatorMs: number;
     /** Camera-rig late pass, excluding the transform pass it triggers (counted in transformMs). */
     rigMs: number;
+    /** UI layout late pass: resolving every UI root's subtree into screen rects. */
+    uiMs: number;
     /** Nodes walked this frame. */
     nodes: number;
+    /** UI elements resolved this frame. */
+    uiNodes: number;
     /** Everything inside Scene.update(). */
     frameMs: number;
 }
@@ -33,7 +37,9 @@ export const sceneStats: SceneStats = {
     scriptMs: 0,
     animatorMs: 0,
     rigMs: 0,
+    uiMs: 0,
     nodes: 0,
+    uiNodes: 0,
     frameMs: 0,
 };
 
@@ -62,4 +68,5 @@ export function resetSceneStats(): void {
     sceneStats.scriptMs = 0;
     sceneStats.animatorMs = 0;
     sceneStats.rigMs = 0;
+    sceneStats.uiMs = 0;
 }
