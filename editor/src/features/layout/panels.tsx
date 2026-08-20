@@ -54,14 +54,20 @@ function ViewportPanel(_: IDockviewPanelProps) {
 }
 
 // Side panels keep the old Sidebar's container behavior (vertical scroll, no horizontal overflow).
-function SidePanel({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-col h-full w-full overflow-x-hidden overflow-y-auto select-none">{children}</div>;
+// `scroll={false}` is for a panel that scrolls its own content — the trees virtualize their rows and need a
+// bounded height, and an outer scroller would give them a second, always-idle scrollbar.
+function SidePanel({ children, scroll = true }: { children: React.ReactNode; scroll?: boolean }) {
+  return (
+    <div className={`flex flex-col h-full w-full overflow-x-hidden select-none ${scroll ? 'overflow-y-auto' : 'overflow-y-hidden'}`}>
+      {children}
+    </div>
+  );
 }
 
 // The Scene panel doubles as the Animation editor's skeleton tree (DockLayout retitles the tab).
 function ScenePanel(_: IDockviewPanelProps) {
   const { editorMode } = useCleoEngine();
-  return <SidePanel>{editorMode === 'animation' ? <SkeletonTree /> : <SceneInspector />}</SidePanel>;
+  return <SidePanel scroll={false}>{editorMode === 'animation' ? <SkeletonTree /> : <SceneInspector />}</SidePanel>;
 }
 
 // The two Add palettes. Both are the same `AddNew` grid over the same catalog and the same drop handlers;

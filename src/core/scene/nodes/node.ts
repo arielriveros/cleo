@@ -249,7 +249,9 @@ export class Node {
       kind: 'structure', node,
       prop: from ? 'reparent' : 'add',
       prev: from,
-      next: { parentId: this._id, index: this._children.length - 1 },
+      // The real landing slot, not `length - 1`: an indexed insert (a drag that drops a row *between* two
+      // siblings) reports where it actually went, so undo/redo puts it back there rather than at the end.
+      next: { parentId: this._id, index: this._children.indexOf(node) },
     });
   }
 

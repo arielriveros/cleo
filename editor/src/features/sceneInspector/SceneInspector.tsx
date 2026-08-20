@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { NodeRendererProps, Tree, TreeApi } from 'react-arborist'
 import { useCleoEngine } from '../EngineContext'
-import { Logger, ModelNode, Node, isUINodeType } from 'cleo';
+import { Logger, Node, isUINodeType } from 'cleo';
 import type { SceneChange } from 'cleo';
 import CameraIcon from '../../icons/camera.png'
 import CameraRigIcon from '../../icons/camera-rig.png'
@@ -14,7 +15,10 @@ import VisibleIcon from '../../icons/visible.png'
 import HiddenIcon from '../../icons/hidden.png'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
-import { SCRIPT_ID_VAR, getScriptIdOf } from '../../utils/scripts';
+import { getScriptIdOf } from '../../utils/scripts';
+import { validateNodeName } from '../../utils/nodeNames';
+import { useElementSize } from '../../utils/useElementSize';
+import { useScopedDndManager } from '../../utils/treeDnd';
 import { hoveredScriptStore, useHoveredScript } from './hoveredScriptStore';
 import {
   CanvasIcon, PanelIcon, StackIcon, SpacerIcon, TextIcon, ImageIcon,
@@ -29,6 +33,14 @@ const UI_ICONS: Record<string, () => JSX.Element> = {
   uiTextInput: TextInputIcon,
 };
 
+const ROW_HEIGHT = 24;
+const INDENT = 12;
+const GUTTER = 6;   // left inset before the first level, so a rule never hugs the panel edge
+const CHEVRON = 16; // the disclosure column; guides are centred on it
+
+/** The one MIME the tree accepts besides new nodes. Node-to-node moves are react-arborist's job now. */
+const SCRIPT_MIME = 'text/cleo-script';
+
 interface NodeDescription {
   id: string;
   name: string;
@@ -37,22 +49,7 @@ interface NodeDescription {
   spawnOnStart: boolean;
   templateId?: string;
   scriptId?: string;
-  children: any[];
-}
-
-interface SceneNodeItemProps {
-  nodeId: string;
-  nodeName?: string;
-  nodeType?: string;
-  children?: string[];
-  templateId?: string;
-  scriptId?: string;
-  onSelect: (nodeId: string) => void;
-  expanded?: boolean;
-  visible?: boolean;
-  spawnOnStart?: boolean;
-  onSetVisibility: (nodeId: string) => void;
-  onExpand: (nodeId: string) => void;
+  children: NodeDescription[];
 }
 
 const PenIcon = () => (
@@ -70,126 +67,196 @@ const ScriptIcon = () => (
   </svg>
 );
 
-function SceneNodeItem(props: SceneNodeItemProps) {
-  const { selectedNode, enterTemplateEditor, enterScriptEditor } = useCleoEngine();
-  const selected = selectedNode === props.nodeId;
+/**
+ * Nodes the tree never shows. Debug/editor helpers and the chunks a landscape subdivides itself into are
+ * implementation detail — the unit of frustum culling and LOD, not something anyone authors. The names are
+ * load-bearing elsewhere (the publish pass strips every node whose name contains '__editor__' or
+ * '__debug__'), so this only mirrors them.
+ */
+const isHiddenInTree = (node: Node): boolean =>
+  node.name.includes('__debug__') || node.name.includes('__editor__') || node.name.startsWith('__terrain_chunk__');
+
+/** A parent's children as the tree shows them — the index space react-arborist reports drops in. */
+const shownChildren = (node: Node): Node[] => node.children.filter(child => !isHiddenInTree(child));
+
+const isAncestorOf = (maybeAncestor: Node, node: Node): boolean => {
+  for (let p: Node | null = node.parent; p; p = p.parent) if (p === maybeAncestor) return true;
+  return false;
+};
+
+/**
+ * Disclosure arrow. A rotating chevron rather than two different glyphs: the turn reads as the row
+ * opening, and one shape at one weight keeps a long list from looking speckled.
+ */
+const Chevron = ({ open }: { open: boolean }) => (
+  <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="3.2"
+       strokeLinecap="round" strokeLinejoin="round"
+       className={`transition-transform duration-100 ${open ? 'rotate-90' : ''}`}>
+    <path d="m9 6 6 6-6 6" />
+  </svg>
+);
+
+/**
+ * The faint vertical rules tying a child to its parent. Absolutely positioned, one per level, centred on
+ * the chevron of the ancestor at that level, so a rule points straight up at the row it belongs to. Drawn
+ * inside the row rather than as padding, so hover and selection fills still sweep the full width — a fill
+ * that stops short of the left edge is what makes an indented list look ragged.
+ */
+const IndentGuides = ({ level }: { level: number }) => (
+  <>
+    {Array.from({ length: level }, (_, i) => (
+      <span key={i} aria-hidden className='absolute inset-y-0 w-px bg-white/[0.08] pointer-events-none'
+            style={{ left: GUTTER + i * INDENT + CHEVRON / 2 }} />
+    ))}
+  </>
+);
+
+/** The inline rename field. Enter commits through onRename; Escape and blur abandon the edit. */
+function RenameInput({ node }: { node: NodeRendererProps<NodeDescription>['node'] }) {
+  const input = useRef<HTMLInputElement | null>(null);
+  return (
+    <input
+      ref={input}
+      autoFocus
+      defaultValue={node.data.name}
+      onFocus={(e) => e.currentTarget.select()}
+      onClick={(e) => e.stopPropagation()}
+      onBlur={() => node.reset()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') node.reset();
+        if (e.key === 'Enter') node.submit(input.current?.value ?? '');
+      }}
+      className='type-value bg-black/40 text-white rounded px-1 outline-none ring-1 ring-primary/60 w-full min-w-0' />
+  );
+}
+
+/**
+ * One row. Its chrome — type icon, script/template shortcuts, visibility toggle, the dormant dimming and
+ * the UI tint — is what the hand-rolled tree drew; only selection, expansion and dragging now come off the
+ * node api instead of per-row state.
+ */
+// react-arborist's `style` (its indent, as padding) is re-derived below instead of applied, so the row can
+// add its own gutter and paint the guides behind a fill that runs the full width.
+function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) {
+  const { editorScene, isPlayMode, enterTemplateEditor, enterScriptEditor } = useCleoEngine();
+  const data = node.data;
   const hoveredScript = useHoveredScript();
+  const selected = node.isSelected;
   // A script glyph on a template-instance node is greyed (its script is authored in the template, not here)
   // but stays clickable. Highlight this node's glyph when its script is the one being hovered anywhere.
-  const scriptGrey = !!props.templateId;
-  const scriptHot = !!props.scriptId && props.scriptId === hoveredScript;
-  // UI elements are tinted so a HUD subtree is distinguishable from world geometry at a glance. The
-  // SELECTED row deliberately keeps the standard blue-and-white treatment: selection is the one signal
-  // that must never be ambiguous, so it wins over the type tint rather than blending with it.
-  const isUI = isUINodeType(props.nodeType ?? '');
-  const UIIcon = isUI ? UI_ICONS[props.nodeType ?? ''] : undefined;
+  const scriptGrey = !!data.templateId;
+  const scriptHot = !!data.scriptId && data.scriptId === hoveredScript;
+  // UI elements are tinted so a HUD subtree is distinguishable from world geometry at a glance. A SELECTED
+  // row drops the tint for the standard indigo fill and white text: selection is the one signal that must
+  // never be ambiguous, so it wins outright rather than blending with the type colour.
+  const isUI = isUINodeType(data.type);
+  const UIIcon = isUI ? UI_ICONS[data.type] : undefined;
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
-    // Dedicated MIME so drop targets can tell a scene node from other text/plain drags (dock tabs,
-    // text selections); text/plain kept as a fallback payload for anything generic.
-    event.dataTransfer.setData('text/cleo-node', props.nodeId);
-    event.dataTransfer.setData('text/plain', props.nodeId);
+    // react-dnd carries the move *within* the tree; these are for everything outside it — the Assets
+    // explorer (drop a node there to save it as a template) and node-reference fields. Dedicated MIME so
+    // those targets can tell a scene node from other text/plain drags; text/plain is the generic fallback.
+    event.dataTransfer.setData('text/cleo-node', data.id);
+    event.dataTransfer.setData('text/plain', data.id);
+  };
+
+  const toggleVisibility = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (isPlayMode) return; // Don't allow visibility changes during play mode
+    const target = editorScene?.getNodeById(data.id);
+    if (target) target.visible = !target.visible;
   };
 
   return (
     <div
-      id={props.nodeId}
-      className={`scene-item group flex w-[90%] h-[24px] py-[1px] px-[5px] mb-[1px] rounded-[2px] text-ellipsis overflow-hidden whitespace-nowrap justify-between ${
-        selected ? 'bg-selected border border-white cursor-default'
-          : isUI ? 'border border-node-ui/40 text-node-ui hover:bg-control-hover cursor-pointer'
-            : 'border border-control hover:bg-control-hover cursor-pointer'}`}
-      onClick={() => props.onSelect(props.nodeId)}
-      draggable={true}
-      onDragStart={handleDragStart} >
+      id={data.id}
+      ref={dragHandle}
+      onDoubleClick={() => { if (node.isEditable) void node.edit(); }}
+      onDragStart={handleDragStart}
+      style={{ paddingLeft: GUTTER + node.level * INDENT }}
+      className={`scene-item group relative flex items-center h-[22px] mt-[1px] pr-[6px] rounded-md overflow-hidden whitespace-nowrap ${
+        selected ? 'bg-primary/40 text-white cursor-default'
+          : node.willReceiveDrop ? 'bg-primary/20 cursor-pointer'
+            : `${isUI ? 'text-node-ui ' : 'text-fg '}hover:bg-white/[0.06] cursor-pointer`}`}>
+      <IndentGuides level={node.level} />
+      {/* Always occupied, so names line up whether or not a row can be opened. */}
+      <span className='flex items-center justify-center w-[16px] shrink-0 text-muted hover:text-fg z-[1]'
+            onClick={(e) => { e.stopPropagation(); if (data.children.length) node.toggle(); }}>
+        { data.children.length > 0 && <Chevron open={node.isOpen} /> }
+      </span>
       {/* Dormant nodes (spawnOnStart off) read as "present but asleep": the row is dimmed, but stays fully
           interactive — it is still authored here, and the only way to select it. */}
-      <div className={props.spawnOnStart === false ? 'opacity-50' : undefined} title={props.spawnOnStart === false ? 'Dormant until a script spawns it' : undefined}>
-        { props.nodeType === 'camera' && <img src={CameraIcon} alt='camera' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'cameraRig' && <img src={CameraRigIcon} alt='camera rig' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'model' && <img src={ModelIcon} alt='model' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'sprite' && <img src={SpriteIcon} alt='sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'animatedSprite' && <img src={SpriteIcon} alt='animated sprite' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'light' && <img src={LightIcon} alt='light' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'lightProbe' && <img src={SkyboxIcon} alt='light probe' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'volumetricClouds' && <img src={CloudsIcon} alt='volumetric clouds' className='inline-block w-4 h-4 mr-1 align-middle' /> }
-        { props.nodeType === 'skyAtmosphere' && <span className='inline-block w-4 h-4 mr-1 align-middle text-white'><SkyIcon /></span> }
-        { UIIcon && <span className='inline-flex w-4 h-4 mr-1 align-middle items-center justify-center'><UIIcon /></span> }
-        { props.nodeName }
+      <div className={`flex items-center min-w-0 flex-1 ${data.spawnOnStart === false ? 'opacity-50' : ''}`}
+           title={data.spawnOnStart === false ? 'Dormant until a script spawns it' : undefined}>
+        { data.type === 'camera' && <img src={CameraIcon} alt='camera' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'cameraRig' && <img src={CameraRigIcon} alt='camera rig' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'model' && <img src={ModelIcon} alt='model' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'sprite' && <img src={SpriteIcon} alt='sprite' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'animatedSprite' && <img src={SpriteIcon} alt='animated sprite' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'light' && <img src={LightIcon} alt='light' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'lightProbe' && <img src={SkyboxIcon} alt='light probe' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'skybox' && <img src={SkyboxIcon} alt='skybox' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'volumetricClouds' && <img src={CloudsIcon} alt='volumetric clouds' className='inline-block w-4 h-4 mr-1.5 align-middle' /> }
+        { data.type === 'skyAtmosphere' && <span className='inline-block w-4 h-4 mr-1.5 align-middle text-white'><SkyIcon /></span> }
+        { UIIcon && <span className='inline-flex w-4 h-4 mr-1.5 align-middle items-center justify-center'><UIIcon /></span> }
+        { node.isEditing ? <RenameInput node={node} /> : <span className='truncate'>{data.name}</span> }
       </div>
-      <div className='flex flex-row items-center'>
-        { props.scriptId &&
+      {/* The row's own controls. They fade in with the row rather than sitting there permanently, so a deep
+          hierarchy reads as names first and buttons second. */}
+      <div className='flex flex-row items-center shrink-0 gap-1 pl-1'>
+        { data.scriptId &&
           <button
             title={scriptGrey ? 'Edit script (authored in the template)' : 'Edit script'}
-            onClick={(e) => { e.stopPropagation(); enterScriptEditor(props.scriptId); }}
-            onMouseEnter={() => hoveredScriptStore.set(props.scriptId ?? null)}
+            onClick={(e) => { e.stopPropagation(); enterScriptEditor(data.scriptId); }}
+            onMouseEnter={() => hoveredScriptStore.set(data.scriptId ?? null)}
             onMouseLeave={() => hoveredScriptStore.set(null)}
-            className={`inline-flex items-center justify-center w-4 h-4 mr-1 ${
-              scriptHot ? 'text-highlight' : scriptGrey ? 'text-white/40 hover:text-white/70' : 'text-white hover:text-highlight'}`}>
+            className={`inline-flex items-center justify-center w-4 h-4 transition-colors ${
+              scriptHot ? 'text-highlight' : scriptGrey ? 'text-white/35 hover:text-white/70' : 'text-white/70 hover:text-highlight'}`}>
             <ScriptIcon />
           </button>
         }
-        { props.templateId &&
+        { data.templateId &&
           <button
             title='Edit template'
-            onClick={(e) => { e.stopPropagation(); enterTemplateEditor(props.templateId); }}
-            className='inline-flex items-center justify-center w-4 h-4 mr-1 text-white hover:text-highlight'>
+            onClick={(e) => { e.stopPropagation(); enterTemplateEditor(data.templateId); }}
+            className='inline-flex items-center justify-center w-4 h-4 text-white/70 hover:text-highlight transition-colors'>
             <PenIcon />
           </button>
         }
         <img
-          onClick={ (e) => { e.stopPropagation(); props.onSetVisibility(props.nodeId); } }
-          src={props.visible ? VisibleIcon : HiddenIcon} alt='visible'
-          className={`inline-block w-4 h-4 mr-1 align-middle ${props.visible ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`} />
-        { props.children && props.children.length > 0 &&
-          <div className='flex items-center justify-center w-[20px] h-[20px] text-white cursor-pointer select-none' onClick={() => props.onExpand(props.nodeId)}>
-            { props.expanded ? '>' : '∨' }
-          </div>
-        }
+          onClick={toggleVisibility}
+          src={data.visible ? VisibleIcon : HiddenIcon} alt='visible'
+          title={data.visible ? 'Hide' : 'Show'}
+          className={`inline-block w-4 h-4 align-middle transition-opacity ${
+            data.visible ? 'opacity-0 group-hover:opacity-60 hover:!opacity-100' : 'opacity-70 hover:opacity-100'}`} />
       </div>
     </div>
   );
 }
 
-interface SceneListRecursiveProps {
-  node: NodeDescription;
-  setSelectedNode: (nodeId: string | null) => void;
-  handleSetVisibility: (nodeId: string) => void;
-}
-function SceneListRecursive(props: SceneListRecursiveProps) {
-  const [expanded, setIsExpanded] = useState(true);
-
-  return (
-    props.node.name.includes('__debug__') ? null : 
-    <div className="pl-[10px]">
-      <SceneNodeItem
-        key={props.node.id}
-        nodeId={props.node.id}
-        nodeName={props.node.name}
-        nodeType={props.node.type}
-        onSelect={props.setSelectedNode}
-        expanded={expanded}
-        onExpand={() => setIsExpanded(!expanded) }
-        visible={props.node.visible}
-        spawnOnStart={props.node.spawnOnStart}
-        onSetVisibility={props.handleSetVisibility}
-        children={props.node.children}
-        templateId={props.node.templateId}
-        scriptId={props.node.scriptId}
-        />
-      { expanded ? 
-        props.node.children.map( child => { return <SceneListRecursive key={child.id} node={child} setSelectedNode={props.setSelectedNode} handleSetVisibility={props.handleSetVisibility} /> })
-      : <></>
-      }
-    </div>    
-  );
-}
-
+/**
+ * Drop cursor drawn between rows: a capped line in the editor's indigo accent rather than
+ * react-arborist's stock blue. The dot marks the level the row would land at.
+ */
+const DropCursor = ({ top, left, indent }: { top: number; left: number; indent: number }) => (
+  <div style={{ position: 'absolute', pointerEvents: 'none', top: top - 3, left, right: indent }}
+       className='flex items-center gap-[1px]'>
+    <span className='w-[5px] h-[5px] rounded-full bg-highlight shrink-0' />
+    <span className='flex-1 h-[2px] rounded-full bg-highlight' />
+  </div>
+);
 
 export default function SceneInspector() {
   const { editorScene, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId, attachScriptToNode,
-          activeTab, sceneList, openSceneId } = useCleoEngine()
+          activeTab, sceneList, openSceneId, selectedNode } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
+  const [ filter, setFilter ] = useState('');
+  const treeRef = useRef<TreeApi<NodeDescription> | undefined>(undefined);
+  // react-arborist is virtualized, so it needs real pixel dimensions; the same element also scopes its
+  // drag-and-drop backend, which would otherwise disable every native drop in the editor (see treeDnd).
+  const { ref: viewportRef, element: viewportEl, size } = useElementSize<HTMLDivElement>();
+  const dndManager = useScopedDndManager(viewportEl);
 
   // The scene tab's root row is labelled with the scene asset, not the engine node's name. The node itself
   // stays named 'root' — Scene.parse re-finds the root by that literal name, so renaming it would make the
@@ -202,11 +269,12 @@ export default function SceneInspector() {
   // Mesh mode deliberately keeps the real scene root: its root row is load-bearing there (it is the drop
   // target and the parent for the LOD level nodes), so rooting at the mesh hides something needed. The
   // viewing light is kept out of the tree by its `__editor__` name instead, not by the root choice.
-  const treeRoot = (): Node | undefined =>
-    (editorMode === 'template' && templateRootId) ? editorScene.getNodeById(templateRootId) : editorScene.root;
+  const treeRoot = useCallback((): Node | undefined =>
+    (editorMode === 'template' && templateRootId) ? editorScene.getNodeById(templateRootId) : editorScene.root,
+    [editorScene, editorMode, templateRootId]);
 
   // generate a recursive list of id nodes where each node has a list of children
-  function generateNodeList(node: Node): NodeDescription {
+  const generateNodeList = useCallback(function build(node: Node): NodeDescription {
     // Template instance roots collapse to a single leaf row (with a pen icon) in scene mode.
     // The guard is essential: in template mode the tree is rooted at the template's own
     // instance root, which also carries the marker — pruning there would hide the very
@@ -220,88 +288,9 @@ export default function SceneInspector() {
       spawnOnStart: node.spawnOnStart,
       templateId,
       scriptId: getScriptIdOf(node),
-      // A landscape is a normal, selectable row now (positioned with the ordinary gizmo), but the render
-      // chunks it subdivides itself into are an implementation detail — the unit of frustum culling and
-      // LOD, not something anyone authors. They are hidden by their name prefix and MUST keep it: the
-      // publish pass strips every node whose name contains '__editor__' or '__debug__' (buildGameData),
-      // so renaming them to reuse those prefixes would delete the terrain from every shipped build.
-      children: templateId ? [] : node.children
-        .filter((child: Node) => !(child.name.includes('__debug__') || child.name.includes('__editor__')
-          || child.name.startsWith('__terrain_chunk__')))
-        .map((child: Node) => generateNodeList(child))
+      children: templateId ? [] : shownChildren(node).map(build),
     }
-  }
-
-  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    // Only the kinds the tree actually accepts, so unrelated drags don't read as droppable here.
-    const types = Array.from(event.dataTransfer.types);
-    if (types.includes('text/cleo-node') || types.includes(NEW_NODE_MIME) || types.includes('text/cleo-script')) event.preventDefault();
-  };
-
-  const handleDrop: React.DragEventHandler<HTMLDivElement> = (event) => {
-    event.preventDefault();
-
-    // Find the closest parent div with the class 'sceneItem'
-    const targetElement = (event.target as HTMLDivElement).closest('.scene-item');
-
-    // A script asset dragged from the Assets explorer: attach it to the node it was dropped on (base-type
-    // enforced by attachScriptToNode). Read-only template-instance nodes are skipped.
-    const scriptId = event.dataTransfer.getData('text/cleo-script');
-    if (scriptId) {
-      const node = targetElement ? editorScene?.getNodeById(targetElement.id) : null;
-      if (!node) { Logger.warn('Drop the script onto a node to attach it', 'Editor'); return; }
-      if (editorMode === 'scene' && isWithinTemplateInstance(node)) {
-        Logger.warn('Cannot attach a script to a template instance', 'Editor');
-        return;
-      }
-      attachScriptToNode(node, scriptId);
-      return;
-    }
-
-    // A new node dragged out of the Add section: parent it under the row it was dropped on, or under the
-    // tree root when dropped on the empty space below the tree.
-    const newNodeId = event.dataTransfer.getData(NEW_NODE_MIME);
-    if (newNodeId) {
-      const item = findAddItem(newNodeId);
-      const parent = targetElement ? editorScene?.getNodeById(targetElement.id) : treeRoot();
-      if (!item || !parent) return;
-      if (editorMode === 'scene' && isWithinTemplateInstance(parent)) {
-        Logger.warn('Cannot add a node inside a template instance', 'Editor');
-        return;
-      }
-      addItemTo(item, parent, { editorScene, eventEmitter, triggers }).catch(err => console.error(err));
-      return;
-    }
-
-    if (targetElement) {
-      const targetId = targetElement.id;
-      const draggedId = event.dataTransfer.getData('text/cleo-node') || event.dataTransfer.getData('text/plain');
-
-      if (draggedId === targetId) return; // Don't allow dropping onto the same node
-
-      // Implement logic to update the hierarchy, e.g., update the parent of the dragged node
-      const draggedNode = editorScene?.getNodeById(draggedId);
-      const targetNode = editorScene?.getNodeById(targetId);
-
-      if (!(draggedNode && targetNode)) return;
-
-      // check if the dragged node is a parent of the target node
-      if (targetNode.parent?.id === draggedNode.id) {
-        Logger.warn('Cannot move a node to its child', 'Editor');
-        return;
-      }
-
-      // check if the dragged node contains a body
-      // TODO: Temporary solution, in the future inner nodes should be able to have bodies
-      const body = bodies.get(draggedNode.id);
-      if (body) {
-        Logger.warn('Cannot move a node with a body', 'Editor');
-        return;
-      }
-      
-      targetNode.addChild(draggedNode);
-    }
-  };
+  }, [editorMode]);
 
   useEffect(() => {
     const rebuild = () => {
@@ -320,27 +309,235 @@ export default function SceneInspector() {
     };
     eventEmitter.on('SCENE_CHANGED', onSceneChanged);
     return () => { eventEmitter.off("SCENE_CHANGED", onSceneChanged) }; // Remove the listener on component unmount
-  }, [eventEmitter, editorScene, editorMode, templateRootId, sceneName]);
+  }, [eventEmitter, generateNodeList, treeRoot, sceneName]);
 
-  const handleSelectNode = (nodeId: string | null) => {
-    // Don't allow node selection during play mode
-    if (isPlayMode) return;
-    eventEmitter.emit('SELECT_NODE', nodeId);
-  }
+  const rootId = nodes?.id;
+  const data = useMemo(() => (nodes ? [nodes] : []), [nodes]);
 
-  const handleSetVisibility = (nodeId: string) => {
-    // Don't allow visibility changes during play mode
+  // --- selection ------------------------------------------------------------------------------------
+
+  // Deliberately NOT the `selection` prop: that one collapses the tree to a single row every time it
+  // changes, which would undo a ctrl/shift multi-selection the instant it was reported. The engine's
+  // selection is pushed in only when the tree does not already hold it — i.e. the pick came from the
+  // viewport rather than from a click in here.
+  const selectedRef = useRef<string | null>(selectedNode ?? null);
+  selectedRef.current = selectedNode ?? null;
+
+  useEffect(() => {
+    const tree = treeRef.current;
+    if (!tree) return;
+    if (!selectedNode) { if (tree.selectedIds.size) tree.deselectAll(); return; }
+    if (tree.selectedIds.has(selectedNode)) return;
+    // The row may sit inside a collapsed subtree: scrollTo opens its parents and waits for it to exist
+    // before the selection lands, because tree.get only resolves nodes that are currently visible.
+    const scrolled = tree.scrollTo(selectedNode);
+    const select = () => {
+      const t = treeRef.current;
+      if (t && t.get(selectedNode)) t.select(selectedNode, { focus: false });
+    };
+    if (scrolled) scrolled.then(select).catch(() => undefined); else select();
+    // dndManager/height are in here because the tree renders one pass after this panel does: without them
+    // a selection made before it mounted would never reach it.
+  }, [selectedNode, nodes, dndManager, size.height]);
+
+  const handleSelect = (selection: { id: string }[]) => {
+    if (isPlayMode) return; // Don't allow node selection during play mode
+    const id = selection.length ? selection[selection.length - 1].id : null;
+    if (id === selectedRef.current) return; // the echo of the sync above, or a rebuild re-reporting the same row
+    eventEmitter.emit('SELECT_NODE', id);
+  };
+
+  // --- moving nodes ---------------------------------------------------------------------------------
+
+  // Rows are deliberately left draggable even when they cannot be re-parented (a node with a body, the
+  // root): the same gesture drops a node onto the Assets explorer to save it as a template, so refusing
+  // the drag outright would take that away. What a move may actually do is decided here.
+  const handleMove = ({ dragIds, parentId, index }: { dragIds: string[]; parentId: string | null; index: number }) => {
     if (isPlayMode) return;
-    const node = editorScene?.getNodeById(nodeId);
-    if (node) node.visible = !node.visible;
-  }
+    const parent = parentId ? editorScene?.getNodeById(parentId) : undefined;
+    if (!parent) return; // a drop past the root row would make a sibling of the scene root
+    if (editorMode === 'scene' && isWithinTemplateInstance(parent)) {
+      Logger.warn('Cannot move a node into a template instance', 'Editor');
+      return;
+    }
+
+    const dragging = new Set(dragIds);
+    const moving: Node[] = [];
+    for (const id of dragIds) {
+      const node = editorScene?.getNodeById(id);
+      if (!node || id === rootId) continue;
+      // TODO: Temporary solution, in the future inner nodes should be able to have bodies
+      if (bodies.get(id)) { Logger.warn('Cannot move a node with a body', 'Editor'); continue; }
+      // Dragging a parent already carries its children; moving them too would flatten the subtree.
+      if (node.parent && dragging.has(node.parent.id)) continue;
+      if (node === parent || isAncestorOf(node, parent)) {
+        Logger.warn('Cannot move a node to its child', 'Editor');
+        continue;
+      }
+      moving.push(node);
+    }
+    if (!moving.length) return;
+
+    // react-arborist counts `index` among the parent's VISIBLE children with the dragged rows still in
+    // place; addChild indexes the real children array, which also holds terrain chunks and editor helpers.
+    // Anchoring on the sibling the rows land in front of translates between the two, and the -1 accounts
+    // for addChild detaching the node before it splices it back in.
+    //
+    // Dropped ON a row rather than between two: react-arborist reports that as index 0, which would make
+    // the node the parent's FIRST child. Appending is what re-parenting has always done here, and what
+    // "drop it in there" reads as, so the two cases are told apart by the cursor that was showing.
+    const siblings = shownChildren(parent);
+    const anchor = treeRef.current?.cursorOverFolder ? undefined : siblings[index];
+    let engineIndex = anchor ? parent.children.indexOf(anchor) : parent.children.length;
+    for (const node of moving) {
+      const from = node.parent === parent ? parent.children.indexOf(node) : -1;
+      parent.addChild(node, from >= 0 && from < engineIndex ? engineIndex - 1 : engineIndex);
+      engineIndex = parent.children.indexOf(node) + 1;
+    }
+  };
+
+  // --- rename / delete ------------------------------------------------------------------------------
+
+  const handleRename = ({ id, name }: { id: string; name: string }) => {
+    const node = editorScene?.getNodeById(id);
+    if (!node || name === node.name) return;
+    const problem = validateNodeName(name);
+    if (problem) { Logger.warn(problem, 'Editor'); return; }
+    // No event of our own: the engine's name setter emits SCENE_CHANGED { kind: 'name' }, which is what
+    // rebuilds this tree, refreshes the Properties panel and marks the tab unsaved.
+    node.name = name;
+  };
+
+  const handleDelete = ({ ids }: { ids: string[] }) => {
+    if (isPlayMode) return;
+    for (const id of ids) {
+      if (id === rootId) continue;
+      const node = editorScene?.getNodeById(id);
+      if (!node) continue;
+      // The instance root itself is deletable — it is a normal node in the scene. Only its interior is
+      // off limits, and that is authored in the template rather than here.
+      if (editorMode === 'scene' && isWithinTemplateInstance(node.parent)) {
+        Logger.warn('Cannot delete a node inside a template instance', 'Editor');
+        continue;
+      }
+      // removeNode, not Node.remove(): the scene unwinds its own bookkeeping around the tree link.
+      editorScene.removeNode(node);
+    }
+  };
+
+  // --- drops from outside the tree ------------------------------------------------------------------
+
+  // What this panel accepts from elsewhere in the editor. Node-to-node moves are deliberately NOT here:
+  // those belong to react-arborist, and leaving them out is what stops both drag systems acting on one drop.
+  const nativeDrag = (types: readonly string[]) =>
+    types.includes(SCRIPT_MIME) ? 'script' : types.includes(NEW_NODE_MIME) ? 'new-node' : null;
+
+  /*
+   * Both handlers run in the CAPTURE phase and stop propagation, so these drags never reach the react-dnd
+   * listeners on the tree container below: that backend force-sets dropEffect='none' for any drag it does
+   * not own (which cancels the drop before it happens) and throws "cannot hover while not dragging" on
+   * release. Sitting on an ancestor makes the ordering structural rather than a race over which listener
+   * was registered first.
+   */
+  const handleDragOver: React.DragEventHandler<HTMLDivElement> = (event) => {
+    if (!nativeDrag(event.dataTransfer.types)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop: React.DragEventHandler<HTMLDivElement> = (event) => {
+    const kind = nativeDrag(event.dataTransfer.types);
+    if (!kind) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Find the closest parent div with the class 'scene-item'
+    const targetElement = (event.target as HTMLElement).closest('.scene-item');
+
+    // A script asset dragged from the Assets explorer: attach it to the node it was dropped on (base-type
+    // enforced by attachScriptToNode). Read-only template-instance nodes are skipped.
+    if (kind === 'script') {
+      const scriptId = event.dataTransfer.getData(SCRIPT_MIME);
+      const node = targetElement ? editorScene?.getNodeById(targetElement.id) : null;
+      if (!node) { Logger.warn('Drop the script onto a node to attach it', 'Editor'); return; }
+      if (editorMode === 'scene' && isWithinTemplateInstance(node)) {
+        Logger.warn('Cannot attach a script to a template instance', 'Editor');
+        return;
+      }
+      attachScriptToNode(node, scriptId);
+      return;
+    }
+
+    // A new node dragged out of the Add section: parent it under the row it was dropped on, or under the
+    // tree root when dropped on the empty space below the tree.
+    const item = findAddItem(event.dataTransfer.getData(NEW_NODE_MIME));
+    const parent = targetElement ? editorScene?.getNodeById(targetElement.id) : treeRoot();
+    if (!item || !parent) return;
+    if (editorMode === 'scene' && isWithinTemplateInstance(parent)) {
+      Logger.warn('Cannot add a node inside a template instance', 'Editor');
+      return;
+    }
+    addItemTo(item, parent, { editorScene, eventEmitter, triggers }).catch(err => console.error(err));
+  };
+
+  // Delete and F2, on top of react-arborist's own keymap (which binds Backspace and Enter to the same two
+  // actions). In the capture phase, and stopping propagation, because react-arborist's own handler treats
+  // any unrecognised key as type-ahead and would jump the focus to a node beginning with "delete".
+  // Ignored while a field has focus, so typing in the filter box can never delete a node.
+  const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (event) => {
+    const tree = treeRef.current;
+    if (!tree || tree.isEditing) return;
+    if ((event.target as HTMLElement).closest('input')) return;
+    if (event.key !== 'Delete' && event.key !== 'F2') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === 'Delete') {
+      const ids = Array.from(tree.selectedIds);
+      if (ids.length) void tree.delete(ids);
+      return;
+    }
+    const node = tree.focusedNode;
+    if (node?.isEditable) void tree.edit(node);
+  };
 
   return (
     // The tree alone: the Add palettes are their own dock panels above this one, so there is no longer a
     // second section here for a drag to be released over by mistake.
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full min-h-[40px]'
-         onDragOver={handleDragOver} onDrop={handleDrop}>
-      { nodes && <SceneListRecursive node={nodes} setSelectedNode={handleSelectNode} handleSetVisibility={handleSetVisibility} /> }
+    <div className='flex flex-col text-white bg-surface-raised w-full h-full min-h-[40px] overflow-hidden'
+         onDragOverCapture={handleDragOver} onDropCapture={handleDrop} onKeyDownCapture={handleKeyDown}>
+      <div className='shrink-0 px-[5px] py-1'>
+        <input
+          type='text' value={filter} placeholder='Filter nodes'
+          onChange={(e) => setFilter(e.target.value)}
+          className='type-value w-full bg-white/[0.06] text-white placeholder:text-dim rounded-md px-2 py-[3px] outline-none focus:bg-white/[0.1] transition-colors' />
+      </div>
+      <div ref={viewportRef} className='flex-1 min-h-0'>
+        { dndManager && size.height > 0 &&
+          <Tree<NodeDescription>
+            ref={treeRef}
+            data={data}
+            dndManager={dndManager}
+            width={size.width}
+            height={size.height}
+            rowHeight={ROW_HEIGHT}
+            indent={INDENT}
+            openByDefault
+            selectionFollowsFocus
+            searchTerm={filter}
+            searchMatch={(node, term) => node.data.name.toLowerCase().includes(term.toLowerCase())}
+            onSelect={handleSelect}
+            onMove={handleMove}
+            onRename={handleRename}
+            onDelete={handleDelete}
+            disableEdit={(d) => isPlayMode || d.id === rootId}
+            disableDrop={({ parentNode }) => isPlayMode || !!parentNode.data.templateId || !editorScene?.getNodeById(parentNode.id)}
+            renderCursor={DropCursor}
+            className='outline-none'>
+            {SceneNodeRow}
+          </Tree>
+        }
+      </div>
     </div>
   )
 }

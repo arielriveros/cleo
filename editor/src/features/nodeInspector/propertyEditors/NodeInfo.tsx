@@ -4,6 +4,7 @@ import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
 import { PropertyTable, PropertyRow, TextInput, ButtonWithConfirm, Toggle, Hint } from '../../../components/ui'
 import { InfoIcon } from '../sectionIcons'
+import { validateNodeName } from '../../../utils/nodeNames'
 
 export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
   const { eventEmitter: eventEmitter, editorScene } = useCleoEngine();
@@ -15,6 +16,16 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
     setSpawnOnStart(props.node.spawnOnStart);
   }, [props.node]);
 
+  // The name can also be changed from the scene tree's inline rename, which leaves this field showing the
+  // old text: the selected node is the same object, so the effect above never re-runs for it.
+  useEffect(() => {
+    const onSceneChanged = (e?: { kind?: string; node?: Node }) => {
+      if (e?.kind === 'name' && e.node === props.node) setNodeName(props.node.name);
+    };
+    eventEmitter.on('SCENE_CHANGED', onSceneChanged);
+    return () => { eventEmitter.off('SCENE_CHANGED', onSceneChanged) };
+  }, [eventEmitter, props.node]);
+
   // The flag is a RUNTIME rule — editing scenes set scene.spawnRulesEnabled = false, so the node stays
   // visible here whatever this says. Nothing to re-derive in the viewport, just the dirty mark.
   const handleSpawnOnStartChange = (value: boolean) => {
@@ -25,23 +36,10 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
 
   const handleNodeNameChange = () => {
     if (nodeName === props.node.name) return;
-    if (nodeName === '') {
-      Logger.warn('Node name cannot be empty', 'Editor');
-      setNodeName(props.node.name);
-      return;
-    }
-    if (nodeName === 'root') {
-      Logger.warn('"root" name is reserved for the root node', 'Editor');
-      setNodeName(props.node.name);
-      return;
-    }
-    if (nodeName.includes('__debug__')) {
-      Logger.warn('Node name cannot contain "__debug__"', 'Editor');
-      setNodeName(props.node.name);
-      return;
-    }
-    if (nodeName.includes('__editor__')) {
-      Logger.warn('Node name cannot contain "__editor__"', 'Editor');
+    // Same rules as the scene tree's inline rename — they live in one place so the two can't drift.
+    const problem = validateNodeName(nodeName);
+    if (problem) {
+      Logger.warn(problem, 'Editor');
       setNodeName(props.node.name);
       return;
     }
