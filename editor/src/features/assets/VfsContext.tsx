@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { TextureManager, isDerivedTextureId } from 'cleo'
+import { Logger, TextureManager, isDerivedTextureId } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { idbGet, idbSet } from '../../utils/idb'
 import {
   EMPTY_VFS, LibSnapshot, VfsEntry, VfsIndex, vfsKey,
-  AssetKind, indexByPath, reconcileVfs,
+  AssetKind, indexByPath, reconcileVfs, repairVfs,
 } from '../../utils/vfs'
 import { AssetDeps, sizeOfAsset } from './assetKinds'
 
@@ -49,7 +49,7 @@ export function useVfs(): VfsContextValue {
 
 export function VfsProvider({ children }: { children: React.ReactNode }) {
   const engine = useCleoEngine()
-  const { eventEmitter, isSceneReady, sceneList } = engine
+  const { eventEmitter, isSceneReady, texturesPreloaded, sceneList } = engine
   // The five libraries come from the split-out slice, so reconciliation re-runs on library changes
   // rather than on every unrelated EngineContext update.
   const {
@@ -125,11 +125,24 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
 
   // Initial read. On a first run this stays EMPTY_VFS, and the reconcile below lands every existing asset
   // at the root — that is the whole migration.
+  //
+  // Everything that comes off disk goes through repairVfs first. A stored index can be structurally
+  // broken — an entry whose ancestor folder is missing, a path claimed twice — and the file manager does
+  // not survive that: FileTree.parse quietly unlinks the orphan, the store sync then tries to create it,
+  // and FileTree.add dereferences the absent parent. Since the damage is persisted, the explorer would
+  // throw on every load until the index is fixed, which is what this does.
   useEffect(() => {
     (async () => {
       try {
         const stored = await idbGet<VfsIndex>(vfsKey())
-        if (stored?.entries) setVfs(stored)
+        if (stored?.entries) {
+          const { next, notes } = repairVfs(stored)
+          if (notes.length) {
+            Logger.warn(`Repaired the asset index on load: ${notes.join('; ')}`, 'Editor')
+            idbSet(vfsKey(), next).catch(e => console.warn('Failed to persist the repaired asset index:', e))
+          }
+          setVfs(next)
+        }
       } catch (e) { console.warn('Failed to load the asset index:', e) }
       finally { vfsLoadedRef.current = true; setVfsLoaded(true) }
     })()
@@ -153,11 +166,16 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
       const { next, changed } = reconcileVfs(prev, libs, {
         landingFolder: landingFolderRef.current,
         prune: assetsLoaded && librariesPopulated,
+        // Textures have no library of their own to look "populated"; the preload settling is the
+        // equivalent signal. `isSceneReady` on top of it because restoring the initial scene registers
+        // more textures (a legacy ModelAsset re-registers its embedded ones when it is instantiated),
+        // and pruning between those two points would drop entries that were about to be filled in.
+        pruneTextures: assetsLoaded && texturesPreloaded && isSceneReady,
         sizeOf: (kind: AssetKind, assetId: string) => sizeOfAsset(kind, assetId, depsRef.current),
       })
       return changed ? next : prev
     })
-  }, [vfsLoaded, libs, assetsLoaded, librariesPopulated])
+  }, [vfsLoaded, libs, assetsLoaded, librariesPopulated, texturesPreloaded, isSceneReady])
 
   // Persist, debounced: texture registration is chatty while a project or a mesh import loads.
   useEffect(() => {

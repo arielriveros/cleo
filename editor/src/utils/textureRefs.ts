@@ -1,7 +1,12 @@
-// Detects texture image files a model references but that were NOT included in the upload. The engine
-// loaders silently drop a missing texture reference (the name never reaches the returned Material), so
-// we re-derive references directly from the source files: GLTF `images[].uri` and MTL `map_*` lines.
-// GLB/FBX embed their textures, so nothing to detect there.
+// Detects texture image files a model references but that were NOT included in the upload, by reading the
+// source files directly: GLTF `images[].uri` and MTL `map_*` lines.
+//
+// This covers only the text formats, and deliberately so — it exists to name images that never reach the
+// loader at all. Everything else (FBX and GLB, whose references are binary, and any slot that resolved to
+// nothing) is reported by the loaders themselves through `TextureLoadReport`, which importModelFiles
+// unions with this. A previous version of this comment claimed GLB/FBX always embed their textures and
+// therefore needed no detection; they frequently do not, and the result was an untextured import that
+// cheerfully announced "All referenced textures are present".
 
 // Last path segment, splitting on both separators (MTL paths are often Windows-style, e.g. `tex\a.png`).
 function baseName(path: string): string { const parts = path.split(/[\\/]/); return parts[parts.length - 1] }

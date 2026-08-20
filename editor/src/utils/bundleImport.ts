@@ -1,6 +1,6 @@
 import { Logger } from 'cleo'
 import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb'
-import { VfsIndex, EMPTY_VFS, withAncestors } from './vfs'
+import { VfsIndex, EMPTY_VFS, withAncestors, repairVfs } from './vfs'
 import { ProjectMeta } from './sceneStorage'
 import { libKey, metaKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
 import { getAllTextures, putTextures, deleteTextures, StoredTexture } from './textureStore'
@@ -58,7 +58,9 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
       prefs: bundle.manifest.prefs,
     }
     await idbSet(metaKey(pid), meta)
-    await idbSet(vfsKey(pid), bundle.vfs)
+    // Even a bundle we exported ourselves is untrusted input by the time it comes back: repairVfs is what
+    // guarantees the index the editor boots into satisfies its structural invariants.
+    await idbSet(vfsKey(pid), repairVfs(bundle.vfs).next)
   } else {
     // Asset pack: keep local scenes/meta; swap the asset entries of the VFS, keep local scene entries.
     const localVfs = (await idbGet<VfsIndex>(vfsKey(pid))) ?? EMPTY_VFS
@@ -67,7 +69,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
       folders: withAncestors([...localVfs.folders, ...bundle.vfs.folders]),
       entries: [...localVfs.entries.filter(e => e.kind === 'scene'), ...bundle.vfs.entries.filter(e => e.kind !== 'scene')],
     }
-    await idbSet(vfsKey(pid), merged)
+    await idbSet(vfsKey(pid), repairVfs(merged).next)
   }
 
   // Textures: wipe and rewrite from the bundle (within this project only).
@@ -163,7 +165,7 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
     folders: withAncestors([...vfs.folders, ...plan.vfsFolders]),
     entries: [...vfs.entries, ...plan.vfsEntries],
   }
-  await idbSet(vfsKey(), merged)
+  await idbSet(vfsKey(), repairVfs(merged).next)
 
   Logger.info(`Imported ${bundle.manifest.kind} (merge) — reloading`, 'Editor')
   window.location.reload()

@@ -12,7 +12,7 @@ import { useDragOutPatch } from './useDragOutPatch'
 import { runUpload } from './uploadRouter'
 import { iconFor, thumbnailOf } from './assetKinds'
 import MissingAssetsPopover from './MissingAssetsPopover'
-import { buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer } from '../../utils/vfs'
+import { buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
@@ -65,6 +65,11 @@ function AssetsExplorerHost() {
     const treeIds = new Set((apiRef.current?.serialize('/') ?? []).map((e: any) => e.id))
     return findMissingFromExplorer(vfs, libs, treeIds.size ? treeIds : undefined)
   }, [vfs, libs, apiRef, missingOpen])
+
+  // The opposite direction: entries pointing at an asset that no longer exists. They draw nothing, but
+  // they hold their path reserved, so re-importing the same file quietly comes back as "Rock (2)".
+  const orphans = useMemo(() => findOrphanEntries(vfs, libs), [vfs, libs])
+  const audited = missing.length + orphans.length
 
   useEffect(() => {
     if (!missingOpen) return
@@ -372,23 +377,25 @@ function AssetsExplorerHost() {
             id='asset-missing-audit'
             className={`shrink-0 w-[24px] h-[20px] inline-flex items-center justify-center rounded ${
               missingOpen ? 'bg-selected text-white'
-                : missing.length ? 'text-warning hover:bg-control-hover'
+                : audited ? 'text-warning hover:bg-control-hover'
                 : 'text-muted hover:bg-control-hover hover:text-fg'
             }`}
             onClick={() => setMissingOpen(v => !v)}
-            title={missing.length
-              ? `${missing.length} asset${missing.length === 1 ? '' : 's'} in your libraries are not showing in the explorer`
+            title={audited
+              ? `${audited} asset${audited === 1 ? '' : 's'} are out of step between your libraries and the explorer`
               : 'Check for assets missing from the explorer'}>
             <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
               <circle cx='11' cy='11' r='7' /><path d='M20 20l-3.5-3.5' /><path d='M11 8v3.5M11 14.5h.01' />
             </svg>
           </button>
-          {missing.length > 0 && !missingOpen && (
+          {audited > 0 && !missingOpen && (
             <span className='absolute -top-[2px] -right-[2px] min-w-[12px] h-[12px] px-[3px] inline-flex items-center justify-center rounded-full bg-warning text-[9px] font-bold leading-none text-black pointer-events-none'>
-              {missing.length > 99 ? '99+' : missing.length}
+              {audited > 99 ? '99+' : audited}
             </span>
           )}
-          {missingOpen && <MissingAssetsPopover missing={missing} onClose={() => setMissingOpen(false)} />}
+          {missingOpen && (
+            <MissingAssetsPopover missing={missing} orphans={orphans} onClose={() => setMissingOpen(false)} />
+          )}
         </div>
 
         <button

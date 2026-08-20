@@ -1,0 +1,179 @@
+import { describe, it, expect } from 'vitest';
+import {
+  applyDelete, buildFileManagerData, reconcileVfs, repairVfs, topMostIds,
+  type LibSnapshot, type VfsEntry, type VfsIndex,
+} from '../editor/src/utils/vfs';
+
+// The asset explorer is two data structures pretending to be one: our VfsIndex and SVAR's FileTree. The
+// file manager crashes hard — `Cannot read properties of undefined (reading 'data')` — when the index
+// violates a structural invariant, and because the index is persisted the crash then repeats on every
+// load. These tests pin the invariants that make that unreachable:
+//
+//   1. every entry path's ancestors are in `folders`  (else FileTree.add dereferences a missing parent)
+//   2. no path is claimed twice                       (else SVAR renames one to '<name>.new' and desyncs)
+//   3. a delete batch never names a folder AND something inside it (else DataTree.remove purges the
+//      subtree, then dereferences the already-purged child)
+
+const libs = (over: Partial<LibSnapshot> = {}): LibSnapshot => ({
+  materials: [], terrainMaterials: [], templates: [], models: [],
+  scripts: [], animationFields: [], tilesets: [], scenes: [], textureIds: [],
+  ...over,
+});
+
+const entry = (path: string, over: Partial<VfsEntry> = {}): VfsEntry =>
+  ({ path, kind: 'material', assetId: path, ...over });
+
+const index = (folders: string[], entries: VfsEntry[]): VfsIndex => ({ version: 1, folders, entries });
+
+/** Invariant 1, stated as an assertion so every test can check it the same way. */
+function expectClosedUnderAncestors(vfs: VfsIndex) {
+  const folders = new Set(vfs.folders);
+  for (const e of vfs.entries) {
+    const parts = e.path.split('/').filter(Boolean);
+    parts.pop();
+    let acc = '';
+    for (const p of parts) {
+      acc += `/${p}`;
+      expect(folders, `"${e.path}" needs its ancestor "${acc}"`).toContain(acc);
+    }
+  }
+}
+
+describe('repairVfs', () => {
+  it('restores an ancestor folder that the index lost', () => {
+    // The exact shape that bricks the explorer: FileTree.parse leaves the file unlinked (invisible to
+    // serialize), the store sync then tries to create it, and FileTree.add throws on the absent parent.
+    const { next, notes } = repairVfs(index([], [entry('/Characters/Hero.mat')]));
+
+    expect(next.folders).toContain('/Characters');
+    expect(next.entries).toHaveLength(1);
+    expect(notes.join(' ')).toMatch(/folder/i);
+    expectClosedUnderAncestors(next);
+  });
+
+  it('restores every level of a deep path, not just the immediate parent', () => {
+    const { next } = repairVfs(index(['/a/b'], [entry('/a/b/c/Deep.mat')]));
+    expect(next.folders).toEqual(expect.arrayContaining(['/a', '/a/b', '/a/b/c']));
+    expectClosedUnderAncestors(next);
+  });
+
+  it('re-homes the second of two entries claiming one path', () => {
+    const { next, notes } = repairVfs(index([], [
+      entry('/Rock.mat', { assetId: 'first' }),
+      entry('/Rock.mat', { assetId: 'second' }),
+    ]));
+
+    const paths = next.entries.map(e => e.path);
+    expect(paths).toHaveLength(2);
+    expect(new Set(paths).size).toBe(2);
+    expect(paths[0]).toBe('/Rock.mat'); // the incumbent keeps its path
+    expect(paths[1]).toBe('/Rock (2).mat');
+    expect(notes.join(' ')).toMatch(/claimed twice/);
+  });
+
+  it('moves an entry off a path a folder already owns', () => {
+    // A folder may already have children hanging off it, so the file is the one that has to move.
+    const { next } = repairVfs(index(['/Shared'], [entry('/Shared', { kind: 'texture', assetId: 't' })]));
+
+    expect(next.folders).toContain('/Shared');
+    expect(next.entries[0].path).not.toBe('/Shared');
+  });
+
+  it('drops a second entry for the same asset', () => {
+    const { next } = repairVfs(index([], [
+      entry('/A.mat', { assetId: 'same' }),
+      entry('/B.mat', { assetId: 'same' }),
+    ]));
+    expect(next.entries).toHaveLength(1);
+  });
+
+  it('normalises malformed paths and drops nameless ones', () => {
+    const { next } = repairVfs(index(['/a//b/'], [
+      entry('//Props//Crate.mat'),
+      entry('/'),
+      entry('/Trailing/'),
+    ]));
+
+    expect(next.folders).toContain('/a/b');
+    expect(next.entries.map(e => e.path)).toEqual(['/Props/Crate.mat', '/Trailing']);
+    expectClosedUnderAncestors(next);
+  });
+
+  it('survives junk without throwing', () => {
+    const junk = { version: 1, folders: [null, 3, '/ok'], entries: [null, {}, { path: 5 }] } as any;
+    const { next } = repairVfs(junk);
+    expect(next.folders).toEqual(['/ok']);
+    expect(next.entries).toEqual([]);
+    expect(repairVfs(undefined).next.entries).toEqual([]);
+  });
+
+  it('is idempotent — a healthy index comes back untouched', () => {
+    const healthy = repairVfs(index(['/Props'], [entry('/Props/Crate.mat')])).next;
+    const again = repairVfs(healthy);
+    expect(again.next).toEqual(healthy);
+    expect(again.notes).toEqual([]);
+  });
+});
+
+describe('reconcileVfs', () => {
+  it('reports a change when a folder is missing even though the folder count matches', () => {
+    // `changed` used to be decided by comparing folder-array LENGTHS. A duplicate in the stored list
+    // cancelled out a genuinely missing ancestor, so the un-closed index was returned as-is and the file
+    // manager threw on its next sync.
+    const prev = index(['/Dup', '/Dup'], [entry('/Props/Crate.mat')]);
+    const { next, changed } = reconcileVfs(prev, libs({ materials: [{ id: '/Props/Crate.mat', name: 'Crate' } as any] }));
+
+    expect(changed).toBe(true);
+    expect(next.folders).toContain('/Props');
+    expectClosedUnderAncestors(next);
+  });
+
+  it('keeps texture entries until pruneTextures is explicitly armed', () => {
+    // TextureManager is emptied and refilled on every project load, so an entry that merely looks
+    // orphaned may just be waiting for preloadTextures.
+    const prev = index([], [entry('/gone.png', { kind: 'texture', assetId: 'gone.png' })]);
+
+    expect(reconcileVfs(prev, libs(), { prune: true }).next.entries).toHaveLength(1);
+    expect(reconcileVfs(prev, libs(), { prune: true, pruneTextures: true }).next.entries).toHaveLength(0);
+  });
+});
+
+describe('buildFileManagerData', () => {
+  it('never emits a file whose parent folder it did not also emit', () => {
+    const vfs = repairVfs(index([], [
+      entry('/Props/Crate.mat', { assetId: 'crate' }),
+      entry('/Props/Sub/Deep.mat', { assetId: 'deep' }),
+    ])).next;
+
+    const data = buildFileManagerData(vfs, libs({
+      materials: [{ id: 'crate', name: 'Crate' }, { id: 'deep', name: 'Deep' }] as any,
+    }));
+
+    const folders = new Set(data.filter(d => d.type === 'folder').map(d => d.id));
+    for (const file of data.filter(d => d.type === 'file')) {
+      const parent = file.id.slice(0, file.id.lastIndexOf('/')) || '/';
+      if (parent !== '/') expect(folders).toContain(parent);
+    }
+  });
+
+  it('holds a deleted folder and its contents out of the tree together', () => {
+    const vfs = applyDelete(index(['/Props'], [entry('/Props/Crate.mat', { assetId: 'crate' })]), ['/Props']);
+    const data = buildFileManagerData(vfs, libs({ materials: [{ id: 'crate', name: 'Crate' }] as any }));
+    expect(data).toEqual([]);
+  });
+});
+
+describe('topMostIds', () => {
+  it('drops ids contained by another id in the same batch', () => {
+    expect(topMostIds(['/A', '/A/file.mat', '/A/Sub', '/B.mat'])).toEqual(['/A', '/B.mat']);
+  });
+
+  it('does not treat a name-prefix as containment', () => {
+    // '/Models2' starts with the characters of '/Models' but is not inside it.
+    expect(topMostIds(['/Models', '/Models2/x.mat'])).toEqual(['/Models', '/Models2/x.mat']);
+  });
+
+  it('de-duplicates and leaves unrelated ids alone', () => {
+    expect(topMostIds(['/A.mat', '/A.mat', '/B.mat'])).toEqual(['/A.mat', '/B.mat']);
+  });
+});

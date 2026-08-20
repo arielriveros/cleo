@@ -15,6 +15,49 @@ import { Logger } from "../core/logger";
  * @returns The corrected path for the current environment
  */
 
+/** One texture reference a model made that did not end up as a texture. */
+export type UnresolvedTexture = {
+    /** Basename of the image the model asked for. The import review matches uploaded files against this. */
+    name: string;
+    /** Where it was referenced from, e.g. "BodyMat · base colour". Display only. */
+    from: string;
+};
+
+/**
+ * Texture references a model made that did not end up as a texture.
+ *
+ * A loader that quietly drops them is indistinguishable from a model that genuinely has none, which is
+ * how an FBX could import looking correct and completely untextured with nothing in the log. The split
+ * matters to the caller: `missingFiles` names images that simply weren't in the upload and can be fixed
+ * by picking them, while `unloadable` covers references no file can repair — an embedded texture in a
+ * format that cannot be decoded, or bytes that failed to decode.
+ */
+export type TextureLoadReport = { missingFiles: UnresolvedTexture[], unloadable: UnresolvedTexture[] };
+
+/** Human-readable name for a texture slot, for the "where did this come from" line. */
+const SLOT_LABELS: Record<string, string> = {
+    base: 'base colour', baseColorTexture: 'base colour',
+    specular: 'specular', normal: 'normal map', normalMap: 'normal map',
+    emissive: 'emissive', emissiveMap: 'emissive',
+    mask: 'opacity mask', reflectivity: 'reflectivity',
+    metallicRoughnessTexture: 'metallic/roughness', occlusionMap: 'occlusion',
+};
+
+/** Last path segment, splitting on both separators (model files often carry Windows-style paths). */
+function textureBaseName(path: string): string {
+    return path.split(/[\\/]/).pop() || path;
+}
+
+/** An id like `base`, or `base (2)` if that is already registered. Ids are user-visible names here. */
+function uniqueTextureId(base: string): string {
+    const taken = TextureManager.Instance.textures;
+    if (!taken.has(base)) return base;
+    for (let n = 2; ; n++) {
+        const candidate = `${base} (${n})`;
+        if (!taken.has(candidate)) return candidate;
+    }
+}
+
 export class Loader {
     /**
      * Load models from file paths. Automatically detects GLTF files and uses appropriate loader.
@@ -194,24 +237,45 @@ export class Loader {
      */
     public static assembleGltfModels(
         parsed: GltfParseResult,
-        files: File[]
+        files: File[],
+        report?: TextureLoadReport
     ): { name: string, model: Model | AnimatedModel, transform?: ImportTransform }[] {
         const cfg = { wrapping: 'repeat' as const };
 
-        const textureIds: (string | undefined)[] = parsed.images.map((image): string | undefined => {
+        // Which material/slot first referenced each image, so an unresolved one can say where it came
+        // from. The descriptors carry no material names, so the index is the best label available.
+        const referencedBy = new Map<number, string>();
+        parsed.materials.forEach((d, mi) => {
+            for (const [slot, index] of Object.entries(d.textures) as [string, number | undefined][])
+                if (index !== undefined && !referencedBy.has(index))
+                    referencedBy.set(index, `material ${mi} · ${SLOT_LABELS[slot] ?? slot}`);
+        });
+
+        const textureIds: (string | undefined)[] = parsed.images.map((image, i): string | undefined => {
+            const from = referencedBy.get(i) ?? `image #${i}`;
             try {
                 switch (image.kind) {
                     case 'bytes': return TextureManager.Instance.addTextureFromBytes(image.bytes, image.mime, { ...cfg, mipMap: false });
                     case 'dataUri': return TextureManager.Instance.addTextureFromBase64(image.uri, { ...cfg, mipMap: false });
                     case 'file': {
                         const file = files.find(f => f.name === image.fileName);
-                        return file ? TextureManager.Instance.addTextureFromFile(file, cfg) : undefined;
+                        if (!file) { report?.missingFiles.push({ name: image.fileName, from }); return undefined; }
+                        return TextureManager.Instance.addTextureFromFile(file, cfg, uniqueTextureId(file.name));
                     }
                     case 'path': return TextureManager.Instance.addTextureFromPath(image.uri, cfg);
-                    default: return undefined; // 'missing' — the texture was never uploaded
+                    default:
+                        // 'missing' — the glTF named an image that resolved to no source. When it named a
+                        // URI it is an ordinary absent file and the user can supply it, so it belongs in
+                        // missingFiles (which drives the review modal's picker) and NOT in unloadable,
+                        // which renders as unfixable. This is the sole reporting path for every external
+                        // texture of a converted FBX/GLB.
+                        if (image.uri) report?.missingFiles.push({ name: textureBaseName(image.uri), from });
+                        else report?.unloadable.push({ name: `image #${i}`, from });
+                        return undefined;
                 }
             } catch (error) {
                 Logger.print('warn', ['Failed to load texture:', error], 'Loader');
+                report?.unloadable.push({ name: `image #${i}`, from });
                 return undefined;
             }
         });
@@ -264,7 +328,8 @@ export class Loader {
      */
     public static async assembleAssimpModels(
         parsed: AssimpParseResult,
-        files: File[]
+        files: File[],
+        report?: TextureLoadReport
     ): Promise<{ name: string, geometry: Geometry, material: Material }[]> {
         const validateBase64Image = async (base64: string): Promise<boolean> => {
             return new Promise((resolve) => {
@@ -275,33 +340,53 @@ export class Loader {
             });
         };
 
-        const loadTextureFromSources = async (texturePath: string | undefined, textureData: string | undefined) => {
+        const loadTextureFromSources = async (
+            texturePath: string | undefined, textureData: string | undefined, id: string, from: string
+        ) => {
+            // One line per reference, so "did this file actually embed its textures?" is answerable from
+            // the console. Without it the only symptom of any failure below is an untextured model.
+            if (texturePath)
+                Logger.print('info', [`${from}: ${texturePath}${textureData ? ' (embedded data found)' : ''}`], 'Import');
+
             // First priority: use embedded base64 data if available and valid
             if (textureData) {
                 const isValid = await validateBase64Image(textureData);
                 if (isValid) {
-                    return TextureManager.Instance.addTextureFromBase64(textureData, { wrapping: 'repeat', mipMap: false });
+                    return TextureManager.Instance.addTextureFromBase64(
+                        textureData, { wrapping: 'repeat', mipMap: false }, uniqueTextureId(id));
                 } else {
                     Logger.print('warn', ['Base64 texture data is not a valid image, skipping:', textureData.slice(0, 50)], 'Loader');
+                    report?.unloadable.push({ name: id, from });
+                    return undefined;
                 }
+            }
+
+            if (!texturePath) return undefined;
+
+            // `*N` is assimp's reference to a texture embedded in the model file. Reaching here means the
+            // parse could not turn it into bytes (an unsupported format, or raw pixels) — it is emphatically
+            // NOT a filename, and searching the upload for one would silently report nothing at all.
+            if (texturePath.startsWith('*')) {
+                report?.unloadable.push({ name: `embedded texture ${texturePath}`, from });
+                return undefined;
             }
 
             // Second priority: look for texture file in uploaded files
-            if (texturePath) {
-                const textureFileName = texturePath.split(/[\/\\]/).pop();
-                if (textureFileName) {
-                    const textureFile = files.find(file =>
-                        file.name.toLowerCase().endsWith(textureFileName.toLowerCase()) ||
-                        file.name.toLowerCase() === textureFileName.toLowerCase()
-                    );
+            const textureFileName = textureBaseName(texturePath);
+            if (!textureFileName) return undefined;
 
-                    if (textureFile) {
-                        return TextureManager.Instance.addTextureFromFile(textureFile, { wrapping: 'repeat' });
-                    }
-                }
+            const textureFile = files.find(file =>
+                file.name.toLowerCase().endsWith(textureFileName.toLowerCase()) ||
+                file.name.toLowerCase() === textureFileName.toLowerCase()
+            );
+            if (!textureFile) {
+                report?.missingFiles.push({ name: textureFileName, from });
+                return undefined;
             }
-
-            return undefined;
+            // Named after the file rather than a UUID: the id IS the name the asset explorer shows, and it
+            // is baked into every material that references it, so it has to be both readable and unique.
+            return TextureManager.Instance.addTextureFromFile(
+                textureFile, { wrapping: 'repeat' }, uniqueTextureId(textureFile.name));
         };
 
         const models: { name: string, geometry: Geometry, material: Material }[] = [];
@@ -318,13 +403,19 @@ export class Loader {
                 continue;
             }
 
+            const matName = description.name || mesh.name || 'material';
+            const slot = (name: keyof AssimpParseResult['materials'][number]['material']['texturesPaths']) =>
+                loadTextureFromSources(
+                    description.texturesPaths[name], description.texturesData[name],
+                    `${matName}_${name}`, `${matName} · ${SLOT_LABELS[name] ?? name}`);
+
             const textures = {
-                base: await loadTextureFromSources(description.texturesPaths.base, description.texturesData.base),
-                specular: await loadTextureFromSources(description.texturesPaths.specular, description.texturesData.specular),
-                normal: await loadTextureFromSources(description.texturesPaths.normal, description.texturesData.normal),
-                emissive: await loadTextureFromSources(description.texturesPaths.emissive, description.texturesData.emissive),
-                mask: await loadTextureFromSources(description.texturesPaths.mask, description.texturesData.mask),
-                reflectivity: await loadTextureFromSources(description.texturesPaths.reflectivity, description.texturesData.reflectivity)
+                base: await slot('base'),
+                specular: await slot('specular'),
+                normal: await slot('normal'),
+                emissive: await slot('emissive'),
+                mask: await slot('mask'),
+                reflectivity: await slot('reflectivity')
             };
 
             const material = Material.Default({

@@ -1,12 +1,25 @@
 import { Logger } from "../../core/logger";
 
+// aiTextureType. A `$tex.file` property carries its type in `semantic`, and a material may well use more
+// than one of these for the same slot, so each slot below is a PREFERENCE LIST tried in order.
 const DIFFUSE_TEXTURE = 1;
 const SPECULAR_TEXTURE = 2;
 const AMBIENT_TEXTURE = 3;
-
 const EMISSIVE_TEXTURE = 4;
-const NORMAL_TEXTURE = 5;
+const HEIGHT_TEXTURE = 5;
+const NORMALS_TEXTURE = 6;
 const MASK_TEXTURE = 8;
+const BASE_COLOR_TEXTURE = 12;
+
+// Base colour: legacy exporters write DIFFUSE, PBR ones (Stingray / Maya Standard Surface / 3ds Max
+// Physical, and glTF via assimp) write BASE_COLOR — often only BASE_COLOR.
+const BASE_SLOT = [DIFFUSE_TEXTURE, BASE_COLOR_TEXTURE];
+// Image formats a browser can turn into a texture. DDS/TGA/PSD/EXR do appear in FBX files and have to be
+// reported rather than handed to an <img>, which would just fail silently later.
+const DECODABLE_HINTS = ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp'];
+// Normals: NORMALS is the correct type and what FBX/glTF use. HEIGHT stays as a fallback because assimp
+// maps OBJ's `bump` directive onto it, and that is the case this code was originally written against.
+const NORMAL_SLOT = [NORMALS_TEXTURE, HEIGHT_TEXTURE];
 
 const assimpjs = require('./assimpjs');
 
@@ -219,43 +232,58 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
             return value;
         }
     
-        const getTexture = (properties: AiMaterialProperties[], type: number) => {
-            const textures = find(properties, '$tex.file');
-            for (const tex of textures) if (tex.semantic === type) return tex.value;
-    
+        /** The first `$tex.file` matching any of `types`, in preference order. */
+        const getTexture = (properties: AiMaterialProperties[], types: number[]) => {
+            const files = find(properties, '$tex.file');
+            for (const type of types)
+                for (const tex of files) if (tex.semantic === type) return tex.value;
+
             return undefined;
         }
 
-        // Helper function to get embedded texture data
-        const getEmbeddedTextureData = (texturePath: string) => {
-            if (!texturePath || !textures) return undefined;
-            
-            // Check if the texture path refers to an embedded texture (usually starts with "*" followed by index)
-            if (texturePath.startsWith('*')) {
-                const textureIndex = parseInt(texturePath.substring(1));
-                if (textureIndex >= 0 && textureIndex < textures.length) {
-                    const textureData = textures[textureIndex];
-                    // Return base64 data if available
-                    if (textureData && textureData.achFormatHint && textureData.pcData) {
-                        const formatHint = textureData.achFormatHint.toLowerCase().replace(/\0/g, ''); // Remove null characters
-                        const mimeType = formatHint === 'jpg' ? 'jpeg' : formatHint;
-                        const base64String = `data:image/${mimeType};base64,${textureData.pcData}`;
+        /**
+         * The image bytes behind a `*N` reference — the form assimp gives a texture embedded in the model
+         * file itself (the default for a self-contained FBX or a GLB).
+         *
+         * The field names matter and are easy to get wrong: this reads the **assjson exporter's** output
+         * (`formathint` / `data` / `width` / `height`), NOT the C++ `aiTexture` struct's members
+         * (`achFormatHint` / `pcData`). Reading the struct names silently yields `undefined` for every
+         * texture ever, so an embedded-texture FBX imports with correct geometry and no maps at all —
+         * and nothing downstream can tell that apart from a model that genuinely has no textures.
+         */
+        const getEmbeddedTextureData = (texturePath: string | undefined) => {
+            if (!texturePath || !texturePath.startsWith('*') || !textures) return undefined;
 
-                        // Try to validate the base64 data
-                        try {
-                            // Test if it's valid base64
-                            atob(textureData.pcData.substring(0, 100));
-                            return base64String;
-                        } catch (e) {
-                            Logger.print('error', ['Invalid base64 data:', e], 'Import');
-                            return undefined;
-                        }
-                    }
-                }
+            const index = parseInt(texturePath.substring(1), 10);
+            const record = index >= 0 && index < textures.length ? textures[index] : undefined;
+            if (!record) return undefined;
+
+            // `height > 0` means raw uncompressed ARGB pixels rather than an encoded image, so there is no
+            // mime type that would make a data: URL out of it. Rare (assimp keeps the original bytes when
+            // it can) and not worth an encoder here.
+            if (record.height > 0) {
+                Logger.print('warn', [`Embedded texture ${texturePath} is raw pixel data, which is not supported`], 'Import');
+                return undefined;
             }
-            return undefined;
+
+            const hint = String(record.formathint ?? record.achFormatHint ?? '').toLowerCase().replace(/\0/g, '').trim();
+            // The exporter pretty-prints the payload, so it arrives with embedded and trailing whitespace.
+            const payload = String(record.data ?? record.pcData ?? '').replace(/\s/g, '');
+            if (!hint || !payload) return undefined;
+            if (!DECODABLE_HINTS.includes(hint)) {
+                Logger.print('warn', [`Embedded texture ${texturePath} is a .${hint}, which browsers cannot decode`], 'Import');
+                return undefined;
+            }
+
+            try {
+                atob(payload.substring(0, 100)); // cheap sanity check; a bad payload throws here, not at upload
+            } catch (e) {
+                Logger.print('error', ['Invalid embedded texture data:', e], 'Import');
+                return undefined;
+            }
+            return `data:image/${hint === 'jpg' ? 'jpeg' : hint};base64,${payload}`;
         }
-        
+
         const name = getString(properties, '?mat.name');
         const diffuse = getVec3(properties, '$clr.diffuse');
         const specular = getVec3(properties, '$clr.specular');
@@ -264,12 +292,12 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
         const shininess = getNumber(properties, '$mat.shininess');
         const opacity = getNumber(properties, '$mat.opacity');
 
-        const diffuseMap = getTexture(properties, DIFFUSE_TEXTURE);
-        const specularMap = getTexture(properties, SPECULAR_TEXTURE);
-        const normalMap = getTexture(properties, NORMAL_TEXTURE);
-        const emissiveMap = getTexture(properties, EMISSIVE_TEXTURE);
-        const maskMap = getTexture(properties, MASK_TEXTURE);
-        const reflectivityMap = getTexture(properties, AMBIENT_TEXTURE);
+        const diffuseMap = getTexture(properties, BASE_SLOT);
+        const specularMap = getTexture(properties, [SPECULAR_TEXTURE]);
+        const normalMap = getTexture(properties, NORMAL_SLOT);
+        const emissiveMap = getTexture(properties, [EMISSIVE_TEXTURE]);
+        const maskMap = getTexture(properties, [MASK_TEXTURE]);
+        const reflectivityMap = getTexture(properties, [AMBIENT_TEXTURE]);
 
         const material: OutputMaterial = {
             name,

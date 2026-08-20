@@ -24,9 +24,17 @@ export function isModelFile(file: File): boolean {
 
 /**
  * Group a flat file list into per-model bundles. Each model file (.gltf/.glb/.obj/.fbx) seeds a bundle
- * and collects the aux files (buffers/textures/mtl) that live in its folder or a nested folder. When
- * several models share a folder, companion files (.mtl/.bin) are matched to the model of the same
- * basename; shared textures still attach to every model. Loose (folderless) selections attach all aux.
+ * and collects the aux files (buffers/textures/mtl) that belong to it. When several models share a
+ * folder, companion files (.mtl/.bin) are matched to the model of the same basename; shared textures
+ * still attach to every model. Loose (folderless) selections attach all aux.
+ *
+ * "Belongs to it" is deliberately generous, because the alternative fails silently: an aux file that no
+ * bundle claims is registered as a loose texture by runUpload and never reaches the material, so the
+ * model imports untextured with the images sitting in the explorer and nothing said about it. So:
+ *  - one model in the whole selection → it claims everything (there is nothing else it could belong to);
+ *  - otherwise its own folder and anything nested under it, PLUS sibling folders of it — the extremely
+ *    common `Character/model/char.fbx` + `Character/textures/char_D.png` layout, which a strict
+ *    "at or below the model's folder" test rejects.
  */
 export function groupImportFiles(files: File[]): ImportBundle[] {
   const infos = files.map(f => {
@@ -42,11 +50,19 @@ export function groupImportFiles(files: File[]): ImportBundle[] {
   const modelsPerDir = new Map<string, number>()
   for (const m of models) modelsPerDir.set(m.dir, (modelsPerDir.get(m.dir) ?? 0) + 1)
 
+  const soleModel = models.length === 1
+
   return models.map(m => {
+    // Only a model at least two levels deep has a meaningful parent to look sideways from. At depth 1
+    // the parent is the selection root, and reaching for it would let `rock/rock.fbx` swallow
+    // `tree/`'s textures — over-claiming is not free, since an image a bundle claims but no material
+    // ends up using is never registered as a loose texture either (see runUpload).
+    const parent = dirOf(m.dir)
     const bundleFiles: File[] = [m.file]
     for (const a of aux) {
       const under = m.dir === '' || a.dir === m.dir || a.dir.startsWith(m.dir + '/')
-      if (!under) continue
+      const sibling = parent !== '' && (a.dir === parent || a.dir.startsWith(parent + '/'))
+      if (!soleModel && !under && !sibling) continue
       // A companion in a folder with multiple models belongs only to the matching-named model.
       const isCompanion = COMPANION_EXTS.includes(a.ext)
       if (isCompanion && (modelsPerDir.get(a.dir) ?? 0) > 1 && a.stem !== m.stem) continue

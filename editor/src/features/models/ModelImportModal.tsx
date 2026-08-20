@@ -39,7 +39,7 @@ export default function ModelImportModal() {
     if (!fileList || fileList.length === 0) return
     // Lookup of still-unresolved missing names, keyed by lowercased basename.
     const wanted = new Map<string, string>()
-    for (const name of info.missing) if (!resolved.has(name)) wanted.set(name.toLowerCase(), name)
+    for (const { name } of info.missing) if (!resolved.has(name)) wanted.set(name.toLowerCase(), name)
 
     let ignored = 0
     for (const file of Array.from(fileList)) {
@@ -90,25 +90,54 @@ export default function ModelImportModal() {
                 </label>
               )}
             </div>
-            {info.missing.length === 0 ? (
+            {info.missing.length === 0 && info.unloadable.length === 0 ? (
               <p className='text-xs text-gray-400'>All referenced textures are present.</p>
-            ) : (
+            ) : info.missing.length === 0 ? null : (
               <div className='space-y-1'>
+                {/* Say what the list IS. A bare filename reads as the importer demanding something for
+                    no reason; the model is the one asking, and the file simply wasn't in the upload. */}
                 <p className='text-[11px] text-warning'>
-                  {resolved.size} of {info.missing.length} linked — select the missing texture files (matched by filename).
+                  The model references {info.missing.length} image{info.missing.length === 1 ? '' : 's'} that
+                  {info.missing.length === 1 ? " wasn't" : " weren't"} in your upload
+                  {' '}({resolved.size} linked). Select them, or import the model together with its texture files.
                 </p>
-                {info.missing.map(name => {
+                {info.missing.map(({ name, from }) => {
                   const done = resolved.has(name)
                   return (
                     <div key={name} className='flex items-center gap-2 bg-surface-raised border border-control rounded px-2 py-1'>
-                      <span className={`text-xs truncate flex-1 ${done ? 'text-green-400 line-through' : ''}`} title={name}>{name}</span>
-                      <span className={`text-xs ${done ? 'text-green-400' : 'text-gray-500'}`}>{done ? '✓ linked' : 'missing'}</span>
+                      <div className='min-w-0 flex-1'>
+                        <div className={`text-xs truncate ${done ? 'text-green-400 line-through' : ''}`} title={name}>{name}</div>
+                        <div className='text-[10px] text-gray-500 truncate' title={from}>{from}</div>
+                      </div>
+                      <span className={`text-xs shrink-0 ${done ? 'text-green-400' : 'text-gray-500'}`}>{done ? '✓ linked' : 'missing'}</span>
                     </div>
                   )
                 })}
                 {ignoredCount > 0 && (
                   <p className='text-[11px] text-gray-500'>{ignoredCount} selected file{ignoredCount === 1 ? '' : 's'} didn’t match a missing name and {ignoredCount === 1 ? 'was' : 'were'} ignored.</p>
                 )}
+              </div>
+            )}
+
+            {/* Embedded references that failed to decode. No file picker: there is no file to pick — the
+                image lives inside the model and is in a format the browser can't read. Saying so beats
+                importing a silently untextured model, which is what used to happen. */}
+            {info.unloadable.length > 0 && (
+              <div className='space-y-1 mt-2'>
+                <p className='text-[11px] text-warning'>
+                  {info.unloadable.length} texture{info.unloadable.length === 1 ? '' : 's'} embedded in the
+                  model could not be read. Re-export it with the textures as separate .png/.jpg files, then
+                  import the model and images together.
+                </p>
+                {info.unloadable.map(({ name, from }) => (
+                  <div key={name} className='flex items-center gap-2 bg-surface-raised border border-control rounded px-2 py-1'>
+                    <div className='min-w-0 flex-1'>
+                      <div className='text-xs truncate' title={name}>{name}</div>
+                      <div className='text-[10px] text-gray-500 truncate' title={from}>{from}</div>
+                    </div>
+                    <span className='text-xs text-gray-500 shrink-0'>unreadable</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>

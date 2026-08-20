@@ -6,7 +6,8 @@ import { useCleoEngine } from '../EngineContext'
 import { useVfs } from './VfsContext'
 import {
   applyCreateFolder, applyDelete, applyMoveOne, applyMoves, buildFileManagerData,
-  ancestorsOf, baseOf, dirOf, ensureExt, remapSubtree, stemOf, subtreeOf, VfsEntry, VfsIndex,
+  ancestorsOf, baseOf, dirOf, ensureExt, remapSubtree, stemOf, subtreeOf, topMostIds,
+  withAncestors, VfsEntry, VfsIndex,
 } from '../../utils/vfs'
 import {
   deleteAsset, deleteConsequence, duplicateAsset, openAsset, regenerateThumbnail, renameAsset, thumbnailOf,
@@ -177,7 +178,16 @@ export function useFileManagerBridge() {
     // break. Returning false here cancels before the tree mutates.
     api.intercept('delete-files', (cfg: any) => {
       if (cfg.skipProvider) return true
-      const { entries } = subtreeOf(vfsRef.current, cfg.ids)
+
+      // SVAR's DataTree.remove purges a folder's whole subtree from its id pool and then dereferences
+      // `_pool.get(nextId)` unconditionally, so a selection holding both a folder and something inside
+      // it throws `undefined.data` and leaves the batch half-applied. Keeping only the top-most ids
+      // deletes exactly the same set. Ids the tree no longer resolves are dropped for the same reason.
+      const ids = topMostIds(Array.isArray(cfg.ids) ? cfg.ids : []).filter(id => !!api.getFile(id))
+      if (!ids.length) return false
+      cfg.ids = ids
+
+      const { entries } = subtreeOf(vfsRef.current, ids)
 
       const inUse = entries.filter(isReferenced)
       if (inUse.length) {
@@ -190,7 +200,7 @@ export function useFileManagerBridge() {
       }
 
       for (const e of entries) deleteAsset(e.kind, e.assetId, depsRef.current)
-      setVfs(v => applyDelete(v, cfg.ids))
+      setVfs(v => applyDelete(v, ids))
       return true
     })
 
@@ -244,7 +254,9 @@ export function useFileManagerBridge() {
 
       setVfs(v => ({
         ...v,
-        folders: [...new Set([...v.folders, ...newFolders, ...cloned.flatMap(e => ancestorsOf(e.path))])],
+        // withAncestors, not a bare Set: a copy target's folder set has to stay closed under its
+        // ancestors, or the next store sync tries to create a file under a folder that isn't there.
+        folders: withAncestors([...v.folders, ...newFolders, ...cloned.flatMap(e => ancestorsOf(e.path))]),
         entries: [...v.entries, ...cloned],
       }))
     })
@@ -286,6 +298,27 @@ function thumbFingerprint(entry: VfsEntry, deps: ReturnType<typeof useVfs>['deps
 }
 
 /**
+ * Run a store action without letting a failure escape.
+ *
+ * `api.exec` is an *async* function, so a throw inside a handler surfaces as an unhandled promise
+ * rejection rather than at the call site — which is how a single bad id used to take out the rest of a
+ * sync pass (and, for `delete-files`, leave SVAR's tree half-mutated: nodes purged from its id pool but
+ * still linked in their parent's children array, a corruption `serialize` cannot even show you).
+ * Both shapes are caught here so one bad action is a logged line, not a broken explorer.
+ */
+function safeExec(api: IApi, action: string, cfg: any): void {
+  try {
+    const result = api.exec(action, cfg) as unknown
+    if (result && typeof (result as Promise<unknown>).catch === 'function') {
+      (result as Promise<unknown>).catch(err =>
+        Logger.error(`Asset explorer: "${action}" failed — ${err}`, 'Editor'))
+    }
+  } catch (err) {
+    Logger.error(`Asset explorer: "${action}" failed — ${err}`, 'Editor')
+  }
+}
+
+/**
  * Push changes the explorer didn't make into SVAR's tree — a mesh imported from the left sidebar, a
  * material saved from its editor tab, a texture registered when a project loads. Diffing against the live
  * tree (rather than re-passing `data`) is what keeps the sidebar's open folders and the current path intact.
@@ -304,23 +337,53 @@ function useSyncVfsToStore(
     if (!api) return
 
     const want = buildFileManagerData(vfs, libs)
-    const have = new Set((api.serialize('/') ?? []).map(e => e.id))
+    let have = new Set((api.serialize('/') ?? []).map(e => e.id))
 
-    const add = (e: (typeof want)[number]) => api.exec('create-file', {
-      file: { name: baseOf(e.id), type: e.type, size: e.size, date: e.date },
-      parent: dirOf(e.id),
-      skipProvider: true,
-    })
+    const create = (id: string, file: Record<string, unknown>) => {
+      // A node `getFile` resolves but `serialize` never listed is an orphan stranded in SVAR's id pool:
+      // FileTree.parse registers every node but only links the ones whose parent existed. Creating over
+      // it would make normalizeFile rename ours to '<name>.new' — a path that is never in `want`, so it
+      // would be deleted as stale next pass and re-created the pass after, forever. Reclaim it instead.
+      if (api.getFile(id)) safeExec(api, 'delete-files', { ids: [id], skipProvider: true })
 
-    // Parents first: FileTree.add resolves the parent eagerly, so a child added before its folder is lost.
-    const missing = want
-      .filter(e => !have.has(e.id))
-      .sort((a, b) => a.id.split('/').length - b.id.split('/').length)
-    for (const e of missing) add(e)
+      const cfg: any = { file, parent: dirOf(id), skipProvider: true }
+      safeExec(api, 'create-file', cfg)
+      if (cfg.newId && cfg.newId !== id)
+        Logger.warn(`Asset explorer: "${id}" collided in the tree and landed on "${cfg.newId}"`, 'Editor')
+      have.add(cfg.newId ?? id)
+    }
 
-    const wanted = new Set(want.map(e => e.id))
-    const stale = Array.from(have).filter(id => !wanted.has(id))
-    if (stale.length) api.exec('delete-files', { ids: stale, skipProvider: true })
+    // FileTree.add resolves the parent eagerly and with no guard (`byId(parent).data`), so a file whose
+    // folder isn't in the tree throws. Creating the ancestors on the spot makes that unreachable no
+    // matter what the index looks like — depth-sorting the additions only helped when the folder was in
+    // `want` at all, which is precisely what a damaged index cannot promise.
+    const ensureFolders = (id: string) => {
+      for (const folder of ancestorsOf(id)) {
+        if (have.has(folder)) continue
+        create(folder, { name: baseOf(folder), type: 'folder' })
+      }
+    }
+
+    const add = (e: (typeof want)[number]) => {
+      ensureFolders(e.id)
+      if (have.has(e.id)) return
+      create(e.id, { name: baseOf(e.id), type: e.type, size: e.size, date: e.date })
+    }
+
+    for (const e of want.filter(e => !have.has(e.id))) add(e)
+
+    // A folder that holds something in `want` is wanted too, even when the index forgot to list it —
+    // otherwise the sweep below would delete the parent of the files this pass just created, orphan the
+    // children, and do the whole thing again on the next pass.
+    const wanted = new Set([...want.map(e => e.id), ...want.flatMap(e => ancestorsOf(e.id))])
+    // Top-most ids only, and only ones the tree still resolves: DataTree.remove purges a folder's whole
+    // subtree from its pool, then dereferences the next id blind. `have` comes from serialize, which
+    // recurses, so a stale folder and its stale children always arrive together.
+    const stale = topMostIds(Array.from(have).filter(id => !wanted.has(id))).filter(id => !!api.getFile(id))
+    if (stale.length) {
+      safeExec(api, 'delete-files', { ids: stale, skipProvider: true })
+      have = new Set((api.serialize('/') ?? []).map(e => e.id)) // subtrees went with their folders
+    }
 
     // SVAR memoizes a card's preview against the entity object's identity, so re-saving a material (which
     // re-renders its thumbnail) would keep showing the old image forever. Swap the entity out to invalidate it.
@@ -333,7 +396,8 @@ function useSyncVfsToStore(
       const previous = thumbs.get(e.id)
       thumbs.set(e.id, fp)
       if (previous !== undefined && previous !== fp && have.has(e.id)) {
-        api.exec('delete-files', { ids: [e.id], skipProvider: true })
+        if (api.getFile(e.id)) safeExec(api, 'delete-files', { ids: [e.id], skipProvider: true })
+        have.delete(e.id)
         add(e)
       }
     }

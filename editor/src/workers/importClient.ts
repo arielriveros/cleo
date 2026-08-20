@@ -148,3 +148,16 @@ export async function parseGltfFiles(files: File[], animated: boolean, onProgres
   if (result.kind !== 'parseGltf') throw new Error('Unexpected import job result');
   return result.parsed;
 }
+
+/**
+ * Parse .fbx/.glb by converting to glTF2 first, off the main thread when possible.
+ *
+ * This is what gives those formats skinning: the assjson path (`parseModelFiles`) drops bones entirely,
+ * so a rigged character imports as a static mesh. Same result shape as `parseGltfFiles` — pair with
+ * `Loader.assembleGltfModels`.
+ */
+export async function parseModelAsGltfFiles(files: File[], animated: boolean, onProgress?: ProgressSink) {
+  const result = await dispatch({ kind: 'parseModelAsGltf', files, animated }, onProgress);
+  if (result.kind !== 'parseGltf') throw new Error('Unexpected import job result');
+  return result.parsed;
+}

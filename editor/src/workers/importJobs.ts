@@ -8,7 +8,7 @@
 // Note the engine barrel is safe to *import* without a GL context (it only fails when a Mesh/Texture
 // is constructed), which is what lets a worker pull the parser out of it.
 
-import { parseAssimpFiles, parseResultTransferables, GLTFLoader } from 'cleo'
+import { parseAssimpFiles, parseResultTransferables, convertToGltf2FromFiles, GLTFLoader } from 'cleo'
 import type { AssimpParseResult, GltfParseResult } from 'cleo'
 
 /** Non-glTF formats (.obj/.fbx/.glb) — assimp's WASM converter. */
@@ -24,7 +24,22 @@ export interface ParseGltfJob {
   animated: boolean
 }
 
-export type ImportJob = ParseModelJob | ParseGltfJob
+/**
+ * .fbx/.glb — convert to glTF2 with assimp, then read the result with the engine's own glTF reader.
+ *
+ * The detour exists because the assjson mesh path (`parseModel`) has no channel for skinning: its
+ * `ParsedMesh` carries no bones, so a rigged character imports as a static mesh. The conversion keeps
+ * the skeleton, the joint bindings, the animations and the node transforms, and inlines textures that
+ * are embedded in the model file as data: URIs. Same trip `Loader.loadAnimationsFromFile` already makes
+ * to get clips out of an FBX.
+ */
+export interface ParseModelAsGltfJob {
+  kind: 'parseModelAsGltf'
+  files: File[]
+  animated: boolean
+}
+
+export type ImportJob = ParseModelJob | ParseGltfJob | ParseModelAsGltfJob
 
 export interface ParseModelResult {
   kind: 'parseModel'
@@ -60,6 +75,19 @@ export async function runImportJob(job: ImportJob, onProgress: ProgressSink = ()
     case 'parseGltf': {
       onProgress(0.05, 'Reading glTF')
       const parsed = await new GLTFLoader().parseDescriptorsFromFiles(job.files, job.animated)
+      onProgress(0.95, 'Parsed')
+      return { result: { kind: 'parseGltf', parsed }, transfer: GLTFLoader.parseResultTransferables(parsed) }
+    }
+    case 'parseModelAsGltf': {
+      // Both halves run here so only the descriptors cross back, and so the conversion — a single
+      // uninterruptible WASM call, like the assjson one — stays off the main thread.
+      onProgress(0.05, 'Converting model')
+      const converted = await convertToGltf2FromFiles(job.files)
+      onProgress(0.5, 'Reading glTF')
+      // The ORIGINAL files stay in the list: the converter inlines textures embedded in the model as
+      // data: URIs, but leaves externally-referenced ones as relative URIs for GLTFLoader.findFile to
+      // resolve against the upload. Converted first so its .gltf wins the `.gltf` lookup.
+      const parsed = await new GLTFLoader().parseDescriptorsFromFiles([...converted, ...job.files], job.animated)
       onProgress(0.95, 'Parsed')
       return { result: { kind: 'parseGltf', parsed }, transfer: GLTFLoader.parseResultTransferables(parsed) }
     }

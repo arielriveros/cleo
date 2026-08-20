@@ -40,7 +40,7 @@ import {
   renderModelAssetThumbnail, renderMaterialAssetThumbnail, renderTerrainMaterialAssetThumbnail,
   setThumbnailDirtySuppressor,
 } from "../utils/modelThumbnails";
-import { parseBundleToRoot } from "../utils/modelImport";
+import { parseBundleToRoot, type UnresolvedTexture } from "../utils/modelImport";
 import { cancelAllImports, ImportCancelled } from "../workers/importClient";
 import { detectMissingTextures } from "../utils/textureRefs";
 
@@ -49,7 +49,14 @@ export type PendingModelImportView = {
   bundleName: string;
   subMeshCount: number;
   materialCount: number;
-  missing: string[];      // referenced texture basenames not present in the upload
+  /** Referenced texture files not present in the upload — pickable. `from` names the material + slot. */
+  missing: UnresolvedTexture[];
+  /**
+   * References no upload can fix: a texture embedded in the model itself that could not be decoded (a
+   * .dds/.tga payload, or raw pixels). Listed separately because offering a file picker for one would be
+   * a dead end, and because saying nothing is what let an untextured FBX report "all textures present".
+   */
+  unloadable: UnresolvedTexture[];
   sizeRadius: number;     // combined bounding radius at scale 1 (diameter = 2*radius)
 };
 // The user's decision from the import modal.
@@ -441,6 +448,12 @@ const EngineContext = createContext<{
   isGizmoDragging: boolean;
   isPlayMode: boolean;
   isSceneReady: boolean;
+  /**
+   * True once `preloadTextures()` has settled, so the TextureManager's contents are authoritative.
+   * Until then the registry is still filling and a texture that merely looks absent may only be late —
+   * which is why the asset index refuses to garbage-collect texture entries before this flips.
+   */
+  texturesPreloaded: boolean;
   editorMode: EditorMode;
   setEditorMode: (mode: EditorMode) => void;
   // Transform gizmo mode (move/rotate/scale)
@@ -655,6 +668,7 @@ const EngineContext = createContext<{
     isGizmoDragging: false,
     isPlayMode: false,
     isSceneReady: false,
+    texturesPreloaded: false,
     editorMode: 'scene',
     setEditorMode: () => {},
     gizmoMode: 'position',
@@ -813,6 +827,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
   const [isPlayMode, setIsPlayMode] = useState(false);
   const [isSceneReady, setIsSceneReady] = useState(false);
+  const [texturesPreloaded, setTexturesPreloaded] = useState(false);
   /**
    * The open-documents session from the last visit, read ONCE, synchronously, before the first render.
    *
@@ -3087,7 +3102,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       try {
         // Parse for review (registers textures; broken slots for any files missing from the upload).
         setStage(i, 'parsing', `Reading ${bundle.files.length} file${bundle.files.length === 1 ? '' : 's'}`);
-        let parsedResult: { root: Node; children: ModelNode[] };
+        let parsedResult: Awaited<ReturnType<typeof parseBundleToRoot>>;
         try {
           parsedResult = await parseBundleToRoot(bundle.files, bundle.name,
             (_fraction, stage) => setStage(i, 'parsing', stage || undefined));
@@ -3105,7 +3120,23 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         }
         let { root, children } = parsedResult;
 
-        const missing = await detectMissingTextures(bundle.files);
+        // Two sources, because neither is complete on its own. detectMissingTextures reads the source
+        // files and so can name an image that never even reached the loader (a .gltf/.mtl reference), but
+        // it can only parse the text formats. The loader's own report covers every format — it is the one
+        // thing that actually knows which slot came out empty — including FBX, whose references are
+        // binary and used to go entirely unnoticed.
+        const byName = (list: UnresolvedTexture[]) => {
+          const seen = new Map<string, UnresolvedTexture>();
+          for (const t of list) if (!seen.has(t.name)) seen.set(t.name, t);
+          return [...seen.values()];
+        };
+        const missing = byName([
+          ...(await detectMissingTextures(bundle.files)).map(name => ({ name, from: 'referenced by the model file' })),
+          ...parsedResult.textures.missingFiles,
+        ]);
+        const unloadable = byName(parsedResult.textures.unloadable);
+        if (unloadable.length)
+          Logger.warn(`"${bundle.name}": ${unloadable.length} texture reference(s) could not be loaded — ${unloadable.map(t => t.name).join(', ')}`, 'Editor');
         const sizeRadius = meshBoundsRadius(root);
         const matKeys = new Set<string>();
         for (const c of children) { const m = (c.model as any).material; if (m) matKeys.add(JSON.stringify(m.serialize())); }
@@ -3121,6 +3152,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             subMeshCount: children.length,
             materialCount: matKeys.size,
             missing,
+            unloadable,
             sizeRadius,
           });
         });
@@ -3906,6 +3938,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (loaded) Logger.info(`Loaded ${loaded} texture${loaded === 1 ? '' : 's'}`, 'Editor');
     } catch (e) {
       Logger.error(`Failed to load textures: ${e}`, 'Editor');
+    } finally {
+      // Settled either way: a failed preload is not going to fill the registry later, and leaving this
+      // false forever would keep the asset index's texture GC permanently disarmed.
+      setTexturesPreloaded(true);
     }
 
     // Multi-scene project: load the meta (migrating a legacy single-scene 'cleo_project' blob once),
@@ -4625,6 +4661,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       isGizmoDragging,
       isPlayMode,
       isSceneReady,
+      texturesPreloaded,
       editorMode,
       setEditorMode,
       gizmoMode,
