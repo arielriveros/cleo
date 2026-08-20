@@ -9,7 +9,7 @@
 // is constructed), which is what lets a worker pull the parser out of it.
 
 import { parseAssimpFiles, parseResultTransferables, convertToGltf2FromFiles, GLTFLoader } from 'cleo'
-import type { AssimpParseResult, GltfParseResult } from 'cleo'
+import type { AssimpParseResult, GltfParseResult, Animation, Skin } from 'cleo'
 
 /** Non-glTF formats (.obj/.fbx/.glb) — assimp's WASM converter. */
 export interface ParseModelJob {
@@ -39,11 +39,29 @@ export interface ParseModelAsGltfJob {
   animated: boolean
 }
 
-export type ImportJob = ParseModelJob | ParseGltfJob | ParseModelAsGltfJob
+/**
+ * Animation CLIPS (+ the source skeleton) from any model file, for import/retargeting.
+ *
+ * Same detour as above for non-glTF input, and the same reason it belongs in the worker: the assimp
+ * conversion is one uninterruptible WASM call, and on the main thread it stalled the editor for the
+ * length of the import.
+ */
+export interface ParseAnimationsJob {
+  kind: 'parseAnimations'
+  files: File[]
+}
+
+export type ImportJob = ParseModelJob | ParseGltfJob | ParseModelAsGltfJob | ParseAnimationsJob
 
 export interface ParseModelResult {
   kind: 'parseModel'
   parsed: AssimpParseResult
+}
+
+export interface ParseAnimationsResult {
+  kind: 'parseAnimations'
+  /** `skin` stays nullable: an animation-only file may carry no skin, and the caller checks for it. */
+  parsed: { animations: Animation[]; skin: Skin | null }
 }
 
 export interface ParseGltfResult {
@@ -51,7 +69,7 @@ export interface ParseGltfResult {
   parsed: GltfParseResult
 }
 
-export type ImportJobResult = ParseModelResult | ParseGltfResult
+export type ImportJobResult = ParseModelResult | ParseGltfResult | ParseAnimationsResult
 
 export interface ImportJobOutcome {
   result: ImportJobResult
@@ -90,6 +108,20 @@ export async function runImportJob(job: ImportJob, onProgress: ProgressSink = ()
       const parsed = await new GLTFLoader().parseDescriptorsFromFiles([...converted, ...job.files], job.animated)
       onProgress(0.95, 'Parsed')
       return { result: { kind: 'parseGltf', parsed }, transfer: GLTFLoader.parseResultTransferables(parsed) }
+    }
+    case 'parseAnimations': {
+      // Mirrors Loader.loadAnimationsFromFile rather than calling it: importing `Loader` would drag in
+      // the GL assembly half, which cannot exist in a worker. Both calls below are DOM- and GL-free.
+      onProgress(0.05, 'Converting model')
+      const hasGltf = job.files.some(f => f.name.toLowerCase().endsWith('.gltf'))
+      const parseFiles = hasGltf ? job.files : await convertToGltf2FromFiles(job.files)
+      onProgress(0.5, 'Reading animations')
+      const parsed = await new GLTFLoader().loadAnimationsFromFiles(parseFiles)
+      onProgress(0.95, 'Parsed')
+      // Nothing worth transferring: the samplers are plain number[], and the only typed arrays are one
+      // 64-byte inverse bind matrix per joint — a few hundred tiny buffers whose transfer costs more
+      // than the copy. Structured clone handles the Maps on `skin` natively (JSON would not).
+      return { result: { kind: 'parseAnimations', parsed }, transfer: [] }
     }
     default:
       throw new Error(`Unknown import job: ${(job as any).kind}`)

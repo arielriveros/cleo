@@ -21,6 +21,7 @@ export type AssetLibraryContextValue = Pick<EngineValue,
   | 'models' | 'addModel' | 'removeModel' | 'updateModel'
   | 'scriptAssets' | 'addScriptAsset' | 'removeScriptAsset' | 'updateScriptAsset'
   | 'animationFields' | 'addAnimationField' | 'removeAnimationField' | 'updateAnimationField'
+  | 'animations' | 'addAnimation' | 'removeAnimation' | 'updateAnimation'
   | 'tilesets' | 'addTileset' | 'removeTileset' | 'updateTileset'
   | 'assetsLoaded'
 >;

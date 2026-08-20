@@ -21,7 +21,7 @@ import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates"
 import { instantiateModelAsset, adoptModelMaterial } from "../utils/models";
 import { NEW_NODE_MIME, addItemTo, findAddItem } from "./sceneInspector/addCatalog";
 import { captureViewport, releaseViewport } from "../utils/pointerCapture";
-import { GizmoMode } from "./EngineContext";
+import { GizmoMode, MODE_RENDERS_VIEWPORT } from "./EngineContext";
 import { useSelection } from "./SelectionContext";
 import { usePlayback } from "./PlaybackContext";
 
@@ -58,14 +58,17 @@ const ScaleIcon = () => (
 );
 
 export default function EngineViewport() {
-    const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension,
-            templateRootId, modelEditTargetId, templates, models, materials, scripts, bodies, triggers } = useCleoEngine();
+    const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
+            templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers } = useCleoEngine();
     const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode } = useSelection();
     const { isPlayMode } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
 
     // The node graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D) has nothing to act on.
     const hideForGraph = editorMode === 'animation' && graphView;
+    // Viewport chrome only means something over a render: modes that replace the canvas with their own
+    // full-panel editor (script, tileset) get none of it, and neither does the loading splash.
+    const overRender = MODE_RENDERS_VIEWPORT[editorMode] && isSceneReady && !hideForGraph;
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -408,7 +411,7 @@ export default function EngineViewport() {
                 return;
             }
             try {
-                const newId = instantiateModelAsset(asset, dropParent, materials, models);
+                const newId = instantiateModelAsset(asset, dropParent, materials, models, animations);
                 const node = editorScene.getNodeById(newId);
                 if (node && point) placeAt(node, point, dropParent);
                 // A model is one Geometry + one Material, and the renderer draws in material batches — so
@@ -459,20 +462,22 @@ export default function EngineViewport() {
                 by measured motion has real inputs. */}
             <DebugAnimationOverlay />
             {/* Floating top-right overlays: the debug-visibility menu + gizmo-mode toggle sit to the
-                left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead. */}
-            <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
+                left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead.
+                The container is gated on `overRender`, so a mode that owns the whole panel shows none of
+                it — each control below only states what is true of IT beyond that. */}
+            {overRender && <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
                 {/* The debug menu stays available during play so Runtime toggles can be flipped live. */}
-                {editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !hideForGraph && (
+                {editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && (
                     <DebugVisibilityMenu />
                 )}
-                {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && !hideForGraph && (
+                {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && (
                     <div className='flex items-center rounded overflow-hidden border border-control-hover'>
                         <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'rotation'} title='Rotate' onClick={() => setGizmoMode('rotation')}><RotateIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'scale'} title='Scale' onClick={() => setGizmoMode('scale')}><ScaleIcon /></GizmoSeg>
                     </div>
                 )}
-                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'renderer' && !isPlayMode && !hideForGraph && (
+                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'renderer' && !isPlayMode && (
                     <select
                         data-cleo-overlay
                         value={dimension}
@@ -484,8 +489,8 @@ export default function EngineViewport() {
                         <option value='2D'>2D</option>
                     </select>
                 )}
-            </div>
-            {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'ui' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
+            </div>}
+            {overRender && editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'ui' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}

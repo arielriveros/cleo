@@ -4,6 +4,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const { pathToFileURL } = require('url');
 const { GAME_MAIN_JS, GAME_PRELOAD_JS, gamePackageJson, gameReadme } = require('./gameTemplates');
+const scriptWorkspace = require('./scriptWorkspace');
 
 const isDev = process.env.CLEO_DEV === '1';
 
@@ -157,3 +158,11 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
     return { ok: false, error: String(e && e.stack ? e.stack : e) };
   }
 });
+
+// --- Script workspace IPC ----------------------------------------------------------------------
+//
+// Mirrors the editor's script library into a folder the user picks, so it can be opened in VSCode. Every
+// channel (and all the filesystem work behind it) lives in scriptWorkspace.js; this just hands it the
+// Electron pieces it needs.
+
+scriptWorkspace.registerIpc({ ipcMain, BrowserWindow, pickDirectory });

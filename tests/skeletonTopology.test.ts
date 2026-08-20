@@ -203,3 +203,117 @@ describe('nearestCommonAncestor', () => {
     });
 });
 
+// ---------------------------------------------------------------------------------------------------
+// Non-joint ancestors.
+//
+// `Joint.parentIndex` is the immediate glTF NODE index, and on real rigs that node is often not a joint.
+// Assimp's FBX importer preserves pivots by default and emits `Bone_$AssimpFbx$_Translation/_Rotation/
+// _Scaling` chains between every pair of bones; its glTF2 exporter adds an `<armature>_node` wrapper above
+// the root joint carrying the file's unit scale.
+//
+// Treating such a joint as a fresh root — which this module used to do — flattens the tree, so the editor
+// draws no bone segments at all, and poses every bone relative to the model origin instead of its parent.
+// ---------------------------------------------------------------------------------------------------
+
+/** Build a skin from a node table, so non-joint nodes can exist between the joints. */
+function nodeSkin(nodes: { name: string; parent?: number }[], jointNodes: number[]): Skin {
+    const nodeParents = new Map<number, number>();
+    const nodeTransforms = new Map<number, mat4>();
+    const nodeNames = new Map<number, string>();
+    nodes.forEach((n, i) => {
+        if (n.parent !== undefined) nodeParents.set(i, n.parent);
+        nodeTransforms.set(i, mat4.create());
+        nodeNames.set(i, n.name);
+    });
+    return {
+        joints: jointNodes.map(nodeIndex => ({
+            nodeIndex, inverseBindMatrix: mat4.create(), parentIndex: nodeParents.get(nodeIndex),
+        })),
+        nodeParents, nodeTransforms, nodeNames,
+    };
+}
+
+describe('skeletonTopology — climbing through non-joint ancestors', () => {
+    it('leaves a clean rig untouched (every parent is already a joint)', () => {
+        // The overwhelmingly common case: a Blender-exported glTF. Must behave exactly as before.
+        const t = skeletonTopology(nodeSkin(
+            [{ name: 'Hips' }, { name: 'Spine', parent: 0 }, { name: 'Head', parent: 1 }], [0, 1, 2]));
+
+        expect(t.roots).toEqual([0]);
+        expect(t.parentJoint).toEqual([-1, 0, 1]);
+        expect(t.parentChain).toEqual([[], [], []]);
+        expect(t.order).toEqual([0, 1, 2]);
+    });
+
+    it('resolves through ONE pivot node between two bones', () => {
+        const t = skeletonTopology(nodeSkin([
+            { name: 'Hips' },
+            { name: 'Spine_$AssimpFbx$_Rotation', parent: 0 },
+            { name: 'Spine', parent: 1 },
+        ], [0, 2]));
+
+        expect(t.roots).toEqual([0]);          // Spine is NOT a second root
+        expect(t.parentJoint[1]).toBe(0);      // it hangs off Hips
+        expect(t.parentChain[1]).toEqual([1]); // with the pivot's transform in between
+        expect(t.children[0]).toEqual([1]);
+    });
+
+    it('resolves through a THREE-node pivot chain, ordered top-down', () => {
+        // Order matters: the caller multiplies the chain left to right onto the parent global.
+        const t = skeletonTopology(nodeSkin([
+            { name: 'Hips' },
+            { name: 'Spine_$AssimpFbx$_Translation', parent: 0 },
+            { name: 'Spine_$AssimpFbx$_Rotation', parent: 1 },
+            { name: 'Spine_$AssimpFbx$_Scaling', parent: 2 },
+            { name: 'Spine', parent: 3 },
+        ], [0, 4]));
+
+        expect(t.roots).toEqual([0]);
+        expect(t.parentJoint[1]).toBe(0);
+        expect(t.parentChain[1]).toEqual([1, 2, 3]);
+    });
+
+    it('puts a wrapper ABOVE the root joint into the root joint chain', () => {
+        // assimp's `<armature>_node`, which carries the FBX unit scale. No ancestor joint, so the root
+        // stays a root — but its transform must still reach the pose.
+        const t = skeletonTopology(nodeSkin([
+            { name: 'Armature' },
+            { name: 'Armature_node', parent: 0 },
+            { name: 'Hips', parent: 1 },
+            { name: 'Spine', parent: 2 },
+        ], [2, 3]));
+
+        expect(t.roots).toEqual([0]);
+        expect(t.parentJoint).toEqual([-1, 0]);
+        expect(t.parentChain[0]).toEqual([0, 1]); // Armature then Armature_node, top-down
+        expect(t.parentChain[1]).toEqual([]);     // Spine parent is already a joint
+    });
+
+    it('still orders parents before children through pivots', () => {
+        const t = skeletonTopology(nodeSkin([
+            { name: 'Hips' },
+            { name: 'p1', parent: 0 }, { name: 'Spine', parent: 1 },
+            { name: 'p2', parent: 2 }, { name: 'Head', parent: 3 },
+        ], [0, 2, 4]));
+
+        expect(t.order).toEqual([0, 1, 2]);
+        expect(t.parentJoint).toEqual([-1, 0, 1]);
+    });
+
+    it('terminates on a cycle among NON-joint ancestors', () => {
+        // The climb is new code, so it needs its own guard: w1 -> w2 -> w1 with a joint hanging off it.
+        const t = skeletonTopology(nodeSkin([
+            { name: 'w1', parent: 1 }, { name: 'w2', parent: 0 }, { name: 'Bone', parent: 0 },
+        ], [2]));
+
+        expect(t.roots).toEqual([0]);
+        expect(t.parentJoint[0]).toBe(-1);
+        expect(t.parentChain[0].length).toBeLessThanOrEqual(2);
+    });
+
+    it('survives a skin with no nodeParents map at all', () => {
+        const t = skeletonTopology({ joints: [{ nodeIndex: 0, inverseBindMatrix: mat4.create() }] });
+        expect(t.roots).toEqual([0]);
+        expect(t.parentChain[0]).toEqual([]);
+    });
+});

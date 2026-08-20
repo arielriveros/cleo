@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Editor from './features/Editor'
 import { EngineProvider } from './features/EngineContext'
 import { VfsProvider } from './features/assets/VfsContext'
+import { ScriptWorkspaceProvider } from './features/scriptWorkspace/ScriptWorkspaceContext'
 import LoadingScreen from './components/LoadingScreen'
 import ProjectLauncher from './features/projects/ProjectLauncher'
 import { ProjectRecord, initProjects } from './utils/projects'
@@ -72,7 +73,11 @@ export default function App() {
             {/* The asset explorer's folder index sits above <Editor> so it keeps indexing new assets even
                 while the Assets tab is hidden (renderer mode collapses the whole bottom bar). */}
             <VfsProvider>
-                <Editor />
+                {/* Mirrors the script library to a folder on disk for editing in an external IDE. Inside
+                    VfsProvider because it syncs the VFS layout as well as the sources. */}
+                <ScriptWorkspaceProvider>
+                    <Editor />
+                </ScriptWorkspaceProvider>
             </VfsProvider>
         </EngineProvider>
     </div>

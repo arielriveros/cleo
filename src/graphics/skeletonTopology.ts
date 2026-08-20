@@ -29,6 +29,21 @@ export interface SkeletonTopology {
      */
     parentNode: (number | undefined)[];
     /**
+     * Per joint: the NON-JOINT node indices standing between it and `parentJoint[i]`, ordered top-down —
+     * so accumulating a pose is `parentGlobal × chain[0] × chain[1] × … × local`.
+     *
+     * Real rigs put nodes between bones. Assimp's FBX importer preserves pivots by default and emits
+     * `Bone_$AssimpFbx$_Translation` / `_Rotation` / `_PreRotation` / `_Scaling` chains between every pair
+     * of joints, and its glTF2 exporter adds an `<armature>_node` wrapper above the root joint carrying
+     * the file's unit scale. Treating each such joint as a fresh root — which is what this module used to
+     * do, and what the Animator's own one-level walk did — flattens the tree, draws no bones at all, and
+     * poses every limb relative to the model origin instead of its parent.
+     *
+     * Empty for the common case where a joint's parent is already a joint, so a clean glTF rig pays
+     * nothing and behaves exactly as before.
+     */
+    parentChain: number[][];
+    /**
      * NODE index -> parent NODE index, for the several walks that work in node space throughout (root-motion
      * chains, nearest-bodied-ancestor searches, the ragdoll's pruning). Same information as `parentNode`,
      * keyed the way those callers already think.
@@ -59,17 +74,41 @@ export function skeletonTopology(skin: Skin): SkeletonTopology {
 
     const parentJoint = new Array<number>(count).fill(-1);
     const parentNode = new Array<number | undefined>(count).fill(undefined);
+    const parentChain: number[][] = Array.from({ length: count }, () => []);
     const parentNodeOfNode = new Map<number, number | undefined>();
     const children: number[][] = Array.from({ length: count }, () => []);
     const roots: number[] = [];
+
+    // `Joint.parentIndex` is only the IMMEDIATE parent node, which on many rigs is not a joint. Climbing
+    // `skin.nodeParents` finds the real ancestor joint and records what sits in between, so the caller can
+    // apply those transforms instead of losing them. Bounded and visited-guarded: a malformed skin may
+    // contain a cycle, and this module's contract is that bad input never throws or hangs.
+    const nodeParents = skin.nodeParents;
+    const ancestorJointOf = (from: number | undefined): { joint: number; chain: number[] } => {
+        const chain: number[] = [];
+        const seenNodes = new Set<number>();
+        let node = from;
+        for (let guard = 0; node !== undefined && guard < 256; guard++) {
+            if (seenNodes.has(node)) break;
+            seenNodes.add(node);
+            const asJoint = jointOfNode.get(node);
+            if (asJoint !== undefined) return { joint: asJoint, chain: chain.reverse() };
+            chain.push(node); // a non-joint ancestor: keep it, its transform still applies
+            node = nodeParents?.get(node);
+        }
+        // No joint above: everything walked is the root joint's chain up to the scene root.
+        return { joint: -1, chain: chain.reverse() };
+    };
 
     for (let i = 0; i < count; i++) {
         const p = joints[i].parentIndex;
         parentNode[i] = p;
         parentNodeOfNode.set(joints[i].nodeIndex, p);
-        const pj = p === undefined ? undefined : jointOfNode.get(p);
+
+        const { joint: pj, chain } = ancestorJointOf(p);
+        parentChain[i] = chain;
         // Self-parenting is not a hierarchy, it is a one-node cycle; treat it as a root rather than looping.
-        if (pj === undefined || pj === i) { roots.push(i); continue; }
+        if (pj < 0 || pj === i) { roots.push(i); continue; }
         parentJoint[i] = pj;
         children[pj].push(i);
     }
@@ -91,7 +130,7 @@ export function skeletonTopology(skin: Skin): SkeletonTopology {
     // Anything unreached sits in a cycle. Append it so callers can still iterate every joint exactly once.
     for (let i = 0; i < count; i++) if (!seen[i]) order.push(i);
 
-    return { jointOfNode, parentJoint, parentNode, parentNodeOfNode, children, roots, order };
+    return { jointOfNode, parentJoint, parentNode, parentChain, parentNodeOfNode, children, roots, order };
 }
 
 /**

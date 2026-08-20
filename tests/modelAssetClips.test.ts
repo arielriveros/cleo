@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     skinnedModelJsonOf, uniqueClipName, assetClipNames,
     assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames,
-    assetWithIkRig, assetIkRig,
+    assetWithIkRig, assetIkRig, flattenModelJson,
 } from '../editor/src/utils/modelClips';
 
 // Patching a model asset's serialized clip list. This is the half of "clips belong to the asset" that has
@@ -254,4 +254,66 @@ describe('assetWithIkRig / assetIkRig', () => {
         const unskinned = { id: 'm2', name: 'Crate', nodeJson: { id: 'r', type: 'node', children: [] } };
         expect(assetWithIkRig(unskinned, rig)).toBe(unskinned);
     });
+});
+
+describe('flattenModelJson — collapsing the import holder', () => {
+  const holder = (over: any = {}, child: any = {}) => ({
+    id: 'h', name: 'Character', type: 'node',
+    position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [
+      { id: 'c', name: 'Ch10_Body', type: 'model', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], model: { skin: {} }, ...child },
+    ], ...over,
+  });
+
+  it('keeps the ModelNode, its id and its payload, under the asset name', () => {
+    const flat = flattenModelJson(holder());
+    expect(flat.id).toBe('c');                 // the id anything referencing the model resolves by
+    expect(flat.type).toBe('model');
+    expect(flat.name).toBe('Character');       // the holder's name is the asset name the user sees
+    expect(flat.model).toEqual({ skin: {} });
+    expect(flat.children).toEqual([]);
+  });
+
+  it('folds the holder scale into the child — the rigged-import case', () => {
+    // normalizeRootScale cannot bake a fit-to-size factor into skinned vertices, so it puts the whole
+    // factor on the holder. Losing it would show the character at its raw file scale.
+    const flat = flattenModelJson(holder({ scale: [0.01, 0.01, 0.01] }, { position: [0, 2, 0], scale: [2, 2, 2] }));
+    expect(flat.scale).toEqual([0.02, 0.02, 0.02]);
+    expect(flat.position).toEqual([0, 0.02, 0]);   // the child's offset is scaled by the holder too
+  });
+
+  it('folds the holder position in', () => {
+    const flat = flattenModelJson(holder({ position: [1, 2, 3] }, { position: [0, 1, 0] }));
+    expect(flat.position).toEqual([1, 3, 3]);
+  });
+
+  it('leaves a MULTI-part model alone — the holder is what groups it', () => {
+    const two = holder();
+    two.children.push({ ...two.children[0], id: 'c2', name: 'part2' });
+    expect(flattenModelJson(two)).toBe(two);
+  });
+
+  it('leaves a rotated holder alone rather than guess a decomposition', () => {
+    const rotated = holder({ rotation: [0, 90, 0] });
+    expect(flattenModelJson(rotated)).toBe(rotated);
+  });
+
+  it('is idempotent and returns the SAME object when there is nothing to do', () => {
+    const once = flattenModelJson(holder());
+    expect(flattenModelJson(once)).toBe(once);          // already a ModelNode root
+    const plain = { id: 'x', name: 'n', type: 'node', children: [] };
+    expect(flattenModelJson(plain)).toBe(plain);        // no child
+  });
+
+  it('does not collapse a holder that carries behaviour of its own', () => {
+    const scripted = holder({ script: 'class X {}' });
+    expect(flattenModelJson(scripted)).toBe(scripted);
+  });
+
+  it('merges holder variables in, letting the child win on a clash', () => {
+    const flat = flattenModelJson(
+      holder({ variables: { a: { type: 'string', value: '1' }, b: { type: 'string', value: 'h' } } },
+             { variables: { b: { type: 'string', value: 'c' } } }));
+    expect(flat.variables.a.value).toBe('1');
+    expect(flat.variables.b.value).toBe('c');
+  });
 });

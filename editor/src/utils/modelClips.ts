@@ -152,3 +152,72 @@ export function assetWithIkRig<T extends ClipBearingAsset>(asset: T, rig: any | 
 export function assetIkRig(asset: ClipBearingAsset | undefined): any | null {
   return skinnedModelJsonOf(asset?.nodeJson)?.skin?.ikRig ?? null
 }
+
+/**
+ * Collapse a model asset's redundant holder node into its single ModelNode.
+ *
+ * An import used to always produce `holder -> ModelNode`, so a single-mesh character showed up in the
+ * Scene panel as two identically-named rows (three, with the per-tab container that openMeshTab added on
+ * top). The holder exists for three reasons and all of them survive the collapse:
+ *  - it carries the fit-to-size factor for a RIGGED import, which cannot be baked into skinned vertices —
+ *    folded into the child's scale/position here, and the renderer applies a skinned node's own world
+ *    transform, so it keeps working;
+ *  - it carries `__modelId` on a placed instance — `modelInstanceRootOf` and `skinnedModelNodeOf` are both
+ *    self-inclusive, so the id landing on the ModelNode resolves identically;
+ *  - it groups a MULTI-part model, which is why >1 child is left alone.
+ *
+ * Deliberately conservative: a holder with a non-zero ROTATION is left as-is. Composing an arbitrary
+ * rotation with a child's TRS needs matrix decomposition (and is ambiguous under non-uniform scale), while
+ * every holder this actually targets is either identity or uniformly scaled. Returns the SAME object when
+ * nothing changed, so a caller can skip a pointless rewrite.
+ *
+ * Engine-free, like the rest of this module, so it is unit-testable without a GL context.
+ */
+export function flattenModelJson(nodeJson: any): any {
+  if (!nodeJson || nodeJson.type === 'model' || nodeJson.type === 'mesh') return nodeJson
+  const children = nodeJson.children
+  if (!Array.isArray(children) || children.length !== 1) return nodeJson
+
+  const child = children[0]
+  if (!child || !child.model) return nodeJson                       // not a ModelNode: leave the structure alone
+  if (nodeJson.script || nodeJson.body || nodeJson.trigger) return nodeJson
+
+  const rot = nodeJson.rotation ?? [0, 0, 0]
+  if (rot.some((r: number) => Math.abs(r) > 1e-6)) return nodeJson  // see the note above
+
+  const hs = nodeJson.scale ?? [1, 1, 1]
+  const hp = nodeJson.position ?? [0, 0, 0]
+  const cs = child.scale ?? [1, 1, 1]
+  const cp = child.position ?? [0, 0, 0]
+
+  const flat = {
+    ...child,
+    // The holder's name is the asset's name and the one the user sees; the child's is the file's internal
+    // mesh name, which for a single-part import is usually the same string anyway.
+    name: nodeJson.name ?? child.name,
+    // With no holder rotation this is exact: scale composes componentwise and the child's offset is scaled
+    // by the holder before being added to it.
+    position: [hp[0] + hs[0] * cp[0], hp[1] + hs[1] * cp[1], hp[2] + hs[2] * cp[2]],
+    scale: [hs[0] * cs[0], hs[1] * cs[1], hs[2] * cs[2]],
+    // Holder variables win only where the child has none — the child is the node being kept.
+    variables: { ...(nodeJson.variables ?? {}), ...(child.variables ?? {}) },
+  }
+  if (!Object.keys(flat.variables).length) delete flat.variables
+  return flat
+}
+
+/** {@link flattenModelJson} applied to a whole asset. Returns the SAME asset when nothing changed. */
+export function flattenModelAsset<T extends { nodeJson: any }>(asset: T): T {
+  const nodeJson = flattenModelJson(asset.nodeJson)
+  return nodeJson === asset.nodeJson ? asset : { ...asset, nodeJson }
+}
+
+/** A model asset with the clips removed from its serialized subtree. Same object when it had none. */
+export function assetWithoutEmbeddedClips<T extends ClipBearingAsset>(asset: T): T {
+  const model = skinnedModelJsonOf(asset.nodeJson)
+  if (!model?.animations?.length) return asset
+  const nodeJson = JSON.parse(JSON.stringify(asset.nodeJson))
+  const target = skinnedModelJsonOf(nodeJson)
+  if (target) target.animations = null   // null, not [], to match what AnimatedModel.serialize writes
+  return { ...asset, nodeJson }
+}

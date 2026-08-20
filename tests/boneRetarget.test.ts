@@ -297,9 +297,11 @@ describe('retargetAnimation — identities', () => {
         expect(Math.abs(quat.dot(got, idn))).toBeCloseTo(1, 5);
     });
 
-    // A source animation-only glTF has no IBMs, so its node transforms are the FRAME-0 pose (limbs mid-swing).
-    // A delta against that would mis-rotate the limbs; instead the limb rotation must be copied straight
-    // through (same skeleton). This is what fixed "arms and legs wrongly rotated".
+    // Pins the "no source bind -> raw" guard. NOTE the premise this fixture encodes — that a bind-less
+    // source's node transforms are a mid-swing FRAME-0 pose — is NOT what assimp writes: tools/dump-rig.mjs
+    // measured the authored TRS to equal the local bind on every joint of both real Mixamo files. The guard
+    // is kept because a bind-less import is the same skeleton either way, not because a delta is unsound.
+    // See the regime notes on boneCorrection before changing this.
     it('copies a limb straight through when the source has no bind (frame-0 node transforms)', () => {
         // Source: identity IBMs (animation-only), and the forearm's node transform is a swung frame-0 pose.
         const src = rig('');
@@ -404,5 +406,188 @@ describe('applyManualMapping + mappingReport', () => {
         expect(r.matchedBones).toBe(2);
         expect(r.animatedBones).toBe(2);
         expect(r.compatible).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Pivot rigs.
+//
+// Every fixture above is bone-parented-to-bone, which is exactly why this file passed while a converted
+// FBX was badly broken. Assimp's importer preserves FBX pivots, so a real Mixamo rig has a
+// `Bone_$AssimpFbx$_Rotation` node between every pair of bones, and the bone's ROTATION CURVE targets
+// that pivot rather than the bone.
+//
+// The one-level `joints.find(j => j.nodeIndex === joint.parentIndex)` this file's subject used made
+// every bone report as a root, so each got the armature-difference correction — an accumulated world
+// delta applied as if it were local, growing with depth. Arms and hips-to-toes were the visible failures.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * The same humanoid, with a non-joint pivot inserted above every non-root bone. Pivots are real glTF
+ * nodes (named, parented, with a rest transform) but are NOT in `joints`.
+ */
+function pivotRig(prefix: string) { return pivotRigOf(rig(prefix)); }
+
+/**
+ * `pivotRest` gives every pivot a non-identity rest rotation, and `identityIBMs` reproduces a SKINLESS
+ * source (Mixamo "Without Skin"): gltfLoader synthesizes joints from the animated nodes with identity
+ * inverse bind matrices, and the node transforms are the clip's frame 0 rather than any rest pose.
+ *
+ * Both matter. With identity pivot rests on both sides — which is what this fixture used to do — a
+ * correction of `targetRest x sourceRest^-1` is trivially identity, so the tests passed no matter what
+ * boneCorrection computed.
+ */
+function pivotRigOf(
+    bones: BoneSpec[],
+    opts: { pivotRest?: [number, number, number, number]; identityIBMs?: boolean } = {},
+): { skin: Skin; boneNode: number[]; pivotNode: (number | null)[] } {
+    const nodeNames = new Map<number, string>();
+    const nodeParents = new Map<number, number>();
+    const nodeTransforms = new Map<number, mat4>();
+    const boneNode: number[] = [];
+    const pivotNode: (number | null)[] = [];
+    const worldBind: mat4[] = [];
+    let next = 0;
+
+    bones.forEach((b, i) => {
+        let parentNode: number | undefined;
+        if (b.parent >= 0) {
+            // The pivot carries no rotation of its own here; its job is to break the parent link.
+            const pivot = next++;
+            nodeNames.set(pivot, `${b.name}_$AssimpFbx$_Rotation`);
+            nodeParents.set(pivot, boneNode[b.parent]);
+            nodeTransforms.set(pivot, mat4.fromQuat(mat4.create(), (opts.pivotRest ?? [0, 0, 0, 1]) as any));
+            pivotNode.push(pivot);
+            parentNode = pivot;
+        } else {
+            pivotNode.push(null);
+        }
+        const node = next++;
+        boneNode.push(node);
+        nodeNames.set(node, b.name);
+        if (parentNode !== undefined) nodeParents.set(node, parentNode);
+        const local = mat4.fromRotationTranslation(mat4.create(), (b.r ?? [0, 0, 0, 1]) as any, (b.t ?? [0, 0, 0]) as any);
+        nodeTransforms.set(node, local);
+        worldBind[i] = b.parent >= 0 ? mat4.multiply(mat4.create(), worldBind[b.parent], local) : local;
+    });
+
+    const joints = bones.map((b, i) => ({
+        nodeIndex: boneNode[i],
+        inverseBindMatrix: opts.identityIBMs ? mat4.create() : mat4.invert(mat4.create(), worldBind[i])!,
+        parentIndex: nodeParents.get(boneNode[i]),   // the PIVOT, as assimp leaves it
+    }));
+    return { skin: { joints, nodeNames, nodeParents, nodeTransforms }, boneNode, pivotNode };
+}
+
+describe('retarget across an assimp pivot rig', () => {
+    it('keeps a rest difference LOCAL to the bone it belongs to', () => {
+        // The discriminating case for isRootJoint. Two pivot rigs differing ONLY in the spine's rest
+        // rotation; the forearm's own rest is identical in both, so its correction must be identity.
+        //
+        // While every bone reported as a root, boneCorrection took the armature branch for the forearm
+        // too — an accumulated world delta that picks up the spine's difference and every other ancestor's,
+        // growing with depth. That is precisely what twisted the arms and the hips-to-toes chain.
+        const twisted = (prefix: string) => {
+            const bones = rig(prefix);
+            bones[1] = { ...bones[1], r: qy(35) as any };   // spine only
+            return bones;
+        };
+        const a = pivotRigOf(rig('mixamorig:'));
+        const b = pivotRigOf(twisted('mixamorig:'));
+
+        const clip = clipOf('a', [{ node: a.boneNode[4], rot: qy(20) }]);
+        const m = buildBoneMapping([clip], a.skin, b.skin);
+        const out = retargetAnimation(clip, a.skin, b.skin, m);
+
+        // The forearm's rotation passes through untouched: its own rest matches, the spine's does not.
+        for (let i = 0; i < 4; i++) expect(out.samplers[0].output[i]).toBeCloseTo(qy(20)[i], 4);
+    });
+
+    it('maps a channel that targets a PIVOT node, not the bone', () => {
+        // This is what a real converted FBX clip looks like: the curve is on the pivot.
+        const { skin, pivotNode } = pivotRig('mixamorig:');
+        const m = buildBoneMapping([clipOf('a', [{ node: pivotNode[4]!, rot: qy(30) }])], skin, skin);
+
+        const entry = m.entries.find(e => e.sourceNode === pivotNode[4]);
+        expect(entry?.targetNode).toBe(pivotNode[4]);  // matched to the target's identical pivot
+        expect(entry?.kind).toBe('exact');
+        expect(m.sameRig).toBe(true);                  // ...so the verbatim copy path is reachable
+    });
+
+    it('copies a pivot-targeted clip through unchanged on an identical rig', () => {
+        const { skin, pivotNode } = pivotRig('mixamorig:');
+        const rot = qy(41);
+        const clip = clipOf('a', [{ node: pivotNode[4]!, rot }]);
+        const m = buildBoneMapping([clip], skin, skin);
+        const out = retargetAnimation(clip, skin, skin, m);
+
+        expect(out.channels).toHaveLength(1);
+        expect(out.channels[0].targetNodeIndex).toBe(pivotNode[4]);
+        for (let i = 0; i < 4; i++) expect(out.samplers[0].output[i]).toBeCloseTo(rot[i], 5);
+    });
+
+    it('retargets between two pivot rigs under different namespaces', () => {
+        // `mixamorig:` vs `mixamorig1:` is the same skeleton renamed — the normalized tier must still
+        // pair the bones, and the corrections must stay identity rather than accumulating down the arm.
+        const a = pivotRig('mixamorig:');
+        const b = pivotRig('mixamorig1:');
+        const clip = clipOf('a', [{ node: a.boneNode[4], rot: qy(33) }]);
+        const m = buildBoneMapping([clip], a.skin, b.skin);
+
+        const entry = m.entries.find(e => e.sourceNode === a.boneNode[4]);
+        expect(entry?.targetNode).toBe(b.boneNode[4]);
+        const out = retargetAnimation(clip, a.skin, b.skin, m);
+        for (let i = 0; i < 4; i++) expect(out.samplers[0].output[i]).toBeCloseTo(qy(33)[i], 4);
+    });
+});
+
+/**
+ * The reported bug, reduced.
+ *
+ * A Mixamo "Without Skin" clip has NO skin, so gltfLoader synthesizes its joints from the animated nodes
+ * with identity inverse bind matrices, and those animated nodes are the `$AssimpFbx$` pivots. The
+ * long-standing rule for that case is stated in boneCorrection: a source with no usable bind is copied
+ * straight through, because its node transforms are the clip FRAME 0, not a rest pose, and deltaing
+ * against them "mis-rotates exactly the limbs that move most".
+ *
+ * A correction branch that keys only on the TARGET being a non-joint bypasses that rule for 100% of such
+ * a clip, and deltas the character file's bind against the animation file's frame-0 value — two unrelated
+ * quantities. Playing Mixamo's own T-Pose clip, which should be a visual no-op, then twists every limb.
+ */
+describe('retarget from a SKINLESS animation source (Mixamo "Without Skin")', () => {
+    // Distinct pivot rests: the character file's bind vs the animation file's frame-0. Any correction
+    // derived from these two disagrees with itself, which is the whole point.
+    const target = () => pivotRigOf(rig('mixamorig:'), { pivotRest: qy(15) as any });
+    const source = () => pivotRigOf(rig('mixamorig:'), { pivotRest: qy(-40) as any, identityIBMs: true });
+
+    it('copies a pivot channel through untouched', () => {
+        const t = target(), s = source();
+        const rot = qy(28);
+        const clip = clipOf('a', [{ node: s.pivotNode[4]!, rot }]);
+        const m = buildBoneMapping([clip], s.skin, t.skin);
+        const out = retargetAnimation(clip, s.skin, t.skin, m);
+
+        expect(out.channels[0].targetNodeIndex).toBe(t.pivotNode[4]);
+        for (let i = 0; i < 4; i++) expect(out.samplers[0].output[i]).toBeCloseTo(rot[i], 5);
+    });
+
+    it('leaves a T-pose clip a visual no-op on every bone', () => {
+        // The clip holds each pivot at the SOURCE file's own value. Nothing may be layered on top of it.
+        const t = target(), s = source();
+        const rest = qy(-40);
+        const clip = clipOf('tpose', [1, 2, 3, 4].map(i => ({ node: s.pivotNode[i]!, rot: rest })));
+        const m = buildBoneMapping([clip], s.skin, t.skin);
+        const out = retargetAnimation(clip, s.skin, t.skin, m);
+
+        for (const sampler of out.samplers)
+            for (let i = 0; i < 4; i++) expect(sampler.output[i]).toBeCloseTo(rest[i], 5);
+    });
+
+    it('reports every correction as identity, so the clip stays on the verbatim path', () => {
+        const t = target(), s = source();
+        const clip = clipOf('a', [{ node: s.pivotNode[4]!, rot: qy(28) }]);
+        const m = buildBoneMapping([clip], s.skin, t.skin);
+        expect(m.entries.every(e => e.targetNode !== null)).toBe(true);
+        expect(m.sameRig).toBe(true);
     });
 });

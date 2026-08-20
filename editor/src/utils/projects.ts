@@ -31,6 +31,15 @@ export type ProjectRecord = {
   legacyMigrated?: boolean;
   /** Set while the one-time migration of an existing install is in flight; cleared when it completes. */
   migrating?: boolean;
+  /**
+   * Absolute path of the folder this project's scripts are mirrored into for editing in an external IDE.
+   *
+   * On the project record rather than in scoped storage because it is machine-local: a project exported
+   * and imported elsewhere must not inherit a path that only existed on the author's machine.
+   */
+  scriptWorkspacePath?: string;
+  /** Command used to open that folder ('code', 'cursor', 'codium', …). Defaults to 'code'. */
+  scriptEditorCommand?: string;
 };
 
 /** Registry of all projects. Unscoped — this is what defines the scopes. */
@@ -226,6 +235,21 @@ export async function renameProject(id: string, name: string): Promise<void> {
   if (!trimmed) return;
   // Metadata only. Nothing in storage is keyed by name — that is the whole point of id-based namespacing.
   await saveProjects((await loadProjects()).map(p => (p.id === id ? { ...p, name: trimmed } : p)));
+}
+
+/** The script-workspace settings for a project, or empty defaults when it has never been set up. */
+export async function scriptWorkspaceOf(id: string): Promise<{ path?: string; command?: string }> {
+  const record = (await loadProjects()).find(p => p.id === id);
+  return { path: record?.scriptWorkspacePath, command: record?.scriptEditorCommand };
+}
+
+/** Point a project at a script workspace folder, or pass `undefined` to disconnect it. */
+export async function setScriptWorkspace(id: string, path: string | undefined, command?: string): Promise<void> {
+  const list = await loadProjects();
+  if (!list.some(p => p.id === id)) return;
+  await saveProjects(list.map(p => (p.id === id
+    ? { ...p, scriptWorkspacePath: path, scriptEditorCommand: command ?? p.scriptEditorCommand }
+    : p)));
 }
 
 /** Record a project's latest activity (and its cover image) for the browser's ordering and cards. */

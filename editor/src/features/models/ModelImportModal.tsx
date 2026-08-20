@@ -15,6 +15,7 @@ export default function ModelImportModal() {
   const [normalize, setNormalize] = useState(true)
   const [targetSize, setTargetSize] = useState(2)
   const [separate, setSeparate] = useState(false)
+  const [merge, setMerge] = useState(false)
 
   // Reset per-import state whenever a new review opens.
   useEffect(() => {
@@ -24,6 +25,7 @@ export default function ModelImportModal() {
     setNormalize(true)
     setTargetSize(2)
     setSeparate(false)
+    setMerge(false)
   }, [pendingModelImport])
 
   if (!pendingModelImport) return null
@@ -61,6 +63,7 @@ export default function ModelImportModal() {
     normalize,
     targetSize: targetSize > 0 ? targetSize : 2,
     separate: separate && info.subMeshCount > 1,
+    merge: merge && !separate && info.subMeshCount > 1,
   })
   const cancel = () => resolveModelImport(null)
 
@@ -146,12 +149,37 @@ export default function ModelImportModal() {
           {info.subMeshCount > 1 && (
             <div>
               <div className='text-xs font-semibold mb-1'>Contents</div>
-              <Toggle label='Separate sub-models into individual assets' checked={separate} onChange={setSeparate} />
+              <Toggle label='Separate sub-models into individual assets'
+                      checked={separate}
+                      onChange={(v: boolean) => { setSeparate(v); if (v) setMerge(false) }} />
               <p className='text-[11px] text-gray-400 mt-1'>
                 {separate
                   ? `Creates ${info.subMeshCount} separate model assets, each centred on its own origin.`
-                  : `Creates 1 model asset containing all ${info.subMeshCount} parts.`}
+                  : merge
+                    ? `Creates 1 model asset with a single merged mesh.`
+                    : `Creates 1 model asset containing all ${info.subMeshCount} parts.`}
               </p>
+
+              {/* The opposite of the toggle above. Worth offering because the split is an artefact of the
+                  FILE FORMAT (glTF mandates one primitive per material, and tools split a body across
+                  several mesh objects), not something the author chose: a merged character is one node
+                  with one Animator instead of several that an animation can only drive one of. */}
+              <div className='mt-2'>
+                <Toggle label='Merge sub-meshes into a single mesh'
+                        checked={merge}
+                        onChange={(v: boolean) => { setMerge(v); if (v) setSeparate(false) }} />
+                <p className='text-[11px] text-gray-400 mt-1'>
+                  {merge
+                    ? `Combines all ${info.subMeshCount} parts into one mesh, keeping one material slot per part.`
+                    : 'Keeps the file’s parts as separate nodes under one asset.'}
+                </p>
+                {merge && (
+                  <p className='text-[11px] text-gray-500 mt-1'>
+                    Parts that use different material types, or mix opaque and transparent, stay separate —
+                    the reason is logged.
+                  </p>
+                )}
+              </div>
               {separate && (
                 <p className='text-[11px] text-warning mt-1'>
                   A single model split across several materials will import as separate pieces — leave this

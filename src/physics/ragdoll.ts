@@ -4,6 +4,7 @@ import { AnimatedModel } from '../graphics/animatedModel';
 import type { Animator } from '../graphics/animator';
 import type { ModelNode } from '../core/scene/nodes/modelNode';
 import type { PhysicsSystem } from './physicsSystem';
+import { skeletonTopology } from '../graphics/skeletonTopology';
 
 export interface RagdollOptions {
     /**
@@ -115,17 +116,28 @@ export class Ragdoll {
             bonePos.set(joint.nodeIndex, pos);
         }
 
-        // Children lists + parent lookup (parentIndex is a parent NODE index).
+        // Children lists + parent lookup, in NODE space but resolved through the shared topology.
+        //
+        // `joint.parentIndex` is the immediate parent NODE, which on many rigs is not a joint at all —
+        // assimp's FBX importer preserves pivots, so `Bone_$AssimpFbx$_Rotation` sits between every pair
+        // of bones. Keying off it directly made `childrenOf` keyed by pivots, so every joint looked
+        // childless (no branch detection, fallback radii everywhere) and `nearestKeptAncestor` terminated
+        // on the first pivot — meaning no cone-twist constraints at all, and a ragdoll of loose spheres.
+        const topo = skeletonTopology(skin);
         const childrenOf = new Map<number, number[]>();
         const parentIndexOf = new Map<number, number | undefined>();
-        for (const joint of joints) {
-            parentIndexOf.set(joint.nodeIndex, joint.parentIndex);
-            if (joint.parentIndex !== undefined) {
-                const arr = childrenOf.get(joint.parentIndex) || [];
-                arr.push(joint.nodeIndex);
-                childrenOf.set(joint.parentIndex, arr);
+        for (let j = 0; j < joints.length; j++) {
+            const parentJoint = topo.parentJoint[j];
+            const parentNode = parentJoint >= 0 ? joints[parentJoint].nodeIndex : undefined;
+            parentIndexOf.set(joints[j].nodeIndex, parentNode);
+            if (parentNode !== undefined) {
+                const arr = childrenOf.get(parentNode) || [];
+                arr.push(joints[j].nodeIndex);
+                childrenOf.set(parentNode, arr);
             }
         }
+        /** The parent NODE of a joint, skipping any non-joint nodes between them. */
+        const parentNodeOf = (nodeIndex: number): number | undefined => parentIndexOf.get(nodeIndex);
 
         // Prune tiny bones (fingers/toes/twist helpers): only substantial segments get a physics body.
         // A 1kg body on a 3cm sphere has near-zero rotational inertia, so cone-twist torques spin it
@@ -134,8 +146,9 @@ export class Ragdoll {
         let maxSeg = 0;
         const segLen = new Map<number, number>();
         for (const joint of joints) {
-            if (joint.parentIndex === undefined) continue;
-            const p = bonePos.get(joint.nodeIndex), pp = bonePos.get(joint.parentIndex);
+            const parentNode = parentNodeOf(joint.nodeIndex);
+            if (parentNode === undefined) continue;
+            const p = bonePos.get(joint.nodeIndex), pp = bonePos.get(parentNode);
             if (!p || !pp) continue;
             const d = vec3.distance(p, pp);
             segLen.set(joint.nodeIndex, d);
@@ -144,7 +157,7 @@ export class Ragdoll {
         const minSeg = maxSeg * 0.18;
         const kept = new Set<number>();
         for (const joint of joints) {
-            const isRoot = joint.parentIndex === undefined;
+            const isRoot = parentNodeOf(joint.nodeIndex) === undefined;
             const isBranch = (childrenOf.get(joint.nodeIndex)?.length ?? 0) >= 2;
             const longEnough = (segLen.get(joint.nodeIndex) ?? Infinity) >= minSeg;
             if (isRoot || isBranch || longEnough) kept.add(joint.nodeIndex);
@@ -198,14 +211,15 @@ export class Ragdoll {
                     if (kp) dist = Math.min(dist, vec3.distance(pos, kp));
                 }
             }
-            if (!isFinite(dist) && joint.parentIndex !== undefined) {
-                const pp = bonePos.get(joint.parentIndex);
+            const parentNode = parentNodeOf(nodeIndex);
+            if (!isFinite(dist) && parentNode !== undefined) {
+                const pp = bonePos.get(parentNode);
                 if (pp) dist = vec3.distance(pos, pp);
             }
             if (!isFinite(dist)) dist = minRadius * 2;
             const radius = Math.min(maxRadius, Math.max(minRadius, dist * 0.5 * cfg.radiusScale));
 
-            const dir = dirOf(nodeIndex, joint.parentIndex);
+            const dir = dirOf(nodeIndex, parentNode);
             boneDir.set(nodeIndex, dir);
             const q = quat.rotationTo(quat.create(), up, dir);
 

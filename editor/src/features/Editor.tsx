@@ -5,6 +5,7 @@ import DockLayout from "./layout/DockLayout";
 import ModelImportModal from "./models/ModelImportModal";
 import ProgressWindow from "./progress/ProgressWindow";
 import AnimationImportModal from "./animation/AnimationImportModal";
+import RigPickerModal from "./animation/RigPickerModal";
 import UnsavedSceneModal from "./dialogs/UnsavedSceneModal";
 import { StateMachineProvider } from "./animation/StateMachineContext";
 import { AnimationFieldProvider } from "./animationField/AnimationFieldContext";
@@ -84,6 +85,7 @@ function Shell() {
           here. A floating card stack, not a modal, so it can stay up underneath the review modal. */}
       <ProgressWindow />
       {/* Global animation-import review modal (compatibility vs the skeleton). */}
+      <RigPickerModal />
       <AnimationImportModal />
       {/* Save/Discard/Cancel prompt when unsaved edits would be lost (scene switch, or closing a tab). */}
       <UnsavedSceneModal />

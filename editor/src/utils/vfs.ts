@@ -3,6 +3,7 @@ import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { ScriptAsset } from './scripts'
+import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 
@@ -18,7 +19,7 @@ import type { TilesetAsset } from './tilesets'
 // a virtual extension (.mat/.tmat/.tpl/.model); textures keep their real image extension. Path rules match
 // SVAR's own FileTree.normalizeFile: the extension is everything after the LAST dot.
 
-export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'tileset'
+export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'tileset'
 
 export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
   material: '.mat',
@@ -28,6 +29,7 @@ export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
   scene: '.scene',
   script: '.script',
   animationField: '.afield',
+  animation: '.anim',
   tileset: '.tileset',
 }
 
@@ -40,6 +42,7 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   scene: 'scene',
   script: 'script',
   animationField: 'animation field',
+  animation: 'animation',
   tileset: 'tileset',
 }
 
@@ -70,6 +73,7 @@ export type LibSnapshot = {
   models: ModelAsset[]
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
+  animations: AnimationAsset[]
   tilesets: TilesetAsset[]
   scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
   textureIds: string[]
@@ -121,6 +125,7 @@ export function kindOfExt(ext: string): AssetKind {
     case '.mesh': return 'model'
     case '.script': return 'script'
     case '.afield': return 'animationField'
+    case '.anim': return 'animation'
     case '.tileset': return 'tileset'
     default: return 'texture'
   }
@@ -475,6 +480,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const m of libs.models) visit('model', m.id, m.name)
   for (const s of libs.scripts) visit('script', s.id, s.name)
   for (const f of libs.animationFields) visit('animationField', f.id, f.name)
+  for (const a of libs.animations) visit('animation', a.id, a.name)
   for (const t of libs.tilesets) visit('tileset', t.id, t.name)
   for (const s of libs.scenes) visit('scene', s.id, s.name)
   for (const id of libs.textureIds) visit('texture', id, id)
@@ -545,6 +551,7 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const m of libs.models) check('model', m.id, m.name)
   for (const s of libs.scripts) check('script', s.id, s.name)
   for (const f of libs.animationFields) check('animationField', f.id, f.name)
+  for (const a of libs.animations) check('animation', a.id, a.name)
   for (const t of libs.tilesets) check('tileset', t.id, t.name)
   for (const s of libs.scenes) check('scene', s.id, s.name)
   for (const id of libs.textureIds) check('texture', id, id)
@@ -590,6 +597,7 @@ function aliveIds(libs: LibSnapshot): Record<AssetKind, Set<string>> {
     model: new Set(libs.models.map(m => m.id)),
     script: new Set(libs.scripts.map(s => s.id)),
     animationField: new Set(libs.animationFields.map(f => f.id)),
+    animation: new Set(libs.animations.map(a => a.id)),
     tileset: new Set(libs.tilesets.map(t => t.id)),
     scene: new Set(libs.scenes.map(s => s.id)),
     texture: new Set(libs.textureIds),

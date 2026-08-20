@@ -23,15 +23,34 @@ const KIND_STYLE: Record<BoneMatchKind, string> = {
   none: 'bg-red-900 text-red-300',
 }
 
+/**
+ * The name to seed the rename box with.
+ *
+ * Every Mixamo clip is literally called `mixamo.com`, and a nameless glTF animation parses as
+ * `Animation` — neither identifies anything, and a second import of either collides into "… (2)". For
+ * those two the FILE name is what the user actually recognises.
+ */
+function defaultClipName(clipName: string, fileName: string): string {
+  const generic = clipName === 'mixamo.com' || clipName === 'Animation' || !clipName.trim()
+  if (!generic) return clipName
+  // `fileName` is a File.name — a bare basename — so only the extension needs stripping.
+  const base = fileName.replace(/\.[^.]+$/, '').trim()
+  return base || clipName
+}
+
 export default function AnimationImportModal() {
   const { pendingAnimationImport, resolveAnimationImport } = useEditorSessions()
   const [include, setInclude] = useState<boolean[]>([])
+  // Per-clip name, editable before commit. Renaming here rather than afterwards keeps Animation Field
+  // samples (which reference clips by name and are NOT rewritten by a later rename) from being orphaned.
+  const [names, setNames] = useState<string[]>([])
   // Working copy of the mapping so edits are instant; committed back on Accept.
   const [mapping, setMapping] = useState<BoneMapping | null>(null)
   const [showMap, setShowMap] = useState(false)
 
   useEffect(() => {
     setInclude(pendingAnimationImport ? pendingAnimationImport.clips.map(c => c.report.compatible) : [])
+    setNames(pendingAnimationImport ? pendingAnimationImport.clips.map(c => defaultClipName(c.name, pendingAnimationImport.fileName)) : [])
     setMapping(pendingAnimationImport?.mapping ?? null)
     setShowMap(false)
   }, [pendingAnimationImport])
@@ -41,11 +60,24 @@ export default function AnimationImportModal() {
   const anyIndexMode = mapping.matchMode === 'index'
   const chosen = include.filter(Boolean).length
 
-  const accept = () => resolveAnimationImport({ include, mapping })
+  const accept = () => resolveAnimationImport({ include, mapping, names })
   const cancel = () => resolveAnimationImport(null)
   const toggle = (i: number) => setInclude(prev => prev.map((v, idx) => idx === i ? !v : v))
+  const rename = (i: number, value: string) => setNames(prev => prev.map((v, idx) => idx === i ? value : v))
+
+  // Names that two or more SELECTED clips share: the second to be added silently becomes "name (2)".
+  const duplicated = new Set(
+    names
+      .map((n, i) => (include[i] ? n.trim().toLowerCase() : ''))
+      .filter((n, i, all) => n !== '' && all.indexOf(n) !== i),
+  )
   const remap = (sourceNode: number, targetNode: number | null) =>
     setMapping(prev => (prev ? applyManualMapping(prev, sourceNode, targetNode) : prev))
+
+  /** Source bones in `nodes` that the LIVE mapping sends nowhere, by name. */
+  const unmappedNames = (nodes: number[]): string[] =>
+    nodes.filter(n => (targetOf.get(n) ?? null) === null)
+      .map(n => info.sourceBones.find(b => b.node === n)?.name ?? `node ${n}`)
 
   // target for each source bone, from the live mapping — clip counts read through this.
   const targetOf = new Map(mapping.entries.map(e => [e.sourceNode, e.targetNode] as const))
@@ -119,7 +151,13 @@ export default function AnimationImportModal() {
                 <span title={compatible ? 'Include this clip' : 'No matching bones — cannot import'}>
                   <Toggle checked={!!include[i]} disabled={!compatible} onChange={() => toggle(i)} />
                 </span>
-                <span className='font-semibold flex-1 truncate' title={c.name}>{c.name}</span>
+                <input
+                  className='flex-1 min-w-0 bg-surface-raised border border-control rounded px-2 py-1 text-xs font-semibold text-white disabled:opacity-50'
+                  value={names[i] ?? ''}
+                  disabled={!compatible}
+                  onChange={e => rename(i, e.target.value)}
+                  title={`Imported as this name. Parsed from the file as "${c.name}".`}
+                />
                 <span className={`text-[11px] px-1.5 py-0.5 rounded ${compatible ? 'bg-success/15 text-green-300' : 'bg-red-900 text-red-300'}`}>
                   {compatible ? (mapping.sameRig ? '✓ compatible' : '✓ retargeted') : '✗ incompatible'}
                 </span>
@@ -127,6 +165,27 @@ export default function AnimationImportModal() {
               <div className='mt-1 text-[11px] text-gray-300'>
                 {matched}/{animated} bones mapped
               </div>
+              {/* An unmapped bone's curve is DROPPED at commit and the target bone silently keeps its rest
+                  pose — which reads as a limb rotated by a fixed amount rather than as a missing channel.
+                  Naming them here is the difference between noticing that in the modal and chasing it in
+                  the viewport. */}
+              {compatible && matched < animated && (
+                <div className='mt-1 text-[11px] text-warning' title={unmappedNames(c.animatedNodes).join(', ')}>
+                  {animated - matched} bone{animated - matched === 1 ? '' : 's'} unmapped — their motion is
+                  dropped: {unmappedNames(c.animatedNodes).slice(0, 4).join(', ')}
+                  {animated - matched > 4 ? `, +${animated - matched - 4} more` : ''}
+                </div>
+              )}
+              {compatible && include[i] && !(names[i] ?? '').trim() && (
+                <div className='mt-1 text-[11px] text-warning'>
+                  A blank name imports as “clip”. Type one to keep it findable.
+                </div>
+              )}
+              {compatible && include[i] && duplicated.has((names[i] ?? '').trim().toLowerCase()) && (
+                <div className='mt-1 text-[11px] text-warning'>
+                  Another selected clip has this name — the second will be imported as “{(names[i] ?? '').trim()} (2)”.
+                </div>
+              )}
               {!compatible && (
                 <div className='mt-1 text-[11px] text-red-200'>
                   No source bone maps to the skeleton. Open <b>Skeleton</b> above and map at least the hips.

@@ -128,6 +128,22 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
       : TextureManager.Instance.serializeTextureBytes()
   } catch { textureBytes = [] }
 
+  // Shared animation clips, ONCE for the whole game, in their source rig's space — and a map of which
+  // model asset uses which. `AnimatedModel.serialize` drops an asset-backed clip, so the scenes above
+  // carry none of them; the player resolves and retargets at load instead. That is what keeps one walk
+  // shared by two characters from shipping twice (and from shipping once per PLACEMENT, which is what
+  // embedding would have cost).
+  //
+  // Narrowed to what a shipped model actually references, the same discipline as textures.
+  const modelAnimations: Record<string, string[]> = {}
+  const wantedAnims = new Set<string>()
+  for (const m of src.libs.models ?? []) {
+    if (!m.animationIds?.length) continue
+    modelAnimations[m.id] = [...m.animationIds]
+    for (const id of m.animationIds) wantedAnims.add(id)
+  }
+  const animations = (src.libs.animations ?? []).filter(a => wantedAnims.has(a.id))
+
   const out: any = {
     version: 2,
     entry: src.mainSceneId in scenes ? src.mainSceneId : Object.keys(scenes)[0],
@@ -135,6 +151,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     templates,
     textureBytes,
   }
+  if (animations.length) { out.animations = animations; out.modelAnimations = modelAnimations }
   if (src.settings) out.config = { graphics: { clearColor: src.settings.clearColor }, render: src.settings }
   return out
 }

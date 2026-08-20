@@ -161,3 +161,16 @@ export async function parseModelAsGltfFiles(files: File[], animated: boolean, on
   if (result.kind !== 'parseGltf') throw new Error('Unexpected import job result');
   return result.parsed;
 }
+
+/**
+ * Parse animation CLIPS (+ the source skeleton) out of any model file, off the main thread when possible.
+ *
+ * The engine-side equivalent is `Loader.loadAnimationsFromFile`, which does the same work inline — for an
+ * .fbx that means an uninterruptible assimp WASM call, which is what made importing a clip stall the
+ * editor. Rejects with `ImportCancelled` when `cancelAllImports()` fires, like every other job here.
+ */
+export async function parseAnimationFiles(files: File[], onProgress?: ProgressSink) {
+  const result = await dispatch({ kind: 'parseAnimations', files }, onProgress);
+  if (result.kind !== 'parseAnimations') throw new Error('Unexpected import job result');
+  return result.parsed;
+}

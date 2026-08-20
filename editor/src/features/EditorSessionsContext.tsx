@@ -27,6 +27,7 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   | 'commitAnimationStateMachine' | 'registerAnimationApply'
   | 'importAnimationFiles' | 'importSkeletonNames' | 'renameAnimationClip' | 'removeAnimationClip'
   | 'pendingAnimationImport' | 'resolveAnimationImport'
+  | 'pendingRigPick' | 'resolveRigPick'
   // Model
   | 'enterModelEditor' | 'modelSession' | 'modelEditTargetId' | 'setActiveModelName'
   | 'addModelLodFromAsset' | 'removeModelLod' | 'setModelLodDistance' | 'setModelCullDistance'

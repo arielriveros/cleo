@@ -14,6 +14,8 @@ export const ImportIcon = () => (<S><path d='M12 3v10' /><path d='M8 9.5l4 4 4-4
 export const ExportIcon = () => (<S><path d='M12 14V4' /><path d='M8 7.5l4-4 4 4' /><path d='M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3' /></S>);
 // Rocket — ship a build.
 export const PublishIcon = () => (<S><path d='M13.5 3.5c3 0 6 2 7 7-5 1-7 4-7 7-1.5-1-3-2-4.5-3.5S6 11 5 9.5c3 0 6-2 7-6Z' /><circle cx='14.5' cy='9.5' r='1.6' /><path d='M7 17c-1 1-1.5 2.5-1.5 4 1.5 0 3-.5 4-1.5' /></S>);
+// Angle brackets — open the scripts in an external code editor.
+export const CodeIcon = () => (<S><path d='M8 6 3 12l5 6' /><path d='M16 6l5 6-5 6' /></S>);
 export const ChevronDownIcon = () => (<S width='12' height='12'><path d='M6 9l6 6 6-6' /></S>);
 // Save-state feedback: spinner (animated by the caller), check, alert.
 export const SpinnerIcon = () => (<S className='animate-spin'><path d='M21 12a9 9 0 1 1-6.22-8.56' /></S>);

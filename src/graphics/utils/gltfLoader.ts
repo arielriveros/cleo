@@ -4,6 +4,7 @@ import { TextureManager } from "../systems/textureManager";
 import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../animatedModel";
 import { Logger } from "../../core/logger";
 import { mat4, quat, vec3 } from "gl-matrix";
+import { collapseFbxPivots } from "./fbxPivots";
 
 // GLTF Types based on the specification
 interface GLTFAsset {
@@ -347,16 +348,30 @@ export class GLTFLoader {
             }
         }
 
+        // Fold assimp's FBX pivot nodes away before anything reads the hierarchy. Their shape differs
+        // between two files exported from the SAME rig (assimp emits each pivot only when its FBX property
+        // is non-default), and a retarget matching them by name then drops or doubles a pre-rotation — a
+        // constant per-bone twist on exactly the pre-rotated bones. A file with no pivots is untouched.
+        const fromFile = this.gltf.skins && this.gltf.skins.length > 0 ? this.parseSkin(this.gltf.skins[0]) : null;
+        const collapsed = collapseFbxPivots({ nodeParents, nodeTransforms, nodeNames }, animations, fromFile?.joints);
+        const graph = {
+            nodeParents: collapsed.nodeParents,
+            nodeTransforms: collapsed.nodeTransforms,
+            nodeNames: collapsed.nodeNames,
+        };
+
         // Prefer a real skin (has inverse-bind matrices); else synthesize joints from animated nodes.
-        if (this.gltf.skins && this.gltf.skins.length > 0) {
-            return { animations, skin: this.parseSkin(this.gltf.skins[0]) };
-        }
+        if (fromFile) return { animations: collapsed.animations, skin: { ...fromFile, ...graph } };
+
+        // Synthesized AFTER the collapse, so the joints are the real bones rather than the pivots that
+        // happened to carry the curves. That is what lets bone names, humanoid slots and the spine chain
+        // resolve on an animation-only file at all.
         const animatedNodes = new Set<number>();
-        for (const a of animations) for (const ch of a.channels) animatedNodes.add(ch.targetNodeIndex);
+        for (const a of collapsed.animations) for (const ch of a.channels) animatedNodes.add(ch.targetNodeIndex);
         const joints = [...animatedNodes].sort((x, y) => x - y).map(ni => ({
-            nodeIndex: ni, inverseBindMatrix: mat4.create(), parentIndex: nodeParents.get(ni),
+            nodeIndex: ni, inverseBindMatrix: mat4.create(), parentIndex: collapsed.nodeParents.get(ni),
         }));
-        return { animations, skin: { joints, nodeParents, nodeTransforms, nodeNames } };
+        return { animations: collapsed.animations, skin: { joints, ...graph } };
     }
 
     /**
@@ -649,10 +664,11 @@ export class GLTFLoader {
         };
 
         const skins: (Skin | null)[] = [];
-        const animations: Animation[] = [];
+        let animations: Animation[] = [];
         if (animated) {
             if (this.gltf.skins) for (const s of this.gltf.skins) skins.push(this.parseSkin(s));
             if (this.gltf.animations) for (const a of this.gltf.animations) animations.push(this.parseAnimation(a));
+            animations = this.collapsePivots(skins, animations);
         }
 
         const meshes: GltfMeshDescriptor[] = [];
@@ -689,6 +705,33 @@ export class GLTFLoader {
         }
 
         return { meshes, materials, images: this.imageSources, skins: skins.map(s => s ?? undefined), animations };
+    }
+
+    /**
+     * Fold assimp's FBX pivot nodes away across every skin and clip this file produced.
+     *
+     * Done here rather than per skin because the node graph is the whole glTF node list — one shared
+     * hierarchy — so the fold is computed once and written back to each skin. A character and an animation
+     * file must BOTH be collapsed or their pivot chains can still disagree, which is the whole failure
+     * this removes. `parseAnimationsAndSkeleton` does the same for the animation-only path.
+     */
+    private collapsePivots(skins: (Skin | null)[], animations: Animation[]): Animation[] {
+        const first = skins.find(s => s) as Skin | undefined;
+        if (!first?.nodeNames || !first.nodeParents || !first.nodeTransforms) return animations;
+
+        const joints = skins.flatMap(s => s?.joints ?? []);
+        const collapsed = collapseFbxPivots(
+            { nodeParents: first.nodeParents, nodeTransforms: first.nodeTransforms, nodeNames: first.nodeNames },
+            animations, joints);
+        if (collapsed.removed.size === 0) return animations;
+
+        for (const skin of skins) {
+            if (!skin) continue;
+            skin.nodeParents = collapsed.nodeParents;
+            skin.nodeTransforms = collapsed.nodeTransforms;
+            skin.nodeNames = collapsed.nodeNames;
+        }
+        return collapsed.animations;
     }
 
     /** Buffers in `result` that can be transferred rather than copied across a worker boundary. */
@@ -917,12 +960,14 @@ export class GLTFLoader {
         }
 
         // Parse all animations
-        const animations: Animation[] = [];
+        let animations: Animation[] = [];
         if (this.gltf.animations) {
             for (const gltfAnim of this.gltf.animations) {
                 animations.push(this.parseAnimation(gltfAnim));
             }
         }
+        // Same pivot fold as the descriptor path, so the eager loader cannot drift from it.
+        animations = this.collapsePivots(skins, animations);
 
         // Parse meshes (one entry per scene-node reference, so node names/transforms are preserved)
         for (const instance of this.getMeshInstances()) {

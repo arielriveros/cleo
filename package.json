@@ -19,7 +19,8 @@
     "editor:build": "npm run build:player && cd editor && npm run build",
     "desktop:install": "cd desktop && npm install",
     "desktop:dev": "concurrently \"npm run watch\" \"npm run editor\" \"cd desktop && npm run dev\"",
-    "desktop:build": "npm run build && npm run editor:build && cd desktop && npm run dist"
+    "desktop:build": "npm run build && npm run editor:build && cd desktop && npm run dist",
+    "test:script-workspace": "cd desktop && npm run e2e:scripts"
   },
   "author": "Ariel Riveros",
   "license": "ISC",

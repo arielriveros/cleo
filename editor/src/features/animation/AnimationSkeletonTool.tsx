@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Raycaster, Vec } from 'cleo'
-import { getAnimationTarget, computeBindMatrices, computeJointWorldMatrices, worldPositionOf } from './skeleton'
+import { Raycaster, Vec, skeletonTopology } from 'cleo'
+import { getAnimationTarget, bonePairsOf, computeBindMatrices, computeJointWorldMatrices, worldPositionOf } from './skeleton'
 
 // Viewport overlay for the Animation Editor. Instead of one ModelNode per joint/bone (~130 draw
 // calls), it packs per-instance world matrices into flat Float32Arrays each frame and hands them to
@@ -51,13 +51,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
     const { skin } = target
     const n = skin.joints.length
 
-    const nodeIndexToJoint = new Map<number, number>()
-    skin.joints.forEach((j, i) => nodeIndexToJoint.set(j.nodeIndex, i))
-    const bonePairs: [number, number][] = []
-    skin.joints.forEach((j, i) => {
-      const p = j.parentIndex !== undefined ? (nodeIndexToJoint.get(j.parentIndex) ?? -1) : -1
-      if (p >= 0) bonePairs.push([i, p])
-    })
+    const bonePairs = bonePairsOf(skin)
 
     bonePairsRef.current = bonePairs
     bindMatsRef.current = computeBindMatrices(skin)
@@ -173,8 +167,9 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
       const target = getAnimationTarget(editorScene, animationTargetId)
       const rig = target?.skin?.ikRig
       if (!target || !rig) { ikJointsRef.current = []; return }
-      const jointOfNode = new Map<number, number>()
-      target.skin.joints.forEach((j, i) => jointOfNode.set(j.nodeIndex, i))
+      // The shared topology's map, not another local copy of it — the copies are how the parent lookup
+      // in this same file drifted out of step with the hierarchy the Animator actually poses.
+      const jointOfNode = skeletonTopology(target.skin).jointOfNode
       const out: number[] = []
       const push = (node: number | undefined) => {
         if (node === undefined || node < 0) return

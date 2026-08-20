@@ -1,5 +1,6 @@
 import { Mesh } from './mesh';
 import { Material } from './material';
+import type { Submesh } from './model';
 import { Geometry } from '../core/geometry';
 import { Logger } from '../core/logger';
 import { mat4 } from 'gl-matrix';
@@ -29,6 +30,15 @@ export interface Animation {
      * Plain data, so it rides the model-asset save through {@link AnimatedModel.serialize}/{@link parse}.
      */
     rootMotion?: boolean;
+    /**
+     * Set when this clip came from a SHARED animation asset rather than being embedded in the model.
+     *
+     * Such a clip is deliberately NOT serialized ({@link AnimatedModel.serialize} filters it out): it is
+     * restored by resolving the id again, which is the whole point of a shared asset — one stored copy, not
+     * one per character and one more per placement. A clip without this field is embedded, as before, and
+     * saves exactly as it always did.
+     */
+    assetId?: string;
 }
 
 // Skinning data structures
@@ -77,8 +87,11 @@ interface FromFileOptions {
 export class AnimatedModel {
     private readonly _geometry: Geometry;
     private readonly _mesh: Mesh;
-    private _material: Material;
-    
+    /** One per submesh; `material` aliases `[0]`. See {@link Model} for why the alias exists. */
+    private _materials: Material[];
+    /** Index ranges parallel to `_materials`, empty when the whole index buffer is one draw. */
+    private _submeshes: Submesh[];
+
     // Skinning data
     private readonly _skin: Skin | null = null;
     private readonly _jointIndices: Float32Array | null = null;  // JOINTS_0 attribute
@@ -93,16 +106,18 @@ export class AnimatedModel {
     
     constructor(
         geometry: Geometry,
-        material: Material,
+        material: Material | Material[],
         skin?: Skin,
         jointIndices?: Float32Array,
         jointWeights?: Float32Array,
-        animations?: Animation[]
+        animations?: Animation[],
+        submeshes: Submesh[] = []
     ) {
         this._geometry = geometry;
-        this._material = material;
+        this._materials = Array.isArray(material) ? (material.length ? material : [Material.Default({})]) : [material];
+        this._submeshes = submeshes.length === this._materials.length ? submeshes : [];
         this._mesh = new Mesh();
-        
+
         if (skin) {
             this._skin = skin;
         }
@@ -152,7 +167,10 @@ export class AnimatedModel {
             data.geometry.indices
         );
         
-        const m = data.material || {};
+        // One material per submesh, so this is a function called over `materials` below. The single
+        // `material` key is what almost every saved model carries and stays the fallback.
+        const parseMaterial = (m: any): Material => {
+        m = m || {};
         const config = {
             side: m.config?.side,
             wireframe: m.config?.wireframe,
@@ -160,7 +178,7 @@ export class AnimatedModel {
             castShadow: m.config?.castShadow,
             probeable: m.config?.probeable
         };
-        
+
         let material: Material;
         const type: string = m.type || 'blinn_phong';
         if (type === 'basic') {
@@ -207,7 +225,14 @@ export class AnimatedModel {
                 }
             }, config);
         }
-        
+        return material;
+        };
+
+        const materials: Material[] = Array.isArray(data.materials) && data.materials.length
+            ? data.materials.map(parseMaterial)
+            : [parseMaterial(data.material)];
+        const submeshes: Submesh[] = Array.isArray(data.submeshes) ? data.submeshes : [];
+
         // Parse skin data
         let skin: Skin | undefined = undefined;
         if (data.skin) {
@@ -275,10 +300,11 @@ export class AnimatedModel {
         // Parse animations
         let animations: Animation[] | undefined = undefined;
         if (data.animations) {
-            animations = data.animations;
+            // Copied, never adopted by reference — see the note in serialize().
+            animations = (data.animations as Animation[]).map(a => ({ ...a }));
         }
         
-        return new AnimatedModel(geometry, material, skin, jointIndices, jointWeights, animations);
+        return new AnimatedModel(geometry, materials, skin, jointIndices, jointWeights, animations, submeshes);
     }
 
     /**
@@ -296,67 +322,75 @@ export class AnimatedModel {
             indices: Array.from(this._geometry.indices)
         };
         
+        // One material per submesh, so this is a function rather than a straight-line block. The skinned
+        // type variants normalize back to their base type: the shader picks the skinned program from the
+        // model being animated, not from the saved material.
+        const serializeMaterial = (mat: Material): any => {
         const cfg = {
-            side: this._material.config.side,
-            wireframe: this._material.config.wireframe,
-            transparent: this._material.config.transparent,
-            castShadow: this._material.config.castShadow,
-            probeable: this._material.config.probeable,
+            side: mat.config.side,
+            wireframe: mat.config.wireframe,
+            transparent: mat.config.transparent,
+            castShadow: mat.config.castShadow,
+            probeable: mat.config.probeable,
         };
         const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'blinn_phongSkinned' ? 'blinn_phong' : t);
-        const type = normalizeType(this._material.type as any);
-        
+        const type = normalizeType(mat.type as any);
+
         let material: any;
         if (type === 'basic') {
             material = {
                 type,
-                color: this._material.properties.get('color'),
-                opacity: this._material.properties.get('opacity'),
+                color: mat.properties.get('color'),
+                opacity: mat.properties.get('opacity'),
                 textures: {
-                    texture: this._material.textures.get('texture')
+                    texture: mat.textures.get('texture')
                 },
                 config: cfg
             };
         } else if (type === 'pbr') {
             material = {
                 type,
-                baseColor: this._material.properties.get('baseColor'),
-                metallic: this._material.properties.get('metallic'),
-                roughness: this._material.properties.get('roughness'),
-                opacity: this._material.properties.get('opacity'),
-                emissiveFactor: this._material.properties.get('emissiveFactor'),
+                baseColor: mat.properties.get('baseColor'),
+                metallic: mat.properties.get('metallic'),
+                roughness: mat.properties.get('roughness'),
+                opacity: mat.properties.get('opacity'),
+                emissiveFactor: mat.properties.get('emissiveFactor'),
                 // Source maps only — the engine's derived (channel-packed) slots are never serialized.
                 textures: {
-                    baseColorTexture: this._material.textures.get('baseColorTexture'),
-                    metallicMap: this._material.textures.get('metallicMap'),
-                    roughnessMap: this._material.textures.get('roughnessMap'),
-                    normalMap: this._material.textures.get('normalMap'),
-                    occlusionMap: this._material.textures.get('occlusionMap'),
-                    emissiveMap: this._material.textures.get('emissiveMap')
+                    baseColorTexture: mat.textures.get('baseColorTexture'),
+                    metallicMap: mat.textures.get('metallicMap'),
+                    roughnessMap: mat.textures.get('roughnessMap'),
+                    normalMap: mat.textures.get('normalMap'),
+                    occlusionMap: mat.textures.get('occlusionMap'),
+                    emissiveMap: mat.textures.get('emissiveMap')
                 },
                 config: cfg
             };
         } else {
             material = {
                 type: 'blinn_phong',
-                diffuse: this._material.properties.get('diffuse'),
-                specular: this._material.properties.get('specular'),
-                ambient: this._material.properties.get('ambient'),
-                emissive: this._material.properties.get('emissive'),
-                shininess: this._material.properties.get('shininess'),
-                opacity: this._material.properties.get('opacity'),
+                diffuse: mat.properties.get('diffuse'),
+                specular: mat.properties.get('specular'),
+                ambient: mat.properties.get('ambient'),
+                emissive: mat.properties.get('emissive'),
+                shininess: mat.properties.get('shininess'),
+                opacity: mat.properties.get('opacity'),
                 textures: {
-                    base: this._material.textures.get('baseTexture'),
-                    specular: this._material.textures.get('specularMap'),
-                    normal: this._material.textures.get('normalMap'),
-                    emissive: this._material.textures.get('emissiveMap'),
-                    mask: this._material.textures.get('maskMap'),
-                    reflectivity: this._material.textures.get('reflectivityMap')
+                    base: mat.textures.get('baseTexture'),
+                    specular: mat.textures.get('specularMap'),
+                    normal: mat.textures.get('normalMap'),
+                    emissive: mat.textures.get('emissiveMap'),
+                    mask: mat.textures.get('maskMap'),
+                    reflectivity: mat.textures.get('reflectivityMap')
                 },
                 config: cfg
             };
         }
-        
+        return material;
+        };
+
+        const materials = this._materials.map(serializeMaterial);
+
         // Serialize skin data
         let skin: any = null;
         if (this._skin) {
@@ -403,40 +437,58 @@ export class AnimatedModel {
         let jointIndices = this._jointIndices ? Array.from(this._jointIndices) : null;
         let jointWeights = this._jointWeights ? Array.from(this._jointWeights) : null;
         
-        // Serialize animations
-        let animations = this._animations.length > 0 ? this._animations : null;
+        // Serialize animations.
+        //
+        // A COPY, not the live array. Every other field here is already copied (Array.from for the
+        // geometry and joint arrays, a rebuilt object for the skin); this one was handing out live state,
+        // and `parse` adopted it by reference — so a node parsed from another node's serialized payload
+        // shared its `_animations`. The Animation Editor does exactly that, and adding one clip then
+        // pushed it into the shared array twice: the second add collided with the first and addAnimation's
+        // de-duper renamed it "<clip> (2)". The same aliasing silently made rename/delete no-ops on the
+        // source node, since the clone's mutation had already changed the shared objects.
+        //
+        // Clips resolved from a shared animation asset are filtered out: they are restored by re-resolving
+        // the model's `animationIds`, so writing them here would put a copy in every placement and in the
+        // published game — exactly the duplication the shared asset exists to remove.
+        const own = this._animations.filter(a => !a.assetId);
+        let animations = own.length > 0 ? own.map(a => ({ ...a })) : null;
         
-        return {
+        // `material` is written for every model so the single-material readers (and older builds) keep
+        // working; `materials`/`submeshes` appear only when there is more than one.
+        const out: any = {
             geometry,
-            material,
+            material: materials[0],
             skin,
             jointIndices,
             jointWeights,
             animations
         };
+        if (this._submeshes.length > 1) {
+            out.materials = materials;
+            out.submeshes = this._submeshes.map(s => ({ start: s.start, count: s.count }));
+        }
+        return out;
     }
     
     /**
      * Initialize the mesh with bone data if available
      */
     private _initializeMesh(): void {
-        const vertexCount = this._geometry.positions.length;
-        
+        // `Geometry.positions` is a FLAT array, so its length is 3x the vertex count. Reading it as the
+        // count uploaded both bone buffers at triple size (the extra two thirds filled with the
+        // "no joint" defaults below) and left Mesh._vertexCount wrong for the drawArrays fallback and
+        // for frameStats. The non-skinned path in ModelNode.initializeModel always used vertexCount.
+        const vertexCount = this._geometry.vertexCount;
+
         if (this.hasSkin && this._jointIndices && this._jointWeights) {
             // For skinned meshes, we need to create separate buffers for vertex data and bone data
             // since bone indices must be integers and can't be in the same buffer as floats
             const vertices = this._geometry.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']);
-            
+
             // Create bone indices array (4 per vertex)
             const boneIndices: number[] = [];
             const boneWeights: number[] = [];
-            
-            // Debug: log the data structure we're working with
-            Logger.info(`Vertex count: ${vertexCount}`, 'Animation');
-            Logger.info(`Joint indices length: ${this._jointIndices.length}`, 'Animation');
-            Logger.info(`Joint weights length: ${this._jointWeights.length}`, 'Animation');
-            Logger.info(`Expected bone data length: ${vertexCount * 4}`, 'Animation');
-            
+
             for (let i = 0; i < vertexCount; i++) {
                 const baseIndex = i * 4;
                 
@@ -478,7 +530,6 @@ export class AnimatedModel {
                 boneWeights.push(weights[0], weights[1], weights[2], weights[3]);
             }
             
-            Logger.info(`Created ${boneIndices.length / 4} vertices worth of bone data`, 'Animation');
             this._mesh.createAnimated(vertices, vertexCount, boneIndices, boneWeights, this._geometry.indices);
             this._isAnimated = true;
         } else {
@@ -520,8 +571,15 @@ export class AnimatedModel {
     // Getters
     public get geometry(): Geometry { return this._geometry; }
     public get mesh(): Mesh { return this._mesh; }
-    public get material(): Material { return this._material; }
-    public set material(material: Material) { this._material = material; }
+    /** The first material. Assigning replaces it, leaving any further submesh materials alone. */
+    public get material(): Material { return this._materials[0]; }
+    public set material(material: Material) { this._materials[0] = material; }
+    public get materials(): Material[] { return this._materials; }
+    public set materials(materials: Material[]) { if (materials.length) this._materials = materials; }
+    /** Index ranges parallel to {@link materials}; empty when the whole index buffer is one draw. */
+    public get submeshes(): Submesh[] { return this._submeshes; }
+    /** True when this model needs one draw call per material rather than a single whole-buffer draw. */
+    public get hasSubmeshes(): boolean { return this._submeshes.length > 1; }
     
     public get skin(): Skin | null { return this._skin; }
     public get jointIndices(): Float32Array | null { return this._jointIndices; }

@@ -4,6 +4,11 @@ import { cryptoRandomId } from './ids'
 // Node variable that links a node's mesh material to a shared material asset (mirrors TEMPLATE_ID_VAR).
 export const MATERIAL_ID_VAR = '__materialId'
 
+// A merged, multi-material model links one asset PER SUBMESH. Held as a JSON string list, the same
+// convention SCREEN_MATERIAL_IDS_VAR uses, because the node variable system has no array type.
+// MATERIAL_ID_VAR keeps mirroring entry [0] so everything that reads a node's single material still works.
+export const MATERIAL_IDS_VAR = '__materialIds'
+
 // A reusable, named material saved to the global material library, with a rendered preview thumbnail.
 export type MaterialAsset = {
   id: string
@@ -19,6 +24,24 @@ export type MaterialAsset = {
 /** The material asset id a node currently references, or undefined. */
 export function getMaterialIdOf(node: Node | null | undefined): string | undefined {
   return node?.getVariable(MATERIAL_ID_VAR)
+}
+
+/**
+ * The per-submesh material asset ids a node references, one per submesh.
+ *
+ * Falls back to the single MATERIAL_ID_VAR so an unmerged node reads as a one-entry list and callers
+ * need only one code path.
+ */
+export function getMaterialIdsOf(node: Node | null | undefined): (string | undefined)[] {
+  const raw = node?.getVariable(MATERIAL_IDS_VAR)
+  if (typeof raw === 'string' && raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parsed.map((id: any) => (typeof id === 'string' ? id : undefined))
+    } catch { /* corrupt link: fall through to the single id */ }
+  }
+  const single = getMaterialIdOf(node)
+  return single ? [single] : []
 }
 
 // Sprites are deliberately absent from all three of these. A sprite's image comes from its tileset and
@@ -38,9 +61,12 @@ export function nodeSupportsMaterial(node: Node | null | undefined): boolean {
 }
 
 /** Replace the live Material on a node's mesh. No-op for non-material nodes. */
-function setNodeMaterial(node: Node, material: Material): void {
+function setNodeMaterial(node: Node, material: Material, submesh = 0): void {
   const n = node as any
-  if (node.nodeType === 'model' && n.model) n.model.material = material
+  if (node.nodeType !== 'model' || !n.model) return
+  // `material` is the alias for materials[0], so the default case is unchanged.
+  if (submesh === 0) n.model.material = material
+  else if (submesh < n.model.materials.length) n.model.materials[submesh] = material
 }
 
 // Collect the texture ids referenced by a serialized material's flat `textures` map.
@@ -72,16 +98,30 @@ export function materialAssetTextureIds(asset: MaterialAsset): string[] {
   return (asset.textures ?? []).map((t: any) => t?.id).filter(Boolean)
 }
 
-/** Apply a material asset to a node: rebuild the Material and tag the link. */
-export function applyMaterialAsset(node: Node, asset: MaterialAsset): void {
+/** Apply a material asset to a node's `submesh`-th material: rebuild the Material and tag the link. */
+export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0): void {
   // New assets carry no payloads — their textures are preloaded from the texture store at boot, so they
   // are already registered. This loop only still matters for legacy assets with embedded base64.
   for (const t of asset.textures || []) {
     if (t?.id && !TextureManager.Instance.getTexture(t.id))
       TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id)
   }
-  setNodeMaterial(node, Material.parse(asset.material))
-  node.setVariable(MATERIAL_ID_VAR, asset.id, 'string')
+  setNodeMaterial(node, Material.parse(asset.material), submesh)
+  if (submesh === 0) node.setVariable(MATERIAL_ID_VAR, asset.id, 'string')
+
+  // Keep the per-submesh list in step whenever the node has one, so the two links can never disagree.
+  const ids = getMaterialIdsOf(node)
+  if (ids.length > 1 || submesh > 0) {
+    while (ids.length <= submesh) ids.push(undefined)
+    ids[submesh] = asset.id
+    node.setVariable(MATERIAL_IDS_VAR, JSON.stringify(ids), 'string')
+  }
+}
+
+/** Apply one material asset per submesh, in order, and stamp the whole link list in one go. */
+export function applyMaterialAssets(node: Node, assets: MaterialAsset[]): void {
+  assets.forEach((asset, i) => applyMaterialAsset(node, asset, i))
+  if (assets.length > 1) node.setVariable(MATERIAL_IDS_VAR, JSON.stringify(assets.map(a => a.id)), 'string')
 }
 
 /** The Basic + Null-texture material that referencing nodes fall back to when their asset is deleted. */
@@ -89,10 +129,13 @@ export function fallbackMaterial(): Material {
   return Material.Basic({ color: [1, 1, 1], opacity: 1, texture: 'Null' })
 }
 
-/** Reset a node to the fallback material and drop its material-asset link. */
+/** Reset a node to the fallback material and drop its material-asset link (every submesh's). */
 export function unlinkToFallback(node: Node): void {
-  setNodeMaterial(node, fallbackMaterial())
+  const n = node as any
+  const count = n.model?.materials?.length ?? 1
+  for (let i = 0; i < count; i++) setNodeMaterial(node, fallbackMaterial(), i)
   node.removeVariable(MATERIAL_ID_VAR)
+  node.removeVariable(MATERIAL_IDS_VAR)
 }
 
 /** Read a node variable's value out of SERIALIZED json (the `{ type, value, access }` shape, or a bare value). */
@@ -117,12 +160,31 @@ export function serializedVar(json: any, name: string): string | undefined {
  */
 export function resolveMaterialRefs(json: any, materials: MaterialAsset[]): void {
   if (!json || typeof json !== 'object') return
-  const id = serializedVar(json, MATERIAL_ID_VAR)
-  if (id) {
-    const asset = materials.find(m => m.id === id)
-    // Deep-copy: the asset's serialized material is shared library state, and Material.parse must not be
-    // handed something a later edit could mutate under it.
-    if (asset && json.model) json.model.material = JSON.parse(JSON.stringify(asset.material))
+  // Deep-copy every resolved material: the asset's serialized material is shared library state, and
+  // Material.parse must not be handed something a later edit could mutate under it.
+  const resolve = (id: string | undefined) => {
+    const asset = id ? materials.find(m => m.id === id) : undefined
+    return asset ? JSON.parse(JSON.stringify(asset.material)) : undefined
   }
+
+  const single = resolve(serializedVar(json, MATERIAL_ID_VAR))
+  if (single && json.model) json.model.material = single
+
+  // A merged model links one asset per submesh; `materials` on the serialized model is parallel to them.
+  const rawList = serializedVar(json, MATERIAL_IDS_VAR)
+  if (rawList && json.model?.materials) {
+    try {
+      const ids = JSON.parse(rawList)
+      if (Array.isArray(ids)) {
+        ids.forEach((id: any, i: number) => {
+          const resolved = resolve(typeof id === 'string' ? id : undefined)
+          if (resolved && i < json.model.materials.length) json.model.materials[i] = resolved
+        })
+        // materials[0] and the single link are the same thing; keep them from drifting apart.
+        if (json.model.materials.length) json.model.material = json.model.materials[0]
+      }
+    } catch { /* corrupt link: the embedded copies stand */ }
+  }
+
   for (const child of json.children ?? []) resolveMaterialRefs(child, materials)
 }

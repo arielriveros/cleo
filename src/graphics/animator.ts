@@ -1998,13 +1998,11 @@ export class Animator {
 
         // Build local transforms map for all joints
         const localTransforms = new Map<number, mat4>();
-        for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
-            const joint = this._skin.joints[jointIndex];
-            const nodeIndex = joint.nodeIndex;
-            const boneName = `bone_${nodeIndex}`;
-            // Whichever source is posing this bone — a single clip or a weighted field blend.
-            const current = this._currentLocal(boneName);
 
+        /** Whatever is posing this node right now — a clip, a weighted field blend, or its rest transform. */
+        const resolveLocal = (nodeIndex: number): mat4 => {
+            const boneName = `bone_${nodeIndex}`;
+            const current = this._currentLocal(boneName);
             if (current) {
                 const previous = this._isBlending ? this._previousLocal(boneName) : null;
                 if (previous) {
@@ -2015,18 +2013,28 @@ export class Animator {
                     const blendFactor = this._activeBlendTime > 0
                         ? Math.min(this._currentBlendTime / this._activeBlendTime, 1.0)
                         : 1.0;
-                    const blendedTransform = this._blendTransforms(previous, current, blendFactor);
-                    localTransforms.set(nodeIndex, blendedTransform);
-                } else {
-                    // Use animated transform
-                    localTransforms.set(nodeIndex, current);
+                    return this._blendTransforms(previous, current, blendFactor);
                 }
-            } else {
-                // Use initial node transform from GLTF, or identity if not available
-                const initialTransform = this._skin.nodeTransforms?.get(nodeIndex);
-                localTransforms.set(nodeIndex, initialTransform ? initialTransform : mat4.create());
+                return current;
             }
-        }
+            // Use initial node transform from GLTF, or identity if not available
+            const initialTransform = this._skin!.nodeTransforms?.get(nodeIndex);
+            return initialTransform ? initialTransform : mat4.create();
+        };
+
+        for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++)
+            localTransforms.set(this._skin.joints[jointIndex].nodeIndex, resolveLocal(this._skin.joints[jointIndex].nodeIndex));
+
+        // The nodes BETWEEN joints are animated too, and this is the whole reason a converted FBX played
+        // wrong. Assimp's importer preserves FBX pivots, so a bone's rotation curve lands on
+        // `Bone_$AssimpFbx$_Rotation` rather than on the bone; a Bone object is built for it (every channel
+        // target gets one) but nothing read it, and the chain was folded in from its static rest transform.
+        // Every such bone therefore held its bind orientation while its parent moved — worst on the deepest
+        // chains, which is why arms and hips→toes were the visible failures.
+        const chainTopo = this._topology();
+        for (const chain of chainTopo.parentChain)
+            for (const nodeIndex of chain)
+                if (!localTransforms.has(nodeIndex)) localTransforms.set(nodeIndex, resolveLocal(nodeIndex));
 
         // Accumulate global transforms down the hierarchy.
         //
@@ -2037,21 +2045,30 @@ export class Animator {
         const topo = this._topology();
         const globalTransforms = new Map<number, mat4>();
 
-        // The global of a node that is NOT a joint: a skin's root is routinely parented to an armature or an
-        // empty, whose transform still applies. Such a node has no animated local, so it resolves straight to
-        // its rest transform exactly as the old recursion's fallback did.
-        const outsideSkin = (nodeIndex: number): mat4 => {
-            let m = globalTransforms.get(nodeIndex);
-            if (m) return m;
-            // CLONED, never the skin's own matrix. `globalTransforms` is written in place — by the
-            // re-accumulation loop and by the IK pass's _rotateGlobal — so caching the rest transform by
-            // reference would let a solve write into `nodeTransforms`, which is the bind-pose fallback for
-            // every unanimated joint and the source `_setTPose` reads. The corruption would accumulate every
-            // frame and survive as long as the model does.
-            const rest = this._skin!.nodeTransforms?.get(nodeIndex);
-            m = rest ? mat4.clone(rest) : mat4.create();
-            globalTransforms.set(nodeIndex, m);
-            return m;
+        // Fold in the non-joint nodes standing between this joint and its parent joint. A skin's root is
+        // routinely parented to an armature or an empty, and assimp's FBX importer puts whole pivot chains
+        // (Bone_$AssimpFbx$_Translation/_Rotation/_Scaling) between every pair of bones. Their transforms
+        // are part of the pose; dropping them places each bone relative to the model origin instead of its
+        // parent, which reads as a skeleton that is not a skeleton.
+        //
+        // Nothing here is cached by reference into `globalTransforms`: that map is written IN PLACE by the
+        // re-accumulation loop and by the IK pass's _rotateGlobal, so handing out the skin's own rest
+        // matrix would let a solve write into `nodeTransforms` — the bind-pose fallback for every
+        // unanimated joint, and the source `_setTPose` reads — permanently and cumulatively.
+        const applyParentChain = (out: mat4, jointIndex: number): void => {
+            for (const nodeIndex of topo.parentChain[jointIndex]) {
+                const local = localTransforms.get(nodeIndex) ?? this._skin!.nodeTransforms?.get(nodeIndex);
+                if (local) mat4.multiply(out, out, local);
+            }
+        };
+
+        /** parentGlobal x (chain) x local — the one accumulation both passes below share. */
+        const accumulate = (out: mat4, jointIndex: number, local: mat4): void => {
+            const parentJoint = topo.parentJoint[jointIndex];
+            if (parentJoint >= 0) mat4.copy(out, globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex)!);
+            else mat4.identity(out);
+            applyParentChain(out, jointIndex);
+            mat4.multiply(out, out, local);
         };
 
         for (const jointIndex of topo.order) {
@@ -2059,17 +2076,8 @@ export class Animator {
             const nodeIndex = joint.nodeIndex;
             const local = localTransforms.get(nodeIndex) ?? this._skin.nodeTransforms?.get(nodeIndex) ?? mat4.create();
 
-            const parentNode = topo.parentNode[jointIndex];
             const global = mat4.create();
-            if (parentNode === undefined) {
-                mat4.copy(global, local);
-            } else {
-                const parentJoint = topo.parentJoint[jointIndex];
-                const parentGlobal = parentJoint >= 0
-                    ? globalTransforms.get(this._skin.joints[parentJoint].nodeIndex)!
-                    : outsideSkin(parentNode);
-                mat4.multiply(global, parentGlobal, local);
-            }
+            accumulate(global, jointIndex, local);
             globalTransforms.set(nodeIndex, global);
         }
 
@@ -2082,21 +2090,18 @@ export class Animator {
                 const joint = this._skin.joints[jointIndex];
                 const nodeIndex = joint.nodeIndex;
                 const local = localTransforms.get(nodeIndex)!;
-                const parentNode = topo.parentNode[jointIndex];
-                const global = globalTransforms.get(nodeIndex)!;
-                if (parentNode === undefined) {
-                    mat4.copy(global, local);
-                } else {
-                    const parentJoint = topo.parentJoint[jointIndex];
-                    const parentGlobal = parentJoint >= 0
-                        ? globalTransforms.get(this._skin.joints[parentJoint].nodeIndex)!
-                        : outsideSkin(parentNode);
-                    mat4.multiply(global, parentGlobal, local);
-                }
+                accumulate(globalTransforms.get(nodeIndex)!, jointIndex, local);
             }
         }
 
         // Calculate final bone matrices: finalMatrix = globalTransform × inverseBindMatrix
+        //
+        // No `inverse(globalTransform(meshNode))` term, deliberately. The glTF spec includes one, but only
+        // for implementations that also APPLY the mesh node's transform — the two cancel. This engine
+        // ignores a skinned mesh node's transform (gltfLoader.getMeshInstances emits no transform for
+        // one), so the term must be omitted too or every such model is scaled by its inverse. Verified
+        // against assimp's FBX→glTF2 output, which pushes the file's unit scale onto the mesh node: the
+        // scale already cancels inside globalTransform × inverseBindMatrix.
         for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
             const joint = this._skin.joints[jointIndex];
             const globalTransform = globalTransforms.get(joint.nodeIndex) ?? mat4.create();
@@ -2377,22 +2382,18 @@ export class Animator {
             const local = localTransforms.get(nodeIndex);
             const global = globalTransforms.get(nodeIndex);
             if (!local || !global) continue;
+
+            // Identical accumulation to _recomputePose's, including the non-joint parentChain — the two
+            // must agree or a leg solve (which re-accumulates up to eight times a frame) drags the pose
+            // away from where the first pass put it.
             const parentJoint = topo.parentJoint[jointIndex];
-            if (parentJoint < 0) {
-                const parentNode = topo.parentNode[jointIndex];
-                // A self-parented joint is a one-node cycle, which skeletonTopology reports as a root while
-                // leaving parentNode pointing at the joint itself. Multiplying its global by its own global
-                // SQUARES the transform — and a leg solve re-accumulates up to eight times a frame, so it
-                // compounds instead of merely being wrong once. _recomputePose's own loops dodge this by
-                // branching on `undefined`; this one has to check identity as well.
-                const parentGlobal = parentNode !== undefined && parentNode !== nodeIndex
-                    ? globalTransforms.get(parentNode)
-                    : undefined;
-                if (parentGlobal) mat4.multiply(global, parentGlobal, local);
-                else mat4.copy(global, local);
-            } else {
-                mat4.multiply(global, globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex)!, local);
+            if (parentJoint >= 0) mat4.copy(global, globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex)!);
+            else mat4.identity(global);
+            for (const chainNode of topo.parentChain[jointIndex]) {
+                const chainLocal = localTransforms.get(chainNode) ?? this._skin!.nodeTransforms?.get(chainNode);
+                if (chainLocal) mat4.multiply(global, global, chainLocal);
             }
+            mat4.multiply(global, global, local);
         }
     }
 
@@ -3379,49 +3380,35 @@ export class Animator {
         // very next _recomputePose overwrite the bind pose with the blend again.
         this._clearField();
 
-        // Calculate bind pose transforms for all joints
+        // Accumulate the bind pose along the SHARED topology, exactly as _recomputePose does.
+        //
+        // This used to resolve a parent with `joints.find(j => j.nodeIndex === nodeIndex)`, which finds
+        // nothing for a node that is not itself a joint — so an armature, a wrapper, or one of assimp's
+        // pivot nodes ended the walk and that node's local transform was used as if it were global. The
+        // Animation Editor opens on this function's output, which is why a rig with nodes between its
+        // bones looked wrong before a single frame had played.
+        const topo = this._topology();
         const globalTransforms = new Map<number, mat4>();
-        
-        const calculateBindPoseTransform = (nodeIndex: number): mat4 => {
-            // Check if already calculated
-            if (globalTransforms.has(nodeIndex)) {
-                return globalTransforms.get(nodeIndex)!;
+
+        for (const jointIndex of topo.order) {
+            const nodeIndex = this._skin.joints[jointIndex].nodeIndex;
+            const local = this._skin.nodeTransforms?.get(nodeIndex);
+
+            const global = mat4.create();
+            const parentJoint = topo.parentJoint[jointIndex];
+            if (parentJoint >= 0) mat4.copy(global, globalTransforms.get(this._skin.joints[parentJoint].nodeIndex)!);
+            for (const chainNode of topo.parentChain[jointIndex]) {
+                const rest = this._skin.nodeTransforms?.get(chainNode);
+                if (rest) mat4.multiply(global, global, rest);
             }
-            
-            // Get initial local transform from GLTF data
-            const localTransform = this._skin!.nodeTransforms?.get(nodeIndex);
-            if (!localTransform) {
-                // Fallback to identity if no transform data
-                const identity = mat4.create();
-                globalTransforms.set(nodeIndex, identity);
-                return identity;
-            }
-            
-            // Find parent
-            const joint = this._skin!.joints.find(j => j.nodeIndex === nodeIndex);
-            const parentIndex = joint?.parentIndex;
-            
-            let globalTransform = mat4.create();
-            
-            if (parentIndex !== undefined) {
-                // Has parent - multiply parent's global transform by local transform
-                const parentGlobal = calculateBindPoseTransform(parentIndex);
-                mat4.multiply(globalTransform, parentGlobal, localTransform);
-            } else {
-                // No parent - local transform IS the global transform
-                mat4.copy(globalTransform, localTransform);
-            }
-            
-            globalTransforms.set(nodeIndex, globalTransform);
-            return globalTransform;
-        };
-        
-        // Calculate final bone matrices for bind pose
+            if (local) mat4.multiply(global, global, local);
+            globalTransforms.set(nodeIndex, global);
+        }
+
+        // Calculate final bone matrices for bind pose (same formula as _recomputePose).
         for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
             const joint = this._skin.joints[jointIndex];
-            const nodeIndex = joint.nodeIndex;
-            
-            const globalTransform = calculateBindPoseTransform(nodeIndex);
+            const globalTransform = globalTransforms.get(joint.nodeIndex) ?? mat4.create();
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
         }
     }

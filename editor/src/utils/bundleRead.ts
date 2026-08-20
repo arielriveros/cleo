@@ -49,6 +49,7 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
       [],
     scripts: (await src.json(`${BUNDLE_PATHS.librariesDir}scripts.json`)) ?? [],
     animationFields: (await src.json(`${BUNDLE_PATHS.librariesDir}animationFields.json`)) ?? [],
+    animations: (await src.json(`${BUNDLE_PATHS.librariesDir}animations.json`)) ?? [],
     tilesets: (await src.json(`${BUNDLE_PATHS.librariesDir}tilesets.json`)) ?? [],
   };
   const vfs = (await src.json(BUNDLE_PATHS.vfs)) ?? { version: 1, folders: [], entries: [] };

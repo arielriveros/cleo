@@ -40,7 +40,7 @@ export default function AssetsExplorer() {
 
 function AssetsExplorerHost() {
   const {
-    enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createTilesetFromImage,
+    enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createTilesetFromImage, importAnimationFiles,
     importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, landingFolderRef, depsRef } = useVfs()
@@ -298,6 +298,7 @@ function AssetsExplorerHost() {
     { label: 'Template', icon: <img src={iconFor('template')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTemplateEditor(), title: 'Author a new template in a dedicated empty scene' },
     { label: 'Script', icon: <img src={iconFor('script')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterScriptEditor(), title: 'Create a new class-based script asset' },
     { label: 'Tileset', icon: <img src={iconFor('tileset')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('tileset-atlas-import')?.click(), title: 'Pick an atlas image and slice it into a tileset for tilemap layers' },
+    { label: 'Animation', icon: <img src={iconFor('animation')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('animation-clip-import')?.click(), title: 'Import animation clips from a .fbx/.glb/.gltf and pick the rig they belong to' },
     { label: 'Scene', icon: <img src={iconFor('scene')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => { void createScene() }, title: 'Create a new scene asset' },
     { label: 'Folder', icon: <img src={iconFor('folder')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: newFolder, title: 'Create a folder in the current directory' },
     {
@@ -354,6 +355,16 @@ function AssetsExplorerHost() {
             // Reset first: picking the same file twice in a row fires no change event otherwise.
             e.target.value = ''
             if (file) void createTilesetFromImage(file)
+          }} />
+
+        {/* Animation clips. Its own input, like the tileset one above: the result is a shared animation
+            asset, not a model, and the flow asks which rig to retarget onto rather than placing anything. */}
+        <input id='animation-clip-import' className='hidden' type='file' multiple
+          accept='.fbx,.glb,.gltf,.bin'
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? [])
+            e.target.value = ''   // picking the same file twice fires no change event otherwise
+            if (files.length) void importAnimationFiles(files)
           }} />
 
         <input

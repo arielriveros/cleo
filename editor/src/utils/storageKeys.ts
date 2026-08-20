@@ -26,14 +26,15 @@ export const KEYS = {
   models: 'cleo_models',
   scripts: 'cleo_scripts',
   animationFields: 'cleo_animation_fields',
+  animations: 'cleo_animations',
   tilesets: 'cleo_tilesets',
 } as const;
 
 /** The asset libraries, as `usePersistedLibrary` and the bundle importer address them. */
-export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'tilesets';
+export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'tilesets';
 
 export const LIB_NAMES: readonly LibName[] = [
-  'materials', 'terrainMaterials', 'templates', 'models', 'scripts', 'animationFields', 'tilesets',
+  'materials', 'terrainMaterials', 'templates', 'models', 'scripts', 'animationFields', 'animations', 'tilesets',
 ];
 
 /**

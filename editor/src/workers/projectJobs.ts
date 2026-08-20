@@ -111,6 +111,7 @@ async function runExportBundle(job: Extract<ProjectJob, { kind: 'exportBundle' }
   archive.file(`${BUNDLE_PATHS.librariesDir}templates.json`, JSON.stringify(libraries.templates));
   archive.file(`${BUNDLE_PATHS.librariesDir}models.json`, JSON.stringify(libraries.models));
   archive.file(`${BUNDLE_PATHS.librariesDir}scripts.json`, JSON.stringify(libraries.scripts ?? []));
+  archive.file(`${BUNDLE_PATHS.librariesDir}animations.json`, JSON.stringify(libraries.animations ?? []));
   archive.file(`${BUNDLE_PATHS.librariesDir}animationFields.json`, JSON.stringify(libraries.animationFields ?? []));
   archive.file(`${BUNDLE_PATHS.librariesDir}tilesets.json`, JSON.stringify(libraries.tilesets ?? []));
   for (const [id, data] of Object.entries(scenes)) archive.file(`${BUNDLE_PATHS.scenesDir}${id}.json`, JSON.stringify(data));

@@ -1,6 +1,7 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { Animation, AnimationChannel, AnimationSampler, Skin } from './animatedModel';
 import { normalizeBoneName, humanoidSlotOf } from './boneNames';
+import { skeletonTopology } from './skeletonTopology';
 
 // Retargeting an imported animation clip onto a model's skeleton.
 //
@@ -98,14 +99,17 @@ function localBindRotation(skin: Skin, node: number): quat {
     if (joint && !isIdentityMatrix(joint.inverseBindMatrix as any)) {
         const worldBone = mat4.invert(mat4.create(), joint.inverseBindMatrix as any);
         if (worldBone) {
-            const parentJoint = joint.parentIndex !== undefined
-                ? skin.joints.find(j => j.nodeIndex === joint.parentIndex) : undefined;
+            // Nearest ancestor JOINT, not the immediate parent node. On an assimp-converted FBX a bone's
+            // immediate parent is a `$AssimpFbx$` pivot, so a one-level `joints.find(parentIndex)` misses
+            // every time and this silently returned the WORLD bind — reintroducing exactly the accumulation
+            // down the chain that working in local space exists to prevent.
+            const parentJoint = ancestorJointOf(skin, node);
             let local: mat4;
             if (parentJoint && !isIdentityMatrix(parentJoint.inverseBindMatrix as any)) {
                 // worldParent⁻¹ = IBM_parent, so localBone = IBM_parent · inverse(IBM_bone).
                 local = mat4.multiply(mat4.create(), parentJoint.inverseBindMatrix as any, worldBone);
             } else {
-                local = worldBone; // root: parent is a non-joint armature, treated as identity
+                local = worldBone; // a true root: the armature above it is treated as identity
             }
             return quat.normalize(quat.create(), mat4.getRotation(quat.create(), local));
         }
@@ -146,11 +150,40 @@ function nearIdentity(q: quat): boolean {
     return Math.acos(Math.min(1, Math.abs(q[3]))) < IDENTITY_EPS;
 }
 
-/** Root joints of a skin: a joint whose parent is not itself a joint (or has none). */
+/**
+ * Per-skin topology cache. Keyed on the Skin object, which is fixed once parsed — the same invalidation
+ * rule the Animator uses.
+ */
+const topoCache = new WeakMap<Skin, ReturnType<typeof skeletonTopology>>();
+function topoOf(skin: Skin) {
+    let t = topoCache.get(skin);
+    if (!t) { t = skeletonTopology(skin); topoCache.set(skin, t); }
+    return t;
+}
+
+/**
+ * The nearest ANCESTOR JOINT of a node, climbing through any non-joint nodes in between, or undefined.
+ *
+ * Everything in this file used to ask `skin.joints.find(j => j.nodeIndex === joint.parentIndex)`, which is
+ * a one-level test in NODE space. Rigs routinely have non-joints between bones — assimp's FBX pivots being
+ * the case that broke — so the shared topology answers this instead.
+ */
+function ancestorJointOf(skin: Skin, node: number) {
+    const topo = topoOf(skin);
+    const jointIndex = topo.jointOfNode.get(node);
+    if (jointIndex === undefined) return undefined;
+    const parent = topo.parentJoint[jointIndex];
+    return parent >= 0 ? skin.joints[parent] : undefined;
+}
+
+/** Root joints of a skin: a joint with no ancestor joint above it. */
 function isRootJoint(skin: Skin, node: number): boolean {
-    const joint = skin.joints.find(j => j.nodeIndex === node);
-    if (!joint || joint.parentIndex === undefined) return true;
-    return !skin.joints.some(j => j.nodeIndex === joint.parentIndex);
+    const topo = topoOf(skin);
+    const jointIndex = topo.jointOfNode.get(node);
+    if (jointIndex === undefined) return true;
+    // `parentJoint < 0` means no JOINT above it — pivots and armature nodes do not make a bone a root,
+    // which is what made every bone take the armature-difference branch of boneCorrection.
+    return topo.parentJoint[jointIndex] < 0;
 }
 
 /** The target skeleton's hips node: the humanoid 'hips' bone if named, else the first root joint. */
@@ -221,6 +254,18 @@ export function buildBoneMapping(clips: Animation[], sourceSkin: Skin, targetSki
             const slot = humanoidSlotOf(nm);
             if (slot && !byHumanoid.has(slot)) byHumanoid.set(slot, j.nodeIndex);
         }
+        // Non-joint nodes, by EXACT name only, and only where a joint has not already claimed the name.
+        //
+        // A clip does not only animate joints. Assimp's FBX importer preserves pivots, so a bone's rotation
+        // curve targets `Bone_$AssimpFbx$_Rotation` — not a joint, and so previously unmatchable: every one
+        // of those channels mapped to null, which both dropped the curve and made `entries.every(targetNode
+        // !== null)` false, so two identical Mixamo rigs could never take the verbatim same-rig path.
+        // Exact-name only on purpose: these names are structural, and normalizing or humanoid-matching one
+        // would let a pivot capture the slot its own bone should have.
+        for (const [nodeIndex, nm] of targetSkin.nodeNames!) {
+            if (targetJointNodes.has(nodeIndex) || !nm) continue;
+            if (!byExact.has(nm)) byExact.set(nm, nodeIndex);
+        }
     }
 
     // Distinct animated source bones, in first-seen order.
@@ -289,6 +334,11 @@ export function buildBoneMapping(clips: Animation[], sourceSkin: Skin, targetSki
  * WORLD rotation of a node's ARMATURE — the accumulated rest rotation of every ancestor ABOVE it (the node
  * itself excluded). For a root joint this is the non-joint armature/scene rotation the engine applies above
  * the hips. Static (armature nodes are never animated), so `nodeTransforms` is reliable here on both skins.
+ *
+ * "Never animated" holds only because `isRootJoint` now identifies the TRUE root. It is emphatically false
+ * for an assimp `$AssimpFbx$_Rotation` pivot, whose node transform is the clip's frame-0 value rather than a
+ * rest pose — while every bone wrongly reported as a root, this walked those and produced a correction that
+ * grew with depth, which is what twisted arms and legs.
  */
 function armatureWorldRotation(skin: Skin, node: number): quat {
     const chain: number[] = [];
@@ -316,14 +366,42 @@ function armatureWorldRotation(skin: Skin, node: number): quat {
  *    `displayed = Awt·At = Awt·Awt⁻¹·Aws·As = Aws·As = source`. This keeps a Mixamo clip upright instead of
  *    lying down — the two rigs' armatures differ by ~90° (Z-up FBX → Y-up glTF).
  *  - A non-root bone whose SOURCE has no usable inverse bind matrix is copied straight through (`identity`).
- *    Without an IBM the source's node transforms are the animation's FRAME-0 pose, not the bind — arms and
- *    legs are mid-swing there — so a delta against them mis-rotates exactly the limbs that move most (the
- *    spine, near bind at frame 0, looks fine; the limbs do not). A bind-less animation import is necessarily
- *    the same skeleton, so the raw rotation is already correct; only the root armature needs reorienting.
+ *    MEASURE THIS BEFORE CHANGING IT. The claim that used to sit here — "without an IBM the source's node
+ *    transforms are the animation's FRAME-0 pose, not the bind" — is FALSE for assimp's FBX conversion, and
+ *    believing it cost a wrong fix. `tools/dump-rig.mjs` compares each node's authored glTF TRS (folded
+ *    through its `$AssimpFbx$` chain) against the local bind derived from the inverse bind matrices, and
+ *    they agree on 52 of 52 joints in a Mixamo animation file and 65 of 65 in a character: the node
+ *    transforms ARE the bind. A rest delta against them would therefore be valid.
+ *    It is left as a raw copy anyway, because a bind-less import is necessarily the same skeleton (so the
+ *    raw rotation is already right) and because no bind-less file was on hand to verify a change against —
+ *    not because the delta is unsound. Both Mixamo exports we have carry a real skin and never reach here.
  *  - Otherwise (both skins have real binds) a non-root bone uses the LOCAL bind delta `Bt · Bs⁻¹`, which
  *    keeps a genuine cross-rig difference confined to the bone it belongs to.
+ *
+ * A matched node that is not a JOINT at all — an assimp `$AssimpFbx$` pivot carrying the bone's rotation
+ * curve — is handled before any of that, from the two nodes' local rest rotations. It has no inverse bind
+ * matrix and is not a root; without this it fell into the armature branch and got an accumulated world
+ * delta applied as if it were local.
  */
 function boneCorrection(sourceSkin: Skin, sNode: number, targetSkin: Skin, tNode: number): quat {
+    // A matched node that is not a JOINT — an assimp `$AssimpFbx$` pivot carrying the bone's rotation
+    // curve. Copied straight through, for the same reason as the bind-less case below and more strongly:
+    // a pivot has no inverse bind matrix on EITHER side, so there is no rest to take a delta against.
+    //
+    // Deriving one from `nodeTransforms` is actively wrong, and was the bug: an animation-only file
+    // (Mixamo "Without Skin") has no skin at all, so gltfLoader synthesizes its joints from the animated
+    // nodes with identity IBMs and its node transforms are the clip's FRAME 0. Every channel of such a
+    // clip targets a pivot, so every one took that branch and none reached the guard below — deltaing the
+    // character file's bind against the animation file's frame-0 value, which twists each limb by an
+    // arbitrary amount. Mixamo's own T-Pose clip, which should be a visual no-op, rotated the model.
+    //
+    // Known limitation, worth knowing before touching this: with pivots present the hips curve lands on
+    // `Hips_$AssimpFbx$_Rotation`, so the armature branch below never runs for a converted FBX and its
+    // "keeps a Mixamo clip upright" compensation is inert. Harmless same-rig (both files convert
+    // identically, so the armature delta is identity anyway); a genuinely cross-rig import would need it
+    // applied to the highest mapped node above the hips, which is not this function's shape today.
+    if (!topoOf(targetSkin).jointOfNode.has(tNode)) return quat.create();
+
     if (isRootJoint(targetSkin, tNode)) {
         const aws = armatureWorldRotation(sourceSkin, sNode);
         const awt = armatureWorldRotation(targetSkin, tNode);

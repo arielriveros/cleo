@@ -4,6 +4,9 @@ import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
+import WorkspaceStatusChip from "./scriptWorkspace/WorkspaceStatusChip";
+import { useScriptWorkspace } from "./scriptWorkspace/ScriptWorkspaceContext";
+import { NOT_DESKTOP_REASON } from "./scriptWorkspace/desktopScripts";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
 import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject } from "../utils/bundleImport";
@@ -15,7 +18,7 @@ import ModeSelector from "./ModeSelector";
 import UndoButtons from "./UndoButtons";
 import { Button, buttonVariants, cn } from "../components/ui";
 import {
-  SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
+  SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon, CodeIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon, ProjectsIcon,
   PlayGlyph, PauseGlyph, StopGlyph,
 } from "./topbarIcons";
@@ -51,7 +54,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, tilesets, sceneDimension } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, tilesets, sceneDimension } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -85,6 +88,7 @@ export default function MenuBar() {
   const [publishing, setPublishing] = useState(false);
   const publishRef = useRef<HTMLDivElement>(null);
   const desktop = isDesktop();
+  const scriptWs = useScriptWorkspace();
 
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
@@ -98,7 +102,7 @@ export default function MenuBar() {
   
   // The two project-I/O buttons both operate on the whole workspace as one portable .zip.
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
-  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, tilesets });
+  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets });
 
   // Export the entire project — every scene, all asset libraries, the folder layout (VFS) and texture
   // payloads — as project.cleoproj.zip: a full, portable replica of the workspace. Assembled off-thread.
@@ -160,7 +164,7 @@ export default function MenuBar() {
         data = await buildMultiSceneGameData({
           mainSceneId, openSceneId, scenes: sceneList,
           liveScene: editorScene, liveScripts: scripts, liveBodies: bodies, liveTriggers: triggers,
-          libs: { materials, models, templates, terrainMaterials, scripts: scriptAssets, tilesets },
+          libs: { materials, models, templates, terrainMaterials, scripts: scriptAssets, tilesets, animations },
           scriptAssets,
           liveDimension: sceneDimension,
           settings: renderSettings(),
@@ -242,6 +246,20 @@ export default function MenuBar() {
         <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the whole project (scenes + assets + textures) to a .zip' onClick={onExport}>
           <ExportIcon /> Export
         </Button>
+        {/* The script workspace: connected -> a status chip with its recovery actions; not connected -> the
+            one-time folder picker. Disabled in the browser, which has no filesystem to mirror into. */}
+        {scriptWs.status === 'off' ? (
+          <Button
+            variant='subtle' size='sm' className='h-[25px]'
+            disabled={!scriptWs.available}
+            title={scriptWs.available
+              ? 'Mirror this project’s scripts to a folder you can open in VSCode'
+              : NOT_DESKTOP_REASON}
+            onClick={() => void scriptWs.setup()}
+          >
+            <CodeIcon /> Edit in VSCode
+          </Button>
+        ) : <WorkspaceStatusChip />}
         {pendingBundle && (
           <ImportBundleModal
             bundle={pendingBundle}

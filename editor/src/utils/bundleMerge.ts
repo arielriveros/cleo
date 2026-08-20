@@ -8,6 +8,7 @@ import type { MaterialAsset } from './materials'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
 import type { ModelAsset } from './models'
+import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 
@@ -26,6 +27,7 @@ export interface LocalState {
   modelIds: Set<string>
   scriptIds: Set<string>
   animationFieldIds: Set<string>
+  animationIds: Set<string>
   tilesetIds: Set<string>
   sceneIds: Set<string>
   sceneNames: Set<string>
@@ -42,6 +44,7 @@ export interface MergeResult {
   models: ModelAsset[]
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
+  animations: AnimationAsset[]
   tilesets: TilesetAsset[]
   /** New scene entries + their blobs (project bundles only). */
   scenes: { meta: SceneMeta; data: SceneAssetData }[]
@@ -60,6 +63,7 @@ export type Remaps = {
   model: Map<string, string>
   script: Map<string, string>
   afield: Map<string, string>
+  anim: Map<string, string>
   tileset: Map<string, string>
 }
 
@@ -153,7 +157,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }))
   // Textures carry ArrayBuffers (not JSON-cloneable that way) — keep the originals, remap ids separately.
-  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), tileset: new Map() }
+  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), tileset: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
   const textures: BundleTexture[] = []
@@ -169,6 +173,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const m of data.libraries.models) if (local.modelIds.has(m.id)) r.model.set(m.id, cryptoRandomId())
   for (const s of data.libraries.scripts ?? []) if (local.scriptIds.has(s.id)) r.script.set(s.id, cryptoRandomId())
   for (const f of data.libraries.animationFields ?? []) if (local.animationFieldIds.has(f.id)) r.afield.set(f.id, cryptoRandomId())
+  for (const a of data.libraries.animations ?? []) if (local.animationIds.has(a.id)) r.anim.set(a.id, cryptoRandomId())
   for (const t of data.libraries.tilesets ?? []) if (local.tilesetIds.has(t.id)) r.tileset.set(t.id, cryptoRandomId())
 
   // 3) Apply the id re-mints to the asset records' own ids, then rewrite all references within them.
@@ -178,6 +183,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   const models = data.libraries.models.map(m => ({ ...m, id: sub(r.model, m.id) }))
   const scripts = (data.libraries.scripts ?? []).map(s => ({ ...s, id: sub(r.script, s.id) }))
   const animationFields = (data.libraries.animationFields ?? []).map(f => ({ ...f, id: sub(r.afield, f.id) }))
+  const animations = (data.libraries.animations ?? []).map(a => ({ ...a, id: sub(r.anim, a.id) }))
   const tilesets = (data.libraries.tilesets ?? []).map(t => ({ ...t, id: sub(r.tileset, t.id) }))
   for (const m of materials) remapDeep(m, r)
   for (const m of terrainMaterials) remapDeep(m, r)
@@ -235,5 +241,5 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     vfsEntries.push({ ...e, path, assetId })
   }
 
-  return { materials, terrainMaterials, templates, models, scripts, animationFields, tilesets, scenes, textures, vfsFolders, vfsEntries }
+  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, tilesets, scenes, textures, vfsFolders, vfsEntries }
 }

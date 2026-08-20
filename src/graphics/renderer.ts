@@ -1175,8 +1175,10 @@ export class Renderer {
      */
     private _ensureCustomShaders(scene: Scene): void {
         for (const node of scene.models) {
-            const mat = node.model.material;
-            if (mat instanceof CustomMaterial) ensureCustomShader(mat);
+            // Every submesh material, not just the first: a merged model can carry a custom material on
+            // one range, and a missing program makes getShader throw during the VAO/bind that follows.
+            for (const mat of node.model.materials)
+                if (mat instanceof CustomMaterial) ensureCustomShader(mat);
         }
         // Screen-space post-process materials live on the active camera, not on meshes.
         const screenMats = scene.activeCamera?.screenMaterials;
@@ -1194,7 +1196,8 @@ export class Renderer {
      */
     private _ensurePackedTextures(scene: Scene): void {
         const packer = TexturePacker.Instance;
-        for (const node of scene.models) packer.sync(node.model.material, this._frameIndex);
+        // Per submesh material — a merged model's second range has its own maps to channel-pack.
+        for (const node of scene.models) for (const mat of node.model.materials) packer.sync(mat, this._frameIndex);
         for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._frameIndex);
         packer.sweep(this._frameIndex);
     }
@@ -1274,7 +1277,9 @@ export class Renderer {
             const animated = node.model instanceof AnimatedModel;
             // Only non-animated pbr/blinn_phong materials (14-float layout) can be instanced. Note:
             // opaque blinn_phong is forward-rendered above, so in practice only pbr reaches here.
-            if (!animated && (mat.type === 'pbr' || mat.type === 'blinn_phong')) {
+            // Multi-material models never instance: the instance key is one mesh + one material, and an
+            // instanced draw covers the whole index buffer rather than a range.
+            if (!animated && !node.model.hasSubmeshes && (mat.type === 'pbr' || mat.type === 'blinn_phong')) {
                 const key = `${this._objectId(node.model.mesh)}|${this._objectId(mat)}`;
                 let group = instanceGroups.get(key);
                 if (!group) { group = []; instanceGroups.set(key, group); }
@@ -1493,17 +1498,43 @@ export class Renderer {
 
         if (animated) this._uploadBoneMatrices(shaderType, node);
 
-        if (node.model.material.type === 'terrain') {
-            this._shaderManager.setUniform('u_viewPos', this._activeCamera.position); // parallax view vector
-            this._applyTerrainMaterial(node.model.material);
-        }
-        else if (node.model.material instanceof CustomMaterial)
-            this._applyCustomMaterial(node.model.material);
-        else this._applyMaterial(node.model.material);
-        this._applyCull(node.model.material.config.side);
-        const mode = node.model.material.config.wireframe ? gl.LINES : gl.TRIANGLES;
-        node.model.mesh.draw(mode);
+        // One draw per submesh, sharing everything above: a merged model has one vertex buffer, one
+        // world transform and one bone upload, and differs only in which material each index range uses.
+        // Submeshes are constrained to a single material type, so the shader bound above stays correct.
+        this._drawSubmeshes(node, mat => {
+            if (mat.type === 'terrain') {
+                this._shaderManager.setUniform('u_viewPos', this._activeCamera.position); // parallax view vector
+                this._applyTerrainMaterial(mat);
+            }
+            else if (mat instanceof CustomMaterial) this._applyCustomMaterial(mat);
+            else this._applyMaterial(mat);
+        });
         frameStats.objects++;
+    }
+
+    /**
+     * Draw a model's index buffer, applying `bindMaterial` before each range.
+     *
+     * The single-material case (every model that was not merged at import) takes the same path with one
+     * range, so there is one implementation of "apply material, set cull, draw" rather than two.
+     */
+    private _drawSubmeshes(node: ModelNode, bindMaterial: (material: Material) => void): void {
+        const model = node.model;
+        if (!model.hasSubmeshes) {
+            const mat = model.material;
+            bindMaterial(mat);
+            this._applyCull(mat.config.side);
+            model.mesh.draw(mat.config.wireframe ? gl.LINES : gl.TRIANGLES);
+            return;
+        }
+        const submeshes = model.submeshes;
+        for (let i = 0; i < submeshes.length; i++) {
+            const mat = model.materials[i];
+            bindMaterial(mat);
+            this._applyCull(mat.config.side);
+            model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
+                mat.config.wireframe ? gl.LINES : gl.TRIANGLES);
+        }
     }
 
     private _drawInstancedGroup(group: ModelNode[]): void {
@@ -3490,15 +3521,10 @@ export class Renderer {
         // For animated models, set bone matrices
         if (isAnimatedModel) this._uploadBoneMatrices(shaderType, node);
 
-        // Set material uniforms + bind textures
-        if (node.model.material.type === 'terrain')
-            this._applyTerrainMaterial(node.model.material); // splat/layer uniforms (u_viewPos set above)
-        else if (node.model.material instanceof CustomMaterial)
-            this._applyCustomMaterial(node.model.material);
-        else
-            this._applyMaterial(node.model.material);
         frameStats.objects++;
 
+        // Submeshes share this node's transparency state: they are constrained to agree on `transparent`
+        // precisely so a merged model cannot need to be in the opaque and the transparent pass at once.
         const materialConfig = node.model.material.config;
 
         // Inform shaders about transparency state (only used by PBR shaders)
@@ -3506,10 +3532,16 @@ export class Renderer {
 
         // Control blending per material
         GLState.setEnabled(gl.BLEND, materialConfig.transparent === true);
-        this._applyCull(materialConfig.side);
 
-        const mode = materialConfig.wireframe ? gl.LINES : gl.TRIANGLES;
-        node.model.mesh.draw(mode);
+        // Set material uniforms + bind textures, once per submesh.
+        this._drawSubmeshes(node, mat => {
+            if (mat.type === 'terrain')
+                this._applyTerrainMaterial(mat); // splat/layer uniforms (u_viewPos set above)
+            else if (mat instanceof CustomMaterial)
+                this._applyCustomMaterial(mat);
+            else
+                this._applyMaterial(mat);
+        });
     }
 
     /**
@@ -3646,7 +3678,9 @@ export class Renderer {
             // LOD-hidden levels and user-hidden nodes must not cast shadows (user hides already force
             // castShadow=false via the visible setter, but the LOD flag never touches the material).
             if (!node.visible) continue;
-            if (!node.model.material.config.castShadow || node.model.material.config.wireframe) continue;
+            // A merged model can have a non-casting submesh among casting ones, so the test is "any
+            // submesh casts" and the draw below restricts itself to those ranges.
+            if (!node.model.materials.some(m => m.config.castShadow && !m.config.wireframe)) continue;
             // Skip gizmo/overlay nodes from shadow casting
             if ((node as any).isGizmo) continue;
             if (this._frustumCulling) {
@@ -3674,7 +3708,18 @@ export class Renderer {
                 this._uploadBoneMatrices('shadowMapSkinned', node);
             }
 
-            node.model.mesh.draw(gl.TRIANGLES);
+            // Depth-only, so no material is bound — a merged model normally casts its whole buffer in
+            // ONE call. Only when some submesh opts out of shadows does this fall back to ranges.
+            const casters = node.model.materials;
+            if (!node.model.hasSubmeshes || casters.every(m => m.config.castShadow && !m.config.wireframe)) {
+                node.model.mesh.draw(gl.TRIANGLES);
+            } else {
+                const submeshes = node.model.submeshes;
+                for (let i = 0; i < submeshes.length; i++) {
+                    if (!casters[i].config.castShadow || casters[i].config.wireframe) continue;
+                    node.model.mesh.drawRange(submeshes[i].start, submeshes[i].count, gl.TRIANGLES);
+                }
+            }
         }
     }
 

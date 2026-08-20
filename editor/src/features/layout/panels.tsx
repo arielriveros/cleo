@@ -26,7 +26,7 @@ import { useSelectedNode } from '../nodeInspector/useSelectedNode';
 import ConsolePanel from '../logger/ConsolePanel';
 import ProfilerPanel from '../renderer/ProfilerPanel';
 import AssetsExplorer from '../assets/AssetsExplorer';
-import { useCleoEngine } from '../EngineContext';
+import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
 
 // The viewport panel reproduces the old Center stack: a `relative` wrapper so UIOverlay/StateGraph/
 // LoadingScreen (absolute inset-0) and the data-cleo-overlay HUD keep anchoring to the viewport,
@@ -36,8 +36,10 @@ function ViewportPanel(_: IDockviewPanelProps) {
   return (
     <div className="relative h-full w-full overflow-hidden">
       <EngineViewport />
-      {/* Game UI: real scene nodes, laid out by the engine and painted as DOM over the canvas */}
-      <UIEditorLayer />
+      {/* Game UI: real scene nodes, laid out by the engine and painted as DOM over the canvas. Gated on
+          the same predicate as the viewport chrome — a UI node carrying a z-index would otherwise paint
+          over the full-panel editors below, which cover the canvas completely. */}
+      {MODE_RENDERS_VIEWPORT[editorMode] && <UIEditorLayer />}
       {/* Animation-mode node graph overlays the viewport when Graph view is active */}
       <StateGraph />
       {/* Animation-field mode: the blend-space plot overlays the viewport, with the 3D preview showing

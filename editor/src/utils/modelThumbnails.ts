@@ -78,11 +78,23 @@ export function collectModelNodes(node: Node, out: ModelNode[]): void {
   for (const c of node.children) collectModelNodes(c, out);
 }
 
-// Union of every child ModelNode's world-space bounding sphere (center + radius).
-export function combineBounds(root: Node): { center: [number, number, number]; radius: number } {
+/**
+ * Union of every child ModelNode's world-space bounding sphere (center + radius).
+ *
+ * `cullingMargin` keeps the extra room a skinned model's bounds carry so an animated pose cannot poke
+ * outside them (SKINNED_BOUNDS_MARGIN). That is right for framing a camera and wrong for MEASURING —
+ * pass false to get the true bind-pose size.
+ */
+export function combineBounds(root: Node, cullingMargin = true): { center: [number, number, number]; radius: number } {
   const models: ModelNode[] = [];
   collectModelNodes(root, models);
-  const spheres = models.map(m => m.getBoundingSphere()).filter(s => s && isFinite(s.radius));
+  const spheres = models
+    .map(m => {
+      const s = m.getBoundingSphere();
+      if (cullingMargin || !s) return s;
+      return { center: s.center, radius: s.radius / (m.boundsMargin || 1) };
+    })
+    .filter(s => s && isFinite(s.radius));
   if (spheres.length === 0) return { center: [0, 0, 0], radius: 1 };
 
   let cx = spheres[0].center[0], cy = spheres[0].center[1], cz = spheres[0].center[2];
@@ -101,10 +113,15 @@ export function combineBounds(root: Node): { center: [number, number, number]; r
   return { center: [cx, cy, cz], radius: r };
 }
 
-/** Combined bounding-sphere radius of a subtree at its current scale (updates transforms first). */
+/**
+ * Combined bounding-sphere radius of a subtree at its current scale (updates transforms first).
+ *
+ * Measured WITHOUT the skinned culling margin. Including it made every rigged import land at 1/1.75 of
+ * the size the user asked for, and the import review report a "current size" 1.75x larger than the model.
+ */
 export function meshBoundsRadius(root: Node): number {
   root.updateTransforms();
-  return combineBounds(root).radius;
+  return combineBounds(root, false).radius;
 }
 
 /**

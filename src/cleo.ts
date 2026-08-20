@@ -61,6 +61,9 @@ export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";
 export { Texture } from "./graphics/texture";
 export { Loader } from "./graphics/loader";
+// Merging an importer's per-material sub-meshes into one mesh with one submesh per material.
+export { mergeModels, mergeBlocker } from "./graphics/modelMerge";
+export type { MergePart } from "./graphics/modelMerge";
 export type { TextureLoadReport, UnresolvedTexture } from "./graphics/loader";
 // The pure (no DOM, no GL) half of model import, so the editor can run it inside a Web Worker.
 // Pair with Loader.assembleAssimpModels, which does the GL half on the main thread.
@@ -79,6 +82,7 @@ export { RigidBody as Body, Trigger } from "./physics/body";
 export { Ragdoll, RAGDOLL_DEFAULTS } from "./physics/ragdoll";
 export type { RagdollOptions } from "./physics/ragdoll";
 export { Model } from "./graphics/model";
+export type { Submesh } from "./graphics/model";
 export { AnimatedModel } from "./graphics/animatedModel";
 export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
 export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget, humanoidRigOf } from "./graphics/animationRetarget";

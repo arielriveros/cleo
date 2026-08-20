@@ -3,6 +3,7 @@ import type { ModelAsset } from './models'
 import type { Template } from './templates'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { ScriptAsset } from './scripts'
+import type { AnimationAsset } from './animationAssets'
 import type { TilesetAsset } from './tilesets'
 
 // Content hashes let a closed scene decide, when it is next opened, whether each asset it references
@@ -53,9 +54,13 @@ const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames'])
  * 1 = thumbnail only (original). 2 = thumbnail + ikRig + nodeNames. 3 = node.ts was split into
  * core/scene/nodes/, which moved every subclass onto one shared serialize template; ten of them had been
  * emitting `name, id, type` and now emit `id, name, type`. The JSON is equivalent, but JSON.stringify is
- * key-order sensitive, so every embedded node subtree hashes differently.
+ * key-order sensitive, so every embedded node subtree hashes differently. 4 = a single-sub-mesh model
+ * asset's holder Node is collapsed into its ModelNode (flattenModelJson), so every such asset's nodeJson
+ * — and therefore its hash — changed. Bumping is the conservative reading: existing placements are
+ * self-contained subtrees that keep rendering and still resolve `__modelId` off their holder, so leaving
+ * them alone beats rebuilding every character in the project to gain one fewer row in a panel.
  */
-export const ASSET_HASH_VERSION = 3
+export const ASSET_HASH_VERSION = 4
 
 /**
  * Whether a scene's stored hashes can be compared against ones produced by the CURRENT {@link hashAsset}.
@@ -90,6 +95,12 @@ export interface AssetLibs {
   terrainMaterials: TerrainMaterialAsset[]
   scripts: ScriptAsset[]
   tilesets: TilesetAsset[]
+  /**
+   * Shared animation assets. Present so a resync can re-resolve a model's clips, NOT hashed: an animation
+   * is not structural to a placement — changing one changes what plays, never the node tree — so hashing
+   * it would rebuild every character in the project each time a clip was renamed.
+   */
+  animations?: AnimationAsset[]
 }
 
 /** The hash-map key for an asset of a given kind. Kept in one place so save and resync agree. */

@@ -6,6 +6,7 @@ import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { ScriptAsset } from './scripts'
+import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 
@@ -41,6 +42,7 @@ export interface BundleLibraries {
   models: ModelAsset[]
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
+  animations: AnimationAsset[]
   tilesets: TilesetAsset[]
 }
 

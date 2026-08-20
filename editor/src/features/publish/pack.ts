@@ -91,6 +91,14 @@ export interface PackManifest {
   scenes: Record<string, { name: string; scene: any }>;
   /** Baked node templates for runtime scene.instantiate. Global, like textures — not per scene. */
   templates?: { id: string; name: string; node: any }[];
+  /**
+   * Shared animation clips, ONCE for the whole game, in their source rig's space, plus which model asset
+   * plays which. An asset-backed clip is deliberately absent from every serialized node, so the player
+   * retargets these onto each character at scene load — see player/animations.ts. Both absent on a game
+   * published before shared animations existed.
+   */
+  animations?: { id: string; name: string; clips: any[]; sourceSkin: any }[];
+  modelAnimations?: Record<string, string[]>;
   config?: any;
   geometries: Record<string, PackedGeometry>;
   textures: PackedTexture[];
@@ -328,6 +336,8 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     entry: data?.entry ?? '',
     scenes: data?.scenes ?? {},
     templates: data?.templates,
+    animations: data?.animations,
+    modelAnimations: data?.modelAnimations,
     config: data?.config,
     geometries,
     textures,

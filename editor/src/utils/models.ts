@@ -1,8 +1,10 @@
-import { Node, ModelNode, AnimatedModel, TextureManager } from 'cleo'
+import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, mergeModels } from 'cleo'
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
-import { resolveMaterialRefs, applyMaterialAsset, serializedVar, MATERIAL_ID_VAR, MaterialAsset } from './materials'
-import { skinnedModelJsonOf as skinnedJson } from './modelClips'
+import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, MATERIAL_ID_VAR, MaterialAsset } from './materials'
+import { skinnedModelJsonOf as skinnedJson, flattenModelAsset } from './modelClips'
+import type { AnimationAsset } from './animationAssets'
+import { applyModelAnimations } from './animationResolve'
 
 // A note on vocabulary, because the editor used to get this wrong:
 //
@@ -128,6 +130,15 @@ export type ModelAsset = {
   lods?: ModelLodDef[]
   /** Hide placed instances beyond this camera distance; 0/absent = never cull. */
   cullDistance?: number
+  /**
+   * Shared animation assets this model plays, by id (see utils/animationAssets.ts).
+   *
+   * The clips themselves are NOT stored here: they live once in the animation library, in their source
+   * rig's space, and are retargeted onto this model's skeleton when it is instantiated. That is what lets
+   * two characters on the same rig share one stored walk. Clips embedded directly in `nodeJson` still
+   * play — importing one no longer puts it there, but nothing removes an existing one.
+   */
+  animationIds?: string[]
 }
 
 /**
@@ -208,6 +219,7 @@ export function modelAssetHasLodBehavior(asset: ModelAsset): boolean {
 export {
   skinnedModelJsonOf, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved,
   assetWithClipRootMotion, assetWithBoneNames, assetClipNames, assetWithIkRig, assetIkRig,
+  flattenModelJson, flattenModelAsset, assetWithoutEmbeddedClips,
 } from './modelClips'
 
 /**
@@ -221,7 +233,7 @@ export {
  * Clips and bone names ONLY. `ModelNode.model` is read-only, so geometry and sub-mesh structure cannot be
  * swapped in place; a re-imported character with different sub-meshes still has to be re-placed.
  */
-export function refreshModelClips(root: Node, models: ModelAsset[]): number {
+export function refreshModelClips(root: Node, models: ModelAsset[], animations?: AnimationAsset[]): number {
   let count = 0
   const walk = (node: Node) => {
     const modelId = modelIdOf(node)
@@ -234,6 +246,9 @@ export function refreshModelClips(root: Node, models: ModelAsset[]): number {
         // must disappear here too, and a rename must not leave the old name behind.
         for (const name of model.animations.map((a: any) => a.name)) model.removeAnimation(name)
         for (const clip of json.animations ?? []) model.addAnimation(clip)
+        // Shared clips are not in `json` (serialize drops them), so re-resolve them from the library or a
+        // refresh would silently strip every asset-backed animation off the node.
+        if (animations?.length && asset.animationIds?.length) applyModelAnimations(node, asset, animations)
 
         const names = json.skin?.nodeNames
         if (Array.isArray(names) && names.length && model.skin) {
@@ -332,6 +347,69 @@ export function adoptModelMaterial(added: Node, host: Node, materials: MaterialA
 }
 
 /**
+ * Collapse an imported model's sub-meshes into ONE ModelNode carrying one submesh per material.
+ *
+ * An importer splits a model per material (glTF mandates one primitive per material) and per source mesh
+ * object, so a character routinely arrives as several nodes over one skeleton. That costs a draw call, an
+ * `Animator` and a full 100-mat4 bone upload *per pass and per shadow cascade* each — and, worse, the
+ * editor binds an animation to the FIRST skinned child it finds, so half a two-part character would sit
+ * in bind pose.
+ *
+ * Returns the merged children (a single node) or null with the reason logged when the parts are not
+ * mergeable — mixed skeletons, or materials the renderer would route to different passes.
+ */
+export function mergeSubModels(
+  root: Node,
+  children: ModelNode[],
+  materialAssetOfChild: Map<ModelNode, MaterialAsset>,
+): ModelNode[] | null {
+  if (children.length < 2) return null
+
+  const models = children.map(c => c.model)
+  const blocker = mergeBlocker(models)
+  if (blocker) {
+    Logger.warn(`Kept "${root.name}" split across ${children.length} parts: ${blocker}`, 'Import')
+    return null
+  }
+  // Vertices are concatenated verbatim, so a part sitting at its own transform would land in the wrong
+  // place. Skinned parts never carry one (they are posed by the skeleton); static ones can.
+  const moved = children.filter(c => !isIdentityTransform(c))
+  if (moved.length) {
+    Logger.warn(`Kept "${root.name}" split across ${children.length} parts: a part has its own transform`, 'Import')
+    return null
+  }
+
+  const merged = mergeModels(models)
+  if (!merged) return null
+
+  // Materials come back de-duplicated and in child order, so the assets line up submesh for submesh.
+  const assets: MaterialAsset[] = []
+  for (const child of children) {
+    const asset = materialAssetOfChild.get(child)
+    if (asset && !assets.includes(asset)) assets.push(asset)
+  }
+
+  const name = root.name
+  const node = new ModelNode(name, merged)
+  for (const child of [...children]) root.removeChild(child)
+  root.addChild(node)
+  root.updateTransforms()
+  if (assets.length) applyMaterialAssets(node, assets)
+
+  Logger.info(`Merged ${children.length} parts of "${name}" into one mesh (${assets.length || 1} material${assets.length === 1 ? '' : 's'})`, 'Import')
+  return [node]
+}
+
+/** True when a node sits at its parent's origin unrotated and unscaled. */
+function isIdentityTransform(node: Node): boolean {
+  const near = (v: number, target: number) => Math.abs(v - target) < 1e-6
+  const p = node.position, r = node.rotation, sc = node.scale
+  return near(p[0], 0) && near(p[1], 0) && near(p[2], 0)
+    && near(r[0], 0) && near(r[1], 0) && near(r[2], 0)
+    && near(sc[0], 1) && near(sc[1], 1) && near(sc[2], 1)
+}
+
+/**
  * Turn one imported subtree into a separate ModelAsset per sub-mesh (the import modal's "Separate parts"
  * option). Each asset is re-centred on its own bounds, so dragging it into the scene drops it where you
  * point instead of wherever it happened to sit in the source file.
@@ -374,7 +452,7 @@ export async function separateSubModels(
     holder.updateTransforms()
 
     const materialId = materialIdOfChild.get(child)
-    assets.push(await buildModelAsset(holder, materialId ? [materialId] : [], ''))
+    assets.push(flattenModelAsset(await buildModelAsset(holder, materialId ? [materialId] : [], '')))
   }
 
   return assets
@@ -384,7 +462,7 @@ export async function separateSubModels(
  *  Assets with LOD levels or a cull distance instantiate as a LodGroupNode wrapping one child subtree
  *  per level (level 0 = the base nodeJson); plain assets keep the original single-subtree shape.
  *  `materials` re-resolves the subtree's __materialId links against the library — see resolveMaterialRefs. */
-export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials?: MaterialAsset[], models?: ModelAsset[]): string {
+export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials?: MaterialAsset[], models?: ModelAsset[], animations?: AnimationAsset[]): string {
   // LOD levels are references, so the library is needed to resolve them. A level whose model has been
   // deleted is dropped rather than instantiated as a hole — the instance simply keeps the levels that
   // still resolve, and `resolvedLods` drops the matching distance so the two arrays stay aligned.
@@ -418,5 +496,13 @@ export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials
   }
 
   parseByType(parent, clone)
+
+  // Shared animation clips are applied to the LIVE node, never spliced into `clone`: a resolved clip
+  // carries an `assetId` and AnimatedModel.serialize drops those, so putting them in the JSON would only
+  // get them stripped on the next save. Retargeting happens here because the target rig is this asset's.
+  if (animations?.length && asset.animationIds?.length) {
+    const placed = parent.children.find(c => c.id === clone.id)
+    if (placed) applyModelAnimations(placed, asset, animations)
+  }
   return clone.id
 }

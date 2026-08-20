@@ -49,6 +49,32 @@ export function buildJointTree(skin: Skin): JointTreeNode[] {
   return topo.roots.map(i => treeNodes[i])
 }
 
+/** Per-skin cache: the pairs only depend on the hierarchy, which is fixed once a Skin is parsed. */
+const bonePairsCache = new WeakMap<Skin, [number, number][]>()
+
+/**
+ * The [joint, parentJoint] pairs to draw a bone segment for, in JOINT indices.
+ *
+ * Shared rather than re-derived, because both overlays that draw a skeleton had grown the same wrong
+ * copy: mapping `joint.parentIndex` — a glTF NODE index — through a local node→joint map. That drops
+ * every bone whose parent node is not itself a joint, which on an assimp-converted FBX is *every* bone
+ * (its importer preserves pivots, so `Bone_$AssimpFbx$_Rotation` sits between each pair). The visible
+ * result was a skeleton drawn as two lonely segments while the tree panel — which already went through
+ * `skeletonTopology` — showed the hierarchy correctly.
+ */
+export function bonePairsOf(skin: Skin): [number, number][] {
+  const cached = bonePairsCache.get(skin)
+  if (cached) return cached
+  const topo = skeletonTopology(skin)
+  const pairs: [number, number][] = []
+  for (let i = 0; i < skin.joints.length; i++) {
+    const p = topo.parentJoint[i]
+    if (p >= 0) pairs.push([i, p])
+  }
+  bonePairsCache.set(skin, pairs)
+  return pairs
+}
+
 /**
  * Display label for a joint: its real bone name where the rig has one, else the node index.
  *

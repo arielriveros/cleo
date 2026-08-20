@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { CleoEngine, Scene, TextureManager, setGameHost, setScriptProvider, registerTemplates, Logger } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
+import { attachSharedAnimations } from './animations';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
 
 // Standalone, data-driven runtime for a published Cleo game. It loads game.bin — the single binary
@@ -138,6 +139,9 @@ async function boot(): Promise<void> {
     // Scripts bind during parse, through the provider registered above — there is no separate attach pass
     // any more, because one could not reach a node that does not exist until a script instantiates it.
     scene.parse({ scene: entry.scene, textures: [] }, true); // textures already registered
+    // Shared clips are not in the serialized scene by design (one copy in the game file, not one per
+    // placement), so they are retargeted onto each character here, straight after parse and before start.
+    attachSharedAnimations(scene, data);
     Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
     engine.setScene(scene);
     // The new scene needs the viewport before its first layout, or the HUD resolves against whatever the

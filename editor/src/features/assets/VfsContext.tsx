@@ -54,7 +54,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // rather than on every unrelated EngineContext update.
   const {
     assetsLoaded,
-    materials, terrainMaterials, templates, models, scriptAssets, animationFields, tilesets,
+    materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets,
   } = useAssetLibrary()
 
   const [vfs, setVfs] = useState<VfsIndex>(EMPTY_VFS)
@@ -76,13 +76,13 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [eventEmitter])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, tilesets, scenes: sceneList, textureIds }),
-    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, tilesets, sceneList, textureIds],
+    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets, scenes: sceneList, textureIds }),
+    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets, sceneList, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
-    materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, tilesets,
+    materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets,
     scenes: sceneList,
     addMaterial: engine.addMaterial,
     updateMaterial: engine.updateMaterial,
@@ -102,6 +102,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addAnimationField: engine.addAnimationField,
     updateAnimationField: engine.updateAnimationField,
     removeAnimationField: engine.removeAnimationField,
+    addAnimation: engine.addAnimation,
+    updateAnimation: engine.updateAnimation,
+    removeAnimation: engine.removeAnimation,
     addTileset: engine.addTileset,
     updateTileset: engine.updateTileset,
     removeTileset: engine.removeTileset,
@@ -158,7 +161,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // were the only survivors when this fired.) Requiring at least one asset to be present costs nothing:
   // with every library empty there is, by definition, nothing that needs pruning.
   const librariesPopulated = !!(materials.length || terrainMaterials.length || templates.length
-    || models.length || scriptAssets.length || animationFields.length || tilesets.length)
+    || models.length || scriptAssets.length || animationFields.length || animations.length || tilesets.length)
 
   useEffect(() => {
     if (!vfsLoaded) return

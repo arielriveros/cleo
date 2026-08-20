@@ -12,6 +12,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 
 /**
+ * How far a skinned model's bind-pose bounds are inflated, as a CULLING margin: the mesh deforms on the
+ * GPU, so its bind-pose extent understates where it can actually reach and a tight bound pops.
+ *
+ * Named and exported because it is a culling allowance, not a measurement — anything asking "how big is
+ * this model" (import size normalization, the import review's reported size) has to divide it back out,
+ * and a bare 1.75 buried in a getter is impossible to notice from those call sites.
+ */
+export const SKINNED_BOUNDS_MARGIN = 1.75;
+
+/**
  * The renderable node: a `Model` or `AnimatedModel` plus its animator, physics bounds and BVH.
  */
 
@@ -223,6 +233,9 @@ export class ModelNode extends Node {
      * the transform (`_worldSphereDirty`). Skinned/animated meshes deform on the GPU, so their bind-pose
      * bound understates the animated extent — inflate the radius to avoid popping.
      */
+    /** The bind-pose radius the sphere above is inflated by; see {@link SKINNED_BOUNDS_MARGIN}. */
+    public get boundsMargin(): number { return this._model instanceof AnimatedModel ? SKINNED_BOUNDS_MARGIN : 1; }
+
     public getBoundingSphere(): { center: vec3; radius: number } {
         if (!this._worldSphereDirty) return this._worldSphere;
 
@@ -232,7 +245,7 @@ export class ModelNode extends Node {
         const scale = this.worldScale;
         const maxScale = Math.max(Math.abs(scale[0]), Math.abs(scale[1]), Math.abs(scale[2]));
         let radius = local.radius * maxScale;
-        if (this._model instanceof AnimatedModel) radius *= 1.75;
+        if (this._model instanceof AnimatedModel) radius *= SKINNED_BOUNDS_MARGIN;
 
         this._worldSphere.radius = radius;
         this._worldSphereDirty = false;

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import { ensureMonaco } from './monacoSetup'
 import { useCodeTheme } from './codeThemeStore'
 import CodeEditorHeader from './CodeEditorHeader'
+import { subscribe, getRevision, externalSourceOf } from '../../scriptWorkspace/externalSourceStore'
 
 // The Monaco code editor for a Script asset (the dedicated Script tab). A class-based script is a normal TS
 // module — `class X extends Node { … }` — so Monaco's own TypeScript worker gives full IntelliSense against
@@ -23,6 +24,11 @@ export default function MonacoScriptEditor(props: {
   onChangeRef.current = props.onChange
   const readOnlyRef = useRef(!!props.readOnly)
   readOnlyRef.current = !!props.readOnly
+  // Bumped when the script workspace (VSCode) reports an edit to this script from disk.
+  const externalRevision = useSyncExternalStore(subscribe, getRevision, getRevision)
+  // While an external source is being written into the model, the content listener below must not report
+  // it back out as a user edit — that would re-dirty the tab we are in the middle of reconciling.
+  const applyingExternalRef = useRef(false)
 
   // Created once (the component is re-keyed per script by ScriptTabView, so one editor+model per script).
   useEffect(() => {
@@ -49,12 +55,30 @@ export default function MonacoScriptEditor(props: {
     editorRef.current = editor
 
     const sub = model.onDidChangeContent(() => {
-      if (!readOnlyRef.current) onChangeRef.current(model.getValue())
+      if (!readOnlyRef.current && !applyingExternalRef.current) onChangeRef.current(model.getValue())
     })
 
     return () => { sub.dispose(); editor.dispose(); editorRef.current = null; model.dispose() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Take an edit made in the external script workspace. Applied as an edit operation rather than
+  // setValue so the undo stack and (roughly) the cursor survive.
+  useEffect(() => {
+    const editor = editorRef.current
+    const model = editor?.getModel()
+    if (!editor || !model) return
+    const incoming = externalSourceOf(props.scriptId)
+    if (incoming === undefined || incoming === model.getValue()) return
+
+    applyingExternalRef.current = true
+    try {
+      const selections = editor.getSelections()
+      model.pushEditOperations(selections, [{ range: model.getFullModelRange(), text: incoming }], () => selections)
+    } finally {
+      applyingExternalRef.current = false
+    }
+  }, [externalRevision, props.scriptId])
 
   useEffect(() => { editorRef.current?.updateOptions({ readOnly: !!props.readOnly }) }, [props.readOnly])
   useEffect(() => { monacoRef.current?.editor.setTheme(theme === 'light' ? 'cleo-light' : 'cleo-dark') }, [theme])

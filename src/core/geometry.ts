@@ -77,6 +77,71 @@ export class Geometry {
             this._calculateTangents();
     }
 
+    /**
+     * Concatenate several geometries into one, returning the merged geometry and the index range each
+     * input occupies in it — the ranges a multi-material {@link Model} draws one at a time.
+     *
+     * Two things are easy to get wrong here:
+     *  - **Index offsetting.** Each part's indices address its own vertices, so they shift by the number
+     *    of vertices already emitted. `_indices` is a `Uint32Array`, so passing 65k vertices is safe.
+     *  - **Attribute presence.** `getData` drops an attribute whose array is empty, which silently
+     *    changes the interleaved stride. If ANY part has an attribute, every part must contribute its
+     *    slot — parts that lack it are zero-padded — or the merged vertex buffer desyncs.
+     *
+     * Vertices are copied verbatim: no transform is baked in. A skinned part must not be transformed
+     * anyway (its vertices are bound to the skeleton), and glTF gives skinned nodes no node transform.
+     * A caller merging STATIC parts that sit at different transforms has to bake them first — see
+     * `foliageRules.bakeModel` in the editor for that.
+     */
+    public static merge(parts: Geometry[]): { geometry: Geometry; ranges: { start: number; count: number }[] } {
+        if (parts.length === 0) return { geometry: new Geometry(), ranges: [] };
+        if (parts.length === 1)
+            return { geometry: parts[0], ranges: [{ start: 0, count: parts[0].indices.length }] };
+
+        const totalVertices = parts.reduce((n, p) => n + p.vertexCount, 0);
+        const totalIndices = parts.reduce((n, p) => n + p.indices.length, 0);
+
+        // An attribute is carried only if at least one part has it; parts missing it are zero-filled.
+        const wants = {
+            normals: parts.some(p => p.normals.length > 0),
+            uvs: parts.some(p => p.uvs.length > 0),
+            tangents: parts.some(p => p.tangents.length > 0),
+            bitangents: parts.some(p => p.bitangents.length > 0),
+        };
+        const positions = new Float32Array(totalVertices * 3);
+        const normals = wants.normals ? new Float32Array(totalVertices * 3) : EMPTY_F32;
+        const uvs = wants.uvs ? new Float32Array(totalVertices * 2) : EMPTY_F32;
+        const tangents = wants.tangents ? new Float32Array(totalVertices * 3) : EMPTY_F32;
+        const bitangents = wants.bitangents ? new Float32Array(totalVertices * 3) : EMPTY_F32;
+        const indices = new Uint32Array(totalIndices);
+
+        const ranges: { start: number; count: number }[] = [];
+        let vertexBase = 0;
+        let indexBase = 0;
+        for (const part of parts) {
+            positions.set(part.positions, vertexBase * 3);
+            if (wants.normals && part.normals.length) normals.set(part.normals, vertexBase * 3);
+            if (wants.uvs && part.uvs.length) uvs.set(part.uvs, vertexBase * 2);
+            if (wants.tangents && part.tangents.length) tangents.set(part.tangents, vertexBase * 3);
+            if (wants.bitangents && part.bitangents.length) bitangents.set(part.bitangents, vertexBase * 3);
+
+            const src = part.indices;
+            for (let i = 0; i < src.length; i++) indices[indexBase + i] = src[i] + vertexBase;
+
+            ranges.push({ start: indexBase, count: src.length });
+            vertexBase += part.vertexCount;
+            indexBase += src.length;
+        }
+
+        // Recomputing tangents would be wasted work when every part already carries them, and would
+        // otherwise run over the whole merged buffer rather than only the parts that need it.
+        const haveAll = tangents.length > 0 && bitangents.length > 0;
+        return {
+            geometry: new Geometry(positions, normals, uvs, tangents, bitangents, indices, !haveAll),
+            ranges,
+        };
+    }
+
     // Flat: component `c` of vertex `i` is `positions[i * 3 + c]` (stride 2 for uvs).
     public get positions(): Float32Array { return this._positions; }
     public get normals(): Float32Array { return this._normals; }

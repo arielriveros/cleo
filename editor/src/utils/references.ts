@@ -205,6 +205,19 @@ export function collectReferencedAnimationFieldIds(scene: Scene | null | undefin
   return set
 }
 
+/**
+ * Shared animation asset ids referenced by any MODEL asset in the library.
+ *
+ * The link is on the model asset (`animationIds`), not on a node and not on a scene: clips belong to the
+ * character, so every placement of it plays the same set. That also means "is this animation used" cannot
+ * be answered from a scene at all — hence the library argument rather than a Scene.
+ */
+export function collectReferencedAnimationIds(models: { animationIds?: string[] }[]): Set<string> {
+  const set = new Set<string>()
+  for (const m of models) for (const id of m.animationIds ?? []) set.add(id)
+  return set
+}
+
 /** Tileset asset ids referenced by any live tilemap layer or sprite. */
 export function collectReferencedTilesetIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()

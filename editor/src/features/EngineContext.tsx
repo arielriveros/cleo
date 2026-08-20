@@ -28,8 +28,11 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, assetWithoutEmbeddedClips } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
+import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
+import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
+import { modelAssetSkin, applyModelAnimations, invalidateAnimationCache, resolveAnimationAsset } from "../utils/animationResolve";
 import { AnimationFieldAsset, buildAnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, buildTilesetAsset, guessTileSize, reembedTilesets, detachTileset } from "../utils/tilesets";
 import { importAtlasImage } from "./tileset/importAtlas";
@@ -41,7 +44,7 @@ import {
   setThumbnailDirtySuppressor,
 } from "../utils/modelThumbnails";
 import { parseBundleToRoot, type UnresolvedTexture } from "../utils/modelImport";
-import { cancelAllImports, ImportCancelled } from "../workers/importClient";
+import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
 import { detectMissingTextures } from "../utils/textureRefs";
 
 // A mesh awaiting user review in the import modal (parsed but not yet committed to the library).
@@ -66,6 +69,12 @@ export type ModelImportDecision = {
   targetSize: number;     // desired bounding diameter in world units
   /** Split the file's sub-models into one ModelAsset each, instead of a single asset for the whole file. */
   separate: boolean;
+  /**
+   * Collapse the file's sub-meshes into ONE mesh carrying one submesh per material — the opposite of
+   * `separate`. An importer splits a model per material and per source mesh object, so a character
+   * arrives as several nodes over one skeleton; merged, it is one node with one Animator.
+   */
+  merge: boolean;
 };
 
 // ---- Import progress -------------------------------------------------------------------------------
@@ -99,6 +108,18 @@ const IMPORT_STAGES: Record<ImportStage, { label: string; progress: number; stat
   failed:    { label: 'Failed',                       progress: 1,    status: 'failed'  },
   skipped:   { label: 'Skipped',                      progress: 1,    status: 'skipped' },
 };
+/** Stages an animation-clip import walks through. Mirrors ImportStage; `review` waits on a human. */
+type AnimImportStage = 'parsing' | 'review' | 'retargeting' | 'saving' | 'done' | 'failed' | 'skipped';
+const ANIM_IMPORT_STAGES: Record<AnimImportStage, { label: string; progress: number; status: StepStatus }> = {
+  parsing:     { label: 'Reading animation',   progress: 0.15, status: 'running' },
+  review:      { label: 'Waiting for you',     progress: 0.35, status: 'paused'  },
+  retargeting: { label: 'Retargeting clips',   progress: 0.7,  status: 'running' },
+  saving:      { label: 'Saving to library',   progress: 0.9,  status: 'running' },
+  done:        { label: 'Imported',            progress: 1,    status: 'done'    },
+  failed:      { label: 'Failed',              progress: 1,    status: 'failed'  },
+  skipped:     { label: 'Skipped',             progress: 1,    status: 'skipped' },
+};
+
 /** A bone the mapping table lists in a target-joint dropdown: its node index and display name. */
 export type RetargetBoneOption = { node: number; name: string };
 // Animation clips parsed from a file, each with a compatibility report vs the target skeleton, plus the
@@ -116,7 +137,21 @@ export type PendingAnimationImportView = {
 };
 // The user's decision: which clips to add (by index), and the mapping as finally edited. The mapping rides
 // back so the accept path retargets against exactly what the user saw and corrected.
-export type AnimationImportDecision = { include: boolean[]; mapping: BoneMapping };
+/** The rig picker's data: which skinned models the animation could be retargeted onto. */
+export type PendingRigPickView = { fileName: string; models: { id: string; name: string }[] };
+
+export type AnimationImportDecision = {
+  include: boolean[];
+  mapping: BoneMapping;
+  /**
+   * Per-clip name as typed in the modal, parallel to `include`. Optional so the null/cancel path and any
+   * other caller keep compiling; a blank or missing entry keeps the clip's parsed name.
+   *
+   * Renaming HERE rather than afterwards matters: a later rename rewrites state-machine references
+   * (StateMachineContext.renameClip) but not Animation Field samples, which reference clips by name.
+   */
+  names?: string[];
+};
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
 import { migrateLegacyUI } from "../utils/uiMigration";
@@ -324,6 +359,33 @@ function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefO
 }
 
 export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
+
+/**
+ * Whether a mode actually paints the 3D viewport, or replaces it with a full-panel editor of its own.
+ *
+ * The viewport's floating chrome — the gizmo-mode switch, the 2D/3D view toggle, the debug menu, the
+ * transform gizmo — only means anything over a render. It used to be gated by a denylist of
+ * `editorMode !== 'x'` per control, so every mode added afterwards leaked: `script` and `tileset` cover
+ * the canvas completely, and the chrome floated on top of the code editor and the tileset atlas.
+ *
+ * An exhaustive Record, deliberately: adding a mode to the union without deciding this is a compile
+ * error, which a denylist could never give.
+ */
+export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
+  scene: true,
+  landscape: true,
+  tilemap: true,
+  ui: true,
+  template: true,
+  renderer: true,        // its own perf HUD sits over a live render
+  material: true,        // preview sphere
+  terrainMaterial: true, // preview sphere
+  animation: true,       // except in Graph view — see `hideForGraph`
+  animationField: true,  // the blend-space plot is translucent over the 3D preview
+  model: true,
+  script: false,         // ScriptTabView fills the panel
+  tileset: false,        // TilesetTabView fills the panel
+};
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -480,7 +542,7 @@ const EngineContext = createContext<{
   templateRootId: string | null;
   // Material editor
   enterMaterialEditor: (materialId?: string) => void;
-  createMaterialForNode: (node: Node) => void;
+  createMaterialForNode: (node: Node, submesh?: number) => void;
   editingMaterialName: string | null;
   setActiveMaterialName: (name: string) => void;
   // Terrain-material editor
@@ -536,11 +598,24 @@ const EngineContext = createContext<{
   detachScriptFromNode: (node: Node) => void;
   /** Persist an edited script asset's source and propagate the change to every linked node. */
   saveScriptSource: (id: string, source: string) => void;
+  /**
+   * Take a source edited outside the editor (the script workspace folder) as the new truth for a script:
+   * saves it, refreshes any open Script tab's buffer and clears that tab's dirty flag.
+   * Returns whether the tab was holding UNSAVED edits that this replaced -- the caller decides whether
+   * that is a conflict worth surfacing.
+   */
+  adoptExternalScriptSource: (id: string, source: string) => { replacedUnsaved: boolean };
+  /** Rename a script asset, keeping its source and base type (used when a workspace file is renamed). */
+  renameScriptAsset: (id: string, name: string) => void;
   // Animation Field assets (blend spaces)
   animationFields: AnimationFieldAsset[];
   addAnimationField: (f: AnimationFieldAsset) => void;
   removeAnimationField: (id: string) => void;
   updateAnimationField: (id: string, f: AnimationFieldAsset) => void;
+  animations: AnimationAsset[];
+  addAnimation: (a: AnimationAsset) => void;
+  removeAnimation: (id: string) => void;
+  updateAnimation: (id: string, a: AnimationAsset) => void;
   /** Open (or focus) an Animation Field asset's edit tab. */
   enterAnimationFieldEditor: (fieldId?: string) => void;
   /** Create a field for a skinned model asset and open it. Returns the new field's id, or null. */
@@ -607,6 +682,8 @@ const EngineContext = createContext<{
   removeAnimationClip: (name: string) => void;
   setClipRootMotion: (name: string, on: boolean) => void;
   pendingAnimationImport: PendingAnimationImportView | null;
+  pendingRigPick: PendingRigPickView | null;
+  resolveRigPick: (modelId: string | null) => void;
   resolveAnimationImport: (decision: AnimationImportDecision | null) => void;
   // Project persistence
   savingState: SavingState;
@@ -731,10 +808,16 @@ const EngineContext = createContext<{
     attachScriptToNode: () => false,
     detachScriptFromNode: () => {},
     saveScriptSource: () => {},
+    adoptExternalScriptSource: () => ({ replacedUnsaved: false }),
+    renameScriptAsset: () => {},
     animationFields: [],
     addAnimationField: () => {},
     removeAnimationField: () => {},
     updateAnimationField: () => {},
+    animations: [],
+    addAnimation: () => {},
+    removeAnimation: () => {},
+    updateAnimation: () => {},
     enterAnimationFieldEditor: () => {},
     createAnimationFieldForModel: () => null,
     editingAnimationFieldId: null,
@@ -776,6 +859,8 @@ const EngineContext = createContext<{
     removeAnimationClip: () => {},
     setClipRootMotion: () => {},
     pendingAnimationImport: null,
+    pendingRigPick: null,
+    resolveRigPick: () => {},
     resolveAnimationImport: () => {},
     savingState: 'idle',
     replaceProjectMeta: async () => {},
@@ -1079,7 +1164,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     (async () => {
       try {
         const list = await idbGet<ModelAsset[]>(libKey('models'));
-        if (list && list.length) setModels(prev => prev.length ? prev : list);
+        // One-shot flatten of assets saved before the holder was collapsed away. flattenModelAsset returns
+        // the same object when there is nothing to do, so an already-migrated library is untouched and a
+        // multi-part model is never disturbed. Node ids are preserved, so anything referencing the kept
+        // ModelNode still resolves.
+        if (list && list.length) setModels(prev => prev.length ? prev : list.map(flattenModelAsset));
       } catch (e) { console.warn('Failed to load models:', e); }
       finally { modelsLoadedRef.current = true; }
     })();
@@ -1134,6 +1223,60 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
     if (changed) eventEmitter.current.emit('SCENE_CHANGED');
     setScriptAssets(prev => prev.filter(x => x.id !== id));
+  };
+
+  // Animation assets: shared clips, stored in their SOURCE rig's space and retargeted per model at use.
+  // A clip used to live only inside the model asset that imported it, so two characters on one rig held
+  // two byte-identical copies and shipped two. A model asset now names the animations it uses by id
+  // (`animationIds`) and the clips are resolved and retargeted from here — see utils/animationAssets.ts.
+  const [animations, setAnimations] = useState<AnimationAsset[]>([]);
+  const animationsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = (await idbGet<AnimationAsset[]>(libKey('animations'))) ?? [];
+        // One-shot lift of clips embedded in model assets into shared ones. Runs after both libraries have
+        // been read, and only once (a stamp in kv). Identical clips across characters collapse onto one
+        // asset, which is the point; names are preserved, so state machines and field samples — which
+        // reference clips BY NAME — keep resolving. The pre-migration model library is kept under a backup
+        // key, because this rewrites every skinned model asset in the project.
+        const done = await idbGet<number>(libKey('animations') + ':migrated');
+        if (!done) {
+          const models = (await idbGet<ModelAsset[]>(libKey('models'))) ?? [];
+          const r = extractEmbeddedClips(models, list, skinnedModelJsonOf, assetWithoutEmbeddedClips);
+          if (r.extracted || r.shared) {
+            await idbSet(libKey('models') + ':preAnimationAssets', models);
+            await idbSet(libKey('models'), r.models);
+            await idbSet(libKey('animations'), r.animations);
+            setModels(prev => (prev.length ? r.models.map(flattenModelAsset) : prev));
+            Logger.info(`Animation library: extracted ${r.extracted} clip${r.extracted === 1 ? '' : 's'}` +
+              (r.shared ? `, ${r.shared} already shared with another model` : ''), 'Editor');
+            setAnimations(prev => prev.length ? prev : r.animations);
+          } else if (list.length) setAnimations(prev => prev.length ? prev : list);
+          await idbSet(libKey('animations') + ':migrated', 1);
+        } else if (list.length) setAnimations(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load animations:', e); }
+      finally { animationsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('animations'), animations, animationsLoadedRef);
+
+  // Mirror for the import/save paths, which run off-render — see the library-mirror block below.
+  const animationsRef = useRef<AnimationAsset[]>([]);
+  animationsRef.current = animations;
+
+  const addAnimation = (a: AnimationAsset) => setAnimations(prev => [...prev, a]);
+  const updateAnimation = (id: string, a: AnimationAsset) =>
+    setAnimations(prev => prev.map(x => x.id === id ? a : x));
+  const removeAnimation = (id: string) => {
+    setAnimations(prev => prev.filter(x => x.id !== id));
+    // Drop the reference from every model that used it. The clips already instantiated on live nodes are
+    // left alone: they are a copy the user can still see and delete, which is easier to understand than a
+    // character silently losing its walk mid-session.
+    for (const m of modelsRef.current) {
+      const next = withoutAnimationRef(m, id);
+      if (next !== m) updateModel(m.id, next);
+    }
   };
 
   // Animation Field assets (blend spaces). A field blends clips from ONE model asset by 1D/2D parameters;
@@ -1318,6 +1461,35 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const getScriptTabSource = (scriptId: string): string | undefined => scriptTabSourceRef.current.get(scriptId);
 
+  /** Rename a script asset in place. Its source and base type are untouched, so nothing needs re-seeding. */
+  const renameScriptAsset = (id: string, name: string) => {
+    const existing = scriptAssetsRef.current.find(a => a.id === id);
+    const trimmed = name.trim();
+    if (!existing || !trimmed || existing.name === trimmed) return;
+    updateScriptAsset(id, { ...existing, name: trimmed });
+  };
+
+  /**
+   * Adopt a source edited in the script workspace folder (VSCode) as the new truth.
+   *
+   * Beyond saving, this has to reconcile the Script TAB: its buffer is what Save Script would later write,
+   * so leaving a stale buffer in place would let the next in-editor save silently clobber the external
+   * edit. The buffer is replaced, the tab un-dirtied, and the open Monaco model refreshed through the
+   * external-source store (it is uncontrolled, so a prop could not move it).
+   */
+  const adoptExternalScriptSource = (id: string, source: string): { replacedUnsaved: boolean } => {
+    const tab = tabsRef.current.find(t => t.kind === 'script' && t.scriptId === id);
+    const buffered = scriptTabSourceRef.current.get(id);
+    const replacedUnsaved = !!tab && !!dirtyTabsRef.current[tab.id] && buffered !== undefined && buffered !== source;
+
+    scriptTabSourceRef.current.set(id, source);
+    if (tab) clearTabDirty(tab.id);
+    pushExternalSource(id, source);
+    saveScriptSource(id, source);
+    return { replacedUnsaved };
+  };
+
+
   // True once all IndexedDB-backed libraries (and the project's scene list) have finished their initial
   // read. The asset explorer's path index must not prune entries before this — the arrays start empty,
   // and a pruning pass against an empty library would drop every folder assignment the user has made.
@@ -1325,7 +1497,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && scenesLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && scenesLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -1531,6 +1703,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (r) r(decision);
   };
 
+  // Rig picker, shown before the review modal when the import did not come from an open Animation Editor.
+  // An animation file carries no character, so the rig it retargets onto has to be chosen; with the editor
+  // open, the character on screen IS the answer and no prompt appears.
+  const [pendingRigPick, setPendingRigPick] = useState<PendingRigPickView | null>(null);
+  const pendingRigResolverRef = useRef<((id: string | null) => void) | null>(null);
+  const resolveRigPick = (modelId: string | null) => {
+    const r = pendingRigResolverRef.current;
+    pendingRigResolverRef.current = null;
+    setPendingRigPick(null);
+    if (r) r(modelId);
+  };
+
   // Animation import review modal — same "park then resolve a promise" pattern as the mesh import.
   const [pendingAnimationImport, setPendingAnimationImport] = useState<PendingAnimationImportView | null>(null);
   const pendingAnimResolverRef = useRef<((d: AnimationImportDecision | null) => void) | null>(null);
@@ -1666,7 +1850,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const currentLibs = (): AssetLibs => ({
     materials: materialsRef.current, models: modelsRef.current, templates: templatesRef.current,
     terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
-    tilesets: tilesetsRef.current,
+    tilesets: tilesetsRef.current, animations: animationsRef.current,
   });
 
   // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
@@ -1723,7 +1907,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const templateRoot = scene.getNodeById(rootId);
       if (templateRoot) {
         withoutDirty(() => {
-          const refreshed = refreshModelClips(templateRoot, modelsRef.current);
+          const refreshed = refreshModelClips(templateRoot, modelsRef.current, animationsRef.current);
           if (refreshed) Logger.info(`Refreshed animation clips on ${refreshed} model${refreshed === 1 ? '' : 's'} in "${t.name}"`, 'Editor');
         });
       }
@@ -1841,7 +2025,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const json = await source.serialize();
     stripDebug(json);
     regenerateIds(json, new Map()); // distinct ids so the clone never collides with the original
-    parseByType(scene.root, json);
+
+    // Clone under a HOLDER carrying the source's accumulated world scale/rotation, not straight under
+    // scene.root. A skinned import cannot bake its fit-to-size factor into vertices (the vertices are
+    // bound to the skeleton), so normalizeRootScale puts that factor entirely on the holder ABOVE the
+    // ModelNode — see modelThumbnails.normalizeRootScale and the same note in separateSubModels.
+    // Re-parenting the bare node therefore dropped the whole normalization and the character showed up
+    // here at its raw file scale while looking correct everywhere else.
+    const holder = new Node(`${source.name} (holder)`);
+    scene.addNode(holder);
+    const worldScale = source.parent ? source.parent.worldScale : [1, 1, 1];
+    holder.setScale([worldScale[0], worldScale[1], worldScale[2]]);
+    parseByType(holder, json);
     const cloneRootId = json.id;
     const clone = scene.getNodeById(cloneRootId) as ModelNode | null;
     if (!clone) { Logger.error('Failed to clone model for the Animation Editor', 'Editor'); return; }
@@ -1929,24 +2124,85 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const importAnimationFiles = async (files: File[]) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
     const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
-    if (!(cloneNode instanceof ModelNode) || !(cloneNode.model instanceof AnimatedModel) || !cloneNode.model.skin) {
-      Logger.error('Open the Animation Editor for a skinned model before importing animations', 'Editor');
+    const cloneModel = (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel && cloneNode.model.skin)
+      ? cloneNode.model : null;
+    const fileName = files.find(f => /\.(gltf|glb|fbx)$/i.test(f.name))?.name ?? files[0]?.name ?? 'animation';
+
+    // Which rig to retarget onto. The Animation Editor's open character when there is one — that is the
+    // case where the answer is obvious and asking would be noise — otherwise the user picks from the
+    // skinned models in the library, which is what makes an animation importable from the asset explorer
+    // with no character on screen at all.
+    const rigChoices = modelsRef.current.filter(m => modelAssetIsSkinned(m));
+    const openRigId = cloneNode ? modelIdOf(cloneNode) : undefined;
+    let rigId = openRigId;
+    if (!rigId) {
+      if (!rigChoices.length) {
+        Logger.error('Import a skinned model first — an animation needs a rig to retarget onto', 'Editor');
+        return;
+      }
+      rigId = await new Promise<string | null>(resolve => {
+        pendingRigResolverRef.current = resolve;
+        setPendingRigPick({ fileName, models: rigChoices.map(m => ({ id: m.id, name: m.name })) });
+      }) ?? undefined;
+      if (!rigId) { Logger.info('Animation import cancelled', 'Editor'); return; }
+    }
+    const rigAsset = modelsRef.current.find(m => m.id === rigId);
+    const targetSkin = cloneModel?.skin ?? modelAssetSkin(rigAsset);
+    if (!rigAsset || !targetSkin) {
+      Logger.error('That model has no skeleton to retarget onto', 'Editor');
       return;
     }
-    const cloneModel = cloneNode.model; // narrowed to AnimatedModel
-    const targetSkin = cloneModel.skin!;
 
+    // One task for the whole import, ending in a `finally` so no early return leaves a spinning card.
+    // Single-step on purpose: this handles ONE file, and ProgressWindow renders a lone step as
+    // header + detail rather than a row list.
+    const task = startTask({
+      title: 'Importing animation',
+      steps: [{ name: fileName, status: 'pending' as StepStatus, detail: 'Queued' }],
+      cancellable: true,
+      // Two things to unblock: a parse running in the worker, and a flow parked on the review modal.
+      onCancel: () => {
+        cancelAllImports();
+        if (pendingAnimResolverRef.current) resolveAnimationImport(null);
+      },
+    });
+    const setStage = (stage: AnimImportStage, detail?: string, error?: string) => {
+      const s = ANIM_IMPORT_STAGES[stage];
+      task.setStep(0, {
+        status: s.status,
+        progress: s.progress,
+        detail: detail ?? (s.status === 'running' || s.status === 'paused' ? s.label : undefined),
+        error,
+      });
+    };
+
+    try {
+    // Parsed in the import worker: for an .fbx this is an uninterruptible assimp WASM call, which used
+    // to freeze the editor for the length of the import.
     let parsed: { animations: any[]; skin: any };
-    try { parsed = await Loader.loadAnimationsFromFile(files); }
-    catch (e) { Logger.error('Failed to parse animation file: ' + e, 'Editor'); return; }
-    if (!parsed.animations.length) { Logger.warn('No animation clips found in the file', 'Editor'); return; }
-    if (!parsed.skin) { Logger.warn('The imported file has no skeleton to match against', 'Editor'); return; }
+    setStage('parsing', `Reading ${fileName}`);
+    try { parsed = await parseAnimationFiles(files, (_fraction, stage) => setStage('parsing', stage || undefined)); }
+    catch (e) {
+      if (e instanceof ImportCancelled || task.cancelled) {
+        setStage('skipped', 'Cancelled');
+        Logger.info('Animation import cancelled', 'Editor'); return;
+      }
+      setStage('failed', undefined, String(e));
+      Logger.error('Failed to parse animation file: ' + e, 'Editor'); return;
+    }
+    if (!parsed.animations.length) {
+      setStage('failed', 'No animation clips in the file');
+      Logger.warn('No animation clips found in the file', 'Editor'); return;
+    }
+    if (!parsed.skin) {
+      setStage('failed', 'No skeleton to match against');
+      Logger.warn('The imported file has no skeleton to match against', 'Editor'); return;
+    }
     const sourceSkin = parsed.skin;
 
     // ONE mapping for the whole file — every clip in it shares the source skeleton, so matching is done once
     // and each clip's report is derived cheaply from it (and re-derived as the user edits rows in the modal).
     const mapping = buildBoneMapping(parsed.animations, sourceSkin, targetSkin);
-    const fileName = files.find(f => /\.(gltf|glb|fbx)$/i.test(f.name))?.name ?? files[0]?.name ?? 'animation';
 
     // Diagnostic (scope 'Retarget'): one structured snapshot per import, so a broken retarget can be
     // diagnosed from the console without the user's asset files. Includes each key bone's bind rotation
@@ -1961,6 +2217,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const sourceBones = mapping.entries.map(e => ({ node: e.sourceNode, name: e.sourceName ?? `node ${e.sourceNode}` }));
     const targetBones = targetSkin.joints.map((j: any) => ({ node: j.nodeIndex, name: nameOf(targetSkin, j.nodeIndex) }));
 
+    setStage('review', `${parsed.animations.length} clip${parsed.animations.length === 1 ? '' : 's'} — awaiting review`);
     const decision = await new Promise<AnimationImportDecision | null>(resolve => {
       pendingAnimResolverRef.current = resolve;
       setPendingAnimationImport({
@@ -1973,35 +2230,65 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         mapping, sourceBones, targetBones,
       });
     });
-    if (!decision) { Logger.info('Animation import cancelled', 'Editor'); return; }
+    if (!decision) {
+      setStage('skipped', 'Cancelled at review');
+      Logger.info('Animation import cancelled', 'Editor'); return;
+    }
     const finalMapping = decision.mapping; // the user may have re-pointed bones
 
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
-    const link = animationSourceAsset(src);
-    let asset = link?.asset;
-    let added = 0;
-    parsed.animations.forEach((clip, i) => {
-      if (!decision.include[i]) return;
-      // Retarget against the FINAL mapping, here on accept — this is the one expensive pass, deferred out of
-      // the modal's per-edit re-renders (which only recompute the cheap reports).
-      const remapped = retargetAnimation(clip, sourceSkin, targetSkin, finalMapping);
-      // Everything downstream stores the clip the CLONE settled on, not `remapped`. addAnimation de-dupes
-      // against the clips already present, so letting each target de-dupe independently could give the same
-      // import a different suffix in the asset than on the node — one clip under two names.
-      const stored = cloneModel.addAnimation(remapped);                          // preview clone
-      if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.addAnimation(stored); // persist
-      // The asset, and through it every other placement of this character. Chained rather than written per
-      // clip so a multi-clip import lands as ONE library update instead of one per clip.
-      if (asset) asset = assetWithClipAdded(asset, stored);
-      if (link) propagateModelClips(link.id, m => { m.addAnimation(stored); }, src);
-      added++;
-    });
-    if (added > 0) {
-      if (link && asset) updateModel(link.id, asset);
-      if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-import');
-      eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
-      Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName}`, 'Editor');
+
+    // The clips are stored in the file's OWN rig space, exactly as parsed — no retarget is baked in. That
+    // is what lets one stored walk serve every character sharing the rig, and it is why the source skin is
+    // stored beside them: `buildBoneMapping` needs both sides, at every later use.
+    setStage('retargeting', 'Storing clips');
+    const kept = parsed.animations.filter((_: any, i: number) => decision.include[i]);
+    if (!kept.length) {
+      setStage('skipped', 'Nothing selected');
+      Logger.info('No animation clips selected', 'Editor'); return;
     }
+    const namedClips = kept.map((clip: any) => {
+      const i = parsed.animations.indexOf(clip);
+      const typed = (decision.names?.[i] ?? '').trim();
+      return typed && typed !== clip.name ? { ...clip, name: typed } : clip;
+    });
+
+    // A second import of the same file should link the existing asset, not make a byte-identical twin —
+    // matched on clip CONTENT, since the same Mixamo download is routinely renamed between imports.
+    const existing = findEquivalentAnimation(animationsRef.current, namedClips as any);
+    const animAsset = existing ?? buildAnimationAsset(
+      namedClips[0]?.name || fileName.replace(/\.[^.]+$/, ''),
+      namedClips as any, storeSkin(sourceSkin), fileName,
+    );
+    if (existing) Logger.info(`"${existing.name}" already holds these clips — linked it instead of storing a copy`, 'Editor');
+    else addAnimation(animAsset);
+
+    setStage('saving', 'Linking to the model');
+    // The link lives on the MODEL asset, so every placement of that character picks the clips up.
+    const linkedModel = withAnimationRef(rigAsset, animAsset.id);
+    if (linkedModel !== rigAsset) updateModel(rigAsset.id, linkedModel);
+    invalidateAnimationCache(animAsset.id);
+
+    // Show it immediately on whatever is on screen: the Animation Editor's preview clone, the node it was
+    // opened from, and every other placement of this character across every live scene.
+    const resolved = resolveAnimationAsset(animAsset, targetSkin, rigAsset.id);
+    if (cloneModel) for (const clip of resolved) cloneModel.addAnimation({ ...clip });
+    if (src instanceof ModelNode && src.model instanceof AnimatedModel)
+      for (const clip of resolved) src.model.addAnimation({ ...clip });
+    for (const scene of liveScenes()) {
+      for (const node of Array.from(scene.nodes)) {
+        if (modelIdOf(node) !== rigAsset.id) continue;
+        if (node === src) continue;
+        applyModelAnimations(node, linkedModel, [...animationsRef.current.filter(a => a.id !== animAsset.id), animAsset]);
+      }
+    }
+
+    const added = namedClips.length;
+    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-import');
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+    Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName} into "${rigAsset.name}"`, 'Editor');
+    setStage('done', `Imported ${added} clip${added === 1 ? '' : 's'}`);
+    } finally { task.finish(); }
   };
 
   // Backfill bone names onto a skinned model that was imported before bone-name capture existed (so its
@@ -2016,8 +2303,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       return;
     }
     let parsed: { animations: any[]; skin: any };
-    try { parsed = await Loader.loadAnimationsFromFile(files); }
-    catch (e) { Logger.error('Failed to parse file: ' + e, 'Editor'); return; }
+    try { parsed = await parseAnimationFiles(files); }
+    catch (e) {
+      if (e instanceof ImportCancelled) { Logger.info('Skeleton import cancelled', 'Editor'); return; }
+      Logger.error('Failed to parse file: ' + e, 'Editor'); return;
+    }
     const srcNames: Map<number, string> | undefined = parsed.skin?.nodeNames;
     if (!srcNames || srcNames.size === 0) { Logger.warn('No bone names found in that file', 'Editor'); return; }
 
@@ -2384,13 +2674,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Create a material asset from a node's current material, link the node to it, and open its editor.
-  const createMaterialForNode = (node: Node) => {
+  const createMaterialForNode = (node: Node, submesh = 0) => {
     if (!instanceRef.current) return;
-    const material = getNodeMaterial(node);
+    // A merged model has one material per submesh; seed the new asset from the one being replaced.
+    const material = (node as any).model?.materials?.[submesh] ?? getNodeMaterial(node);
     if (!material) return;
-    const asset = buildMaterialAsset(material, `${node.name} Material`, '');
+    const suffix = submesh > 0 ? ` Material ${submesh + 1}` : ' Material';
+    const asset = buildMaterialAsset(material, `${node.name}${suffix}`, '');
     addMaterial(asset);
-    applyMaterialAsset(node, asset); // stamp __materialId so the node now references the asset
+    applyMaterialAsset(node, asset, submesh); // stamp __materialId(s) so the node now references the asset
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     openMaterialTab(asset); // seed directly: `asset` isn't in the `materials` state this render yet
@@ -2471,8 +2763,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // __editor__ named, so it neither appears in the mesh's tree nor gets saved into the asset.
     void createAssetEditScene(scene, withoutDirty);
 
-    const holder = new Node(asset.name);
-    scene.addNode(holder);
+    // No wrapper node here. This tab used to create `new Node(asset.name)` and parse the asset under it,
+    // which put a THIRD identically-named level in the Scene panel (root -> name -> name -> name). It was
+    // never serialized, carried no transform, and was rebuilt from `asset.name` on every open — a pure
+    // per-tab container. The asset's own root is the tab root now, so `runtime.rootId` addresses real
+    // content and selecting the tab selects the model instead of an empty box.
 
     // Restore legacy embedded textures (instantiateModelAsset used to do this).
     for (const t of asset.textures || []) {
@@ -2501,13 +2796,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     for (const json of levelJsons) {
       const clone = JSON.parse(JSON.stringify(json));
       regenerateIds(clone, new Map());
-      parseByType(holder, clone);
+      parseByType(scene.root, clone);
       levelIds.push(clone.id);
     }
     scene.start();
 
     const tabId = adoptTabId ?? cryptoRandomId();
-    tabRuntimeRef.current.set(tabId, { scene, rootId: holder.id });
+    // Level 0 IS the tab root — the LOD previews are its siblings under the scene root, not its children.
+    tabRuntimeRef.current.set(tabId, { scene, rootId: levelIds[0] });
     setModelSessions(prev => ({
       ...prev,
       [tabId]: {
@@ -2550,7 +2846,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
         // Detach synchronously with removeChild, not remove() — see syncTemplateInstances for why.
         parent.removeChild(inst);
-        const newId = instantiateModelAsset(asset, parent, materialsRef.current, modelsRef.current);
+        const newId = instantiateModelAsset(asset, parent, materialsRef.current, modelsRef.current, animationsRef.current);
         const newNode = scene.getNodeById(newId);
         if (newNode) {
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
@@ -2627,7 +2923,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // deleted subtree, since markForRemoval is never cleared.)
       const alive = (n: Node | null | undefined): n is Node => !!n && !n.markForRemoval;
 
-      const holder = runtime.scene.getNodeById(runtime.rootId);
       let baseRoot: Node | null = null;
       const recorded = runtime.scene.getNodeById(session.levelIds[0]);
       if (alive(recorded)) baseRoot = recorded;
@@ -2639,11 +2934,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const previewIds = new Set(session.levelIds.slice(1));
         const isContent = (n: Node) =>
           alive(n) && !previewIds.has(n.id) && !n.name.includes('__editor__') && !n.name.includes('__debug__');
-        // Inside the holder first (the usual case), then at the scene root — a new root node added while
-        // the scene row was selected lands there rather than inside the holder.
-        let candidates = (holder?.children ?? []).filter(isContent);
-        if (candidates.length === 0)
-          candidates = runtime.scene.root.children.filter(n => n.id !== runtime.rootId && isContent(n));
+        // Everything the user left at the scene root, minus the read-only LOD previews and the editor's
+        // own camera/light. With the per-tab holder gone this is the only place content can be.
+        const candidates = runtime.scene.root.children.filter(isContent);
 
         if (candidates.length === 0) {
           Logger.error(`Model "${tab.title}" has no content to save — its root node was deleted.`, 'Editor');
@@ -2776,16 +3069,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
 
     try {
-      const holder = runtime.scene.getNodeById(runtime.rootId);
-      if (!holder) return;
-
-      // Splice in a preview of the referenced mesh. Ids are regenerated so it cannot collide with the
-      // level it was cloned from — the same asset may legitimately be open in its own tab.
+      // Splice in a preview of the referenced mesh, as a SIBLING of level 0 under the scene root — the
+      // levels are alternatives to each other, and applyActiveModelLevel shows exactly one at a time.
+      // (It used to be parented to this tab's holder; with the holder gone, parenting it to level 0 would
+      // nest one model inside another and it would be serialized into the asset on the next save.)
       const clone = JSON.parse(JSON.stringify(source.nodeJson));
       regenerateIds(clone, new Map());
       resolveMaterialRefs(clone, materialsRef.current);
       clone.name = source.name;
-      parseByType(holder, clone);
+      parseByType(runtime.scene.root, clone);
 
       // Match LOD0's size so the levels line up with the near model.
       const preview = runtime.scene.getNodeById(clone.id);
@@ -2911,7 +3203,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     const holder = new Node(field.name);
     scene.addNode(holder);
-    instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current);
+    instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current, animationsRef.current);
     scene.root.updateTransforms();
 
     const skinned = firstSkinnedModelNode(holder);
@@ -3189,6 +3481,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // Which material asset each sub-mesh ended up on — a separated asset must list only the materials
         // ITS own mesh uses, not every material in the file.
         const materialIdOfChild = new Map<ModelNode, string>();
+        const materialAssetOfChild = new Map<ModelNode, MaterialAsset>();
         for (const child of children) {
           const mat = (child.model as any).material as Material;
           if (!mat) continue;
@@ -3203,9 +3496,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           }
           applyMaterialAsset(child, asset); // stamps __materialId + rebuilds the node's material
           materialIdOfChild.set(child, asset.id);
+          materialAssetOfChild.set(child, asset);
         }
 
         const separate = decision.separate && children.length > 1;
+        // Merge AFTER the material assets exist, so each submesh carries its own __materialId into the
+        // merged node. Mutually exclusive with `separate`, which is the opposite operation.
+        if (decision.merge && !separate && children.length > 1) {
+          setStage(i, 'saving', `Merging ${children.length} sub-meshes`);
+          const mergedChildren = mergeSubModels(root, children, materialAssetOfChild);
+          if (mergedChildren) children = mergedChildren;
+        }
+
         setStage(i, 'saving', separate
           ? `Creating ${children.length} separate assets`
           : 'Serializing to the model library');
@@ -3219,7 +3521,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           setStage(i, 'done', summary);
           Logger.info(`Imported "${bundle.name}" as ${summary}`, 'Editor');
         } else {
-          const modelAsset = await buildModelAsset(root, materialIds, '');
+          // Collapse the import's holder into its single ModelNode, so a one-part model is ONE row in the
+          // Scene panel instead of two identically-named ones. A multi-part model keeps its holder.
+          const modelAsset = flattenModelAsset(await buildModelAsset(root, materialIds, ''));
           addModel(modelAsset);
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
@@ -4582,11 +4886,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addModel, removeModel, updateModel,
     addScriptAsset, removeScriptAsset, updateScriptAsset,
     addAnimationField, removeAnimationField, updateAnimationField,
+    addAnimation, removeAnimation, updateAnimation,
     addTileset, removeTileset, updateTileset,
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
-    templates, materials, terrainMaterials, models, scriptAssets, animationFields, tilesets, assetsLoaded, ...libraryActions,
-  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, tilesets, assetsLoaded, libraryActions]);
+    templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets, assetsLoaded, ...libraryActions,
+  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
     setActiveTab, closeTab, reorderTabs, saveActiveTab, saveAll, markTabDirty, clearTabDirty, withoutDirty,
@@ -4624,10 +4929,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterMaterialEditor, createMaterialForNode, setActiveMaterialName,
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
     enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
-    importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport,
+    importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport, resolveRigPick,
     enterModelEditor, setActiveModelName, addModelLodFromAsset, removeModelLod,
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
     enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource,
+    adoptExternalScriptSource, renameScriptAsset,
     scriptAssetOf, createScriptForNode, attachScriptToNode, detachScriptFromNode,
     enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField,
   });
@@ -4635,7 +4941,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingTemplateName, templateRootId,
     editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
-    animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport,
+    animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
     editingAnimationFieldId, animationFieldTargetId,
     modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
     modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
@@ -4646,7 +4952,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   }), [
     editingTemplateName, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
-    animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport,
+    animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
     editingAnimationFieldId, animationFieldTargetId,
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
@@ -4725,10 +5031,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       attachScriptToNode,
       detachScriptFromNode,
       saveScriptSource,
+      adoptExternalScriptSource,
+      renameScriptAsset,
       animationFields,
       addAnimationField,
       removeAnimationField,
       updateAnimationField,
+      animations,
+      addAnimation,
+      removeAnimation,
+      updateAnimation,
       enterAnimationFieldEditor,
       createAnimationFieldForModel,
       editingAnimationFieldId,
@@ -4773,6 +5085,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setClipRootMotion,
       pendingAnimationImport,
       resolveAnimationImport,
+      pendingRigPick,
+      resolveRigPick,
       replaceProjectMeta,
       savingState,
       sceneList,

@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "cross-env CLEO_DEV=1 electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "e2e:scripts": "electron tools/scriptWorkspaceE2E.js"
   },
   "build": {
     "appId": "com.cleo.editor",
@@ -16,7 +17,8 @@
     "files": [
       "main.js",
       "preload.js",
-      "gameTemplates.js"
+      "gameTemplates.js",
+      "scriptWorkspace.js"
     ],
     "extraResources": [
       {
@@ -27,9 +29,15 @@
     "directories": {
       "output": "dist"
     },
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg" },
-    "linux": { "target": "AppImage" }
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   },
   "devDependencies": {
     "cross-env": "^7.0.3",

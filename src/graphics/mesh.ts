@@ -223,6 +223,25 @@ export class Mesh {
         if (mode === gl.TRIANGLES) frameStats.triangles += count / 3;
     }
 
+    /**
+     * Draw one slice of the index buffer — how a merged, multi-material model draws each of its
+     * submeshes with its own material over a single shared vertex buffer.
+     *
+     * `indexOffset` is in INDICES; `drawElements` wants bytes, hence the multiply by the index size.
+     * LODs are ignored on purpose: a LOD level is a whole alternate index buffer, so its ranges would
+     * be meaningless. A model with submeshes never gets LODs (LOD baking rejects them upstream).
+     */
+    public drawRange(indexOffset: number, indexCount: number, mode: number = gl.TRIANGLES): void {
+        if (indexCount <= 0 || !this._indexBuffer || this._indexCount <= 0) return;
+        GLState.bindVAO(this._vertexArray);
+        if (this.hasLods) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[0]);
+        const bytesPerIndex = this._indexType === gl.UNSIGNED_SHORT ? 2 : 4;
+        gl.drawElements(mode, indexCount, this._indexType, indexOffset * bytesPerIndex);
+        frameStats.drawCalls++;
+        frameStats.vertices += indexCount;
+        if (mode === gl.TRIANGLES) frameStats.triangles += indexCount / 3;
+    }
+
     public drawInstanced(instanceCount: number, mode: number = gl.TRIANGLES): void {
         GLState.bindVAO(this._vertexArray);
         // Note this path ignores LODs entirely — it always draws the base index buffer, so _indexType

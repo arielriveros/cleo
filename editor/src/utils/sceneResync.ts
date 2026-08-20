@@ -143,7 +143,7 @@ export function resyncScene(
     let live = node
     if (!node.getVariable(TEMPLATE_ID_VAR) && changedSince('model', modelId, hashAsset(asset))) {
       live = reinstantiate(scene, node, maps,
-        parent => instantiateModelAsset(asset, parent, libs.materials, libs.models)) ?? node
+        parent => instantiateModelAsset(asset, parent, libs.materials, libs.models, libs.animations)) ?? node
       changed = true
     }
     // The IK rig is skeleton data and the ASSET owns it, so it is re-applied here whatever the hash says.

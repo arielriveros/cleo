@@ -4,7 +4,7 @@ import { usePlayback } from './PlaybackContext'
 import { useDebugVisibility } from './DebugVisibilityContext'
 import { ModelNode, AnimatedModel, Vec } from 'cleo'
 import type { Skin } from 'cleo'
-import { computeBindMatrices, computeJointWorldMatrices, worldPositionOf } from './animation/skeleton'
+import { bonePairsOf, computeBindMatrices, computeJointWorldMatrices, worldPositionOf } from './animation/skeleton'
 
 // Skeleton/bone overlay for the MAIN viewport (a debug category), distinct from the Animation Editor's
 // AnimationSkeletonTool which owns the overlay while that mode is up. This one draws EVERY skinned model
@@ -19,21 +19,6 @@ const BONE_COLOR: [number, number, number] = [0.85, 0.85, 0.9]
 const JOINT_SCREEN_SIZE = 0.02
 
 const bindCache = new WeakMap<Skin, any[]>()
-const pairsCache = new WeakMap<Skin, [number, number][]>()
-
-function bonePairsFor(skin: Skin): [number, number][] {
-  const cached = pairsCache.get(skin)
-  if (cached) return cached
-  const nodeIndexToJoint = new Map<number, number>()
-  skin.joints.forEach((j, i) => nodeIndexToJoint.set(j.nodeIndex, i))
-  const pairs: [number, number][] = []
-  skin.joints.forEach((j, i) => {
-    const p = j.parentIndex !== undefined ? (nodeIndexToJoint.get(j.parentIndex) ?? -1) : -1
-    if (p >= 0) pairs.push([i, p])
-  })
-  pairsCache.set(skin, pairs)
-  return pairs
-}
 
 export default function DebugSkeletonOverlay() {
   const { instance, editorMode } = useCleoEngine()
@@ -78,7 +63,7 @@ export default function DebugSkeletonOverlay() {
           const skin = model.skin
           let bind = bindCache.get(skin)
           if (!bind) { bind = computeBindMatrices(skin); bindCache.set(skin, bind) }
-          const pairs = bonePairsFor(skin)
+          const pairs = bonePairsOf(skin)
           const mats = computeJointWorldMatrices(node, node.animator, skin, bind)
           const n = skin.joints.length
 
