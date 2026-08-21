@@ -10,13 +10,11 @@ layout (location = 6) in vec4 a_weights;     // Joint weights (up to 4 weights p
 
 out vec3 fragPos;
 out vec2 fragTexCoord;
-out vec4 fragPosLightSpace;
 out mat3 TBN;
 
 uniform mat4 u_model;
 uniform mat4 u_view;
 uniform mat4 u_projection;
-uniform mat4 u_lightSpace;
 
 const int MAX_BONES = 100;
 const int MAX_BONE_INFLUENCE = 4;
@@ -58,7 +56,6 @@ void main() {
     
     fragPos = vec3(u_model * totalPosition);
     fragTexCoord = a_texCoord;
-    fragPosLightSpace = u_lightSpace * vec4(fragPos, 1.0);
 
     vec3 T = normalize(vec3(u_model * vec4(totalTangent, 0.0)));
     vec3 N = normalize(vec3(u_model * vec4(totalNormal, 0.0)));

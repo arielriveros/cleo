@@ -20,6 +20,12 @@ import { PointLight, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import { Shader } from './shader';
 import { Framebuffer } from './framebuffer';
+import { LayeredDepthFramebuffer } from './layeredDepthFramebuffer';
+import {
+    MAX_CASCADES, CascadeSphere, computeCascadeSplits, cascadeSphereFromPerspective,
+    cascadeSphereFromCorners, quantizeRadius, cascadeDepthScale, buildCascadeMatrix,
+    spotShadowFar, SpotShadowSlots,
+} from './shadowMath';
 import { Geometry } from '../core/geometry';
 import { Frustum } from '../core/frustum';
 import { AnimatedModel } from './animatedModel';
@@ -38,6 +44,9 @@ import OutlineFragment from './shaders/materials/outline.fs'
 import ShadowMapVertex from './shaders/environment/shadowMap.vs'
 import ShadowMapFragment from './shaders/environment/shadowMap.fs'
 import ShadowMapSkinnedVertex from './shaders/environment/shadowMapSkinned.vs'
+import ShadowMapInstancedVertex from './shaders/environment/shadowMapInstanced.vs'
+import ShadowMapCutoutFragment from './shaders/environment/shadowMapCutout.fs'
+import ShadowDebugFragment from './shaders/screen/shadowDebug.fs'
 import SkyboxVertex from './shaders/environment/skybox.vs'
 import SkyboxFragment from './shaders/environment/skybox.fs'
 import VolumetricCloudsFragment from './shaders/environment/volumetricClouds.fs'
@@ -131,6 +140,14 @@ const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned
  * index space is bounded by the shader's array sizes, so the whole table can be built once.
  */
 const MAX_LIGHT_SLOTS = 32;
+/**
+ * The shader-side array sizes, from shaders/constants.glsl. The name table above is deliberately
+ * larger (a uniform that does not exist is a silent no-op), but the COUNT uniforms are not: the
+ * shaders loop `for (i = 0; i < u_numSpotlights; i++)` and read `u_spotlights[i]`, so a scene with
+ * more lights than the array holds read out of bounds. Clamp the counts, never the table.
+ */
+const GLSL_MAX_POINT_LIGHTS = 16;
+const GLSL_MAX_SPOTLIGHTS = 8;
 const POINT_LIGHT_FIELDS = ['position', 'diffuse', 'specular', 'ambient', 'constant', 'linear', 'quadratic'] as const;
 const SPOT_LIGHT_FIELDS = ['position', 'direction', 'diffuse', 'specular', 'ambient', 'constant', 'linear', 'quadratic', 'cutOff', 'outerCutOff'] as const;
 
@@ -160,7 +177,7 @@ function allForwardShaders(): string[] {
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' | 'overdraw';
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'cascades' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' | 'overdraw';
 
 interface RendererConfig {
     clearColor?: number[];
@@ -170,6 +187,8 @@ interface RendererConfig {
     deferred?: boolean;
     /** Max distance covered by the directional cascaded shadow maps (default 100). */
     shadowDistance?: number;
+    /** Number of shadow cascades, 1..4 (default 3). */
+    shadowCascades?: number;
     /** Screen-space ambient occlusion (deferred path only, default true). */
     ssao?: boolean;
 }
@@ -224,6 +243,25 @@ export interface RenderSettings {
     ssaoResolutionScale: number;
     shadowMapResolution: number;
     bloomEnabled: boolean;
+    // Shadows. Everything here is authored in the editor's Renderer mode and rides the same blob
+    // through save / publish / the standalone player.
+    shadowsEnabled: boolean;
+    shadowCascades: number;
+    shadowDistance: number;
+    shadowSplitLambda: number;
+    shadowDepthBias: number;
+    shadowNormalBias: number;
+    shadowFilterRadius: number;
+    shadowFilterMode: number;
+    shadowStrength: number;
+    shadowCascadeBlend: number;
+    shadowStabilize: boolean;
+    shadowStagger: boolean;
+    shadowCasterPad: number;
+    spotShadowsEnabled: boolean;
+    spotShadowResolution: number;
+    spotShadowDistance: number;
+    spotShadowBias: number;
 }
 
 /** The knobs each quality tier sets. `custom` has no entry — it means "don't touch anything". */
@@ -237,6 +275,11 @@ interface QualityTier {
     ssaoSamples: number;
     ssaoResolutionScale: number;
     shadowMapResolution: number;
+    shadowCascades: number;
+    /** 0 = 3x3 tap grid, 1 = 16-tap rotated Poisson. */
+    shadowFilterMode: number;
+    /** Filter kernel radius in shadow texels; 0 collapses to a single (hard-edged) tap. */
+    shadowFilterRadius: number;
     bloomEnabled: boolean;
     motionBlurEnabled: boolean;
 }
@@ -252,25 +295,29 @@ const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier> = {
         renderScale: 1.0,
         cloudResolutionScale: 1.0, cloudSteps: 48, cloudLightSteps: 6,
         ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0,
-        shadowMapResolution: 4096, bloomEnabled: true, motionBlurEnabled: true,
+        shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
+        bloomEnabled: true, motionBlurEnabled: true,
     },
     high: {
         renderScale: 1.0,
         cloudResolutionScale: 0.5, cloudSteps: 40, cloudLightSteps: 5,
         ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5,
-        shadowMapResolution: 2048, bloomEnabled: true, motionBlurEnabled: true,
+        shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
+        bloomEnabled: true, motionBlurEnabled: true,
     },
     medium: {
         renderScale: 1.0,
         cloudResolutionScale: 0.35, cloudSteps: 28, cloudLightSteps: 4,
         ssaoEnabled: true, ssaoSamples: 16, ssaoResolutionScale: 0.5,
-        shadowMapResolution: 1024, bloomEnabled: true, motionBlurEnabled: false,
+        shadowMapResolution: 1024, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
+        bloomEnabled: true, motionBlurEnabled: false,
     },
     low: {
         renderScale: 0.75,
         cloudResolutionScale: 0.25, cloudSteps: 20, cloudLightSteps: 3,
         ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5,
-        shadowMapResolution: 1024, bloomEnabled: false, motionBlurEnabled: false,
+        shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,
+        bloomEnabled: false, motionBlurEnabled: false,
     },
 };
 
@@ -388,7 +435,6 @@ export class Renderer {
     // draw so fullscreen passes (fog, god rays, screen materials) can sample the full opaque depth
     // without a read/write feedback on the bound _sceneFBO.
     private _sceneDepthFBO: Framebuffer;
-    private _shadowMapFBO: Framebuffer;
     private _gBufferFBO: Framebuffer;
 
     // Offscreen thumbnail capture (editor asset previews). While `_presentTarget` is set the renderer is in
@@ -402,27 +448,117 @@ export class Renderer {
     // Separate 2:1 (non-square) target for the light-probe cubemap preview thumbnail. Allocated on first use.
     private _probePreviewFBO: Framebuffer | null = null;
 
-    // Cascaded shadow maps (directional light, deferred path)
-    private readonly _cascadeCount: number = 3;
-    private _shadowCascades: Framebuffer[] = [];
+    // ---- Cascaded shadow maps --------------------------------------------------------------
+    // ONE depth TEXTURE_2D_ARRAY, one layer per cascade, sampled by every lighting path (deferred,
+    // forward materials, custom materials, god rays) through shaders/environment/shadows.glsl.
+    // There is no second "single shadow map" any more: the legacy path was a fixed 40x40 ortho box
+    // pinned to the world origin, so forward-lit geometry more than 20 units away simply had no
+    // shadow, and spot/point lights got an identity matrix.
+    private _shadowCascadeFBO!: LayeredDepthFramebuffer;
+    private _cascadeCount: number = 3;
+    /**
+     * The matrices the layers were last RASTERIZED with — NOT necessarily this frame's fit.
+     *
+     * With staggering on, a distant cascade is re-rendered only every 2nd or 4th frame, so uploading
+     * a freshly computed matrix for a layer whose depth was rendered with the previous one makes its
+     * shadows slide across the world as the camera moves. The splits still update every frame (they
+     * only decide which layer a pixel reads); the matrix must follow the pixels.
+     */
     private _cascadeMatrices: mat4[] = [];
     private _cascadeSplits: number[] = [];
-    private _useCSM: boolean = false;
+    /** Per cascade: 1 / world depth range, converting the world-unit depth bias into depth units. */
+    private _cascadeDepthScales: number[] = [];
+    /** Per cascade: world size of one shadow texel, scaling the normal-offset bias. */
+    private _cascadeTexelSizes: number[] = [];
+    /** True for the frame when the cascades hold a valid render (a caster exists and shadows are on). */
+    private _shadowsActive: boolean = false;
     // True once something has been rendered into the shadow maps. A scene with no shadow-casting light
     // must clear them (they'd otherwise still hold the previous scene's depth) — but only once, not every
-    // frame: these are several 4096² depth buffers.
+    // frame: these are several 4096² depth layers.
     private _shadowMapsDirty: boolean = false;
+    /**
+     * Forces every cascade to re-rasterize on the next frame, bypassing the stagger.
+     *
+     * Freshly allocated `texStorage3D` storage holds UNDEFINED depth, and the stagger only re-renders
+     * cascade 3 every eighth frame — so after a resolution or cascade-count change the distant layers
+     * would be sampled as garbage for up to eight frames, which shows up as large blotches of false
+     * shadow. Both of those changes are one click apart in the editor's Renderer panel.
+     */
+    private _shadowFullUpdate: boolean = true;
     // Whole-array upload buffers + per-program cached base (`[0]`) locations for the cascade uniforms.
     // Basic-type uniform arrays are only reachable via their [0] location, not per element. Cached per
-    // program because both the deferred lighting and volumetric god-rays passes sample the cascades.
-    private _cascadeMatPacked: Float32Array = new Float32Array(this._cascadeCount * 16);
-    private _cascadeSplitPacked: Float32Array = new Float32Array(this._cascadeCount);
-    private _cascadeUnitPacked: Int32Array = new Int32Array(this._cascadeCount);
-    private _cascadeLocs: Map<WebGLProgram, { mat: WebGLUniformLocation | null, split: WebGLUniformLocation | null, sampler: WebGLUniformLocation | null }> = new Map();
+    // program because every lighting path samples the cascades. Sized to MAX_CASCADES, not the live
+    // count, so changing the cascade count never reallocates them.
+    private _cascadeMatPacked: Float32Array = new Float32Array(MAX_CASCADES * 16);
+    private _cascadeSplitPacked: Float32Array = new Float32Array(MAX_CASCADES);
+    private _cascadeDepthScalePacked: Float32Array = new Float32Array(MAX_CASCADES);
+    private _cascadeTexelPacked: Float32Array = new Float32Array(MAX_CASCADES);
+    private _cascadeLocs: Map<WebGLProgram, { mat: WebGLUniformLocation | null, split: WebGLUniformLocation | null, depthScale: WebGLUniformLocation | null, texel: WebGLUniformLocation | null }> = new Map();
+
+    // ---- Shadow tunables (all authored in the editor's Renderer mode) -----------------------
+    private _shadowsEnabled: boolean = true;
     private _shadowDistance: number;
-    // The frame's shadow-casting light (last one wins, matching the shadow pass) so post passes
-    // (volumetric god rays) can transform samples into light space.
+    /** Split scheme blend: 0 = uniform slabs, 1 = logarithmic. */
+    private _shadowSplitLambda: number = 0.5;
+    /** Constant bias along the light, in WORLD units (converted per cascade — see _cascadeDepthScales). */
+    private _shadowDepthBias: number = 0.03;
+    /** Offset along the surface normal before the lookup, in shadow texels. */
+    private _shadowNormalBias: number = 1.5;
+    /** PCF kernel radius in shadow texels; 0 collapses to a single (hard-edged) tap. */
+    private _shadowFilterRadius: number = 1.0;
+    /** 0 = 3x3 tap grid, 1 = 16-tap rotated Poisson. */
+    private _shadowFilterMode: number = 0;
+    private _shadowStrength: number = 1.0;
+    /** Fraction of a cascade's range used to cross-fade into the next one; 0 = a hard seam. */
+    private _cascadeBlend: number = 0.1;
+    private _shadowStabilize: boolean = true;
+    private _shadowStagger: boolean = true;
+    /** How far behind a cascade's slice the near plane reaches, so off-slice occluders still cast. */
+    private _shadowCasterPad: number = 50;
+    /** Editor debug: tint each pixel by the cascade it selected. */
+    private _debugCascades: boolean = false;
+    /** Editor debug: which cascade layer the 'shadow' channel blits. */
+    private _shadowDebugLayer: number = 0;
+    /**
+     * Suppresses shadow lookups for the current draw regardless of `_shadowsEnabled`. Set while a
+     * light probe is being captured: the cascades are fit to the MAIN camera's frustum, so a probe
+     * anywhere else would sample outside every one of them and bake an arbitrary result.
+     */
+    private _shadowsSuppressed: boolean = false;
+    // The frame's shadow-casting light so post passes (volumetric god rays) know the sun.
     private _shadowLight: LightNode | null = null;
+
+    // ---- Spot-light shadows ------------------------------------------------------------------
+    // A second depth array: one PERSPECTIVE map per shadow-casting spot light, matching its cone.
+    // Capped low on purpose — each caster is a full extra depth rasterization of the scene, and the
+    // shader samples them inside the per-spot-light loop.
+    private static readonly MAX_SPOT_SHADOWS = 4;
+    private _spotShadowFBO!: LayeredDepthFramebuffer;
+    /**
+     * Atlas layer per light id.
+     *
+     * Keyed by node id, never by LightNode.index: Scene assigns those as a dense compaction over
+     * traversal order, so spawning or removing ANY node renumbers every spotlight after it — and an
+     * index-keyed atlas would hand light B the map that was rendered for light A one frame later.
+     */
+    private _spotSlots: SpotShadowSlots = new SpotShadowSlots(Renderer.MAX_SPOT_SHADOWS);
+    private _spotShadowMatrices: mat4[] = [];
+    private _spotShadowMatPacked: Float32Array = new Float32Array(Renderer.MAX_SPOT_SHADOWS * 16);
+    private _spotShadowTexelScalePacked: Float32Array = new Float32Array(Renderer.MAX_SPOT_SHADOWS);
+    /** Layer for spot light i, or -1. Rebuilt WHOLE every frame — see the id-keying note above. */
+    private _spotShadowLayerPacked: Int32Array = new Int32Array(GLSL_MAX_SPOTLIGHTS);
+    private _spotLocs: Map<WebGLProgram, { mat: WebGLUniformLocation | null, texelScale: WebGLUniformLocation | null, layer: WebGLUniformLocation | null }> = new Map();
+    private _spotShadowsEnabled: boolean = true;
+    private _spotShadowResolution: number = 1024;
+    /** Cap on a spot's derived far plane, so a barely-attenuating light cannot stretch its map flat. */
+    private _spotShadowDistance: number = 100;
+    private _spotShadowBias: number = 0.0015;
+    private _spotShadowsActive: boolean = false;
+    private _spotShadowsDirty: boolean = false;
+    private _spotView: mat4 = mat4.create();
+    private _spotProj: mat4 = mat4.create();
+    private _spotTarget: vec3 = vec3.create();
+    private _spotUp: vec3 = vec3.create();
 
     // Post processing
     private _compose_FBOs: Framebuffer[];
@@ -552,7 +688,10 @@ export class Renderer {
     private _csmEye: vec3 = vec3.create();
     private _csmUp: vec3 = vec3.create();
     private _csmTmp: vec3 = vec3.create();
-    private _csmSplits: number[] = new Array(3).fill(0);
+    private _csmSplits: number[] = new Array(MAX_CASCADES).fill(0);
+    private _csmSphere: CascadeSphere = { center: vec3.create(), radius: 0 };
+    private _csmScratch = { view: mat4.create(), proj: mat4.create(), up: vec3.create(), center: vec3.create() };
+    private _csmForward: vec3 = vec3.create();
     /** Frame counter used to stagger distant cascade updates (see _renderCascades). */
     private _frameIndex: number = 0;
     // Scratch for the clip->view matrix handed to ssao.fs (see viewPosFromUV).
@@ -646,6 +785,7 @@ export class Renderer {
         this._config = config;
         this._deferred = config.deferred !== false; // default: deferred on
         this._shadowDistance = config.shadowDistance ?? 100;
+        this._cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._cascadeCount)));
         this._ssaoEnabled = config.ssao !== false; // default: SSAO on
         // Create canvas
         this._canvas = document.createElement('canvas');
@@ -677,11 +817,14 @@ export class Renderer {
         // Create framebuffers
         this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._sceneDepthFBO = new Framebuffer({ usage: 'depth' });
-        this._shadowMapFBO = new Framebuffer({ usage: 'depth' });
-        for (let i = 0; i < this._cascadeCount; i++) {
-            this._shadowCascades.push(new Framebuffer({ usage: 'depth' }));
+        this._shadowCascadeFBO = new LayeredDepthFramebuffer();
+        this._spotShadowFBO = new LayeredDepthFramebuffer();
+        for (let i = 0; i < Renderer.MAX_SPOT_SHADOWS; i++) this._spotShadowMatrices.push(mat4.create());
+        for (let i = 0; i < MAX_CASCADES; i++) {
             this._cascadeMatrices.push(mat4.create());
             this._cascadeSplits.push(0);
+            this._cascadeDepthScales.push(0);
+            this._cascadeTexelSizes.push(0);
         }
         this._gBufferFBO = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
@@ -766,6 +909,8 @@ export class Renderer {
         const shadowMapShader = new Shader().create(ShadowMapVertex, ShadowMapFragment);
         // Skinned depth shader so animated meshes cast their animated-pose shadow (not the bind pose).
         const shadowMapSkinnedShader = new Shader().create(ShadowMapSkinnedVertex, ShadowMapFragment);
+        const shadowMapInstancedShader = new Shader().create(ShadowMapInstancedVertex, ShadowMapFragment);
+        const shadowMapInstancedCutoutShader = new Shader().create(ShadowMapInstancedVertex, ShadowMapCutoutFragment);
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
         // Volumetric clouds (fullscreen raymarch, runs on the screen vertex shader)
         const volumetricCloudsShader = new Shader().create(ScreenVertex, VolumetricCloudsFragment);
@@ -784,6 +929,7 @@ export class Renderer {
         const presentShader = new Shader().create(ScreenVertex, PresentFragment);
         const godRaysShader = new Shader().create(ScreenVertex, VolumetricGodRaysFragment);
         const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
+        const shadowDebugShader = new Shader().create(ScreenVertex, ShadowDebugFragment);
         const bloomShader = new Shader().create(ScreenVertex, Bloom);
         const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
         // Reuses the selection-mask vertex shader: it is the minimal MVP transform the mask pass
@@ -835,6 +981,8 @@ export class Renderer {
         this._shaderManager.addShader('brdf', brdfShader);
         this._shaderManager.addShader('shadowMap', shadowMapShader);
         this._shaderManager.addShader('shadowMapSkinned', shadowMapSkinnedShader);
+        this._shaderManager.addShader('shadowMapInstanced', shadowMapInstancedShader);
+        this._shaderManager.addShader('shadowMapInstancedCutout', shadowMapInstancedCutoutShader);
         this._shaderManager.addShader('skybox', skybox);
         this._shaderManager.addShader('volumetricClouds', volumetricCloudsShader);
         this._shaderManager.addShader('cloudNoiseBake', cloudNoiseBakeShader);
@@ -847,6 +995,7 @@ export class Renderer {
         this._shaderManager.addShader('present', presentShader);
         this._shaderManager.addShader('godRays', godRaysShader);
         this._shaderManager.addShader('debugView', debugViewShader);
+        this._shaderManager.addShader('shadowDebug', shadowDebugShader);
         this._shaderManager.addShader('bloom', bloomShader);
         this._shaderManager.addShader('blur', blurShader);
         this._shaderManager.addShader('overdraw', overdrawShader);
@@ -878,9 +1027,8 @@ export class Renderer {
         // not the old hard-coded 4096 per cascade.
         const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || this._shadowMapResolution;
         this._shadowMapResolution = SHADOW_MAP_SIZE;
-        this._shadowMapFBO.create(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
-        for (const cascade of this._shadowCascades)
-            cascade.create(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+        this._shadowCascadeFBO.create(SHADOW_MAP_SIZE, this._cascadeCount);
+        this._spotShadowFBO.create(this._spotShadowResolution, Renderer.MAX_SPOT_SHADOWS);
 
         this._blur_FBOs[0].create(rw / 2, rh / 2);
         this._blur_FBOs[1].create(rw / 2, rh / 2);
@@ -947,41 +1095,37 @@ export class Renderer {
         resetFrameStats();
         const _statsT0 = performance.now();
 
-        // Shadow map depth pass (shared by both pipelines). Keep the last shadow-casting light.
+        // Shadow map depth pass, shared by both pipelines and by every material path.
+        //
+        // The caster is the FIRST directional light flagged to cast, in scene traversal order. It used
+        // to be the LAST one the light Set happened to yield, which meant adding an unrelated light
+        // could silently move the sun's shadows to a different light.
         let shadowLight: LightNode | null = null;
-        for (const node of scene.lights)
-            if (node.castShadows) shadowLight = node;
-        this._shadowLight = shadowLight; // post passes (volumetric god rays) need its light space
+        for (const node of scene.lights) {
+            if (!node.castShadows || node.type !== 'directional') continue;
+            shadowLight = node;
+            break;
+        }
+        this._shadowLight = shadowLight; // post passes (volumetric god rays) need the sun
 
-        this._useCSM = false;
-        if (shadowLight) {
-            // Directional lights in the deferred path use cascaded shadow maps; everything else
-            // (spot/point shadows, or the whole forward pipeline) uses the single shadow map.
-            if (this._deferred && shadowLight.type === 'directional') {
-                if (this._beginPass('shadows.cascades')) {
-                    this._renderCascades(scene.models, shadowLight);
-                    this._useCSM = true;
-                }
-                // Forward-rendered objects (opaque Blinn-Phong + transparent) sample the single shadow
-                // map, not the cascades — render it too so they receive directional light/shadows
-                // (otherwise they read a stale map, come out fully shadowed, and lose directional light).
-                // Skipped when the scene has no forward objects (pure PBR) to avoid an extra pass.
-                let hasForward = false;
-                for (const n of scene.models) {
-                    if (!n.visible) continue;
-                    const m = n.model.material;
-                    if (m.config.transparent || m.type === 'blinn_phong' || m.type === 'blinn_phongSkinned') { hasForward = true; break; }
-                }
-                if (hasForward && this._beginPass('shadows.single')) this._renderShadowMap(scene.models, shadowLight);
-            } else if (this._beginPass('shadows.single')) {
-                this._renderShadowMap(scene.models, shadowLight);
+        // Foliage GPU state must be current BEFORE the shadow pass, which can now draw it.
+        this._ensureFoliageUploaded(scene);
+
+        this._shadowsActive = false;
+        if (shadowLight && this._shadowsEnabled) {
+            if (this._beginPass('shadows.cascades')) {
+                this._renderCascades(scene, shadowLight);
+                this._shadowsActive = true;
+                this._shadowMapsDirty = true;
             }
-            this._shadowMapsDirty = true;
-        } else {
-            // No shadow caster: the shadow pass above is skipped, so the maps still hold the LAST scene's
-            // depth — and the material/lighting shaders sample them regardless. That leaked a ghost shadow
-            // of the previous scene's geometry into every preview render (asset thumbnails are throwaway
-            // scenes whose lights deliberately don't cast). Clear them to the far plane so nothing occludes.
+        }
+        this._renderSpotShadows(scene);
+
+        if (!this._shadowsActive) {
+            // No caster (or shadows switched off): the pass above is skipped, so the layers still hold
+            // the LAST scene's depth — and every lighting shader samples them regardless. That leaked a
+            // ghost shadow of the previous scene into every preview render (asset thumbnails are
+            // throwaway scenes whose lights deliberately don't cast). Clear to the far plane, once.
             this._clearShadowMaps();
         }
 
@@ -1117,7 +1261,7 @@ export class Renderer {
         this._resetForwardLighting(scene);
         for (const light of scene.lights)
             this._setLighting(light, scene.numPointLights, scene.numSpotlights);
-        if (shadowLight) this._bindShadowToForwardShaders(shadowLight);
+        this._bindShadowsToForwardShaders();
         this._bindEnvToForwardShaders(scene);
         this._renderScene(scene);
     }
@@ -1131,8 +1275,8 @@ export class Renderer {
     private _resetForwardLighting(scene: Scene): void {
         for (const shaderName of allForwardShaders()) {
             this._shaderManager.bind(shaderName);
-            this._shaderManager.setUniform('u_numPointLights', scene.numPointLights);
-            this._shaderManager.setUniform('u_numSpotlights', scene.numSpotlights);
+            this._shaderManager.setUniform('u_numPointLights', Math.min(scene.numPointLights, GLSL_MAX_POINT_LIGHTS));
+            this._shaderManager.setUniform('u_numSpotlights', Math.min(scene.numSpotlights, GLSL_MAX_SPOTLIGHTS));
             this._shaderManager.setUniform('u_dirLight.direction', [0, 0, 0]);
             this._shaderManager.setUniform('u_dirLight.diffuse', [0, 0, 0]);
             this._shaderManager.setUniform('u_dirLight.specular', [0, 0, 0]);
@@ -1140,13 +1284,38 @@ export class Renderer {
         }
     }
 
-    private _bindShadowToForwardShaders(light: LightNode): void {
+    /**
+     * Texture unit the cascade array occupies in EVERY program that samples it.
+     *
+     * 6 was already "the shadow unit" in the forward materials and in the deferred lighting pass, and
+     * is already excluded from the custom-material sampler allocation (which starts at 9) — so the
+     * array slots into the existing reservation with nothing renumbered. Collapsing three cascade
+     * samplers into one array also hands the deferred pass back units 9-11, which had it sitting at
+     * 15 of the 16 texture image units ES 3.00 guarantees.
+     *
+     * terrainForward is the one forward shader that does NOT sample shadows: _applyTerrainMaterial
+     * fills units 0-8 with layer maps, so unit 6 is its u_normal2. It declares no shadow uniforms, so
+     * the uploads below no-op there.
+     */
+    private static readonly SHADOW_UNIT = 6;
+
+    /**
+     * Texture unit for the spot shadow atlas.
+     *
+     * The last of the 16 units ES 3.00 guarantees, because it is the only one free in BOTH pipelines:
+     * the deferred pass fills 0-8 and 12-14, and the forward materials fill 0-7 with custom-material
+     * user samplers growing upward from 9. `_applyCustomMaterial` stops one short of it for that
+     * reason — see the reservation note there.
+     */
+    private static readonly SPOT_SHADOW_UNIT = 15;
+
+    /** Push every shadow uniform to all forward material programs (including custom materials). */
+    private _bindShadowsToForwardShaders(): void {
         for (const shaderName of allForwardShaders()) {
             this._shaderManager.bind(shaderName);
-            this._shaderManager.setUniform('u_lightSpace', light.lightSpace);
-            this._shaderManager.setUniform('u_shadowMap', 6);
+            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            this._uploadShadowUniforms(shaderName);
         }
-        this._shadowMapFBO.depth.bind(6);
     }
 
     private _bindEnvToForwardShaders(scene: Scene): void {
@@ -1313,9 +1482,22 @@ export class Renderer {
         gpuProfiler.endPass();
     }
 
-    private _foliagePass(scene: Scene): void {
+    /**
+     * Bring every foliage layer's GPU state up to date: prototype meshes + per-vertex VAOs, the cell
+     * grid size, and each cell's instance-matrix buffer.
+     *
+     * This used to live inside `_foliagePass`, which runs in the geometry pass — i.e. AFTER the shadow
+     * pass. Once foliage can cast, the shadow pass is the first consumer of these buffers, so the
+     * upload has to happen before it or the first frame (and any frame that skips the geometry pass)
+     * draws uninitialized meshes.
+     *
+     * The VAO is ALWAYS initialized from `blinn_phongGeometry`'s attribute set. Mesh.initializeVAO
+     * derives the interleaved stride from only the attributes the shader it is handed declares, so
+     * re-running it with a different set would re-stride the mesh and corrupt whichever pass ran first.
+     * shadowMapInstanced.vs declares the same five attributes for exactly this reason.
+     */
+    private _ensureFoliageUploaded(scene: Scene): void {
         const defaultAttrs = this._shaderManager.getShader('blinn_phongGeometry').attributes;
-        const camPos = this._activeCamera.position;
 
         // Buffers of layers that were disposed with their terrain. Drained here, ahead of the landscape
         // loop, because those layers are no longer reachable from any live landscape to be drained per-layer.
@@ -1326,8 +1508,6 @@ export class Renderer {
             for (const layer of landscape.terrain.foliage) {
                 if (layer.count === 0) continue;
 
-                // Lazily upload every prototype's (static) mesh + per-vertex VAO (locations 0-4):
-                // all LOD levels' sub-models plus the billboard impostor, if any.
                 if (!layer.initialized) {
                     const initModel = (model: Model) => {
                         const g = model.geometry;
@@ -1342,8 +1522,93 @@ export class Renderer {
                 // Keep the layer's grid at the current global cell size (re-buckets only on change).
                 if (layer.cellSize !== this._foliageCellSize) layer.setCellSize(this._foliageCellSize);
 
-                // Free GPU buffers orphaned by a previous cell-layout rebuild (e.g. after painting or a resize).
+                // Free GPU buffers orphaned by a previous cell-layout rebuild (painting, a resize, ...).
                 for (const buf of layer.collectStaleBuffers()) gl.deleteBuffer(buf);
+
+                // Each cell's static matrices, uploaded once per layout version and then reused by
+                // every sub-model of every level, in both the colour and the shadow pass.
+                for (const cell of layer.cells) {
+                    if (!cell.glBuffer) cell.glBuffer = gl.createBuffer();
+                    if (cell.uploadedVersion !== layer.version) {
+                        gl.bindBuffer(gl.ARRAY_BUFFER, cell.glBuffer);
+                        gl.bufferData(gl.ARRAY_BUFFER, cell.matrices, gl.STATIC_DRAW);
+                        cell.uploadedVersion = layer.version;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Rasterize opted-in foliage layers into the currently bound cascade layer.
+     *
+     * Three departures from the colour pass, each load-bearing:
+     *  - cells are culled against the LIGHT's frustum, not the camera's;
+     *  - `cell.lod` is never written. The colour pass mutates it and reads it back for its hysteresis
+     *    (`_foliagePass`), so a shadow pass writing it would make the MAIN view's LOD flicker;
+     *  - the detail level is fixed rather than distance-picked. A shadow silhouette does not need
+     *    LOD0, and the mesh impostor is a different model with a different texture — resolving it here
+     *    would mean binding impostor textures in a depth pass for no visible gain.
+     */
+    private _foliageShadowPass(scene: Scene, lightSpace: mat4): void {
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                if (!layer.castShadows || layer.count === 0 || !layer.initialized) continue;
+
+                const billboard = layer.kind === 'billboard';
+                // Billboards route every level through the cutout shader (they have only one level);
+                // mesh layers cast from their CHEAPEST real level.
+                const models = billboard ? layer.levels[0].models : layer.levels[layer.levels.length - 1].models;
+                const shaderType = billboard ? 'shadowMapInstancedCutout' : 'shadowMapInstanced';
+
+                const cullDistance = layer.cullDistance > 0 ? layer.cullDistance : this._foliageCullDistance;
+                const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
+                const camPos = this._activeCamera.position;
+
+                let bound = false;
+                for (const model of models) {
+                    for (const cell of layer.cells) {
+                        if (!cell.glBuffer) continue;
+                        // Same distance cull as the colour pass: foliage the camera cannot see does not
+                        // need to cast either, and this is what keeps the added cost proportional.
+                        if (this._aabbDistSq(camPos, cell.min, cell.max) > maxD2) continue;
+                        if (!this._shadowFrustum.intersectsAABB(cell.min, cell.max)) continue;
+
+                        if (!bound) {
+                            this._shaderManager.bind(shaderType);
+                            this._shaderManager.setUniform('u_lightSpace', lightSpace);
+                            if (billboard) {
+                                const texId = layer.textureId;
+                                const tex = texId ? TextureManager.Instance.getTexture(texId) : null;
+                                if (!tex) break; // no alpha to cut against; solid quads would cast rectangles
+                                tex.bind(0);
+                                this._shaderManager.setUniform('u_texture', 0);
+                                // Cross quads are two-sided; front-face culling would drop half of each.
+                                GLState.disable(gl.CULL_FACE);
+                            }
+                            bound = true;
+                        }
+
+                        model.mesh.setupInstanceMatrixBuffer(cell.glBuffer, 5);
+                        model.mesh.drawInstanced(cell.count);
+                        // Locations 5-8 left at divisor 1 corrupt the next NON-instanced draw of the
+                        // same mesh, which in this pass is the very next model.
+                        model.mesh.teardownInstanceMatrixBuffer(5);
+                    }
+                }
+                if (billboard && bound) GLState.enable(gl.CULL_FACE);
+            }
+        }
+    }
+
+    private _foliagePass(scene: Scene): void {
+        const camPos = this._activeCamera.position;
+
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                if (layer.count === 0) continue;
 
                 // The layer's own (mesh-asset) cull threshold wins over the global foliage distance.
                 const cullDistance = layer.cullDistance > 0 ? layer.cullDistance : this._foliageCullDistance;
@@ -1390,16 +1655,8 @@ export class Renderer {
 
                 const drawBucket = (cells: FoliageCell[] | undefined, models: Model[], billboard: boolean) => {
                     if (!cells || cells.length === 0) return;
-                    // Upload each cell's static matrices once (per layout version); the one instance
-                    // buffer is then reused across every sub-model of the level.
-                    for (const cell of cells) {
-                        if (!cell.glBuffer) cell.glBuffer = gl.createBuffer();
-                        if (cell.uploadedVersion !== layer.version) {
-                            gl.bindBuffer(gl.ARRAY_BUFFER, cell.glBuffer);
-                            gl.bufferData(gl.ARRAY_BUFFER, cell.matrices, gl.STATIC_DRAW);
-                            cell.uploadedVersion = layer.version;
-                        }
-                    }
+                    // The cells' instance buffers were uploaded by _ensureFoliageUploaded, before the
+                    // shadow pass — which is now also a consumer of them.
                     for (const model of models) {
                         const shaderType = billboard ? 'foliageBillboardInstanced'
                             : (model.material.type === 'pbr' ? 'pbrGeometryInstanced' : 'blinn_phongGeometryInstanced');
@@ -1630,15 +1887,7 @@ export class Renderer {
         // Shadows
         this._shaderManager.bind('deferredLighting');
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_cascadeCount', this._useCSM ? this._cascadeCount : 0);
-        // Keep the single-map sampler (unit 6) pointing at a complete depth texture even in CSM mode.
-        this._shaderManager.setUniform('u_shadowMap', 6);
-        this._shadowMapFBO.depth.bind(6);
-        if (this._useCSM) {
-            this._uploadCascades('deferredLighting');
-        } else if (shadowLight) {
-            this._shaderManager.setUniform('u_lightSpace', shadowLight.lightSpace);
-        }
+        this._uploadShadowUniforms('deferredLighting');
 
         // Image-based lighting from up to 2 baked light probes with influence volumes (split-sum:
         // per-slot irradiance/prefiltered cubes + shared BRDF LUT on unit 12; slot 0 on the legacy
@@ -1694,39 +1943,88 @@ export class Renderer {
     }
 
     /**
-     * Upload the CSM cascade matrices/splits/sampler units to the CURRENTLY BOUND program (registered
-     * under `shaderKey`) and bind the cascade depth textures to units 9-11. Basic-type uniform arrays
-     * can only be uploaded via their base ([0]) location, which fills every element — per-element
-     * setUniform('...[i]') silently misses elements 1..N — so the base locations are cached per program
-     * (both the deferred lighting and volumetric god-rays passes sample the cascades).
+     * Upload every shadow uniform (declared by shaders/environment/shadows.glsl) to the CURRENTLY
+     * BOUND program, and bind the cascade array to the shared shadow texture unit.
+     *
+     * Basic-type uniform arrays are only reachable through their base (`[0]`) location, which fills
+     * every element — a per-element `setUniform('...[i]')` silently misses elements 1..N — so those
+     * four locations are looked up once and cached per program. Every lighting path calls this, so
+     * "per program" means the deferred pass, each forward material shader, and each custom material.
+     *
+     * Programs that do not declare these uniforms (terrainForward, whose layer samplers already fill
+     * units 0-8) get null locations and no-op setUniform calls, which is the intended outcome.
      */
-    private _uploadCascades(shaderKey: string): void {
-        const program = this._shaderManager.getShader(shaderKey).program;
+    private _uploadShadowUniforms(shaderKey: string): void {
+        const shader = this._shaderManager.getShader(shaderKey);
+        if (!shader) return;
+        const program = shader.program;
         let locs = this._cascadeLocs.get(program);
         if (!locs) {
             locs = {
                 mat: gl.getUniformLocation(program, 'u_cascadeMatrices[0]'),
                 split: gl.getUniformLocation(program, 'u_cascadeSplits[0]'),
-                sampler: gl.getUniformLocation(program, 'u_shadowCascades[0]'),
+                depthScale: gl.getUniformLocation(program, 'u_cascadeDepthScale[0]'),
+                texel: gl.getUniformLocation(program, 'u_cascadeTexelSize[0]'),
             };
             this._cascadeLocs.set(program, locs);
         }
-        for (let i = 0; i < this._cascadeCount; i++) {
-            const slot = 9 + i; // 0-3 gbuffer, 6 shadow, 7 env, 8 skybox
-            this._cascadeMatPacked.set(this._cascadeMatrices[i], i * 16);
-            this._cascadeSplitPacked[i] = this._cascadeSplits[i];
-            this._cascadeUnitPacked[i] = slot;
-            this._shadowCascades[i].depth.bind(slot);
-        }
+
+        const active = this._shadowsActive && !this._shadowsSuppressed;
+        this._shaderManager.setUniform('u_shadowsEnabled', active);
+        this._shaderManager.setUniform('u_cascadeCount', this._cascadeCount);
+        this._shaderManager.setUniform('u_shadowCascades', Renderer.SHADOW_UNIT);
+        this._shaderManager.setUniform('u_shadowTexel', [1 / this._shadowMapResolution, 1 / this._shadowMapResolution]);
+        this._shaderManager.setUniform('u_shadowDepthBias', this._shadowDepthBias);
+        this._shaderManager.setUniform('u_shadowNormalBias', this._shadowNormalBias);
+        this._shaderManager.setUniform('u_shadowFilterRadius', this._shadowFilterRadius);
+        this._shaderManager.setUniform('u_shadowFilterMode', this._shadowFilterMode);
+        this._shaderManager.setUniform('u_shadowStrength', this._shadowStrength);
+        this._shaderManager.setUniform('u_cascadeBlend', this._cascadeBlend);
+        this._shaderManager.setUniform('u_debugCascades', this._debugCascades && active);
+
         if (locs.mat) gl.uniformMatrix4fv(locs.mat, false, this._cascadeMatPacked);
         if (locs.split) gl.uniform1fv(locs.split, this._cascadeSplitPacked);
-        if (locs.sampler) gl.uniform1iv(locs.sampler, this._cascadeUnitPacked);
+        if (locs.depthScale) gl.uniform1fv(locs.depthScale, this._cascadeDepthScalePacked);
+        if (locs.texel) gl.uniform1fv(locs.texel, this._cascadeTexelPacked);
+
+        // The sampler must point at a COMPLETE texture on every frame, shadows on or off — an
+        // incomplete sampler is a draw-time error, not merely a wrong colour.
+        this._shadowCascadeFBO.bindTexture(Renderer.SHADOW_UNIT);
+
+        // --- spot shadows ---
+        let spot = this._spotLocs.get(program);
+        if (!spot) {
+            spot = {
+                mat: gl.getUniformLocation(program, 'u_spotShadowMatrices[0]'),
+                texelScale: gl.getUniformLocation(program, 'u_spotShadowTexelScale[0]'),
+                layer: gl.getUniformLocation(program, 'u_spotShadowLayer[0]'),
+            };
+            this._spotLocs.set(program, spot);
+        }
+        this._shaderManager.setUniform('u_spotShadowsEnabled', this._spotShadowsActive && !this._shadowsSuppressed);
+        this._shaderManager.setUniform('u_spotShadows', Renderer.SPOT_SHADOW_UNIT);
+        this._shaderManager.setUniform('u_spotShadowTexel', [1 / this._spotShadowResolution, 1 / this._spotShadowResolution]);
+        this._shaderManager.setUniform('u_spotShadowBias', this._spotShadowBias);
+        if (spot.mat) gl.uniformMatrix4fv(spot.mat, false, this._spotShadowMatPacked);
+        if (spot.texelScale) gl.uniform1fv(spot.texelScale, this._spotShadowTexelScalePacked);
+        if (spot.layer) gl.uniform1iv(spot.layer, this._spotShadowLayerPacked);
+        this._spotShadowFBO.bindTexture(Renderer.SPOT_SHADOW_UNIT);
+    }
+
+    /** Repack the per-cascade arrays into the upload buffers. Called once, after the cascade pass. */
+    private _packCascadeUniforms(): void {
+        for (let i = 0; i < MAX_CASCADES; i++) {
+            this._cascadeMatPacked.set(this._cascadeMatrices[i], i * 16);
+            this._cascadeSplitPacked[i] = this._cascadeSplits[i];
+            this._cascadeDepthScalePacked[i] = this._cascadeDepthScales[i];
+            this._cascadeTexelPacked[i] = this._cascadeTexelSizes[i];
+        }
     }
 
     private _setDeferredLighting(scene: Scene): void {
         this._shaderManager.bind('deferredLighting');
-        this._shaderManager.setUniform('u_numPointLights', scene.numPointLights);
-        this._shaderManager.setUniform('u_numSpotlights', scene.numSpotlights);
+        this._shaderManager.setUniform('u_numPointLights', Math.min(scene.numPointLights, GLSL_MAX_POINT_LIGHTS));
+        this._shaderManager.setUniform('u_numSpotlights', Math.min(scene.numSpotlights, GLSL_MAX_SPOTLIGHTS));
         let hasDirectional = false;
         for (const node of scene.lights) {
             switch (node.type) {
@@ -1758,8 +2056,11 @@ export class Renderer {
                     this._shaderManager.setUniform(SL[node.index]['constant'], (node.light as Spotlight).constant);
                     this._shaderManager.setUniform(SL[node.index]['linear'], (node.light as Spotlight).linear);
                     this._shaderManager.setUniform(SL[node.index]['quadratic'], (node.light as Spotlight).quadratic);
-                    this._shaderManager.setUniform(SL[node.index]['cutOff'], (node.light as Spotlight).cutOff * Math.PI / 180);
-                    this._shaderManager.setUniform(SL[node.index]['outerCutOff'], (node.light as Spotlight).outerCutOff * Math.PI / 180);
+                    // The shaders compare these against `dot(L, -direction)`, a COSINE — so the cosine is what
+                    // belongs in the uniform. They used to receive the half-angle in radians, which made
+                    // every spotlight's cone ~46-52 degrees regardless of what was authored.
+                    this._shaderManager.setUniform(SL[node.index]['cutOff'], Math.cos((node.light as Spotlight).cutOff * Math.PI / 180));
+                    this._shaderManager.setUniform(SL[node.index]['outerCutOff'], Math.cos((node.light as Spotlight).outerCutOff * Math.PI / 180));
                     break;
                 }
             }
@@ -1960,7 +2261,16 @@ export class Renderer {
         this._activeCamera = cam;
 
         // Forward lighting for the capture (no probe IBL bound -> avoids feedback).
+        //
+        // Shadows are suppressed for the whole capture. The cascades are fit to the MAIN camera's
+        // frustum, so a probe anywhere else falls outside every one of them and would bake whatever
+        // the edge clamp happened to return. Suppressing is the honest version of that: probes bake
+        // unshadowed direct light, deterministically, instead of arbitrarily.
+        // (The bind still has to happen — a sampler pointing at an incomplete texture is a draw-time
+        // error, not merely a wrong colour.)
+        this._shadowsSuppressed = true;
         for (const light of scene.lights) this._setLighting(light, scene.numPointLights, scene.numSpotlights);
+        this._bindShadowsToForwardShaders();
         this._bindEnvToForwardShaders(scene);
 
         const probePos = probe.worldPosition;
@@ -2024,6 +2334,10 @@ export class Renderer {
         probe.setBakedMaps(sourceCube, irradiance, prefiltered);
 
         this._setViewport(this._renderWidth, this._renderHeight);
+        this._shadowsSuppressed = false;
+        // The forward programs still hold the capture's u_shadowsEnabled = false; restore them so the
+        // frame that follows this bake is not silently unshadowed.
+        this._bindShadowsToForwardShaders();
         this._capturing = false;
     }
 
@@ -2114,9 +2428,6 @@ export class Renderer {
                 }
             }
         }
-        const useCSM = this._useCSM && this._shadowLight?.type === 'directional';
-        const hasShadow = useCSM || (this._shadowLight?.type === 'directional');
-
         // Pass A: raymarch at half resolution into the blur scratch buffer (safe to reuse — bloom,
         // its only other consumer, runs after god rays and overwrites it). Blend off: plain write.
         this._blur_FBOs[0].bind(); // also sets the half-res viewport
@@ -2137,16 +2448,10 @@ export class Renderer {
         this._shaderManager.setUniform('u_anisotropy', node.godRayAnisotropy);
         this._shaderManager.setUniform('u_maxDistance', node.godRayMaxDistance);
         this._shaderManager.setUniform('u_steps', node.godRaySamples);
-        this._shaderManager.setUniform('u_hasShadow', hasShadow);
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_cascadeCount', useCSM ? this._cascadeCount : 0);
-        this._shaderManager.setUniform('u_shadowMap', 2);
-        this._shadowMapFBO.depth.bind(2); // keep the single-map sampler complete even in CSM mode
-        if (useCSM) {
-            this._uploadCascades('godRays');
-        } else if (hasShadow && this._shadowLight) {
-            this._shaderManager.setUniform('u_lightSpace', this._shadowLight.lightSpace);
-        }
+        // With no caster the cascade lookups all return "lit" and the shafts degrade to uniform haze,
+        // which is why this pass needs no shadow-present branch of its own any more.
+        this._uploadShadowUniforms('godRays');
         this._drawFullscreen();
 
         // Pass B: additively upsample (LINEAR) into the pre-bloom scene buffer so the shafts bloom
@@ -2329,7 +2634,7 @@ export class Renderer {
             this._resetForwardLighting(scene);
             for (const light of scene.lights)
                 this._setLighting(light, scene.numPointLights, scene.numSpotlights);
-            if (shadowLight) this._bindShadowToForwardShaders(shadowLight);
+            this._bindShadowsToForwardShaders();
             this._bindEnvToForwardShaders(scene);
         }
 
@@ -3055,9 +3360,10 @@ export class Renderer {
     /**
      * Upload a custom material's user uniforms to the currently bound program. Scalars/vectors go by bare
      * `u_<name>` (from the live `properties` value, falling back to the uniform's declared default); user
-     * samplers bind from texture unit 9 upward (0-5 std material, 6 shadow, 7 env, 8 skybox are reserved),
-     * with the shared 'Null' texture as a fallback so every sampler references a valid texture. Shared by
-     * the forward (`_renderModel`) and deferred (`_drawGeometryNode`) paths.
+     * samplers bind from texture unit 9 upward (0-5 std material, 6 shadow cascades, 7 env, 8 skybox and
+     * 15 the spot shadow atlas are reserved), with the shared 'Null' texture as a fallback so every
+     * sampler references a valid texture. Shared by the forward (`_renderModel`) and deferred
+     * (`_drawGeometryNode`) paths.
      */
     private _applyCustomMaterial(material: CustomMaterial): void {
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
@@ -3066,6 +3372,10 @@ export class Renderer {
         let unit = 9;
         for (const u of material.uniforms) {
             if (u.type === 'sampler2D' || u.type === 'samplerCube') {
+                // Stop before the reserved spot-shadow unit. Past it a material would be asking for a
+                // 17th texture image unit anyway, which ES 3.00 does not guarantee — so the samplers
+                // that do not fit keep the fallback texture rather than aliasing a shadow atlas.
+                if (unit >= Renderer.SPOT_SHADOW_UNIT) continue;
                 const texId = material.textures.get(u.name);
                 const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
                 this._shaderManager.setUniform(`u_${u.name}`, unit);
@@ -3624,43 +3934,16 @@ export class Renderer {
     }
 
     /**
-     * Reset the shadow map + cascades to the far plane (depth 1.0), so every shadow lookup passes and
-     * nothing is occluded. Used when a scene has no shadow-casting light: the shadow pass is skipped
-     * entirely, and without this the maps keep whatever the previously rendered scene left in them.
-     * Idempotent — the dirty flag keeps it to a single pass rather than clearing every frame.
+     * Reset every cascade layer to the far plane (depth 1.0), so every shadow lookup passes and
+     * nothing is occluded. Used when a scene has no shadow-casting light (or shadows are off): the
+     * shadow pass is skipped entirely, and without this the layers keep whatever the previously
+     * rendered scene left in them. Idempotent — the dirty flag keeps it to a single pass rather than
+     * clearing several 4096² layers every frame.
      */
     private _clearShadowMaps(): void {
         if (!this._shadowMapsDirty) return;
-
-        // The depth clear value is 1.0 by default; be explicit since post/other passes can change it.
-        gl.clearDepth(1.0);
-        GLState.depthMask(true); // a depth write mask of false would make the clear a no-op
-
-        this._shadowMapFBO.bind();
-        gl.clear(gl.DEPTH_BUFFER_BIT);
-        for (const cascade of this._shadowCascades) {
-            cascade.bind();
-            gl.clear(gl.DEPTH_BUFFER_BIT);
-        }
-        this._shadowMapFBO.unbind();
-
+        this._shadowCascadeFBO.clearAll();
         this._shadowMapsDirty = false;
-    }
-
-    private _renderShadowMap(models: Set<ModelNode>, light: LightNode): void {
-        // Set framebuffer
-        this._shadowMapFBO.bind();
-        gl.clear(gl.DEPTH_BUFFER_BIT);
-
-        // Render scene (front-face culling reduces peter-panning)
-        GLState.enable(gl.DEPTH_TEST);
-        GLState.depthMask(true);
-        GLState.enable(gl.CULL_FACE);
-        GLState.cullFace(gl.FRONT);
-
-        this._renderShadowCasters(models, light.lightSpace);
-
-        GLState.cullFace(gl.BACK);
     }
 
     /**
@@ -3697,7 +3980,6 @@ export class Renderer {
             if (shaderType !== bound) {
                 this._shaderManager.bind(shaderType);
                 this._shaderManager.setUniform('u_lightSpace', lightSpace);
-                if (shaderType === 'shadowMap') this._shaderManager.setUniform('u_isInstanced', false);
                 bound = shaderType;
             }
 
@@ -3726,108 +4008,179 @@ export class Renderer {
         }
     }
 
-    /** Render the directional light's cascaded shadow maps (one depth map per view-frustum slice). */
-    private _renderCascades(models: Set<ModelNode>, light: LightNode): void {
-        const cam = this._activeCamera;
-        // Cap the shadowed range so cascades stay tight regardless of the camera far plane
-        // (the editor camera uses far=10000, which otherwise stretches the cascades → jagged).
-        const shadowFar = Math.min(cam.far, this._shadowDistance);
-        const splits = this._computeCascadeSplits(cam.near, shadowFar);
+    /**
+     * Render one perspective depth map per shadow-casting spot light into the spot atlas.
+     *
+     * The frustum is built from the light's own cone: fov = 2 * outerCutOff (so the map covers exactly
+     * what the light lits, and no resolution is spent outside it), and the far plane is derived from
+     * the attenuation coefficients — a spot light has no authored range in this engine, so the only
+     * alternative would be a hand-tuned far plane on every light.
+     *
+     * Foliage deliberately does NOT cast into these. A spot's map is re-rendered every frame (there is
+     * no equivalent of the cascade stagger here), so adding an instanced draw per cell per light is a
+     * much worse trade than it is for the sun.
+     */
+    private _renderSpotShadows(scene: Scene): void {
+        this._spotShadowsActive = false;
+        this._spotShadowLayerPacked.fill(-1);
+
+        const casters: LightNode[] = [];
+        if (this._shadowsEnabled && this._spotShadowsEnabled)
+            for (const node of scene.lights)
+                if (node.type === 'spotlight' && node.castShadows) casters.push(node);
+
+        // Reconcile first, THEN read layers back: an id that already held a layer keeps it, so a light
+        // that merely moved in the traversal order keeps rendering into the same map.
+        this._spotSlots.update(casters.map(n => n.id));
+
+        if (casters.length === 0) {
+            if (this._spotShadowsDirty) { this._spotShadowFBO.clearAll(); this._spotShadowsDirty = false; }
+            return;
+        }
+        if (!this._beginPass('shadows.spot')) return;
 
         GLState.enable(gl.DEPTH_TEST);
         GLState.depthMask(true);
         GLState.enable(gl.CULL_FACE);
         GLState.cullFace(gl.FRONT);
 
+        for (const node of casters) {
+            const layer = this._spotSlots.layerOf(node.id);
+            if (layer < 0) continue; // past MAX_SPOT_SHADOWS — this light simply goes unshadowed
+
+            const light = node.light as Spotlight;
+            const pos = node.worldPosition;
+            const fwd = node.worldForward;
+            // A cone pointing straight down is parallel to the default up; lookAt would go NaN.
+            const up = Math.abs(fwd[1]) > 0.99 ? vec3.set(this._spotUp, 0, 0, 1) : vec3.set(this._spotUp, 0, 1, 0);
+            vec3.add(this._spotTarget, pos, fwd);
+            mat4.lookAt(this._spotView, pos, this._spotTarget, up);
+
+            // Widen slightly past the outer cone so the falloff's last degree is not clipped by the
+            // map's own edge (which the shader treats as "unshadowed").
+            const halfFov = Math.min(89, light.outerCutOff * 1.05) * Math.PI / 180;
+            const far = spotShadowFar(light.constant, light.linear, light.quadratic, this._spotShadowDistance);
+            mat4.perspective(this._spotProj, halfFov * 2, 1, 0.1, far);
+            mat4.multiply(this._spotShadowMatrices[layer], this._spotProj, this._spotView);
+
+            this._spotShadowMatPacked.set(this._spotShadowMatrices[layer], layer * 16);
+            // One texel's world size PER UNIT of distance — the shader multiplies by the actual
+            // distance, because a perspective map's texel grows as it goes.
+            this._spotShadowTexelScalePacked[layer] = (2 * Math.tan(halfFov)) / this._spotShadowResolution;
+
+            this._spotShadowFBO.bindLayer(layer);
+            gl.clear(gl.DEPTH_BUFFER_BIT);
+            this._renderShadowCasters(scene.models, this._spotShadowMatrices[layer]);
+        }
+
+        this._spotShadowFBO.unbind();
+        GLState.cullFace(gl.BACK);
+        this._spotShadowsActive = true;
+        this._spotShadowsDirty = true;
+
+        // Built from scratch every frame rather than patched: LightNode.index is renumbered by Scene
+        // on any structural change, so last frame's entries describe a mapping that may no longer hold.
+        for (const node of casters) {
+            const layer = this._spotSlots.layerOf(node.id);
+            if (layer >= 0 && node.index >= 0 && node.index < GLSL_MAX_SPOTLIGHTS)
+                this._spotShadowLayerPacked[node.index] = layer;
+        }
+    }
+
+    /** Render the directional light's cascaded shadow maps (one array layer per view-frustum slice). */
+    private _renderCascades(scene: Scene, light: LightNode): void {
+        const models = scene.models;
+        const cam = this._activeCamera;
+        // Cap the shadowed range so cascades stay tight regardless of the camera far plane
+        // (the editor camera uses far=10000, which otherwise stretches the cascades → jagged).
+        const shadowFar = Math.min(cam.far, this._shadowDistance);
+        const splits = computeCascadeSplits(cam.near, shadowFar, this._cascadeCount,
+                                            this._shadowSplitLambda, this._csmSplits);
+
+        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthMask(true);
+        GLState.enable(gl.CULL_FACE);
+        // Front-face culling: rasterize back faces into the depth map so the recorded occluder depth
+        // sits behind the lit surface, which is what keeps a small bias from producing acne.
+        GLState.cullFace(gl.FRONT);
+
         for (let i = 0; i < this._cascadeCount; i++) {
             const nearD = i === 0 ? cam.near : splits[i - 1];
             const farD = splits[i];
-            // The split matrix must be recomputed every frame regardless of whether the cascade is
-            // re-rasterized: the lighting pass selects a cascade by view-space depth, so a stale
-            // split would send pixels to the wrong map.
-            this._computeCascadeMatrix(light.worldForward, nearD, farD, this._cascadeMatrices[i]);
+            // The split ALWAYS updates, even for a cascade that is not re-rasterized this frame: the
+            // lighting pass picks a layer by view-space depth, so a stale split sends pixels to the
+            // wrong map. The matrix is the opposite — see below.
             this._cascadeSplits[i] = farD;
 
             // Stagger the distant cascades: cascade 1 every other frame, cascade 2 every fourth.
             // They cover the largest world area at the lowest angular resolution, so a one-to-three
             // frame lag in their contents is invisible at the distances they shade, and skipping them
-            // removes two full depth rasterizations from most frames.
-            if (i > 0 && (this._frameIndex % (1 << i)) !== 0) continue;
+            // removes several full depth rasterizations from most frames.
+            if (this._shadowStagger && !this._shadowFullUpdate && i > 0 && (this._frameIndex % (1 << i)) !== 0) continue;
 
-            this._shadowCascades[i].bind();
+            // Only cascades that are actually re-rendered get a new matrix. Recomputing it every
+            // frame while the depth behind it is several frames old means the lighting pass projects
+            // pixels with a matrix the map was never drawn with, and distant shadows visibly swim.
+            const fit = this._computeCascadeMatrix(light.worldForward, nearD, farD, this._cascadeMatrices[i]);
+            this._cascadeDepthScales[i] = cascadeDepthScale(fit.depthRange);
+            this._cascadeTexelSizes[i] = fit.texelWorldSize;
+
+            this._shadowCascadeFBO.bindLayer(i);
             gl.clear(gl.DEPTH_BUFFER_BIT);
-
             this._renderShadowCasters(models, this._cascadeMatrices[i]);
+            // _renderShadowCasters leaves _shadowFrustum set to this cascade, which is what the
+            // foliage cull below tests against.
+            this._foliageShadowPass(scene, this._cascadeMatrices[i]);
         }
+        this._shadowCascadeFBO.unbind();
         GLState.cullFace(gl.BACK);
+
+        this._packCascadeUniforms();
+        this._shadowFullUpdate = false;
     }
 
-    /** Practical split scheme (blend of logarithmic and uniform) — returns the far distance of each cascade. */
-    private _computeCascadeSplits(near: number, far: number): number[] {
-        const lambda = 0.5;
-        const splits = this._csmSplits; // reused; this runs every frame
-        for (let i = 1; i <= this._cascadeCount; i++) {
-            const p = i / this._cascadeCount;
-            const logSplit = near * Math.pow(far / near, p);
-            const uniformSplit = near + (far - near) * p;
-            splits[i - 1] = lambda * logSplit + (1 - lambda) * uniformSplit;
-        }
-        return splits;
-    }
-
-    /** Fit a light-space ortho matrix around the camera sub-frustum [nearD, farD] (Gribb/LearnOpenGL CSM). */
-    private _computeCascadeMatrix(lightForward: vec3, nearD: number, farD: number, out: mat4): mat4 {
-        // All temporaries below are preallocated fields: this runs once per cascade per frame, and
-        // the naive version allocated ~15 gl-matrix objects each time for values that never escape.
+    /**
+     * Fit one cascade's light-space matrix around the camera sub-frustum [nearD, farD].
+     *
+     * The bound is a SPHERE, not a light-space box. A box taken in light space has the light's axes,
+     * which do not turn with the camera — so it grew and shrank as the camera rotated, moving every
+     * shadow texel in the world with it. A sphere's radius depends only on (near, far, fov, aspect),
+     * so rotating the camera moves the fit rigidly and the footprint can then be snapped to a stable
+     * texel grid. That snap is what removes the crawling edges.
+     */
+    private _computeCascadeMatrix(lightForward: vec3, nearD: number, farD: number, out: mat4): { depthRange: number; texelWorldSize: number } {
         const cam = this._activeCamera;
-        const proj = this._csmProj;
-        if (cam.type === 'perspective')
-            mat4.perspective(proj, cam.fov * Math.PI / 180, this._renderWidth / this._renderHeight, nearD, farD);
-        else
-            mat4.ortho(proj, cam.left, cam.right, cam.bottom, cam.top, nearD, farD);
 
-        const invVP = this._csmInvVP;
-        mat4.multiply(invVP, proj, cam.viewMatrix);
-        mat4.invert(invVP, invVP);
-
-        // 8 world-space corners of the sub-frustum + their centroid.
-        const corners = this._csmCorners;
-        const centroid = vec3.set(this._csmCentroid, 0, 0, 0);
-        let ci = 0;
-        for (let x = 0; x < 2; x++)
-            for (let y = 0; y < 2; y++)
-                for (let z = 0; z < 2; z++) {
-                    const corner = vec3.set(corners[ci++], 2 * x - 1, 2 * y - 1, 2 * z - 1);
-                    vec3.transformMat4(corner, corner, invVP); // gl-matrix divides by w
-                    vec3.add(centroid, centroid, corner);
-                }
-        vec3.scale(centroid, centroid, 1 / 8);
-
-        const lightDir = vec3.normalize(this._csmLightDir, lightForward);
-        const up = Math.abs(lightDir[1]) > 0.99 ? vec3.set(this._csmUp, 0, 0, 1) : vec3.set(this._csmUp, 0, 1, 0);
-        // Place the light camera on the source side (opposite the light's travel direction), looking
-        // along +lightDir, matching the known-good single shadow map (LightNode.lightSpace).
-        const eye = vec3.subtract(this._csmEye, centroid, lightDir);
-        const lightView = mat4.lookAt(this._csmLightView, eye, centroid, up);
-
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        const tmp = this._csmTmp;
-        for (const c of corners) {
-            vec3.transformMat4(tmp, c, lightView);
-            minX = Math.min(minX, tmp[0]); maxX = Math.max(maxX, tmp[0]);
-            minY = Math.min(minY, tmp[1]); maxY = Math.max(maxY, tmp[1]);
-            minZ = Math.min(minZ, tmp[2]); maxZ = Math.max(maxZ, tmp[2]);
+        if (cam.type === 'perspective') {
+            // Camera forward = -Z of the view matrix's rotation, read straight out of the columns.
+            const v = cam.viewMatrix;
+            vec3.set(this._csmForward, -v[2], -v[6], -v[10]);
+            cascadeSphereFromPerspective(nearD, farD, cam.fov * Math.PI / 180,
+                                         this._renderWidth / this._renderHeight,
+                                         cam.position, this._csmForward, this._csmSphere);
+        } else {
+            // Orthographic (2D mode): the slice is a box, so take the corners. Still rotation
+            // invariant — the corners transform rigidly with the camera.
+            mat4.ortho(this._csmProj, cam.left, cam.right, cam.bottom, cam.top, nearD, farD);
+            mat4.multiply(this._csmInvVP, this._csmProj, cam.viewMatrix);
+            mat4.invert(this._csmInvVP, this._csmInvVP);
+            let ci = 0;
+            for (let x = 0; x < 2; x++)
+                for (let y = 0; y < 2; y++)
+                    for (let z = 0; z < 2; z++) {
+                        const corner = vec3.set(this._csmCorners[ci++], 2 * x - 1, 2 * y - 1, 2 * z - 1);
+                        vec3.transformMat4(corner, corner, this._csmInvVP); // gl-matrix divides by w
+                    }
+            cascadeSphereFromCorners(this._csmCorners, this._csmSphere);
         }
 
-        // Pull the near/far planes out so shadow casters outside the frustum slice are still captured.
-        const zMult = 10.0;
-        minZ = minZ < 0 ? minZ * zMult : minZ / zMult;
-        maxZ = maxZ < 0 ? maxZ / zMult : maxZ * zMult;
+        // Quantize the radius before it reaches the snap: it is invariant under camera ROTATION but
+        // not under a viewport resize or an fov change, and the texel grid is derived from it — a
+        // radius that drifts by a hair every frame is a grid that drifts with it.
+        if (this._shadowStabilize) this._csmSphere.radius = quantizeRadius(this._csmSphere.radius);
 
-        const lightProj = mat4.ortho(this._csmLightProj, minX, maxX, minY, maxY, minZ, maxZ);
-        mat4.multiply(out, lightProj, lightView);
-        return out;
+        return buildCascadeMatrix(this._csmSphere, lightForward, this._shadowMapResolution,
+                                  this._shadowCasterPad, out, this._csmScratch, this._shadowStabilize);
     }
 
     private _setLighting(node: LightNode, numPointLights: number, numSpotlights: number): void {
@@ -3862,8 +4215,11 @@ export class Renderer {
                     this._shaderManager.setUniform(SL[node.index]['constant'], (node.light as Spotlight).constant);
                     this._shaderManager.setUniform(SL[node.index]['linear'], (node.light as Spotlight).linear);
                     this._shaderManager.setUniform(SL[node.index]['quadratic'], (node.light as Spotlight).quadratic);
-                    this._shaderManager.setUniform(SL[node.index]['cutOff'], (node.light as Spotlight).cutOff * Math.PI / 180);
-                    this._shaderManager.setUniform(SL[node.index]['outerCutOff'], (node.light as Spotlight).outerCutOff * Math.PI / 180);
+                    // The shaders compare these against `dot(L, -direction)`, a COSINE — so the cosine is what
+                    // belongs in the uniform. They used to receive the half-angle in radians, which made
+                    // every spotlight's cone ~46-52 degrees regardless of what was authored.
+                    this._shaderManager.setUniform(SL[node.index]['cutOff'], Math.cos((node.light as Spotlight).cutOff * Math.PI / 180));
+                    this._shaderManager.setUniform(SL[node.index]['outerCutOff'], Math.cos((node.light as Spotlight).outerCutOff * Math.PI / 180));
                     break;
                 }
             }
@@ -3873,8 +4229,8 @@ export class Renderer {
         for (const shaderName of allForwardShaders()) {
             try {
                 this._shaderManager.bind(shaderName);
-                this._shaderManager.setUniform('u_numPointLights', numPointLights);
-                this._shaderManager.setUniform('u_numSpotlights', numSpotlights);
+                this._shaderManager.setUniform('u_numPointLights', Math.min(numPointLights, GLSL_MAX_POINT_LIGHTS));
+                this._shaderManager.setUniform('u_numSpotlights', Math.min(numSpotlights, GLSL_MAX_SPOTLIGHTS));
                 setLights(shaderName, node);
             } catch (error) {
                 // Shader may not have lighting uniforms (e.g., basic shader)
@@ -4100,9 +4456,33 @@ export class Renderer {
         this._overdrawFBO.unbind();
     }
 
+    /**
+     * Blit one cascade layer's depth to the screen (the 'shadow' debug channel).
+     *
+     * The array is a comparison texture, and reading one through a non-shadow sampler is undefined
+     * per the GLES spec — so comparison is switched off for the draw and back on immediately after.
+     * Debug-only, once a frame, and the alternative (a WebGL sampler object bound just for this unit)
+     * is more machinery than the channel is worth.
+     */
+    private _blitShadowLayer(): void {
+        const layer = Math.min(this._cascadeCount - 1, Math.max(0, this._shadowDebugLayer));
+        this._shadowCascadeFBO.setCompareEnabled(false);
+        this._shaderManager.bind('shadowDebug');
+        this._shaderManager.setUniform('u_shadowCascades', 0);
+        this._shaderManager.setUniform('u_layer', layer);
+        this._shadowCascadeFBO.bindTexture(0);
+        this._drawFullscreen();
+        this._shadowCascadeFBO.setCompareEnabled(true);
+    }
+
     // Draw a single intermediate buffer to the screen for the editor's Renderer debug channels.
     // All passes above still ran, so every buffer (G-buffer, SSAO, bloom, …) is populated.
     private _blitDebugView(): void {
+        // The cascades live in a TEXTURE_2D_ARRAY, which debugView.fs's single sampler2D cannot read,
+        // so that one channel takes its own tiny program. 'cascades' needs no blit at all — it is a
+        // tint applied inside the lighting shader itself (see u_debugCascades in shadows.glsl).
+        if (this._debugView === 'shadow') { this._blitShadowLayer(); return; }
+
         // mode: 0 passthrough RGB · 1 normal remap · 2 alpha->grayscale · 3 depth · 4 red->grayscale
         let tex: Texture;
         let mode = 0;
@@ -4116,7 +4496,6 @@ export class Renderer {
             case 'ao':        tex = this._gBufferFBO.colors[2];    mode = 2; break;
             case 'depth':     tex = this._gBufferFBO.depth;        mode = 3; break;
             case 'ssao':      tex = this._ssaoBlurFBO.colors[0];   mode = 4; break;
-            case 'shadow':    tex = this._shadowMapFBO.depth;      mode = 3; break;
             case 'bloom':     tex = this._bloomMips[0].colors[0];  mode = 6; break;
             // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
             // black cannot. Exists because "bloom does nothing" is otherwise indistinguishable between
@@ -4402,7 +4781,9 @@ export class Renderer {
             for (const c of fbo.colors) bytes += c.byteSize;
             if (fbo.depth) bytes += fbo.depth.byteSize;
         };
-        addFbo(this._sceneFBO); addFbo(this._gBufferFBO); addFbo(this._shadowMapFBO);
+        addFbo(this._sceneFBO); addFbo(this._gBufferFBO);
+        bytes += this._shadowCascadeFBO.texture.byteSize; // one array texture, layers included
+        bytes += this._spotShadowFBO.texture.byteSize;
         for (const m of this._bloomMips) addFbo(m);
         // Previously missing from this list, and now joined by the cloud temporal targets and the
         // baked noise volumes — an 8MB volume silently absent from the estimate defeats its purpose.
@@ -4413,7 +4794,6 @@ export class Renderer {
         addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
         addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
-        for (const f of this._shadowCascades) addFbo(f);
         for (const f of this._blur_FBOs) addFbo(f);
         for (const f of this._compose_FBOs) addFbo(f);
         for (const tex of TextureManager.Instance.textures.values()) bytes += tex.byteSize;
@@ -4539,7 +4919,9 @@ export class Renderer {
             this._renderScale = t.renderScale;
             if (gl) this._resizeBuffers(this._renderWidth, this._renderHeight);
         }
-        this._setShadowMapResolution(t.shadowMapResolution);
+        this._recreateShadowTargets(t.shadowMapResolution, t.shadowCascades);
+        this._shadowFilterMode = t.shadowFilterMode;
+        this._shadowFilterRadius = t.shadowFilterRadius;
         // Re-applying the tier must not leave the label saying "custom" from an earlier manual tweak.
         this._quality = preset;
         // A preset moves a dozen knobs at once; tell any panel mirroring them to re-read.
@@ -4574,21 +4956,134 @@ export class Renderer {
     }
 
     public get shadowMapResolution(): number { return this._shadowMapResolution; }
-    public set shadowMapResolution(size: number) { this._setShadowMapResolution(size); }
+    public set shadowMapResolution(size: number) {
+        this._recreateShadowTargets(size, this._cascadeCount);
+    }
+
+    public get shadowsEnabled(): boolean { return this._shadowsEnabled; }
+    public set shadowsEnabled(v: boolean) {
+        if (this._shadowsEnabled === v) return;
+        this._shadowsEnabled = v;
+        // Switching off leaves the layers holding the last render; mark them so the next frame clears.
+        if (!v) this._shadowMapsDirty = true;
+    }
+
+    /** Max view distance the cascades cover. Beyond it nothing is shadowed. */
+    public get shadowDistance(): number { return this._shadowDistance; }
+    public set shadowDistance(d: number) { this._shadowDistance = Math.max(1, d); }
+
+    /** Split scheme blend: 0 = uniform slabs, 1 = logarithmic (more resolution up close). */
+    public get shadowSplitLambda(): number { return this._shadowSplitLambda; }
+    public set shadowSplitLambda(v: number) { this._shadowSplitLambda = Math.min(1, Math.max(0, v)); }
 
     /**
-     * Reallocate the single shadow map and every cascade at `size`. Three 4096px cascades is 150MB of
-     * depth and ~50M texels rasterized per frame; 2048 is a quarter of that and, at the default
-     * 100-unit shadow distance, still resolves better than one texel per screen pixel in cascade 0.
+     * Constant bias along the light, in WORLD units — converted per cascade, so one value means the
+     * same thing in all of them. Too small gives acne, too large detaches shadows from their casters.
      */
-    private _setShadowMapResolution(size: number): void {
-        const clamped = Math.min(4096, Math.max(512, 1 << Math.round(Math.log2(size))));
-        if (clamped === this._shadowMapResolution) return;
-        this._shadowMapResolution = clamped;
+    public get shadowDepthBias(): number { return this._shadowDepthBias; }
+    public set shadowDepthBias(v: number) { this._shadowDepthBias = Math.max(0, v); }
+
+    /**
+     * Offset along the surface normal before the lookup, in shadow texels. This is the knob that
+     * clears acne on steeply lit surfaces without the peter-panning a larger depth bias causes.
+     */
+    public get shadowNormalBias(): number { return this._shadowNormalBias; }
+    public set shadowNormalBias(v: number) { this._shadowNormalBias = Math.max(0, v); }
+
+    /** PCF kernel radius in shadow texels; 0 collapses to a single (hard-edged) tap. */
+    public get shadowFilterRadius(): number { return this._shadowFilterRadius; }
+    public set shadowFilterRadius(v: number) { this._shadowFilterRadius = Math.min(16, Math.max(0, v)); }
+
+    /** 0 = 3x3 tap grid (9 taps), 1 = 16-tap rotated Poisson disk (softer, ~2x the cost). */
+    public get shadowFilterMode(): number { return this._shadowFilterMode; }
+    public set shadowFilterMode(v: number) { this._shadowFilterMode = v === 1 ? 1 : 0; }
+
+    /** How dark a fully shadowed pixel gets. 1 = full occlusion, lower lifts shadows artistically. */
+    public get shadowStrength(): number { return this._shadowStrength; }
+    public set shadowStrength(v: number) { this._shadowStrength = Math.min(1, Math.max(0, v)); }
+
+    /** Fraction of each cascade's range used to cross-fade into the next; 0 leaves a hard seam. */
+    public get shadowCascadeBlend(): number { return this._cascadeBlend; }
+    public set shadowCascadeBlend(v: number) { this._cascadeBlend = Math.min(0.5, Math.max(0, v)); }
+
+    /** Snap each cascade to a texel grid so shadow edges stop crawling as the camera moves. */
+    public get shadowStabilize(): boolean { return this._shadowStabilize; }
+    public set shadowStabilize(v: boolean) { this._shadowStabilize = v; }
+
+    /** Re-rasterize distant cascades only every 2nd/4th frame. Large saving, invisible at distance. */
+    public get shadowStagger(): boolean { return this._shadowStagger; }
+    public set shadowStagger(v: boolean) { this._shadowStagger = v; }
+
+    /** How far behind a cascade's slice the near plane reaches, so off-slice occluders still cast. */
+    public get shadowCasterPad(): number { return this._shadowCasterPad; }
+    public set shadowCasterPad(v: number) { this._shadowCasterPad = Math.max(0, v); }
+
+    /**
+     * Spot-light shadows, one perspective map per flagged spot light (capped at MAX_SPOT_SHADOWS).
+     * Independent of the directional cascades, but gated by the global `shadowsEnabled`.
+     */
+    public get spotShadowsEnabled(): boolean { return this._spotShadowsEnabled; }
+    public set spotShadowsEnabled(v: boolean) {
+        if (this._spotShadowsEnabled === v) return;
+        this._spotShadowsEnabled = v;
+        if (!v) this._spotShadowsDirty = true;
+    }
+
+    public get spotShadowResolution(): number { return this._spotShadowResolution; }
+    public set spotShadowResolution(size: number) {
+        const clamped = Math.min(2048, Math.max(256, 1 << Math.round(Math.log2(size))));
+        if (clamped === this._spotShadowResolution) return;
+        this._spotShadowResolution = clamped;
         if (!gl) return;
-        this._shadowMapFBO.create(clamped, clamped);
-        for (const cascade of this._shadowCascades) cascade.create(clamped, clamped);
+        this._spotShadowFBO.create(clamped, Renderer.MAX_SPOT_SHADOWS);
+        this._spotLocs.clear();
+        this._spotShadowsDirty = true;
+        this._spotShadowsActive = false;
+    }
+
+    /** Cap on a spot's far plane, derived otherwise from its attenuation coefficients. */
+    public get spotShadowDistance(): number { return this._spotShadowDistance; }
+    public set spotShadowDistance(d: number) { this._spotShadowDistance = Math.max(1, d); }
+
+    /** Constant bias in DEPTH units — perspective depth does not convert from world units linearly. */
+    public get spotShadowBias(): number { return this._spotShadowBias; }
+    public set spotShadowBias(v: number) { this._spotShadowBias = Math.max(0, v); }
+
+    /** How many spot lights can cast at once; extra casters go unshadowed rather than stealing a map. */
+    public get maxSpotShadows(): number { return Renderer.MAX_SPOT_SHADOWS; }
+
+    /** Editor debug: which cascade layer the 'shadow' channel shows. */
+    public get shadowDebugLayer(): number { return this._shadowDebugLayer; }
+    public set shadowDebugLayer(n: number) { this._shadowDebugLayer = Math.min(MAX_CASCADES - 1, Math.max(0, Math.round(n))); }
+
+    public get shadowCascades(): number { return this._cascadeCount; }
+    public set shadowCascades(n: number) {
+        this._recreateShadowTargets(this._shadowMapResolution, n);
+    }
+
+    /**
+     * Reallocate the cascade array at `size` x `size` x `layers`.
+     *
+     * Resolution and cascade count share one path because `texStorage3D` storage is immutable —
+     * changing either dimension means building a new texture, not resizing the old one. Four 4096px
+     * layers is 268MB of depth and ~67M texels rasterized per frame; 2048 is a quarter of that and,
+     * at the default 100-unit shadow distance, still resolves better than one texel per screen pixel
+     * in cascade 0.
+     */
+    private _recreateShadowTargets(size: number, layers: number): void {
+        const clampedSize = Math.min(4096, Math.max(512, 1 << Math.round(Math.log2(size))));
+        const clampedLayers = Math.min(MAX_CASCADES, Math.max(1, Math.round(layers)));
+        if (clampedSize === this._shadowMapResolution && clampedLayers === this._cascadeCount) return;
+        this._shadowMapResolution = clampedSize;
+        this._cascadeCount = clampedLayers;
+        if (!gl) return;
+        this._shadowCascadeFBO.create(clampedSize, clampedLayers);
+        // A new program-visible texture means the cached uniform locations describe nothing; and the
+        // fresh storage holds undefined depth until the next shadow pass writes or clears it.
+        this._cascadeLocs.clear();
         this._shadowMapsDirty = true;
+        this._shadowsActive = false;
+        this._shadowFullUpdate = true;
     }
 
     public get ssaoSamples(): number { return this._ssaoSamples; }
@@ -4618,6 +5113,23 @@ export class Renderer {
             ssaoSamples: this._ssaoSamples,
             ssaoResolutionScale: this._ssaoResolutionScale,
             shadowMapResolution: this._shadowMapResolution,
+            shadowsEnabled: this._shadowsEnabled,
+            shadowCascades: this._cascadeCount,
+            shadowDistance: this._shadowDistance,
+            shadowSplitLambda: this._shadowSplitLambda,
+            shadowDepthBias: this._shadowDepthBias,
+            shadowNormalBias: this._shadowNormalBias,
+            shadowFilterRadius: this._shadowFilterRadius,
+            shadowFilterMode: this._shadowFilterMode,
+            shadowStrength: this._shadowStrength,
+            shadowCascadeBlend: this._cascadeBlend,
+            shadowStabilize: this._shadowStabilize,
+            shadowStagger: this._shadowStagger,
+            shadowCasterPad: this._shadowCasterPad,
+            spotShadowsEnabled: this._spotShadowsEnabled,
+            spotShadowResolution: this._spotShadowResolution,
+            spotShadowDistance: this._spotShadowDistance,
+            spotShadowBias: this._spotShadowBias,
             bloomEnabled: this._bloomIntensity > 0,
             clearColor: this.clearColor,
             exposure: this._exposure,
@@ -4655,7 +5167,27 @@ export class Renderer {
         // applying it afterwards would silently overwrite settings the caller explicitly saved.
         if (s.quality !== undefined) this.quality = s.quality;
         if (s.renderScale !== undefined) this.renderScale = s.renderScale;
-        if (s.shadowMapResolution !== undefined) this.shadowMapResolution = s.shadowMapResolution;
+        // Resolution and cascade count share one immutable-storage reallocation, so apply them in
+        // a single call rather than letting the first setter rebuild an array the second discards.
+        if (s.shadowMapResolution !== undefined || s.shadowCascades !== undefined)
+            this._recreateShadowTargets(s.shadowMapResolution ?? this._shadowMapResolution,
+                                        s.shadowCascades ?? this._cascadeCount);
+        if (s.shadowsEnabled !== undefined) this.shadowsEnabled = s.shadowsEnabled;
+        if (s.shadowDistance !== undefined) this.shadowDistance = s.shadowDistance;
+        if (s.shadowSplitLambda !== undefined) this.shadowSplitLambda = s.shadowSplitLambda;
+        if (s.shadowDepthBias !== undefined) this.shadowDepthBias = s.shadowDepthBias;
+        if (s.shadowNormalBias !== undefined) this.shadowNormalBias = s.shadowNormalBias;
+        if (s.shadowFilterRadius !== undefined) this.shadowFilterRadius = s.shadowFilterRadius;
+        if (s.shadowFilterMode !== undefined) this.shadowFilterMode = s.shadowFilterMode;
+        if (s.shadowStrength !== undefined) this.shadowStrength = s.shadowStrength;
+        if (s.shadowCascadeBlend !== undefined) this.shadowCascadeBlend = s.shadowCascadeBlend;
+        if (s.shadowStabilize !== undefined) this.shadowStabilize = s.shadowStabilize;
+        if (s.shadowStagger !== undefined) this.shadowStagger = s.shadowStagger;
+        if (s.shadowCasterPad !== undefined) this.shadowCasterPad = s.shadowCasterPad;
+        if (s.spotShadowsEnabled !== undefined) this.spotShadowsEnabled = s.spotShadowsEnabled;
+        if (s.spotShadowResolution !== undefined) this.spotShadowResolution = s.spotShadowResolution;
+        if (s.spotShadowDistance !== undefined) this.spotShadowDistance = s.spotShadowDistance;
+        if (s.spotShadowBias !== undefined) this.spotShadowBias = s.spotShadowBias;
         if (s.ssaoSamples !== undefined) this.ssaoSamples = s.ssaoSamples;
         if (s.ssaoResolutionScale !== undefined) this.ssaoResolutionScale = s.ssaoResolutionScale;
         if (s.clearColor) this.clearColor = s.clearColor;
@@ -4684,7 +5216,12 @@ export class Renderer {
 
     // Editor "Renderer" debug channel currently blitted to screen ('final' = normal image).
     public get debugView(): DebugView { return this._debugView; }
-    public set debugView(view: DebugView) { this._debugView = view; }
+    public set debugView(view: DebugView) {
+        this._debugView = view;
+        // 'cascades' is not a blit: the tint is produced inside the lighting shader itself, so the
+        // flag has to reach a uniform rather than the present pass.
+        this._debugCascades = view === 'cascades';
+    }
 
     // Read-only mirrors of the grid state (set via setGridVisible / setGridPlane) for editor UIs.
     public get gridVisible(): boolean { return this._gridEnabled; }

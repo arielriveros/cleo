@@ -17,6 +17,7 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'depth',     label: 'Depth' },
   { key: 'ssao',      label: 'SSAO' },
   { key: 'shadow',    label: 'Shadow' },
+  { key: 'cascades',  label: 'Cascades' },
   { key: 'bloom',     label: 'Bloom' },
   { key: 'bloomMask', label: 'Bloom Mask' },
   { key: 'velocity',  label: 'Velocity' },
@@ -31,6 +32,34 @@ const LOD_DETAIL: { label: string; step: number; title: string }[] = [
   { label: '½', step: 2, title: 'Every 2nd vertex — a quarter of the triangles' },
   { label: '¼', step: 4, title: 'Every 4th vertex — a sixteenth of the triangles' },
   { label: '⅛', step: 8, title: 'Every 8th vertex — a sixty-fourth of the triangles' },
+];
+
+// Shadow map resolution per cascade layer. VRAM is size² x 4 bytes x cascade count, so 4096 x 4
+// layers is ~268MB of depth — the top of the ladder is a "capture a still" setting, not a default.
+const SHADOW_RES: { label: string; size: number; title: string }[] = [
+  { label: '512',  size: 512,  title: '512px per cascade — lowest cost, visibly blocky up close' },
+  { label: '1K',   size: 1024, title: '1024px per cascade' },
+  { label: '2K',   size: 2048, title: '2048px per cascade — the default' },
+  { label: '4K',   size: 4096, title: '4096px per cascade — ~268MB of depth at 4 cascades' },
+];
+
+// Cascade count. More cascades spend resolution where the camera actually is, at one extra depth
+// rasterization each (the distant ones are staggered, so the real cost is well under linear).
+const SHADOW_CASCADES = [1, 2, 3, 4].map((n) => ({ value: n, label: String(n), title: `${n} cascade${n > 1 ? 's' : ''}` }));
+
+// PCF kernels. Both sample a hardware comparison texture, so every tap is already a 2x2 filter.
+const SHADOW_FILTER: { label: string; mode: number; title: string }[] = [
+  { label: '3×3',     mode: 0, title: '9 taps in a grid — the default' },
+  { label: 'Poisson', mode: 1, title: '16 taps on a per-pixel rotated disk — softer at wide radii' },
+];
+
+// Spot-light shadow map resolution. One map PER casting spot light, re-rendered every frame (there
+// is no equivalent of the cascade stagger), so this ladder tops out lower than the cascades'.
+const SPOT_RES: { label: string; size: number }[] = [
+  { label: '256', size: 256 },
+  { label: '512', size: 512 },
+  { label: '1K', size: 1024 },
+  { label: '2K', size: 2048 },
 ];
 
 // Motion-blur quality presets: sample taps per pixel (higher = smoother, costlier).
@@ -69,6 +98,25 @@ export default function RendererOptions() {
   const [motionBlur, setMotionBlur] = useState<boolean>(() => renderer?.motionBlurEnabled ?? true);
   const [motionBlurIntensity, setMotionBlurIntensity] = useState<number>(() => renderer?.motionBlurIntensity ?? 1.0);
   const [motionBlurSamples, setMotionBlurSamples] = useState<number>(() => renderer?.motionBlurSamples ?? 12);
+  const [shadowsEnabled, setShadowsEnabled] = useState<boolean>(() => renderer?.shadowsEnabled ?? true);
+  const [shadowRes, setShadowRes] = useState<number>(() => renderer?.shadowMapResolution ?? 2048);
+  const [shadowCascades, setShadowCascades] = useState<number>(() => renderer?.shadowCascades ?? 3);
+  const [shadowDistance, setShadowDistance] = useState<number>(() => renderer?.shadowDistance ?? 100);
+  const [shadowLambda, setShadowLambda] = useState<number>(() => renderer?.shadowSplitLambda ?? 0.5);
+  const [shadowDepthBias, setShadowDepthBias] = useState<number>(() => renderer?.shadowDepthBias ?? 0.03);
+  const [shadowNormalBias, setShadowNormalBias] = useState<number>(() => renderer?.shadowNormalBias ?? 1.5);
+  const [shadowSoftness, setShadowSoftness] = useState<number>(() => renderer?.shadowFilterRadius ?? 1);
+  const [shadowFilterMode, setShadowFilterMode] = useState<number>(() => renderer?.shadowFilterMode ?? 0);
+  const [shadowStrength, setShadowStrength] = useState<number>(() => renderer?.shadowStrength ?? 1);
+  const [shadowBlend, setShadowBlend] = useState<number>(() => renderer?.shadowCascadeBlend ?? 0.1);
+  const [shadowStabilize, setShadowStabilize] = useState<boolean>(() => renderer?.shadowStabilize ?? true);
+  const [shadowStagger, setShadowStagger] = useState<boolean>(() => renderer?.shadowStagger ?? true);
+  const [shadowCasterPad, setShadowCasterPad] = useState<number>(() => renderer?.shadowCasterPad ?? 50);
+  const [shadowDebugLayer, setShadowDebugLayer] = useState<number>(() => renderer?.shadowDebugLayer ?? 0);
+  const [spotShadows, setSpotShadows] = useState<boolean>(() => renderer?.spotShadowsEnabled ?? true);
+  const [spotShadowRes, setSpotShadowRes] = useState<number>(() => renderer?.spotShadowResolution ?? 1024);
+  const [spotShadowDist, setSpotShadowDist] = useState<number>(() => renderer?.spotShadowDistance ?? 100);
+  const [spotShadowBias, setSpotShadowBias] = useState<number>(() => renderer?.spotShadowBias ?? 0.0015);
 
   // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => { if (renderer) renderer.debugView = 'final'; }, [renderer]);
@@ -106,6 +154,25 @@ export default function RendererOptions() {
     setMotionBlur(renderer.motionBlurEnabled);
     setMotionBlurIntensity(renderer.motionBlurIntensity);
     setMotionBlurSamples(renderer.motionBlurSamples);
+    setShadowsEnabled(renderer.shadowsEnabled);
+    setShadowRes(renderer.shadowMapResolution);
+    setShadowCascades(renderer.shadowCascades);
+    setShadowDistance(renderer.shadowDistance);
+    setShadowLambda(renderer.shadowSplitLambda);
+    setShadowDepthBias(renderer.shadowDepthBias);
+    setShadowNormalBias(renderer.shadowNormalBias);
+    setShadowSoftness(renderer.shadowFilterRadius);
+    setShadowFilterMode(renderer.shadowFilterMode);
+    setShadowStrength(renderer.shadowStrength);
+    setShadowBlend(renderer.shadowCascadeBlend);
+    setShadowStabilize(renderer.shadowStabilize);
+    setShadowStagger(renderer.shadowStagger);
+    setShadowCasterPad(renderer.shadowCasterPad);
+    setShadowDebugLayer(renderer.shadowDebugLayer);
+    setSpotShadows(renderer.spotShadowsEnabled);
+    setSpotShadowRes(renderer.spotShadowResolution);
+    setSpotShadowDist(renderer.spotShadowDistance);
+    setSpotShadowBias(renderer.spotShadowBias);
   }, [renderer]);
 
   // Play/stop resets debugView and toggles the grid on the renderer directly.
@@ -235,6 +302,113 @@ export default function RendererOptions() {
           />
         </div>
         <Hint>Camera-reprojection motion blur (UE5-style). Amount scales the shutter length.</Hint>
+      </Section>
+
+      <Section title='Shadows'>
+        <Toggle label='Enabled' checked={shadowsEnabled} className='my-1'
+          onChange={(c) => { renderer.shadowsEnabled = c; setShadowsEnabled(c); }} />
+
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>Resolution</span>
+          <SegmentedControl
+            value={shadowRes}
+            onChange={(size) => { renderer.shadowMapResolution = size; setShadowRes(renderer.shadowMapResolution); }}
+            options={SHADOW_RES.map((r) => ({ value: r.size, label: r.label, title: r.title }))}
+          />
+        </div>
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>Cascades</span>
+          <SegmentedControl
+            value={shadowCascades}
+            onChange={(n) => { renderer.shadowCascades = n; setShadowCascades(renderer.shadowCascades); }}
+            options={SHADOW_CASCADES}
+          />
+        </div>
+        <Field label='Distance'>
+          <NumberInput value={shadowDistance} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.shadowDistance = v; setShadowDistance(renderer.shadowDistance); }} />
+        </Field>
+        <Slider label='Split &#955;' value={shadowLambda} min={0} max={1} step={0.05}
+          onChange={(v) => { renderer.shadowSplitLambda = v; setShadowLambda(v); }} />
+        <Hint>Distance is how far the cascades reach; nothing past it is shadowed. &#955; trades near
+          detail against far coverage: 0 splits the range into even slabs, 1 packs resolution close to
+          the camera. Watch the Cascades channel while you drag it.</Hint>
+
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>Filter</span>
+          <SegmentedControl
+            value={shadowFilterMode}
+            onChange={(m) => { renderer.shadowFilterMode = m; setShadowFilterMode(renderer.shadowFilterMode); }}
+            options={SHADOW_FILTER.map((f) => ({ value: f.mode, label: f.label, title: f.title }))}
+          />
+        </div>
+        <Slider label='Softness' value={shadowSoftness} min={0} max={8} step={0.25}
+          readout={(v) => (v <= 0 ? 'hard' : `${v.toFixed(2)} px`)}
+          onChange={(v) => { renderer.shadowFilterRadius = v; setShadowSoftness(v); }} />
+        <Slider label='Strength' value={shadowStrength} min={0} max={1} step={0.05}
+          onChange={(v) => { renderer.shadowStrength = v; setShadowStrength(v); }} />
+        <Slider label='Blend' value={shadowBlend} min={0} max={0.5} step={0.01}
+          onChange={(v) => { renderer.shadowCascadeBlend = v; setShadowBlend(v); }} />
+        <Hint>Softness is the filter radius in shadow texels (0 = a single hard-edged tap). Blend
+          cross-fades the seam where one cascade hands over to the next; 0 leaves a visible line.</Hint>
+
+        <Slider label='Depth Bias' value={shadowDepthBias} min={0} max={0.5} step={0.005}
+          onChange={(v) => { renderer.shadowDepthBias = v; setShadowDepthBias(v); }} />
+        <Slider label='Normal Bias' value={shadowNormalBias} min={0} max={8} step={0.1}
+          onChange={(v) => { renderer.shadowNormalBias = v; setShadowNormalBias(v); }} />
+        <Hint>Depth bias is in WORLD units and is rescaled per cascade, so one value means the same
+          thing in all of them. Raise Normal Bias first for acne on steeply lit surfaces — it moves the
+          lookup across the map instead of pulling the surface toward the light, so shadows stay
+          attached to their casters.</Hint>
+
+        <Toggle label='Stabilize' checked={shadowStabilize} className='my-1'
+          onChange={(c) => { renderer.shadowStabilize = c; setShadowStabilize(c); }} />
+        <Toggle label='Stagger Updates' checked={shadowStagger} className='my-1'
+          onChange={(c) => { renderer.shadowStagger = c; setShadowStagger(c); }} />
+        <Field label='Caster Pad'>
+          <NumberInput value={shadowCasterPad} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.shadowCasterPad = v; setShadowCasterPad(renderer.shadowCasterPad); }} />
+        </Field>
+        <Hint>Stabilize snaps each cascade to a texel grid so shadow edges stop crawling as the camera
+          moves. Stagger re-draws the distant cascades every 2nd/4th frame. Caster Pad (world units) is
+          how far behind a cascade the depth pass still captures occluders.</Hint>
+
+        {debugView === 'shadow' && (
+          <div className='flex items-center gap-1 my-1 text-xs'>
+            <span className='w-[70px] shrink-0'>View Layer</span>
+            <SegmentedControl
+              value={shadowDebugLayer}
+              onChange={(n) => { renderer.shadowDebugLayer = n; setShadowDebugLayer(renderer.shadowDebugLayer); }}
+              options={Array.from({ length: shadowCascades }, (_, i) => ({ value: i, label: String(i) }))}
+            />
+          </div>
+        )}
+        {!shadowsEnabled && <Hint>Shadows are off — every lookup returns fully lit.</Hint>}
+      </Section>
+
+      <Section title='Spot Shadows'>
+        <Toggle label='Enabled' checked={spotShadows} className='my-1'
+          onChange={(c) => { renderer.spotShadowsEnabled = c; setSpotShadows(c); }} />
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>Resolution</span>
+          <SegmentedControl
+            value={spotShadowRes}
+            onChange={(size) => { renderer.spotShadowResolution = size; setSpotShadowRes(renderer.spotShadowResolution); }}
+            options={SPOT_RES.map((r) => ({ value: r.size, label: r.label }))}
+          />
+        </div>
+        <Field label='Max Dist'>
+          <NumberInput value={spotShadowDist} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.spotShadowDistance = v; setSpotShadowDist(renderer.spotShadowDistance); }} />
+        </Field>
+        <Slider label='Bias' value={spotShadowBias} min={0} max={0.02} step={0.0005}
+          readout={(v) => v.toFixed(4)}
+          onChange={(v) => { renderer.spotShadowBias = v; setSpotShadowBias(v); }} />
+        <Hint>Up to {renderer.maxSpotShadows} spot lights cast at once — flag them per light with
+          Cast Shadows in the inspector; any beyond the cap simply go unshadowed. A spot&apos;s frustum
+          matches its outer cone, and its far plane comes from its attenuation, capped by Max Dist.
+          Bias is in depth units here, not world units: perspective depth does not convert linearly.</Hint>
+        {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
       </Section>
 
       <Section title='SSAO'>

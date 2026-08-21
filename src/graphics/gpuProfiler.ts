@@ -32,7 +32,7 @@ export interface PassTiming {
  */
 export const RENDER_PASSES = [
     'shadows.cascades',
-    'shadows.single',
+    'shadows.spot',
     'geometry',
     'foliage',
     'ssao',
@@ -67,7 +67,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 /** Passes the profiler panel offers as on/off switches. Excludes the ones that would leave the
  *  pipeline in a broken state (you cannot skip `geometry` or `present` and still have an image). */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
-    'shadows.cascades', 'shadows.single', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'grid',
+    'shadows.cascades', 'shadows.spot', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'grid',
     'transparent', '2d', 'gizmos', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
 ];

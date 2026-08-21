@@ -10,7 +10,7 @@ export interface TextureConfig {
     mipMap?: boolean;
     mipMapFilter?: 'nearest' | 'linear';
     precision?: 'low' | 'high';
-    target?: 'texture2D' | 'cubemap' | 'texture3D';
+    target?: 'texture2D' | 'cubemap' | 'texture3D' | 'texture2DArray';
     /**
      * Number of colour channels. Defaults to RGBA; 'r' allocates a single-channel target, for buffers
      * that hold one scalar (ambient occlusion, masks) and would otherwise pay 4x the bandwidth and
@@ -41,7 +41,7 @@ export class Texture {
     private _height: number = 0;
     // Colour channels actually allocated (1 for an R8/R16F target, 4 otherwise). Only affects byteSize.
     private _channels: number = 4;
-    // Third dimension, only ever non-zero for a TEXTURE_3D volume. Kept as a plain field rather than
+    // Third dimension: slices of a TEXTURE_3D volume or layers of a TEXTURE_2D_ARRAY. Kept as a plain field rather than
     // a separate subclass so `byteSize`, `bind`/`unbind` and `delete` stay single implementations.
     private _depth: number = 0;
     private _data: HTMLImageElement | CubemapFaces | null = null;
@@ -74,6 +74,7 @@ export class Texture {
 
         this._target = options?.target === 'cubemap' ? gl.TEXTURE_CUBE_MAP
                      : options?.target === 'texture3D' ? gl.TEXTURE_3D
+                     : options?.target === 'texture2DArray' ? gl.TEXTURE_2D_ARRAY
                      : gl.TEXTURE_2D;
 
         this._wrapping = this._getWrappingValue(options?.wrapping) || gl.CLAMP_TO_EDGE;
@@ -361,6 +362,64 @@ export class Texture {
         this.unbind();
     }
 
+    /**
+     * Allocate an empty renderable DEPTH texture array with immutable storage. Requires
+     * `target: 'texture2DArray'` and `usage: 'depth'`. This is the cascaded-shadow-map target: one
+     * layer per cascade, filled through `gl.framebufferTextureLayer` (see LayeredDepthFramebuffer).
+     *
+     * Two things here differ from every other depth texture in the engine, and both are the point:
+     *
+     *  - One array replaces N separate `sampler2D`s. GLSL ES 3.00 forbids dynamically indexing a
+     *    SAMPLER array, which is why the old three-cascade code had to unroll its cascade select into
+     *    an if-chain and burn three texture units. A `sampler2DArray` takes a dynamic layer index, so
+     *    the cascade count becomes a plain uniform and the whole thing costs one unit.
+     *  - `compare` turns it into a `sampler2DArrayShadow`: the hardware does the depth comparison and
+     *    bilinearly filters the RESULT, so one tap is already a 2x2 percentage-closer filter. That is
+     *    why this path must NOT inherit `create()`'s forced NEAREST for depth textures.
+     */
+    public createArrayTarget(size: number, layers: number, compare: boolean = true): void {
+        if (this._target !== gl.TEXTURE_2D_ARRAY) {
+            Logger.error('createArrayTarget requires a texture created with target: "texture2DArray"', 'Texture');
+            return;
+        }
+        this._bindForUpload();
+        this._width = size;
+        this._height = size;
+        this._depth = layers;
+        this._mipMap = false;
+
+        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, this._internalFormat, size, size, layers);
+
+        const filter = compare ? gl.LINEAR : gl.NEAREST;
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, filter);
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, filter);
+        // CLAMP, not REPEAT: a lookup that falls outside a cascade's footprint must read the border,
+        // not wrap around and shadow the far side of the map with unrelated geometry.
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        if (compare) {
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_COMPARE_FUNC, gl.LESS);
+        }
+        this.checkForErrors();
+        this.unbind();
+    }
+
+    /**
+     * Toggle hardware depth comparison on a depth array/2D target.
+     *
+     * Reading a texture whose TEXTURE_COMPARE_MODE is COMPARE_REF_TO_TEXTURE through a NON-shadow
+     * sampler is undefined per the GLES 3.0 spec, so the editor's cascade debug blit — which wants
+     * the stored depth, not a comparison result — has to switch the mode off around its draw.
+     */
+    public setDepthCompare(enabled: boolean): void {
+        this._bindForUpload();
+        gl.texParameteri(this._target, gl.TEXTURE_COMPARE_MODE, enabled ? gl.COMPARE_REF_TO_TEXTURE : gl.NONE);
+        gl.texParameteri(this._target, gl.TEXTURE_MIN_FILTER, enabled ? gl.LINEAR : gl.NEAREST);
+        gl.texParameteri(this._target, gl.TEXTURE_MAG_FILTER, enabled ? gl.LINEAR : gl.NEAREST);
+        this.unbind();
+    }
+
     /** (Re)generate the mip chain for this texture — e.g. after rendering a captured cubemap. */
     public generateMipmaps(): void {
         this._bindForUpload();
@@ -431,11 +490,12 @@ export class Texture {
             mipMapFilter: this._minFilter === gl.NEAREST_MIPMAP_NEAREST ? 'nearest' : 'linear',
             precision: this._precision,
             target: this._target === gl.TEXTURE_2D ? 'texture2D'
-                  : this._target === gl.TEXTURE_3D ? 'texture3D' : 'cubemap'
+                  : this._target === gl.TEXTURE_3D ? 'texture3D'
+                  : this._target === gl.TEXTURE_2D_ARRAY ? 'texture2DArray' : 'cubemap'
         }
     }
 
-    /** Depth of a 3D volume; 0 for 2D and cubemap textures. */
+    /** Slices of a 3D volume or layers of a 2D array; 0 for plain 2D and cubemap textures. */
     public get depth(): number { return this._depth; }
 
     /** Rough VRAM footprint in bytes (width*height*depth * bytes-per-pixel * faces * mip factor). bpp
@@ -445,7 +505,7 @@ export class Texture {
         const bytesPerChannel = this._precision === 'high' ? 2 : 1;
         const bpp = this._usage === 'depth' ? 4 : this._channels * bytesPerChannel;
         const faces = this._target === gl.TEXTURE_CUBE_MAP ? 6 : 1;
-        const slices = this._target === gl.TEXTURE_3D ? Math.max(1, this._depth) : 1;
+        const slices = (this._target === gl.TEXTURE_3D || this._target === gl.TEXTURE_2D_ARRAY) ? Math.max(1, this._depth) : 1;
         // 4/3 is the 2D mip series; a 3D chain converges to 8/7 instead.
         const mip = this._mipMap ? (this._target === gl.TEXTURE_3D ? 8 / 7 : 4 / 3) : 1;
         return this._width * this._height * slices * bpp * faces * mip;

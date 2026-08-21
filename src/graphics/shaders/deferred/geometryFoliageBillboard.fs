@@ -8,7 +8,6 @@ precision highp float;
 
 in vec3 fragPos;
 in vec2 fragTexCoord;
-in vec4 fragPosLightSpace; // unused
 in mat3 TBN;
 
 layout(location = 0) out vec4 gAlbedoMetallic;

@@ -7,7 +7,6 @@ precision highp float;
 
 in vec3 fragPos;            // world-space position (unused here; lighting reconstructs from depth)
 in vec2 fragTexCoord;
-in vec4 fragPosLightSpace;  // unused in the geometry pass
 in mat3 TBN;
 
 layout(location = 0) out vec4 gAlbedoMetallic;   // rgb = albedo, a = metallic

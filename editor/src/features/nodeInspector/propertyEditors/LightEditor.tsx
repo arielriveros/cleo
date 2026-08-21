@@ -3,7 +3,7 @@ import { LightNode, PointLight, Spotlight, SpriteNode } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { useEventBus } from '../../EventBusContext';
 import Collapsable from '../../../components/Collapsable'
-import { ColorInput, PropertyTable, PropertyRow, Slider, Section } from '../../../components/ui'
+import { ColorInput, PropertyTable, PropertyRow, Slider, Section, Toggle, Hint } from '../../../components/ui'
 import { LightIcon } from '../sectionIcons'
 
 // The ColorInput now lives in the ui library; re-exported so existing importers
@@ -15,6 +15,7 @@ export default function LightEditor(props: {node: LightNode}) {
   const light = props.node.light;
   const markLightDirty = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'light', node: props.node });
 
+  const [castShadows, setCastShadows] = useState(props.node.castShadows);
   const [diffuse, setDiffuse] = useState(vec3ToHex(light.diffuse));
   const [specular, setSpecular] = useState(vec3ToHex(light.specular));
   const [ambient, setAmbient] = useState(vec3ToHex(light.ambient));
@@ -27,6 +28,7 @@ export default function LightEditor(props: {node: LightNode}) {
   });
 
   useEffect(() => {
+    setCastShadows(props.node.castShadows);
     setDiffuse(vec3ToHex(light.diffuse));
     setSpecular(vec3ToHex(light.specular));
     setAmbient(vec3ToHex(light.ambient));
@@ -97,6 +99,19 @@ export default function LightEditor(props: {node: LightNode}) {
             <ColorInput color={ambient} onChange={(color) => { light.ambient = color; setAmbient(vec3ToHex(color)); markLightDirty(); }} />
           </PropertyRow>
         </PropertyTable>
+      </Section>
+
+      <Section title='Shadows'>
+        <Toggle label='Cast Shadows' checked={castShadows} className='my-1'
+          onChange={(c) => { props.node.castShadows = c; setCastShadows(c); markLightDirty(); }} />
+        {props.node.type === 'directional'
+          ? <Hint>The FIRST directional light with this on is the scene&apos;s sun: the renderer fits its
+              shadow cascades around the camera for it. Tune them in Renderer mode.</Hint>
+          : props.node.type === 'spotlight'
+            ? <Hint>Spot lights get their own shadow map, sized to the outer cone. A few can cast at
+                once (see Spot Shadows in Renderer mode); any beyond that cap go unshadowed.</Hint>
+            : <Hint>Point lights do not cast shadows — that needs a cubemap per light, which the
+                renderer has no path for. The flag is still saved.</Hint>}
       </Section>
 
       { props.node.light instanceof PointLight &&

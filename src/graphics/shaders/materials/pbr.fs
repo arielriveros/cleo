@@ -6,7 +6,6 @@ precision highp float;
 
 in vec3 fragPos;
 in vec2 fragTexCoord;
-in vec4 fragPosLightSpace;
 in mat3 TBN;
 
 layout(location = 0) out vec4 fragColor;
@@ -44,7 +43,7 @@ uniform vec3 u_viewPos;
 
 uniform int u_numPointLights;
 uniform int u_numSpotlights;
-uniform sampler2D u_shadowMap;
+uniform mat4 u_view; // only to get the view-space depth that selects a cascade
 
 uniform struct DirectionalLight {
     vec3 direction;
@@ -72,8 +71,8 @@ struct SpotLight {
     float constant;
     float linear;
     float quadratic;
-    float cutOff;
-    float outerCutOff;
+    float cutOff;      // cosine of the inner half-angle
+    float outerCutOff; // cosine of the outer half-angle (smaller than cutOff)
 };
 
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
@@ -84,29 +83,7 @@ uniform bool u_useEnvMap;
 uniform samplerCube u_envMap;
 uniform bool u_envMapLinear; // env cube is linear HDR (a light probe) -> skip the sRGB decode
 
-// Shadow mapping
-float shadowCalculation(vec4 fragPosLS) {
-    vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
-    projCoords = projCoords * 0.5 + 0.5;
-    if (projCoords.x > 1.0 || projCoords.y > 1.0 || projCoords.x < 0.0 || projCoords.y < 0.0 || projCoords.z > 1.0)
-        return 0.0;
-
-    float closestDepth = texture(u_shadowMap, projCoords.xy).r; 
-    float currentDepth = projCoords.z;
-    float bias = 0.001;
-    float shadow = 0.0;
-
-    float offset = (1.0 / float(textureSize(u_shadowMap, 0).x)) / 2.0;
-    for(int x = -1; x <= 1; ++x) {
-        for(int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * offset).r; 
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
-        }    
-    }
-    shadow /= 9.0;
-
-    return shadow;
-}
+#include "../environment/shadows.glsl";
 
 // Utility
 const float PI = 3.14159265359;
@@ -224,7 +201,7 @@ void main() {
     // Directional light (guard against an unset/zero direction -> normalize(0) = NaN)
     vec3 Lo = vec3(0.0);
     if (dot(u_dirLight.direction, u_dirLight.direction) > 1e-6) {
-        float shadow = shadowCalculation(fragPosLightSpace);
+        float shadow = directionalShadow(fragPos, N, -(u_view * vec4(fragPos, 1.0)).z);
         vec3 Ld = normalize(-u_dirLight.direction);
         vec3 radiance = u_dirLight.diffuse; // intensity/color
         accumulateLight(N, V, albedo, metallic, roughness, Ld, radiance * (1.0 - shadow), Lo);
@@ -245,9 +222,12 @@ void main() {
         float dist = length(u_spotlights[i].position - fragPos);
         float att = 1.0 / (u_spotlights[i].constant + u_spotlights[i].linear * dist + u_spotlights[i].quadratic * dist * dist);
         float theta = dot(L, normalize(-u_spotlights[i].direction));
-        float epsilon = u_spotlights[i].outerCutOff - u_spotlights[i].cutOff;
+        // cutOff/outerCutOff are COSINES of the half-angles (see Renderer's spot upload), so the
+        // inner one is the LARGER value and the falloff denominator is inner - outer.
+        float epsilon = u_spotlights[i].cutOff - u_spotlights[i].outerCutOff;
         float intensity = clamp((theta - u_spotlights[i].outerCutOff) / epsilon, 0.0, 1.0);
-        vec3 rad = u_spotlights[i].diffuse * att * intensity;
+        float spotSh = spotShadowFor(i, fragPos, N, u_spotlights[i].position);
+        vec3 rad = u_spotlights[i].diffuse * att * intensity * (1.0 - spotSh);
         accumulateLight(N, V, albedo, metallic, roughness, L, rad, Lo);
     }
 

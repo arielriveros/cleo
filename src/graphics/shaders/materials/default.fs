@@ -4,9 +4,11 @@
 precision mediump float;
 #include "../screen/tonemap.glsl";
 
-in vec3 fragPos;
+// highp, not the file's mediump default: this is a WORLD position, and it is what the shadow
+// lookup projects into light space. At mediump a position a few hundred units out is only good to
+// about half a unit, which is many shadow texels.
+in highp vec3 fragPos;
 in vec2 fragTexCoord;
-in vec4 fragPosLightSpace;
 in mat3 TBN;
 
 // Material
@@ -45,7 +47,9 @@ uniform vec3 u_viewPos;
 
 uniform int u_numPointLights;
 uniform int u_numSpotlights;
-uniform sampler2D u_shadowMap;
+// highp is also required for LINKING: default.vs declares u_view at the vertex stage's default
+// (highp), and a uniform of the same name must have the same precision in both stages.
+uniform highp mat4 u_view; // only to get the view-space depth that selects a cascade
 
 // Directional
 uniform struct DirectionalLight {
@@ -76,8 +80,8 @@ struct SpotLight {
     float constant;
     float linear;
     float quadratic;
-    float cutOff;
-    float outerCutOff;
+    float cutOff;      // cosine of the inner half-angle
+    float outerCutOff; // cosine of the outer half-angle (smaller than cutOff)
 };
 
 // Environment
@@ -88,29 +92,7 @@ uniform bool u_envMapLinear; // env cube is linear HDR (a light probe) -> skip t
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 uniform SpotLight u_spotlights[MAX_SPOTLIGHTS];
 
-float shadowCalculation(vec4 fragPosLS) {
-    vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
-    projCoords = projCoords * 0.5 + 0.5;
-    if (projCoords.x > 1.0 || projCoords.y > 1.0 || projCoords.x < 0.0 || projCoords.y < 0.0 || projCoords.z > 1.0)
-        return 0.0;
-
-    float closestDepth = texture(u_shadowMap, projCoords.xy).r; 
-    float currentDepth = projCoords.z;
-    float bias = 0.001;
-    float shadow = 0.0;
-
-    // pcf
-    float offset = (1.0 / float(textureSize(u_shadowMap, 0).x)) / 2.0;
-    for(int x = -1; x <= 1; ++x) {
-        for(int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * offset).r; 
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
-        }    
-    }
-    shadow /= 9.0;
-
-    return shadow;
-}
+#include "../environment/shadows.glsl";
 
 // Per-light functions return direct diffuse + specular only. Ambient is applied once in main()
 // (a single term), not accumulated per light — otherwise ambient scales with the light count.
@@ -125,7 +107,7 @@ vec3 computeDirectionalLight(vec3 normal, vec3 viewDir, DirectionalLight light, 
     vec3 specular = light.specular * spec * materialSpecular;
 
     // calculate shadow
-    float shadow = shadowCalculation(fragPosLightSpace);
+    float shadow = directionalShadow(fragPos, normal, -(u_view * vec4(fragPos, 1.0)).z);
 
     return (1.0 - shadow) * (diffuse + specular);
 }
@@ -148,7 +130,7 @@ vec3 computePointLight(vec3 normal, vec3 viewDir, PointLight light, vec3 materia
     return (diffuse + specular) * attenuation;
 }
 
-vec3 computeSpotlight(vec3 normal, vec3 viewDir, SpotLight light, vec3 materialDiffuse, vec3 materialSpecular) {
+vec3 computeSpotlight(int index, vec3 normal, vec3 viewDir, SpotLight light, vec3 materialDiffuse, vec3 materialSpecular) {
     // diffuse
     vec3 lightDir = normalize(light.position - fragPos);
     float diff = max(dot(normal, lightDir), 0.0f);
@@ -165,10 +147,13 @@ vec3 computeSpotlight(vec3 normal, vec3 viewDir, SpotLight light, vec3 materialD
 
     // spotlight
     float theta = dot(lightDir, normalize(-light.direction));
-    float epsilon = light.outerCutOff - light.cutOff;
+    // cutOff/outerCutOff are COSINES of the half-angles (see Renderer's spot upload), so the
+    // inner one is the LARGER value and the falloff denominator is inner - outer.
+    float epsilon = light.cutOff - light.outerCutOff;
     float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);
 
-    return (diffuse + specular) * attenuation * intensity;
+    float shadow = spotShadowFor(index, fragPos, normal, light.position);
+    return (diffuse + specular) * attenuation * intensity * (1.0 - shadow);
 }
 
 layout(location = 0) out vec4 fragColor;
@@ -216,7 +201,7 @@ void main() {
     }
 
     for (int i = 0; i < u_numSpotlights; i++) {
-        result += computeSpotlight(normal, viewDir, u_spotlights[i], matDiffuse, matSpecular);
+        result += computeSpotlight(i, normal, viewDir, u_spotlights[i], matDiffuse, matSpecular);
     }
 
     if (u_useEnvMap) {

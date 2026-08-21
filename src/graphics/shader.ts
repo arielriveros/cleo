@@ -178,15 +178,22 @@ export class Shader {
                 gl.uniform4iv(location, value);
                 break;
     
+            // Every sampler type is set identically: the texture UNIT index, as an int.
             case 'sampler2D':
-                gl.uniform1i(location, value);
-                break;
-    
             case 'samplerCube':
-                gl.uniform1i(location, value);
-                break;
-
             case 'sampler3D':
+            case 'sampler2DArray':
+            case 'sampler2DArrayShadow':
+            case 'sampler2DShadow':
+            case 'samplerCubeShadow':
+            case 'isampler2D':
+            case 'isampler3D':
+            case 'isamplerCube':
+            case 'isampler2DArray':
+            case 'usampler2D':
+            case 'usampler3D':
+            case 'usamplerCube':
+            case 'usampler2DArray':
                 gl.uniform1i(location, value);
                 break;
 
@@ -277,13 +284,21 @@ export class Shader {
                     defaultValue = false;
                     break;
                 case 'sampler2D':
-                    defaultValue = 0;
-                    break;
                 case 'samplerCube':
-                    defaultValue = 0;
-                    break;
                 case 'sampler3D':
-                    defaultValue = 0;
+                case 'sampler2DArray':
+                case 'sampler2DArrayShadow':
+                case 'sampler2DShadow':
+                case 'samplerCubeShadow':
+                case 'isampler2D':
+                case 'isampler3D':
+                case 'isamplerCube':
+                case 'isampler2DArray':
+                case 'usampler2D':
+                case 'usampler3D':
+                case 'usamplerCube':
+                case 'usampler2DArray':
+                    defaultValue = 0; // texture unit 0
                     break;
                 // These are all already handled by _setUniform and named by getTypeName; only this
                 // switch was missing them, so declaring e.g. an ivec2 uniform threw at link time
@@ -348,6 +363,20 @@ export class Shader {
             case gl.SAMPLER_2D: return 'sampler2D';
             case gl.SAMPLER_CUBE: return 'samplerCube';
             case gl.SAMPLER_3D: return 'sampler3D';
+            // WebGL2 sampler types. All are set the same way (a texture unit index via uniform1i);
+            // they are listed individually because reflection matches on the exact GL enum.
+            case gl.SAMPLER_2D_ARRAY: return 'sampler2DArray';
+            case gl.SAMPLER_2D_ARRAY_SHADOW: return 'sampler2DArrayShadow';
+            case gl.SAMPLER_2D_SHADOW: return 'sampler2DShadow';
+            case gl.SAMPLER_CUBE_SHADOW: return 'samplerCubeShadow';
+            case gl.INT_SAMPLER_2D: return 'isampler2D';
+            case gl.INT_SAMPLER_3D: return 'isampler3D';
+            case gl.INT_SAMPLER_CUBE: return 'isamplerCube';
+            case gl.INT_SAMPLER_2D_ARRAY: return 'isampler2DArray';
+            case gl.UNSIGNED_INT_SAMPLER_2D: return 'usampler2D';
+            case gl.UNSIGNED_INT_SAMPLER_3D: return 'usampler3D';
+            case gl.UNSIGNED_INT_SAMPLER_CUBE: return 'usamplerCube';
+            case gl.UNSIGNED_INT_SAMPLER_2D_ARRAY: return 'usampler2DArray';
             default: return 'unknown';
         }
     }

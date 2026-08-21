@@ -12,7 +12,6 @@ precision highp float;
 
 in vec3 fragPos;
 in vec2 fragTexCoord;
-in vec4 fragPosLightSpace;
 in mat3 TBN;
 
 layout(location = 0) out vec4 fragColor;
@@ -42,10 +41,13 @@ uniform vec2 u_hRange0; uniform vec2 u_hRange1; uniform vec2 u_hRange2; uniform 
 uniform vec2 u_sRange0; uniform vec2 u_sRange1; uniform vec2 u_sRange2; uniform vec2 u_sRange3;
 
 // --- Lighting uniforms (subset of pbr.fs, populated by _setLighting) -----------------------------------
-// NOTE: intentionally NO u_shadowMap / u_envMap here. The terrain layer samplers occupy texture units
-// 0..8 (unit 6 = normal2, unit 7 = albedo3, ...), which would collide with the forward shadow (unit 6)
-// and env cube (unit 7) — and a samplerCube + sampler2D on the same unit is a GLES draw error. Terrain is
-// rough/diffuse, so dropping specular IBL and probe-capture shadows costs almost nothing here.
+// NOTE: intentionally NO shadow cascades / u_envMap here, so this shader does NOT include
+// environment/shadows.glsl. The terrain layer samplers occupy texture units 0..8 (unit 6 = normal2,
+// unit 7 = albedo3, ...), which would collide with the shared shadow unit (6) and the env cube (7) —
+// and two sampler TYPES on one unit is a GLES draw error. This shader only runs during light-probe
+// capture (the main pipeline draws terrain through terrainGeometry), and shadows are suppressed for
+// captures anyway, so it costs nothing. If shadows are ever wanted here, drop u_normal3 (unit 8)
+// rather than renumbering the shared reservation.
 // (It was 0..12 before each layer's height moved into its normal map's alpha; the collision remains.)
 uniform int u_numPointLights;
 uniform int u_numSpotlights;
@@ -76,8 +78,8 @@ struct SpotLight {
     float constant;
     float linear;
     float quadratic;
-    float cutOff;
-    float outerCutOff;
+    float cutOff;      // cosine of the inner half-angle
+    float outerCutOff; // cosine of the outer half-angle (smaller than cutOff)
 };
 
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
@@ -235,7 +237,9 @@ void main() {
         float dist = length(u_spotlights[i].position - fragPos);
         float att = 1.0 / (u_spotlights[i].constant + u_spotlights[i].linear * dist + u_spotlights[i].quadratic * dist * dist);
         float theta = dot(L, normalize(-u_spotlights[i].direction));
-        float epsilon = u_spotlights[i].outerCutOff - u_spotlights[i].cutOff;
+        // cutOff/outerCutOff are COSINES of the half-angles (see Renderer's spot upload), so the
+        // inner one is the LARGER value and the falloff denominator is inner - outer.
+        float epsilon = u_spotlights[i].cutOff - u_spotlights[i].outerCutOff;
         float intensity = clamp((theta - u_spotlights[i].outerCutOff) / epsilon, 0.0, 1.0);
         accumulateLight(N, V, albedo, metallic, roughness, L, u_spotlights[i].diffuse * att * intensity, Lo);
     }

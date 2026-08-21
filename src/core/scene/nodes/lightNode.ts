@@ -1,6 +1,6 @@
 import { DirectionalLight, Light, PointLight, Spotlight } from "../../../graphics/lighting";
 import { Logger } from "../../logger";
-import { mat4, vec3 } from "gl-matrix";
+import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 
@@ -12,18 +12,12 @@ export class LightNode extends Node {
     private readonly _light: Light
     private readonly _type: 'directional' | 'point' | 'spotlight';
     private _index: number;
-    private _lightSpace: mat4;
     private _castShadows: boolean;
-    // Reused scratch to avoid per-frame allocations in the lightSpace getter.
-    private readonly _lightView: mat4 = mat4.create();
-    private readonly _lightProjection: mat4 = mat4.create();
-    private readonly _lightPos: vec3 = vec3.create();
 
     constructor(name: string, light: Light, castShadows: boolean = false, id: string = uuidv4()) {
         super(name, 'light', id);
         this._light = light;
         this._index = -1;
-        this._lightSpace = mat4.create();
         this._castShadows = castShadows;
 
         if (light instanceof DirectionalLight)
@@ -75,6 +69,7 @@ export class LightNode extends Node {
         return {
                     lightType: this._type,
                     light: lightData,
+                    castShadows: this._castShadows,
         };
     }
 
@@ -113,7 +108,11 @@ export class LightNode extends Node {
                 Logger.error(errMsg);
                 throw new Error(errMsg);
         }
-        const node = new LightNode(json.name, light, json.lightType === 'directional' ? true : false, json.id);
+        // Back-compat: `castShadows` was never serialized, so every directional light was forced to
+        // cast on load and any authored value was silently discarded. Payloads written before it was
+        // added have no key at all, and for those the old behaviour IS the saved intent.
+        const castShadows = json.castShadows ?? (json.lightType === 'directional');
+        const node = new LightNode(json.name, light, castShadows, json.id);
         Node.finishParse(node, parent, json);
     }
 
@@ -121,15 +120,15 @@ export class LightNode extends Node {
     public get type(): 'directional' | 'point' | 'spotlight' { return this._type; }
     public get index(): number { return this._index; }
     public set index(value: number) { this._index = value; }
-    public get lightSpace(): mat4 {
-        const lightPos = vec3.scale(this._lightPos, this.worldForward, -50);
-        if (this._type === 'directional') {
-            // TODO: Change look at position to be the center of where the camera is looking
-            mat4.lookAt(this._lightView, lightPos, [0, 0, 0], [0, 1, 0]);
-            mat4.ortho(this._lightProjection, -20, 20, -20, 20, 0.1, 100);
-        }
-        return mat4.multiply(this._lightSpace, this._lightProjection, this._lightView);
-    }
+    /**
+     * Whether this light casts shadows. Only DIRECTIONAL lights are honoured today: the renderer fits
+     * its cascades around the camera frustum for the first flagged directional light in the scene.
+     *
+     * There is deliberately no `lightSpace` on the node any more. It used to build a fixed 40x40x100
+     * orthographic box centred on the WORLD ORIGIN, ignoring the light's own position, with a
+     * hardcoded up vector that went NaN when the light pointed straight down — and an identity matrix
+     * for spot/point lights. Every light-space matrix now comes from the renderer's cascade fit.
+     */
     public get castShadows(): boolean { return this._castShadows; }
     public set castShadows(value: boolean) { this._castShadows = value; }
 

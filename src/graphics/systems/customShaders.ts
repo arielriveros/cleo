@@ -2,6 +2,7 @@ import { Shader } from '../shader';
 import { ShaderManager } from './shaderManager';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
 import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
+import SHADOWS_SRC from '../shaders/environment/shadows.glsl';
 import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } from '../material';
 
 // -----------------------------------------------------------------------------------------------
@@ -15,7 +16,9 @@ import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } 
 //
 // IMPORTANT — keep in sync with the build-time shaders (runtime GLSL can't `#include`):
 //   - MAX_POINT_LIGHTS / MAX_SPOTLIGHTS  -> shaders/constants.glsl
-//   - light structs, shadowCalculation, PBR helpers -> shaders/materials/pbr.fs
+//   - light structs, PBR helpers -> shaders/materials/pbr.fs
+//   (shadow sampling is NOT on this list any more: shaders/environment/shadows.glsl is imported
+//    verbatim below, so it cannot drift.)
 //   - G-buffer output layout -> shaders/deferred/geometryPBR.fs
 //   - toLinear/toSrgb -> shaders/screen/tonemap.glsl
 // -----------------------------------------------------------------------------------------------
@@ -29,8 +32,13 @@ precision highp float;
 
 in vec3 fragPos;
 in vec2 fragTexCoord;
-in vec4 fragPosLightSpace;
 in mat3 TBN;
+
+// Back-compat shim. fragPosLightSpace was a varying carrying the position in the (single, world-
+// origin-pinned) shadow map's space; cascades made it meaningless, but user-authored GLSL in
+// existing projects still names it. Keeping the identifier as an unused const means those materials
+// keep compiling instead of all falling back to magenta.
+const vec4 fragPosLightSpace = vec4(0.0);
 
 const int MAX_POINT_LIGHTS = ${MAX_POINT_LIGHTS};
 const int MAX_SPOTLIGHTS = ${MAX_SPOTLIGHTS};
@@ -50,7 +58,7 @@ const LIGHTING_BLOCK = `
 uniform bool u_isTransparent;
 uniform int u_numPointLights;
 uniform int u_numSpotlights;
-uniform sampler2D u_shadowMap;
+uniform mat4 u_view;    // only to get the view-space depth that selects a cascade
 
 uniform struct DirectionalLight {
     vec3 direction;
@@ -78,8 +86,8 @@ struct SpotLight {
     float constant;
     float linear;
     float quadratic;
-    float cutOff;
-    float outerCutOff;
+    float cutOff;      // cosine of the inner half-angle
+    float outerCutOff; // cosine of the outer half-angle (smaller than cutOff)
 };
 
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
@@ -89,23 +97,15 @@ uniform bool u_useEnvMap;
 uniform samplerCube u_envMap;
 uniform bool u_envMapLinear;   // true when u_envMap is a linear HDR probe cube (skip the sRGB decode)
 
-float shadowCalculation(vec4 fragPosLS) {
-    vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
-    projCoords = projCoords * 0.5 + 0.5;
-    if (projCoords.x > 1.0 || projCoords.y > 1.0 || projCoords.x < 0.0 || projCoords.y < 0.0 || projCoords.z > 1.0)
-        return 0.0;
-    float currentDepth = projCoords.z;
-    float bias = 0.001;
-    float shadow = 0.0;
-    float offset = (1.0 / float(textureSize(u_shadowMap, 0).x)) / 2.0;
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * offset).r;
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
-        }
-    }
-    return shadow / 9.0;
-}
+${SHADOWS_SRC}
+
+/** View-space depth of this fragment — what picks a cascade. */
+float cleoViewDepth() { return -(u_view * vec4(fragPos, 1.0)).z; }
+
+// The shadow helper custom materials are documented to call. The vec4 overload ignores its argument
+// (see the fragPosLightSpace shim above) so material source written before cascades still works.
+float shadowCalculation() { return directionalShadow(fragPos, getNormal(), cleoViewDepth()); }
+float shadowCalculation(vec4 ignored) { return shadowCalculation(); }
 
 float DistributionGGX(vec3 N, vec3 H, float roughness) {
     float a = roughness * roughness;
@@ -303,22 +303,22 @@ function releaseKey(key: string): void {
 
 const FALLBACK_FORWARD_FS = `#version 300 es
 precision highp float;
-in vec3 fragPos; in vec2 fragTexCoord; in vec4 fragPosLightSpace; in mat3 TBN;
+in vec3 fragPos; in vec2 fragTexCoord; in mat3 TBN;
 layout(location = 0) out vec4 fragColor;
 void main() {
-    float k = 0.0 * (fragPos.x + fragTexCoord.x + fragPosLightSpace.x + TBN[0].x);
+    float k = 0.0 * (fragPos.x + fragTexCoord.x + TBN[0].x);
     fragColor = vec4(1.0, 0.0, 1.0, 1.0) + k;   // magenta = compile error
 }
 `;
 
 const FALLBACK_DEFERRED_FS = `#version 300 es
 precision highp float;
-in vec3 fragPos; in vec2 fragTexCoord; in vec4 fragPosLightSpace; in mat3 TBN;
+in vec3 fragPos; in vec2 fragTexCoord; in mat3 TBN;
 layout(location = 0) out vec4 gAlbedoMetallic;
 layout(location = 1) out vec4 gNormalRoughness;
 layout(location = 2) out vec4 gEmissiveAO;
 void main() {
-    float k = 0.0 * (fragPos.x + fragTexCoord.x + fragPosLightSpace.x);
+    float k = 0.0 * (fragPos.x + fragTexCoord.x + TBN[0].x);
     gAlbedoMetallic  = vec4(1.0, 0.0, 1.0, 0.0) + k;   // magenta = compile error
     gNormalRoughness = vec4(normalize(TBN[2]), 1.0);
     gEmissiveAO      = vec4(0.0, 0.0, 0.0, 1.0);
@@ -442,7 +442,7 @@ export function customSeedUniforms(baseType: CustomBaseType, renderMode: CustomR
 const FWD_SCRATCH = `// FORWARD custom material. Return the final LINEAR-HDR color (tonemap/gamma happen at present).
 // Available: fragPos, fragTexCoord, TBN, getNormal(), u_viewPos, u_time,
 //   lights (u_dirLight, u_pointLights[u_numPointLights], u_spotlights[u_numSpotlights]),
-//   helpers accumulateLight(), shadowCalculation(fragPosLightSpace), fresnelSchlick(), toLinear().
+//   helpers accumulateLight(), shadowCalculation(), fresnelSchlick(), toLinear().
 // Declare your own inputs in the Uniforms panel; they appear here as u_<name>.
 vec4 fragment() {
     vec3 col = u_tint * (0.5 + 0.5 * sin(u_time));
@@ -462,7 +462,7 @@ vec4 fragment() {
     if (dot(u_dirLight.direction, u_dirLight.direction) > 1e-6) {
         vec3 L = normalize(-u_dirLight.direction);
         vec3 H = normalize(L + V);
-        float shadow = shadowCalculation(fragPosLightSpace);
+        float shadow = shadowCalculation();
         color += u_dirLight.diffuse * (1.0 - shadow) *
                  (max(dot(N, L), 0.0) * u_diffuse + pow(max(dot(N, H), 0.0), u_shininess) * u_specular);
     }
@@ -500,7 +500,7 @@ vec4 fragment() {
 
     vec3 Lo = vec3(0.0);
     if (dot(u_dirLight.direction, u_dirLight.direction) > 1e-6) {
-        float shadow = shadowCalculation(fragPosLightSpace);
+        float shadow = shadowCalculation();
         accumulateLight(N, V, albedo, metallic, roughness, normalize(-u_dirLight.direction), u_dirLight.diffuse * (1.0 - shadow), Lo);
     }
     for (int i = 0; i < u_numPointLights; i++) {
@@ -514,8 +514,9 @@ vec4 fragment() {
         float d = length(u_spotlights[i].position - fragPos);
         float att = 1.0 / (u_spotlights[i].constant + u_spotlights[i].linear * d + u_spotlights[i].quadratic * d * d);
         float theta = dot(L, normalize(-u_spotlights[i].direction));
-        float inten = clamp((theta - u_spotlights[i].outerCutOff) / (u_spotlights[i].outerCutOff - u_spotlights[i].cutOff), 0.0, 1.0);
-        accumulateLight(N, V, albedo, metallic, roughness, L, u_spotlights[i].diffuse * att * inten, Lo);
+        float inten = clamp((theta - u_spotlights[i].outerCutOff) / (u_spotlights[i].cutOff - u_spotlights[i].outerCutOff), 0.0, 1.0);
+        float spotSh = spotShadowFor(i, fragPos, N, u_spotlights[i].position);
+        accumulateLight(N, V, albedo, metallic, roughness, L, u_spotlights[i].diffuse * att * inten * (1.0 - spotSh), Lo);
     }
 
     return vec4(ambient + Lo + u_emissive, 1.0);

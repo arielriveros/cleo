@@ -26,18 +26,10 @@ uniform float u_anisotropy;       // Henyey-Greenstein g (0..0.95)
 uniform float u_maxDistance;      // march cap in world units
 uniform int u_steps;              // march steps (<= MAX_STEPS)
 
-// Shadow source: cascaded maps when u_cascadeCount > 0, else the single map, else no occlusion
-// (u_hasShadow == false -> uniform haze). Structure mirrors deferredLighting.fs (sampler arrays
-// can't be indexed dynamically in GLSL ES 3.00, so the cascade access is unrolled).
-#define CASCADE_COUNT 3
-uniform bool u_hasShadow;
-uniform int u_cascadeCount;
+// Shadow source: the shared cascade sampler. With u_shadowsEnabled false (no caster, or shadows
+// switched off) every lookup returns "lit" and the shafts degrade to uniform haze.
 uniform mat4 u_view;              // cascade slice pick uses view-space depth
-uniform sampler2D u_shadowMap;
-uniform mat4 u_lightSpace;
-uniform sampler2D u_shadowCascades[CASCADE_COUNT];
-uniform mat4 u_cascadeMatrices[CASCADE_COUNT];
-uniform float u_cascadeSplits[CASCADE_COUNT];
+#include "../environment/shadows.glsl";
 
 const int MAX_STEPS = 128;
 const float PI = 3.14159265359;
@@ -48,26 +40,10 @@ vec3 reconstructWorldPos(float depth) {
     return world.xyz / world.w;
 }
 
-// 1 = the sun reaches p, 0 = occluded. A single binary depth compare per sample — the march itself
-// averages many samples, so PCF here would be wasted work.
-float sampleShadow(sampler2D map, vec4 posLS) {
-    vec3 proj = posLS.xyz / posLS.w * 0.5 + 0.5;
-    if (proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0 || proj.z > 1.0) return 1.0;
-    return proj.z - 0.001 > texture(map, proj.xy).r ? 0.0 : 1.0;
-}
-
+// 1 = the sun reaches p, 0 = occluded. Single unfiltered tap — see shadowVisibility's note on why
+// PCF here would be wasted work.
 float sunVisibility(vec3 p) {
-    if (u_cascadeCount > 0) {
-        float viewDepth = -(u_view * vec4(p, 1.0)).z;
-        int layer = CASCADE_COUNT - 1;
-        for (int i = 0; i < CASCADE_COUNT; i++) {
-            if (viewDepth < u_cascadeSplits[i]) { layer = i; break; }
-        }
-        if (layer == 0) return sampleShadow(u_shadowCascades[0], u_cascadeMatrices[0] * vec4(p, 1.0));
-        else if (layer == 1) return sampleShadow(u_shadowCascades[1], u_cascadeMatrices[1] * vec4(p, 1.0));
-        return sampleShadow(u_shadowCascades[2], u_cascadeMatrices[2] * vec4(p, 1.0));
-    }
-    return sampleShadow(u_shadowMap, u_lightSpace * vec4(p, 1.0));
+    return shadowVisibility(p, -(u_view * vec4(p, 1.0)).z);
 }
 
 // Henyey-Greenstein phase function: how much light scatters from the sun direction toward the camera.
@@ -109,7 +85,7 @@ void main() {
     for (int i = 0; i < MAX_STEPS; i++) {
         if (i >= steps) break;
         vec3 p = u_viewPos + rd * ((float(i) + jitter) * stepLen);
-        float vis = u_hasShadow ? sunVisibility(p) : 1.0;
+        float vis = sunVisibility(p); // u_shadowsEnabled false -> always 1.0 -> uniform haze
         scatter += vis * transmittance * segScatter;
         visSum += vis;
         transmittance *= segTrans;

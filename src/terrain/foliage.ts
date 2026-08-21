@@ -94,6 +94,15 @@ export class FoliageLayer {
     public billboardDistance = Infinity;
     /** Hide instances beyond this camera distance; 0 = use the renderer's global foliage cull distance. */
     public cullDistance = 0;
+    /**
+     * Whether these instances rasterize into the shadow cascades.
+     *
+     * Off by default, and deliberately: a dense grass layer can be tens of thousands of instances, and
+     * switching it on adds one instanced draw per cell PER CASCADE. Existing scenes must not silently
+     * get slower when this arrives. The layer flag drives the shadow pass directly — the impostor
+     * materials are authored `castShadow: false` for the colour pass and stay that way.
+     */
+    public castShadows = false;
     /** Static physics proxy for nearby instances, or null for non-collidable foliage (grass). Mirrored
      *  from the rule onto the LAYER so a published build — which rebuilds layers straight from the
      *  serialized foliage blob, without re-parsing every terrain material — still gets colliders. */
@@ -149,6 +158,7 @@ export class FoliageLayer {
         if (rule.kind === 'billboard') {
             const bb = FoliageLayer.Billboard(rule.name, rule.textureId || 'Null', params);
             bb.collision = rule.collision ?? null;
+            bb.castShadows = !!rule.castShadows;
             return bb;
         }
         const base = (rule.models?.length ? rule.models[0] : rule.model);
@@ -186,6 +196,7 @@ export class FoliageLayer {
         }
         this.cullDistance = Math.max(0, Number(src.cullDistance) || 0);
         this.collision = src.collision ?? null;
+        this.castShadows = !!src.castShadows;
         this.initialized = false; // new Model objects — the foliage pass re-uploads their meshes
     }
 
@@ -196,6 +207,7 @@ export class FoliageLayer {
         if (rule.density !== undefined) this.params.density = rule.density;
         if (rule.minScale !== undefined) this.params.minScale = rule.minScale;
         if (rule.maxScale !== undefined) this.params.maxScale = rule.maxScale;
+        this.castShadows = !!rule.castShadows;
         if (this.kind === 'billboard') {
             this.collision = rule.collision ?? null;
             const tex = rule.textureId || 'Null';
@@ -435,6 +447,7 @@ export class FoliageLayer {
             billboard: this.kind === 'mesh' && this.billboardModel
                 ? { textureId: this.billboardTextureId, distance: this.billboardDistance } : undefined,
             cullDistance: this.cullDistance > 0 ? this.cullDistance : undefined,
+            castShadows: this.castShadows || undefined,
             instances: btoa(bin),
         };
     }
@@ -454,6 +467,7 @@ export class FoliageLayer {
             layer = FoliageLayer.Mesh(json.name, Model.parse(json.models?.length ? json.models[0] : json.model), params);
             layer._applyMeshPrototype(json);
         }
+        layer.castShadows = !!json.castShadows;
         if (json.instances) {
             const bin = atob(json.instances);
             const bytes = new Uint8Array(bin.length);

@@ -14,18 +14,15 @@ layout (location = 5) in mat4 a_instanceModel; // occupies locations 5,6,7,8
 
 out vec3 fragPos;
 out vec2 fragTexCoord;
-out vec4 fragPosLightSpace;
 out mat3 TBN;
 
 uniform mat4 u_view;
 uniform mat4 u_projection;
-uniform mat4 u_lightSpace;
 
 void main() {
     mat4 model = a_instanceModel;
     fragPos = vec3(model * vec4(a_position, 1.0));
     fragTexCoord = a_texCoord;
-    fragPosLightSpace = u_lightSpace * vec4(fragPos, 1.0);
 
     vec3 T = normalize(vec3(model * vec4(a_tangent,   0.0)));
     vec3 N = normalize(vec3(model * vec4(a_normal,    0.0)));

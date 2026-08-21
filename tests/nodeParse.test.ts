@@ -150,6 +150,37 @@ describe('parseNodeJson', () => {
         expect(parent.children[0].children[0]).toBeInstanceOf(CameraNode);
     });
 
+    /**
+     * `castShadows` used to be dropped on serialize and hardcoded from the light TYPE on parse, so a
+     * directional light you had switched OFF came back on, and a spot light you had switched on came
+     * back off. Now that spot lights actually cast, that silent override is a visible bug.
+     */
+    describe('LightNode.castShadows', () => {
+        it('round-trips whatever was authored, for every light type', async () => {
+            const cases: [LightNode, boolean][] = [
+                [new LightNode('sun-off', new DirectionalLight({}), false), false],
+                [new LightNode('sun-on', new DirectionalLight({}), true), true],
+                [new LightNode('spot-on', new Spotlight({}), true), true],
+                [new LightNode('point-on', new PointLight({}), true), true],
+            ];
+            for (const [node, expected] of cases) {
+                const { parent } = parseCapturing(await node.serialize());
+                expect((parent.children[0] as LightNode).castShadows).toBe(expected);
+            }
+        });
+
+        it('falls back to the old type rule for payloads written before it was serialized', async () => {
+            // Those payloads carry no key at all, and for them the old behaviour IS the saved intent.
+            const json = await new LightNode('legacy', new DirectionalLight({}), false).serialize();
+            delete json.castShadows;
+            expect(parseCapturing(json).parent.children[0].castShadows).toBe(true);
+
+            const spot = await new LightNode('legacy-spot', new Spotlight({}), true).serialize();
+            delete spot.castShadows;
+            expect(parseCapturing(spot).parent.children[0].castShadows).toBe(false);
+        });
+    });
+
     // The hook LandscapeNode uses to keep its generated terrain chunks out of the saved scene. Exercised
     // here through a local subclass rather than through LandscapeNode itself, which needs a GL context.
     it('honours _serializableChildren, so a node can withhold generated children', async () => {

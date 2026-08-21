@@ -422,6 +422,9 @@ export interface TerrainFoliageRule {
     billboard?: { textureId: string; distance: number } | null;
     /** Hide instances beyond this camera distance; 0/absent = the renderer's global foliage cull. */
     cullDistance?: number;
+    /** Rasterize these instances into the shadow cascades. Off by default — a dense grass layer costs
+     *  one instanced draw per cell per cascade, so existing scenes must opt in. */
+    castShadows?: boolean;
     /** Instances per SQUARE METRE — the same unit for the brush disc and whole-terrain generation. */
     density?: number;
     /** Unit marker for `density`. Absent = legacy per-100x100-tile; see {@link migrateFoliageRule}. */

@@ -26,14 +26,9 @@ uniform mat4 u_view;
 uniform int u_numPointLights;
 uniform int u_numSpotlights;
 
-// Shadows: single map (u_cascadeCount == 0) or cascaded shadow maps (u_cascadeCount > 0)
-#define CASCADE_COUNT 3
-uniform sampler2D u_shadowMap;
-uniform mat4 u_lightSpace;
-uniform int u_cascadeCount;
-uniform sampler2D u_shadowCascades[CASCADE_COUNT];
-uniform mat4 u_cascadeMatrices[CASCADE_COUNT];
-uniform float u_cascadeSplits[CASCADE_COUNT]; // view-space far distance of each cascade
+// Cascaded shadow maps. Every uniform and every sampling function lives in the shared include, so
+// this pass, the forward materials, custom materials and the god rays cannot drift apart.
+#include "../environment/shadows.glsl";
 
 uniform struct DirectionalLight {
     vec3 direction;
@@ -61,8 +56,8 @@ struct SpotLight {
     float constant;
     float linear;
     float quadratic;
-    float cutOff;
-    float outerCutOff;
+    float cutOff;      // cosine of the inner half-angle
+    float outerCutOff; // cosine of the outer half-angle (smaller than cutOff)
 };
 
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
@@ -100,43 +95,6 @@ const float AO_DEPTH_TOLERANCE = 0.02;
 
 const float PI = 3.14159265359;
 const float MAX_REFLECTION_LOD = 4.0;
-
-float pcf(sampler2D shadowMap, vec4 fragPosLS) {
-    vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
-    projCoords = projCoords * 0.5 + 0.5;
-    if (projCoords.x > 1.0 || projCoords.y > 1.0 || projCoords.x < 0.0 || projCoords.y < 0.0 || projCoords.z > 1.0)
-        return 0.0;
-
-    float currentDepth = projCoords.z;
-    float bias = 0.001;
-    float shadow = 0.0;
-
-    float offset = (1.0 / float(textureSize(shadowMap, 0).x)) / 2.0;
-    for(int x = -1; x <= 1; ++x) {
-        for(int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * offset).r;
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
-        }
-    }
-    return shadow / 9.0;
-}
-
-float shadowCalculation(vec4 fragPosLS) {
-    return pcf(u_shadowMap, fragPosLS);
-}
-
-// Cascaded shadow: pick the cascade by view-space depth, then PCF-sample it.
-// Sampler arrays can't be indexed dynamically in GLSL ES 3.00, so the sampler access is unrolled.
-float cascadedShadow(vec3 worldPos) {
-    float viewDepth = -(u_view * vec4(worldPos, 1.0)).z;
-    int layer = CASCADE_COUNT - 1;
-    for (int i = 0; i < CASCADE_COUNT; i++) {
-        if (viewDepth < u_cascadeSplits[i]) { layer = i; break; }
-    }
-    if (layer == 0) return pcf(u_shadowCascades[0], u_cascadeMatrices[0] * vec4(worldPos, 1.0));
-    else if (layer == 1) return pcf(u_shadowCascades[1], u_cascadeMatrices[1] * vec4(worldPos, 1.0));
-    return pcf(u_shadowCascades[2], u_cascadeMatrices[2] * vec4(worldPos, 1.0));
-}
 
 float DistributionGGX(vec3 N, vec3 H, float roughness) {
     float a = roughness*roughness;
@@ -314,12 +272,14 @@ void main() {
         ambient = fallbackAmbient;
     }
 
+    // Distance in front of the camera, which is what selects a cascade.
+    float viewDepth = -(u_view * vec4(worldPos, 1.0)).z;
+
     vec3 Lo = vec3(0.0);
 
     // Directional light + shadow (guard against an unset/zero direction -> normalize(0) = NaN)
     if (dot(u_dirLight.direction, u_dirLight.direction) > 1e-6) {
-        float shadow = (u_cascadeCount > 0) ? cascadedShadow(worldPos)
-                                            : shadowCalculation(u_lightSpace * vec4(worldPos, 1.0));
+        float shadow = directionalShadow(worldPos, N, viewDepth);
         vec3 Ld = normalize(-u_dirLight.direction);
         accumulateLight(N, V, albedo, metallic, roughness, Ld, u_dirLight.diffuse * (1.0 - shadow), Lo);
     }
@@ -336,15 +296,22 @@ void main() {
         float dist = length(u_spotlights[i].position - worldPos);
         float att = 1.0 / (u_spotlights[i].constant + u_spotlights[i].linear * dist + u_spotlights[i].quadratic * dist * dist);
         float theta = dot(L, normalize(-u_spotlights[i].direction));
-        float epsilon = u_spotlights[i].outerCutOff - u_spotlights[i].cutOff;
+        // cutOff/outerCutOff are COSINES of the half-angles (see Renderer's spot upload), so the
+        // inner one is the LARGER value and the falloff denominator is inner - outer.
+        float epsilon = u_spotlights[i].cutOff - u_spotlights[i].outerCutOff;
         float intensity = clamp((theta - u_spotlights[i].outerCutOff) / epsilon, 0.0, 1.0);
-        accumulateLight(N, V, albedo, metallic, roughness, L, u_spotlights[i].diffuse * att * intensity, Lo);
+        float spotSh = spotShadowFor(i, worldPos, N, u_spotlights[i].position);
+        accumulateLight(N, V, albedo, metallic, roughness, L, u_spotlights[i].diffuse * att * intensity * (1.0 - spotSh), Lo);
     }
 
     // Output LINEAR HDR radiance. Exposure, tonemap and sRGB encode are applied once at the final
     // present (screen.fs). Unlit "basic" materials arrive as zero albedo + authored emissive, so
     // they pass straight through here and are tonemapped uniformly with everything else.
     vec3 color = ambient * ao * ssao + Lo + emissive;
+    // Cascade debug channel: replace the shading with a flat per-cascade tint, modulated by the
+    // shadow term so the shadow shapes stay readable inside each coloured band.
+    if (u_debugCascades)
+        color = cascadeDebugTint(viewDepth) * mix(0.25, 1.0, 1.0 - directionalShadow(worldPos, N, viewDepth));
     // Alpha = bloom-eligibility mask: 1 for lit PBR-model surfaces (PBR / terrain / foliage), 0 for
     // unlit "basic" pixels (which write zero albedo). Sampled by the bloom bright-pass so only lit
     // material surfaces bloom.

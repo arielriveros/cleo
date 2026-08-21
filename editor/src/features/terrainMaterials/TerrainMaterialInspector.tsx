@@ -230,6 +230,12 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
                   <input type='number' step={0.1} className={num} value={r.maxScale ?? 1.4} onChange={e => patchRule(i, { maxScale: Number(e.target.value) })} />
                 </span>
               </div>
+              {/* Off by default: a layer casting shadows adds one instanced draw per cell PER CASCADE,
+                  which is fine for a few hundred trees and expensive for a field of grass. */}
+              <div className='flex items-center justify-between'>
+                <span className={label} title='Rasterize these instances into the shadow cascades. Costs one extra instanced draw per cell per cascade — cheap for trees, expensive for dense grass.'>Cast shadows</span>
+                <input type='checkbox' checked={!!r.castShadows} onChange={e => patchRule(i, { castShadows: e.target.checked })} />
+              </div>
 
               {r.kind === 'mesh' && <>
                 {/* LOD/cull come from the model asset (edited in the model editor) — shown, not edited. */}
