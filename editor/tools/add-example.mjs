@@ -110,7 +110,11 @@ async function regenerateIndex() {
       continue;
     }
     const meta = (await readJsonFile(path.join(dir, 'example.json'))) ?? {};
-    const textures = (await readJsonFile(path.join(dir, 'textures', 'index.json'))) ?? [];
+    // Format 2 lists textures in assets.json alongside every other payload; format 1 had a file each,
+    // indexed by textures/index.json. Both layouts stay readable — see utils/bundleRead.ts.
+    const textures = (await readJsonFile(path.join(dir, 'assets.json')))?.textures
+      ?? (await readJsonFile(path.join(dir, 'textures', 'index.json')))
+      ?? [];
     const hasThumb = await fs.access(path.join(dir, 'thumbnail.png')).then(() => true, () => false);
 
     entries.push({
@@ -146,14 +150,29 @@ function printCatalogue(entries) {
 
 // ---- ingest -------------------------------------------------------------------------------------
 
-/** The cover image, taken from the main scene's saved thumbnail. Absent is fine — the gallery has a glyph. */
+/**
+ * The cover image, taken from the main scene's saved thumbnail. Absent is fine — the gallery has a glyph.
+ *
+ * In a format-2 export that thumbnail is a `{o,l}` chunk in assets.bin rather than a data URL, so this
+ * reads the bytes straight out of the blob. Slicing it here is deliberate: the alternative is exempting
+ * the manifest from packing, and then "no payload is left in the JSON" stops being true of the format.
+ */
 async function writeThumbnail(dir, manifest) {
   const metas = manifest.sceneMetas ?? [];
   const main = metas.find(m => m.id === manifest.mainSceneId) ?? metas[0];
-  const dataUrl = main?.thumbnail;
-  const match = typeof dataUrl === 'string' && dataUrl.match(/^data:image\/\w+;base64,(.+)$/s);
-  if (!match) return false;
-  await fs.writeFile(path.join(dir, 'thumbnail.png'), Buffer.from(match[1], 'base64'));
+
+  let bytes = null;
+  const match = typeof main?.thumbnail === 'string' && main.thumbnail.match(/^data:image\/\w+;base64,(.+)$/s);
+  if (match) {
+    bytes = Buffer.from(match[1], 'base64');
+  } else if (main?.thumbnailChunk) {
+    const { o, l } = main.thumbnailChunk;
+    const blob = await fs.readFile(path.join(dir, 'assets.bin')).catch(() => null);
+    if (blob && o + l <= blob.length) bytes = blob.subarray(o, o + l);
+  }
+
+  if (!bytes) return false;
+  await fs.writeFile(path.join(dir, 'thumbnail.png'), bytes);
   return true;
 }
 
@@ -164,7 +183,8 @@ async function ingest(zipPath, opts) {
   const manifestFile = archive.file('manifest.json');
   if (!manifestFile) die(`${path.basename(zipPath)} has no manifest.json — is it a Cleo project export?`);
   const manifest = JSON.parse(await manifestFile.async('string'));
-  if (manifest.formatVersion !== 1) die(`Unsupported bundle formatVersion ${manifest.formatVersion}`);
+  if (manifest.formatVersion !== 1 && manifest.formatVersion !== 2)
+    die(`Unsupported bundle formatVersion ${manifest.formatVersion}`);
   if (manifest.kind !== 'project') {
     die(`This is a "${manifest.kind}" bundle. Examples must be full project exports, not asset packs.`);
   }

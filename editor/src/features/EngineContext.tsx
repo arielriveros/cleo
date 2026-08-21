@@ -28,7 +28,7 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, assetWithoutEmbeddedClips } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
@@ -653,6 +653,15 @@ const EngineContext = createContext<{
   updateModel: (id: string, m: ModelAsset) => void;
   /** Open (or focus) a model asset's edit tab, rendering its thumbnail on the way in. */
   enterModelEditor: (modelId?: string) => void;
+  /** The model asset a node belongs to, adding one to the library from its subtree if it has none. */
+  adoptModelAsset: (node: Node | null | undefined) => Promise<string | null>;
+  /** The model asset a node belongs to — its back-link, or the asset the current tab is editing. */
+  resolveModelAssetId: (node: Node | null | undefined) => string | undefined;
+  /** Link an existing `.anim` asset to a model asset; its clips appear on every placement immediately. */
+  linkAnimationToModel: (modelId: string, animationId: string) => void;
+  unlinkAnimationFromModel: (modelId: string, animationId: string) => void;
+  /** Rename a clip inside a shared `.anim` asset, or toggle its root motion. */
+  editSharedClip: (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => void;
   // Mesh editor (active mesh tab): LOD/cull authoring + save-and-propagate
   modelSession: ModelEditSession | null;
   /** Node id of the active LOD level's root in the model tab scene (viewport drop parent), or null. */
@@ -839,6 +848,11 @@ const EngineContext = createContext<{
     removeModel: () => {},
     updateModel: () => {},
     enterModelEditor: () => {},
+    adoptModelAsset: async () => null,
+    resolveModelAssetId: () => undefined,
+    linkAnimationToModel: () => {},
+    unlinkAnimationFromModel: () => {},
+    editSharedClip: () => {},
     modelSession: null,
     modelEditTargetId: null,
     setActiveModelName: () => {},
@@ -2117,6 +2131,90 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return asset ? { id, asset } : null;
   };
 
+  /**
+   * Re-resolve a model asset's SHARED clips (`animationIds`) onto everything showing that model.
+   *
+   * The counterpart of propagateModelClips for the `.anim` layer. applyModelAnimations is idempotent — it
+   * drops every clip carrying an `assetId` before re-adding — so this covers linking, unlinking and a
+   * change to a linked asset's contents with one call, and running it twice changes nothing.
+   *
+   * `except` skips a node the caller has already updated; `extra` lets a caller pass an animation asset
+   * that is not yet in `animationsRef` (a brand-new import, where the state update has not landed).
+   */
+  const applyAnimationLinks = (modelAsset: ModelAsset, except?: Node | null, extra?: AnimationAsset) => {
+    const library = extra ? [...animationsRef.current.filter(a => a.id !== extra.id), extra] : animationsRef.current;
+    let count = 0;
+    for (const scene of liveScenes()) {
+      for (const node of Array.from(scene.nodes)) {
+        if (node === except) continue;
+        if (modelIdOf(node) !== modelAsset.id) continue;
+        count += applyModelAnimations(node, modelAsset, library);
+      }
+    }
+    // Asset-edit tabs (the model preview, the Animation Editor's clone) are shown FROM the asset and so
+    // carry no back-link of their own — a definition never holds an instance stamp, and the clone is a
+    // ModelNode whose holder had it. Without this the clips landed everywhere except the thing on screen.
+    // Safe to run unconditionally: applyModelAnimations drops every assetId-bearing clip before re-adding.
+    const rt = tabRuntimeRef.current.get(activeTabIdRef.current);
+    const shown = rt?.rootId ? rt.scene.getNodeById(rt.rootId) : null;
+    if (shown && shown !== except && resolveModelAssetId(null) === modelAsset.id)
+      count += applyModelAnimations(shown, modelAsset, library);
+    return count;
+  };
+
+  /** Link an existing `.anim` asset to a model, so every placement of that model plays its clips. */
+  const linkAnimationToModel = (modelId: string, animationId: string) => {
+    const asset = modelsRef.current.find(m => m.id === modelId);
+    const anim = animationsRef.current.find(a => a.id === animationId);
+    if (!asset || !anim) return;
+    const linked = withAnimationRef(asset, animationId);
+    if (linked === asset) return; // already linked
+    updateModel(modelId, linked);
+    invalidateAnimationCache(animationId);
+    applyAnimationLinks(linked);
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+    eventEmitter.current.emit('SCENE_CHANGED');
+    Logger.info(`Linked "${anim.name}" to "${asset.name}"`, 'Editor');
+  };
+
+  /** Drop a `.anim` link. Its clips disappear from every placement — applyModelAnimations removes them. */
+  const unlinkAnimationFromModel = (modelId: string, animationId: string) => {
+    const asset = modelsRef.current.find(m => m.id === modelId);
+    if (!asset) return;
+    const unlinked = withoutAnimationRef(asset, animationId);
+    if (unlinked === asset) return;
+    updateModel(modelId, unlinked);
+    invalidateAnimationCache(animationId);
+    applyAnimationLinks(unlinked);
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+    eventEmitter.current.emit('SCENE_CHANGED');
+    Logger.info(`Unlinked "${animationsRef.current.find(a => a.id === animationId)?.name ?? animationId}" from "${asset.name}"`, 'Editor');
+  };
+
+  /**
+   * Edit one clip inside a shared `.anim` asset (its name or its root-motion flag).
+   *
+   * Clips resolved from an asset carry `assetId`, and AnimatedModel.serialize drops those — so the
+   * embedded-clip helpers (assetWithClipRenamed / assetWithClipRootMotion) patch a list that is not where
+   * the clip lives. The edit appeared to work and was gone on reload. This writes the library asset, which
+   * is where a shared clip actually is, and re-resolves everything showing it.
+   */
+  const editSharedClip = (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => {
+    const anim = animationsRef.current.find(a => a.id === animationId);
+    if (!anim) return;
+    const clips = anim.clips.map(c => (c.name === clipName ? { ...c, ...patch } : c));
+    if (clips.every((c, i) => c === anim.clips[i])) return;
+    const updated: AnimationAsset = { ...anim, clips };
+    updateAnimation(animationId, updated);
+    invalidateAnimationCache(animationId);
+    // `updated` is handed through explicitly: updateAnimation is a state write, so animationsRef still
+    // holds the PREVIOUS clips during this call and re-resolving from it would put the old name back.
+    for (const model of modelsRef.current) {
+      if (model.animationIds?.includes(animationId)) applyAnimationLinks(model, null, updated);
+    }
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+  };
+
   // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation
   // Editor. Parses the file, builds a bone MAPPING from the file's skeleton onto the model's, shows the
   // review modal (where the user can correct the mapping), then RETARGETS each accepted clip through the
@@ -2275,13 +2373,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (cloneModel) for (const clip of resolved) cloneModel.addAnimation({ ...clip });
     if (src instanceof ModelNode && src.model instanceof AnimatedModel)
       for (const clip of resolved) src.model.addAnimation({ ...clip });
-    for (const scene of liveScenes()) {
-      for (const node of Array.from(scene.nodes)) {
-        if (modelIdOf(node) !== rigAsset.id) continue;
-        if (node === src) continue;
-        applyModelAnimations(node, linkedModel, [...animationsRef.current.filter(a => a.id !== animAsset.id), animAsset]);
-      }
-    }
+    applyAnimationLinks(linkedModel, src, animAsset);
 
     const added = namedClips.length;
     if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-import');
@@ -2849,6 +2941,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // The animation state machine is authored onto the PLACED node and never stored in the asset, so a
         // rebuild would replace a configured character with a bare one. Same reasoning as spawnOnStart above.
         const animation = captureAnimationState(inst);
+        // What the asset's own root transform said when this copy was built. Restoring `pos/rot/scl` below
+        // is right for where the user put the copy and wrong for a change the MODEL made to its root
+        // transform — the two share one slot — so the difference is re-applied on top afterwards.
+        const baseTrs = readModelBaseTrs(inst);
         const wasSelected = inst.id === selectedNode;
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
@@ -2860,6 +2956,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
           newNode.spawnOnStart = spawnOnStart;
           restoreAnimationState(newNode, animation);
+          // A LOD-wrapped asset keeps its root transform on the wrapper's child 0, so the edit already
+          // arrives through the child and applying it here as well would double it.
+          if (!modelAssetHasLodBehavior(asset)) applyModelTransformDelta(newNode, baseTrs, asset.nodeJson);
         }
         if (wasSelected) reselectId = newId;
         count++;
@@ -3164,8 +3263,70 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const session = modelSessions[tab.id];
     if (!runtime || !session || level < 0 || level >= session.levelIds.length) return;
     setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, activeLevel: level } }));
+    // The ref is normally refreshed on the next render, but SELECT_NODE is coerced to the ACTIVE level's
+    // root (model tabs pin their selection), so it has to be current before the emit below or the
+    // selection snaps straight back to the level we just left.
+    modelSessionsRef.current = { ...modelSessionsRef.current, [tab.id]: { ...session, activeLevel: level } };
     applyActiveModelLevel(runtime.scene, session.levelIds, level);
     eventEmitter.current.emit('SELECT_NODE', session.levelIds[level]);
+  };
+
+  /**
+   * The model asset a node belongs to — its own back-link, or the asset the current tab is editing.
+   *
+   * The tab fallback is not cosmetic. A model tab parses `asset.nodeJson`, which has the back-link
+   * stripped (a definition must never carry an instance stamp), and the Animation Editor opened from one
+   * clones that node. Without the fallback both read as "no asset", and adopting would file a duplicate
+   * copy of the model the user is already editing.
+   */
+  const resolveModelAssetId = (node: Node | null | undefined): string | undefined => {
+    const own = modelIdOf(node);
+    if (own) return own;
+    const tabOf = (id: string | undefined) => (id ? tabsRef.current.find(t => t.id === id) : undefined);
+    const active = tabOf(activeTabIdRef.current);
+    if (active?.kind === 'model') return active.modelId ?? undefined;
+    // An animation/field tab records which tab it was opened from; a model tab there is the same case.
+    const source = tabOf(tabRuntimeRef.current.get(activeTabIdRef.current)?.sourceTabId);
+    return source?.kind === 'model' ? (source.modelId ?? undefined) : undefined;
+  };
+
+  /**
+   * The model asset a node belongs to, creating one from its subtree when it has none.
+   *
+   * A placed model normally carries the back-link already, and then this is a lookup. The exception is a
+   * subtree that never came from the library — an old project, or geometry built in the scene — and the
+   * editor used to hand that case to the user as a "Link to a model asset…" dropdown, with the node's
+   * animation fields and its way into the model editor disabled until they answered. Adopting silently
+   * removes both the question and the disabled state.
+   *
+   * Called only from actions that actually need an asset (link an animation, create a field, open the
+   * model editor) — never from rendering, so selecting a node cannot spawn library entries.
+   */
+  const adoptModelAsset = async (node: Node | null | undefined): Promise<string | null> => {
+    if (!node) return null;
+    const existing = resolveModelAssetId(node);
+    if (existing) return existing;
+
+    // The node AS GIVEN, not the ModelNode found under it: a skinned import cannot bake its fit-to-size
+    // factor into vertices, so that factor lives on the holder ABOVE the skinned node (see
+    // normalizeRootScale) and adopting the child alone would file the character at its raw file scale.
+    // A subtree with no geometry in it would produce an asset that renders as nothing — refuse instead.
+    if (!modelNodeOf(node)) return null;
+
+    const materialIds = new Set<string>();
+    const collect = (n: Node) => { for (const id of getMaterialIdsOf(n)) if (id) materialIds.add(id); n.children.forEach(collect); };
+    collect(node);
+
+    const asset = flattenModelAsset(await buildModelAsset(node, [...materialIds], ''));
+    asset.name = node.name || 'Model';
+    // Drop where this copy happens to sit — that is the placement, not the model. Rotation and scale are
+    // kept: those are the model's authored orientation and size (same rule as separateSubModels).
+    if (asset.nodeJson) asset.nodeJson.position = [0, 0, 0];
+    addModel(asset);
+    node.setVariable(MODEL_ID_VAR, asset.id, 'string');
+    eventEmitter.current.emit('SCENE_CHANGED');
+    Logger.info(`Added "${asset.name}" to the model library`, 'Editor');
+    return asset.id;
   };
 
   // Open (or focus) the edit tab for a library mesh, rendering its thumbnail on the way in.
@@ -4632,6 +4793,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     eventEmitter.current.on('SELECT_NODE', (node: string | null) => {
       console.log('SELECT_NODE event received:', node);
+      // A model tab edits ONE thing and has no tree to browse, so the selection is pinned to the active
+      // LOD level's root: clicking any part of the model in the viewport selects the model, and the
+      // Transform panel therefore always edits the model's own transform rather than a sub-mesh's. One
+      // choke point covers tab activation, the LOD level radio and viewport picking alike.
+      if (activeTabKindRef.current === 'model') {
+        const session = modelSessionsRef.current[activeTabIdRef.current];
+        const pinned = session ? session.levelIds[session.activeLevel] : undefined;
+        if (pinned) node = pinned;
+      }
       setSelectedNode(node);
 
       // Use stencil-based outlining instead of creating outline nodes. In a material tab the preview
@@ -4940,7 +5110,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
     enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
     importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport, resolveRigPick,
-    enterModelEditor, setActiveModelName, addModelLodFromAsset, removeModelLod,
+    enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToModel, unlinkAnimationFromModel, editSharedClip,
+    setActiveModelName, addModelLodFromAsset, removeModelLod,
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
     enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource,
     adoptExternalScriptSource, renameScriptAsset,
@@ -5072,6 +5243,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       removeModel,
       updateModel,
       enterModelEditor,
+      adoptModelAsset,
+      resolveModelAssetId,
+      linkAnimationToModel,
+      unlinkAnimationFromModel,
+      editSharedClip,
       modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
       modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
         ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null

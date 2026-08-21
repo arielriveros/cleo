@@ -1,94 +1,77 @@
 import { Node, AnimatedModel } from 'cleo'
-import { useState } from 'react'
 import { useEditorSessions } from '../../EditorSessionsContext'
 import { useAssetLibrary } from '../../AssetLibraryContext'
-import { useCleoEngine } from '../../EngineContext'
-import { useEventBus } from '../../EventBusContext'
 import Collapsable from '../../../components/Collapsable'
 import { Button, Hint } from '../../../components/ui'
 import { AnimationIcon } from '../sectionIcons'
-import { modelIdOf, skinnedModelNodeOf, skinnedModelJsonOf, MODEL_ID_VAR } from '../../../utils/models'
+import AnimationAssetPicker from '../../animation/AnimationAssetPicker'
+import { skinnedModelNodeOf } from '../../../utils/models'
 
-// Entry point to the Animation Editor mode, shown for any node that IS or CONTAINS a skinned model (an
-// AnimatedModel with a skin + animator). Takes any Node and finds the skinned ModelNode in its subtree, so
-// selecting a holder root — including a character's root inside a template — shows the section, not only the
-// deep ModelNode child. Renders itself away when the subtree has no skinned model.
+// Everything about the selected model's animation, in the inspector — clips, the shared `.anim` assets it
+// plays, its blend spaces, and the way into the Animation Editor.
+//
+// It shows for any node that IS or CONTAINS a skinned model, so selecting a character's holder root (a
+// template instance, say) is enough. Nothing here is gated on the node being "linked" to a library model
+// any more: the clip list is read off the live node, and the two actions that genuinely need an asset
+// (linking an animation, creating a blend space) adopt the subtree into the library on the way.
 export default function AnimationSlot(props: { node: Node }) {
-  const { enterAnimationEditor, createAnimationFieldForModel, enterAnimationFieldEditor } = useEditorSessions()
+  const { enterAnimationEditor, createAnimationFieldForModel, enterAnimationFieldEditor, adoptModelAsset, resolveModelAssetId } = useEditorSessions()
   const { animationFields } = useAssetLibrary()
-  const { models } = useCleoEngine()
-  const eventEmitter = useEventBus()
-  const [, force] = useState(0)
 
   const modelNode = skinnedModelNodeOf(props.node)
   if (!modelNode) return null
 
   const model = modelNode.model as AnimatedModel
-  const clipCount = model.animations.length
-
-  // A field belongs to a MODEL ASSET, resolved by the `__modelId` back-link. modelIdOf WALKS UP from the
-  // skinned model node: an imported model instantiates as a holder Node with the skinned ModelNode beneath it,
-  // so `__modelId` is on the holder while the model node is the child.
-  const modelId = modelIdOf(modelNode)
+  const clips = model.animations
+  // Walks UP from the skinned node (an imported model is a holder with the ModelNode beneath it, so the
+  // asset reference sits on the holder), and falls back to the asset the current tab is editing — see
+  // resolveModelAssetId.
+  const modelId = resolveModelAssetId(modelNode)
   const fields = modelId ? animationFields.filter(f => f.modelId === modelId) : []
 
-  // Only skinned assets are worth linking a skinned model node to — a static model has no clips to blend.
-  const skinnedAssets = models.filter(m => !!skinnedModelJsonOf(m.nodeJson))
-
-  // Establish the missing asset link (older / imported models that never went through library placement carry
-  // no `__modelId`, so modelIdOf finds nothing). Stamping it on THIS model node makes both the Animation Fields
-  // and the Model-asset (Edit Model) section resolve; SCENE_CHANGED persists it and marks the tab dirty. It is
-  // only a reference — the node's own geometry/clips are left as they are.
-  const linkTo = (assetId: string) => {
-    if (!assetId) return
-    modelNode.setVariable(MODEL_ID_VAR, assetId, 'string')
-    eventEmitter.emit('SCENE_CHANGED')
-    force(x => x + 1)
+  const newField = async () => {
+    const id = await adoptModelAsset(props.node)
+    if (id) createAnimationFieldForModel(id)
   }
 
   return (
-    <Collapsable title='Animation' icon={<AnimationIcon />} badge={clipCount || undefined} persistKey='animation'>
+    <Collapsable title='Animation' icon={<AnimationIcon />} badge={clips.length || undefined} persistKey='animation'>
       <div className='w-full p-2 flex flex-col gap-2'>
-        <Hint>
-          Skinned model — {clipCount} clip{clipCount === 1 ? '' : 's'}. Edit the skeleton, preview
-          clips and author the animation state machine in the Animation Editor.
-        </Hint>
         <Button variant='primary' className='w-full py-2' onClick={() => enterAnimationEditor(modelNode.id)}
           title='Open the Animation Editor for this skinned model'>
           ▶ Open Animation Editor
         </Button>
 
-        {modelId ? <>
+        <div className='flex flex-col gap-0.5'>
+          {clips.length === 0 && <Hint>No clips yet — link one below, or import a file in the Animation Editor.</Hint>}
+          {clips.map(c => (
+            <div key={c.name} className='flex items-center gap-1 text-xs px-1 py-0.5'>
+              <span className='truncate flex-1' title={c.name}>{c.name}</span>
+              {/* A clip carrying an assetId came from a shared `.anim`; it is stored once in the library and
+                  retargeted onto this rig, not embedded in this node. Worth distinguishing, because that is
+                  what decides where renaming or deleting it has to happen. */}
+              {c.assetId && <span className='text-[10px] text-muted shrink-0' title='From a linked animation asset'>linked</span>}
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <div className='text-[11px] text-muted mb-1'>Animations</div>
+          <AnimationAssetPicker modelId={modelId ?? null} onNeedModel={() => adoptModelAsset(props.node)} />
+        </div>
+
+        <div className='flex flex-col gap-1'>
           {fields.map(f => (
             <Button key={f.id} variant='subtle' className='w-full py-1.5' onClick={() => enterAnimationFieldEditor(f.id)}
               title={`Open the "${f.name}" blend space`}>
               ⊞ {f.name}
             </Button>
           ))}
-          <Button variant='subtle' className='w-full py-1.5' onClick={() => createAnimationFieldForModel(modelId)}
+          <Button variant='subtle' className='w-full py-1.5' onClick={() => void newField()}
             title='Create a blend space that mixes this model’s clips by 1D or 2D parameters'>
             + New Animation Field
           </Button>
-        </> : <>
-          {/* No asset link: this model node was never placed from the library (an older / imported subtree), so
-              its blend spaces can't be resolved. Let the user point it at the matching library asset once. */}
-          <Hint>
-            This model node isn’t linked to a model asset, so its Animation Fields can’t be shown. Link it to the
-            matching library model to manage its blend spaces (and enable Edit Model). This only sets a
-            reference — it won’t replace the node’s geometry.
-          </Hint>
-          {skinnedAssets.length > 0 ? (
-            <select
-              className='w-full bg-control text-white border border-border rounded px-2 py-1 text-xs'
-              value=''
-              onChange={e => linkTo(e.target.value)}>
-              <option value=''>Link to a model asset…</option>
-              {skinnedAssets.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-          ) : (
-            <Hint>No skinned model assets in the library to link to — import the character as a model first.</Hint>
-          )}
-        </>}
+        </div>
       </div>
     </Collapsable>
   )

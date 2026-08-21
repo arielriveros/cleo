@@ -1,7 +1,7 @@
 import { Scene, Node, CameraNode, isInlineTilesetId } from 'cleo'
 import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
-import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig } from './models'
+import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior } from './models'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
 
@@ -44,7 +44,15 @@ function collectSubtreeIds(node: Node, out: string[] = []): string[] {
  * Re-instantiate a placed instance subtree in place, preserving its transform (mesh/template shared).
  * Returns the rebuilt node, so callers keep working on the live one rather than the detached original.
  */
-function reinstantiate(scene: Scene, inst: Node, maps: ResyncMaps, make: (parent: Node) => string): Node | null {
+function reinstantiate(
+  scene: Scene,
+  inst: Node,
+  maps: ResyncMaps,
+  make: (parent: Node) => string,
+  /** Runs once the rebuilt node has its transform, spawn flag and variables back. `prev` is the detached
+   *  original, still readable — that is where a per-instance baseline like MODEL_BASE_TRS_VAR lives. */
+  onRebuilt?: (rebuilt: Node, prev: Node) => void,
+): Node | null {
   const parent = inst.parent
   if (!parent) return null
   const pos = Array.from(inst.position) as [number, number, number]
@@ -75,6 +83,7 @@ function reinstantiate(scene: Scene, inst: Node, maps: ResyncMaps, make: (parent
       newNode.setVariable(name, v.value, v.type, v.access)
     }
     restoreAnimationState(newNode, animation)
+    onRebuilt?.(newNode, inst)
   }
   return newNode ?? null
 }
@@ -143,7 +152,13 @@ export function resyncScene(
     let live = node
     if (!node.getVariable(TEMPLATE_ID_VAR) && changedSince('model', modelId, hashAsset(asset))) {
       live = reinstantiate(scene, node, maps,
-        parent => instantiateModelAsset(asset, parent, libs.materials, libs.models, libs.animations)) ?? node
+        parent => instantiateModelAsset(asset, parent, libs.materials, libs.models, libs.animations),
+        // The rebuild has just put this copy's own transform back, which is right for where the user placed
+        // it and wrong for a change the MODEL made to its root transform. Re-apply that change on top. A
+        // LOD-wrapped asset carries its root transform on the wrapper's child, so it needs no delta.
+        (rebuilt, prev) => {
+          if (!modelAssetHasLodBehavior(asset)) applyModelTransformDelta(rebuilt, readModelBaseTrs(prev), asset.nodeJson)
+        }) ?? node
       changed = true
     }
     // The IK rig is skeleton data and the ASSET owns it, so it is re-applied here whatever the hash says.

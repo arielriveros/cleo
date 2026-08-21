@@ -2,7 +2,7 @@ import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, m
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MaterialAsset } from './materials'
-import { skinnedModelJsonOf as skinnedJson, flattenModelAsset } from './modelClips'
+import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, modelTransformDelta } from './modelClips'
 import type { AnimationAsset } from './animationAssets'
 import { applyModelAnimations } from './animationResolve'
 
@@ -26,6 +26,46 @@ export const MODEL_ID_VAR = '__modelId'
 
 /** The pre-rename spelling of MODEL_ID_VAR, still read so unmigrated data keeps resolving. */
 export const LEGACY_MODEL_ID_VAR = '__meshId'
+
+/**
+ * The model asset's OWN root transform at the moment this instance was built, as a flat
+ * `[px,py,pz, rx,ry,rz, sx,sy,sz]`.
+ *
+ * It exists because a placement's transform and the asset root's transform occupy the SAME slot: the
+ * clone arrives carrying the asset's TRS and is then overwritten with wherever the user put this copy.
+ * A rebuild therefore had no way to tell "the user moved this copy" from "the model itself moved", so an
+ * edit to the model's root transform was the one asset field that silently went nowhere.
+ *
+ * Recording what the asset said last time turns that into a subtraction — see applyModelTransformDelta.
+ * A placement without this variable (everything authored before it existed) simply keeps its transform
+ * verbatim, exactly as before, and gains a baseline on its next rebuild.
+ */
+export const MODEL_BASE_TRS_VAR = '__modelBaseTRS'
+
+/**
+ * The MODEL_BASE_TRS_VAR baseline off a live node, or null when it has none.
+ *
+ * Stored as JSON because a node variable has only number/string/boolean/vec3 to work with; the array
+ * shape is accepted too, so a value that reached the node some other way still reads.
+ */
+export function readModelBaseTrs(node: Node | null | undefined): number[] | null {
+  const raw = node?.getVariable(MODEL_BASE_TRS_VAR)
+  const parsed = typeof raw === 'string' ? (() => { try { return JSON.parse(raw) } catch { return null } })() : raw
+  return Array.isArray(parsed) && parsed.length >= 9 ? parsed.map(Number) : null
+}
+
+/**
+ * Re-apply a placement's own transform on top of a model whose root transform has moved since.
+ *
+ * The arithmetic (and why it is component-wise) lives in modelTransformDelta; this is the half that
+ * touches a live Node. Returns true when something moved.
+ */
+export function applyModelTransformDelta(node: Node, base: number[] | null | undefined, assetRootJson: any): boolean {
+  const next = modelTransformDelta(node, base, nodeJsonTrs(assetRootJson))
+  if (!next) return false
+  node.setPosition(next.position).setRotation(next.rotation).setScale(next.scale)
+  return true
+}
 
 /**
  * Walk up to the placed model-instance root — the nearest ancestor (or self) carrying `__modelId`.
@@ -69,6 +109,23 @@ export function skinnedModelNodeOf(node: Node | null | undefined): ModelNode | n
     return node
   for (const child of node.children) {
     const found = skinnedModelNodeOf(child)
+    if (found) return found
+  }
+  return null
+}
+
+/**
+ * The first ModelNode AT or BENEATH `node` (depth-first, self first), or null.
+ *
+ * The unskinned sibling of skinnedModelNodeOf, and it walks for the same reason: an imported model is a
+ * holder Node with its ModelNodes as children, so "does this selection contain geometry" cannot be
+ * answered from the selected node alone.
+ */
+export function modelNodeOf(node: Node | null | undefined): ModelNode | null {
+  if (!node) return null
+  if (node instanceof ModelNode) return node
+  for (const child of node.children) {
+    const found = modelNodeOf(child)
     if (found) return found
   }
   return null
@@ -161,6 +218,7 @@ export async function buildModelAsset(
   if (nodeJson.variables) {
     delete nodeJson.variables[MODEL_ID_VAR]
     delete nodeJson.variables[LEGACY_MODEL_ID_VAR]
+    delete nodeJson.variables[MODEL_BASE_TRS_VAR]
   }
 
   const texIds = new Set<string>()
@@ -177,6 +235,7 @@ export async function buildModelAsset(
       if (lod.nodeJson.variables) {
         delete lod.nodeJson.variables[MODEL_ID_VAR]
         delete lod.nodeJson.variables[LEGACY_MODEL_ID_VAR]
+        delete lod.nodeJson.variables[MODEL_BASE_TRS_VAR]
       }
       collectTextureIds(lod.nodeJson, texIds)
     }
@@ -498,6 +557,14 @@ export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials
   // Tag the instance root so it can be recognized as a placed model instance. Persists via the node's
   // serialized `variables`.
   clone.variables = { ...(clone.variables || {}), [MODEL_ID_VAR]: { type: 'string', value: asset.id } }
+
+  // ...and record the asset's own root transform, so a later edit to it can be applied to this copy as a
+  // change rather than being overwritten by the copy's placement (see applyModelTransformDelta). A
+  // LOD-wrapped instance needs no baseline: the wrapper is identity and the asset root sits INSIDE it as
+  // child 0, so a transform edit already arrives through the child — recording one here would double it.
+  // Serialized as JSON because a node variable has only number/string/boolean/vec3 to work with.
+  if (!(lods.length || (asset.cullDistance ?? 0) > 0))
+    clone.variables[MODEL_BASE_TRS_VAR] = { type: 'string', value: JSON.stringify(nodeJsonTrs(asset.nodeJson)) }
 
   // Restore any embedded textures not already present.
   for (const t of asset.textures || []) {

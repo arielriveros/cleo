@@ -6,6 +6,7 @@ import FieldDebugReadout from './FieldDebugReadout'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
 import { useStateMachine } from './StateMachineContext'
 import ConditionTree from './ConditionTree'
+import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '../../components/Collapsable'
 import { SegmentedControl, Toggle } from '../../components/ui'
 
@@ -44,8 +45,35 @@ function ApplyBar() {
 
 // ---- Clips panel ------------------------------------------------------------------------------------
 export function ClipsPanel() {
-  const { target, clips, hasBoneNames, renameClip, deleteClip, rootMotionOf, toggleClipRootMotion, importAnimationFiles, importSkeletonNames } = useStateMachine()
+  const {
+    target, clips, clipAssetId, modelId, adoptModel, hasBoneNames,
+    renameClip, deleteClip, rootMotionOf, toggleClipRootMotion, importAnimationFiles, importSkeletonNames,
+  } = useStateMachine()
   if (!target) return <NoModel />
+
+  // Where a clip lives decides what can be done to it here. A shared clip is one stored copy retargeted
+  // onto this rig, so removing it is unlinking its ASSET (one level up, in the picker) — deleting it off
+  // this model alone would be undone by the next resolve.
+  const clipRow = (name: string) => {
+    const sharedId = clipAssetId(name)
+    return (
+      <div key={name} className='flex items-center gap-1'>
+        <input className={input + ' flex-1'} defaultValue={name}
+          title={sharedId ? 'Rename this clip in its animation asset (Enter to apply) — every model using it follows' : 'Rename clip (Enter to apply)'}
+          onBlur={e => renameClip(name, e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+        <span className='shrink-0' title='Root motion — apply this clip&#39;s root bone translation/rotation to the character (body if it has one) instead of playing it in place'>
+          <Toggle checked={rootMotionOf(name)} onChange={on => toggleClipRootMotion(name, on)} />
+        </span>
+        {sharedId
+          ? <span className='text-[10px] text-muted shrink-0 w-[52px] text-center' title='From a linked animation asset — unlink it above to remove'>linked</span>
+          : <button className={danger} title='Delete clip' onClick={() => deleteClip(name)}>✕</button>}
+      </div>
+    )
+  }
+
+  const shared = clips.filter(c => !!clipAssetId(c))
+  const own = clips.filter(c => !clipAssetId(c))
 
   return (
     <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
@@ -65,19 +93,16 @@ export function ClipsPanel() {
           </label>
         )}
 
+        {/* Clips already in the library, linked rather than re-imported — the same affordance a texture
+            slot gives: pick one, or drag it in from Assets. */}
+        <AnimationAssetPicker className='mt-1' modelId={modelId} onNeedModel={adoptModel} />
+
         <div className='mt-1 flex flex-col gap-1'>
-          {clips.length === 0 && <p className='text-[11px] text-gray-400'>No clips. Import one above.</p>}
-          {clips.map(name => (
-            <div key={name} className='flex items-center gap-1'>
-              <input className={input + ' flex-1'} defaultValue={name} title='Rename clip (Enter to apply)'
-                onBlur={e => renameClip(name, e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
-              <span className='shrink-0' title='Root motion — apply this clip&#39;s root bone translation/rotation to the character (body if it has one) instead of playing it in place'>
-                <Toggle checked={rootMotionOf(name)} onChange={on => toggleClipRootMotion(name, on)} />
-              </span>
-              <button className={danger} title='Delete clip' onClick={() => deleteClip(name)}>✕</button>
-            </div>
-          ))}
+          {clips.length === 0 && <p className='text-[11px] text-gray-400'>No clips. Import or link one above.</p>}
+          {shared.length > 0 && <p className='text-[10px] uppercase tracking-wide text-muted mt-1'>From linked animations</p>}
+          {shared.map(clipRow)}
+          {own.length > 0 && shared.length > 0 && <p className='text-[10px] uppercase tracking-wide text-muted mt-1'>This model’s own clips</p>}
+          {own.map(clipRow)}
         </div>
       </div>
     </div>

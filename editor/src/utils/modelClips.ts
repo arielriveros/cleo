@@ -221,3 +221,53 @@ export function assetWithoutEmbeddedClips<T extends ClipBearingAsset>(asset: T):
   if (target) target.animations = null   // null, not [], to match what AnimatedModel.serialize writes
   return { ...asset, nodeJson }
 }
+
+/**
+ * The `[px,py,pz, rx,ry,rz, sx,sy,sz]` of a serialized node, defaulting to an identity transform.
+ *
+ * Engine-free half of the model-transform propagation (see applyModelTransformDelta in models.ts).
+ */
+export function nodeJsonTrs(nodeJson: any): number[] {
+  const triple = (v: any, d: number) => {
+    const a = Array.isArray(v) ? v : []
+    // `a[i] == null` first: Number(null) is 0, so a null component would silently read as a zero SCALE
+    // rather than falling back to 1.
+    return [0, 1, 2].map(i => (a[i] == null || !Number.isFinite(Number(a[i])) ? d : Number(a[i])))
+  }
+  return [...triple(nodeJson?.position, 0), ...triple(nodeJson?.rotation, 0), ...triple(nodeJson?.scale, 1)]
+}
+
+/**
+ * A placement's transform with the change its MODEL made to its own root transform applied on top.
+ *
+ * A placement's transform and the asset root's transform occupy the SAME slot: the clone arrives carrying
+ * the asset's TRS and is immediately overwritten with wherever the user put this copy. A rebuild therefore
+ * had no way to tell "the user moved this copy" from "the model itself moved", and an edit to the model's
+ * root transform was the one asset field that silently went nowhere.
+ *
+ * Recording what the asset said when the copy was built (MODEL_BASE_TRS_VAR) turns that into a
+ * subtraction. Component-wise on purpose — `pos += new - base`, `rot += new - base`, `scale *= new / base`
+ * — which is exactly "keep the copy where it is, and apply the change the model made". Exact whenever the
+ * model root is unrotated, the normal case since flattenModelJson refuses to collapse a rotated holder;
+ * an approximation under simultaneous rotation and non-uniform scale, the same ambiguity that function
+ * declines to resolve.
+ *
+ * Returns null when there is no baseline or nothing moved, so the caller can skip the write.
+ */
+export function modelTransformDelta(
+  instance: { position: ArrayLike<number>; rotation: ArrayLike<number>; scale: ArrayLike<number> },
+  base: number[] | null | undefined,
+  next: number[],
+): { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] } | null {
+  if (!Array.isArray(base) || base.length < 9) return null
+  if (base.every((v, i) => Math.abs(v - next[i]) < 1e-6)) return null
+
+  const p = instance.position, r = instance.rotation, s = instance.scale
+  // A zero base scale carries no ratio — treat it as 1 rather than producing NaN or collapsing the copy.
+  const ratio = (i: number) => (Math.abs(base[6 + i]) < 1e-6 ? 1 : next[6 + i] / base[6 + i])
+  return {
+    position: [p[0] + (next[0] - base[0]), p[1] + (next[1] - base[1]), p[2] + (next[2] - base[2])],
+    rotation: [r[0] + (next[3] - base[3]), r[1] + (next[4] - base[4]), r[2] + (next[5] - base[5])],
+    scale: [s[0] * ratio(0), s[1] * ratio(1), s[2] * ratio(2)],
+  }
+}

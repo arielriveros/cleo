@@ -328,10 +328,12 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
     case 'tilemap':
       hide('scripts', 'physics');
       break;
-    // A mesh tab is a read-only preview: keep the tree + Properties to inspect the subtree, but there is
-    // nothing to add to it.
+    // A model tab edits ONE thing, so there is no tree to browse: the model node is selected for you and
+    // stays selected (see the SELECT_NODE coercion in EngineContext), and Properties hosts both the asset's
+    // own inspector and that node's transform. The tree it used to show was rooted at the throwaway scene
+    // root, so it was a meaningless `root` row plus one sibling per LOD preview.
     case 'model':
-      hide(...ADD_PANELS, 'scripts', 'physics');
+      hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
       break;
     // Animation brings its own three panels, so Properties has nothing left to host and the Scene panel
     // becomes the skeleton tree (retitled by panelTitle).

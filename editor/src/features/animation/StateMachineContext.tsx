@@ -40,6 +40,12 @@ interface StateMachineContextValue {
   target: AnimationTarget | null
   hasBoneNames: boolean
   clips: string[]
+  /** Which shared `.anim` asset a clip came from, or undefined when it is embedded in the model. */
+  clipAssetId: (name: string) => string | undefined
+  /** The model asset this session edits through, or null for a subtree that is not in the library yet. */
+  modelId: string | null
+  /** Put this session's model in the library if it isn't, and return its id. */
+  adoptModel: () => Promise<string | null>
   accessVars: AccessibleVariable[]
   /** Every Animation Field in the project — a state can play one instead of a single clip. */
   animationFields: AnimationFieldAsset[]
@@ -197,7 +203,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     editorScene, animationTargetId, animationSourceScene, animationSourceId,
     commitAnimationStateMachine, importAnimationFiles, importSkeletonNames,
     renameAnimationClip, removeAnimationClip, setClipRootMotion, closeTab, activeTabId, eventEmitter,
-    scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply, bodies,
+    scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply, bodies, editSharedClip,
+    adoptModelAsset, resolveModelAssetId,
   } = useCleoEngine()
   const { animationFields } = useAssetLibrary()
 
@@ -477,7 +484,14 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const renameClip = (oldName: string, typed: string) => {
     const next = typed.trim()
     if (!next || next === oldName) return
-    const finalName = renameAnimationClip(oldName, next)
+    // A shared clip's name belongs to the `.anim` ASSET. Writing it there is what survives a reload (and
+    // what every other model linking the same asset sees); the re-resolve inside editSharedClip replaces
+    // the live clips, so the embedded-clip rename below must not also run — it would be renaming a clip
+    // that no longer exists under that name.
+    const sharedId = clipAssetId(oldName)
+    const finalName = sharedId
+      ? (editSharedClip(sharedId, oldName, { name: next }), next)
+      : renameAnimationClip(oldName, next)
     update(prev => ({
       ...prev,
       states: prev.states.map(s => s.clipName === oldName ? { ...s, clipName: finalName } : s),
@@ -496,12 +510,32 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   // Root motion is read straight off the live model; the ANIM_CLIPS_CHANGED force-render above reflects a
   // toggle without a working-copy edit, since the flag lives on the clip, not in the state machine.
   const rootMotionOf = (name: string) => !!target?.model.animations.find(a => a.name === name)?.rootMotion
-  const toggleClipRootMotion = (name: string, on: boolean) => setClipRootMotion(name, on)
+
+  /**
+   * Which shared `.anim` asset a clip came from, or undefined for a clip embedded in the model.
+   *
+   * It decides where an edit to that clip has to land. A resolved clip carries `assetId` and
+   * AnimatedModel.serialize drops it, so the embedded-clip helpers patch a list the clip is not in — the
+   * rename/delete/root-motion looked applied and was gone on reload. See editSharedClip.
+   */
+  const clipAssetId = (name: string) => target?.model.animations.find(a => a.name === name)?.assetId
+
+  const toggleClipRootMotion = (name: string, on: boolean) => {
+    const assetId = clipAssetId(name)
+    if (assetId) { editSharedClip(assetId, name, { rootMotion: on }); return }
+    setClipRootMotion(name, on)
+  }
 
   const fieldOf = (id: string | undefined) => (id ? animationFields.find(f => f.id === id) : undefined)
 
+  // The link is read off the SOURCE node, not the preview clone: enterAnimationEditor clones the character
+  // into a throwaway scene, and adopting from the clone would put the throwaway copy in the library.
+  const sourceNode = animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null
+  const modelId = resolveModelAssetId(sourceNode) ?? resolveModelAssetId(target?.node) ?? null
+  const adoptModel = () => adoptModelAsset(sourceNode ?? target?.node ?? null)
+
   const value: StateMachineContextValue = {
-    target, hasBoneNames, clips, accessVars, animationFields, fieldOf,
+    target, hasBoneNames, clips, clipAssetId, modelId, adoptModel, accessVars, animationFields, fieldOf,
     sm, selection, setSelection, graphView, setGraphView, simulate, setSimulate,
     apply, paramOf,
     addParam, setParam, removeParam,

@@ -11,6 +11,7 @@
 
 import { PACK_MAGIC, PACK_HEADER_BYTES, ATTRS } from '../features/publish/pack';
 import type { PackManifest, PackedTexture } from '../features/publish/pack';
+import { ChunkReader, align4 } from '../utils/chunkBlob';
 
 /** The shape Model.parse reads out of `model.geometry`. */
 export interface GeometryArrays {
@@ -54,21 +55,17 @@ function readHeader(buffer: ArrayBuffer): { manifest: PackManifest; blobStart: n
   if (manifestEnd > buffer.byteLength) throw new Error('game.bin is truncated (manifest)');
 
   const json = new TextDecoder().decode(new Uint8Array(buffer, PACK_HEADER_BYTES, manifestLength));
-  return { manifest: JSON.parse(json) as PackManifest, blobStart: (manifestEnd + 3) & ~3 };
+  return { manifest: JSON.parse(json) as PackManifest, blobStart: align4(manifestEnd) };
 }
 
 export function unpackGameBin(buffer: ArrayBuffer): UnpackedGame {
   const { manifest, blobStart } = readHeader(buffer);
 
-  const bounded = (o: number, l: number): number => {
-    const start = blobStart + o;
-    if (start + l > buffer.byteLength) throw new Error('game.bin is truncated (chunk past end of file)');
-    return start;
-  };
+  const reader = new ChunkReader(buffer, blobStart, 'game.bin');
 
   const textures: UnpackedTexture[] = (manifest.textures ?? []).map((t: PackedTexture) => ({
     id: t.id,
-    bytes: new Uint8Array(buffer, bounded(t.o, t.l), t.l),
+    bytes: reader.bytes({ o: t.o, l: t.l })!,
     mime: t.mime,
     config: t.config,
   }));
@@ -92,24 +89,19 @@ export function unpackGameBin(buffer: ArrayBuffer): UnpackedGame {
 
     const out: GeometryArrays = {};
     for (const name of ATTRS) {
-      const chunk = packed[name];
-      if (!chunk) continue;
-      const floats = new Float32Array(buffer, bounded(chunk.o, chunk.l), chunk.l / 4);
+      const floats = reader.floats(packed[name]);
+      if (!floats) continue;
       out[name] = first ? floats : floats.slice();
     }
     if (packed.indices) {
-      const { o, l, bits } = packed.indices;
-      const start = bounded(o, l);
-      const indices = bits === 32
-        ? new Uint32Array(buffer, start, l / 4)
-        : new Uint16Array(buffer, start, l / 2);
+      const indices = packed.indices.bits === 32 ? reader.u32(packed.indices)! : reader.u16(packed.indices)!;
       out.indices = first ? indices : indices.slice();
     }
     return out;
   };
 
   const chunkBytes = (chunk: { o: number; l: number } | undefined): Uint8Array | undefined =>
-    chunk ? new Uint8Array(buffer, bounded(chunk.o, chunk.l), chunk.l) : undefined;
+    reader.bytes(chunk);
 
   return { manifest, textures, geometryFor, chunkBytes };
 }

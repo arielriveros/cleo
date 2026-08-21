@@ -16,6 +16,9 @@
 // JSON, not a .ts constant, so webpack.player.config.js (CommonJS) can `require` the same file the
 // packer imports. One number, one source of truth.
 import playerContract from './playerContract.json';
+// The container primitives (alignment, chunk refs, byte hashing) are shared with the project export's
+// assets.bin — see utils/chunkBlob.ts. Same three invariants, one implementation.
+import { ChunkWriter, align4, asBytes, hashBytes, FNV_OFFSET, type ChunkRef } from '../../utils/chunkBlob';
 
 /** File layout, version 1:
  *
@@ -62,8 +65,9 @@ export const PACK_HEADER_BYTES = 16;
  */
 export const PLAYER_CONTRACT: number = playerContract.contract;
 
-/** Where a chunk sits in the blob region: byte offset and byte length. */
-export interface ChunkRef { o: number; l: number }
+/** Where a chunk sits in the blob region: byte offset and byte length. Re-exported so the reader and
+ *  the tests keep importing the pack format's vocabulary from the pack module. */
+export type { ChunkRef };
 
 /** The five float attributes, in the order Model.serialize emits them. */
 export const ATTRS = ['positions', 'normals', 'tangents', 'bitangents', 'texCoords'] as const;
@@ -109,12 +113,6 @@ export interface PackStats {
   textures: number;
   bytes: number;
 }
-
-const align4 = (n: number): number => (n + 3) & ~3;
-
-/** Structured clone across the worker boundary can turn a Uint8Array back into a plain array. */
-const asBytes = (input: any): Uint8Array =>
-  input instanceof Uint8Array ? input : new Uint8Array(input);
 
 /**
  * Narrowest lossless index width.
@@ -164,21 +162,9 @@ function toFloats(input: any, stride: number): Float32Array {
 
 const EMPTY_F32 = new Float32Array(0);
 
-/**
- * FNV-1a over a view's raw bytes.
- *
- * The old packAssets keyed its geometry dedup on `JSON.stringify(model.geometry)` — a full
- * re-stringification of every mesh in the game, O(total geometry bytes) of string work thrown away
- * immediately. Hashing the bytes we are about to write costs a single pass over data we already hold.
- */
-function hashBytes(h: number, view: ArrayBufferView): number {
-  const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-  for (let i = 0; i < bytes.length; i++) {
-    h ^= bytes[i];
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
+// Geometry dedup hashes the bytes it is about to write (hashBytes, chunkBlob.ts) rather than
+// JSON.stringify-ing every mesh the way the old packAssets did — that was O(total geometry bytes) of
+// string work thrown away immediately.
 
 /** Typed arrays for one geometry, before layout. */
 interface GeoArrays {
@@ -206,15 +192,10 @@ function sameGeometry(a: GeoArrays, b: GeoArrays): boolean {
  * the object into the worker by structured clone, so the editor's own copy is untouched.
  */
 export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats } {
-  const chunks: ArrayBufferView[] = [];
-  let blobBytes = 0;
-
-  const addChunk = (view: ArrayBufferView): ChunkRef => {
-    const o = blobBytes;
-    chunks.push(view);
-    blobBytes = align4(blobBytes + view.byteLength);
-    return { o, l: view.byteLength };
-  };
+  // Plain `add`, not `addInterned`: this format dedupes one level up, at the GEOMETRY (see intern
+  // below), so that two meshes sharing only their normals still get their own contiguous records.
+  const blob = new ChunkWriter();
+  const addChunk = (view: ArrayBufferView): ChunkRef => blob.add(view);
 
   // --- Geometry: collect, dedupe, lay out -------------------------------------------------------
 
@@ -224,7 +205,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
 
   const intern = (raw: any): string => {
     const arrays: GeoArrays = { attrs: {} };
-    let h = 0x811c9dc5;
+    let h = FNV_OFFSET;
     for (const name of ATTRS) {
       const floats = toFloats(raw[name], ATTR_STRIDE[name]);
       if (floats.length === 0) continue; // omit empty attributes entirely
@@ -345,7 +326,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
 
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
   const blobStart = align4(PACK_HEADER_BYTES + manifestBytes.length);
-  const buffer = new ArrayBuffer(blobStart + blobBytes);
+  const buffer = new ArrayBuffer(blobStart + blob.byteLength);
   const out = new Uint8Array(buffer);
   const view = new DataView(buffer);
 
@@ -354,11 +335,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
   view.setUint32(12, manifestBytes.length, true);
   out.set(manifestBytes, PACK_HEADER_BYTES);
 
-  let cursor = blobStart;
-  for (const chunk of chunks) {
-    out.set(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength), cursor);
-    cursor = align4(cursor + chunk.byteLength);
-  }
+  blob.writeInto(out, blobStart);
 
   return {
     buffer,

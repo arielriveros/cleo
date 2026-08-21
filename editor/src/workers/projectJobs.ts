@@ -14,8 +14,8 @@ import JSZip from 'jszip';
 import { packGameBin } from '../features/publish/pack';
 import { obfuscateScripts } from '../features/publish/obfuscate';
 import { idbSet } from '../utils/idb';
-import { BundleData, BundleTextureIndexRow, BUNDLE_PATHS } from '../utils/bundle';
-import { BundleSource, readBundle } from '../utils/bundleRead';
+import { BundleData, BUNDLE_PATHS } from '../utils/bundle';
+import { BundleSource, bundleEntries, readBundle } from '../utils/bundleRead';
 
 // The files that make up a published game: index.html + game.js + game.scripts.js + game.bin.
 //
@@ -99,30 +99,16 @@ async function runPublish(job: Extract<ProjectJob, { kind: 'publish' }>): Promis
   return { result: { kind: 'publish', zip: zipped, warnings }, transfer: [zipped] };
 }
 
-// Zip up a fully-gathered bundle. Scenes/libraries/vfs/manifest are JSON; texture payloads are written
-// as one binary file each, indexed by textures/index.json.
+// Zip up a fully-gathered bundle. WHICH entries it is made of is bundleRead.ts's business — the reader
+// and the writer of a layout have to agree, and the way they stop agreeing is by living apart. All this
+// supplies is "how do I put one entry into a zip".
 async function runExportBundle(job: Extract<ProjectJob, { kind: 'exportBundle' }>): Promise<JobOutcome> {
-  const { manifest, scenes, libraries, vfs, textures } = job.bundle;
   const archive = new JSZip();
-  archive.file(BUNDLE_PATHS.manifest, JSON.stringify(manifest));
-  archive.file(BUNDLE_PATHS.vfs, JSON.stringify(vfs));
-  archive.file(`${BUNDLE_PATHS.librariesDir}materials.json`, JSON.stringify(libraries.materials));
-  archive.file(`${BUNDLE_PATHS.librariesDir}terrainMaterials.json`, JSON.stringify(libraries.terrainMaterials));
-  archive.file(`${BUNDLE_PATHS.librariesDir}templates.json`, JSON.stringify(libraries.templates));
-  archive.file(`${BUNDLE_PATHS.librariesDir}models.json`, JSON.stringify(libraries.models));
-  archive.file(`${BUNDLE_PATHS.librariesDir}scripts.json`, JSON.stringify(libraries.scripts ?? []));
-  archive.file(`${BUNDLE_PATHS.librariesDir}animations.json`, JSON.stringify(libraries.animations ?? []));
-  archive.file(`${BUNDLE_PATHS.librariesDir}animationFields.json`, JSON.stringify(libraries.animationFields ?? []));
-  archive.file(`${BUNDLE_PATHS.librariesDir}tilesets.json`, JSON.stringify(libraries.tilesets ?? []));
-  for (const [id, data] of Object.entries(scenes)) archive.file(`${BUNDLE_PATHS.scenesDir}${id}.json`, JSON.stringify(data));
-
-  const index: BundleTextureIndexRow[] = [];
-  textures.forEach((t, i) => {
-    const file = `${BUNDLE_PATHS.texturesDir}${i}.bin`;
-    archive.file(file, t.bytes);
-    index.push({ id: t.id, mime: t.mime, config: t.config, file });
-  });
-  archive.file(BUNDLE_PATHS.texturesIndex, JSON.stringify(index));
+  for (const entry of await bundleEntries(job.bundle)) {
+    archive.file(entry.path, entry.data, entry.text
+      ? { compression: 'DEFLATE', compressionOptions: { level: 6 } }
+      : { compression: 'STORE' });
+  }
 
   const zip = await archive.generateAsync({ type: 'arraybuffer' });
   return { result: { kind: 'exportBundle', zip }, transfer: [zip] };
