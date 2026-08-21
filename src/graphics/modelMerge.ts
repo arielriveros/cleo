@@ -62,36 +62,62 @@ export function mergeBlocker(models: MergePart[]): string | null {
     return null;
 }
 
+/** A merged model plus which source model each of its submeshes came from. */
+export interface MergedModel {
+    model: Model | AnimatedModel;
+    /**
+     * `sources[i]` is the index in `models` that submesh `i` came from — the first part of its run when
+     * consecutive parts were collapsed.
+     *
+     * Returned because `materials` is NOT a de-duplicated set: a material that recurs non-consecutively
+     * appears once per run. A caller building anything parallel to the submeshes (the editor stamps one
+     * material-asset link per submesh) cannot reconstruct that by de-duplicating the inputs itself, and
+     * silently mis-aligning the two is how links ended up on the wrong ranges.
+     */
+    sources: number[];
+}
+
 /**
- * Concatenate `models` into a single model carrying one submesh per input.
+ * Concatenate `models` into a single model carrying one submesh per run of parts sharing a material.
  *
  * Returns null when {@link mergeBlocker} rejects them, so callers can report the reason rather than
- * producing a subtly wrong mesh. Materials are kept in input order and de-duplicated only by identity —
- * two parts that genuinely share a material object collapse to one submesh.
+ * producing a subtly wrong mesh. Materials are kept in input order; only CONSECUTIVE parts that share a
+ * material object collapse into one submesh, because only contiguous index ranges can be drawn as one.
  */
-export function mergeModels(models: (Model | AnimatedModel)[]): Model | AnimatedModel | null {
+export function mergeModels(models: (Model | AnimatedModel)[]): MergedModel | null {
     if (mergeBlocker(models) !== null) return null;
 
     const { geometry, ranges } = Geometry.merge(models.map(m => m.geometry));
 
-    // Parts that share the same material object become one range, which keeps the draw count at the
-    // number of distinct materials rather than the number of source parts.
+    // CONSECUTIVE parts sharing a material object become one range, which keeps the draw count down
+    // without reordering anything. Only the last group can absorb a part: `Geometry.merge` concatenates
+    // in order, so any earlier group's range has already been closed off by whatever followed it. A
+    // material that recurs later therefore gets a SECOND entry in `materials` — the arrays stay parallel
+    // to `submeshes`, they are not a set.
+    //
+    // This used to test `materials.indexOf(mat)`, the FIRST occurrence, and then require it to be
+    // adjacent. That failed both ways round: two consecutive parts sharing a material that had appeared
+    // earlier were never merged (an avoidable extra draw call), and — the damaging half — callers read
+    // `materials` as if it were de-duplicated. `sources` exists so they no longer have to guess.
     const materials: Material[] = [];
     const submeshes: Submesh[] = [];
+    /** Which source model each submesh came from, parallel to `submeshes`. */
+    const sources: number[] = [];
     models.forEach((m, i) => {
         const mat = m.materials[0];
-        const at = materials.indexOf(mat);
         const range = ranges[i];
-        if (at >= 0 && submeshes[at].start + submeshes[at].count === range.start) {
-            submeshes[at] = { start: submeshes[at].start, count: submeshes[at].count + range.count };
+        const last = submeshes.length - 1;
+        if (last >= 0 && materials[last] === mat && submeshes[last].start + submeshes[last].count === range.start) {
+            submeshes[last] = { start: submeshes[last].start, count: submeshes[last].count + range.count };
             return;
         }
         materials.push(mat);
         submeshes.push({ start: range.start, count: range.count });
+        sources.push(i);
     });
 
     const animated = models.filter((m): m is AnimatedModel => m instanceof AnimatedModel);
-    if (!animated.length) return new Model(geometry, materials, submeshes);
+    if (!animated.length) return { model: new Model(geometry, materials, submeshes), sources };
 
     // Joint attributes are 4 floats per vertex in the same vertex order as the geometry, so they
     // concatenate exactly as the positions did — and, sharing one skin, need no index remapping.
@@ -103,7 +129,10 @@ export function mergeModels(models: (Model | AnimatedModel)[]): Model | Animated
     const skin = animated[0].skin as Skin;
     const animations: Animation[] = animated[0].animations ?? [];
 
-    return new AnimatedModel(geometry, materials, skin, jointIndices, jointWeights, animations, submeshes);
+    return {
+        model: new AnimatedModel(geometry, materials, skin, jointIndices, jointWeights, animations, submeshes),
+        sources,
+    };
 }
 
 /**

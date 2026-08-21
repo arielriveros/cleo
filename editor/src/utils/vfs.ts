@@ -215,6 +215,21 @@ export function topMostIds(ids: string[]): string[] {
   return unique.filter(id => !unique.some(other => other !== id && isUnder(id, other)))
 }
 
+/**
+ * Of `paths`, the ones that can actually move into `target` — the filter a multi-item move has to pass
+ * before SVAR's store sees it. Anything else either throws inside the store or is a no-op:
+ *
+ *   - a descendant listed alongside its own folder — FileTree.copyFiles re-ids the folder's subtree as it
+ *     moves, so the descendant's id is stale by the time its turn comes (same trap as `topMostIds`)
+ *   - the target itself, or a folder containing it — the store logs "cannot move a folder into itself"
+ *   - something already in the target — FileTree.moveFiles tests only ids[0]'s parent, so one such id at
+ *     the head of the batch silently cancels the whole move
+ */
+export function movablePaths(paths: string[], target: string, isKnown: (path: string) => boolean): string[] {
+  return topMostIds(paths).filter(src =>
+    src !== '/' && isKnown(src) && !isUnder(target, src) && dirOf(src) !== target)
+}
+
 /** Everything (entries + folders) at or beneath any of `ids`. Folders expand recursively. */
 export function subtreeOf(vfs: VfsIndex, ids: string[]): { entries: VfsEntry[]; folders: string[] } {
   const folderSet = new Set(vfs.folders)

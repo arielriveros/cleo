@@ -1,5 +1,5 @@
 import { Scene, Node, CameraNode, isInlineTilesetId } from 'cleo'
-import { getMaterialIdOf, applyMaterialAsset, unlinkToFallback, MaterialAsset } from './materials'
+import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
 import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig } from './models'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
@@ -182,11 +182,16 @@ export function resyncScene(
 
   // --- Materials on placed nodes + camera screen-material passes ---
   for (const node of Array.from(scene.nodes)) {
-    const matId = getMaterialIdOf(node)
-    if (matId) {
+    // One pass per SUBMESH: a merged model links one asset per index range, and reading only the scalar
+    // `__materialId` (which mirrors slot 0) skipped every material but the first — so an asset edited
+    // while this scene was closed never reached the other submeshes.
+    const matIds = getMaterialIdsOf(node)
+    for (let slot = 0; slot < matIds.length; slot++) {
+      const matId = matIds[slot]
+      if (!matId) continue
       const asset = materialById.get(matId)
-      if (!asset) { unlinkToFallback(node); changed = true }
-      else if (changedSince('material', matId, hashAsset(asset))) { applyMaterialAsset(node, asset); changed = true }
+      if (!asset) { unlinkMaterialAt(node, slot); changed = true }
+      else if (changedSince('material', matId, hashAsset(asset))) { applyMaterialAsset(node, asset, slot); changed = true }
     }
     if (node.nodeType === 'camera') {
       const cam = node as CameraNode

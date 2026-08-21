@@ -1529,7 +1529,9 @@ export class Renderer {
         }
         const submeshes = model.submeshes;
         for (let i = 0; i < submeshes.length; i++) {
-            const mat = model.materials[i];
+            // `materials` is parallel to `submeshes` by construction, but indexing it unguarded turns any
+            // future disagreement into a mid-frame TypeError rather than a wrong colour. Slot 0 always exists.
+            const mat = model.materials[i] ?? model.materials[0];
             bindMaterial(mat);
             this._applyCull(mat.config.side);
             model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
@@ -3716,7 +3718,8 @@ export class Renderer {
             } else {
                 const submeshes = node.model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
-                    if (!casters[i].config.castShadow || casters[i].config.wireframe) continue;
+                    const caster = casters[i] ?? casters[0];   // see _drawSubmeshes: never index past the array
+                    if (!caster.config.castShadow || caster.config.wireframe) continue;
                     node.model.mesh.drawRange(submeshes[i].start, submeshes[i].count, gl.TRIANGLES);
                 }
             }

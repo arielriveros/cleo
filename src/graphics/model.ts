@@ -3,6 +3,7 @@ import { Material } from './material';
 import { Geometry } from '../core/geometry';
 import { Loader } from './loader';
 import { ImportTransform } from './utils/gltfLoader';
+import { Logger } from '../core/logger';
 
 interface FromPathptions {
     filePaths: string[];
@@ -39,7 +40,12 @@ export class Model {
     constructor(geometry: Geometry, material: Material | Material[], submeshes: Submesh[] = []) {
         this._geometry = geometry;
         this._materials = Array.isArray(material) ? (material.length ? material : [Material.Default({})]) : [material];
+        // A submesh list that does not line up with the materials is dropped, which turns the model back
+        // into one whole-buffer draw with materials[0]. Say so: silently, it presents as "the second
+        // material vanished on reload", because serialize() then writes only the singular `material`.
         this._submeshes = submeshes.length === this._materials.length ? submeshes : [];
+        if (submeshes.length && submeshes.length !== this._materials.length)
+            Logger.warn(`Model: ${submeshes.length} submeshes vs ${this._materials.length} materials — submeshes dropped`, 'Model');
 
         this._mesh = new Mesh();
     }

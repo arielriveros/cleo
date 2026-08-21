@@ -148,7 +148,9 @@ export class ModelNode extends Node {
     public get visible(): boolean { return super.visible; }
     public set visible(value: boolean) {
       super.visible = value;
-      this._model.material.config.castShadow = value;
+      // Every submesh, not just slot 0: hiding a merged model used to leave its other index ranges still
+      // casting shadows, so the character vanished but part of its silhouette did not.
+      for (const material of this._model.materials) material.config.castShadow = value;
       for (const child of this._children)
         child.visible = value;
       // The base setter (super.visible) already emitted the visibility SCENE_CHANGED for this node.

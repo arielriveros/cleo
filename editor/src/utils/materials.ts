@@ -118,10 +118,17 @@ export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0
   }
 }
 
-/** Apply one material asset per submesh, in order, and stamp the whole link list in one go. */
-export function applyMaterialAssets(node: Node, assets: MaterialAsset[]): void {
-  assets.forEach((asset, i) => applyMaterialAsset(node, asset, i))
-  if (assets.length > 1) node.setVariable(MATERIAL_IDS_VAR, JSON.stringify(assets.map(a => a.id)), 'string')
+/**
+ * Apply one material asset per submesh, in order, and stamp the whole link list in one go.
+ *
+ * `assets` is parallel to the model's SUBMESHES, so a hole is meaningful: that submesh keeps the material
+ * the merge gave it and records no link. Holes must be preserved in the stamped list rather than
+ * compacted away, or every later entry shifts onto the wrong range.
+ */
+export function applyMaterialAssets(node: Node, assets: (MaterialAsset | undefined)[]): void {
+  assets.forEach((asset, i) => { if (asset) applyMaterialAsset(node, asset, i) })
+  // `JSON.stringify` writes a hole as `null`, which getMaterialIdsOf reads back as undefined.
+  if (assets.length > 1) node.setVariable(MATERIAL_IDS_VAR, JSON.stringify(assets.map(a => a?.id ?? null)), 'string')
 }
 
 /** The Basic + Null-texture material that referencing nodes fall back to when their asset is deleted. */
@@ -136,6 +143,52 @@ export function unlinkToFallback(node: Node): void {
   for (let i = 0; i < count; i++) setNodeMaterial(node, fallbackMaterial(), i)
   node.removeVariable(MATERIAL_ID_VAR)
   node.removeVariable(MATERIAL_IDS_VAR)
+}
+
+/**
+ * Which submeshes of `node` reference a given material asset.
+ *
+ * The one definition of "does this node use that material", so every propagation and cleanup path agrees.
+ * Matching on `getMaterialIdOf` instead — the scalar `__materialId`, which only ever mirrors entry [0] —
+ * is what made an edit to a second submesh's material match no node at all and silently do nothing.
+ *
+ * Returns every matching slot, since the same asset may legitimately be linked to several.
+ */
+export function materialSlotsReferencing(node: Node | null | undefined, materialId: string): number[] {
+  const out: number[] = []
+  const ids = getMaterialIdsOf(node)
+  for (let i = 0; i < ids.length; i++) if (ids[i] === materialId) out.push(i)
+  return out
+}
+
+/**
+ * Reset ONE submesh to the fallback material and drop just that submesh's link.
+ *
+ * The ✕ on a material slot used to call {@link unlinkToFallback}, which resets every submesh and removes
+ * both link variables — so clearing one slot of a merged model wiped all of them. `setNodeMaterial`
+ * already writes a single index, so nothing ever required the whole-node behaviour.
+ *
+ * `__materialId` keeps mirroring entry [0] (and disappears with it), because everything that has not been
+ * converted to the per-submesh list still reads the scalar.
+ */
+export function unlinkMaterialAt(node: Node, submesh: number): void {
+  const n = node as any
+  const count: number = n.model?.materials?.length ?? 1
+  if (count <= 1) { unlinkToFallback(node); return }   // nothing to keep: the single-slot case is unchanged
+
+  setNodeMaterial(node, fallbackMaterial(), submesh)
+
+  const ids = getMaterialIdsOf(node)
+  while (ids.length < count) ids.push(undefined)
+  ids[submesh] = undefined
+
+  if (ids.every(id => !id)) {
+    node.removeVariable(MATERIAL_ID_VAR)
+    node.removeVariable(MATERIAL_IDS_VAR)
+    return
+  }
+  node.setVariable(MATERIAL_IDS_VAR, JSON.stringify(ids), 'string')
+  if (submesh === 0) node.removeVariable(MATERIAL_ID_VAR)
 }
 
 /** Read a node variable's value out of SERIALIZED json (the `{ type, value, access }` shape, or a bare value). */
@@ -168,7 +221,13 @@ export function resolveMaterialRefs(json: any, materials: MaterialAsset[]): void
   }
 
   const single = resolve(serializedVar(json, MATERIAL_ID_VAR))
-  if (single && json.model) json.model.material = single
+  if (single && json.model) {
+    json.model.material = single
+    // `Model.parse` PREFERS `materials` over `material` whenever the array is present, so writing only the
+    // singular here left a merged model rendering the stale embedded copy while its resolved link sat in a
+    // field nothing read. Slot 0 and the scalar link are the same thing; keep them together from the start.
+    if (Array.isArray(json.model.materials) && json.model.materials.length) json.model.materials[0] = single
+  }
 
   // A merged model links one asset per submesh; `materials` on the serialized model is parallel to them.
   const rawList = serializedVar(json, MATERIAL_IDS_VAR)

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyDelete, buildFileManagerData, reconcileVfs, repairVfs, topMostIds,
+  applyDelete, buildFileManagerData, movablePaths, reconcileVfs, repairVfs, topMostIds,
   type LibSnapshot, type VfsEntry, type VfsIndex,
 } from '../editor/src/utils/vfs';
 
@@ -175,5 +175,37 @@ describe('topMostIds', () => {
 
   it('de-duplicates and leaves unrelated ids alone', () => {
     expect(topMostIds(['/A.mat', '/A.mat', '/B.mat'])).toEqual(['/A.mat', '/B.mat']);
+  });
+});
+
+// Dragging a multi-selection onto a folder hands SVAR's store one batched `move-files`. The store is not
+// defensive about that batch: a stale descendant id throws, a folder that contains the target logs an
+// error and aborts, and an id already in the target cancels the *whole* move (FileTree.moveFiles tests
+// only ids[0]'s parent). movablePaths is the filter that keeps all three out.
+describe('movablePaths', () => {
+  const known = (path: string) => path !== '/Ghost.mat';
+
+  it('keeps only the top-most of a folder and its own contents', () => {
+    expect(movablePaths(['/A', '/A/file.mat', '/B.mat'], '/Target', known)).toEqual(['/A', '/B.mat']);
+  });
+
+  it('drops the target itself and any folder containing it', () => {
+    expect(movablePaths(['/A', '/A/Sub', '/B.mat'], '/A/Sub', known)).toEqual(['/B.mat']);
+  });
+
+  it('drops what already sits in the target, keeping the rest', () => {
+    expect(movablePaths(['/Target/a.mat', '/b.mat'], '/Target', known)).toEqual(['/b.mat']);
+  });
+
+  it('treats root as a target like any other folder', () => {
+    expect(movablePaths(['/A/x.mat', '/y.mat'], '/', known)).toEqual(['/A/x.mat']);
+  });
+
+  it('drops paths the index does not know', () => {
+    expect(movablePaths(['/Ghost.mat', '/b.mat'], '/Target', known)).toEqual(['/b.mat']);
+  });
+
+  it('returns nothing when every path is unmovable', () => {
+    expect(movablePaths(['/Target/a.mat'], '/Target', known)).toEqual([]);
   });
 });

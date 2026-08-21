@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Node } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
-import { getMaterialIdsOf, applyMaterialAsset, unlinkToFallback } from '../../../utils/materials'
+import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt } from '../../../utils/materials'
 import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
 import { MaterialIcon } from '../sectionIcons'
 
@@ -58,9 +58,10 @@ function Slot(props: {
     applyMaterialAsset(props.node, a, props.submesh)
     changed()
   }
-  // Unlinking resets every submesh: the fallback replaces the whole model's materials, and leaving the
-  // others linked would claim a link the node no longer honours.
-  const unlink = () => { unlinkToFallback(props.node); changed() }
+  // Clears THIS submesh only. It used to call the whole-node unlink, so ✕ on one slot of a merged model
+  // reset every slot and dropped both link variables — `setNodeMaterial` has always written a single
+  // index, so nothing ever required that.
+  const unlink = () => { unlinkMaterialAt(props.node, props.submesh); changed() }
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
     const id = e.dataTransfer.getData('text/cleo-material')

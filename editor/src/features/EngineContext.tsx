@@ -24,7 +24,7 @@ import { createAssetEditScene } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { cryptoRandomId } from "../utils/ids";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
-import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getNodeMaterial, unlinkToFallback, resolveMaterialRefs } from "../utils/materials";
+import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getMaterialIdsOf, getNodeMaterial, unlinkToFallback, unlinkMaterialAt, materialSlotsReferencing, resolveMaterialRefs } from "../utils/materials";
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
@@ -2575,7 +2575,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     let changed = false;
     for (const scene of liveScenes(exceptTabId)) {
       for (const n of Array.from(scene.nodes)) {
-        if (getMaterialIdOf(n) === materialId) { applyMaterialAsset(n, asset); changed = true; }
+        // Every submesh that references it, not just the one `__materialId` mirrors. Matching on the
+        // scalar meant a material linked to a second submesh matched NO node, so saving an edit to it did
+        // nothing at all — and writing submesh 0 would have put it on the wrong range even if it had.
+        for (const slot of materialSlotsReferencing(n, materialId)) { applyMaterialAsset(n, asset, slot); changed = true; }
         // Cameras referencing it in their ordered screen-space pass list: rebuild the list, substituting
         // the freshly saved asset for its id (other slots resolve from the current library).
         if (n.nodeType !== 'camera') continue;
@@ -2601,7 +2604,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const scene = editorSceneRef.current;
     let changed = false;
     for (const n of Array.from(scene.nodes)) {
-      if (getMaterialIdOf(n) === id) { unlinkToFallback(n); changed = true; }
+      for (const slot of materialSlotsReferencing(n, id)) { unlinkMaterialAt(n, slot); changed = true; }
       if (n.nodeType === 'camera') {
         const cam = n as CameraNode;
         const ids = getScreenMaterialIds(cam);
@@ -2796,6 +2799,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     for (const json of levelJsons) {
       const clone = JSON.parse(JSON.stringify(json));
       regenerateIds(clone, new Map());
+      // Re-resolve the material links against the LIBRARY, exactly as instantiateModelAsset does for a
+      // placement. Without it this tab rendered the copies embedded when the model was last saved, so a
+      // material edited since looked unchanged here — and saving the model then wrote the stale copy back
+      // over the asset. The embedded material is a fallback for a deleted asset, never the source of truth.
+      resolveMaterialRefs(clone, materialsRef.current);
       parseByType(scene.root, clone);
       levelIds.push(clone.id);
     }
@@ -2978,7 +2986,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // materialIds is the informational list of library materials this mesh's own subtree references.
       // Referenced LOD levels are not included — their materials belong to their own asset.
       const materialIdSet = new Set<string>();
-      const collectMats = (n: Node) => { const id = getMaterialIdOf(n); if (id) materialIdSet.add(id); n.children.forEach(collectMats); };
+      // Every submesh's link, not just slot 0 — a merged model's second material would otherwise be
+      // absent from the asset's own reference list and read as unused by the explorer and the publisher.
+      const collectMats = (n: Node) => { for (const id of getMaterialIdsOf(n)) if (id) materialIdSet.add(id); n.children.forEach(collectMats); };
       collectMats(baseRoot);
 
       const prev = modelsRef.current.find(m => m.id === tab.modelId);

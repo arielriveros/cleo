@@ -12,7 +12,7 @@ import { useDragOutPatch } from './useDragOutPatch'
 import { runUpload } from './uploadRouter'
 import { iconFor, thumbnailOf } from './assetKinds'
 import MissingAssetsPopover from './MissingAssetsPopover'
-import { buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
+import { baseOf, buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
@@ -250,6 +250,25 @@ function AssetsExplorerHost() {
     el.addEventListener('mouseout', onOut)
     return () => { el.removeEventListener('mouseover', onOver); el.removeEventListener('mouseout', onOut); hoveredScriptStore.set(null) }
   }, [pathIndexRef])
+
+  // A card label is ellipsized at 80px, so hovering has to be able to say what the name actually is.
+  // SVAR renders no title of its own; the attribute is written on hover rather than up front because the
+  // card elements are React-reused across renames, which would leave a cached title stale.
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+    const onOver = (e: Event) => {
+      const card = (e.target as HTMLElement | null)?.closest?.('.wx-cards .wx-item[data-id]') as HTMLElement | null
+      if (!card || card.closest('.wx-breadcrumbs')) return // the breadcrumb bar reuses .wx-item
+      const raw = card.getAttribute('data-id') ?? ''
+      const path = raw.startsWith(':') ? raw.slice(1) : raw // setID prefixes every DOM id with ':'
+      if (!path.startsWith('/')) return
+      const name = baseOf(path)
+      if (card.getAttribute('title') !== name) card.setAttribute('title', name)
+    }
+    el.addEventListener('mouseover', onOver)
+    return () => el.removeEventListener('mouseover', onOver)
+  }, [])
 
   // --- file-manager rendering hooks -------------------------------------------------------------------
   // Stable identities: SVAR memoizes its `templates` (preview/icon) object, and a changing `data`/config

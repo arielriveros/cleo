@@ -1,7 +1,7 @@
 import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, mergeModels } from 'cleo'
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
-import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, MATERIAL_ID_VAR, MaterialAsset } from './materials'
+import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MaterialAsset } from './materials'
 import { skinnedModelJsonOf as skinnedJson, flattenModelAsset } from './modelClips'
 import type { AnimationAsset } from './animationAssets'
 import { applyModelAnimations } from './animationResolve'
@@ -316,7 +316,12 @@ function hostMaterialId(host: Node, added: Node): string | null {
   let found: string | null = null
   for (const n of modelNodesOf(host)) {
     if (ignore.has(n)) continue
-    const id = n.getVariable(MATERIAL_ID_VAR)
+    // A MERGED node carries one material per submesh, so it is mixed by construction. Reading its scalar
+    // link would report the first submesh's material as "the" host material and then overwrite the added
+    // part with it — the same slot-0-only mistake that made editing a second submesh do nothing.
+    const ids = getMaterialIdsOf(n).filter((x): x is string => !!x)
+    if (ids.length > 1) return null
+    const id = ids[0]
     if (typeof id !== 'string') continue
     if (found && found !== id) return null // host is already mixed; adopting would be arbitrary
     found = id
@@ -339,6 +344,9 @@ export function adoptModelMaterial(added: Node, host: Node, materials: MaterialA
 
   let changed = false
   for (const n of modelNodesOf(added)) {
+    // Never flatten a merged part onto one material: that would silently discard the other submeshes'
+    // links. Such a part keeps what it has, and the caller's "adopted" notice simply does not fire for it.
+    if (getMaterialIdsOf(n).filter(Boolean).length > 1) continue
     if (n.getVariable(MATERIAL_ID_VAR) === wanted) continue
     applyMaterialAsset(n, asset)
     changed = true
@@ -382,21 +390,23 @@ export function mergeSubModels(
   const merged = mergeModels(models)
   if (!merged) return null
 
-  // Materials come back de-duplicated and in child order, so the assets line up submesh for submesh.
-  const assets: MaterialAsset[] = []
-  for (const child of children) {
-    const asset = materialAssetOfChild.get(child)
-    if (asset && !assets.includes(asset)) assets.push(asset)
-  }
+  // One asset per SUBMESH, taken from the child that submesh came from. This used to de-duplicate the
+  // assets itself and assume the result lined up — but `mergeModels` collapses only CONSECUTIVE parts, so
+  // a material used again later legitimately gets a second submesh while the de-duplicated asset list did
+  // not. The lists then drifted: every link after the first repeat landed on the wrong range, and the
+  // trailing submeshes got none at all — so editing those materials appeared to do nothing. With 2 parts
+  // the two rules agree, which is why it only showed up on a model with many sub-meshes.
+  const assets = merged.sources.map(i => materialAssetOfChild.get(children[i]))
 
   const name = root.name
-  const node = new ModelNode(name, merged)
+  const node = new ModelNode(name, merged.model)
   for (const child of [...children]) root.removeChild(child)
   root.addChild(node)
   root.updateTransforms()
-  if (assets.length) applyMaterialAssets(node, assets)
+  if (assets.some(Boolean)) applyMaterialAssets(node, assets)
 
-  Logger.info(`Merged ${children.length} parts of "${name}" into one mesh (${assets.length || 1} material${assets.length === 1 ? '' : 's'})`, 'Import')
+  const distinct = new Set(assets.filter(Boolean)).size
+  Logger.info(`Merged ${children.length} parts of "${name}" into one mesh (${assets.length} submesh${assets.length === 1 ? '' : 'es'}, ${distinct || 1} material${distinct === 1 ? '' : 's'})`, 'Import')
   return [node]
 }
 

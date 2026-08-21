@@ -128,8 +128,26 @@ function remapVariables(vars: any, r: Remaps): void {
   one('__meshId', r.model) // pre-rename spelling, still present in unmigrated bundles
   one('__templateId', r.tpl)
   one('__scriptId', r.script)
-  const sm = vars['__screenMaterialIds']
-  if (sm && Array.isArray(sm.value)) sm.value = sm.value.map((x: any) => sub(r.mat, x))
+
+  // The two JSON-STRING id lists. `__screenMaterialIds` was already here but guarded on
+  // `Array.isArray(sm.value)` — and setScreenMaterialIds writes `JSON.stringify(ids)`, so that branch
+  // never ran and a camera's post passes kept pointing at re-minted ids. `__materialIds` (one material
+  // per submesh of a merged model) was missing outright, which dangled every slot but the first.
+  list('__materialIds', r.mat)
+  list('__screenMaterialIds', r.mat)
+
+  function list(name: string, m: Map<string, string>): void {
+    const entry = vars[name]
+    if (!entry) return
+    // Written as a JSON string; an older bundle may hold a real array. Remap either, in place.
+    if (Array.isArray(entry.value)) { entry.value = entry.value.map((x: any) => (typeof x === 'string' ? sub(m, x) : x)); return }
+    if (typeof entry.value !== 'string') return
+    try {
+      const ids = JSON.parse(entry.value)
+      if (!Array.isArray(ids)) return
+      entry.value = JSON.stringify(ids.map((x: any) => (typeof x === 'string' ? sub(m, x) : x)))
+    } catch { /* corrupt list: leave it rather than replace it with something invented */ }
+  }
 }
 
 /** A texture id that is free locally, else a fresh one; records the remap when it changes. */

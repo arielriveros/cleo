@@ -1,5 +1,5 @@
 import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId } from 'cleo'
-import { getNodeMaterial, getMaterialIdOf, MaterialAsset } from './materials'
+import { getNodeMaterial, getMaterialIdsOf, MaterialAsset } from './materials'
 import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
 import { ModelAsset, MODEL_ID_VAR, LEGACY_MODEL_ID_VAR } from './models'
@@ -136,8 +136,9 @@ export function collectReferencedMaterialIds(scene: Scene | null | undefined, mo
   const set = new Set<string>()
   if (scene) {
     for (const node of scene.nodes) {
-      const id = getMaterialIdOf(node)
-      if (id) set.add(id)
+      // Every submesh's link. A merged model's second material is referenced by nothing else, so reading
+      // only the scalar reported it as orphaned in the explorer.
+      for (const id of getMaterialIdsOf(node)) if (id) set.add(id)
       if (node.nodeType === 'camera')
         for (const sid of getScreenMaterialIds(node as CameraNode)) set.add(sid)
     }
