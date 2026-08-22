@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ModelNode, CustomMaterial, customSeedTemplate, tryCompileCustom } from 'cleo'
+import { ModelNode, CustomMaterial, customSeedTemplate, tryCompileCustom, vulkanUnsupportedReason } from 'cleo'
 import type { CustomBaseType, CustomRenderMode } from 'cleo'
 import { useEventBus } from '../../EventBusContext'
+import { useDocument } from '../../DocumentContext'
 import { seedCustomMaterial } from '../../../utils/customMaterials'
+import { ensureWgslTranslator } from '../../../utils/wgslTranslator'
 import GlslCodeEditor from '../scriptEditor/GlslCodeEditor'
 import CustomUniformsEditor from './CustomUniformsEditor'
 import { Select, Field, Hint, Button } from '../../../components/ui'
@@ -30,9 +32,16 @@ const keyToBase = (k: string): CustomBaseType => (k === 'scratch' ? null : k as 
  */
 export default function CustomMaterialEditor(props: { node: ModelNode }) {
   const eventEmitter = useEventBus()
+  const { saveActiveTab } = useDocument()
   const mat = props.node.model.material as CustomMaterial
   const [source, setSource] = useState(mat.fragmentSource)
   const [error, setError] = useState<string | null>(null)
+  // The WebGPU verdict from the last compile. Separate state from `error` on purpose: a material that
+  // fails to translate still compiles, still renders and is still worth saving — it just will not run on
+  // a WebGPU backend. Folding the two together would either block a working shader or bury a real
+  // portability problem in a banner the user learns to ignore.
+  const [wgslWarning, setWgslWarning] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const [, force] = useState(0)
   const timer = useRef<number | null>(null)
   // The source the live program and the error banner currently reflect. Anything typed since is unapplied,
@@ -43,7 +52,20 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
   const recompile = (src = mat.fragmentSource) => {
     const res = tryCompileCustom(mat.renderMode, src, mat.uniforms)
     setError(res.ok ? null : (res.error ?? 'Compile error'))
-    return res.ok
+
+    if (!res.ok) {
+      // Nothing to say about WebGPU when the shader does not compile at all; the GL diagnostic is the
+      // one with real line numbers, and a second failure about the same source is just noise.
+      setWgslWarning(null)
+      return { ok: false, wgsl: null as string | null }
+    }
+
+    if (res.wgsl) { setWgslWarning(null); return { ok: true, wgsl: res.wgsl } }
+    // No WGSL and no error means no translator is installed, which is not something to warn about.
+    setWgslWarning(res.wgslError
+      ? 'Compiles and runs on WebGL2, but will not run on WebGPU:\n' + res.wgslError
+      : vulkanUnsupportedReason(mat.renderMode))
+    return { ok: true, wgsl: null }
   }
 
   /**
@@ -54,7 +76,15 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
     // A pending store from onSourceChange would otherwise write the same text again and re-dirty the tab.
     if (timer.current) { window.clearTimeout(timer.current); timer.current = null }
     mat.fragmentSource = src
-    if (recompile(src)) mat.refreshType()
+    const res = recompile(src)
+    if (res.ok) {
+      mat.refreshType()
+      // Stamped AFTER refreshType, never before: `compiledWgslType` records the hash this WGSL was
+      // produced from, and comparing it against a hash computed from the previous source would mark a
+      // fresh translation stale (or, worse, an old one current).
+      mat.compiledWgsl = res.wgsl
+      mat.compiledWgslType = res.wgsl ? mat.type : null
+    }
     setCompiledSource(src)
     eventEmitter.emit('SCENE_CHANGED')
   }
@@ -64,9 +94,10 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
     if (!mat.fragmentSource) seedCustomMaterial(mat, mat.baseType, mat.renderMode)
     setSource(mat.fragmentSource)
     setCompiledSource(mat.fragmentSource)
-    // One compile per material opened, to surface any error the stored source already has. Discrete and
-    // user-initiated (selecting the node), unlike the per-keystroke compiles this replaced.
-    recompile(mat.fragmentSource)
+    // Fetch naga before the opening compile, so the first verdict the user sees is a real one rather
+    // than "not checked". It is a dynamic import of ~1.3 MB, so it happens here — on opening a custom
+    // material — and not at editor boot.
+    ensureWgslTranslator().then(() => recompile(mat.fragmentSource))
   }, [props.node])
 
   // Drop a pending store if the inspector closes mid-debounce — it would otherwise write to a material the
@@ -86,6 +117,33 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
 
   /** Typed-but-not-yet-compiled edits exist: the preview and the error banner are both out of date. */
   const isStale = source !== compiledSource
+
+  // --- Save -------------------------------------------------------------------------------------
+  //
+  // Deliberately NOT gated on a clean compile. Saving a shader mid-edit is a normal thing to want —
+  // stopping for the day on something that does not compile yet, or keeping a WebGL2-only material that
+  // simply cannot be translated. A disabled Save would make the editor lose work to protect a rule the
+  // user never agreed to. So it always saves, and says what it is saving instead.
+
+  /** Why saving now stores something other than what is on screen, or null when it does not. */
+  const saveWarning = isStale
+    ? 'Saves the source as typed. The compiled preview is older — Compile first to save what you see.'
+    : error
+      ? 'Saves source that does not compile. The material will fall back to the magenta shader until it does.'
+      : wgslWarning
+        ? 'Saves without WGSL: this material runs on WebGL2 but not on WebGPU.'
+        : null
+
+  const saveTitle = saveWarning ?? 'Save this material to the library (Ctrl+S)'
+
+  const save = async () => {
+    setSaving(true)
+    // saveActiveTab reads the material off the tab's own scene, so the latest typed text has to be
+    // committed first — otherwise a save within the 300 ms store debounce would write the previous text.
+    if (timer.current) { window.clearTimeout(timer.current); timer.current = null }
+    mat.fragmentSource = source
+    try { await saveActiveTab() } finally { setSaving(false) }
+  }
 
   // Replacing the scaffold (base or mode change) discards the current source — confirm if the user edited it.
   const wouldDiscard = () => mat.fragmentSource.trim() !== customSeedTemplate(mat.baseType, mat.renderMode).trim()
@@ -161,6 +219,7 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
         value={source}
         onChange={onSourceChange}
         error={error}
+        warning={wgslWarning}
         onSubmit={() => { if (isStale) compileNow(source) }}
         headerRight={
           <>
@@ -173,6 +232,15 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
               title={isStale ? 'Compile and apply (Ctrl+Enter)' : 'No changes to compile'}
             >
               Compile
+            </Button>
+            <Button
+              size='sm'
+              variant={isStale ? 'default' : 'primary'}
+              disabled={saving}
+              onClick={save}
+              title={saveTitle}
+            >
+              {saving ? 'Saving…' : saveWarning ? 'Save ⚠' : 'Save'}
             </Button>
           </>
         }

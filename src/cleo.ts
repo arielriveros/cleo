@@ -56,7 +56,9 @@ export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
 export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
-export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment } from "./graphics/systems/customShaders";
+export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment,
+         setWgslTranslator, hasWgslTranslator, vulkanUnsupportedReason } from "./graphics/systems/customShaders";
+export type { ShaderDialect, WgslTranslator } from "./graphics/systems/customShaders";
 export { Renderer } from "./graphics/renderer";
 export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";

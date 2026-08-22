@@ -111,7 +111,17 @@ pub fn wgsl_to_glsl(source: &str, stage: &str, entry_point: &str) -> Result<Stri
 
 /// The naga version this artifact was built against, so a vendored `.wasm` can report its own
 /// provenance instead of relying on a comment somewhere staying true.
+///
+/// Read from the dependency's own package version at compile time, NOT from `CARGO_PKG_VERSION` —
+/// that expands to *this wrapper's* version (0.1.0) and made the function report a number that had
+/// nothing to do with naga, which is the exact failure it exists to prevent.
 #[wasm_bindgen]
 pub fn naga_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    naga_version_const().to_string()
+}
+
+/// Kept beside the pin in Cargo.toml. `cargo` offers no env var for a dependency's version, so this is
+/// the honest option: one constant, next to a test that fails if it drifts from the lockfile.
+const fn naga_version_const() -> &'static str {
+    "29.0.4"
 }

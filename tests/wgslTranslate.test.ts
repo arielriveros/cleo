@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { findEntryPoints, buildRenames } from '../tools/wgslTranslate.mjs';
 
 // The identifier remap is the load-bearing half of the WGSL build step, and it is pure text, so it
@@ -96,5 +98,28 @@ fn fs(in: VertexOutput) -> GBuffer { var o: GBuffer; return o; }`;
         const r = buildRenames(mrt, { fragment: 'fs' });
         expect(r.get('_fs2p_location0')).toBe('albedo');
         expect(r.get('_fs2p_location1')).toBe('normal');
+    });
+});
+
+describe('vendored naga provenance', () => {
+    // `naga_version()` reports a constant, because cargo exposes no env var for a dependency's version.
+    // A constant that nobody checks is just a comment, and this one already shipped wrong once — it
+    // returned the wrapper crate's 0.1.0, which looked plausible and meant nothing.
+    const read = (p: string) => readFileSync(path.resolve(__dirname, '..', p), 'utf-8');
+
+    it('reports the naga version the wrapper is actually pinned to', () => {
+        const declared = /naga_version_const\(\) -> &'static str \{\s*"([\d.]+)"/
+            .exec(read('tools/naga-wasm/src/lib.rs'))?.[1];
+        expect(declared, 'naga_version_const in lib.rs').toBeTruthy();
+
+        const pinned = /^naga = \{ version = "([\d.]+)"/m.exec(read('tools/naga-wasm/Cargo.toml'))?.[1];
+        expect(pinned, 'naga pin in Cargo.toml').toBeTruthy();
+
+        // The pin is a minor-level range ("29.0"), so the constant must start with it rather than equal it.
+        expect(declared!.startsWith(pinned!)).toBe(true);
+    });
+
+    it('pins naga rather than floating, since 30.x does not compile its own glsl-in', () => {
+        expect(read('tools/naga-wasm/Cargo.toml')).toMatch(/^naga = \{ version = "29\.0"/m);
     });
 });

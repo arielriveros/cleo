@@ -2,6 +2,7 @@ import { mat4, vec2, vec3, vec4 } from 'gl-matrix';
 import { gl } from './glContext';
 import { Loader } from './loader';
 import { GLState } from './systems/glState';
+import { UniformBlockSet } from './systems/uniformBlocks';
 
 
 type AttributeLayout = {
@@ -35,6 +36,12 @@ export class Shader {
     private _uniforms: {
         [name: string]: {info: UniformInfo, value: any}
     } = {};
+    /**
+     * std140 blocks, for programs generated from WGSL. Null for every hand-written GLSL program, which
+     * is all of them but two — WGSL has no loose uniforms, so naga wraps them in a block. See
+     * systems/uniformBlocks.ts.
+     */
+    private _blocks: UniformBlockSet | null = null;
 
     constructor() {
         let vs = gl.createShader(gl.VERTEX_SHADER);
@@ -76,6 +83,9 @@ export class Shader {
 
         this.storeAttributes();
         this.storeUniforms();
+        // After storeUniforms, which skips block members: getUniformLocation returns null for them, so
+        // they are invisible to the loose-uniform path and have to be reflected separately.
+        this._blocks = UniformBlockSet.reflect(this._shaderProgram);
 
         return this;
     }
@@ -102,19 +112,43 @@ export class Shader {
         if (this._fragmentShader) { gl.deleteShader(this._fragmentShader); this._fragmentShader = null!; }
         this._attributes = [];
         this._uniforms = {};
+        this._blocks?.dispose();
+        this._blocks = null;
     }
 
     public use(): void {
         // Use the program only if it is not already in use (deduped by the GL state cache)
+        const switching = GLState.currentProgram !== this._shaderProgram;
         GLState.useProgram(this._shaderProgram);
+
+        // Indexed UNIFORM_BUFFER binding points are global, so another program's blocks are sitting in
+        // ours while it is current. Rebind on the switch — and only on the switch, since nothing can
+        // have disturbed them while this program stayed bound.
+        if (switching && this._blocks) this._blocks.bind();
     }
 
     public setUniform(name: string, value: any) {
         const uniform = this._uniforms[name];
-        if (!uniform) return;
+        if (!uniform) {
+            // Not a loose uniform. It may still be a std140 block member, which has no location and so
+            // never reached `_uniforms`. Writing goes to a CPU buffer and is uploaded by `flush()`.
+            this._blocks?.set(name, value);
+            return;
+        }
         uniform.value = value;
         this._setUniform(uniform.info.location, uniform.info.type, value);
     }
+
+    /**
+     * Upload any block writes made since the last flush.
+     *
+     * Called immediately before a draw rather than on every `setUniform`, so a pass that sets a dozen
+     * members costs one buffer upload instead of a dozen. A no-op for the loose-uniform programs.
+     */
+    public flushUniformBlocks(): void { this._blocks?.flush(); }
+
+    /** Whether this program carries std140 blocks — i.e. whether it was generated from WGSL. */
+    public get hasUniformBlocks(): boolean { return this._blocks !== null; }
 
     private _setUniform(location: WebGLUniformLocation, type: string, value: any) {
         switch (type) {

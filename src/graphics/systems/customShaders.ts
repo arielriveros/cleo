@@ -186,26 +186,156 @@ void main() {
 }
 `;
 
-/** Screen prelude: fullscreen post-process pass on screen.vs. User writes \`vec4 fragment()\`. */
-const SCREEN_PRELUDE = `#version 300 es
-precision highp float;
+// --- Dialects -----------------------------------------------------------------------------------
+//
+// The same user snippet has to compile twice: once as GLSL ES 300 for WebGL2, and once as Vulkan GLSL
+// so naga can translate it to WGSL for WebGPU. The two dialects disagree about how the *engine's*
+// declarations are spelled, never about the body the user writes — which is the property that makes a
+// single stored source viable at all.
+//
+// What differs, all of it verified against naga 29.0.4 rather than assumed:
+//
+//   - `#version 300 es` + `precision` are rejected outright; Vulkan GLSL is `#version 450`, no precision.
+//   - Combined samplers do not exist. A `sampler2D` becomes a `texture2D` + `sampler` pair, rebuilt into
+//     a combined handle by a `#define` — naga runs a real preprocessor, so `texture(u_tex, uv)` in the
+//     user's body needs no change.
+//   - Loose uniforms are rejected: "uniform/buffer blocks require layout(binding=X)". Everything scalar
+//     has to live in an explicitly bound block.
+//   - `bool` is not host-shareable, so it cannot be a block member. It round-trips as an `int` plus a
+//     `#define`, which again leaves the user's `if (u_flag)` untouched.
+//   - Varyings need an explicit `layout(location=N)`.
+//
+// Both forms are generated from ONE interface description below. That is the whole point: a
+// hand-written second copy of each prelude would drift the moment somebody added a built-in to one and
+// not the other, and the symptom would be a user's material failing naga for a reason they did not
+// cause and cannot see.
 
-in vec2 fragTexCoord;
+export type ShaderDialect = 'es300' | 'vulkan';
 
-layout(location = 0) out vec4 fragColor;
+type SamplerType = 'sampler2D' | 'samplerCube' | 'sampler2DArray';
 
+/** The Vulkan-GLSL texture type and combined-sampler constructor behind each ES sampler type. */
+const SAMPLER_PARTS: Record<SamplerType, { texture: string; combined: string }> = {
+    sampler2D: { texture: 'texture2D', combined: 'sampler2D' },
+    samplerCube: { texture: 'textureCube', combined: 'samplerCube' },
+    sampler2DArray: { texture: 'texture2DArray', combined: 'sampler2DArray' },
+};
+
+interface SamplerDecl { name: string; type: SamplerType; comment?: string }
+interface ValueDecl { name: string; type: string; comment?: string }
+
+/** Everything a prelude declares, spelled once and rendered into either dialect. */
+interface PreludeInterface {
+    varyings: ValueDecl[];
+    samplers: SamplerDecl[];
+    uniforms: ValueDecl[];
+    /** Fragment outputs, in location order. Identical in both dialects. */
+    outputs: ValueDecl[];
+    /** Constants and helper functions — plain GLSL, valid as-is under both dialects. */
+    body: string;
+}
+
+const trailingComment = (comment?: string) => (comment ? ` // ${comment}` : '');
+
+function versionHeader(dialect: ShaderDialect): string {
+    // Vulkan GLSL has no `precision` at all — naga does not implement the qualifier, and 450 core has
+    // no default-precision concept to begin with.
+    return dialect === 'es300' ? '#version 300 es\nprecision highp float;\n' : '#version 450\n';
+}
+
+/**
+ * Sampler declarations, consuming two binding slots each in the Vulkan form.
+ *
+ * `binding` is threaded through rather than derived per call so engine samplers and user samplers land
+ * in one continuous range within the group.
+ */
+function declareSamplers(samplers: SamplerDecl[], dialect: ShaderDialect, group: number, binding: number): { glsl: string; next: number } {
+    if (dialect === 'es300')
+        return {
+            glsl: samplers.map(s => `uniform ${s.type} ${s.name};${trailingComment(s.comment)}`).join('\n'),
+            next: binding,
+        };
+
+    const lines: string[] = [];
+    for (const s of samplers) {
+        const parts = SAMPLER_PARTS[s.type];
+        lines.push(`layout(set = ${group}, binding = ${binding}) uniform ${parts.texture} ${s.name}_t;${trailingComment(s.comment)}`);
+        lines.push(`layout(set = ${group}, binding = ${binding + 1}) uniform sampler ${s.name}_s;`);
+        lines.push(`#define ${s.name} ${parts.combined}(${s.name}_t, ${s.name}_s)`);
+        binding += 2;
+    }
+    return { glsl: lines.join('\n'), next: binding };
+}
+
+/** Scalar/vector/matrix uniforms: loose under ES, one bound block under Vulkan. */
+function declareUniforms(uniforms: ValueDecl[], dialect: ShaderDialect, blockName: string, set: number): string {
+    if (!uniforms.length) return '';
+    if (dialect === 'es300')
+        return uniforms.map(u => `uniform ${u.type} ${u.name};${trailingComment(u.comment)}`).join('\n');
+
+    // A `bool` member fails naga's validator as NonHostShareable, so it is carried as an int and
+    // restored by a macro. The user's source keeps saying `u_flag`.
+    const members = uniforms.map(u => u.type === 'bool'
+        ? `    int ${u.name}_b;${trailingComment(u.comment)}`
+        : `    ${u.type} ${u.name};${trailingComment(u.comment)}`);
+    const macros = uniforms.filter(u => u.type === 'bool').map(u => `#define ${u.name} (${u.name}_b != 0)`);
+
+    return `layout(set = ${set}, binding = 0) uniform ${blockName} {\n${members.join('\n')}\n};` +
+        (macros.length ? '\n' + macros.join('\n') : '');
+}
+
+function declareVaryings(varyings: ValueDecl[], dialect: ShaderDialect): string {
+    return varyings.map((v, i) => dialect === 'es300'
+        ? `in ${v.type} ${v.name};${trailingComment(v.comment)}`
+        : `layout(location = ${i}) in ${v.type} ${v.name};${trailingComment(v.comment)}`).join('\n');
+}
+
+function declareOutputs(outputs: ValueDecl[]): string {
+    return outputs.map((o, i) => `layout(location = ${i}) out ${o.type} ${o.name};${trailingComment(o.comment)}`).join('\n');
+}
+
+/** Render a whole interface, then the user's uniforms, in the requested dialect. */
+function renderPrelude(iface: PreludeInterface, userUniforms: CustomUniform[], dialect: ShaderDialect): string {
+    const engineSamplers = declareSamplers(iface.samplers, dialect, 0, 0);
+    const userSamplers = declareSamplers(userSamplerDecls(userUniforms), dialect, 0, engineSamplers.next);
+
+    return [
+        versionHeader(dialect),
+        declareVaryings(iface.varyings, dialect),
+        declareOutputs(iface.outputs),
+        engineSamplers.glsl,
+        declareUniforms(iface.uniforms, dialect, 'CleoEngineUniforms', 1),
+        iface.body,
+        userSamplers.glsl,
+        declareUniforms(userValueDecls(userUniforms), dialect, 'CleoUserUniforms', 2),
+    ].filter(Boolean).join('\n');
+}
+
+// --- The screen-mode interface ------------------------------------------------------------------
+//
+// Screen is the mode with full WebGPU support today, and not by accident: it has no lighting, no
+// shadow library and no mat3 varying, which are exactly the three things the forward and deferred
+// preludes carry that Vulkan GLSL will not take (see `vulkanUnsupportedReason`).
+
+const SCREEN_INTERFACE: PreludeInterface = {
+    varyings: [{ name: 'fragTexCoord', type: 'vec2' }],
+    outputs: [{ name: 'fragColor', type: 'vec4' }],
+    samplers: [
+        { name: 'u_screenTexture', type: 'sampler2D', comment: 'previous pass color (LINEAR HDR — before exposure/ACES/sRGB)' },
+        { name: 'u_depth', type: 'sampler2D', comment: 'opaque scene depth (deferred + forward); 1.0 = sky' },
+    ],
+    uniforms: [
+        { name: 'u_time', type: 'float', comment: 'seconds' },
+        { name: 'u_resolution', type: 'vec2', comment: 'render target size in pixels' },
+        { name: 'u_viewPos', type: 'vec3', comment: 'camera world position' },
+        { name: 'u_invViewProj', type: 'mat4', comment: 'clip -> world (reconstruct rays / positions)' },
+        { name: 'u_sunDir', type: 'vec3', comment: 'world dir TOWARD the sun ((0,0,0) when there is none)' },
+        { name: 'u_sunUV', type: 'vec2', comment: 'sun screen-space UV (only meaningful while u_sunVisible > 0)' },
+        { name: 'u_sunVisible', type: 'float', comment: '0..1 edge fade; 0 = behind camera / far off-screen / no sun' },
+        { name: 'u_exposure', type: 'float', comment: 'camera exposure the final present applies (present = toSrgb(aces(hdr * u_exposure)))' },
+    ],
+    body: `
 const float PI = 3.14159265359;
-
-uniform sampler2D u_screenTexture; // previous pass color (LINEAR HDR — before exposure/ACES/sRGB)
-uniform sampler2D u_depth;         // opaque scene depth (deferred + forward); 1.0 = sky
-uniform float u_time;              // seconds
-uniform vec2  u_resolution;        // render target size in pixels
-uniform vec3  u_viewPos;           // camera world position
-uniform mat4  u_invViewProj;       // clip -> world (reconstruct rays / positions)
-uniform vec3  u_sunDir;            // world dir TOWARD the sun ((0,0,0) when there is none)
-uniform vec2  u_sunUV;             // sun screen-space UV (only meaningful while u_sunVisible > 0)
-uniform float u_sunVisible;        // 0..1 edge fade; 0 = behind camera / far off-screen / no sun
-uniform float u_exposure;          // camera exposure the final present applies (present = toSrgb(aces(hdr * u_exposure)))
 
 vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
 vec3 toSrgb(vec3 c)   { return pow(c, vec3(1.0 / 2.2)); }
@@ -215,7 +345,8 @@ vec3 reconstructWorldPos(vec2 uv, float depth) {
     vec4 world = u_invViewProj * clip;
     return world.xyz / world.w;
 }
-`;
+`,
+};
 
 const SCREEN_EPILOGUE = `
 void main() { fragColor = fragment(); }
@@ -226,7 +357,23 @@ const GLSL_TYPE: Record<string, string> = {
     int: 'int', bool: 'bool', sampler2D: 'sampler2D', samplerCube: 'samplerCube',
 };
 
-/** Auto-generated `uniform <type> u_<name>;` declarations from the user's uniform list. */
+const isSamplerType = (type: string): type is SamplerType => type === 'sampler2D' || type === 'samplerCube';
+
+/** The user's sampler uniforms, as declarations. */
+function userSamplerDecls(uniforms: CustomUniform[]): SamplerDecl[] {
+    return uniforms
+        .filter(u => u.name && isSamplerType(u.type))
+        .map(u => ({ name: `u_${u.name}`, type: u.type as SamplerType }));
+}
+
+/** The user's non-sampler uniforms, as declarations. */
+function userValueDecls(uniforms: CustomUniform[]): ValueDecl[] {
+    return uniforms
+        .filter(u => u.name && GLSL_TYPE[u.type] && !isSamplerType(u.type))
+        .map(u => ({ name: `u_${u.name}`, type: GLSL_TYPE[u.type] }));
+}
+
+/** Auto-generated declarations from the user's uniform list, in the ES dialect. */
 function uniformDeclarations(uniforms: CustomUniform[]): string {
     return uniforms
         .filter(u => u.name && GLSL_TYPE[u.type])
@@ -234,13 +381,41 @@ function uniformDeclarations(uniforms: CustomUniform[]): string {
         .join('\n');
 }
 
+/**
+ * Why a render mode cannot be assembled as Vulkan GLSL yet, or null when it can.
+ *
+ * Returned as prose because it reaches the user: the material editor shows it in place of a naga
+ * diagnostic, and `NotIOShareableType([0])` pointing into a prelude they never wrote would tell them
+ * nothing about what to do. Each reason is a real, measured incompatibility — see the probe results
+ * recorded in WEBGPU_ROADMAP.md M3.
+ */
+export function vulkanUnsupportedReason(renderMode: CustomRenderMode): string | null {
+    if (renderMode === 'screen') return null;
+    return 'Forward and deferred custom materials cannot be checked for WebGPU yet: the lighting ' +
+        'prelude passes the TBN basis as a mat3 varying (not a valid interface type outside GLSL ES), ' +
+        'declares its lights through an inline `uniform struct`, and includes the shadow library, ' +
+        'which is written in GLSL ES with precision qualifiers. All three are ported when the engine\'s ' +
+        'own forward lighting moves to WGSL. The material still runs normally on WebGL2.';
+}
+
 /** Assemble the full fragment shader source: prelude + user uniform decls + user function + epilogue. */
-export function assembleCustomFragment(renderMode: CustomRenderMode, fragmentSource: string, uniforms: CustomUniform[]): string {
+export function assembleCustomFragment(
+    renderMode: CustomRenderMode,
+    fragmentSource: string,
+    uniforms: CustomUniform[],
+    dialect: ShaderDialect = 'es300',
+): string {
+    if (dialect === 'vulkan') {
+        const reason = vulkanUnsupportedReason(renderMode);
+        if (reason) throw new Error(reason);
+        return `${renderPrelude(SCREEN_INTERFACE, uniforms, 'vulkan')}\n${fragmentSource}\n${SCREEN_EPILOGUE}`;
+    }
+
     const decls = uniformDeclarations(uniforms);
     if (renderMode === 'deferred')
         return `${DEFERRED_PRELUDE}\n${decls}\n${fragmentSource}\n${DEFERRED_EPILOGUE}`;
     if (renderMode === 'screen')
-        return `${SCREEN_PRELUDE}\n${decls}\n${fragmentSource}\n${SCREEN_EPILOGUE}`;
+        return `${renderPrelude(SCREEN_INTERFACE, uniforms, 'es300')}\n${fragmentSource}\n${SCREEN_EPILOGUE}`;
     return `${FORWARD_PRELUDE}\n${decls}\n${fragmentSource}\n${FORWARD_EPILOGUE}`;
 }
 
@@ -391,15 +566,67 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
  * for the life of the tab. The `finally` matters as much as the dispose — a failing compile is the COMMON
  * case while typing, and the constructor has already allocated both shader objects by the time it throws.
  */
-export function tryCompileCustom(renderMode: CustomRenderMode, fragmentSource: string, uniforms: CustomUniform[]): { ok: boolean; error?: string } {
+// --- WGSL translation, injected -----------------------------------------------------------------
+//
+// Custom materials are GLSL stored inside saved projects, so checking one against WebGPU means running
+// naga *in the app*, not at build time like the engine's own shaders. The translator is therefore
+// injected rather than imported: the engine holds a slot, the editor fills it with the vendored naga
+// wasm, and a published game fills nothing.
+//
+// That indirection is the entire reason players do not download 1.3 MB of shader compiler. If this
+// module imported naga directly, webpack would follow the import into `cleo.js` and every player would
+// carry it to run code that only ever executes behind an editor button.
+
+/** Translates one GLSL fragment stage to WGSL, or throws with a diagnostic. */
+export type WgslTranslator = (glsl: string) => string;
+
+let translator: WgslTranslator | null = null;
+
+/** Install (or clear, with null) the GLSL -> WGSL translator. Called by the editor once naga is ready. */
+export function setWgslTranslator(next: WgslTranslator | null): void { translator = next; }
+
+/** Whether a translator is available — false in a published game, and in the editor before naga loads. */
+export function hasWgslTranslator(): boolean { return translator !== null; }
+
+/**
+ * Compile a custom material's source, and translate it to WGSL when a translator is installed.
+ *
+ * The two halves are reported separately and deliberately so:
+ *
+ *   - `ok`/`error` is the GL compile. It is authoritative — it decides whether the material renders at
+ *     all today, and its diagnostics come from the real driver with real line numbers.
+ *   - `wgsl`/`wgslError` is the WebGPU verdict. A failure here means the material works now and will
+ *     not work on a WebGPU backend, which is a warning, not an error. Collapsing the two would either
+ *     block a working material or hide a real portability problem.
+ *
+ * `wgslError` is also set, without any translation being attempted, for the render modes whose prelude
+ * is not yet expressible in Vulkan GLSL — the message then explains the engine's limitation rather than
+ * implying the user's source is at fault.
+ */
+export function tryCompileCustom(
+    renderMode: CustomRenderMode,
+    fragmentSource: string,
+    uniforms: CustomUniform[],
+): { ok: boolean; error?: string; wgsl?: string; wgslError?: string } {
     const probe = new Shader();
+    let result: { ok: boolean; error?: string };
     try {
         probe.create(vertexSource(renderMode), assembleCustomFragment(renderMode, fragmentSource, uniforms));
-        return { ok: true };
+        result = { ok: true };
     } catch (e: any) {
         return { ok: false, error: String(e?.message ?? e) };
     } finally {
         probe.dispose();
+    }
+
+    // Only worth translating source that already compiles: naga's diagnostics for GLSL that is simply
+    // broken are strictly worse than the driver's, and reporting both would just be noise.
+    if (!translator) return result;
+
+    try {
+        return { ...result, wgsl: translator(assembleCustomFragment(renderMode, fragmentSource, uniforms, 'vulkan')) };
+    } catch (e: any) {
+        return { ...result, wgslError: String(e?.message ?? e) };
     }
 }
 

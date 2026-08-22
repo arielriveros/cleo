@@ -13,6 +13,7 @@ import {
     packedModelLayout, instanceMatrixLayout, isModelAttribute,
 } from './rhi/vertexLayouts';
 import { GLState } from './systems/glState';
+import { ShaderManager } from './systems/shaderManager';
 import { frameStats } from './renderStats';
 import { createIndexArray, glTypeFor } from './indexFormat';
 
@@ -210,6 +211,7 @@ export class Mesh {
 
     public draw(topology: PrimitiveTopology = 'triangle-list'): void {
         GLState.bindVAO(this._vertexArray);
+        ShaderManager.Instance.flushBound();
         const mode = glTopology(topology);
         const triangles = isTriangleTopology(topology);
         // With LODs, the element binding is VAO state that the last draw may have left on another level,
@@ -245,6 +247,7 @@ export class Mesh {
     public drawRange(indexOffset: number, indexCount: number, topology: PrimitiveTopology = 'triangle-list'): void {
         if (indexCount <= 0 || !this._indexBuffer || this._indexCount <= 0) return;
         GLState.bindVAO(this._vertexArray);
+        ShaderManager.Instance.flushBound();
         if (this.hasLods) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[0].handle);
         const bytesPerIndex = this._indexType === gl.UNSIGNED_SHORT ? 2 : 4;
         gl.drawElements(glTopology(topology), indexCount, this._indexType, indexOffset * bytesPerIndex);
@@ -255,6 +258,7 @@ export class Mesh {
 
     public drawInstanced(instanceCount: number, topology: PrimitiveTopology = 'triangle-list'): void {
         GLState.bindVAO(this._vertexArray);
+        ShaderManager.Instance.flushBound();
         const mode = glTopology(topology);
         // Note this path ignores LODs entirely — it always draws the base index buffer, so _indexType
         // (level 0's type) is the right one to read. Pre-existing behaviour; foliage never sets LODs.

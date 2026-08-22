@@ -55,6 +55,15 @@ export class ShaderManager {
         this._boundShader.setUniform(name, value);
     }
 
+    /**
+     * Upload any std140 block writes the bound program has pending.
+     *
+     * Called from the draw paths rather than from `setUniform`, so a pass that sets a dozen members
+     * pays one buffer upload instead of a dozen. A no-op for every hand-written GLSL program, which
+     * has no blocks at all — the check is a null test on a field.
+     */
+    public flushBound(): void { this._boundShader?.flushUniformBlocks(); }
+
     public get registeredShaders(): string[] {
         return Array.from(this._shaders.keys());
     }

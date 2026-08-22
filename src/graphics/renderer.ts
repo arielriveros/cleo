@@ -64,6 +64,7 @@ import ScreenFragment from './shaders/screen/screen.fs'
 // backend. `screen.vs`/`screen.fs` above are still imported: 26 other programs pair that vertex shader
 // with their own fragment stage and have not moved yet.
 import ScreenProgram from './shaders/wgsl/screen.wgsl'
+import PresentProgram from './shaders/wgsl/present.wgsl'
 import PresentFragment from './shaders/screen/present.fs'
 import DebugViewFragment from './shaders/screen/debugView.fs'
 import OverdrawFragment from './shaders/screen/overdraw.fs'
@@ -996,7 +997,7 @@ export class Renderer {
         // Screen shaders
         const screenShader = new Shader().create(ScreenProgram.vertex!, ScreenProgram.fragment!);
         // Final present: exposure -> tonemap -> sRGB (the single display resolve).
-        const presentShader = new Shader().create(ScreenVertex, PresentFragment);
+        const presentShader = new Shader().create(PresentProgram.vertex!, PresentProgram.fragment!);
         const godRaysShader = new Shader().create(ScreenVertex, VolumetricGodRaysFragment);
         const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
         const shadowDebugShader = new Shader().create(ScreenVertex, ShadowDebugFragment);

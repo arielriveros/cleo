@@ -583,6 +583,25 @@ export class CustomMaterial extends Material {
     public fragmentSource: string = '';
     public uniforms: CustomUniform[] = [];
 
+    /**
+     * The WGSL this material's source last translated to, for the WebGPU backend.
+     *
+     * Written by the editor's Compile button, never at runtime: naga does not ship to players, so a
+     * published game can only use WGSL that was translated while the project was being authored.
+     */
+    public compiledWgsl: string | null = null;
+
+    /**
+     * The `type` hash `compiledWgsl` was produced from.
+     *
+     * The alternative — clearing `compiledWgsl` whenever the source changes — cannot actually be
+     * implemented here: `fragmentSource` and `uniforms` are public fields that the editor writes
+     * directly, so there is no setter to hook. Stamping the hash instead makes staleness a comparison
+     * rather than an event, which additionally survives a save/load round trip: `parse` restores both
+     * and `refreshType` recomputes `type`, and they agree if and only if the source really is unchanged.
+     */
+    public compiledWgslType: string | null = null;
+
     /** Create a bare custom material. Callers (the editor) seed `fragmentSource`/`uniforms` from customShaders' templates, then `refreshType()`. */
     public static Create(baseType: CustomBaseType, renderMode: CustomRenderMode = 'forward', config?: MaterialConfig): CustomMaterial {
         const m = new CustomMaterial(config);
@@ -604,12 +623,19 @@ export class CustomMaterial extends Material {
             this.renderMode === 'screen' ? 'customScreen:' : 'custom:') + cyrb53(sig)) as any;
     }
 
+    /** True when `compiledWgsl` was translated from exactly the source and uniforms in effect now. */
+    public get wgslIsCurrent(): boolean {
+        return this.compiledWgsl !== null && this.compiledWgslType === this.type;
+    }
+
     public serialize(): any {
         const properties: { [k: string]: any } = {};
         for (const [k, v] of this.properties) properties[k] = toPlainValue(v);
         return {
             type: this.type,
             customMaterial: true,
+            compiledWgsl: this.compiledWgsl,
+            compiledWgslType: this.compiledWgslType,
             renderMode: this.renderMode,
             baseType: this.baseType,
             fragmentSource: this.fragmentSource,
@@ -641,6 +667,8 @@ export class CustomMaterial extends Material {
         cm.uniforms = Array.isArray(m.uniforms)
             ? m.uniforms.map((u: any) => ({ name: u.name, type: u.type, value: toPlainValue(u.value) }))
             : [];
+        cm.compiledWgsl = typeof m.compiledWgsl === 'string' ? m.compiledWgsl : null;
+        cm.compiledWgslType = typeof m.compiledWgslType === 'string' ? m.compiledWgslType : null;
         for (const [k, v] of Object.entries(m.properties ?? {})) cm.properties.set(k, toPlainValue(v));
         for (const [k, v] of Object.entries(m.textures ?? {})) if (v) cm.textures.set(k, v as string);
         cm.refreshType();

@@ -34,6 +34,14 @@ module.exports = {
           to: ".",
           noErrorOnMissing: true,
         },
+        {
+          // The vendored naga WASM, loaded on demand by utils/wgslTranslator to check custom materials
+          // against WebGPU. Copied rather than duplicated into public/ so the repository keeps one copy,
+          // and kept out of the bundle so only users who open a custom material ever download it.
+          from: path.resolve(__dirname, "..", "src", "graphics", "rhi", "webgpu", "naga"),
+          to: "naga",
+          noErrorOnMissing: true,
+        },
       ],
     }),
     isDevelopment && new webpack.HotModuleReplacementPlugin(),
