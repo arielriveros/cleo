@@ -145,3 +145,23 @@ export const BONE_WEIGHT_LAYOUT: VertexBufferLayout = {
     stepMode: 'vertex',
     attributes: [{ name: 'a_weights', shaderLocation: 0, offset: 0, format: 'float32x4' }],
 };
+
+/**
+ * The tilemap chunk vertex: position.xy | uv.xy | colour.rgba, 8 floats and a 32-byte stride.
+ *
+ * Genuinely different from the model vertex, and deliberately so — per-cell tint and opacity need a
+ * colour attribute, and smuggling it through the normal slot would work today and be a trap forever.
+ * What it does NOT need is its own copy of the attribute-binding code, which is what it had.
+ *
+ * Locations are fixed here rather than reflected, matching the explicit `layout(location = ...)` in
+ * shaders/materials/tilemap.vs.
+ */
+export const TILE_VERTEX_LAYOUT: VertexBufferLayout = {
+    arrayStride: 32,
+    stepMode: 'vertex',
+    attributes: [
+        { name: 'a_position', shaderLocation: 0, offset: 0,  format: 'float32x2' },
+        { name: 'a_uv',       shaderLocation: 1, offset: 8,  format: 'float32x2' },
+        { name: 'a_color',    shaderLocation: 2, offset: 16, format: 'float32x4' },
+    ],
+};

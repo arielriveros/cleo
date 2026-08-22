@@ -16,19 +16,18 @@
 import { gl } from '../../graphics/renderer';
 import { GLState } from '../../graphics/systems/glState';
 import { frameStats } from '../../graphics/renderStats';
+import { TILE_VERTEX_LAYOUT } from '../rhi/vertexLayouts';
+import { applyVertexLayout } from '../rhi/webgl2/vertexArray';
 import { GridSpec, cellSortY, cellToWorld } from './cellMath';
 import { CELL_EMPTY, CHUNK_SIZE, TileChunk, cellFlipX, cellFlipY, cellRot90, cellTile } from './chunk';
 import type { TilemapLayer } from './tilemapLayer';
 import type { Tileset } from './tileset';
 
-const FLOATS_PER_VERTEX = 8;
-const STRIDE = FLOATS_PER_VERTEX * 4;
+// Derived from the layout rather than restated, so the scratch-buffer arithmetic below cannot drift
+// from the attribute offsets the VAO is actually built with. Attribute locations and the stride now
+// live in one place: TILE_VERTEX_LAYOUT in rhi/vertexLayouts.ts.
+const FLOATS_PER_VERTEX = TILE_VERTEX_LAYOUT.arrayStride / 4;
 const MAX_CELLS = CHUNK_SIZE * CHUNK_SIZE;
-
-/** Attribute locations, matching the explicit `layout(location = ...)` in tilemap.vs. */
-const LOC_POSITION = 0;
-const LOC_UV = 1;
-const LOC_COLOR = 2;
 
 // Unit-square corners in draw order: bottom-left, bottom-right, top-right, top-left.
 const CORNERS: readonly [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 1]];
@@ -187,12 +186,9 @@ export class TileMesh {
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vbo);
         gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
 
-        gl.enableVertexAttribArray(LOC_POSITION);
-        gl.vertexAttribPointer(LOC_POSITION, 2, gl.FLOAT, false, STRIDE, 0);
-        gl.enableVertexAttribArray(LOC_UV);
-        gl.vertexAttribPointer(LOC_UV, 2, gl.FLOAT, false, STRIDE, 2 * 4);
-        gl.enableVertexAttribArray(LOC_COLOR);
-        gl.vertexAttribPointer(LOC_COLOR, 4, gl.FLOAT, false, STRIDE, 4 * 4);
+        // The layout is still this chunk's own — a tilemap vertex really is position/uv/colour, not the
+        // model vertex — but the attribute binding is no longer a private copy of the same six calls.
+        applyVertexLayout(TILE_VERTEX_LAYOUT, this._vbo as WebGLBuffer);
 
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._ibo);
         gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);

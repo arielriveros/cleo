@@ -5,9 +5,10 @@ import {
     glIndexType, indexByteSize, glTextureTarget, glTextureFormat, glVertexFormat,
 } from '../src/graphics/rhi/webgl2/glEnums';
 import {
-    MODEL_VERTEX_LAYOUT, packedModelLayout, instanceMatrixLayout, isModelAttribute,
+    MODEL_VERTEX_LAYOUT, TILE_VERTEX_LAYOUT, packedModelLayout, instanceMatrixLayout, isModelAttribute,
 } from '../src/graphics/rhi/vertexLayouts';
 import { resolveTextureFormat } from '../src/graphics/rhi/textureFormat';
+import { vertexFormatSize } from '../src/graphics/rhi/types';
 
 // The RHI's translation layer. Everything here is pure, so it is reachable from the DOM-free suite —
 // which matters because a wrong entry in one of these tables does not throw, it renders the wrong
@@ -216,6 +217,56 @@ describe('vertexLayouts', () => {
         expect(layout.arrayStride).toBe(64);
         expect(layout.attributes.map(a => [a.shaderLocation, a.offset]))
             .toEqual([[5, 0], [6, 16], [7, 32], [8, 48]]);
+    });
+});
+
+describe('TILE_VERTEX_LAYOUT', () => {
+    // position.xy | uv.xy | colour.rgba. tileMesh.ts now derives FLOATS_PER_VERTEX from this stride, so
+    // a change here moves the scratch-buffer arithmetic with it instead of silently disagreeing.
+    it('packs 8 floats into a 32-byte stride', () => {
+        expect(TILE_VERTEX_LAYOUT.arrayStride).toBe(32);
+        expect(TILE_VERTEX_LAYOUT.arrayStride / 4).toBe(8);
+        expect(TILE_VERTEX_LAYOUT.attributes.map(a => [a.name, a.offset, a.shaderLocation])).toEqual([
+            ['a_position', 0, 0], ['a_uv', 8, 1], ['a_color', 16, 2],
+        ]);
+    });
+
+    // Fixed rather than reflected, matching the explicit layout(location=) in tilemap.vs. Locations
+    // must be distinct and gapless from 0 or the shader binds the wrong buffer slice.
+    it('assigns distinct sequential locations', () => {
+        const locations = TILE_VERTEX_LAYOUT.attributes.map(a => a.shaderLocation);
+        expect(locations).toEqual([0, 1, 2]);
+    });
+
+    // The offsets have to tile the stride exactly: any gap means the colour attribute reads into the
+    // next vertex, which renders as scrolling tint rather than as an error.
+    it('has offsets that exactly tile the stride', () => {
+        let expected = 0;
+        for (const attribute of TILE_VERTEX_LAYOUT.attributes) {
+            expect(attribute.offset).toBe(expected);
+            expected += vertexFormatSize(attribute.format);
+        }
+        expect(expected).toBe(TILE_VERTEX_LAYOUT.arrayStride);
+    });
+
+    // The tilemap vertex is NOT the model vertex, and conflating the two is the trap tileMesh.ts's
+    // header warns about. Sharing the binder must not have quietly shared the layout.
+    it('stays distinct from the model vertex', () => {
+        expect(TILE_VERTEX_LAYOUT.arrayStride).not.toBe(MODEL_VERTEX_LAYOUT.arrayStride);
+        expect(TILE_VERTEX_LAYOUT.attributes.map(a => a.name))
+            .not.toEqual(MODEL_VERTEX_LAYOUT.attributes.map(a => a.name));
+    });
+});
+
+describe('integer vs float attribute binding', () => {
+    // applyVertexLayout branches on this flag to choose vertexAttribIPointer over vertexAttribPointer.
+    // Routing bone indices through the float entry point converts the bits instead of reinterpreting
+    // them, and every vertex then skins to joint 0 — a failure that renders as a collapsed mesh.
+    it('flags exactly the formats that need vertexAttribIPointer', () => {
+        for (const format of ['sint32x4', 'uint8x4', 'uint16x4', 'uint32'] as const)
+            expect(glVertexFormat(format).integer).toBe(true);
+        for (const format of ['float32x2', 'float32x3', 'float32x4', 'unorm8x4'] as const)
+            expect(glVertexFormat(format).integer).toBe(false);
     });
 });
 

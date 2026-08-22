@@ -1,6 +1,7 @@
 import { gl } from './glContext';
 import type { PrimitiveTopology } from './rhi/types';
-import { glTopology, isTriangleTopology, glVertexFormat } from './rhi/webgl2/glEnums';
+import { glTopology, isTriangleTopology } from './rhi/webgl2/glEnums';
+import { applyVertexLayout, clearVertexLayout } from './rhi/webgl2/vertexArray';
 import { MODEL_VERTEX_LAYOUT, packedModelLayout, instanceMatrixLayout, isModelAttribute } from './rhi/vertexLayouts';
 import { GLState } from './systems/glState';
 import { frameStats } from './renderStats';
@@ -268,19 +269,11 @@ export class Mesh {
     public initializeVAO(attributes: any): void {
         GLState.bindVAO(this._vertexArray);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
-
         // The standard attributes, packed in canonical order over only the ones this program declares.
         // The order is the layout's, NOT the shader's reflected enumeration — that is driver- and
         // program-dependent, and trusting it would interleave the same mesh differently for, say, the
         // 'default' and 'pbr' programs. See rhi/vertexLayouts.ts.
-        const layout = packedModelLayout(attributes);
-        for (const attribute of layout.attributes) {
-            const { size, type, normalized } = glVertexFormat(attribute.format);
-            gl.enableVertexAttribArray(attribute.shaderLocation);
-            gl.vertexAttribPointer(attribute.shaderLocation, size, type, normalized,
-                                   layout.arrayStride, attribute.offset);
-        }
+        applyVertexLayout(packedModelLayout(attributes), this._vertexBuffer);
 
         // Fallback for any non-standard attribute: trust the reflected layout.
         for (const attr of attributes) {
@@ -300,27 +293,28 @@ export class Mesh {
         GLState.bindVAO(this._vertexArray);
 
         // The full interleaved model vertex — position(3), normal(3), uv(2), tangent(3), bitangent(3),
-        // 14 floats and a 56-byte stride. Unlike the non-animated path this is the WHOLE layout even
-        // when a program declares only part of it, because createAnimated always writes all five.
-        const stride = MODEL_VERTEX_LAYOUT.arrayStride;
-        const offsets = new Map(MODEL_VERTEX_LAYOUT.attributes.map(a => [a.name, a]));
+        // 14 floats and a 56-byte stride. Unlike the non-animated path this keeps the WHOLE layout's
+        // stride and offsets even when a program declares only part of it, because createAnimated
+        // always writes all five attributes.
+        const declared = new Map<string, number>();
+        for (const attr of attributes) declared.set(attr.name as string, attr.location as number);
 
-        // Set up main vertex buffer attributes (position, normal, uv, tangent, bitangent)
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
-        for (let attr of attributes) {
+        // Only the attributes this program actually declares, at the full layout's offsets. Bone data
+        // rides in dedicated buffers and is bound separately below.
+        applyVertexLayout({
+            ...MODEL_VERTEX_LAYOUT,
+            attributes: MODEL_VERTEX_LAYOUT.attributes
+                .filter(a => declared.has(a.name))
+                .map(a => ({ ...a, shaderLocation: declared.get(a.name) as number })),
+        }, this._vertexBuffer);
+
+        // Fallback for anything unexpected: trust the reflected layout, as the non-animated path does.
+        for (const attr of attributes) {
             const name: string = attr.name;
-            if (name === 'a_boneIds' || name === 'a_weights') continue; // handled below with dedicated buffers
-
-            const spec = offsets.get(name);
-            if (spec) {
-                const { size, type, normalized } = glVertexFormat(spec.format);
-                gl.enableVertexAttribArray(attr.location);
-                gl.vertexAttribPointer(attr.location, size, type, normalized, stride, spec.offset);
-            } else {
-                // Fallback: if an unexpected attribute appears, try using provided layout info
-                gl.enableVertexAttribArray(attr.location);
-                gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
-            }
+            if (name === 'a_boneIds' || name === 'a_weights') continue; // dedicated buffers, below
+            if (MODEL_VERTEX_LAYOUT.attributes.some(a => a.name === name)) continue;
+            gl.enableVertexAttribArray(attr.location);
+            gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
         }
 
         // Find the bone attributes in the shader
@@ -355,16 +349,9 @@ export class Mesh {
      */
     public setupInstanceMatrixBuffer(buffer: WebGLBuffer, baseLocation: number = 5): void {
         GLState.bindVAO(this._vertexArray);
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-        // Neither API has a mat4 vertex format; both consume one as four consecutive vec4 slots.
-        const layout = instanceMatrixLayout(baseLocation);
-        for (const attribute of layout.attributes) {
-            const { size, type, normalized } = glVertexFormat(attribute.format);
-            gl.enableVertexAttribArray(attribute.shaderLocation);
-            gl.vertexAttribPointer(attribute.shaderLocation, size, type, normalized,
-                                   layout.arrayStride, attribute.offset);
-            gl.vertexAttribDivisor(attribute.shaderLocation, 1);
-        }
+        // Neither API has a mat4 vertex format; both consume one as four consecutive vec4 slots. The
+        // per-instance divisor comes from the layout's stepMode.
+        applyVertexLayout(instanceMatrixLayout(baseLocation), buffer);
     }
 
     /**
@@ -374,11 +361,7 @@ export class Mesh {
      */
     public teardownInstanceMatrixBuffer(baseLocation: number = 5): void {
         GLState.bindVAO(this._vertexArray);
-        for (let i = 0; i < 4; i++) {
-            const loc = baseLocation + i;
-            gl.vertexAttribDivisor(loc, 0);
-            gl.disableVertexAttribArray(loc);
-        }
+        clearVertexLayout(instanceMatrixLayout(baseLocation));
     }
 
     public get vertexArray(): WebGLVertexArrayObject { return this._vertexArray; }
