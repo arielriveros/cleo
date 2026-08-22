@@ -4478,6 +4478,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
               },
           });
 
+          // Before setupInitialScene() and the texture registrations below: both build GPU resources,
+          // and device acquisition is asynchronous.
+          await engine.initialize();
+
           instanceRef.current = engine;
           instanceRef.current.isPaused = false;
 

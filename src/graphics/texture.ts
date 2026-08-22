@@ -2,6 +2,49 @@ import { gl } from "./glContext";
 import { GLState } from "./systems/glState";
 import { bytesToDataUrl } from "../core/base64";
 import { Logger } from "../core/logger";
+import { resolveTextureFormat } from "./rhi/textureFormat";
+import { glTextureFormat, glTextureTarget } from "./rhi/webgl2/glEnums";
+import type { TextureFormat, TextureDimension } from "./rhi/types";
+
+/**
+ * Float-texture capability, resolved once per context.
+ *
+ * This used to be two `getExtension` calls in the `Texture` constructor, i.e. on every single texture
+ * the engine ever allocates. The result cannot change for the lifetime of a context, so it is cached —
+ * keyed on the context object itself, so acquiring a new one (which `Renderer.initialize` can now do)
+ * re-resolves rather than inheriting the previous device's answer.
+ */
+let floatSupportContext: WebGL2RenderingContext | null = null;
+let floatSupportCache = { floatRenderable: false, floatFilterable: false };
+
+function floatSupport(): { floatRenderable: boolean; floatFilterable: boolean } {
+    if (floatSupportContext !== gl) {
+        floatSupportContext = gl;
+        floatSupportCache = {
+            floatRenderable: gl.getExtension('EXT_color_buffer_float') !== null,
+            floatFilterable: gl.getExtension('OES_texture_float_linear') !== null,
+        };
+    }
+    return floatSupportCache;
+}
+
+/**
+ * Say, once, that a float target was downgraded.
+ *
+ * Once per format rather than per texture: the renderer allocates well over a dozen HDR targets, and a
+ * device missing the extensions would otherwise produce a wall of identical warnings at boot. One line
+ * is enough to explain why the image looks banded and clipped.
+ */
+const reportedDowngrades = new Set<string>();
+function reportFloatDowngrade(requested: TextureFormat, actual: TextureFormat): void {
+    if (reportedDowngrades.has(requested)) return;
+    reportedDowngrades.add(requested);
+    Logger.warn(
+        `Float textures are unavailable on this device: ${requested} allocated as ${actual}. ` +
+        `HDR rendering (bloom threshold, tonemapping headroom) will be clipped to 0..1.`,
+        'Runtime',
+    );
+}
 
 export interface TextureConfig {
     flipY?: boolean;
@@ -17,6 +60,13 @@ export interface TextureConfig {
      * memory to store three copies of nothing.
      */
     channels?: 'rgba' | 'r';
+    /**
+     * An exact format, bypassing the `precision`/`channels` inference.
+     *
+     * Still subject to the same float fallback: naming `rgba16float` on a device without the float
+     * extensions degrades to RGBA8 exactly as `precision: 'high'` does. See rhi/textureFormat.ts.
+     */
+    format?: TextureFormat;
 }
 
 /**
@@ -64,6 +114,8 @@ export class Texture {
     private _type: number;
     // Unit this texture was last bound to, so `unbind()` releases that unit rather than assuming 0.
     private _boundSlot: number = 0;
+    // Definite-assignment: written by the constructor, immediately below.
+    private _resolvedFormat!: TextureFormat;
 
     constructor(options?: TextureConfig) {
         this._texture = gl.createTexture() as WebGLTexture;
@@ -72,30 +124,37 @@ export class Texture {
         this._precision = options?.precision || 'low';
         this._mipMap = options?.mipMap === undefined ? true : options.mipMap;
 
-        this._target = options?.target === 'cubemap' ? gl.TEXTURE_CUBE_MAP
-                     : options?.target === 'texture3D' ? gl.TEXTURE_3D
-                     : options?.target === 'texture2DArray' ? gl.TEXTURE_2D_ARRAY
-                     : gl.TEXTURE_2D;
+        const dimension: TextureDimension = options?.target === 'cubemap' ? 'cube'
+                     : options?.target === 'texture3D' ? '3d'
+                     : options?.target === 'texture2DArray' ? '2d-array'
+                     : '2d';
+        this._target = glTextureTarget(dimension);
 
         this._wrapping = this._getWrappingValue(options?.wrapping) || gl.CLAMP_TO_EDGE;
 
-        // Check for floating point texture support before using high precision
-        const hasFloatTextureSupport = gl.getExtension('EXT_color_buffer_float') && gl.getExtension('OES_texture_float_linear');
-        
-        const singleChannel = options?.channels === 'r' && this._usage !== 'depth';
-        this._internalFormat = this._usage === 'depth' ? gl.DEPTH_COMPONENT24 :
-                              singleChannel ? (this._precision === 'high' && hasFloatTextureSupport ? gl.R16F : gl.R8) :
-                              (this._precision === 'high' && hasFloatTextureSupport ? gl.RGBA16F : gl.RGBA8);
+        // Which format the device can actually give us, and whether that is the one we asked for. The
+        // policy — including the float-to-RGBA8 fallback that silently turns the HDR pipeline LDR — is
+        // in rhi/textureFormat.ts so it can be tested without a context.
+        const resolved = resolveTextureFormat(
+            { usage: this._usage, precision: this._precision, channels: options?.channels, format: options?.format },
+            floatSupport(),
+        );
+        this._resolvedFormat = resolved.format;
+        if (resolved.downgraded) reportFloatDowngrade(resolved.requested, resolved.format);
+
+        const triple = glTextureFormat(resolved.format);
+        this._internalFormat = triple.internalFormat;
+        this._format = triple.format;
+        this._type = triple.type;
+        this._channels = this._usage === 'depth' ? 1 : (options?.channels === 'r' ? 1 : 4);
 
         this._minFilter = this._mipMap ? 
             (options?.mipMapFilter === 'nearest' ? gl.NEAREST_MIPMAP_NEAREST : gl.LINEAR_MIPMAP_LINEAR) :
             (options?.mipMapFilter === 'nearest' ? gl.NEAREST : gl.LINEAR);
-
-        this._format = this._usage === 'depth' ? gl.DEPTH_COMPONENT : (singleChannel ? gl.RED : gl.RGBA);
-        this._channels = singleChannel ? 1 : 4;
-        this._type = this._usage === 'depth' ? gl.UNSIGNED_INT : 
-                     (this._precision === 'low' || !hasFloatTextureSupport ? gl.UNSIGNED_BYTE : gl.FLOAT);
     }
+
+    /** The format actually allocated, which is not necessarily the one requested. */
+    public get format(): TextureFormat { return this._resolvedFormat; }
 
     private _getWrappingValue(wrapping?: 'clamp' | 'repeat' | 'mirror'): number {
         switch (wrapping) {

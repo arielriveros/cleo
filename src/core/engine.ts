@@ -100,9 +100,22 @@ export class CleoEngine {
     CleoEngine._instance = this;
   }
 
-  private async _initialize(): Promise<void> {
+  /**
+   * Acquire the graphics device and bring the engine up.
+   *
+   * Public and awaitable because device acquisition is asynchronous: WebGL2's `getContext` is not, but
+   * `navigator.gpu.requestAdapter()` is, and the renderer presents one interface for both. Nothing may
+   * construct a GPU resource — a Texture, a Mesh, a Material's shader — until this has resolved, which
+   * is why both hosts await it immediately after `new CleoEngine(...)` and before they load anything.
+   *
+   * Idempotent, and still called by `run()` for embedders that never awaited it.
+   */
+  public async initialize(): Promise<void> {
     try {
       if (this._ready) return;
+
+      // Before InputManager, which binds to the canvas, and before anything else touches the GPU.
+      await this._renderer.initialize();
 
       InputManager.initialize(this._renderer.canvas);
       window.addEventListener('resize', this.onResize.bind(this));
@@ -123,18 +136,28 @@ export class CleoEngine {
   public run(): void {
     try {
       Logger.info('Engine starting');
-      if (!this._ready)
-        this._initialize();
+      if (!this._ready) {
+        // A host that did not await initialize() cannot have its first frame this tick: the device is
+        // not up yet, and running the loop against a renderer with no context would throw on the first
+        // draw. Start the loop when the device lands instead. Hosts that DID await fall through to the
+        // synchronous path below and start immediately, exactly as before.
+        void this.initialize().then(() => this._startLoop());
+        return;
+      }
 
-      // _lastTimestamp is set when the engine is CONSTRUCTED, which can be long before run() — the editor
-      // builds its scene and loads textures in between. Without this reset that whole gap is charged to
-      // the first frame's delta. The clamp would cap it, but starting the clock here is exact rather than
-      // merely bounded, and mirrors what uiRuntime.start() already does.
-      this._lastTimestamp = performance.now();
-      this._gameLoop();
+      this._startLoop();
     } catch (e) {
       Logger.error(e);
     }
+  }
+
+  private _startLoop(): void {
+    // _lastTimestamp is set when the engine is CONSTRUCTED, which can be long before run() — the editor
+    // builds its scene and loads textures in between. Without this reset that whole gap is charged to
+    // the first frame's delta. The clamp would cap it, but starting the clock here is exact rather than
+    // merely bounded, and mirrors what uiRuntime.start() already does.
+    this._lastTimestamp = performance.now();
+    this._gameLoop();
   }
 
   public shutdown(): void {

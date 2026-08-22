@@ -72,6 +72,11 @@ async function boot(): Promise<void> {
     physics: data?.config?.physics ?? {},
   });
 
+  // Acquire the graphics device before anything touches the GPU. Everything below this line —
+  // applyRenderSettings, the texture registrations, template inflation — constructs or resizes GPU
+  // resources, and none of them can run before a device exists.
+  await engine.initialize();
+
   // Reproduce the editor's Renderer-panel look (exposure, SSAO, motion blur, foliage culling, clear
   // color). Without this the standalone game would use renderer defaults and not match editor play.
   engine.renderer.applyRenderSettings(data?.config?.render);

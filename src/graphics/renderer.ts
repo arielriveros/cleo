@@ -118,6 +118,9 @@ import { collectOrphanedFoliageBuffers } from '../terrain/foliage';
 // `import { gl } from './renderer'` keeps working.
 export { gl } from './glContext';
 import { gl, setGLContext } from './glContext';
+import { describeCapabilities } from './rhi/device';
+import type { BackendKind, DeviceCapabilities } from './rhi/device';
+import { detectWebGL2Capabilities } from './rhi/webgl2/capabilities';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
@@ -349,6 +352,10 @@ export interface SkeletonOverlay {
 export class Renderer {
     private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
+    // Whether initialize() has acquired a device. Gates preInitialize and every GPU allocation.
+    private _deviceReady: boolean = false;
+    // Definite-assignment: written by initialize(), which every host awaits before using the renderer.
+    private _capabilities!: DeviceCapabilities;
     // Definite-assignment: set by the `viewport` setter during engine initialization, before any render.
     private _viewport!: HTMLElement;
 
@@ -430,12 +437,12 @@ export class Renderer {
      */
     private _renderScale: number = 1.0;
 
-    private _sceneFBO: Framebuffer;
+    private _sceneFBO!: Framebuffer;
     // Snapshot of _sceneFBO's depth (deferred blit + forward opaques), taken after the opaque forward
     // draw so fullscreen passes (fog, god rays, screen materials) can sample the full opaque depth
     // without a read/write feedback on the bound _sceneFBO.
-    private _sceneDepthFBO: Framebuffer;
-    private _gBufferFBO: Framebuffer;
+    private _sceneDepthFBO!: Framebuffer;
+    private _gBufferFBO!: Framebuffer;
 
     // Offscreen thumbnail capture (editor asset previews). While `_presentTarget` is set the renderer is in
     // "thumbnail mode": the pipeline renders at the target's square size, skips every background/atmosphere
@@ -561,8 +568,8 @@ export class Renderer {
     private _spotUp: vec3 = vec3.create();
 
     // Post processing
-    private _compose_FBOs: Framebuffer[];
-    private _blur_FBOs: Framebuffer[];
+    private _compose_FBOs!: Framebuffer[];
+    private _blur_FBOs!: Framebuffer[];
     /**
      * Bloom downsample/upsample pyramid. Level 0 is half the render size and each level halves again,
      * so the whole chain costs about a third of one full-res pass — versus the 20 same-size blurs it
@@ -574,7 +581,7 @@ export class Renderer {
     private static readonly BLOOM_FILTER_RADIUS = 2.0;
     // Reduced-resolution volumetric-clouds raymarch target (lazily sized to the node's resolutionScale;
     // upsampled + composited into the scene buffer). Only used when resolutionScale < 1.
-    private _cloudsFBO: Framebuffer;
+    private _cloudsFBO!: Framebuffer;
 
     // ---------------------------------------------------------------------------------------------
     // Volumetric cloud noise volumes + temporal reprojection state
@@ -600,7 +607,7 @@ export class Renderer {
      * `_cloudTraceFBO` holds the newly traced samples at 1/4 per axis, i.e. 1/16 of the pixels.
      */
     private _cloudHistoryFBOs: Framebuffer[] = [];
-    private _cloudTraceFBO: Framebuffer;
+    private _cloudTraceFBO!: Framebuffer;
     private _cloudHistoryIndex: number = 0;
     /**
      * False whenever the history cannot be trusted: first frame, a resize (Framebuffer.create
@@ -643,8 +650,8 @@ export class Renderer {
     private _velocityNeighborFBO!: Framebuffer;
 
     // SSAO (deferred path). Raw pass -> blur pass, consumed in the deferred lighting pass.
-    private _ssaoFBO: Framebuffer;
-    private _ssaoBlurFBO: Framebuffer;
+    private _ssaoFBO!: Framebuffer;
+    private _ssaoBlurFBO!: Framebuffer;
     /**
      * Whichever AO buffer holds the result the lighting pass should read. Normally the blurred one;
      * the raw one when the blur is switched off. A pointer rather than a hardcoded reference so the
@@ -704,7 +711,7 @@ export class Renderer {
 
     // IBL (image-based lighting). Shared BRDF LUT + a cube framebuffer/mesh/camera for baking, plus a
     // scene-wide IBL cache built from scene.environmentMap when no light probe is active.
-    private _brdfFBO: Framebuffer;
+    private _brdfFBO!: Framebuffer;
     private _cubeFBO!: CubeFramebuffer;
     private _iblCubeMesh!: Mesh;
     private _captureCamera!: Camera;
@@ -726,7 +733,7 @@ export class Renderer {
     private static readonly BRDF_LUT_SIZE = 512;
     private static readonly _IDENTITY_MAT4: mat4 = mat4.create();
 
-    private _screenQuad: Mesh;
+    private _screenQuad!: Mesh;
 
     // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
     private _warnedScreenMaterialMeshes: Set<string> = new Set();
@@ -787,23 +794,13 @@ export class Renderer {
         this._shadowDistance = config.shadowDistance ?? 100;
         this._cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._cascadeCount)));
         this._ssaoEnabled = config.ssao !== false; // default: SSAO on
-        // Create canvas
+        // The canvas ELEMENT exists from construction, deliberately: the editor re-parents it on every
+        // mode switch and InputManager binds its listeners to it, both of which can happen before a
+        // device has been acquired. Only the context is deferred — see initialize().
         this._canvas = document.createElement('canvas');
-
-        // Check WebGL support
-        if (!this._canvas.getContext('webgl2'))
-            throw new Error('WebGL context not available');
-
-        // Get WebGL context
-        setGLContext(this._canvas.getContext('webgl2') as WebGL2RenderingContext);
-        // Resolve the timer-query extension while we have the fresh context. Cheap, and it means
-        // `gpuProfilingAvailable` is answerable before the first frame rather than after it.
-        if (gl) gpuProfiler.initialize(gl);
 
         // Create material system
         this._shaderManager = ShaderManager.Instance;
-
-        this._screenQuad = new Mesh();
 
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
@@ -814,11 +811,8 @@ export class Renderer {
             this._boneIdentityScratch[i * 16 + 15] = 1;
         }
 
-        // Create framebuffers
-        this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-        this._sceneDepthFBO = new Framebuffer({ usage: 'depth' });
-        this._shadowCascadeFBO = new LayeredDepthFramebuffer();
-        this._spotShadowFBO = new LayeredDepthFramebuffer();
+        // Plain mat4s and numbers — CPU scratch for the shadow passes, no GPU resource — so these stay
+        // in the constructor while the framebuffers they feed move into initialize().
         for (let i = 0; i < Renderer.MAX_SPOT_SHADOWS; i++) this._spotShadowMatrices.push(mat4.create());
         for (let i = 0; i < MAX_CASCADES; i++) {
             this._cascadeMatrices.push(mat4.create());
@@ -826,6 +820,50 @@ export class Renderer {
             this._cascadeDepthScales.push(0);
             this._cascadeTexelSizes.push(0);
         }
+    }
+
+    /**
+     * Acquire the GPU device and allocate every render target.
+     *
+     * Must complete before any other GPU resource — a Texture, a Mesh, a Shader — is constructed
+     * anywhere in the engine. `CleoEngine.initialize()` awaits this, and both hosts await that.
+     *
+     * This used to be the tail of the constructor, and moving it out is what makes a second backend
+     * possible at all: `navigator.gpu.requestAdapter()` and `adapter.requestDevice()` are both
+     * promises, and a constructor cannot await one. WebGL2's `getContext` is synchronous, so today
+     * this resolves on a microtask — but callers must treat it as genuinely asynchronous, because
+     * under WebGPU it will not.
+     *
+     * The framebuffer allocations came along because they had no choice: `new Framebuffer(...)` calls
+     * `gl.createFramebuffer()` in its own constructor, and `new Texture(...)` / `new Mesh()` likewise
+     * call `gl.createTexture()` / `gl.createVertexArray()`. None of them can exist before a device does.
+     *
+     * Idempotent — a second call is a no-op, so a host that awaits this and then calls `run()` (which
+     * also ensures initialization) does not end up with two sets of targets.
+     */
+    public async initialize(): Promise<void> {
+        if (this._deviceReady) return;
+
+        const context = this._canvas.getContext('webgl2') as WebGL2RenderingContext | null;
+        if (!context) throw new Error('WebGL context not available');
+        setGLContext(context);
+
+        // Read the device's real limits once, while the context is fresh and before anything has had a
+        // chance to depend on a guessed value. See rhi/webgl2/capabilities.ts for why every field is
+        // queried rather than assumed.
+        this._capabilities = detectWebGL2Capabilities(context);
+
+        // Resolve the timer-query extension while we have the fresh context. Cheap, and it means
+        // `gpuProfilingAvailable` is answerable before the first frame rather than after it.
+        gpuProfiler.initialize(context);
+
+        this._screenQuad = new Mesh();
+
+        // Create framebuffers
+        this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._sceneDepthFBO = new Framebuffer({ usage: 'depth' });
+        this._shadowCascadeFBO = new LayeredDepthFramebuffer();
+        this._spotShadowFBO = new LayeredDepthFramebuffer();
         this._gBufferFBO = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
@@ -851,9 +889,31 @@ export class Renderer {
         this._brdfFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Selection outline silhouette mask (low precision, no mipmaps).
         this._outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
+
+        this._deviceReady = true;
+        Logger.info(`Graphics device ready — ${describeCapabilities(this._capabilities)}`, 'Runtime');
+    }
+
+    /** Whether {@link initialize} has completed and GPU resources may be created. */
+    public get deviceReady(): boolean { return this._deviceReady; }
+
+    /** Which graphics API is driving this renderer. */
+    public get backend(): BackendKind { return this._capabilities?.backend ?? 'webgl2'; }
+
+    /**
+     * The running device's real limits.
+     *
+     * Passes branch on this rather than on hardcoded minimums. Reading it before {@link initialize}
+     * has resolved is a programming error, not a recoverable state — there is no device to describe.
+     */
+    public get capabilities(): DeviceCapabilities {
+        if (!this._capabilities) throw new Error('Renderer.capabilities read before initialize() completed');
+        return this._capabilities;
     }
 
     public preInitialize(): void {
+        if (!this._deviceReady)
+            throw new Error('Renderer.preInitialize() called before initialize() — await the device first');
         const clearColor = this._config.clearColor || [0.0, 0.0, 0.0, 1.0];
         gl.clearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1781,7 +1841,7 @@ export class Renderer {
             const mat = model.material;
             bindMaterial(mat);
             this._applyCull(mat.config.side);
-            model.mesh.draw(mat.config.wireframe ? gl.LINES : gl.TRIANGLES);
+            model.mesh.draw(mat.config.wireframe ? 'line-list' : 'triangle-list');
             return;
         }
         const submeshes = model.submeshes;
@@ -1792,7 +1852,7 @@ export class Renderer {
             bindMaterial(mat);
             this._applyCull(mat.config.side);
             model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
-                mat.config.wireframe ? gl.LINES : gl.TRIANGLES);
+                mat.config.wireframe ? 'line-list' : 'triangle-list');
         }
     }
 
@@ -1820,8 +1880,8 @@ export class Renderer {
         gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this._instanceScratch.subarray(0, needed), gl.DYNAMIC_DRAW);
         mesh.setupInstanceMatrixBuffer(this._instanceBuffer as WebGLBuffer, 5);
-        const mode = first.model.material.config.wireframe ? gl.LINES : gl.TRIANGLES;
-        mesh.drawInstanced(count, mode);
+        const topology = first.model.material.config.wireframe ? 'line-list' : 'triangle-list';
+        mesh.drawInstanced(count, topology);
         frameStats.objects += count; // each batched node is a distinct scene object
         // Reset the per-instance divisor so a later non-instanced draw of this (possibly shared) mesh
         // isn't left reading the instance buffer.
@@ -3634,6 +3694,19 @@ export class Renderer {
         if (this._viewport) this._viewport.removeChild(this._canvas);
         this._viewport = viewport
         this._viewport.appendChild(this._canvas);
+        // Size to the new host immediately.
+        //
+        // `preInitialize` ends with a `resize()` that no-ops when there is no viewport yet — and since
+        // device acquisition became asynchronous, both hosts await `initialize()` BEFORE calling
+        // `setViewport`, so that is now the normal case rather than a corner one. Without this the
+        // screen-space framebuffers stay at 0x0 with no attachments, and the frames drawn before some
+        // later `window.resize` happens along all target an incomplete framebuffer — which shows up as
+        // a pending INVALID_FRAMEBUFFER_OPERATION the next time anything checks `gl.getError()`.
+        //
+        // The editor already called `renderer.resize()` by hand right after `setViewport` for exactly
+        // this reason; doing it here means the player (which has no ResizeObserver of its own) gets it
+        // too, and the editor's manual call becomes harmless belt-and-braces.
+        if (this._deviceReady) this.resize();
     }
     public get context(): WebGL2RenderingContext { return gl; }
 
@@ -3926,8 +3999,8 @@ export class Renderer {
         GLState.depthMask(false);
         this._applyCull(materialConfig.side);
 
-        const mode = materialConfig.wireframe ? gl.LINES : gl.TRIANGLES;
-        node.sprite.mesh.draw(mode);
+        const topology = materialConfig.wireframe ? 'line-list' : 'triangle-list';
+        node.sprite.mesh.draw(topology);
 
         // Restore depth writes after drawing sprite
         if (manageDepth) GLState.depthMask(true);
@@ -3996,13 +4069,13 @@ export class Renderer {
             // ONE call. Only when some submesh opts out of shadows does this fall back to ranges.
             const casters = node.model.materials;
             if (!node.model.hasSubmeshes || casters.every(m => m.config.castShadow && !m.config.wireframe)) {
-                node.model.mesh.draw(gl.TRIANGLES);
+                node.model.mesh.draw('triangle-list');
             } else {
                 const submeshes = node.model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
                     const caster = casters[i] ?? casters[0];   // see _drawSubmeshes: never index past the array
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
-                    node.model.mesh.drawRange(submeshes[i].start, submeshes[i].count, gl.TRIANGLES);
+                    node.model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');
                 }
             }
         }
@@ -5259,7 +5332,7 @@ export class Renderer {
             for (const node of modelNodes) {
                 if (!node.initialized || !node.model) continue;
                 this._shaderManager.setUniform('u_model', node.worldTransform);
-                node.model.mesh.draw(gl.TRIANGLES);
+                node.model.mesh.draw('triangle-list');
             }
 
             // Selected sprites and their children (preserving billboard constraints).
@@ -5268,7 +5341,7 @@ export class Renderer {
             for (const node of spriteNodes) {
                 if (!node.initialized || !node.sprite) continue;
                 this._shaderManager.setUniform('u_model', this._spriteBillboardMatrix(node));
-                node.sprite.mesh.draw(gl.TRIANGLES);
+                node.sprite.mesh.draw('triangle-list');
             }
 
             GLState.depthMask(true);
@@ -5403,7 +5476,7 @@ export class Renderer {
             gl.bindBuffer(gl.ARRAY_BUFFER, buf);
             gl.bufferData(gl.ARRAY_BUFFER, matrices.subarray(0, count * 16), gl.DYNAMIC_DRAW);
             mesh.setupInstanceMatrixBuffer(buf, 5);
-            mesh.drawInstanced(count, gl.TRIANGLES);
+            mesh.drawInstanced(count, 'triangle-list');
             mesh.teardownInstanceMatrixBuffer(5);
         };
 

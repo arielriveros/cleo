@@ -1,4 +1,7 @@
 import { gl } from './glContext';
+import type { PrimitiveTopology } from './rhi/types';
+import { glTopology, isTriangleTopology, glVertexFormat } from './rhi/webgl2/glEnums';
+import { MODEL_VERTEX_LAYOUT, packedModelLayout, instanceMatrixLayout, isModelAttribute } from './rhi/vertexLayouts';
 import { GLState } from './systems/glState';
 import { frameStats } from './renderStats';
 import { createIndexArray, glTypeFor } from './indexFormat';
@@ -199,8 +202,10 @@ export class Mesh {
         this._lod = Math.max(0, Math.min(Math.round(level), Math.max(0, this._lodBuffers.length - 1)));
     }
 
-    public draw(mode: number = gl.TRIANGLES): void {
+    public draw(topology: PrimitiveTopology = 'triangle-list'): void {
         GLState.bindVAO(this._vertexArray);
+        const mode = glTopology(topology);
+        const triangles = isTriangleTopology(topology);
         // With LODs, the element binding is VAO state that the last draw may have left on another level,
         // so the selected level's buffer is (re)bound every draw.
         if (this.hasLods) {
@@ -209,7 +214,7 @@ export class Mesh {
             gl.drawElements(mode, lodCount, this._lodTypes[this._lod], 0);
             frameStats.drawCalls++;
             frameStats.vertices += lodCount;
-            if (mode === gl.TRIANGLES) frameStats.triangles += lodCount / 3;
+            if (triangles) frameStats.triangles += lodCount / 3;
             return;
         }
         const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
@@ -220,7 +225,7 @@ export class Mesh {
         // Perf stats: every GL draw funnels through here (incl. fullscreen post-process quads).
         frameStats.drawCalls++;
         frameStats.vertices += count;
-        if (mode === gl.TRIANGLES) frameStats.triangles += count / 3;
+        if (triangles) frameStats.triangles += count / 3;
     }
 
     /**
@@ -231,19 +236,20 @@ export class Mesh {
      * LODs are ignored on purpose: a LOD level is a whole alternate index buffer, so its ranges would
      * be meaningless. A model with submeshes never gets LODs (LOD baking rejects them upstream).
      */
-    public drawRange(indexOffset: number, indexCount: number, mode: number = gl.TRIANGLES): void {
+    public drawRange(indexOffset: number, indexCount: number, topology: PrimitiveTopology = 'triangle-list'): void {
         if (indexCount <= 0 || !this._indexBuffer || this._indexCount <= 0) return;
         GLState.bindVAO(this._vertexArray);
         if (this.hasLods) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[0]);
         const bytesPerIndex = this._indexType === gl.UNSIGNED_SHORT ? 2 : 4;
-        gl.drawElements(mode, indexCount, this._indexType, indexOffset * bytesPerIndex);
+        gl.drawElements(glTopology(topology), indexCount, this._indexType, indexOffset * bytesPerIndex);
         frameStats.drawCalls++;
         frameStats.vertices += indexCount;
-        if (mode === gl.TRIANGLES) frameStats.triangles += indexCount / 3;
+        if (isTriangleTopology(topology)) frameStats.triangles += indexCount / 3;
     }
 
-    public drawInstanced(instanceCount: number, mode: number = gl.TRIANGLES): void {
+    public drawInstanced(instanceCount: number, topology: PrimitiveTopology = 'triangle-list'): void {
         GLState.bindVAO(this._vertexArray);
+        const mode = glTopology(topology);
         // Note this path ignores LODs entirely — it always draws the base index buffer, so _indexType
         // (level 0's type) is the right one to read. Pre-existing behaviour; foliage never sets LODs.
         const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
@@ -256,51 +262,29 @@ export class Mesh {
         frameStats.instancedDrawCalls++;
         frameStats.instances += instanceCount;
         frameStats.vertices += count * instanceCount;
-        if (mode === gl.TRIANGLES) frameStats.triangles += (count / 3) * instanceCount;
+        if (isTriangleTopology(topology)) frameStats.triangles += (count / 3) * instanceCount;
     }
-
-    // Canonical interleaved vertex layout, matching the fixed order Geometry.getData() emits:
-    // position, normal, uv, tangent, bitangent. Keyed by both the `a_`-prefixed shader name and
-    // the bare name. This is the single source of truth for attribute order/size — NOT the shader's
-    // reflected attribute enumeration (gl.getActiveAttrib), whose order is driver/program dependent
-    // and would otherwise scramble the VAO for some material programs (e.g. 'default' vs 'pbr').
-    private static readonly _CANON_ATTR: Record<string, { order: number; size: number }> = {
-        a_position:  { order: 0, size: 3 }, position:  { order: 0, size: 3 },
-        a_normal:    { order: 1, size: 3 }, normal:    { order: 1, size: 3 },
-        a_texCoord:  { order: 2, size: 2 }, texCoord:  { order: 2, size: 2 },
-        a_uv:        { order: 2, size: 2 }, uv:        { order: 2, size: 2 },
-        a_tangent:   { order: 3, size: 3 }, tangent:   { order: 3, size: 3 },
-        a_bitangent: { order: 4, size: 3 }, bitangent: { order: 4, size: 3 },
-    };
 
     public initializeVAO(attributes: any): void {
         GLState.bindVAO(this._vertexArray);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
 
-        // Split the shader's attributes into the canonical standard set and any unknown extras.
-        const known: { location: number; size: number; order: number }[] = [];
-        const unknown: any[] = [];
-        for (const attr of attributes) {
-            const canon = Mesh._CANON_ATTR[attr.name as string];
-            if (canon) known.push({ location: attr.location, size: canon.size, order: canon.order });
-            else unknown.push(attr);
-        }
-
-        // Assign packed offsets in canonical order (position, normal, uv, tangent, bitangent),
-        // over only the attributes present — exactly how Geometry.getData() interleaves them.
-        known.sort((a, b) => a.order - b.order);
-        const floatSize = 4;
-        const stride = known.reduce((s, a) => s + a.size, 0) * floatSize;
-        let offset = 0;
-        for (const attr of known) {
-            gl.enableVertexAttribArray(attr.location);
-            gl.vertexAttribPointer(attr.location, attr.size, gl.FLOAT, false, stride, offset);
-            offset += attr.size * floatSize;
+        // The standard attributes, packed in canonical order over only the ones this program declares.
+        // The order is the layout's, NOT the shader's reflected enumeration — that is driver- and
+        // program-dependent, and trusting it would interleave the same mesh differently for, say, the
+        // 'default' and 'pbr' programs. See rhi/vertexLayouts.ts.
+        const layout = packedModelLayout(attributes);
+        for (const attribute of layout.attributes) {
+            const { size, type, normalized } = glVertexFormat(attribute.format);
+            gl.enableVertexAttribArray(attribute.shaderLocation);
+            gl.vertexAttribPointer(attribute.shaderLocation, size, type, normalized,
+                                   layout.arrayStride, attribute.offset);
         }
 
         // Fallback for any non-standard attribute: trust the reflected layout.
-        for (const attr of unknown) {
+        for (const attr of attributes) {
+            if (isModelAttribute(attr.name)) continue;
             gl.enableVertexAttribArray(attr.location);
             gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
         }
@@ -315,17 +299,11 @@ export class Mesh {
 
         GLState.bindVAO(this._vertexArray);
 
-        // Our interleaved main vertex buffer layout (floats):
-        // position(3), normal(3), uv(2), tangent(3), bitangent(3) => 14 floats per-vertex
-        const floatSize = 4;
-        const stride = 14 * floatSize; // 56 bytes
-        const offsets: Record<string, { size: number; offset: number }> = {
-            'a_position':   { size: 3, offset: 0 * floatSize },
-            'a_normal':     { size: 3, offset: 3 * floatSize },
-            'a_texCoord':   { size: 2, offset: 6 * floatSize },
-            'a_tangent':    { size: 3, offset: 8 * floatSize },
-            'a_bitangent':  { size: 3, offset: 11 * floatSize },
-        };
+        // The full interleaved model vertex — position(3), normal(3), uv(2), tangent(3), bitangent(3),
+        // 14 floats and a 56-byte stride. Unlike the non-animated path this is the WHOLE layout even
+        // when a program declares only part of it, because createAnimated always writes all five.
+        const stride = MODEL_VERTEX_LAYOUT.arrayStride;
+        const offsets = new Map(MODEL_VERTEX_LAYOUT.attributes.map(a => [a.name, a]));
 
         // Set up main vertex buffer attributes (position, normal, uv, tangent, bitangent)
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
@@ -333,10 +311,11 @@ export class Mesh {
             const name: string = attr.name;
             if (name === 'a_boneIds' || name === 'a_weights') continue; // handled below with dedicated buffers
 
-            const layout = offsets[name];
-            if (layout) {
+            const spec = offsets.get(name);
+            if (spec) {
+                const { size, type, normalized } = glVertexFormat(spec.format);
                 gl.enableVertexAttribArray(attr.location);
-                gl.vertexAttribPointer(attr.location, layout.size, gl.FLOAT, false, stride, layout.offset);
+                gl.vertexAttribPointer(attr.location, size, type, normalized, stride, spec.offset);
             } else {
                 // Fallback: if an unexpected attribute appears, try using provided layout info
                 gl.enableVertexAttribArray(attr.location);
@@ -377,12 +356,14 @@ export class Mesh {
     public setupInstanceMatrixBuffer(buffer: WebGLBuffer, baseLocation: number = 5): void {
         GLState.bindVAO(this._vertexArray);
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-        const stride = 16 * 4; // mat4 = 16 floats
-        for (let i = 0; i < 4; i++) {
-            const loc = baseLocation + i;
-            gl.enableVertexAttribArray(loc);
-            gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, stride, i * 4 * 4);
-            gl.vertexAttribDivisor(loc, 1);
+        // Neither API has a mat4 vertex format; both consume one as four consecutive vec4 slots.
+        const layout = instanceMatrixLayout(baseLocation);
+        for (const attribute of layout.attributes) {
+            const { size, type, normalized } = glVertexFormat(attribute.format);
+            gl.enableVertexAttribArray(attribute.shaderLocation);
+            gl.vertexAttribPointer(attribute.shaderLocation, size, type, normalized,
+                                   layout.arrayStride, attribute.offset);
+            gl.vertexAttribDivisor(attribute.shaderLocation, 1);
         }
     }
 
