@@ -1,0 +1,27 @@
+# GLSL ES 300 -> WGSL, compiled to WebAssembly.
+#
+# Exists because there is no shippable naga WASM build: the only one on npm is wasm-naga@0.3.2 (2022),
+# whose GLSL frontend rejects `precision` and `layout` and which has no WGSL backend at all. This wraps
+# the real thing. See tools/naga-wasm/README.md for the build, and WEBGPU_ROADMAP.md M3 for why.
+[package]
+name = "cleo-naga-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Only the two directions we need. naga's other frontends/backends (spv, msl, hlsl, dot) would each drag
+# in dependencies and wasm bytes for nothing.
+naga = { version = "29.0", default-features = false, features = ["glsl-in", "wgsl-out", "wgsl-in", "glsl-out"] }
+wasm-bindgen = "0.2"
+
+# Size matters: this ships to every browser that opens a project with a custom material.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

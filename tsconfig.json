@@ -31,5 +31,5 @@
     "outDir": "dist",
     "declarationDir": "dist"
   },
-  "files": ["src/cleo.ts", "src/glsl.d.ts", "src/webgpu.d.ts", "src/webglHandles.d.ts"],
+  "files": ["src/cleo.ts", "src/glsl.d.ts", "src/webgpu.d.ts", "src/webglHandles.d.ts", "src/wgsl.d.ts"],
 }

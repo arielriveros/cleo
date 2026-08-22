@@ -25,6 +25,13 @@ const config = {
                 test: /\.glsl|vs|fs$/,
                 exclude: /node_modules/,
                 loader: 'ts-shader-loader'
+              },
+            {
+                // WGSL is the engine's shader source; the loader translates it to GLSL ES 300 for the
+                // WebGL2 backend at build time. See tools/wgslTranslate.mjs and WEBGPU_ROADMAP.md M3.
+                test: /\.wgsl$/,
+                exclude: /node_modules/,
+                loader: path.resolve(__dirname, 'tools/wgslLoader.mjs')
               }
         ]
     },

@@ -59,6 +59,11 @@ import SkyFogFragment from './shaders/screen/skyFog.fs'
 
 import ScreenVertex from './shaders/screen/screen.vs'
 import ScreenFragment from './shaders/screen/screen.fs'
+// First program authored in WGSL. The import is a whole PROGRAM — the loader translates both stages to
+// GLSL ES 300 at build time (tools/wgslTranslate.mjs) and carries the WGSL through for the WebGPU
+// backend. `screen.vs`/`screen.fs` above are still imported: 26 other programs pair that vertex shader
+// with their own fragment stage and have not moved yet.
+import ScreenProgram from './shaders/wgsl/screen.wgsl'
 import PresentFragment from './shaders/screen/present.fs'
 import DebugViewFragment from './shaders/screen/debugView.fs'
 import OverdrawFragment from './shaders/screen/overdraw.fs'
@@ -989,7 +994,7 @@ export class Renderer {
         // Sky fog (fullscreen distance fog whose colour is sampled from the atmosphere cubemap)
         const skyFogShader = new Shader().create(ScreenVertex, SkyFogFragment);
         // Screen shaders
-        const screenShader = new Shader().create(ScreenVertex, ScreenFragment);
+        const screenShader = new Shader().create(ScreenProgram.vertex!, ScreenProgram.fragment!);
         // Final present: exposure -> tonemap -> sRGB (the single display resolve).
         const presentShader = new Shader().create(ScreenVertex, PresentFragment);
         const godRaysShader = new Shader().create(ScreenVertex, VolumetricGodRaysFragment);
