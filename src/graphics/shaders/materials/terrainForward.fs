@@ -12,7 +12,14 @@ precision highp float;
 
 in vec3 fragPos;
 in vec2 fragTexCoord;
-in mat3 TBN;
+in vec3 fragTangent;
+in vec3 fragBitangent;
+in vec3 fragNormal;
+
+// Reassembled from the three varyings at the top of main(), which is where it has to happen: GLSL ES
+// 300 forbids initialising a global from a varying, and TBN is read from inside helper functions as
+// well as from main, so it cannot just be a local.
+mat3 TBN;
 
 layout(location = 0) out vec4 fragColor;
 
@@ -149,6 +156,7 @@ void accumulateLight(vec3 N, vec3 V, vec3 albedo, float metallic, float roughnes
 }
 
 void main() {
+    TBN = mat3(fragTangent, fragBitangent, fragNormal);
     // --- 1. Terrain layer blend (mirrors geometryTerrain.fs) ------------------------------------------
     vec3 Ngeom = normalize(TBN[2]);
     float height = fragPos.y;

@@ -9,7 +9,14 @@ precision mediump float;
 // about half a unit, which is many shadow texels.
 in highp vec3 fragPos;
 in vec2 fragTexCoord;
-in mat3 TBN;
+in vec3 fragTangent;
+in vec3 fragBitangent;
+in vec3 fragNormal;
+
+// Reassembled from the three varyings at the top of main(), which is where it has to happen: GLSL ES
+// 300 forbids initialising a global from a varying, and TBN is read from inside helper functions as
+// well as from main, so it cannot just be a local.
+mat3 TBN;
 
 // Material
 uniform struct Material {
@@ -159,6 +166,7 @@ vec3 computeSpotlight(int index, vec3 normal, vec3 viewDir, SpotLight light, vec
 layout(location = 0) out vec4 fragColor;
 
 void main() {
+    TBN = mat3(fragTangent, fragBitangent, fragNormal);
     if (u_material.hasMaskMap) {
         float mask = texture(u_material.maskMap, fragTexCoord).r;
         if (mask < 0.5) discard;

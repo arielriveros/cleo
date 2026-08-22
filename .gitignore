@@ -12,3 +12,9 @@ coverage/
 # Rust build output for the vendored naga WASM artifact. The artifact itself
 # (src/graphics/rhi/webgpu/naga/) IS committed — see tools/naga-wasm/README.md.
 tools/naga-wasm/target/
+
+# Staged copies written by the real-GPU harnesses on every run (sources: dist/ and
+# src/graphics/rhi/webgpu/naga/). tools/harness/passBaseline.json IS committed.
+tools/harness/pages/*/cleo.js
+tools/harness/pages/naga/naga/
+tools/harness/shots/

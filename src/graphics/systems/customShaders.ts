@@ -32,7 +32,15 @@ precision highp float;
 
 in vec3 fragPos;
 in vec2 fragTexCoord;
-in mat3 TBN;
+
+// The TBN basis arrives as three vectors, because a matrix is not a valid shader interface type
+// outside GLSL ES. It is reassembled into TBN in the epilogue's main(), before the user's
+// function runs — user source in existing projects reads TBN directly, and getNormal() is
+// documented in terms of it, so the name has to survive even though the transport did not.
+in vec3 fragTangent;
+in vec3 fragBitangent;
+in vec3 fragNormal;
+mat3 TBN;
 
 // Back-compat shim. fragPosLightSpace was a varying carrying the position in the (single, world-
 // origin-pinned) shadow map's space; cascades made it meaningless, but user-authored GLSL in
@@ -151,7 +159,10 @@ layout(location = 0) out vec4 fragColor;
 `;
 
 const FORWARD_EPILOGUE = `
-void main() { fragColor = fragment(); }
+void main() {
+    TBN = mat3(fragTangent, fragBitangent, fragNormal);
+    fragColor = fragment();
+}
 `;
 
 /** Deferred prelude: user writes `void surface(inout Surface s)` writing G-buffer channels. */
@@ -172,6 +183,7 @@ struct Surface {
 
 const DEFERRED_EPILOGUE = `
 void main() {
+    TBN = mat3(fragTangent, fragBitangent, fragNormal);
     Surface s;
     s.albedo = vec3(1.0);
     s.normal = normalize(TBN[2]);
@@ -478,9 +490,12 @@ function releaseKey(key: string): void {
 
 const FALLBACK_FORWARD_FS = `#version 300 es
 precision highp float;
-in vec3 fragPos; in vec2 fragTexCoord; in mat3 TBN;
+in vec3 fragPos; in vec2 fragTexCoord;
+in vec3 fragTangent; in vec3 fragBitangent; in vec3 fragNormal;
+mat3 TBN;
 layout(location = 0) out vec4 fragColor;
 void main() {
+    TBN = mat3(fragTangent, fragBitangent, fragNormal);
     float k = 0.0 * (fragPos.x + fragTexCoord.x + TBN[0].x);
     fragColor = vec4(1.0, 0.0, 1.0, 1.0) + k;   // magenta = compile error
 }
@@ -488,11 +503,14 @@ void main() {
 
 const FALLBACK_DEFERRED_FS = `#version 300 es
 precision highp float;
-in vec3 fragPos; in vec2 fragTexCoord; in mat3 TBN;
+in vec3 fragPos; in vec2 fragTexCoord;
+in vec3 fragTangent; in vec3 fragBitangent; in vec3 fragNormal;
+mat3 TBN;
 layout(location = 0) out vec4 gAlbedoMetallic;
 layout(location = 1) out vec4 gNormalRoughness;
 layout(location = 2) out vec4 gEmissiveAO;
 void main() {
+    TBN = mat3(fragTangent, fragBitangent, fragNormal);
     float k = 0.0 * (fragPos.x + fragTexCoord.x + TBN[0].x);
     gAlbedoMetallic  = vec4(1.0, 0.0, 1.0, 0.0) + k;   // magenta = compile error
     gNormalRoughness = vec4(normalize(TBN[2]), 1.0);

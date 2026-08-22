@@ -41,9 +41,9 @@ import DefaultSkinnedVertex from './shaders/materials/default_skinned.vs'
 import OutlineVertex from './shaders/materials/outline.vs'
 import OutlineFragment from './shaders/materials/outline.fs'
 
-import ShadowMapVertex from './shaders/environment/shadowMap.vs'
+import ShadowMapProgram from './shaders/wgsl/shadowMap.wgsl'
 import ShadowMapFragment from './shaders/environment/shadowMap.fs'
-import ShadowMapSkinnedVertex from './shaders/environment/shadowMapSkinned.vs'
+import ShadowMapSkinnedProgram from './shaders/wgsl/shadowMapSkinned.wgsl'
 import ShadowMapInstancedVertex from './shaders/environment/shadowMapInstanced.vs'
 import ShadowMapCutoutFragment from './shaders/environment/shadowMapCutout.fs'
 import ShadowDebugFragment from './shaders/screen/shadowDebug.fs'
@@ -68,19 +68,19 @@ import PresentProgram from './shaders/wgsl/present.wgsl'
 import PresentFragment from './shaders/screen/present.fs'
 import DebugViewFragment from './shaders/screen/debugView.fs'
 import OverdrawFragment from './shaders/screen/overdraw.fs'
-import Bloom from './shaders/screen/bloom.fs'
-import BloomDownsample from './shaders/screen/bloomDownsample.fs'
-import BloomUpsample from './shaders/screen/bloomUpsample.fs'
-import GaussianBlur from './shaders/screen/gaussianBlur.fs'
-import ChromaticAberration from './shaders/screen/chromaticAberration.fs'
-import Composer from './shaders/screen/composer.fs'
+import BloomProgram from './shaders/wgsl/bloom.wgsl'
+import BloomDownsampleProgram from './shaders/wgsl/bloomDownsample.wgsl'
+import BloomUpsampleProgram from './shaders/wgsl/bloomUpsample.wgsl'
+import GaussianBlurProgram from './shaders/wgsl/gaussianBlur.wgsl'
+import ChromaticAberrationProgram from './shaders/wgsl/chromaticAberration.wgsl'
+import ComposerProgram from './shaders/wgsl/composer.wgsl'
 import VolumetricGodRaysFragment from './shaders/screen/volumetricGodRays.fs'
 import GridFragment from './shaders/screen/grid.fs'
 import OutlinePostFragment from './shaders/screen/outline.fs'
-import MotionBlurVelocity from './shaders/screen/motionBlurVelocity.fs'
-import MotionBlurTileMax from './shaders/screen/motionBlurTileMax.fs'
-import MotionBlurNeighborMax from './shaders/screen/motionBlurNeighborMax.fs'
-import MotionBlurGather from './shaders/screen/motionBlur.fs'
+import MotionBlurVelocityProgram from './shaders/wgsl/motionBlurVelocity.wgsl'
+import MotionBlurTileMaxProgram from './shaders/wgsl/motionBlurTileMax.wgsl'
+import MotionBlurNeighborMaxProgram from './shaders/wgsl/motionBlurNeighborMax.wgsl'
+import MotionBlurGatherProgram from './shaders/wgsl/motionBlur.wgsl'
 import PBRVertex from './shaders/materials/pbr.vs'
 import PBRFragment from './shaders/materials/pbr.fs'
 import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
@@ -96,8 +96,8 @@ import GeometryFoliageBillboardFragment from './shaders/deferred/geometryFoliage
 import GeometryBasicFragment from './shaders/deferred/geometryBasic.fs'
 import GeometryInstancedVertex from './shaders/deferred/geometry_instanced.vs'
 import DeferredLightingFragment from './shaders/deferred/deferredLighting.fs'
-import SSAOFragment from './shaders/deferred/ssao.fs'
-import SSAOBlurFragment from './shaders/deferred/ssaoBlur.fs'
+import SSAOProgram from './shaders/wgsl/ssao.wgsl'
+import SSAOBlurProgram from './shaders/wgsl/ssaoBlur.wgsl'
 
 // IBL (image-based lighting) precompute shaders
 import CubeVertex from './shaders/ibl/cube.vs'
@@ -508,7 +508,6 @@ export class Renderer {
     private _cascadeSplitPacked: Float32Array = new Float32Array(MAX_CASCADES);
     private _cascadeDepthScalePacked: Float32Array = new Float32Array(MAX_CASCADES);
     private _cascadeTexelPacked: Float32Array = new Float32Array(MAX_CASCADES);
-    private _cascadeLocs: Map<WebGLProgram, { mat: WebGLUniformLocation | null, split: WebGLUniformLocation | null, depthScale: WebGLUniformLocation | null, texel: WebGLUniformLocation | null }> = new Map();
 
     // ---- Shadow tunables (all authored in the editor's Renderer mode) -----------------------
     private _shadowsEnabled: boolean = true;
@@ -562,7 +561,6 @@ export class Renderer {
     private _spotShadowTexelScalePacked: Float32Array = new Float32Array(Renderer.MAX_SPOT_SHADOWS);
     /** Layer for spot light i, or -1. Rebuilt WHOLE every frame — see the id-keying note above. */
     private _spotShadowLayerPacked: Int32Array = new Int32Array(GLSL_MAX_SPOTLIGHTS);
-    private _spotLocs: Map<WebGLProgram, { mat: WebGLUniformLocation | null, texelScale: WebGLUniformLocation | null, layer: WebGLUniformLocation | null }> = new Map();
     private _spotShadowsEnabled: boolean = true;
     private _spotShadowResolution: number = 1024;
     /** Cap on a spot's derived far plane, so a barely-attenuating light cannot stretch its map flat. */
@@ -715,7 +713,6 @@ export class Renderer {
     private _ssaoRadius: number = 0.5;
     private _ssaoBias: number = 0.025;
     private _ssaoPower: number = 1.5;
-    private _ssaoKernelLoc: WebGLUniformLocation | null | undefined = undefined;
 
     // IBL (image-based lighting). Shared BRDF LUT + a cube framebuffer/mesh/camera for baking, plus a
     // scene-wide IBL cache built from scene.environmentMap when no light probe is active.
@@ -782,7 +779,6 @@ export class Renderer {
     // Reused scratch to avoid per-frame allocations
     private _boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
     private _boneIdentityScratch: Float32Array;
-    private _boneLocations: Map<WebGLProgram, WebGLUniformLocation | null> = new Map();
     private _instanceBuffer: WebGL2Buffer | null = null;
     private _instanceScratch: Float32Array = new Float32Array(16 * 64);
 
@@ -970,16 +966,16 @@ export class Renderer {
         // Deferred lighting (fullscreen) shader
         const deferredLightingShader = new Shader().create(ScreenVertex, DeferredLightingFragment);
         // SSAO (fullscreen) shaders
-        const ssaoShader = new Shader().create(ScreenVertex, SSAOFragment);
-        const ssaoBlurShader = new Shader().create(ScreenVertex, SSAOBlurFragment);
+        const ssaoShader = new Shader().create(SSAOProgram.vertex!, SSAOProgram.fragment!);
+        const ssaoBlurShader = new Shader().create(SSAOBlurProgram.vertex!, SSAOBlurProgram.fragment!);
         // IBL precompute shaders
         const irradianceShader = new Shader().create(CubeVertex, IrradianceFragment);
         const prefilterShader = new Shader().create(CubeVertex, PrefilterFragment);
         const brdfShader = new Shader().create(ScreenVertex, BRDFFragment);
         // Environment shaders
-        const shadowMapShader = new Shader().create(ShadowMapVertex, ShadowMapFragment);
+        const shadowMapShader = new Shader().create(ShadowMapProgram.vertex!, ShadowMapProgram.fragment!);
         // Skinned depth shader so animated meshes cast their animated-pose shadow (not the bind pose).
-        const shadowMapSkinnedShader = new Shader().create(ShadowMapSkinnedVertex, ShadowMapFragment);
+        const shadowMapSkinnedShader = new Shader().create(ShadowMapSkinnedProgram.vertex!, ShadowMapSkinnedProgram.fragment!);
         const shadowMapInstancedShader = new Shader().create(ShadowMapInstancedVertex, ShadowMapFragment);
         const shadowMapInstancedCutoutShader = new Shader().create(ShadowMapInstancedVertex, ShadowMapCutoutFragment);
         const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
@@ -1001,15 +997,15 @@ export class Renderer {
         const godRaysShader = new Shader().create(ScreenVertex, VolumetricGodRaysFragment);
         const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
         const shadowDebugShader = new Shader().create(ScreenVertex, ShadowDebugFragment);
-        const bloomShader = new Shader().create(ScreenVertex, Bloom);
-        const blurShader = new Shader().create(ScreenVertex, GaussianBlur);
+        const bloomShader = new Shader().create(BloomProgram.vertex!, BloomProgram.fragment!);
+        const blurShader = new Shader().create(GaussianBlurProgram.vertex!, GaussianBlurProgram.fragment!);
         // Reuses the selection-mask vertex shader: it is the minimal MVP transform the mask pass
         // already drives over these same meshes, so no new vertex path is introduced.
         const overdrawShader = new Shader().create(OutlineVertex, OverdrawFragment);
-        const bloomDownsampleShader = new Shader().create(ScreenVertex, BloomDownsample);
-        const bloomUpsampleShader = new Shader().create(ScreenVertex, BloomUpsample);
-        const chromaticAbShader = new Shader().create(ScreenVertex, ChromaticAberration);
-        const composerShader = new Shader().create(ScreenVertex, Composer);
+        const bloomDownsampleShader = new Shader().create(BloomDownsampleProgram.vertex!, BloomDownsampleProgram.fragment!);
+        const bloomUpsampleShader = new Shader().create(BloomUpsampleProgram.vertex!, BloomUpsampleProgram.fragment!);
+        const chromaticAbShader = new Shader().create(ChromaticAberrationProgram.vertex!, ChromaticAberrationProgram.fragment!);
+        const composerShader = new Shader().create(ComposerProgram.vertex!, ComposerProgram.fragment!);
         // Editor infinite grid (fullscreen world-plane pass)
         const gridShader = new Shader().create(ScreenVertex, GridFragment);
         // Outline: material shader stamps the selection silhouette into the mask; the screen shader
@@ -1017,10 +1013,10 @@ export class Renderer {
         const outlineShader = new Shader().create(OutlineVertex, OutlineFragment);
         const outlinePostShader = new Shader().create(ScreenVertex, OutlinePostFragment);
         // Motion blur (camera reprojection): velocity -> tile max -> neighbor max -> gather.
-        const motionBlurVelocityShader = new Shader().create(ScreenVertex, MotionBlurVelocity);
-        const motionBlurTileMaxShader = new Shader().create(ScreenVertex, MotionBlurTileMax);
-        const motionBlurNeighborMaxShader = new Shader().create(ScreenVertex, MotionBlurNeighborMax);
-        const motionBlurShader = new Shader().create(ScreenVertex, MotionBlurGather);
+        const motionBlurVelocityShader = new Shader().create(MotionBlurVelocityProgram.vertex!, MotionBlurVelocityProgram.fragment!);
+        const motionBlurTileMaxShader = new Shader().create(MotionBlurTileMaxProgram.vertex!, MotionBlurTileMaxProgram.fragment!);
+        const motionBlurNeighborMaxShader = new Shader().create(MotionBlurNeighborMaxProgram.vertex!, MotionBlurNeighborMaxProgram.fragment!);
+        const motionBlurShader = new Shader().create(MotionBlurGatherProgram.vertex!, MotionBlurGatherProgram.fragment!);
 
         // Add shaders to the material system
         this._shaderManager.addShader('basic', basicShader);
@@ -2029,18 +2025,14 @@ export class Renderer {
     private _uploadShadowUniforms(shaderKey: string): void {
         const shader = this._shaderManager.getShader(shaderKey);
         if (!shader) return;
-        const program = shader.program;
-        let locs = this._cascadeLocs.get(program);
-        if (!locs) {
-            locs = {
-                mat: gl.getUniformLocation(program, 'u_cascadeMatrices[0]'),
-                split: gl.getUniformLocation(program, 'u_cascadeSplits[0]'),
-                depthScale: gl.getUniformLocation(program, 'u_cascadeDepthScale[0]'),
-                texel: gl.getUniformLocation(program, 'u_cascadeTexelSize[0]'),
-            };
-            this._cascadeLocs.set(program, locs);
-        }
 
+        // Every uniform here goes through `setUniform`, including the arrays. That is load-bearing, not
+        // stylistic: the cascade and spot arrays used to be uploaded through cached
+        // `gl.getUniformLocation(program, 'u_cascadeMatrices[0]')` handles, and `getUniformLocation`
+        // returns **null** for a member of a std140 block — the same value an unused uniform returns, so
+        // the `if (loc)` guards swallowed it. The first shader here authored in WGSL would have lost its
+        // shadows silently while still paying for the full cascade render. SSAO lost its kernel exactly
+        // that way before `Shader.storeUniforms` learned to alias the `[0]`-stripped name.
         const active = this._shadowsActive && !this._shadowsSuppressed;
         this._shaderManager.setUniform('u_shadowsEnabled', active);
         this._shaderManager.setUniform('u_cascadeCount', this._cascadeCount);
@@ -2054,32 +2046,23 @@ export class Renderer {
         this._shaderManager.setUniform('u_cascadeBlend', this._cascadeBlend);
         this._shaderManager.setUniform('u_debugCascades', this._debugCascades && active);
 
-        if (locs.mat) gl.uniformMatrix4fv(locs.mat, false, this._cascadeMatPacked);
-        if (locs.split) gl.uniform1fv(locs.split, this._cascadeSplitPacked);
-        if (locs.depthScale) gl.uniform1fv(locs.depthScale, this._cascadeDepthScalePacked);
-        if (locs.texel) gl.uniform1fv(locs.texel, this._cascadeTexelPacked);
+        this._shaderManager.setUniform('u_cascadeMatrices', this._cascadeMatPacked);
+        this._shaderManager.setUniform('u_cascadeSplits', this._cascadeSplitPacked);
+        this._shaderManager.setUniform('u_cascadeDepthScale', this._cascadeDepthScalePacked);
+        this._shaderManager.setUniform('u_cascadeTexelSize', this._cascadeTexelPacked);
 
         // The sampler must point at a COMPLETE texture on every frame, shadows on or off — an
         // incomplete sampler is a draw-time error, not merely a wrong colour.
         this._shadowCascadeFBO.bindTexture(Renderer.SHADOW_UNIT);
 
         // --- spot shadows ---
-        let spot = this._spotLocs.get(program);
-        if (!spot) {
-            spot = {
-                mat: gl.getUniformLocation(program, 'u_spotShadowMatrices[0]'),
-                texelScale: gl.getUniformLocation(program, 'u_spotShadowTexelScale[0]'),
-                layer: gl.getUniformLocation(program, 'u_spotShadowLayer[0]'),
-            };
-            this._spotLocs.set(program, spot);
-        }
         this._shaderManager.setUniform('u_spotShadowsEnabled', this._spotShadowsActive && !this._shadowsSuppressed);
         this._shaderManager.setUniform('u_spotShadows', Renderer.SPOT_SHADOW_UNIT);
         this._shaderManager.setUniform('u_spotShadowTexel', [1 / this._spotShadowResolution, 1 / this._spotShadowResolution]);
         this._shaderManager.setUniform('u_spotShadowBias', this._spotShadowBias);
-        if (spot.mat) gl.uniformMatrix4fv(spot.mat, false, this._spotShadowMatPacked);
-        if (spot.texelScale) gl.uniform1fv(spot.texelScale, this._spotShadowTexelScalePacked);
-        if (spot.layer) gl.uniform1iv(spot.layer, this._spotShadowLayerPacked);
+        this._shaderManager.setUniform('u_spotShadowMatrices', this._spotShadowMatPacked);
+        this._shaderManager.setUniform('u_spotShadowTexelScale', this._spotShadowTexelScalePacked);
+        this._shaderManager.setUniform('u_spotShadowLayer', this._spotShadowLayerPacked);
         this._spotShadowFBO.bindTexture(Renderer.SPOT_SHADOW_UNIT);
     }
 
@@ -2195,14 +2178,18 @@ export class Renderer {
         this._shaderManager.setUniform('u_power', this._ssaoPower);
         this._shaderManager.setUniform('u_sampleCount', this._ssaoSamples);
 
-        // vec3 arrays are only reachable via their [0] location (see the cascade uniforms).
-        const program = this._shaderManager.getShader('ssao').program;
-        if (this._ssaoKernelLoc === undefined)
-            this._ssaoKernelLoc = gl.getUniformLocation(program, 'u_samples[0]');
-        // Upload only the samples in use — the tail is zeroed and never read, so sending all 64
-        // floats at 16 or 24 samples is pure transfer.
-        if (this._ssaoKernelLoc)
-            gl.uniform3fv(this._ssaoKernelLoc, this._ssaoKernel.subarray(0, this._ssaoSamples * 3));
+        // Upload only the samples in use — the tail is zeroed and never read, so sending all 64 floats
+        // at 16 or 24 samples is pure transfer. The std140 writer stops at the end of a short value and
+        // spaces what it does write by the driver-reported array stride, which is what turns this
+        // tightly-packed Float32Array into the vec4-padded layout the block expects.
+        //
+        // This used to cache `gl.getUniformLocation(program, 'u_samples[0]')` and call `uniform3fv`
+        // directly, on the grounds that a vec3 array is only reachable through its [0] location. Once
+        // ssao.wgsl moved the kernel into a uniform block that location became **null** — silently, since
+        // a null location is exactly what an unused uniform returns. The kernel then stayed all-zeroes,
+        // every sample landed on the shaded point itself, and SSAO output a uniform 1.0 while still
+        // costing a full-resolution pass. Going through setUniform keeps it working under either layout.
+        this._shaderManager.setUniform('u_samples', this._ssaoKernel.subarray(0, this._ssaoSamples * 3));
 
         this._drawFullscreen();
 
@@ -3493,24 +3480,24 @@ export class Renderer {
         }
     }
 
+    /**
+     * Upload the skinning palette.
+     *
+     * Set by name rather than through a cached location. The saving from caching was one hash lookup
+     * per skinned draw; the cost was that `getUniformLocation` returns null for a std140 block member,
+     * which is indistinguishable from "this shader has no bones" — so the first skinned shader authored
+     * in WGSL would have rendered every vertex at its bind pose, silently. See `_uploadShadowUniforms`.
+     */
     private _uploadBoneMatrices(shaderType: string, node: ModelNode): void {
-        const program = this._shaderManager.getShader(shaderType).program;
-        let location = this._boneLocations.get(program);
-        if (location === undefined) {
-            location = gl.getUniformLocation(program, 'u_boneMatrices');
-            this._boneLocations.set(program, location);
-        }
-        if (!location) return;
-
         const animatedModel = node.model as AnimatedModel;
         if (animatedModel.hasSkin && node.animator) {
             const boneMatrices = node.animator.getFinalBoneMatrices();
             const scratch = this._boneMatrixScratch;
             const n = Math.min(100, boneMatrices.length);
             for (let i = 0; i < n; i++) scratch.set(boneMatrices[i], i * 16);
-            gl.uniformMatrix4fv(location, false, scratch.subarray(0, 100 * 16));
+            this._shaderManager.setUniform('u_boneMatrices', scratch.subarray(0, 100 * 16));
         } else {
-            gl.uniformMatrix4fv(location, false, this._boneIdentityScratch);
+            this._shaderManager.setUniform('u_boneMatrices', this._boneIdentityScratch);
         }
     }
 
@@ -5109,7 +5096,6 @@ export class Renderer {
         this._spotShadowResolution = clamped;
         if (!gl) return;
         this._spotShadowFBO.create(clamped, Renderer.MAX_SPOT_SHADOWS);
-        this._spotLocs.clear();
         this._spotShadowsDirty = true;
         this._spotShadowsActive = false;
     }
@@ -5151,9 +5137,7 @@ export class Renderer {
         this._cascadeCount = clampedLayers;
         if (!gl) return;
         this._shadowCascadeFBO.create(clampedSize, clampedLayers);
-        // A new program-visible texture means the cached uniform locations describe nothing; and the
-        // fresh storage holds undefined depth until the next shadow pass writes or clears it.
-        this._cascadeLocs.clear();
+        // The fresh storage holds undefined depth until the next shadow pass writes or clears it.
         this._shadowMapsDirty = true;
         this._shadowsActive = false;
         this._shadowFullUpdate = true;

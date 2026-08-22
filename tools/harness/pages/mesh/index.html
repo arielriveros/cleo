@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cleo mesh check</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #202028; }
+  #vp { position: absolute; inset: 0; }
+</style>
+<script src="cleo.js"></script>
+</head>
+<body>
+<div id="vp"></div>
+<script>
+// Drives the engine's public API directly — no editor, no project gate, no 206 MB import.
+//
+// The point is the vertex layout: a Cube plus a Sphere with a PBR material exercise the full
+// five-attribute model vertex (position, normal, uv, tangent, bitangent) through initializeVAO, which
+// is what M1 rewrote. A scrambled stride or offset shows up here as visibly wrong geometry, and shows
+// up nowhere in the type checker or the DOM-free unit tests.
+window.__ready = false;
+window.__error = null;
+
+(async () => {
+  try {
+    const engine = new cleo.CleoEngine({ graphics: { clearColor: [0.08, 0.08, 0.11, 1.0] } });
+    await engine.initialize();
+    engine.setViewport(document.getElementById('vp'));
+
+    // A real texture, so the 2D upload path (texImage2D from an HTMLImageElement, sampler parameters,
+    // mip generation) is actually exercised. Drawn here rather than embedded so the bytes are a valid
+    // PNG the browser will decode.
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const g = canvas.getContext('2d');
+    for (let y = 0; y < 8; y++)
+      for (let x = 0; x < 8; x++) {
+        g.fillStyle = (x + y) % 2 ? '#e8e2d0' : '#3c6ea5';
+        g.fillRect(x * 8, y * 8, 8, 8);
+      }
+    cleo.TextureManager.Instance.addTextureFromBase64(canvas.toDataURL('image/png'), { mipMap: true }, 'checker');
+
+    const scene = new cleo.Scene();
+
+    // A sky atmosphere bakes into a CUBEMAP and generates its mip chain, which is the cube upload path
+    // plus createCubemapTarget — neither of which a plain textured quad reaches.
+    scene.addNode(new cleo.SkyAtmosphereNode('sky'));
+
+    const camera = new cleo.CameraNode('camera', new cleo.Camera({ type: 'perspective', far: 100 }));
+    camera.setPosition([4, 4, 4]);
+    // Exactly the editor's default framing (createEmptyScene): +pitch looks DOWN in this engine, and
+    // guessing the sign the other way put every model outside the frustum.
+    camera.setRotation([30, -135, 0]);
+    // Scene.activeCamera is a getter that returns the first camera flagged active; there is no setter.
+    camera.active = true;
+    scene.addNode(camera);
+
+    const sun = new cleo.LightNode('sun', new cleo.DirectionalLight({
+      diffuse: [1.0, 0.97, 0.9], specular: [1, 1, 1], ambient: [0.18, 0.19, 0.24],
+    }), true);
+    sun.setPosition([0, 1, 0]);
+    sun.setRotation([100, 25, 0]);
+    scene.addNode(sun);
+
+    // Cube: flat faces, sharp normals — a wrong stride turns it into spikes or nothing at all.
+    const cube = new cleo.ModelNode('cube', new cleo.Model(
+      cleo.Geometry.Cube(1.4, 1.4, 1.4),
+      cleo.Material.PBR({ baseColor: [0.85, 0.35, 0.25], metallic: 0.1, roughness: 0.45, textures: { baseColorTexture: 'checker' } }),
+    ));
+    cube.setPosition([-1.4, 0.7, 0]);
+    scene.addNode(cube);
+
+    // Sphere: smooth normals and a full UV sphere — catches a normal/uv swap that a cube can hide.
+    const sphere = new cleo.ModelNode('sphere', new cleo.Model(
+      cleo.Geometry.Sphere(48, 0.85),
+      cleo.Material.PBR({ baseColor: [0.3, 0.55, 0.9], metallic: 0.8, roughness: 0.25 }),
+    ));
+    sphere.setPosition([1.4, 0.85, 0]);
+    scene.addNode(sphere);
+
+    // A wide flat quad underneath, so shadows and the ground plane are visible.
+    const floor = new cleo.ModelNode('floor', new cleo.Model(
+      cleo.Geometry.Cube(8, 0.2, 8),
+      cleo.Material.PBR({ baseColor: [0.55, 0.55, 0.58], metallic: 0.0, roughness: 0.9, textures: { baseColorTexture: 'checker' } }),
+    ));
+    floor.setPosition([0, -0.2, 0]);
+    scene.addNode(floor);
+
+    // Four nodes SHARING one Model instance. The renderer groups by mesh|material object identity, so
+    // this is what drives _drawInstancedGroup -> setupInstanceMatrixBuffer, i.e. the per-instance mat4
+    // spread across attribute slots 5..8 that the shared layout binder now owns.
+    const shared = new cleo.Model(
+      cleo.Geometry.Cube(0.45, 0.45, 0.45),
+      cleo.Material.PBR({ baseColor: [0.95, 0.8, 0.2], metallic: 0.2, roughness: 0.5 }),
+    );
+    for (let i = 0; i < 4; i++) {
+      const n = new cleo.ModelNode('inst' + i, shared);
+      n.setPosition([-2.4 + i * 1.6, 0.25, -2.2]);
+      scene.addNode(n);
+    }
+
+    // A SKINNED mesh — the path that binds the dedicated bone-index and bone-weight buffers through
+    // vertexAttribIPointer. Nothing else in this scene reaches initializeAnimatedVAO, and a wrapper
+    // object passed where a raw WebGLBuffer was expected there threw only at runtime, only on a
+    // skinned draw, and only once a shadow cascade asked for one.
+    try {
+      const geo = cleo.Geometry.Cube(0.8, 2.2, 0.8);
+      const vertexCount = geo.positions.length / 3;
+      // Two joints, weighted purely to joint 0 so the pose is the bind pose and the draw is comparable.
+      const boneIds = new Int32Array(vertexCount * 4);
+      const weights = new Float32Array(vertexCount * 4);
+      for (let i = 0; i < vertexCount; i++) weights[i * 4] = 1;
+      const identity = () => cleo.Vec.mat4.create();
+      const skin = {
+        joints: [
+          { nodeIndex: 0, inverseBindMatrix: identity() },
+          { nodeIndex: 1, inverseBindMatrix: identity(), parentIndex: 0 },
+        ],
+        skeleton: 0,
+      };
+      const skinned = new cleo.AnimatedModel(geo, cleo.Material.PBR({ baseColor: [0.6, 0.85, 0.5], roughness: 0.6 }),
+                                             skin, boneIds, weights, []);
+      const skinnedNode = new cleo.ModelNode('skinned', skinned);
+      skinnedNode.setPosition([0, 1.1, -2.6]);
+      scene.addNode(skinnedNode);
+      window.__skinned = true;
+    } catch (e) {
+      window.__skinnedError = String((e && e.message) || e);
+    }
+
+    // A tilemap chunk — TileMesh owns its own buffers and its own vertex layout, and both moved during
+    // the RHI migration. Placed unrotated in the XY plane, which is the orientation the chunk-visibility
+    // test assumes; rotating the node flat is what made an earlier attempt cull every chunk.
+    try {
+      const tileset = cleo.gridTileset('tilecheck.ts', 'checker', 8, 8);
+      const tilemap = new cleo.Tilemap({ kind: 'orthogonal', cellWidth: 1, cellHeight: 1 });
+      tilemap.registerTileset(tileset);
+      tilemap.addLayer({ tilesetId: tileset.id });
+      for (let c = 0; c < 6; c++)
+        for (let r = 0; r < 4; r++)
+          tilemap.setTile(0, c, r, (c + r) % 8);
+      const mapNode = new cleo.TilemapNode('tiles', tilemap);
+      mapNode.setPosition([-6, 0.5, -4]);
+      scene.addNode(mapNode);
+      window.__tilemapInfo = () => {
+        const layer = tilemap.layers[0];
+        let cells = 0;
+        for (const chunk of layer.chunks.values()) cells += chunk.count;
+        return {
+          inScene: engine.scene ? engine.scene.tilemaps.size : -1,
+          layers: tilemap.layers.length,
+          tileset: !!tilemap.tilesetOf(0),
+          visible: layer.cfg.visible, opacity: layer.cfg.opacity,
+          chunks: layer.chunks.size, cells,
+        };
+      };
+    } catch (e) {
+      window.__tilemapError = String((e && e.message) || e);
+    }
+
+    engine.setScene(scene);
+    scene.start();
+    engine.isPaused = false;
+    engine.run();
+
+    // Cascade updates are STAGGERED by default (cascade 1 every 2nd frame, cascade 2 every 4th), so the
+    // number of shadow-caster draws in any single frame depends on the frame index. That makes a
+    // one-frame stat snapshot non-deterministic and useless for a before/after diff. Pin it.
+    engine.renderer.shadowStagger = false;
+
+    window.__stats = () => ({ ...cleo.frameStats });
+    window.__renderStats = () => ({ ...engine.renderer.stats });
+    window.__setExposure = (v) => { engine.renderer.exposure = v; };
+
+    // Assign renderer feature toggles by name, so the driver can walk a table of configurations without
+    // the page knowing which ones exist. Reports back what it actually set: a silently ignored key would
+    // otherwise make a pass look covered when it never ran.
+    window.__setRender = (patch) => {
+      const applied = [];
+      for (const key of Object.keys(patch)) {
+        if (!(key in engine.renderer)) continue;
+        engine.renderer[key] = patch[key];
+        applied.push(key);
+      }
+      return applied;
+    };
+    // Motion blur reprojects against the PREVIOUS frame's view matrix, so a static scene produces zero
+    // velocity and the pass, while it runs, changes nothing. Moving the camera by a fixed amount gives it
+    // something to blur — deterministically, unlike letting a controller drift.
+    window.__moveCamera = (dx, dy, dz) => {
+      camera.setPosition([4 + dx, 4 + dy, 4 + dz]);
+    };
+    // Continuous motion, driven per frame, for the one pass that needs it: a single nudge decays to zero
+    // velocity within a frame, long before capturePage can compose the result.
+    // Rate and amplitude are chosen so every capture lands near t=0, where sin() is close to linear and
+    // its DERIVATIVE — the velocity motion blur actually reprojects — is at its maximum and barely
+    // changing. A faster oscillation put captures at arbitrary phases, including the turning points where
+    // velocity is zero and the blur legitimately vanishes, which made the check fail about a third of the
+    // time for a reason that had nothing to do with the shader.
+    let motionHandle = null;
+    window.__startMotion = (amp) => {
+      let t = 0;
+      motionHandle = setInterval(() => { t += 0.006; camera.setPosition([4 + Math.sin(t) * amp, 4, 4]); }, 16);
+    };
+    window.__stopMotion = () => {
+      if (motionHandle) clearInterval(motionHandle);
+      motionHandle = null;
+      camera.setPosition([4, 4, 4]);
+    };
+    window.__renderState = (keys) => {
+      const out = {};
+      for (const k of keys) out[k] = engine.renderer[k];
+      return out;
+    };
+
+    // Real-driver compile of every custom-material prelude.
+    //
+    // The screen prelude is now GENERATED from an interface description so the ES and Vulkan dialects
+    // cannot drift apart. Generated text that reads correctly can still fail to compile — a declaration
+    // emitted after its first use, a dropped semicolon — and no unit test sees that, because unit tests
+    // have no GL driver. `tryCompileCustom` builds and links a real program, so calling it here is the
+    // only place that answer exists.
+    const CUSTOM_SOURCES = {
+      screen: {
+        uniforms: [
+          { name: 'intensity', type: 'float', value: 1 },
+          { name: 'tint', type: 'vec3', value: [1, 1, 1] },
+          { name: 'invert', type: 'bool', value: false },
+          { name: 'mask', type: 'sampler2D', value: '' },
+        ],
+        // Touches every built-in the screen prelude is documented to provide, so a name dropped while
+        // restructuring the prelude fails here rather than in somebody's project.
+        body: `
+vec4 fragment() {
+    vec3 c = texture(u_screenTexture, fragTexCoord).rgb;
+    float d = texture(u_depth, fragTexCoord).r;
+    vec3 w = reconstructWorldPos(fragTexCoord, d);
+    float fog = clamp(length(w - u_viewPos) / 100.0, 0.0, 1.0);
+    vec2 ct = fragTexCoord - 0.5;
+    float vig = 1.0 - dot(ct, ct) * u_intensity;
+    float pulse = 0.5 + 0.5 * sin(u_time * PI);
+    float sun = u_sunVisible * max(0.0, 1.0 - length(fragTexCoord - u_sunUV) * 8.0);
+    vec3 t = mix(c * vig, toLinear(u_tint), fog * 0.2);
+    t *= texture(u_mask, fragTexCoord * (u_resolution / u_resolution)).r;
+    if (u_invert) t = vec3(1.0) - t;
+    return vec4(toSrgb(t * u_exposure + sun * pulse + dot(u_sunDir, vec3(0.0, 1.0, 0.0)) * 0.0), 1.0);
+}
+`,
+      },
+      forward: {
+        uniforms: [
+          { name: 'base', type: 'vec3', value: [1, 1, 1] },
+          { name: 'metal', type: 'float', value: 0 },
+        ],
+        body: `
+vec4 fragment() {
+    vec3 n = getNormal();
+    float sh = shadowCalculation();
+    vec3 Lo = vec3(0.0);
+    accumulateLight(n, normalize(u_viewPos - fragPos), u_base, u_metal, 0.5,
+                    normalize(-u_dirLight.direction), u_dirLight.diffuse * sh, Lo);
+    float counts = float(u_numPointLights + u_numSpotlights);
+    return vec4(Lo + u_dirLight.ambient * u_base * counts * 0.0 + u_time * 0.0, 1.0);
+}
+`,
+      },
+      deferred: {
+        uniforms: [{ name: 'base', type: 'vec3', value: [1, 1, 1] }],
+        body: `
+void surface(inout Surface s) {
+    s.albedo = u_base;
+    s.normal = getNormal();
+    s.ao = 1.0;
+}
+`,
+      },
+      // Proves a failure is still reported rather than swallowed by the widened return shape.
+      broken: { uniforms: [], body: 'vec4 fragment() { return notAThing(); }' },
+    };
+
+    window.__compileCustomOne = (mode) => {
+      const spec = CUSTOM_SOURCES[mode];
+      const glMode = mode === 'broken' ? 'screen' : mode;
+      const r = cleo.tryCompileCustom(glMode, spec.body, spec.uniforms);
+      return {
+        ok: !!r.ok,
+        error: r.error ? String(r.error).slice(0, 600) : null,
+        hasWgsl: !!r.wgsl,
+        wgslError: r.wgslError ? String(r.wgslError).slice(0, 300) : null,
+      };
+    };
+
+    window.__compileCustom = () => {
+      const out = {};
+      for (const mode of Object.keys(CUSTOM_SOURCES)) out[mode] = window.__compileCustomOne(mode);
+      return out;
+    };
+
+    window.__ready = true;
+  } catch (e) {
+    window.__error = String((e && e.stack) || e);
+  }
+})();
+</script>
+</body>
+</html>

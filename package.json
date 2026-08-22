@@ -22,7 +22,10 @@
     "desktop:dev": "concurrently \"npm run watch\" \"npm run editor\" \"cd desktop && npm run dev\"",
     "desktop:build": "npm run build && npm run editor:build && cd desktop && npm run dist",
     "test:script-workspace": "cd desktop && npm run e2e:scripts",
-    "naga:build": "node tools/naga-wasm/build.mjs"
+    "naga:build": "node tools/naga-wasm/build.mjs",
+    "harness:mesh": "node desktop/node_modules/electron/cli.js tools/harness/meshCheck.js",
+    "harness:pass": "node desktop/node_modules/electron/cli.js tools/harness/passCheck.js",
+    "harness:naga": "node desktop/node_modules/electron/cli.js tools/harness/nagaCheck.js"
   },
   "author": "Ariel Riveros",
   "license": "ISC",

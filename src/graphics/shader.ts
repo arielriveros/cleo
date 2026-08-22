@@ -136,7 +136,7 @@ export class Shader {
             return;
         }
         uniform.value = value;
-        this._setUniform(uniform.info.location, uniform.info.type, value);
+        this._setUniform(uniform.info.location, uniform.info.type, value, uniform.info.size);
     }
 
     /**
@@ -150,10 +150,19 @@ export class Shader {
     /** Whether this program carries std140 blocks — i.e. whether it was generated from WGSL. */
     public get hasUniformBlocks(): boolean { return this._blocks !== null; }
 
-    private _setUniform(location: WebGLUniformLocation, type: string, value: any) {
+    /**
+     * `size` is the ARRAY length GL reported for this uniform, 1 for a scalar.
+     *
+     * It matters only for the types whose single-element form is not already a `*v` call: `uniform1f`
+     * sets one float, so a `float[4]` set through it would silently write only the first element and
+     * leave the rest at whatever they were. The vector and matrix cases below already take a typed
+     * array of any length, so an array of those needs no special handling.
+     */
+    private _setUniform(location: WebGLUniformLocation, type: string, value: any, size: number = 1) {
         switch (type) {
             case 'float':
-                gl.uniform1f(location, value);
+                if (size > 1) gl.uniform1fv(location, value);
+                else gl.uniform1f(location, value);
                 break;
     
             case 'vec2':
@@ -181,7 +190,8 @@ export class Shader {
                 break;
     
             case 'int':
-                gl.uniform1i(location, value);
+                if (size > 1) gl.uniform1iv(location, value);
+                else gl.uniform1i(location, value);
                 break;
     
             case 'ivec2':
@@ -197,7 +207,8 @@ export class Shader {
                 break;
     
             case 'bool':
-                gl.uniform1i(location, value);
+                if (size > 1) gl.uniform1iv(location, value);
+                else gl.uniform1i(location, value);
                 break;
     
             case 'bvec2':
@@ -228,7 +239,8 @@ export class Shader {
             case 'usampler3D':
             case 'usamplerCube':
             case 'usampler2DArray':
-                gl.uniform1i(location, value);
+                if (size > 1) gl.uniform1iv(location, value);
+                else gl.uniform1i(location, value);
                 break;
 
             default:
@@ -365,7 +377,7 @@ export class Shader {
                     throw new Error(`Uniform type ${type} not supported`);
             }
 
-            this._uniforms[name] = {
+            const entry = {
                 info: {
                     type: type,
                     size: size,
@@ -374,6 +386,21 @@ export class Shader {
                 },
                 value: defaultValue
             };
+            this._uniforms[name] = entry;
+
+            // GL reports an array uniform as `u_cascadeMatrices[0]`, and that is the only name
+            // `getUniformLocation` accepts — so filing it under just that name meant
+            // `setUniform('u_cascadeMatrices', …)` found nothing and silently did nothing. Callers
+            // worked around it by caching raw locations themselves, which then broke the moment a
+            // shader moved its arrays into a std140 block: `getUniformLocation` returns null for a
+            // block member, indistinguishable from an unused uniform. That is how SSAO came out
+            // uniformly unoccluded after ssao.fs became ssao.wgsl.
+            //
+            // Aliasing the stripped name onto the SAME entry makes the bare name work under either
+            // layout — loose array here, block member via UniformBlockSet, which registers the
+            // stripped name too.
+            const stripped = name.endsWith('[0]') ? name.slice(0, -3) : null;
+            if (stripped && !(stripped in this._uniforms)) this._uniforms[stripped] = entry;
         }
     }
 

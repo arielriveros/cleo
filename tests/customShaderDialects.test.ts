@@ -95,11 +95,31 @@ describe('assembleCustomFragment — ES 300 (WebGL2)', () => {
         const forward = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', []);
         expect(forward).toContain('#version 300 es');
         expect(forward).toContain('shadowCalculation');
-        expect(forward).toContain('void main() { fragColor = fragment(); }');
+        expect(forward).toContain('fragColor = fragment();');
 
         const deferred = assembleCustomFragment('deferred', 'void surface(inout Surface s) { s.ao = 1.0; }', []);
         expect(deferred).toContain('layout(location = 2) out vec4 gEmissiveAO;');
         expect(deferred).toContain('struct Surface');
+    });
+
+    it('still hands lit materials a TBN, now rebuilt from three varyings', () => {
+        // The transport changed (a mat3 is not a valid interface type outside GLSL ES) but the NAME did
+        // not, and must not: user source in saved projects reads `TBN` directly, and `getNormal()` is
+        // documented in terms of it. The reassembly has to happen before the user's function is called.
+        for (const mode of ['forward', 'deferred'] as const) {
+            const src = assembleCustomFragment(mode, 'vec4 fragment() { return vec4(getNormal(), 1.0); }', []);
+            expect(src, mode).toContain('in vec3 fragTangent;');
+            expect(src, mode).toContain('in vec3 fragBitangent;');
+            expect(src, mode).toContain('in vec3 fragNormal;');
+            expect(src, mode).not.toContain('in mat3 TBN;');
+            expect(src, mode).toContain('TBN = mat3(fragTangent, fragBitangent, fragNormal);');
+
+            // Assigned before the user's entry point is invoked, not after.
+            const assigned = src.indexOf('TBN = mat3(fragTangent');
+            const called = src.search(/(fragColor = fragment\(\)|surface\(s\))/);
+            expect(assigned, mode).toBeGreaterThan(-1);
+            expect(assigned, mode).toBeLessThan(called);
+        }
     });
 });
 

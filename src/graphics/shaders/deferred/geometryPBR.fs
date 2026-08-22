@@ -7,7 +7,14 @@ precision highp float;
 
 in vec3 fragPos;            // world-space position (unused here; lighting reconstructs from depth)
 in vec2 fragTexCoord;
-in mat3 TBN;
+in vec3 fragTangent;
+in vec3 fragBitangent;
+in vec3 fragNormal;
+
+// Reassembled from the three varyings at the top of main(), which is where it has to happen: GLSL ES
+// 300 forbids initialising a global from a varying, and TBN is read from inside helper functions as
+// well as from main, so it cannot just be a local.
+mat3 TBN;
 
 layout(location = 0) out vec4 gAlbedoMetallic;   // rgb = albedo, a = metallic
 layout(location = 1) out vec4 gNormalRoughness;  // rgb = world normal, a = roughness
@@ -49,6 +56,7 @@ vec3 getNormal() {
 }
 
 void main() {
+    TBN = mat3(fragTangent, fragBitangent, fragNormal);
     vec3 albedo = u_material.baseColor;
     if (u_material.hasBaseColorTexture)
         albedo *= pow(texture(u_material.baseColorTexture, fragTexCoord).rgb, vec3(2.2)); // sRGB -> linear
