@@ -1,4 +1,6 @@
 import { gl } from './glContext';
+import { device } from './rhi/webgl2/webgl2Device';
+import type { WebGL2Framebuffer } from './rhi/webgl2/webgl2Device';
 import { GLState } from './systems/glState';
 import { Logger } from '../core/logger';
 import { setViewportSize } from './renderStats';
@@ -15,14 +17,14 @@ import { Texture } from './texture';
  * cloud noise volume bake in Renderer, for the same reason.
  */
 export class LayeredDepthFramebuffer {
-    private readonly _id: WebGLFramebuffer;
+    private readonly _id: WebGL2Framebuffer;
     private _texture: Texture;
     private _size: number = 0;
     private _layers: number = 0;
     private _checked: boolean = false;
 
     constructor() {
-        this._id = gl.createFramebuffer() as WebGLFramebuffer;
+        this._id = device.createFramebuffer('layeredDepthFramebuffer');
         this._texture = new Texture({ usage: 'depth', target: 'texture2DArray', mipMap: false });
     }
 
@@ -43,18 +45,15 @@ export class LayeredDepthFramebuffer {
 
     /** Bind `layer` as the depth attachment and set the viewport to the map's resolution. */
     public bindLayer(layer: number): void {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this._id);
-        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, this._texture.texture, 0, layer);
+        this._id.bind();
+        this._id.attachDepthLayer(this._texture.texture, layer);
         // Depth-only: with no colour attachment, both draw and read buffers must be explicitly NONE
-        // or the framebuffer is incomplete.
-        gl.drawBuffers([gl.NONE]);
-        gl.readBuffer(gl.NONE);
+        // or the framebuffer is incomplete. setDrawBuffers(0) does the pair.
+        this._id.setDrawBuffers(0);
 
         if (!this._checked) {
             this._checked = true;
-            const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-            if (status !== gl.FRAMEBUFFER_COMPLETE)
-                Logger.error(`Layered depth framebuffer incomplete: ${status}`, 'LayeredDepthFramebuffer');
+            this._id.checkStatus('bindLayer');
         }
 
         gl.viewport(0, 0, this._size, this._size);
@@ -95,7 +94,7 @@ export class LayeredDepthFramebuffer {
 
     public delete(): void {
         this._texture.delete();
-        gl.deleteFramebuffer(this._id);
+        this._id.destroy();
     }
 
     public get texture(): Texture { return this._texture; }

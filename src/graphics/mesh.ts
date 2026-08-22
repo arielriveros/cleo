@@ -2,7 +2,16 @@ import { gl } from './glContext';
 import type { PrimitiveTopology } from './rhi/types';
 import { glTopology, isTriangleTopology } from './rhi/webgl2/glEnums';
 import { applyVertexLayout, clearVertexLayout } from './rhi/webgl2/vertexArray';
-import { MODEL_VERTEX_LAYOUT, packedModelLayout, instanceMatrixLayout, isModelAttribute } from './rhi/vertexLayouts';
+// The backend buffer type, not the RHI `Buffer` interface: Mesh still builds its own VAO, which is a
+// WebGL2-only construct that needs the raw handle. It becomes `Buffer` once render pipelines take over
+// vertex-layout ownership and the VAO disappears (M5).
+import { device } from './rhi/webgl2/webgl2Device';
+import type { WebGL2Buffer as GpuBuffer } from './rhi/webgl2/webgl2Device';
+import { BufferUsage } from './rhi/types';
+import {
+    MODEL_VERTEX_LAYOUT, BONE_INDEX_LAYOUT, BONE_WEIGHT_LAYOUT,
+    packedModelLayout, instanceMatrixLayout, isModelAttribute,
+} from './rhi/vertexLayouts';
 import { GLState } from './systems/glState';
 import { frameStats } from './renderStats';
 import { createIndexArray, glTypeFor } from './indexFormat';
@@ -18,10 +27,10 @@ function asF32(data: VertexData): Float32Array {
 
 export class Mesh {
     private _vertexArray: WebGLVertexArrayObject;
-    private _vertexBuffer: WebGLBuffer;
-    private _indexBuffer: WebGLBuffer | null;
-    private _boneIndicesBuffer: WebGLBuffer | null;
-    private _boneWeightsBuffer: WebGLBuffer | null;
+    private _vertexBuffer: GpuBuffer;
+    private _indexBuffer: GpuBuffer | null;
+    private _boneIndicesBuffer: GpuBuffer | null;
+    private _boneWeightsBuffer: GpuBuffer | null;
     private _vertexCount: number;
     private _indexCount: number;
     // GL element type of _indexBuffer — UNSIGNED_SHORT or UNSIGNED_INT, chosen per upload by index range.
@@ -29,7 +38,7 @@ export class Mesh {
     private _indexType: number;
     private _isAnimated: boolean;
     // Alternate index buffers over the SAME vertex buffer (level 0 = the base one). Terrain LOD only.
-    private _lodBuffers: WebGLBuffer[] = [];
+    private _lodBuffers: GpuBuffer[] = [];
     private _lodCounts: number[] = [];
     // Element type per LOD level, parallel to _lodCounts. Levels index the same vertex buffer as the base,
     // so they can never need a wider type than it — but create() does not keep the base index array, so a
@@ -40,7 +49,9 @@ export class Mesh {
 
     constructor() {
         this._vertexArray = gl.createVertexArray() as WebGLVertexArrayObject;
-        this._vertexBuffer = gl.createBuffer() as WebGLBuffer;
+        // VERTEX | COPY_DST: the geometry is written after creation, and terrain sculpting rewrites it
+        // in place through updateVertexData — which is also what earns it a DYNAMIC_DRAW hint.
+        this._vertexBuffer = device.createBuffer({ label: 'mesh.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
         this._indexBuffer = null;
         this._boneIndicesBuffer = null;
         this._boneWeightsBuffer = null;
@@ -53,9 +64,8 @@ export class Mesh {
     public create(vertices: VertexData, vertex_count: number, indices: IndexData | null = null): Mesh {
         GLState.bindVAO(this._vertexArray);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
         // No copy when the caller already has a Float32Array — which Geometry.getData now returns.
-        gl.bufferData(gl.ARRAY_BUFFER, asF32(vertices), gl.STATIC_DRAW);
+        device.reallocateBuffer(this._vertexBuffer, asF32(vertices));
         this._vertexCount = vertex_count;
 
         // `indices.length`, not just `indices`: an empty array is truthy, so a geometry with no indices
@@ -64,9 +74,8 @@ export class Mesh {
         if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
             this._indexType = glTypeFor(data);
-            this._indexBuffer = gl.createBuffer() as WebGLBuffer;
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._indexBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data, gl.STATIC_DRAW);
+            this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX });
+            device.reallocateBuffer(this._indexBuffer, data);
             this._indexCount = indices.length;
         }
 
@@ -81,8 +90,7 @@ export class Mesh {
      * so the buffer size is unchanged. Used for dynamically deforming meshes (e.g. terrain sculpting).
      */
     public updateVertexData(vertices: VertexData): void {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, asF32(vertices));
+        device.writeBuffer(this._vertexBuffer, 0, asF32(vertices));
     }
 
     public createAnimated(
@@ -95,19 +103,18 @@ export class Mesh {
         GLState.bindVAO(this._vertexArray);
         
         // Create and bind main vertex buffer (positions, normals, uvs, tangents, bitangents)
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        device.reallocateBuffer(this._vertexBuffer, new Float32Array(vertices));
         this._vertexCount = vertex_count;
 
         // Create and bind bone indices buffer
-        this._boneIndicesBuffer = gl.createBuffer() as WebGLBuffer;
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._boneIndicesBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Int32Array(boneIndices), gl.STATIC_DRAW);
+        const boneIndexData = new Int32Array(boneIndices);
+        this._boneIndicesBuffer = device.createBuffer({ label: 'mesh.boneIndices', size: 0, usage: BufferUsage.VERTEX });
+        device.reallocateBuffer(this._boneIndicesBuffer, boneIndexData);
 
         // Create and bind bone weights buffer
-        this._boneWeightsBuffer = gl.createBuffer() as WebGLBuffer;
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._boneWeightsBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(boneWeights), gl.STATIC_DRAW);
+        const boneWeightData = new Float32Array(boneWeights);
+        this._boneWeightsBuffer = device.createBuffer({ label: 'mesh.boneWeights', size: 0, usage: BufferUsage.VERTEX });
+        device.reallocateBuffer(this._boneWeightsBuffer, boneWeightData);
 
         // `indices.length`, not just `indices`: an empty array is truthy, so a geometry with no indices
         // used to allocate a zero-length index buffer that no draw could ever use — and that nothing frees.
@@ -115,9 +122,8 @@ export class Mesh {
         if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
             this._indexType = glTypeFor(data);
-            this._indexBuffer = gl.createBuffer() as WebGLBuffer;
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._indexBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data, gl.STATIC_DRAW);
+            this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX });
+            device.reallocateBuffer(this._indexBuffer, data);
             this._indexCount = indices.length;
         }
 
@@ -138,15 +144,14 @@ export class Mesh {
         // before uploading: doing it with another mesh's VAO bound would rewrite that mesh's index binding.
         GLState.bindVAO(this._vertexArray);
 
-        for (let i = 1; i < this._lodBuffers.length; i++) gl.deleteBuffer(this._lodBuffers[i]);
+        for (let i = 1; i < this._lodBuffers.length; i++) this._lodBuffers[i].destroy();
         this._lodBuffers = [this._indexBuffer];
         this._lodCounts = [this._indexCount];
         this._lodTypes = [this._indexType];
         for (const indices of levels) {
             const data = createIndexArray(indices);
-            const buffer = gl.createBuffer() as WebGLBuffer;
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data, gl.STATIC_DRAW);
+            const buffer = device.createBuffer({ label: 'mesh.lodIndices', size: 0, usage: BufferUsage.INDEX });
+            device.reallocateBuffer(buffer, data);
             this._lodBuffers.push(buffer);
             this._lodCounts.push(indices.length);
             this._lodTypes.push(glTypeFor(data));
@@ -155,7 +160,7 @@ export class Mesh {
 
         // Leave this VAO pointing at a valid index buffer (the uploads left the last level bound); every
         // subsequent draw re-binds the selected level anyway, since `hasLods` is now true.
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod]);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod].handle);
         GLState.bindVAO(null);
     }
 
@@ -174,16 +179,16 @@ export class Mesh {
         // Level 0 aliases _indexBuffer, so start at 1 — deleting it here and again below is harmless
         // (deleteBuffer on an already-deleted buffer is a no-op) but the aliasing is worth being explicit
         // about, since _lodBuffers[0] === _indexBuffer is load-bearing elsewhere.
-        for (let i = 1; i < this._lodBuffers.length; i++) gl.deleteBuffer(this._lodBuffers[i]);
+        for (let i = 1; i < this._lodBuffers.length; i++) this._lodBuffers[i].destroy();
         this._lodBuffers = [];
         this._lodCounts = [];
         this._lodTypes = [];
         this._lod = 0;
 
-        if (this._indexBuffer) { gl.deleteBuffer(this._indexBuffer); this._indexBuffer = null; }
-        if (this._boneIndicesBuffer) { gl.deleteBuffer(this._boneIndicesBuffer); this._boneIndicesBuffer = null; }
-        if (this._boneWeightsBuffer) { gl.deleteBuffer(this._boneWeightsBuffer); this._boneWeightsBuffer = null; }
-        if (this._vertexBuffer) { gl.deleteBuffer(this._vertexBuffer); this._vertexBuffer = null!; }
+        if (this._indexBuffer) { this._indexBuffer.destroy(); this._indexBuffer = null; }
+        if (this._boneIndicesBuffer) { this._boneIndicesBuffer.destroy(); this._boneIndicesBuffer = null; }
+        if (this._boneWeightsBuffer) { this._boneWeightsBuffer.destroy(); this._boneWeightsBuffer = null; }
+        if (this._vertexBuffer) { this._vertexBuffer.destroy(); this._vertexBuffer = null!; }
 
         if (this._vertexArray) {
             // Same trap as the shader program: GLState dedupes bindVertexArray by identity, so a deleted
@@ -210,7 +215,7 @@ export class Mesh {
         // With LODs, the element binding is VAO state that the last draw may have left on another level,
         // so the selected level's buffer is (re)bound every draw.
         if (this.hasLods) {
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod]);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod].handle);
             const lodCount = this._lodCounts[this._lod];
             gl.drawElements(mode, lodCount, this._lodTypes[this._lod], 0);
             frameStats.drawCalls++;
@@ -240,7 +245,7 @@ export class Mesh {
     public drawRange(indexOffset: number, indexCount: number, topology: PrimitiveTopology = 'triangle-list'): void {
         if (indexCount <= 0 || !this._indexBuffer || this._indexCount <= 0) return;
         GLState.bindVAO(this._vertexArray);
-        if (this.hasLods) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[0]);
+        if (this.hasLods) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[0].handle);
         const bytesPerIndex = this._indexType === gl.UNSIGNED_SHORT ? 2 : 4;
         gl.drawElements(glTopology(topology), indexCount, this._indexType, indexOffset * bytesPerIndex);
         frameStats.drawCalls++;
@@ -273,7 +278,7 @@ export class Mesh {
         // The order is the layout's, NOT the shader's reflected enumeration — that is driver- and
         // program-dependent, and trusting it would interleave the same mesh differently for, say, the
         // 'default' and 'pbr' programs. See rhi/vertexLayouts.ts.
-        applyVertexLayout(packedModelLayout(attributes), this._vertexBuffer);
+        applyVertexLayout(packedModelLayout(attributes), this._vertexBuffer.handle);
 
         // Fallback for any non-standard attribute: trust the reflected layout.
         for (const attr of attributes) {
@@ -306,7 +311,7 @@ export class Mesh {
             attributes: MODEL_VERTEX_LAYOUT.attributes
                 .filter(a => declared.has(a.name))
                 .map(a => ({ ...a, shaderLocation: declared.get(a.name) as number })),
-        }, this._vertexBuffer);
+        }, this._vertexBuffer.handle);
 
         // Fallback for anything unexpected: trust the reflected layout, as the non-animated path does.
         for (const attr of attributes) {
@@ -325,19 +330,22 @@ export class Mesh {
             else if (attr.name === 'a_weights') weightsLocation = attr.location;
         }
 
-        // Set up bone indices attribute (integers)
-        if (boneIdsLocation >= 0) {
-            gl.bindBuffer(gl.ARRAY_BUFFER, this._boneIndicesBuffer);
-            gl.enableVertexAttribArray(boneIdsLocation);
-            gl.vertexAttribIPointer(boneIdsLocation, 4, gl.INT, 0, 0);
-        }
+        // The bone attributes ride in dedicated buffers, so each is its own single-attribute layout at
+        // the location this program reflected. Indices go through the INTEGER pointer — that is what
+        // BONE_INDEX_LAYOUT's sint32x4 selects inside applyVertexLayout, and routing them through the
+        // float path would convert the bits rather than reinterpret them, skinning every vertex to
+        // joint 0.
+        if (boneIdsLocation >= 0)
+            applyVertexLayout(
+                { ...BONE_INDEX_LAYOUT, attributes: [{ ...BONE_INDEX_LAYOUT.attributes[0], shaderLocation: boneIdsLocation }] },
+                this._boneIndicesBuffer.handle,
+            );
 
-        // Set up bone weights attribute (floats)
-        if (weightsLocation >= 0) {
-            gl.bindBuffer(gl.ARRAY_BUFFER, this._boneWeightsBuffer);
-            gl.enableVertexAttribArray(weightsLocation);
-            gl.vertexAttribPointer(weightsLocation, 4, gl.FLOAT, false, 0, 0);
-        }
+        if (weightsLocation >= 0)
+            applyVertexLayout(
+                { ...BONE_WEIGHT_LAYOUT, attributes: [{ ...BONE_WEIGHT_LAYOUT.attributes[0], shaderLocation: weightsLocation }] },
+                this._boneWeightsBuffer.handle,
+            );
 
         GLState.bindVAO(null);
     }
@@ -347,11 +355,11 @@ export class Mesh {
      * at attribute locations baseLocation..baseLocation+3, advancing once per instance. The caller
      * is responsible for uploading matrices to `buffer` before drawing with `drawInstanced`.
      */
-    public setupInstanceMatrixBuffer(buffer: WebGLBuffer, baseLocation: number = 5): void {
+    public setupInstanceMatrixBuffer(buffer: GpuBuffer, baseLocation: number = 5): void {
         GLState.bindVAO(this._vertexArray);
         // Neither API has a mat4 vertex format; both consume one as four consecutive vec4 slots. The
         // per-instance divisor comes from the layout's stepMode.
-        applyVertexLayout(instanceMatrixLayout(baseLocation), buffer);
+        applyVertexLayout(instanceMatrixLayout(baseLocation), buffer.handle);
     }
 
     /**
@@ -365,6 +373,8 @@ export class Mesh {
     }
 
     public get vertexArray(): WebGLVertexArrayObject { return this._vertexArray; }
-    public get vertexBuffer(): WebGLBuffer { return this._vertexBuffer; }
+    /** The device-owned vertex buffer. Was declared as a raw WebGLBuffer, which the empty-interface
+     *  structural match let through even after the field became a wrapper. */
+    public get vertexBuffer(): GpuBuffer { return this._vertexBuffer; }
     public get isAnimated(): boolean { return this._isAnimated; }
 }

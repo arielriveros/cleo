@@ -1,4 +1,7 @@
 import { gl } from './glContext';
+import { device } from './rhi/webgl2/webgl2Device';
+import type { ColorAttachmentDescriptor } from './rhi/types';
+import type { WebGL2Framebuffer } from './rhi/webgl2/webgl2Device';
 import { Texture, TextureConfig } from './texture';
 import { Logger } from '../core/logger';
 import { setViewportSize } from './renderStats';
@@ -16,7 +19,9 @@ interface FrameBufferOptions {
 }
 
 export class Framebuffer {
-    private _id!: number;
+    // Was typed `number` and cast through `unknown` to WebGLFramebuffer at the getter — a lie the
+    // compiler could not catch. The device hands back a real object with a real lifetime.
+    private _id: WebGL2Framebuffer;
     private _width: number;
     private _height: number;
     private _colors: Texture[];
@@ -24,7 +29,7 @@ export class Framebuffer {
     private _options: FrameBufferOptions;
 
     constructor(options?: FrameBufferOptions) {
-        this._id = gl.createFramebuffer() as number;
+        this._id = device.createFramebuffer('framebuffer');
         this._width = 0;
         this._height = 0;
         this._options = {
@@ -48,7 +53,7 @@ export class Framebuffer {
         this._depth.delete();
         this._depth = new Texture({ usage: 'depth', mipMap: false });
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this._id);
+        this._id.bind();
 
         const numColorAttachments = this._options.colorAttachments as number;
         const usage = this._options.usage;
@@ -56,37 +61,26 @@ export class Framebuffer {
         for (let i = 0; i < numColorAttachments; i++) {
             this._colors.push(new Texture(this._options.colorTextureOptions));
             this._colors[i].create(null, width, height);
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, this._colors[i].texture, 0);
+            this._id.attachColor2D(i, this._colors[i].texture);
         }
 
-        if (usage === 'color') { 
-            const colorAttachments = [];
-            for (let i = 0; i < numColorAttachments; i++)
-                colorAttachments.push(gl.COLOR_ATTACHMENT0 + i);
-            gl.drawBuffers(colorAttachments);
-        }
+        if (usage === 'color') this._id.setDrawBuffers(numColorAttachments);
 
         if (this._options.depth !== false) {
             this._depth.create(null, width, height);
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this._depth.texture, 0);
+            this._id.attachDepth2D(this._depth.texture);
         }
 
-        if (usage === 'depth') {
-            gl.drawBuffers([gl.NONE]);
-            gl.readBuffer(gl.NONE);
-        }
+        if (usage === 'depth') this._id.setDrawBuffers(0);
 
-        const framebufferStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        if (framebufferStatus !== gl.FRAMEBUFFER_COMPLETE) {
-            Logger.print('error', ['Framebuffer is not complete:', framebufferStatus], 'Renderer');
-        }
+        this._id.checkStatus('create');
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         return this;
     }
 
     public bind(): Framebuffer {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this._id);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this._id.handle);
         gl.viewport(0, 0, this._width, this._height);
         setViewportSize(this._width, this._height);
 
@@ -112,7 +106,42 @@ export class Framebuffer {
         this.recreate();
     }
 
-    public get framebuffer(): WebGLFramebuffer { return this._id as unknown as WebGLFramebuffer; }
+    public get framebuffer(): WebGLFramebuffer { return this._id.handle; }
+
+    /**
+     * Open a render pass on this target: bind it, set the viewport, and clear what was asked for.
+     *
+     * The pass boundary, in one call. `bind()` and `gl.clear()` were only ever adjacent by convention,
+     * and nothing stopped a pass binding and forgetting to clear — which produced a frame of the
+     * previous pass's contents rather than an error.
+     *
+     * The descriptor names every colour attachment this framebuffer actually has, not just slot 0:
+     * `gl.clear` clears them all, and a descriptor that claimed otherwise would be a lie the WebGPU
+     * backend would then faithfully implement as something different.
+     */
+    public beginPass(label: string, clear: { color?: boolean; depth?: boolean } = {}): void {
+        const colorAttachments: ColorAttachmentDescriptor[] = [];
+        for (let i = 0; i < this._colors.length; i++)
+            colorAttachments.push({ target: i, loadOp: clear.color ? 'clear' : 'load', storeOp: 'store' });
+        device.beginRenderPass(
+            { framebuffer: this._id, width: this._width, height: this._height },
+            {
+                label,
+                colorAttachments,
+                depthAttachment: this._options.depth !== false
+                    ? { loadOp: clear.depth ? 'clear' : 'load', storeOp: 'store' }
+                    : undefined,
+            },
+        );
+    }
+
+    /** Release the framebuffer object and every attachment it owns. */
+    public destroy(): void {
+        for (const color of this._colors) color.delete();
+        this._colors = [];
+        this._depth.delete();
+        this._id.destroy();
+    }
     public get colors(): Texture[] { return this._colors; }
     public get depth(): Texture { return this._depth; }
     public get width(): number { return this._width; }

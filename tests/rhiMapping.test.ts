@@ -3,12 +3,13 @@ import {
     GL_ENUMS, glTopology, isTriangleTopology, glCompare, glBlendFactor, glBlendOperation,
     glCullMode, glFrontFace, glAddressMode, glMagFilter, glMinFilter,
     glIndexType, indexByteSize, glTextureTarget, glTextureFormat, glVertexFormat,
+    glBufferTarget, glBufferUsageHint,
 } from '../src/graphics/rhi/webgl2/glEnums';
 import {
     MODEL_VERTEX_LAYOUT, TILE_VERTEX_LAYOUT, packedModelLayout, instanceMatrixLayout, isModelAttribute,
 } from '../src/graphics/rhi/vertexLayouts';
 import { resolveTextureFormat } from '../src/graphics/rhi/textureFormat';
-import { vertexFormatSize } from '../src/graphics/rhi/types';
+import { vertexFormatSize, BufferUsage } from '../src/graphics/rhi/types';
 
 // The RHI's translation layer. Everything here is pure, so it is reachable from the DOM-free suite —
 // which matters because a wrong entry in one of these tables does not throw, it renders the wrong
@@ -147,6 +148,34 @@ describe('glEnums — buffers and textures', () => {
         expect(glVertexFormat('unorm8x4').integer).toBe(false);
         expect(glVertexFormat('uint8x4').normalized).toBe(false);
         expect(glVertexFormat('uint8x4').integer).toBe(true);
+    });
+});
+
+describe('buffer usage mapping', () => {
+    // WebGL2 has no usage mask — a buffer belongs to a target — so a usage naming several roles has to
+    // pick one, and index has to win. ELEMENT_ARRAY_BUFFER is VAO state: binding an index buffer to
+    // ARRAY_BUFFER instead does not error, it silently draws from the wrong memory.
+    it('resolves index before vertex before uniform', () => {
+        expect(glBufferTarget(BufferUsage.INDEX)).toBe(GL_ENUMS.ELEMENT_ARRAY_BUFFER);
+        expect(glBufferTarget(BufferUsage.VERTEX)).toBe(GL_ENUMS.ARRAY_BUFFER);
+        expect(glBufferTarget(BufferUsage.UNIFORM)).toBe(GL_ENUMS.UNIFORM_BUFFER);
+        expect(glBufferTarget(BufferUsage.INDEX | BufferUsage.VERTEX)).toBe(GL_ENUMS.ELEMENT_ARRAY_BUFFER);
+        expect(glBufferTarget(BufferUsage.VERTEX | BufferUsage.UNIFORM)).toBe(GL_ENUMS.ARRAY_BUFFER);
+    });
+
+    // A copy-only buffer must NOT land on ARRAY_BUFFER: binding it there would clobber whatever vertex
+    // binding was live at the time.
+    it('parks a copy-only buffer on a neutral target', () => {
+        const target = glBufferTarget(BufferUsage.COPY_SRC | BufferUsage.COPY_DST);
+        expect(target).toBe(GL_ENUMS.COPY_READ_BUFFER);
+        expect(target).not.toBe(GL_ENUMS.ARRAY_BUFFER);
+    });
+
+    // COPY_DST is the "this gets rewritten" signal, since WebGPU has no draw hints to carry across.
+    it('derives the draw hint from COPY_DST', () => {
+        expect(glBufferUsageHint(BufferUsage.VERTEX)).toBe(GL_ENUMS.STATIC_DRAW);
+        expect(glBufferUsageHint(BufferUsage.INDEX)).toBe(GL_ENUMS.STATIC_DRAW);
+        expect(glBufferUsageHint(BufferUsage.VERTEX | BufferUsage.COPY_DST)).toBe(GL_ENUMS.DYNAMIC_DRAW);
     });
 });
 

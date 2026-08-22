@@ -16,7 +16,9 @@
 import type {
     PrimitiveTopology, CompareFunction, BlendFactor, BlendOperation, CullMode, FrontFace,
     AddressMode, FilterMode, IndexFormat, TextureFormat, TextureDimension, VertexFormat,
+    BufferUsageFlags,
 } from '../types';
+import { BufferUsage } from '../types';
 
 // ------------------------------------------------------------------------------------------------
 // Raw WebGL2 enum values
@@ -63,6 +65,11 @@ const GL = {
 
     // Pixel formats
     DEPTH_COMPONENT: 0x1902, RED: 0x1903, RGBA: 0x1908,
+
+    // Buffer targets and usage hints
+    ARRAY_BUFFER: 0x8892, ELEMENT_ARRAY_BUFFER: 0x8893, UNIFORM_BUFFER: 0x8A11,
+    COPY_READ_BUFFER: 0x8F36, COPY_WRITE_BUFFER: 0x8F37,
+    STATIC_DRAW: 0x88E4, DYNAMIC_DRAW: 0x88E8, STREAM_DRAW: 0x88E0,
 
     // Sized internal formats
     R8: 0x8229, R16F: 0x822D,
@@ -238,3 +245,37 @@ const VERTEX_FORMAT: Readonly<Record<VertexFormat, GlVertexFormat>> = {
 };
 
 export function glVertexFormat(format: VertexFormat): GlVertexFormat { return VERTEX_FORMAT[format]; }
+
+// ------------------------------------------------------------------------------------------------
+// Buffers
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * The GL target a buffer of this usage should be bound to.
+ *
+ * WebGL2 has no usage mask — a buffer belongs to a target — so a usage that names several roles has to
+ * pick one. Index beats vertex beats uniform, because ELEMENT_ARRAY_BUFFER is the binding that is
+ * actually load-bearing: it is VAO state, and getting it wrong silently draws from the wrong memory.
+ * A buffer that genuinely needs two roles is a WebGPU-only construct and should be two buffers here.
+ *
+ * COPY_READ_BUFFER is the neutral landing spot for a buffer that is only ever a copy source or
+ * destination: binding it to ARRAY_BUFFER instead would clobber whatever vertex binding was live.
+ */
+export function glBufferTarget(usage: BufferUsageFlags): number {
+    if (usage & BufferUsage.INDEX) return GL.ELEMENT_ARRAY_BUFFER;
+    if (usage & BufferUsage.VERTEX) return GL.ARRAY_BUFFER;
+    if (usage & BufferUsage.UNIFORM) return GL.UNIFORM_BUFFER;
+    return GL.COPY_READ_BUFFER;
+}
+
+/**
+ * The draw hint for a buffer of this usage.
+ *
+ * WebGPU has no equivalent — it infers access patterns from the usage flags alone — so the hint is
+ * derived rather than passed in, keeping the descriptor WebGPU-shaped. `COPY_DST` is the signal: a
+ * buffer declared writable is one the engine intends to rewrite (instance matrices every frame, a
+ * tilemap chunk on every edit), and everything else is uploaded once at creation.
+ */
+export function glBufferUsageHint(usage: BufferUsageFlags): number {
+    return (usage & BufferUsage.COPY_DST) ? GL.DYNAMIC_DRAW : GL.STATIC_DRAW;
+}

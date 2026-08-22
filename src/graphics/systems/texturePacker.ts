@@ -1,4 +1,6 @@
 import { gl } from "../glContext";
+import { device } from '../rhi/webgl2/webgl2Device';
+import type { WebGL2Framebuffer } from '../rhi/webgl2/webgl2Device';
 import { Texture } from "../texture";
 import { Shader } from "../shader";
 import { Mesh } from "../mesh";
@@ -83,7 +85,7 @@ export class TexturePacker {
      */
     private _bindings: WeakMap<Material, Binding> = new WeakMap();
 
-    private _fbo: WebGLFramebuffer | null = null;
+    private _fbo: WebGL2Framebuffer | null = null;
     private _quad: Mesh | null = null;
     private _placeholder: string | null = null;
     private _lastSweep: number = 0;
@@ -332,16 +334,13 @@ export class TexturePacker {
             break;
         }
 
-        if (!this._fbo) {
-            this._fbo = gl.createFramebuffer();
-            if (!this._fbo) { Logger.error('Could not create the channel-pack framebuffer', 'TexturePacker'); return null; }
-        }
+        if (!this._fbo) this._fbo = device.createFramebuffer('channelPack');
 
         const output = new Texture({ mipMap: true, precision: 'low', wrapping });
         output.create(null, width, height);
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this._fbo);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, output.texture, 0);
+        this._fbo.bind();
+        this._fbo.attachColor2D(0, output.texture);
         // Worth checking: an incomplete framebuffer drops the draw silently and the texture keeps
         // whatever texImage2D left in it, which reads as a plausible-looking flat material.
         const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);

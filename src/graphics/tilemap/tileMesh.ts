@@ -18,6 +18,9 @@ import { GLState } from '../../graphics/systems/glState';
 import { frameStats } from '../../graphics/renderStats';
 import { TILE_VERTEX_LAYOUT } from '../rhi/vertexLayouts';
 import { applyVertexLayout } from '../rhi/webgl2/vertexArray';
+import { device } from '../rhi/webgl2/webgl2Device';
+import type { WebGL2Buffer } from '../rhi/webgl2/webgl2Device';
+import { BufferUsage } from '../rhi/types';
 import { GridSpec, cellSortY, cellToWorld } from './cellMath';
 import { CELL_EMPTY, CHUNK_SIZE, TileChunk, cellFlipX, cellFlipY, cellRot90, cellTile } from './chunk';
 import type { TilemapLayer } from './tilemapLayer';
@@ -57,8 +60,8 @@ interface AnimatedRef {
 
 export class TileMesh {
     private _vao: WebGLVertexArrayObject | null = null;
-    private _vbo: WebGLBuffer | null = null;
-    private _ibo: WebGLBuffer | null = null;
+    private _vbo: WebGL2Buffer | null = null;
+    private _ibo: WebGL2Buffer | null = null;
     private _indexCount = 0;
     private _vertexCount = 0;
     private _bands: DepthBand[] = [];
@@ -179,19 +182,19 @@ export class TileMesh {
     private _upload(verts: Float32Array, indices: Uint16Array): void {
         if (!this._vao) {
             this._vao = gl.createVertexArray();
-            this._vbo = gl.createBuffer();
-            this._ibo = gl.createBuffer();
+            // COPY_DST on the vertex buffer: an animated chunk rewrites its UVs every frame through
+            // `advanceAnimation`, which is what earns it a DYNAMIC_DRAW hint. Indices never change.
+            this._vbo = device.createBuffer({ label: 'tileChunk.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+            this._ibo = device.createBuffer({ label: 'tileChunk.indices', size: 0, usage: BufferUsage.INDEX });
         }
         GLState.bindVAO(this._vao);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._vbo);
-        gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+        device.reallocateBuffer(this._vbo as WebGL2Buffer, verts);
 
         // The layout is still this chunk's own — a tilemap vertex really is position/uv/colour, not the
         // model vertex — but the attribute binding is no longer a private copy of the same six calls.
-        applyVertexLayout(TILE_VERTEX_LAYOUT, this._vbo as WebGLBuffer);
+        applyVertexLayout(TILE_VERTEX_LAYOUT, (this._vbo as WebGL2Buffer).handle);
 
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._ibo);
-        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+        device.reallocateBuffer(this._ibo as WebGL2Buffer, indices);
         GLState.bindVAO(null);
     }
 
@@ -221,8 +224,7 @@ export class TileMesh {
             }
         }
         GLState.bindVAO(this._vao);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._vbo);
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._verts);
+        device.writeBuffer(this._vbo as WebGL2Buffer, 0, this._verts);
         GLState.bindVAO(null);
     }
 
@@ -246,8 +248,8 @@ export class TileMesh {
     }
 
     public dispose(): void {
-        if (this._ibo) { gl.deleteBuffer(this._ibo); this._ibo = null; }
-        if (this._vbo) { gl.deleteBuffer(this._vbo); this._vbo = null; }
+        if (this._ibo) { this._ibo.destroy(); this._ibo = null; }
+        if (this._vbo) { this._vbo.destroy(); this._vbo = null; }
         if (this._vao) {
             // GLState dedupes bindVertexArray by identity, so a deleted VAO left in its cache would make
             // the next bind of that handle a silent no-op.

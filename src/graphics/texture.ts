@@ -1,31 +1,23 @@
-import { gl } from "./glContext";
 import { GLState } from "./systems/glState";
 import { bytesToDataUrl } from "../core/base64";
 import { Logger } from "../core/logger";
 import { resolveTextureFormat } from "./rhi/textureFormat";
-import { glTextureFormat, glTextureTarget } from "./rhi/webgl2/glEnums";
-import type { TextureFormat, TextureDimension } from "./rhi/types";
+import { glTextureFormat, glTextureTarget, glAddressMode, glMinFilter } from "./rhi/webgl2/glEnums";
+import { device } from "./rhi/webgl2/webgl2Device";
+import { WebGL2Texture } from "./rhi/webgl2/webgl2Device";
+import { TextureUsage } from "./rhi/types";
+import type { TextureFormat, TextureDimension, AddressMode } from "./rhi/types";
 
 /**
- * Float-texture capability, resolved once per context.
+ * Float-texture capability, as the device reported it at boot.
  *
- * This used to be two `getExtension` calls in the `Texture` constructor, i.e. on every single texture
- * the engine ever allocates. The result cannot change for the lifetime of a context, so it is cached —
- * keyed on the context object itself, so acquiring a new one (which `Renderer.initialize` can now do)
- * re-resolves rather than inheriting the previous device's answer.
+ * This used to be two `getExtension` calls in the `Texture` constructor — on every single texture the
+ * engine ever allocated. The device resolves both once while acquiring the context and publishes them
+ * through {@link DeviceCapabilities}, so this is now a field read.
  */
-let floatSupportContext: WebGL2RenderingContext | null = null;
-let floatSupportCache = { floatRenderable: false, floatFilterable: false };
-
 function floatSupport(): { floatRenderable: boolean; floatFilterable: boolean } {
-    if (floatSupportContext !== gl) {
-        floatSupportContext = gl;
-        floatSupportCache = {
-            floatRenderable: gl.getExtension('EXT_color_buffer_float') !== null,
-            floatFilterable: gl.getExtension('OES_texture_float_linear') !== null,
-        };
-    }
-    return floatSupportCache;
+    const caps = device.capabilities;
+    return { floatRenderable: caps.floatRenderable, floatFilterable: caps.floatFilterable };
 }
 
 /**
@@ -85,8 +77,18 @@ export interface CubemapFaces {
     negZ: HTMLImageElement
 }
 
+/** TextureConfig's short wrapping names mapped onto the RHI's. */
+const ADDRESS_MODES: Readonly<Record<'clamp' | 'repeat' | 'mirror', AddressMode>> = {
+    clamp: 'clamp-to-edge', repeat: 'repeat', mirror: 'mirror-repeat',
+};
+
 export class Texture {
-    private readonly _texture: WebGLTexture;
+    /**
+     * The device-owned texture object. `_texture` below is a getter onto its handle, so the upload
+     * paths — six of them, one per WebGL2 entry point — keep reading exactly as they did while the
+     * allocation, the lifetime and the byte accounting move behind the RHI.
+     */
+    private readonly _gpu: WebGL2Texture;
     private _width: number = 0;
     private _height: number = 0;
     // Colour channels actually allocated (1 for an R8/R16F target, 4 otherwise). Only affects byteSize.
@@ -106,6 +108,8 @@ export class Texture {
     private _usage: 'color' | 'depth';
     private _precision: 'low' | 'high';
     private _wrapping: number;
+    private _addressMode: AddressMode;
+    private _mipMapFilter: 'nearest' | 'linear' = 'linear';
     private _target: number;
     private _internalFormat: number;
     private _mipMap: boolean;
@@ -118,7 +122,6 @@ export class Texture {
     private _resolvedFormat!: TextureFormat;
 
     constructor(options?: TextureConfig) {
-        this._texture = gl.createTexture() as WebGLTexture;
         this._flipY = options?.flipY || false;
         this._usage = options?.usage || 'color';
         this._precision = options?.precision || 'low';
@@ -130,7 +133,8 @@ export class Texture {
                      : '2d';
         this._target = glTextureTarget(dimension);
 
-        this._wrapping = this._getWrappingValue(options?.wrapping) || gl.CLAMP_TO_EDGE;
+        this._addressMode = ADDRESS_MODES[options?.wrapping ?? 'clamp'];
+        this._wrapping = glAddressMode(this._addressMode);
 
         // Which format the device can actually give us, and whether that is the one we asked for. The
         // policy — including the float-to-RGBA8 fallback that silently turns the HDR pipeline LDR — is
@@ -142,69 +146,51 @@ export class Texture {
         this._resolvedFormat = resolved.format;
         if (resolved.downgraded) reportFloatDowngrade(resolved.requested, resolved.format);
 
+        this._gpu = device.createTexture({
+            label: 'texture',
+            format: resolved.format,
+            dimension,
+            width: 0, height: 0,
+            usage: this._usage === 'depth'
+                ? TextureUsage.RENDER_ATTACHMENT | TextureUsage.TEXTURE_BINDING
+                : TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST | TextureUsage.RENDER_ATTACHMENT,
+        });
+
         const triple = glTextureFormat(resolved.format);
         this._internalFormat = triple.internalFormat;
         this._format = triple.format;
         this._type = triple.type;
         this._channels = this._usage === 'depth' ? 1 : (options?.channels === 'r' ? 1 : 4);
 
-        this._minFilter = this._mipMap ? 
-            (options?.mipMapFilter === 'nearest' ? gl.NEAREST_MIPMAP_NEAREST : gl.LINEAR_MIPMAP_LINEAR) :
-            (options?.mipMapFilter === 'nearest' ? gl.NEAREST : gl.LINEAR);
+        const filter = options?.mipMapFilter === 'nearest' ? 'nearest' : 'linear';
+        this._mipMapFilter = filter;
+        this._minFilter = glMinFilter(filter, this._mipMap ? filter : null);
+
+        this._gpu.configure(triple.internalFormat, triple.format, triple.type,
+                            this._wrapping, this._minFilter, this._flipY, this._usage === 'depth');
     }
 
     /** The format actually allocated, which is not necessarily the one requested. */
     public get format(): TextureFormat { return this._resolvedFormat; }
 
-    private _getWrappingValue(wrapping?: 'clamp' | 'repeat' | 'mirror'): number {
-        switch (wrapping) {
-            case 'clamp':
-                return gl.CLAMP_TO_EDGE;
-            case 'repeat':
-                return gl.REPEAT;
-            case 'mirror':
-                return gl.MIRRORED_REPEAT;
-            default:
-                return gl.CLAMP_TO_EDGE;
-        }
-    }
+    /** The device-owned handle. Everything below still binds and uploads through it directly. */
+    private get _texture(): WebGLTexture { return this._gpu.handle; }
 
-    /**
-     * Bind for *sampling*, through the GL state cache — a rebind of the texture already on that unit
-     * costs nothing. This is the frame's hottest bind path (every material map on every draw), and it
-     * was the one hole left in the state cache: `GLState.bindTexture` existed but nothing called it.
-     */
-    public bind(slot: number = 0): void {
-        this._boundSlot = slot;
-        GLState.bindTexture(slot, this._target, this._texture);
-    }
-
-    /**
-     * Bind for *mutation* (texImage/texParameter/generateMipmap), which all act on the active unit —
-     * so this forces both the unit and the binding rather than letting the cache elide either.
-     */
-    private _bindForUpload(): void {
-        this._boundSlot = 0;
-        GLState.bindTextureForced(0, this._target, this._texture);
-    }
+    /** Bind for sampling. See WebGL2Texture.bind — the state cache lives with the GPU resource now. */
+    public bind(slot: number = 0): void { this._gpu.bind(slot); }
 
     /** Release whichever unit this texture was last bound to. */
-    public unbind(): void {
-        GLState.bindTexture(this._boundSlot, this._target, null);
-    }
+    public unbind(): void { this._gpu.unbind(); }
 
     public create(data: HTMLImageElement | CubemapFaces | null, width: number = 0, height: number = 0): void {
-        this._bindForUpload();
-
+        this._gpu.bindForUpload();
         this._data = data;
         this._width = width;
         this._height = height;
 
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
-
-        if (this._target === gl.TEXTURE_2D) {
-            if (data) {
-                const img = data as HTMLImageElement;
+        if (this._gpu.dimension === '2d') {
+            const img = data as HTMLImageElement | null;
+            if (img) {
                 Logger.print('info', ['Creating texture with image:', {
                     width: img.width,
                     height: img.height,
@@ -214,55 +200,23 @@ export class Texture {
                     src: img.src?.substring(0, 50) + '...'
                 }], 'Texture');
 
-                // Validate image is properly loaded
                 if (!img.complete || img.naturalWidth === 0) {
                     Logger.error('Image not properly loaded before texture creation', 'Texture');
                     this.unbind();
                     return;
                 }
-                
-                // When using HTMLImageElement, use the 6-parameter version
-                gl.texImage2D(this._target, 0, this._internalFormat, this._format, this._type, img);
-            } else {
-                // When using null data (for render targets), use the 9-parameter version
-                gl.texImage2D(this._target, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, null);
             }
+            this._gpu.upload2D(img, this._width, this._height, this._mipMap);
         } else {
-            const CUBE_FACES = [
-                gl.TEXTURE_CUBE_MAP_POSITIVE_X, gl.TEXTURE_CUBE_MAP_NEGATIVE_X,
-                gl.TEXTURE_CUBE_MAP_POSITIVE_Y, gl.TEXTURE_CUBE_MAP_NEGATIVE_Y,
-                gl.TEXTURE_CUBE_MAP_POSITIVE_Z, gl.TEXTURE_CUBE_MAP_NEGATIVE_Z,
-            ];
-            if (data) {
-                const faces = data as CubemapFaces;
-                const images = [faces.posX, faces.negX, faces.posY, faces.negY, faces.posZ, faces.negZ];
-                for (let i = 0; i < CUBE_FACES.length; i++)
-                    gl.texImage2D(CUBE_FACES[i], 0, this._internalFormat, this._format, this._type, images[i]);
-            } else {
-                // Null data on a cubemap used to walk straight into `faces.posX` and throw a TypeError —
-                // the null path existed only on the TEXTURE_2D side above, even though `new Skybox(null)`
-                // reaches exactly here and the public signature openly accepts null. Allocate six empty
-                // faces instead, mirroring what the 2D branch does for render targets: a no-op would leave
-                // the texture incomplete, which is a subtler failure than the crash it replaced.
-                for (const face of CUBE_FACES)
-                    gl.texImage2D(face, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, null);
-            }
+            // Null data on a cubemap allocates six empty faces rather than walking into `faces.posX` —
+            // `new Skybox(null)` reaches exactly here, and a no-op would leave the texture incomplete,
+            // which is a subtler failure than the crash it replaced.
+            const faces = data as CubemapFaces | null;
+            const images = faces
+                ? [faces.posX, faces.negX, faces.posY, faces.negY, faces.posZ, faces.negZ]
+                : null;
+            this._gpu.uploadCube(images, this._width, this._height, this._mipMap);
         }
-
-        const textureParams = this._usage === 'depth' ? 
-            [gl.NEAREST, gl.NEAREST, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE] :
-            [this._minFilter, gl.LINEAR, this._wrapping, this._wrapping];
-
-        gl.texParameteri(this._target, gl.TEXTURE_MIN_FILTER, textureParams[0]);
-        gl.texParameteri(this._target, gl.TEXTURE_MAG_FILTER, textureParams[1]);
-        gl.texParameteri(this._target, gl.TEXTURE_WRAP_S, textureParams[2]);
-        gl.texParameteri(this._target, gl.TEXTURE_WRAP_T, textureParams[3]);
-
-        if (this._mipMap) {
-            gl.generateMipmap(this._target);
-        }
-
-        this.checkForErrors();
 
         this.unbind();
     }
@@ -272,97 +226,50 @@ export class Texture {
      * data maps 1:1 to UVs, and it can be partially updated later with `updateRegion`.
      */
     public createFromData(data: Uint8Array, width: number, height: number, wrapping: 'clamp' | 'repeat' | 'mirror' = 'clamp'): void {
-        this._bindForUpload();
+        this._gpu.bindForUpload();
         this._data = null;
         this._width = width;
         this._height = height;
-        const wrap = this._getWrappingValue(wrapping);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-        gl.texImage2D(this._target, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-        gl.texParameteri(this._target, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(this._target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(this._target, gl.TEXTURE_WRAP_S, wrap);
-        gl.texParameteri(this._target, gl.TEXTURE_WRAP_T, wrap);
-        this.checkForErrors();
+        this._gpu.uploadBytes(data, width, height, glAddressMode(ADDRESS_MODES[wrapping]));
         this.unbind();
     }
 
     /** Upload a sub-rectangle of RGBA bytes (row-major, tightly packed) into an existing data texture. */
     public updateRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
-        this._bindForUpload();
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-        gl.texSubImage2D(this._target, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        this._gpu.bindForUpload();
+        this._gpu.uploadRegion(x, y, width, height, data);
         this.unbind();
     }
 
     public updateImg(data: HTMLImageElement | null): void {
-        if (this._target !== gl.TEXTURE_2D) {
+        if (this._gpu.dimension !== '2d') {
             Logger.error('Cannot update 2D texture with cubemap face', 'Texture');
             return;
         }
-        this._bindForUpload();
+        this._gpu.bindForUpload();
         this._data = data;
         if (data) {
             this._width = data.width;
             this._height = data.height;
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
-            // Use the 6-parameter version for HTMLImageElement
-            gl.texImage2D(this._target, 0, this._internalFormat, this._format, this._type, data);
-        } else {
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
-            // Use the 9-parameter version for null data
-            gl.texImage2D(this._target, 0, this._internalFormat, this._width, this._height, 0, this._format, this._type, null);
         }
-        if (this._mipMap) {
-            gl.generateMipmap(this._target);
-        }
-        this.checkForErrors();
+        this._gpu.upload2D(data, this._width, this._height, this._mipMap);
         this.unbind();
     }
 
     public updateFace(face: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ', data: HTMLImageElement): void {
-        if (this._target !== gl.TEXTURE_CUBE_MAP) {
+        if (this._gpu.dimension !== 'cube') {
             Logger.error('Cannot set cubemap face on non-cubemap texture', 'Texture');
             return;
         }
-        
-        this._bindForUpload(); // Bind the texture before updating the face
-        let target = 0;
-        switch (face) {
-            case 'posX':
-                target = gl.TEXTURE_CUBE_MAP_POSITIVE_X;
-                (this._data as CubemapFaces).posX = data;
-                break;
-            case 'negX':
-                target = gl.TEXTURE_CUBE_MAP_NEGATIVE_X;
-                (this._data as CubemapFaces).negX = data;
-                break;
-            case 'posY':
-                target = gl.TEXTURE_CUBE_MAP_POSITIVE_Y;
-                (this._data as CubemapFaces).posY = data;
-                break;
-            case 'negY':
-                target = gl.TEXTURE_CUBE_MAP_NEGATIVE_Y;
-                (this._data as CubemapFaces).negY = data;
-                break;
-            case 'posZ':
-                target = gl.TEXTURE_CUBE_MAP_POSITIVE_Z;
-                (this._data as CubemapFaces).posZ = data;
-                break;
-            case 'negZ':
-                target = gl.TEXTURE_CUBE_MAP_NEGATIVE_Z;
-                (this._data as CubemapFaces).negZ = data;
-                break;
-        }
+        this._gpu.bindForUpload();
+        // Face order matches WebGL2Texture.cubeFaces(): +X, -X, +Y, -Y, +Z, -Z.
+        const order: readonly ('posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ')[] =
+            ['posX', 'negX', 'posY', 'negY', 'posZ', 'negZ'];
+        (this._data as CubemapFaces)[face] = data;
         this._width = data.width;
         this._height = data.height;
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
-        gl.texImage2D(target, 0, this._internalFormat, this._format, this._type, data);
-        if (this._mipMap) {
-            gl.generateMipmap(this._target);
-        }
-        this.checkForErrors();
-        this.unbind();        
+        this._gpu.uploadFace(WebGL2Texture.cubeFaces()[order.indexOf(face)], data, this._mipMap);
+        this.unbind();
     }
 
     /**
@@ -371,53 +278,32 @@ export class Texture {
      * prefiltered specular) — render into a face/level with a framebuffer, then sample as a cubemap.
      */
     public createCubemapTarget(size: number, levels: number = 1): void {
-        this._bindForUpload();
+        this._gpu.bindForUpload();
         this._width = size;
         this._height = size;
         this._mipMap = levels > 1;
-        gl.texStorage2D(gl.TEXTURE_CUBE_MAP, levels, this._internalFormat, size, size);
-
-        const minFilter = levels > 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR;
-        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, minFilter);
-        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+        this._gpu.allocateCube(size, levels);
         this.unbind();
     }
 
     /**
      * Allocate an empty renderable 3D volume with immutable storage. Requires `target: 'texture3D'`.
      *
-     * Immutable storage (`texStorage3D` rather than `texImage3D`) is deliberate: it is what makes the
-     * texture's layers valid attachment targets for `gl.framebufferTextureLayer`, which is how the
-     * volume gets filled — one fullscreen draw per z-slice. Generating a 128³ field on the CPU would
-     * be tens of millions of noise evaluations in JS; on the GPU it is one frame's work, once.
-     *
      * Wrapping defaults to REPEAT on all three axes, including WRAP_R (which the 2D path never sets),
      * because the only consumer so far is a *tileable* noise field whose whole purpose is to repeat.
      */
     public createVolume(width: number, height: number, depth: number,
                         wrapping: 'clamp' | 'repeat' | 'mirror' = 'repeat'): void {
-        if (this._target !== gl.TEXTURE_3D) {
+        if (this._gpu.dimension !== '3d') {
             Logger.error('createVolume requires a texture created with target: "texture3D"', 'Texture');
             return;
         }
-        this._bindForUpload();
+        this._gpu.bindForUpload();
         this._width = width;
         this._height = height;
         this._depth = depth;
         this._mipMap = false; // a tiling noise field wants a single level; mips would blur the tile seams
-
-        gl.texStorage3D(gl.TEXTURE_3D, 1, this._internalFormat, width, height, depth);
-
-        const wrap = this._getWrappingValue(wrapping);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, wrap);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, wrap);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, wrap);
-        this.checkForErrors();
+        this._gpu.allocateVolume(width, height, depth, glAddressMode(ADDRESS_MODES[wrapping]));
         this.unbind();
     }
 
@@ -426,75 +312,41 @@ export class Texture {
      * `target: 'texture2DArray'` and `usage: 'depth'`. This is the cascaded-shadow-map target: one
      * layer per cascade, filled through `gl.framebufferTextureLayer` (see LayeredDepthFramebuffer).
      *
-     * Two things here differ from every other depth texture in the engine, and both are the point:
-     *
-     *  - One array replaces N separate `sampler2D`s. GLSL ES 3.00 forbids dynamically indexing a
-     *    SAMPLER array, which is why the old three-cascade code had to unroll its cascade select into
-     *    an if-chain and burn three texture units. A `sampler2DArray` takes a dynamic layer index, so
-     *    the cascade count becomes a plain uniform and the whole thing costs one unit.
-     *  - `compare` turns it into a `sampler2DArrayShadow`: the hardware does the depth comparison and
-     *    bilinearly filters the RESULT, so one tap is already a 2x2 percentage-closer filter. That is
-     *    why this path must NOT inherit `create()`'s forced NEAREST for depth textures.
+     * One array replaces N separate `sampler2D`s: GLSL ES 3.00 forbids dynamically indexing a SAMPLER
+     * array, which is why the old three-cascade code unrolled its cascade select into an if-chain and
+     * burned three texture units. A `sampler2DArray` takes a dynamic layer index, so the cascade count
+     * becomes a plain uniform and the whole thing costs one unit.
      */
     public createArrayTarget(size: number, layers: number, compare: boolean = true): void {
-        if (this._target !== gl.TEXTURE_2D_ARRAY) {
+        if (this._gpu.dimension !== '2d-array') {
             Logger.error('createArrayTarget requires a texture created with target: "texture2DArray"', 'Texture');
             return;
         }
-        this._bindForUpload();
+        this._gpu.bindForUpload();
         this._width = size;
         this._height = size;
         this._depth = layers;
         this._mipMap = false;
-
-        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, this._internalFormat, size, size, layers);
-
-        const filter = compare ? gl.LINEAR : gl.NEAREST;
-        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, filter);
-        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, filter);
-        // CLAMP, not REPEAT: a lookup that falls outside a cascade's footprint must read the border,
-        // not wrap around and shadow the far side of the map with unrelated geometry.
-        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        if (compare) {
-            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
-            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_COMPARE_FUNC, gl.LESS);
-        }
-        this.checkForErrors();
+        this._gpu.allocateDepthArray(size, layers, compare);
         this.unbind();
     }
 
-    /**
-     * Toggle hardware depth comparison on a depth array/2D target.
-     *
-     * Reading a texture whose TEXTURE_COMPARE_MODE is COMPARE_REF_TO_TEXTURE through a NON-shadow
-     * sampler is undefined per the GLES 3.0 spec, so the editor's cascade debug blit — which wants
-     * the stored depth, not a comparison result — has to switch the mode off around its draw.
-     */
+    /** Toggle hardware depth comparison on a depth array/2D target. */
     public setDepthCompare(enabled: boolean): void {
-        this._bindForUpload();
-        gl.texParameteri(this._target, gl.TEXTURE_COMPARE_MODE, enabled ? gl.COMPARE_REF_TO_TEXTURE : gl.NONE);
-        gl.texParameteri(this._target, gl.TEXTURE_MIN_FILTER, enabled ? gl.LINEAR : gl.NEAREST);
-        gl.texParameteri(this._target, gl.TEXTURE_MAG_FILTER, enabled ? gl.LINEAR : gl.NEAREST);
+        this._gpu.bindForUpload();
+        this._gpu.setCompareMode(enabled);
         this.unbind();
     }
 
     /** (Re)generate the mip chain for this texture — e.g. after rendering a captured cubemap. */
     public generateMipmaps(): void {
-        this._bindForUpload();
-        gl.generateMipmap(this._target);
+        this._gpu.bindForUpload();
+        this._gpu.generateMipmaps();
         this.unbind();
     }
 
-    private checkForErrors(): void {
-        const error = gl.getError();
-        if (error !== gl.NO_ERROR) {
-            Logger.error(`Error creating texture: ${error} with usage ${this._usage}, internal format ${this._internalFormat}, format ${this._format}`, 'Texture');
-        }
-    }
-
     public delete(): void {
-        gl.deleteTexture(this._texture);
+        this._gpu.destroy();
         if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
     }
 
@@ -544,13 +396,13 @@ export class Texture {
         return {
             flipY: this._flipY,
             usage: this._usage,
-            wrapping: this._wrapping === gl.CLAMP_TO_EDGE ? 'clamp' : this._wrapping === gl.REPEAT ? 'repeat' : 'mirror',
+            wrapping: this._addressMode === 'clamp-to-edge' ? 'clamp' : this._addressMode === 'repeat' ? 'repeat' : 'mirror',
             mipMap: this._mipMap,
-            mipMapFilter: this._minFilter === gl.NEAREST_MIPMAP_NEAREST ? 'nearest' : 'linear',
+            mipMapFilter: this._mipMapFilter,
             precision: this._precision,
-            target: this._target === gl.TEXTURE_2D ? 'texture2D'
-                  : this._target === gl.TEXTURE_3D ? 'texture3D'
-                  : this._target === gl.TEXTURE_2D_ARRAY ? 'texture2DArray' : 'cubemap'
+            target: this._gpu.dimension === '2d' ? 'texture2D'
+                  : this._gpu.dimension === '3d' ? 'texture3D'
+                  : this._gpu.dimension === '2d-array' ? 'texture2DArray' : 'cubemap'
         }
     }
 
@@ -561,12 +413,23 @@ export class Texture {
      *  mirrors the constructor's internalFormat choice (depth=4 / RGBA16F=8 / RGBA8=4). Used by the
      *  perf HUD. Without the depth term a 128³ volume would report as 64 KB rather than 8 MB. */
     public get byteSize(): number {
-        const bytesPerChannel = this._precision === 'high' ? 2 : 1;
-        const bpp = this._usage === 'depth' ? 4 : this._channels * bytesPerChannel;
-        const faces = this._target === gl.TEXTURE_CUBE_MAP ? 6 : 1;
-        const slices = (this._target === gl.TEXTURE_3D || this._target === gl.TEXTURE_2D_ARRAY) ? Math.max(1, this._depth) : 1;
-        // 4/3 is the 2D mip series; a 3D chain converges to 8/7 instead.
-        const mip = this._mipMap ? (this._target === gl.TEXTURE_3D ? 8 / 7 : 4 / 3) : 1;
-        return this._width * this._height * slices * bpp * faces * mip;
+        this._syncGpuSize();
+        return this._gpu.byteSize;
+    }
+
+    /**
+     * Push the dimensions the upload paths established into the device texture.
+     *
+     * Done on read rather than at every assignment: `_width`/`_height`/`_depth`/`_mipMap` are written
+     * from six different upload entry points, and mirroring each one is six chances to miss one.
+     */
+    private _syncGpuSize(): void {
+        const slices = (this._gpu.dimension === '3d' || this._gpu.dimension === '2d-array')
+            ? Math.max(1, this._depth) : 1;
+        // Levels of a full chain over the larger dimension, which is what generateMipmap produces.
+        const levels = this._mipMap
+            ? Math.floor(Math.log2(Math.max(1, this._width, this._height))) + 1
+            : 1;
+        this._gpu.setSize(this._width, this._height, slices, levels);
     }
 }

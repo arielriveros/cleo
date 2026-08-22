@@ -120,7 +120,9 @@ export { gl } from './glContext';
 import { gl, setGLContext } from './glContext';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities } from './rhi/device';
-import { detectWebGL2Capabilities } from './rhi/webgl2/capabilities';
+import { WebGL2Device, setDevice, device } from './rhi/webgl2/webgl2Device';
+import type { WebGL2Buffer } from './rhi/webgl2/webgl2Device';
+import { BufferUsage } from './rhi/types';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
@@ -775,14 +777,14 @@ export class Renderer {
     private _boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
     private _boneIdentityScratch: Float32Array;
     private _boneLocations: Map<WebGLProgram, WebGLUniformLocation | null> = new Map();
-    private _instanceBuffer: WebGLBuffer | null = null;
+    private _instanceBuffer: WebGL2Buffer | null = null;
     private _instanceScratch: Float32Array = new Float32Array(16 * 64);
 
     // Editor skeleton overlay: drawn instanced + always-on-top in the gizmo pass (set by the editor).
     private _skeletonOverlay: SkeletonOverlay | null = null;
     private _overlaySphereMesh: Mesh | null = null;
     private _overlayBoneMesh: Mesh | null = null;
-    private _overlayInstanceBuffer: WebGLBuffer | null = null;
+    private _overlayInstanceBuffer: WebGL2Buffer | null = null;
 
     // Object -> stable id (for grouping identical mesh+material into instanced draws)
     private _objIds: WeakMap<object, number> = new WeakMap();
@@ -848,10 +850,13 @@ export class Renderer {
         if (!context) throw new Error('WebGL context not available');
         setGLContext(context);
 
-        // Read the device's real limits once, while the context is fresh and before anything has had a
-        // chance to depend on a guessed value. See rhi/webgl2/capabilities.ts for why every field is
-        // queried rather than assumed.
-        this._capabilities = detectWebGL2Capabilities(context);
+        // The RHI device. It reads the hardware's real limits once, while the context is fresh and
+        // before anything has had a chance to depend on a guessed value — see rhi/webgl2/capabilities.ts
+        // for why every field is queried rather than assumed. Published through a live binding so the
+        // low-level wrappers can reach it without importing the renderer.
+        const gpu = new WebGL2Device(context);
+        setDevice(gpu);
+        this._capabilities = gpu.capabilities;
 
         // Resolve the timer-query extension while we have the fresh context. Cheap, and it means
         // `gpuProfilingAvailable` is answerable before the first frame rather than after it.
@@ -1081,7 +1086,9 @@ export class Renderer {
         this._generateSSAOKernelAndNoise();
 
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
-        this._instanceBuffer = gl.createBuffer();
+        // VERTEX | COPY_DST: rewritten every frame with the batch's world matrices, which is what
+        // earns it a DYNAMIC_DRAW hint.
+        this._instanceBuffer = device.createBuffer({ label: 'renderer.instanceMatrices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
 
         // Config wins if given; otherwise the quality tier's value (2048 at the 'high' default),
         // not the old hard-coded 4096 per cascade.
@@ -1561,7 +1568,7 @@ export class Renderer {
 
         // Buffers of layers that were disposed with their terrain. Drained here, ahead of the landscape
         // loop, because those layers are no longer reachable from any live landscape to be drained per-layer.
-        for (const buf of collectOrphanedFoliageBuffers()) gl.deleteBuffer(buf);
+        for (const buf of collectOrphanedFoliageBuffers()) buf.destroy();
 
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -1583,15 +1590,15 @@ export class Renderer {
                 if (layer.cellSize !== this._foliageCellSize) layer.setCellSize(this._foliageCellSize);
 
                 // Free GPU buffers orphaned by a previous cell-layout rebuild (painting, a resize, ...).
-                for (const buf of layer.collectStaleBuffers()) gl.deleteBuffer(buf);
+                for (const buf of layer.collectStaleBuffers()) buf.destroy();
 
                 // Each cell's static matrices, uploaded once per layout version and then reused by
                 // every sub-model of every level, in both the colour and the shadow pass.
                 for (const cell of layer.cells) {
-                    if (!cell.glBuffer) cell.glBuffer = gl.createBuffer();
+                    if (!cell.glBuffer)
+                        cell.glBuffer = device.createBuffer({ label: 'foliage.cellMatrices', size: 0, usage: BufferUsage.VERTEX });
                     if (cell.uploadedVersion !== layer.version) {
-                        gl.bindBuffer(gl.ARRAY_BUFFER, cell.glBuffer);
-                        gl.bufferData(gl.ARRAY_BUFFER, cell.matrices, gl.STATIC_DRAW);
+                        device.reallocateBuffer(cell.glBuffer, cell.matrices);
                         cell.uploadedVersion = layer.version;
                     }
                 }
@@ -1735,7 +1742,7 @@ export class Renderer {
                         }
 
                         for (const cell of cells) {
-                            model.mesh.setupInstanceMatrixBuffer(cell.glBuffer as WebGLBuffer, 5);
+                            model.mesh.setupInstanceMatrixBuffer(cell.glBuffer as WebGL2Buffer, 5);
                             model.mesh.drawInstanced(cell.count);
                             model.mesh.teardownInstanceMatrixBuffer(5);
                         }
@@ -1877,9 +1884,8 @@ export class Renderer {
         this._applyCull(first.model.material.config.side);
 
         const mesh = first.model.mesh;
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, this._instanceScratch.subarray(0, needed), gl.DYNAMIC_DRAW);
-        mesh.setupInstanceMatrixBuffer(this._instanceBuffer as WebGLBuffer, 5);
+        device.reallocateBuffer(this._instanceBuffer as WebGL2Buffer, this._instanceScratch.subarray(0, needed));
+        mesh.setupInstanceMatrixBuffer(this._instanceBuffer as WebGL2Buffer, 5);
         const topology = first.model.material.config.wireframe ? 'line-list' : 'triangle-list';
         mesh.drawInstanced(count, topology);
         frameStats.objects += count; // each batched node is a distinct scene object
@@ -2201,8 +2207,7 @@ export class Renderer {
         // cost, since a timer around a draw misses the FBO round trip that goes with it.
         this._ssaoResult = this._ssaoFBO;
         if (this._beginPass('ssao.blur')) {
-            this._ssaoBlurFBO.bind();
-            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._ssaoBlurFBO.beginPass('ssao.blur', { color: true });
             this._shaderManager.bind('ssaoBlur');
             this._shaderManager.setUniform('u_ssao', 0);
             this._ssaoFBO.colors[0].bind(0);
@@ -2985,8 +2990,7 @@ export class Renderer {
         if (this._cloudNoiseBaked) return;
         this._cloudNoiseBaked = true; // set first: a failed bake must not retry every frame
 
-        const bakeFbo = gl.createFramebuffer();
-        if (!bakeFbo) { Logger.error('Could not create cloud noise bake framebuffer', 'Renderer'); return; }
+        const bakeFbo = device.createFramebuffer('cloudNoiseBake');
 
         // Volumes are RGBA8 (the default `precision: 'low'`): the fields are 0..1 scalars that then
         // get remapped and smoothstepped, so 8 bits per channel sits below the noise floor of the
@@ -2997,10 +3001,10 @@ export class Renderer {
             this._shaderManager.setUniform('u_period', period);
             this._shaderManager.setUniform('u_octaves', octaves);
             this._shaderManager.setUniform('u_detail', detail);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, bakeFbo);
+            bakeFbo.bind();
             this._setViewport(size, size);
             for (let z = 0; z < size; z++) {
-                gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, tex.texture, 0, z);
+                bakeFbo.attachColorLayer(0, tex.texture, z);
                 if (z === 0) {
                     // Check once per volume rather than per slice. Worth checking at all because the
                     // failure is silent: an incomplete framebuffer drops every draw, and the volume
@@ -3029,7 +3033,7 @@ export class Renderer {
         bake(this._cloudDetailNoise, Renderer.CLOUD_DETAIL_NOISE_SIZE, Renderer.CLOUD_DETAIL_NOISE_PERIOD, 3, true);
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.deleteFramebuffer(bakeFbo);
+        bakeFbo.destroy();
         GLState.depthMask(true);
         Logger.info('Baked cloud noise volumes', 'Renderer');
     }
@@ -3109,8 +3113,7 @@ export class Renderer {
         gpuProfiler.beginPass('clouds.resolve');
         const dst = this._cloudHistoryIndex ^ 1;
         const prev = this._cloudHistoryFBOs[this._cloudHistoryIndex];
-        this._cloudHistoryFBOs[dst].bind();
-        gl.clear(gl.COLOR_BUFFER_BIT);
+        this._cloudHistoryFBOs[dst].beginPass('clouds.resolve', { color: true });
 
         this._shaderManager.bind('cloudTemporalResolve');
         this._shaderManager.setUniform('u_trace', 0);
@@ -4338,8 +4341,7 @@ export class Renderer {
             if (this._debugView === 'velocity' && this._hasPrevViewProj && this._beginPass('velocity'))
                 this._velocityPass();
             gpuProfiler.beginPass('present');
-            this._compose_FBOs[0].bind();
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            this._compose_FBOs[0].beginPass('compose', { color: true, depth: true });
             this._shaderManager.bind('screen');
             this._shaderManager.setUniform('u_screenTexture', 0);
             this._sceneFBO.colors[0].bind();
@@ -4407,8 +4409,7 @@ export class Renderer {
             if (!(mat instanceof CustomMaterial) || mat.renderMode !== 'screen') continue;
             ensureCustomShader(mat); // idempotent; magenta fallback under the key on compile error
             const dst = 1 - src;
-            this._compose_FBOs[dst].bind();
-            gl.clear(gl.COLOR_BUFFER_BIT);
+            this._compose_FBOs[dst].beginPass('compose', { color: true });
             this._shaderManager.bind(mat.type);
             this._shaderManager.setUniform('u_screenTexture', 0);
             this._compose_FBOs[src].colors[0].bind(0);
@@ -4614,8 +4615,7 @@ export class Renderer {
         // 1. Bright pass into the largest mip (half res). Also writes the scene passthrough into
         gpuProfiler.beginPass('bloom.bright');
         const mip0 = this._bloomMips[0];
-        mip0.bind();
-        gl.clear(gl.COLOR_BUFFER_BIT);
+        mip0.beginPass('bloom.bright', { color: true });
         this._shaderManager.bind('bloom');
         // The bright pass reads pre-exposure linear radiance, so it needs the exposure to decide what
         // counts as bright — without it the threshold is compared against radiance ~3x darker than what
@@ -4682,8 +4682,7 @@ export class Renderer {
         if (!this._passEnabled['bloom.composite']) return;
         gpuProfiler.beginPass('bloom.composite');
         const dst = 1 - src;
-        this._compose_FBOs[dst].bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._compose_FBOs[dst].beginPass('compose', { color: true, depth: true });
         this._shaderManager.bind('composer');
         this._shaderManager.setUniform('u_buffer1', 0);
         this._compose_FBOs[src].colors[0].bind(0);
@@ -4697,8 +4696,7 @@ export class Renderer {
     private _chromaticAberrationPass(): void {
         const src = this._composeIndex;
         const dst = 1 - src;
-        this._compose_FBOs[dst].bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._compose_FBOs[dst].beginPass('compose', { color: true, depth: true });
         this._shaderManager.bind('chromaticAberration');
         this._shaderManager.setUniform('u_screenTexture', 0);
         this._compose_FBOs[src].colors[0].bind();
@@ -4712,8 +4710,7 @@ export class Renderer {
     // units, clamped to one tile) in _velocityFBO. Also used standalone by the 'velocity' debug view.
     private _velocityPass(): void {
         const w = this._renderWidth, h = this._renderHeight;
-        this._velocityFBO.bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._velocityFBO.beginPass('velocity', { color: true, depth: true });
         this._shaderManager.bind('motionBlurVelocity');
         this._shaderManager.setUniform('u_gDepth', 0);
         this._gBufferFBO.depth.bind(0);
@@ -4738,8 +4735,7 @@ export class Renderer {
         gpuProfiler.beginPass('motionBlur');
 
         // 2) TileMax: dominant velocity per KxK tile.
-        this._velocityTileFBO.bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._velocityTileFBO.beginPass('velocity.tile', { color: true, depth: true });
         this._shaderManager.bind('motionBlurTileMax');
         this._shaderManager.setUniform('u_velocity', 0);
         this._velocityFBO.colors[0].bind(0);
@@ -4748,8 +4744,7 @@ export class Renderer {
         this._drawFullscreen();
 
         // 3) NeighborMax: 3x3 dilation of the tile velocities.
-        this._velocityNeighborFBO.bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._velocityNeighborFBO.beginPass('velocity.neighbor', { color: true, depth: true });
         this._shaderManager.bind('motionBlurNeighborMax');
         this._shaderManager.setUniform('u_tileMax', 0);
         this._velocityTileFBO.colors[0].bind(0);
@@ -4757,8 +4752,7 @@ export class Renderer {
         this._drawFullscreen();
 
         // 4) Gather: reconstruct the blurred image into _compose_FBOs[0].
-        this._compose_FBOs[0].bind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this._compose_FBOs[0].beginPass('compose', { color: true, depth: true });
         this._shaderManager.bind('motionBlur');
         this._shaderManager.setUniform('u_screenTexture', 0);
         this._sceneFBO.colors[0].bind(0);
@@ -5454,7 +5448,8 @@ export class Renderer {
         };
         if (!this._overlaySphereMesh) this._overlaySphereMesh = build(Geometry.Sphere(8, 1));
         if (!this._overlayBoneMesh) this._overlayBoneMesh = build(Geometry.Cube(1, 1, 1));
-        if (!this._overlayInstanceBuffer) this._overlayInstanceBuffer = gl.createBuffer();
+        if (!this._overlayInstanceBuffer)
+            this._overlayInstanceBuffer = device.createBuffer({ label: 'renderer.overlayInstances', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
     }
 
     private _drawSkeletonOverlay(): void {
@@ -5473,8 +5468,7 @@ export class Renderer {
             this._shaderManager.setUniform('u_material.color', color);
             this._shaderManager.setUniform('u_material.hasTexture', false);
             this._shaderManager.setUniform('u_material.opacity', 1.0);
-            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-            gl.bufferData(gl.ARRAY_BUFFER, matrices.subarray(0, count * 16), gl.DYNAMIC_DRAW);
+            device.reallocateBuffer(buf, matrices.subarray(0, count * 16));
             mesh.setupInstanceMatrixBuffer(buf, 5);
             mesh.drawInstanced(count, 'triangle-list');
             mesh.teardownInstanceMatrixBuffer(5);

@@ -1,4 +1,5 @@
 import { mat4, quat } from 'gl-matrix';
+import type { WebGL2Buffer } from '../graphics/rhi/webgl2/webgl2Device';
 import { Geometry } from '../core/geometry';
 import { Model } from '../graphics/model';
 import {
@@ -22,12 +23,12 @@ export const MAX_INSTANCES = 200000;
 /**
  * GPU buffers left behind by layers that were disposed with their terrain. The renderer's foliage pass
  * only walks LIVE landscapes, so a detached terrain's own `collectStaleBuffers()` would never be called
- * again — this module-level queue is how those buffers still reach a `gl.deleteBuffer`.
+ * again — this module-level queue is how those buffers still reach a `destroy()`.
  */
-const ORPHANED_FOLIAGE_BUFFERS: WebGLBuffer[] = [];
+const ORPHANED_FOLIAGE_BUFFERS: WebGL2Buffer[] = [];
 
 /** Drain the buffers of disposed foliage layers. Called by the renderer, which owns the GL context. */
-export function collectOrphanedFoliageBuffers(): WebGLBuffer[] {
+export function collectOrphanedFoliageBuffers(): WebGL2Buffer[] {
     if (ORPHANED_FOLIAGE_BUFFERS.length === 0) return [];
     return ORPHANED_FOLIAGE_BUFFERS.splice(0, ORPHANED_FOLIAGE_BUFFERS.length);
 }
@@ -44,7 +45,7 @@ export interface FoliageCell {
     indices: Int32Array;                 // instance indices in this cell (see forEachInstanceNear)
     min: [number, number, number];       // world AABB (instance extents, expanded by geometry size)
     max: [number, number, number];
-    glBuffer: WebGLBuffer | null;         // renderer-owned; lazily created
+    glBuffer: WebGL2Buffer | null;        // renderer-owned; lazily created
     uploadedVersion: number;              // renderer's record of which layer.version is on the GPU
     lod: number;                          // current detail level (renderer-owned hysteresis memory)
 }
@@ -122,7 +123,7 @@ export class FoliageLayer {
     public initialized = false;
 
     // GPU buffers orphaned by a rebuild (cells are recreated), drained + deleted by the renderer.
-    private _stale: WebGLBuffer[] = [];
+    private _stale: WebGL2Buffer[] = [];
 
     // Set by pushInstance(); commit() rebuilds once for a whole batch.
     private _dirty = false;
@@ -350,7 +351,7 @@ export class FoliageLayer {
     }
 
     /** WebGL buffers left over from the previous cell layout; the renderer deletes these. Returns and clears. */
-    public collectStaleBuffers(): WebGLBuffer[] {
+    public collectStaleBuffers(): WebGL2Buffer[] {
         const s = this._stale;
         this._stale = [];
         return s;

@@ -1,4 +1,6 @@
 import { gl } from './glContext';
+import { device } from './rhi/webgl2/webgl2Device';
+import type { WebGL2Framebuffer } from './rhi/webgl2/webgl2Device';
 import { Texture } from './texture';
 
 /**
@@ -8,12 +10,12 @@ import { Texture } from './texture';
  * passes that need depth testing (scene capture); the convolution passes are color-only.
  */
 export class CubeFramebuffer {
-    private _id: WebGLFramebuffer;
+    private _id: WebGL2Framebuffer;
     private _rbo: WebGLRenderbuffer;
     private _depthSize: number = 0;
 
     constructor() {
-        this._id = gl.createFramebuffer() as WebGLFramebuffer;
+        this._id = device.createFramebuffer('cubeFramebuffer');
         this._rbo = gl.createRenderbuffer() as WebGLRenderbuffer;
     }
 
@@ -23,8 +25,8 @@ export class CubeFramebuffer {
      * @param size face size at this mip (only required when withDepth is true).
      */
     public bindFace(cube: Texture, face: number, mip: number = 0, withDepth: boolean = false, size: number = 0): void {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this._id);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, cube.texture, mip);
+        this._id.bind();
+        this._id.attachColorCubeFace(0, cube.texture, face, mip);
 
         if (withDepth) {
             if (this._depthSize !== size) {
@@ -38,12 +40,15 @@ export class CubeFramebuffer {
             gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, null);
         }
 
-        gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+        this._id.setDrawBuffers(1);
     }
 
     public unbind(): void {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    public get framebuffer(): WebGLFramebuffer { return this._id; }
+    public get framebuffer(): WebGLFramebuffer { return this._id.handle; }
+
+    /** Release the framebuffer object. Its attachments are owned by the cubemap, not by this. */
+    public destroy(): void { this._id.destroy(); }
 }

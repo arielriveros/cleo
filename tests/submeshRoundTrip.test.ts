@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { setGLContext } from '../src/graphics/glContext';
+import { WebGL2Device, setDevice } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { Geometry } from '../src/core/geometry';
 import { Model } from '../src/graphics/model';
 import { AnimatedModel } from '../src/graphics/animatedModel';
@@ -19,6 +20,12 @@ import { mergeModels } from '../src/graphics/modelMerge';
  * bone attributes eagerly, so a handful of real entry points get called even though nothing is ever drawn.
  * Unknown members resolve to a no-op function rather than being enumerated, since the exact set is an
  * implementation detail of code these tests are not about.
+ *
+ * A device is published alongside the context because buffer allocation moved behind the RHI: `Mesh`
+ * now asks `device.createBuffer` rather than calling `gl.createBuffer` itself. The device reads the
+ * hardware's limits at construction, which against this stub means every `getExtension` returns
+ * undefined and it reports a machine with no optional features — exactly right for a test that never
+ * draws.
  */
 beforeAll(() => {
   let n = 0;
@@ -27,11 +34,14 @@ beforeAll(() => {
     ELEMENT_ARRAY_BUFFER: 0x8893, STATIC_DRAW: 0x88e4, FLOAT: 0x1406, TRIANGLES: 0x0004,
   };
   const objects = new Set(['createVertexArray', 'createBuffer', 'createTexture']);
-  setGLContext(new Proxy({}, {
+  const gl = new Proxy({}, {
     get: (_t, key: string) => (key in constants ? constants[key]
       : objects.has(key) ? () => ({ id: ++n })
       : () => undefined),
-  }) as any);
+  });
+  setGLContext(gl as any);
+
+  setDevice(new WebGL2Device(gl as unknown as WebGL2RenderingContext));
 });
 
 const geometry = () => new Geometry(
