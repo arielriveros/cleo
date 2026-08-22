@@ -22,7 +22,6 @@ mat3 TBN;
 uniform struct Material {
     vec3 diffuse;
     bool hasBaseTexture;
-    sampler2D baseTexture;
 
     vec3 ambient;
     vec3 specular;
@@ -31,23 +30,32 @@ uniform struct Material {
     // the others fall back to the scalars.
     bool hasSpecularMap;
     bool hasReflectivityMap;
-    sampler2D specularReflectivityMap;
     float shininess;
     
     vec3 emissive;
     bool hasEmissiveMap;
-    sampler2D emissiveMap;
 
     bool hasNormalMap;
-    sampler2D normalMap;
 
     bool hasMaskMap;
-    sampler2D maskMap;
 
     float opacity;
 
     float reflectivity;
 } u_material;
+
+// Samplers live OUTSIDE the material struct, named `<instance>_<field>`.
+//
+// GLSL allows an opaque type inside a uniform struct; WGSL does not, and a dotted name cannot
+// survive translation either — there is no legal WGSL identifier that would generate
+// `uniform sampler2D u_material.baseColorTexture;`. Hoisting them out and joining with an
+// underscore is the one spelling both dialects can produce, so the renderer can keep naming
+// them from the material's texture map.
+uniform sampler2D u_material_baseTexture;
+uniform sampler2D u_material_specularReflectivityMap;
+uniform sampler2D u_material_emissiveMap;
+uniform sampler2D u_material_normalMap;
+uniform sampler2D u_material_maskMap;
 
 // Lighting
 uniform vec3 u_viewPos;
@@ -168,7 +176,7 @@ layout(location = 0) out vec4 fragColor;
 void main() {
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
     if (u_material.hasMaskMap) {
-        float mask = texture(u_material.maskMap, fragTexCoord).r;
+        float mask = texture(u_material_maskMap, fragTexCoord).r;
         if (mask < 0.5) discard;
     }
 
@@ -176,14 +184,14 @@ void main() {
     vec3 viewDir = normalize(u_viewPos - fragPos);
 
     if (u_material.hasNormalMap) {
-        normal = texture(u_material.normalMap, fragTexCoord).rgb;
+        normal = texture(u_material_normalMap, fragTexCoord).rgb;
         normal = normalize(normal * 2.0 - 1.0);  
         normal = normalize(TBN * normal);
     }
     // Decode the sRGB base colour once to linear; reuse it for both diffuse and ambient tints.
     vec3 baseTex = vec3(1.0);
     if (u_material.hasBaseTexture)
-        baseTex = toLinear(texture(u_material.baseTexture, fragTexCoord).rgb);
+        baseTex = toLinear(texture(u_material_baseTexture, fragTexCoord).rgb);
 
     vec3 matAmbient  = u_material.ambient * baseTex;
     vec3 matDiffuse  = u_material.diffuse * baseTex;
@@ -194,7 +202,7 @@ void main() {
     vec3 matSpecular = u_material.specular;
     float reflectivity = u_material.reflectivity;
     if (u_material.hasSpecularMap || u_material.hasReflectivityMap) {
-        vec4 specRefl = texture(u_material.specularReflectivityMap, fragTexCoord);
+        vec4 specRefl = texture(u_material_specularReflectivityMap, fragTexCoord);
         if (u_material.hasSpecularMap) matSpecular *= toLinear(specRefl.rgb);
         if (u_material.hasReflectivityMap) reflectivity = specRefl.a;
     }
@@ -222,7 +230,7 @@ void main() {
 
     // Emissive (sRGB-decoded map). Output stays LINEAR HDR — tonemap/gamma happen at the final present.
     if (u_material.hasEmissiveMap)
-        result += toLinear(texture(u_material.emissiveMap, fragTexCoord).rgb) * u_material.emissive * 1.25;
+        result += toLinear(texture(u_material_emissiveMap, fragTexCoord).rgb) * u_material.emissive * 1.25;
     else
         result += u_material.emissive * 1.25;
 

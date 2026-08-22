@@ -89,7 +89,9 @@ import TilemapVertex from './shaders/materials/tilemap.vs'
 import TilemapFragment from './shaders/materials/tilemap.fs'
 
 // Deferred pipeline shaders
-import GeometryPBRFragment from './shaders/deferred/geometryPBR.fs'
+import GeometryPBRProgram from './shaders/wgsl/geometryPBR.wgsl'
+import GeometryPBRSkinnedProgram from './shaders/wgsl/geometryPBRSkinned.wgsl'
+import GeometryPBRInstancedProgram from './shaders/wgsl/geometryPBRInstanced.wgsl'
 import GeometryDefaultFragment from './shaders/deferred/geometryDefault.fs'
 import GeometryTerrainFragment from './shaders/deferred/geometryTerrain.fs'
 import GeometryFoliageBillboardFragment from './shaders/deferred/geometryFoliageBillboard.fs'
@@ -945,14 +947,14 @@ export class Renderer {
         const pbrShader = new Shader().create(PBRVertex, PBRFragment);
         const pbrSkinnedShader = new Shader().create(PBRSkinnedVertex, PBRFragment);
         // Deferred geometry-pass shaders (reuse the material vertex shaders + G-buffer fragment shaders)
-        const pbrGeometryShader = new Shader().create(PBRVertex, GeometryPBRFragment);
-        const pbrGeometrySkinnedShader = new Shader().create(PBRSkinnedVertex, GeometryPBRFragment);
+        const pbrGeometryShader = new Shader().create(GeometryPBRProgram.vertex!, GeometryPBRProgram.fragment!);
+        const pbrGeometrySkinnedShader = new Shader().create(GeometryPBRSkinnedProgram.vertex!, GeometryPBRSkinnedProgram.fragment!);
         const defaultGeometryShader = new Shader().create(DefaultVertex, GeometryDefaultFragment);
         const defaultGeometrySkinnedShader = new Shader().create(DefaultSkinnedVertex, GeometryDefaultFragment);
         const basicGeometryShader = new Shader().create(BasicVertex, GeometryBasicFragment);
         const basicGeometrySkinnedShader = new Shader().create(BasicSkinnedVertex, GeometryBasicFragment);
         // Instanced geometry variants (pbr/default share the 14-float vertex layout)
-        const pbrGeometryInstancedShader = new Shader().create(GeometryInstancedVertex, GeometryPBRFragment);
+        const pbrGeometryInstancedShader = new Shader().create(GeometryPBRInstancedProgram.vertex!, GeometryPBRInstancedProgram.fragment!);
         const defaultGeometryInstancedShader = new Shader().create(GeometryInstancedVertex, GeometryDefaultFragment);
         // Terrain splat geometry shader (reuses the default 14-float vertex layout).
         const terrainGeometryShader = new Shader().create(DefaultVertex, GeometryTerrainFragment);
@@ -3407,7 +3409,11 @@ export class Renderer {
         for (const [name, tex] of material.textures) {
             if (Renderer._SOURCE_SLOTS.has(name)) continue;
             const slot = this._textureSlot(name);
-            this._shaderManager.setUniform(`u_material.${name}`, slot);
+            // Samplers are named `u_material_<field>`, with an underscore, while the scalar properties
+            // above keep the dotted `u_material.<field>`. The split is not cosmetic: GLSL permits an
+            // opaque type inside a uniform struct and WGSL does not, so the samplers had to be hoisted
+            // out of the struct in the shaders, and no legal WGSL identifier can generate a dotted name.
+            this._shaderManager.setUniform(`u_material_${name}`, slot);
             const texture = TextureManager.Instance.getTexture(tex);
             if (texture) texture.bind(slot);
         }
@@ -5402,7 +5408,8 @@ export class Renderer {
                         slot = 5;
                         break;
                 }
-                this._shaderManager.setUniform(`u_material.${name}`, slot);
+                // Underscore, not a dot — see the note in _applyMaterial.
+                this._shaderManager.setUniform(`u_material_${name}`, slot);
                 const textureToBind = TextureManager.Instance.getTexture(tex);
                 if (!textureToBind) continue;
                 textureToBind.bind(slot);

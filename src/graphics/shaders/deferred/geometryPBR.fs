@@ -23,7 +23,6 @@ layout(location = 2) out vec4 gEmissiveAO;       // rgb = emissive, a = ambient 
 uniform struct PBRMaterial {
     vec3 baseColor;
     bool hasBaseColorTexture;
-    sampler2D baseColorTexture;
 
     float metallic;
     float roughness;
@@ -33,22 +32,31 @@ uniform struct PBRMaterial {
     bool hasMetallicMap;
     bool hasRoughnessMap;
     bool hasOcclusionMap;
-    sampler2D ormTexture;
 
     bool hasNormalMap;
-    sampler2D normalMap;
 
     bool hasEmissiveMap;
     vec3 emissiveFactor;
-    sampler2D emissiveMap;
 
     float opacity;
 } u_material;
 
+// Samplers live OUTSIDE the material struct, named `<instance>_<field>`.
+//
+// GLSL allows an opaque type inside a uniform struct; WGSL does not, and a dotted name cannot
+// survive translation either — there is no legal WGSL identifier that would generate
+// `uniform sampler2D u_material_baseColorTexture;`. Hoisting them out and joining with an
+// underscore is the one spelling both dialects can produce, so the renderer can keep naming
+// them from the material's texture map.
+uniform sampler2D u_material_baseColorTexture;
+uniform sampler2D u_material_ormTexture;
+uniform sampler2D u_material_normalMap;
+uniform sampler2D u_material_emissiveMap;
+
 vec3 getNormal() {
     vec3 N = TBN[2];
     if (u_material.hasNormalMap) {
-        vec3 n = texture(u_material.normalMap, fragTexCoord).rgb;
+        vec3 n = texture(u_material_normalMap, fragTexCoord).rgb;
         n = normalize(n * 2.0 - 1.0);
         N = normalize(TBN * n);
     }
@@ -59,13 +67,13 @@ void main() {
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
     vec3 albedo = u_material.baseColor;
     if (u_material.hasBaseColorTexture)
-        albedo *= pow(texture(u_material.baseColorTexture, fragTexCoord).rgb, vec3(2.2)); // sRGB -> linear
+        albedo *= pow(texture(u_material_baseColorTexture, fragTexCoord).rgb, vec3(2.2)); // sRGB -> linear
 
     float metallic = u_material.metallic;
     float roughness = u_material.roughness;
     float ao = 1.0;
     if (u_material.hasMetallicMap || u_material.hasRoughnessMap || u_material.hasOcclusionMap) {
-        vec3 orm = texture(u_material.ormTexture, fragTexCoord).rgb;
+        vec3 orm = texture(u_material_ormTexture, fragTexCoord).rgb;
         if (u_material.hasOcclusionMap) ao = orm.r;
         if (u_material.hasRoughnessMap) roughness = orm.g;
         if (u_material.hasMetallicMap) metallic = orm.b;
@@ -73,7 +81,7 @@ void main() {
 
     vec3 emissive = u_material.emissiveFactor;
     if (u_material.hasEmissiveMap)
-        emissive = pow(texture(u_material.emissiveMap, fragTexCoord).rgb, vec3(2.2)) * u_material.emissiveFactor; // sRGB -> linear
+        emissive = pow(texture(u_material_emissiveMap, fragTexCoord).rgb, vec3(2.2)) * u_material.emissiveFactor; // sRGB -> linear
 
     vec3 N = normalize(getNormal());
 

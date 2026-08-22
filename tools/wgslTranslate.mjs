@@ -124,6 +124,42 @@ export function buildRenames(wgsl, entryPoints, label = 'shader') {
     return renames;
 }
 
+/**
+ * Reduce a generated fragment shader to a REUSABLE GLSL chunk: its structs, uniforms, globals and
+ * functions, with the program scaffolding removed.
+ *
+ * This exists for one consumer. `systems/customShaders.ts` assembles user-authored GLSL at runtime and
+ * pastes the shadow library into it as a raw string, so that library has to exist as GLSL — but the
+ * engine's own shaders now want it as WGSL, and 239 lines of cascade and bias math cannot be maintained
+ * twice without drifting. Authoring it once in WGSL and generating the GLSL half here keeps one source
+ * of truth.
+ *
+ * What is stripped, and why each would break the paste:
+ *   - `#version` / `precision`, which may appear only once and must come first in the host shader.
+ *   - the fragment output, which the host already declares.
+ *   - `main()`, which the host defines itself.
+ *
+ * The dummy entry point in the source module is not optional: naga emits only functions REACHABLE from
+ * an entry point, so anything the module means to export has to be called from it, or it is dead-code
+ * eliminated and silently missing from the chunk.
+ */
+export function extractGlslChunk(glsl, label = 'shader') {
+    const withoutMain = glsl.replace(/\nvoid main\(\) \{[\s\S]*\n\}\s*$/, '\n');
+    if (withoutMain === glsl)
+        throw new Error(label + ': no trailing main() to strip — naga output shape changed');
+
+    const kept = withoutMain
+        .split('\n')
+        .filter(line => !/^\s*#version\b/.test(line))
+        .filter(line => !/^\s*precision\s+\w+\s+\w+\s*;/.test(line))
+        .filter(line => !/^\s*layout\(location\s*=\s*\d+\)\s+out\b/.test(line))
+        .join('\n')
+        .trim();
+
+    if (!kept) throw new Error(label + ': chunk is empty after stripping');
+    return kept;
+}
+
 /** Apply the rename map. Longest key first, so no key can be a prefix of another. */
 function applyRenames(glsl, renames) {
     let out = glsl;
@@ -147,6 +183,10 @@ export async function translateWgsl(wgsl, label = 'shader') {
 
     const renames = buildRenames(wgsl, entryPoints, label);
     const out = { wgsl, entryPoints };
+    // A module marked `// @glsl-chunk` also exports a pasteable GLSL chunk. Opt-in via a
+    // directive rather than always, because the extraction only makes sense for a module whose
+    // entry point exists purely to keep its functions alive.
+    const isLibrary = /^[ \t]*\/\/[ \t]*@glsl-chunk[ \t]*$/m.test(wgsl);
     for (const stage of ['vertex', 'fragment', 'compute']) {
         const entry = entryPoints[stage];
         if (!entry) continue;
@@ -157,6 +197,10 @@ export async function translateWgsl(wgsl, label = 'shader') {
             // far more than a line number in generated GLSL nobody has seen.
             throw new Error(label + ': ' + stage + ' stage (' + entry + ') failed to translate\n' + (e.message || e));
         }
+    }
+    if (isLibrary) {
+        if (!out.fragment) throw new Error(label + ': @glsl-chunk needs a fragment entry point');
+        out.glslChunk = extractGlslChunk(out.fragment, label);
     }
     return out;
 }

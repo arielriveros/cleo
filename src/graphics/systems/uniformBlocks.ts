@@ -120,27 +120,37 @@ export class UniformBlockSet {
     }
 
     /**
-     * Register a member under both its full reflected name and its last path segment.
+     * Register a member under its full reflected name and under every dotted suffix of it.
      *
      * naga wraps a program's uniforms in a struct, so GL reports members as
-     * `PresentUniforms_block_0Fragment.u_present.u_exposure` while the renderer asks for `u_exposure`.
-     * Registering the short name is what keeps every existing call site working; registering the full
-     * one keeps an unambiguous handle available when two blocks collide.
+     * `PresentUniforms_block_0Fragment.u_present.u_exposure` while call sites ask for `u_exposure`.
+     *
+     * Every suffix is registered, not just the last segment, because the renderer names material
+     * uniforms compositionally: `setUniform(\`u_material.${name}\`, …)` over a material's property map.
+     * That asks for `u_material.baseColor`, which is neither the full reflected name nor the last
+     * segment — so registering only those two would leave every material uniform silently unset, which
+     * looks exactly like a material rendering with default values.
+     *
+     * First registration wins on a collision, and the loser is reported rather than dropped silently:
+     * two blocks sharing a suffix would otherwise route one program's writes into the other's buffer.
      */
     private _register(reflectedName: string, block: Block, member: BlockMember): void {
         // GL appends "[0]" to the name of an array member.
         const full = reflectedName.replace(/\[0\]$/, '');
         this._members.set(full, { block, member });
 
-        const short = full.slice(full.lastIndexOf('.') + 1);
-        if (short === full) return;
-        if (this._members.has(short)) {
-            Logger.warn(
-                `Uniform "${short}" is ambiguous — declared in more than one block. Set it by its full ` +
-                `name to disambiguate.`, 'Shader');
-            return;
+        // Longest suffix first, so the most specific alias is the one that reports a collision.
+        const parts = full.split('.');
+        for (let i = 1; i < parts.length; i++) {
+            const suffix = parts.slice(i).join('.');
+            if (this._members.has(suffix)) {
+                Logger.warn(
+                    `Uniform "${suffix}" is ambiguous — declared in more than one block. Set it by its ` +
+                    `full name to disambiguate.`, 'Shader');
+                continue;
+            }
+            this._members.set(suffix, { block, member });
         }
-        this._members.set(short, { block, member });
     }
 
     public has(name: string): boolean { return this._members.has(name); }

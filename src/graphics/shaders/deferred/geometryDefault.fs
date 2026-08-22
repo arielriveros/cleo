@@ -24,7 +24,6 @@ layout(location = 2) out vec4 gEmissiveAO;       // rgb = emissive, a = ambient 
 uniform struct Material {
     vec3 diffuse;
     bool hasBaseTexture;
-    sampler2D baseTexture;
 
     vec3 ambient;
     vec3 specular;
@@ -33,34 +32,43 @@ uniform struct Material {
     // G-buffer has nowhere to put a specular colour.
     bool hasSpecularMap;
     bool hasReflectivityMap;
-    sampler2D specularReflectivityMap;
     float shininess;
 
     vec3 emissive;
     bool hasEmissiveMap;
-    sampler2D emissiveMap;
 
     bool hasNormalMap;
-    sampler2D normalMap;
 
     bool hasMaskMap;
-    sampler2D maskMap;
 
     float opacity;
 
     float reflectivity;
 } u_material;
 
+// Samplers live OUTSIDE the material struct, named `<instance>_<field>`.
+//
+// GLSL allows an opaque type inside a uniform struct; WGSL does not, and a dotted name cannot
+// survive translation either — there is no legal WGSL identifier that would generate
+// `uniform sampler2D u_material.baseColorTexture;`. Hoisting them out and joining with an
+// underscore is the one spelling both dialects can produce, so the renderer can keep naming
+// them from the material's texture map.
+uniform sampler2D u_material_baseTexture;
+uniform sampler2D u_material_specularReflectivityMap;
+uniform sampler2D u_material_emissiveMap;
+uniform sampler2D u_material_normalMap;
+uniform sampler2D u_material_maskMap;
+
 void main() {
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
     if (u_material.hasMaskMap) {
-        float mask = texture(u_material.maskMap, fragTexCoord).r;
+        float mask = texture(u_material_maskMap, fragTexCoord).r;
         if (mask < 0.5) discard;
     }
 
     vec3 albedo = u_material.diffuse;
     if (u_material.hasBaseTexture)
-        albedo *= pow(texture(u_material.baseTexture, fragTexCoord).rgb, vec3(2.2)); // sRGB -> linear
+        albedo *= pow(texture(u_material_baseTexture, fragTexCoord).rgb, vec3(2.2)); // sRGB -> linear
 
     // Blinn-Phong shininess -> perceptual roughness. Biased rougher (matte) so typical default
     // materials aren't glossy and don't pick up env reflection (shininess 32 -> ~0.49).
@@ -70,7 +78,7 @@ void main() {
 
     vec3 N = TBN[2];
     if (u_material.hasNormalMap) {
-        vec3 n = texture(u_material.normalMap, fragTexCoord).rgb;
+        vec3 n = texture(u_material_normalMap, fragTexCoord).rgb;
         n = normalize(n * 2.0 - 1.0);
         N = normalize(TBN * n);
     }
@@ -78,7 +86,7 @@ void main() {
     // Match the old forward path's emissive boost of 1.25.
     vec3 emissive = u_material.emissive * 1.25;
     if (u_material.hasEmissiveMap)
-        emissive = pow(texture(u_material.emissiveMap, fragTexCoord).rgb, vec3(2.2)) * u_material.emissive * 1.25; // sRGB -> linear
+        emissive = pow(texture(u_material_emissiveMap, fragTexCoord).rgb, vec3(2.2)) * u_material.emissive * 1.25; // sRGB -> linear
 
     gAlbedoMetallic  = vec4(albedo, metallic);
     gNormalRoughness = vec4(normalize(N), roughness);

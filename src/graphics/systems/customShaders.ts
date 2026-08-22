@@ -2,7 +2,13 @@ import { Shader } from '../shader';
 import { ShaderManager } from './shaderManager';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
 import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
-import SHADOWS_SRC from '../shaders/environment/shadows.glsl';
+import ShadowsChunk from '../shaders/wgsl/shadowsChunk.wgsl';
+
+// The shadow library, GENERATED from chunks/shadows.wgsl at build time rather than read from
+// environment/shadows.glsl. Custom materials are assembled here at runtime and need the library as
+// text, while the engine's own shaders want it as WGSL; generating this half means the cascade and
+// bias arithmetic is authored once. See tools/wgslTranslate.mjs `extractGlslChunk`.
+const SHADOWS_SRC = ShadowsChunk.glslChunk!;
 import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } from '../material';
 
 // -----------------------------------------------------------------------------------------------
@@ -161,6 +167,7 @@ layout(location = 0) out vec4 fragColor;
 const FORWARD_EPILOGUE = `
 void main() {
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
+    cleoFragCoord = gl_FragCoord.xy;
     fragColor = fragment();
 }
 `;
@@ -183,6 +190,9 @@ struct Surface {
 
 const DEFERRED_EPILOGUE = `
 void main() {
+    // No cleoFragCoord here: the deferred prelude is COMMON_HEADER only and does not paste the shadow
+    // library, because a G-buffer pass writes surface parameters and never samples a shadow map. The
+    // global therefore does not exist in this program, and assigning it is a compile error.
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
     Surface s;
     s.albedo = vec3(1.0);

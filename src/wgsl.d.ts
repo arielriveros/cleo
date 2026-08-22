@@ -18,6 +18,16 @@ declare module '*.wgsl' {
         readonly compute?: string;
         /** Entry-point function names by stage, as declared in the module. */
         readonly entryPoints: { vertex?: string; fragment?: string; compute?: string };
+        /**
+         * The module's GLSL, reduced to a pasteable chunk — structs, uniforms, globals and functions,
+         * with `#version`, `precision`, the fragment output and `main()` stripped.
+         *
+         * Present only for a module carrying the `// @glsl-chunk` directive. It exists for
+         * `systems/customShaders.ts`, which assembles user GLSL at runtime and needs the shadow library
+         * as text; generating that half means the library is authored once, in WGSL, instead of being
+         * maintained as two copies that drift.
+         */
+        readonly glslChunk?: string;
     }
     const value: WgslProgram;
     export default value;

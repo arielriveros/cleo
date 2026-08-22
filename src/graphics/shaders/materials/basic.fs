@@ -6,9 +6,17 @@ precision mediump float;
 uniform struct {
     vec3 color;
     bool hasTexture;
-    sampler2D texture;
     float opacity;
 } u_material;
+
+// Samplers live OUTSIDE the material struct, named `<instance>_<field>`.
+//
+// GLSL allows an opaque type inside a uniform struct; WGSL does not, and a dotted name cannot
+// survive translation either — there is no legal WGSL identifier that would generate
+// `uniform sampler2D u_material.baseColorTexture;`. Hoisting them out and joining with an
+// underscore is the one spelling both dialects can produce, so the renderer can keep naming
+// them from the material's texture map.
+uniform sampler2D u_material_texture;
 
 in vec2 fragTexCoord;
 
@@ -21,7 +29,7 @@ void main() {
     float alpha = u_material.opacity;
 
     if (u_material.hasTexture) {
-        vec4 texColor = texture(u_material.texture, fragTexCoord);
+        vec4 texColor = texture(u_material_texture, fragTexCoord);
         color *= toLinear(texColor.rgb);
         alpha *= texColor.a;
     }

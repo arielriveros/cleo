@@ -103,8 +103,13 @@ describe('every shadow-sampling shader includes the shared block', () => {
     }
 
     it('customShaders.ts imports it rather than copying it', () => {
+        // It now imports the GENERATED chunk rather than environment/shadows.glsl. Same contract, one
+        // step stronger: the library is authored once in chunks/shadows.wgsl and the GLSL half is
+        // produced at build time, so custom materials cannot drift from the engine's own shadows even
+        // in principle. tests/shadowLibraryParity.test.ts guards the two while both still exist.
         const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'systems', 'customShaders.ts'), 'utf-8');
-        expect(src).toContain("from '../shaders/environment/shadows.glsl'");
+        expect(src).toContain("from '../shaders/wgsl/shadowsChunk.wgsl'");
+        expect(src).toContain('ShadowsChunk.glslChunk');
         expect(src).toContain('${SHADOWS_SRC}');
     });
 

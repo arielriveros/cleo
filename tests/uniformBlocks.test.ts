@@ -123,6 +123,20 @@ describe('UniformBlockSet — reflection', () => {
         expect(set.has('U_block_0Fragment.u_data.u_exposure')).toBe(true);
     });
 
+    it('registers every dotted suffix, not only the last segment', () => {
+        // The renderer names material uniforms compositionally — `u_material.baseColor` — which is
+        // neither the full reflected name nor the last segment. Registering only those two left every
+        // material uniform silently unset, which looks identical to a material with default values.
+        const set = UniformBlockSet.reflect(install([BLOCK]))!;
+        expect(set.has('u_data.u_exposure')).toBe(true);
+        expect(set.has('u_exposure')).toBe(true);
+        expect(set.has('U_block_0Fragment.u_data.u_exposure')).toBe(true);
+
+        set.set('u_data.u_exposure', 3);
+        set.flush();
+        expect(uploads[0].floats[0]).toBe(3);
+    });
+
     it('strips the "[0]" GL appends to an array member', () => {
         const set = UniformBlockSet.reflect(install([BLOCK]))!;
         expect(set.has('u_kernel')).toBe(true);
