@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { remapDeep, type Remaps } from '../editor/src/utils/bundleMerge';
+import { remapDeep, type Remaps } from '../src/utils/bundleMerge';
 
 // Importing a bundle into a project that already owns some of its asset ids re-mints the collisions and
 // then rewrites every reference to them. The dangerous half is the EMBEDDED copies: a link is remapped

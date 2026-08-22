@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { packGameBin, PACK_HEADER_BYTES, PLAYER_CONTRACT } from '../editor/src/features/publish/pack';
-import { unpackGameBin, inflateSceneGeometry, inflateTerrainData } from '../editor/src/player/unpack';
+import { packGameBin, PACK_HEADER_BYTES, PLAYER_CONTRACT } from '../src/features/publish/pack';
+import { unpackGameBin, inflateSceneGeometry, inflateTerrainData } from '../src/player/unpack';
 
 /**
  * Round-trip contract for the `game.bin` container that publishing emits.

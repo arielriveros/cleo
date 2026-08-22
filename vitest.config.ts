@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
-import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { glslRaw } from './tools/vitestGlsl.mjs';
 
 // The engine is overwhelmingly WebGL2-bound and not testable without a GL context. What IS testable is
 // the pure math/data core — BVH traversal, ray-triangle intersection, convex hull generation, base64 —
@@ -8,18 +8,10 @@ import { fileURLToPath } from 'url';
 // graph reaches the renderer. Those are exactly the places where a silent regression is invisible until
 // something misbehaves at runtime, so they are where tests earn their keep. Keep this suite free of the
 // DOM and of any test that needs a real GL context or an asset fixture.
+//
+// Editor-side tests live in editor/tests and run under editor/vitest.config.ts. This file is engine-only.
 export default defineConfig({
-    // webpack resolves the engine's `import shader from './x.vs'` through a raw-loader rule; Vite has no
-    // such rule and hands the GLSL to its JS parser, which fails on `#version 300 es`. This is the same
-    // "shaders are strings" contract, so importing node.ts/scene.ts does not drag a bundler config along.
-    plugins: [{
-        name: 'glsl-raw',
-        transform(_code: string, id: string) {
-            const file = id.split('?')[0];
-            if (!/\.(vs|fs|glsl|vert|frag)$/.test(file)) return;
-            return { code: `export default ${JSON.stringify(readFileSync(file, 'utf-8'))};`, map: null };
-        },
-    }],
+    plugins: [glslRaw()],
     // Editor modules under test import the engine as `cleo`, which only resolves inside editor/ (where
     // the package points at the built dist). Aliasing it to the engine SOURCE keeps the suite independent
     // of a build step, and — more importantly — gives a test one set of class identities rather than two.
@@ -29,5 +21,61 @@ export default defineConfig({
     test: {
         include: ['tests/**/*.test.ts'],
         environment: 'node',
+        coverage: {
+            // istanbul, not v8: the v8 provider under this vite version reports branch coverage as a flat
+            // 100% (it counts functions in the branch column), which would make the branch floor below a
+            // lie. istanbul instruments the source directly and costs a few seconds on a suite this size.
+            provider: 'istanbul',
+            reporter: ['text', 'text-summary', 'json-summary', 'lcov'],
+
+            // `include` is an explicit allowlist, and it has to be. Three tests import the `cleo` barrel
+            // and scene.ts reaches the renderer, so "every file loaded during the run" is effectively the
+            // WHOLE engine — thousands of GL-bound lines no node-env test can ever execute. Measured over
+            // that, any threshold is theatre. Measured over the modules the tests actually target, it is
+            // a real ratchet: these files may not get less tested than they are today.
+            //
+            // The rule for this list: a module belongs here once it clears the thresholds below. To see
+            // what is still outside the gate (and what to write next), run:
+            //     npx vitest run --coverage --coverage.include='src/**/*.ts'
+            include: [
+                'src/core/base64.ts',
+                'src/core/cameraRigMath.ts',
+                'src/core/geometry.ts',
+                'src/core/history.ts',
+                'src/core/math.ts',
+                'src/core/scene/nodes/nodeType.ts',
+                'src/core/scene/nodes/parseNodeJson.ts',
+                'src/core/scene/nodes/ui/uiContainers.ts',
+                'src/core/scene/nodes/ui/uiContent.ts',
+                'src/core/scene/nodes/ui/uiNode.ts',
+                'src/core/scene/nodes/ui/uiWidgets.ts',
+                'src/core/uiLayout.ts',
+                'src/graphics/animationField.ts',
+                'src/graphics/boneNames.ts',
+                'src/graphics/glContext.ts',
+                'src/graphics/ik.ts',
+                'src/graphics/indexFormat.ts',
+                'src/graphics/shadowMath.ts',
+                'src/graphics/skeletonTopology.ts',
+                'src/graphics/ssaoKernel.ts',
+                'src/graphics/tilemap/cellMath.ts',
+                'src/graphics/tilemap/chunk.ts',
+                'src/graphics/tilemap/tilemapCollision.ts',
+                'src/graphics/tilemap/tilemapLayer.ts',
+                'src/graphics/utils/fbxPivots.ts',
+                'src/physics/cameraRayFilter.ts',
+                'src/physics/motion.ts',
+            ],
+
+            // Aggregate over the list above, not per file — a single module is allowed a thin patch as
+            // long as the set as a whole holds. Measured at the time these were set: statements 93.1,
+            // functions 94.3, lines 93.5, branches 76.9.
+            //
+            // Branches sit at a lower floor on purpose. This code is full of `?? default` and optional
+            // serialize fields whose other arm only exists for data written by an older version; 90%
+            // there would be bought with tests that assert nothing. It is still a ratchet: it may only
+            // ever be raised. The 90% number is the one people mean by "coverage" — statements and lines.
+            thresholds: { statements: 90, functions: 90, lines: 90, branches: 75, perFile: false },
+        },
     },
 });

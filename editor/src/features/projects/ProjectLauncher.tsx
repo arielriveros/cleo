@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import ProjectsBrowser from './ProjectsBrowser'
 import { ProjectRecord } from '../../utils/projects'
+import { VERSION_LABEL } from '../../version'
 
 /**
  * The full-screen picker shown before the workspace exists — a fresh install, or a browser whose registry
@@ -19,6 +20,7 @@ export default function ProjectLauncher({ projects }: { projects: ProjectRecord[
         <div className='flex flex-col items-center gap-2'>
           <h1 className='text-2xl font-semibold tracking-[0.3em] text-slate-200'>CLEO ENGINE</h1>
           <span className='text-[10px] uppercase tracking-[0.3em] text-slate-500'>Editor</span>
+          <span className='text-[10px] tabular-nums tracking-[0.2em] text-dim'>{VERSION_LABEL}</span>
         </div>
         <div className='flex flex-col gap-2'>
           <div className='text-sm text-slate-300'>

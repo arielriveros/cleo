@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { migrateLegacyUI, migrateGameDataUI } from '../editor/src/utils/uiMigration';
-import { Node } from '../src/core/scene/nodes/node';
-import { UIRootNode } from '../src/core/scene/nodes/ui/uiRoot';
-import { UIPanelNode, UIStackNode } from '../src/core/scene/nodes/ui/uiContainers';
-import { UITextNode } from '../src/core/scene/nodes/ui/uiContent';
-import { UIButtonNode } from '../src/core/scene/nodes/ui/uiWidgets';
-import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
+import { migrateLegacyUI, migrateGameDataUI } from '../src/utils/uiMigration';
+import { Node } from '../../src/core/scene/nodes/node';
+import { UIRootNode } from '../../src/core/scene/nodes/ui/uiRoot';
+import { UIPanelNode, UIStackNode } from '../../src/core/scene/nodes/ui/uiContainers';
+import { UITextNode } from '../../src/core/scene/nodes/ui/uiContent';
+import { UIButtonNode } from '../../src/core/scene/nodes/ui/uiWidgets';
+import { parseNodeJson } from '../../src/core/scene/nodes/parseNodeJson';
 
 const sceneRoot = () => ({ name: 'root', type: 'node', children: [] as any[] });
 

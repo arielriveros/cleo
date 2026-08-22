@@ -1,0 +1,75 @@
+# The unit-test gate, as a reusable workflow. Called by ci.yml (every push and PR) and by release.yml
+# (before anything is tagged or published), so the bar a release has to clear is literally the same file
+# as the bar a merge has to clear, rather than a copy of it that drifts.
+#
+# Both suites run vitest with coverage thresholds enforced inside their configs -- 90% statements,
+# functions and lines over an explicit allowlist of the modules the tests actually target. See the long
+# comment in vitest.config.ts for why the allowlist has to be explicit.
+name: Tests
+
+on:
+  workflow_call:
+
+jobs:
+  test-engine:
+    name: Test engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # No build step: the suite is pure (node env, no DOM, no GL) and imports the engine source.
+      - name: Test
+        run: npm run test:coverage
+
+      - name: Coverage summary
+        if: always()
+        run: node tools/coverage-summary.mjs coverage/coverage-summary.json Engine >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-engine
+          path: coverage/lcov.info
+          if-no-files-found: warn
+
+  test-editor:
+    name: Test editor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # The root install is here for resolution, not for a build: editor/vitest.config.ts aliases `cleo`
+      # to the engine source, whose own imports (cannon-es, gl-matrix, uuid, sucrase) resolve out of the
+      # root node_modules. That alias is why this job needs no `npm run build:dev` and stays fast.
+      - run: npm ci
+
+      - name: Install editor deps
+        run: npm ci
+        working-directory: editor
+
+      - name: Test
+        run: npm run test:coverage
+        working-directory: editor
+
+      - name: Coverage summary
+        if: always()
+        run: node tools/coverage-summary.mjs editor/coverage/coverage-summary.json Editor >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-editor
+          path: editor/coverage/lcov.info
+          if-no-files-found: warn

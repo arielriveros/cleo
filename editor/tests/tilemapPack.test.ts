@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { packGameBin } from '../editor/src/features/publish/pack';
-import { unpackGameBin, inflateTilemapData } from '../editor/src/player/unpack';
-import { Tilemap } from '../src/graphics/tilemap/tilemap';
-import { Tileset } from '../src/graphics/tilemap/tileset';
-import { CHUNK_SIZE } from '../src/graphics/tilemap/chunk';
-import { compressTilemapData } from '../editor/src/features/publish/terrainImages';
+import { packGameBin } from '../src/features/publish/pack';
+import { unpackGameBin, inflateTilemapData } from '../src/player/unpack';
+import { Tilemap } from '../../src/graphics/tilemap/tilemap';
+import { Tileset } from '../../src/graphics/tilemap/tileset';
+import { CHUNK_SIZE } from '../../src/graphics/tilemap/chunk';
+import { compressTilemapData } from '../src/features/publish/terrainImages';
 
 // The publish round-trip for a tilemap's cell grids: base64 in the editor's blob, DEFLATE in game.bin,
 // a pre-decoded Uint32Array on the way back in. Mirrors gamePack's terrain height/splat coverage.

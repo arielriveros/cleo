@@ -1,11 +1,12 @@
 {
   "name": "cleo",
-  "version": "1.0.0",
+  "version": "0.156.27",
   "description": "WebGL2 Game Engine",
   "main": "cleo.js",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "jsdoc:gaps": "node tools/jsdoc-gaps.mjs",
     "watch": "webpack --watch",
@@ -27,6 +28,7 @@
   "devDependencies": {
     "@types/uuid": "^9.0.7",
     "@types/webgl2": "0.0.10",
+    "@vitest/coverage-istanbul": "^3.2.7",
     "concurrently": "^8.2.2",
     "copy-webpack-plugin": "^14.0.0",
     "file-loader": "^6.2.0",

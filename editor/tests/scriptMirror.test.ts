@@ -3,9 +3,9 @@ import {
   BULK_DELETE_LIMIT, advanceState, buildDesiredMirror, hashSource, inferBaseType, mirrorRelOf,
   planPull, planPush, sanitizeSegment, vfsPathOfRel,
   type ExternalChange, type MirrorState,
-} from '../editor/src/utils/scriptMirror';
-import { BASE_CLASS, type ScriptAsset } from '../editor/src/utils/scripts';
-import type { VfsIndex } from '../editor/src/utils/vfs';
+} from '../src/utils/scriptMirror';
+import { BASE_CLASS, type ScriptAsset } from '../src/utils/scripts';
+import type { VfsIndex } from '../src/utils/vfs';
 
 // The script workspace makes a folder on disk BE the script library, which means two writers and one
 // truth. These tests pin the three things that make that safe:

@@ -3,8 +3,8 @@ import {
   storeSkin, loadSkin, buildAnimationAsset, clipFingerprint, assetFingerprint,
   findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips,
   type StoredClip,
-} from '../editor/src/utils/animationAssets';
-import { skinnedModelJsonOf, assetWithoutEmbeddedClips } from '../editor/src/utils/modelClips';
+} from '../src/utils/animationAssets';
+import { skinnedModelJsonOf, assetWithoutEmbeddedClips } from '../src/utils/modelClips';
 
 // Animation clips as a SHARED asset: stored once, in the source rig's space, and retargeted per model at
 // use. The two things that have to hold for that to be worth anything are (a) the stored skin survives a

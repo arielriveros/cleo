@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   applyDelete, buildFileManagerData, movablePaths, reconcileVfs, repairVfs, topMostIds,
   type LibSnapshot, type VfsEntry, type VfsIndex,
-} from '../editor/src/utils/vfs';
+} from '../src/utils/vfs';
 
 // The asset explorer is two data structures pretending to be one: our VfsIndex and SVAR's FileTree. The
 // file manager crashes hard — `Cannot read properties of undefined (reading 'data')` — when the index

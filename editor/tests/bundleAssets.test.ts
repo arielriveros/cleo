@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { packBundleAssets, inflateBundleAssets } from '../editor/src/utils/bundleAssets';
-import { BUNDLE_FORMAT_VERSION } from '../editor/src/utils/bundle';
-import type { BundleData } from '../editor/src/utils/bundle';
-import { bytesToBase64, bytesToDataUrl } from '../editor/src/utils/bytes';
+import { packBundleAssets, inflateBundleAssets } from '../src/utils/bundleAssets';
+import { BUNDLE_FORMAT_VERSION } from '../src/utils/bundle';
+import type { BundleData } from '../src/utils/bundle';
+import { bytesToBase64, bytesToDataUrl } from '../src/utils/bytes';
 
 /**
  * Round-trip contract for the `assets.bin` an export bundle now carries.

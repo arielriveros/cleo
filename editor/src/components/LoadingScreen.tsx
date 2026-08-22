@@ -1,6 +1,8 @@
 // `import type` so the pre-engine boot gate (app.tsx) can render this without pulling EngineContext — and
 // everything it constructs at module scope — into the bundle before a project has been opened.
 import type { LoadingProgress } from '../features/EngineContext';
+// A value import, unlike the one above: version.ts compiles to two string constants and pulls in nothing.
+import { VERSION_LABEL } from '../version';
 
 interface LoadingScreenProps {
   progress: LoadingProgress;
@@ -19,6 +21,7 @@ export default function LoadingScreen({ progress }: LoadingScreenProps) {
         <div className="flex flex-col items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-[0.3em] text-slate-200">CLEO ENGINE</h1>
           <span className="text-[10px] uppercase tracking-[0.3em] text-slate-500">Editor</span>
+          <span className="text-[10px] tabular-nums tracking-[0.2em] text-dim">{VERSION_LABEL}</span>
         </div>
 
         <div className="w-full">

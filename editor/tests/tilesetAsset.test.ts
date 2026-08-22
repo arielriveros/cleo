@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_TILE_SIZE, buildTilesetAsset, gridOf, guessTileSize, resliceTileset, toRuntimeTileset,
   reembedTilesets, detachTileset, tilesetIdsInScene,
-} from '../editor/src/utils/tilesets';
+} from '../src/utils/tilesets';
 import { Scene, SpriteNode, Sprite } from 'cleo';
 
 // The pure half of the tileset asset: how an atlas is cut into a grid, and what happens to per-tile

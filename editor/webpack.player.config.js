@@ -2,6 +2,7 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 const path = require("path");
 const webpack = require("webpack");
 const { contract } = require("./src/features/publish/playerContract.json");
+const { buildVersionDefines } = require("./buildVersion");
 
 // Stamps public/player/build.json with the contract this bundle was built against, so publishing can
 // tell a fresh player from a stale one. Emitted through webpack rather than written by a side script
@@ -46,6 +47,10 @@ module.exports = {
     clean: true,
   },
   plugins: [
+    // Nothing under src/player/ imports src/version.ts today. The define is here anyway because this is a
+    // SEPARATE bundle that drifts silently (see EmitPlayerBuildInfo above) -- without it, the first shared
+    // import to reach the player would be a runtime ReferenceError inside a published game, not a build error.
+    new webpack.DefinePlugin(buildVersionDefines()),
     new HtmlWebpackPlugin({
       template: "./src/player/index.html",
       filename: "index.html",

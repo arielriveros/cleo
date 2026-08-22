@@ -6,10 +6,10 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { staticScaffold } from '../editor/src/features/scriptWorkspace/scaffold';
+import { staticScaffold } from '../src/features/scriptWorkspace/scaffold';
 
 const exec = promisify(execFile);
-const repo = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]tests[\\/]?$/, '');
+const repo = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]editor[\\/]tests[\\/]?$/, '');
 
 // The point of the script workspace is that a folder on disk types a script exactly the way the in-editor
 // Monaco does: `import { Node } from 'cleo'` resolves, F12 walks into the engine's declaration tree, and

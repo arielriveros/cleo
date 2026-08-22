@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { packBundleAssets, inflateBundleAssets } from '../editor/src/utils/bundleAssets';
-import type { BundleData } from '../editor/src/utils/bundle';
+import { packBundleAssets, inflateBundleAssets } from '../src/utils/bundleAssets';
+import type { BundleData } from '../src/utils/bundle';
 
 /**
  * The packer against a REAL project, not a fixture: the 3D example shipped under editor/public/examples.
@@ -16,7 +16,7 @@ import type { BundleData } from '../editor/src/utils/bundle';
  * test failure.
  */
 
-const DIR = path.join(__dirname, '..', 'editor', 'public', 'examples', '3d-example');
+const DIR = path.join(__dirname, '..', 'public', 'examples', '3d-example');
 const present = fs.existsSync(path.join(DIR, 'manifest.json'));
 
 const readJson = (p: string) => JSON.parse(fs.readFileSync(path.join(DIR, p), 'utf8'));

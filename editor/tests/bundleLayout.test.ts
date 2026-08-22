@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { BUNDLE_FORMAT_VERSION, BUNDLE_PATHS } from '../editor/src/utils/bundle';
-import type { BundleData } from '../editor/src/utils/bundle';
-import { bundleEntries, readBundle, type BundleEntry } from '../editor/src/utils/bundleRead';
-import { bytesToBase64 } from '../editor/src/utils/bytes';
+import { BUNDLE_FORMAT_VERSION, BUNDLE_PATHS } from '../src/utils/bundle';
+import type { BundleData } from '../src/utils/bundle';
+import { bundleEntries, readBundle, type BundleEntry } from '../src/utils/bundleRead';
+import { bytesToBase64 } from '../src/utils/bytes';
 
 /**
  * The two halves of the on-disk layout against each other: the entries an export writes, read back by the

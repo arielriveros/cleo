@@ -1,3 +1,4 @@
+export { VERSION } from "./version";
 export { CleoEngine } from "./core/engine";
 export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { groupImportFiles, isModelFile } from '../editor/src/utils/importGrouping';
+import { groupImportFiles, isModelFile } from '../src/utils/importGrouping';
 
 // Model import has two silent-failure modes that these cover.
 //

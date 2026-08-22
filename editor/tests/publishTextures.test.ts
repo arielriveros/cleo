@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { collectPublishedTextureIds } from '../editor/src/utils/references';
+import { collectPublishedTextureIds } from '../src/utils/references';
 
 /**
  * Publishing now ships only the textures the scenes reference, instead of the entire TextureManager.

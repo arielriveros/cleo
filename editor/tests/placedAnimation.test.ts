@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     captureAnimationState, restoreAnimationState, NodeLike, PlacedAnimationState,
-} from '../editor/src/utils/placedAnimation';
+} from '../src/utils/placedAnimation';
 
 // A placed instance is rebuilt FROM ITS ASSET whenever that asset's content hash changes — and a model asset
 // never carries an animation state machine, because machines are authored onto the placed node. Without this

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hashAsset, hashesComparable, ASSET_HASH_VERSION } from '../editor/src/utils/assetHash';
+import { hashAsset, hashesComparable, ASSET_HASH_VERSION } from '../src/utils/assetHash';
 
 // The asset hash decides whether opening a scene RE-INSTANTIATES its placed instances. That rebuild comes
 // from the asset, which knows nothing about how a placement was configured — so a hash that changes when it

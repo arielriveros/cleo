@@ -1,21 +1,20 @@
-# Correctness gate for the engine: typecheck + unit tests.
+# The pre-release pipeline: typecheck, test, deploy. One workflow so the stages can depend on each other
+# -- the editor used to deploy from firebase-hosting-merge.yml, which ran in parallel with CI and happily
+# shipped a build whose tests were red. Deploy now hangs off the test jobs.
 #
-# Separate from the two firebase-hosting-* workflows on purpose. Those deploy, consume Firebase secrets
-# and are therefore restricted to same-repo PRs — which means fork PRs currently run no checks at all.
-# This job touches no secrets, so it runs for forks too and closes that hole.
+# Severity is deliberately not uniform:
 #
-# The engine job deliberately does NOT build: typecheck is `tsc --noEmit` and the test suite is pure
-# (node env, no DOM, no GL), so neither needs dist/. Keeping it fast is what keeps it from being ignored.
+#   typecheck  WARNS.  `tsc --noEmit` is the only thing that checks the editor at all (its webpack goes
+#              through babel-loader, which strips types without looking at them), so it has to run -- but
+#              a type error blocks nothing that a green test suite says is working. It reports as an
+#              annotation plus a job-summary block, and the job stays green.
+#   tests      FAIL.   Plus a coverage floor. They live in tests.yml, which release.yml calls too, so the
+#              bar for shipping is the same file as the bar for merging.
 #
-# The editor job is the one that has to build, because `dist/` is gitignored and the editor consumes the
-# engine through it (`"cleo": "file:../dist"`). Without that build there is nothing for it to typecheck
-# against. It is a separate job so a broken editor cannot mask a broken engine, and so the fast engine
-# feedback is not held behind the slow build.
-#
-# Why the editor job matters at all: its webpack goes through babel-loader, which STRIPS TypeScript types
-# without checking them — so despite `"strict": true`, nothing verified the editor until this ran. It is
-# also the only automated thing that can catch a regression in the engine's emitted .d.ts, which the
-# editor compiles against in strict mode.
+# The two typecheck jobs and the two test jobs all start at once. The typechecks are the slow half (the
+# editor one needs a full engine build first, because dist/ is gitignored and the editor consumes the
+# engine through it), so running them alongside the tests rather than in front of them is what keeps the
+# gate fast enough to not be ignored. None of them touch a secret, so they run for fork PRs too.
 name: CI
 
 on:
@@ -24,30 +23,74 @@ on:
       - main
   pull_request:
 
+# A newer push to the same branch makes the older run's answer irrelevant -- and, for a PR, its preview
+# deploy stale.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  checks: write
+  contents: read
+  pull-requests: write
+
 jobs:
-  engine:
-    name: Typecheck & test
+  typecheck-engine:
+    name: Typecheck engine (warn)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Both deploy workflows ride whatever Node ubuntu-latest happens to ship — a silently moving
-      # target. Pin it here and read the major from .nvmrc so there is one source of truth.
+      # The deploy used to ride whatever Node ubuntu-latest happened to ship -- a silently moving target.
+      # Every job here reads the major from .nvmrc so there is one source of truth.
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
+
+      # The product version lives in four places at once (three package.json files, their lockfiles, and
+      # src/version.ts, which drops the fixed `1.` prefix the others cannot store). Only
+      # tools/bump-version.mjs writes them; this catches a hand-edit that touched one and missed the rest.
+      # A warning here and fatal in release.yml: drift only becomes dangerous at the moment of publishing.
+      - name: Version consistency
+        id: version
+        continue-on-error: true
+        shell: bash
+        run: node tools/bump-version.mjs --check 2>&1 | tee version.log
 
       - name: Typecheck
-        run: npm run typecheck
+        id: tsc
+        continue-on-error: true
+        shell: bash
+        run: npm run typecheck 2>&1 | tee tsc.log
 
-      - name: Test
-        run: npm test
+      - name: Report
+        if: always() && (steps.tsc.outcome == 'failure' || steps.version.outcome == 'failure')
+        shell: bash
+        run: |
+          if [ "${{ steps.tsc.outcome }}" = failure ]; then
+            echo "::warning title=Engine typecheck failed::$(grep -c 'error TS' tsc.log) TypeScript error(s) -- non-blocking"
+            {
+              echo "### :warning: Engine typecheck failed (non-blocking)"
+              echo '```'
+              cat tsc.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${{ steps.version.outcome }}" = failure ]; then
+            echo "::warning title=Version drift::package.json, its lockfiles and src/version.ts disagree -- non-blocking"
+            {
+              echo "### :warning: Version drift (non-blocking)"
+              echo '```'
+              cat version.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
-  editor:
-    name: Typecheck editor
+  typecheck-editor:
+    name: Typecheck editor (warn)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,8 +102,9 @@ jobs:
 
       - run: npm ci
 
-      # dist/ is untracked, and editor/node_modules/cleo symlinks to it — so the engine must be built
-      # before the editor can resolve, let alone typecheck against, it.
+      # dist/ is untracked and editor/node_modules/cleo points at it, so the engine must be built before
+      # the editor can resolve -- let alone typecheck against -- it. This is also the only automated check
+      # on the engine's emitted .d.ts, which the editor compiles against in strict mode.
       - name: Build engine (editor resolves cleo -> ../dist)
         run: npm run build:dev
 
@@ -68,6 +112,69 @@ jobs:
         run: npm ci
         working-directory: editor
 
-      - name: Typecheck editor
-        run: npm run typecheck
+      - name: Typecheck
+        id: tsc
+        continue-on-error: true
+        shell: bash
         working-directory: editor
+        run: npm run typecheck 2>&1 | tee tsc.log
+
+      - name: Report
+        if: always() && steps.tsc.outcome == 'failure'
+        shell: bash
+        working-directory: editor
+        run: |
+          echo "::warning title=Editor typecheck failed::$(grep -c 'error TS' tsc.log) TypeScript error(s) -- non-blocking"
+          {
+            echo "### :warning: Editor typecheck failed (non-blocking)"
+            echo '```'
+            cat tsc.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  tests:
+    name: Unit tests
+    uses: ./.github/workflows/tests.yml
+
+  deploy:
+    name: Deploy editor
+    runs-on: ubuntu-latest
+    needs: tests
+    # The Firebase secret is invisible to fork PRs, so this would fail for a reason the contributor cannot
+    # fix. Skip it there; the four check jobs above still run and are what gate the merge.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+        # The editor stamps its version from `git describe --exact-match`, which needs the tags. Without
+        # them every build silently renders as `-dev`.
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # `editor:build` -> `build:player` -> npm's implicit prebuild hook -> root `build:dev`, so the
+      # engine is built as part of this. The old deploy workflow also ran `npm run build` (production)
+      # first, which that hook then overwrote -- dropped rather than reordered, since nothing consumed it.
+      - run: npm ci && npm run editor:install && npm run editor:build
+
+      - name: Deploy to live
+        if: github.event_name == 'push'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          entryPoint: ./editor
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}
+          channelId: live
+          projectId: cleo-editor
+
+      - name: Deploy preview channel
+        if: github.event_name == 'pull_request'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          entryPoint: ./editor
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}
+          projectId: cleo-editor

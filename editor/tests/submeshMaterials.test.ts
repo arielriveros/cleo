@@ -24,7 +24,7 @@ vi.mock('cleo', () => ({
 const {
   MATERIAL_ID_VAR, MATERIAL_IDS_VAR, getMaterialIdsOf, applyMaterialAsset,
   unlinkToFallback, unlinkMaterialAt, materialSlotsReferencing, resolveMaterialRefs,
-} = await import('../editor/src/utils/materials');
+} = await import('../src/utils/materials');
 
 /**
  * A stand-in for a ModelNode: the variable bag plus a live `model` whose `material` is an alias for

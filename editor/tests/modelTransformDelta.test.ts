@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nodeJsonTrs, modelTransformDelta } from '../editor/src/utils/modelClips'
+import { nodeJsonTrs, modelTransformDelta } from '../src/utils/modelClips'
 
 // The model editor can now move/rotate/scale a model's root and have every placement follow. Placements
 // keep where the user put them, so what propagates is the CHANGE the model made — see modelTransformDelta.

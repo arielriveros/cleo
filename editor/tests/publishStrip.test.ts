@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { stripDimensionData } from '../editor/src/features/publish/stripDimensionData';
-import { collectPublishedTextureIds } from '../editor/src/utils/references';
+import { stripDimensionData } from '../src/features/publish/stripDimensionData';
+import { collectPublishedTextureIds } from '../src/utils/references';
 
 // A serialized scene tree in the shape buildGameData emits: a plain root with typed children.
 function scene(): any {

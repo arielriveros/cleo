@@ -3,6 +3,7 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MonacoWebpackPlugin = require("monaco-editor-webpack-plugin");
 const path = require("path");
 const webpack = require("webpack");
+const { buildVersionDefines } = require("./buildVersion");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
@@ -21,6 +22,8 @@ module.exports = {
     clean: true,
   },
   plugins: [
+    // Feeds src/version.ts, which renders the version on the splash screen and project launcher.
+    new webpack.DefinePlugin(buildVersionDefines()),
     new HtmlWebpackPlugin({
       template: "./src/index.html",
     }),

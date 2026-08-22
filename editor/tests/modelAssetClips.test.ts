@@ -3,7 +3,7 @@ import {
     skinnedModelJsonOf, uniqueClipName, assetClipNames,
     assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames,
     assetWithIkRig, assetIkRig, flattenModelJson,
-} from '../editor/src/utils/modelClips';
+} from '../src/utils/modelClips';
 
 // Patching a model asset's serialized clip list. This is the half of "clips belong to the asset" that has
 // to agree, byte for byte, with what AnimatedModel would have written itself — the live model and the asset
