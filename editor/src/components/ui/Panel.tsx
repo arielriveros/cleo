@@ -24,14 +24,27 @@ export interface SectionProps {
   title?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  /**
+   * Native tooltip on the caption, for the explanation that would otherwise be a paragraph under it.
+   *
+   * The renderer panels used to print a `Hint` beneath every group. That reads well once and then
+   * costs vertical space forever, on panels that are already tall columns of controls — so the prose
+   * moved here, where it is available on hover and free when it is not wanted.
+   */
+  hint?: string;
 }
 
 /** A titled group of controls (uppercase caption + body). Promoted from RendererOptions. */
-export function Section({ title, children, className }: SectionProps) {
+export function Section({ title, children, className, hint }: SectionProps) {
   return (
     <div className={cn('mb-3', className)}>
       {title !== undefined && (
-        <div className={cn(sectionTitleClass, 'mb-1')}>{title}</div>
+        <div
+          className={cn(sectionTitleClass, 'mb-1', hint && 'cursor-help decoration-dotted underline underline-offset-2')}
+          title={hint}
+        >
+          {title}
+        </div>
       )}
       {children}
     </div>

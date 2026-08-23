@@ -7,6 +7,14 @@ export interface RenderStats {
     drawCalls: number;
     /** Subset of drawCalls issued via gl.drawElementsInstanced / drawArraysInstanced. */
     instancedDrawCalls: number;
+    /**
+     * Draws recorded through the RHI command model rather than by `Mesh` directly.
+     *
+     * Migration instrumentation, and load-bearing while it lasts: a draw that quietly falls back to the
+     * legacy path produces identical pixels and identical draw counts, so without this number a
+     * regression from "on the RHI" to "not on the RHI" is invisible. It is what the mesh harness pins.
+     */
+    rhiDrawCalls: number;
     /** Scene meshes drawn in the color pass (post-`visible`; excludes shadow/IBL re-draws and foliage blades). */
     objects: number;
     /** Scene meshes skipped this frame by camera frustum culling (color pass only). */
@@ -49,6 +57,7 @@ export interface RenderStats {
 export const frameStats: RenderStats = {
     drawCalls: 0,
     instancedDrawCalls: 0,
+    rhiDrawCalls: 0,
     objects: 0,
     culled: 0,
     instances: 0,
@@ -94,6 +103,7 @@ export function countFullscreenPass(): void {
 export function resetFrameStats(): void {
     frameStats.drawCalls = 0;
     frameStats.instancedDrawCalls = 0;
+    frameStats.rhiDrawCalls = 0;
     frameStats.objects = 0;
     frameStats.culled = 0;
     frameStats.instances = 0;

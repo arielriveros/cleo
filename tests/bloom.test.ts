@@ -10,9 +10,13 @@ import { join } from 'node:path';
 
 const SRC = join(__dirname, '..', 'src');
 const renderer = readFileSync(join(SRC, 'graphics', 'renderer.ts'), 'utf8');
-const bloomShader = readFileSync(join(SRC, 'graphics', 'shaders', 'screen', 'bloom.fs'), 'utf8');
-const downsampleShader = readFileSync(join(SRC, 'graphics', 'shaders', 'screen', 'bloomDownsample.fs'), 'utf8');
-const upsampleShader = readFileSync(join(SRC, 'graphics', 'shaders', 'screen', 'bloomUpsample.fs'), 'utf8');
+// The three bloom passes are authored in WGSL now; the GLSL for WebGL2 is generated from these at
+// build time. The assertions below moved with them, so they still pin the same behaviour — but against
+// the source somebody edits rather than against generated text.
+const WGSL = join(SRC, 'graphics', 'shaders', 'wgsl');
+const bloomShader = readFileSync(join(WGSL, 'bloom.wgsl'), 'utf8');
+const downsampleShader = readFileSync(join(WGSL, 'bloomDownsample.wgsl'), 'utf8');
+const upsampleShader = readFileSync(join(WGSL, 'bloomUpsample.wgsl'), 'utf8');
 
 /** Body of a `private _name(...)` method, so a uniform upload can be attributed to its own pass. */
 function methodBody(source: string, name: string): string {
@@ -35,8 +39,8 @@ describe('bloom bright-pass threshold space', () => {
         // ~2), so comparing it against the default threshold of 1.0 gave contribution == 0 for
         // essentially every pixel. Bloom was black no matter what threshold, knee, intensity or
         // exposure were set to — the whole control group was inert.
-        expect(bloomShader).toMatch(/uniform float u_exposure/);
-        expect(bloomShader).toMatch(/luma = dot\(color \* u_exposure/);
+        expect(bloomShader).toMatch(/u_exposure: f32/);
+        expect(bloomShader).toMatch(/let luma = dot\(color \* u_bloom\.u_exposure/);
     });
 
     it('still scales the UN-exposed colour', () => {
@@ -44,7 +48,7 @@ describe('bloom bright-pass threshold space', () => {
         // stay in pre-exposure linear, because composer.fs adds it to the pre-exposure scene and
         // present.fs applies exposure once, to the sum. Multiplying here as well would double-expose
         // every bloomed pixel.
-        expect(bloomShader).toMatch(/brightColor = vec4\(color \* contribution \* mask, 1\.0\);/);
+        expect(bloomShader).toMatch(/return vec4<f32>\(color \* contribution \* mask, 1\.0\);/);
     });
 
     it('is fed the exposure by the bloom pass itself', () => {
@@ -63,10 +67,12 @@ describe('bloom eligibility mask', () => {
         // atmosphere sky and clouds can set it. Sprites, tilemaps, transparents and unlit "basic"
         // materials draw under a mask-preserving blend and *cannot*, so with the mask forced on they
         // are permanently ineligible — a silent no-op for any 2D or unlit project.
-        expect(bloomShader).toMatch(/uniform bool\s+u_bloomMaskEnabled/);
+        // An i32, not a bool: WGSL forbids bool in a uniform buffer. Call sites still pass a boolean.
+        expect(bloomShader).toMatch(/u_bloomMaskEnabled: i32/);
         // `uv`, not fragTexCoord: this pass halves resolution, so the mask has to be read on the same
         // snapped source block as the colour or the two disagree along every edge.
-        expect(bloomShader).toMatch(/mask = u_bloomMaskEnabled \? step\(0\.5, texture\(u_bloomMask, uv\)\.a\) : 1\.0;/);
+        expect(bloomShader).toMatch(/if \(u_bloom\.u_bloomMaskEnabled != 0\) \{/);
+        expect(bloomShader).toMatch(/mask = step\(0\.5, textureSample\(u_bloomMask_texture, u_bloomMask_sampler, uv\)\.a\);/);
     });
 
     it('defaults to off', () => {
@@ -98,19 +104,19 @@ describe('bloom pyramid grid alignment', () => {
         // texels — a full texel by the far edge — and the drift beats against the source grid: sample
         // points land alternately on texel centres and boundaries, producing banding that worsens
         // toward the right/bottom with dark lines where a bright column is skipped outright.
-        for (const [name, shader] of [['bloom.fs', bloomShader], ['bloomDownsample.fs', downsampleShader]] as const) {
-            expect(shader, name).toMatch(/vec2 sourceBlockUV\(/);
+        for (const [name, shader] of [['bloom.wgsl', bloomShader], ['bloomDownsample.wgsl', downsampleShader]] as const) {
+            expect(shader, name).toMatch(/fn sourceBlockUV\(/);
             expect(shader, name).toMatch(/floor\(uv \* dstResolution\) \* 2\.0 \+ 1\.0\) \* srcTexelSize/);
-            expect(shader, name).toMatch(/uv = sourceBlockUV\(fragTexCoord/);
+            expect(shader, name).toMatch(/let uv = sourceBlockUV\(in\.uv,/);
         }
     });
 
     it('never samples the halving passes at the raw fragTexCoord', () => {
-        // The whole point: a bare texture(..., fragTexCoord) in a pass that also halves resolution is
-        // a point sample of half the source.
-        expect(bloomShader).not.toMatch(/texture\(u_screenTexture, fragTexCoord\)/);
-        expect(bloomShader).not.toMatch(/texture\(u_bloomMask, fragTexCoord\)/);
-        expect(downsampleShader).not.toMatch(/vec2 uv = fragTexCoord;/);
+        // The whole point: a bare fetch at the interpolated UV, in a pass that also halves resolution,
+        // is a point sample of half the source. Both fetches must go through the snapped block centre.
+        expect(bloomShader).not.toMatch(/u_screenTexture_sampler, in\.uv\)/);
+        expect(bloomShader).not.toMatch(/u_bloomMask_sampler, in\.uv\)/);
+        expect(downsampleShader).not.toMatch(/let uv = in\.uv;/);
     });
 
     it('feeds both grids from the renderer', () => {
@@ -124,9 +130,9 @@ describe('bloom pyramid grid alignment', () => {
     it('gives the upsample tent a per-axis radius', () => {
         // One float derived from the source WIDTH, applied to both axes, made the vertical reach short
         // by the aspect ratio — a tent stretched sideways rather than an even spread.
-        expect(upsampleShader).toMatch(/uniform vec2 u_filterRadius/);
-        expect(upsampleShader).toMatch(/float x = u_filterRadius\.x;/);
-        expect(upsampleShader).toMatch(/float y = u_filterRadius\.y;/);
+        expect(upsampleShader).toMatch(/u_filterRadius: vec2<f32>/);
+        expect(upsampleShader).toMatch(/let x = u_bloom\.u_filterRadius\.x;/);
+        expect(upsampleShader).toMatch(/let y = u_bloom\.u_filterRadius\.y;/);
         expect(renderer).toMatch(/BLOOM_FILTER_RADIUS \/ from\.width, Renderer\.BLOOM_FILTER_RADIUS \/ from\.height/);
     });
 

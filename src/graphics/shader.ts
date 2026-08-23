@@ -147,6 +147,9 @@ export class Shader {
      */
     public flushUniformBlocks(): void { this._blocks?.flush(); }
 
+    /** The driver's reported block layout, for verification. Empty for a loose-uniform program. */
+    public describeBlockLayout(): unknown[] { return this._blocks?.describeLayout() ?? []; }
+
     /** Whether this program carries std140 blocks — i.e. whether it was generated from WGSL. */
     public get hasUniformBlocks(): boolean { return this._blocks !== null; }
 

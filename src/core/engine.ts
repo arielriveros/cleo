@@ -16,6 +16,11 @@ interface CleoConfig {
     deferred?: boolean;
     /** Max distance covered by the directional cascaded shadow maps (default 100). */
     shadowDistance?: number;
+    /**
+     * Which graphics API to ask for (default 'webgl2'). A request, not a guarantee — see
+     * `Renderer.backendFallbackReason`. Read once, when the device is acquired.
+     */
+    backend?: 'webgl2' | 'webgpu';
   },
   physics?: {
     gravity?: number[];
@@ -88,7 +93,8 @@ export class CleoEngine {
                                     shadowMapResolution: config?.graphics?.shadowMapSize,
                                     bloom: config?.graphics?.bloom,
                                     deferred: config?.graphics?.deferred,
-                                    shadowDistance: config?.graphics?.shadowDistance });
+                                    shadowDistance: config?.graphics?.shadowDistance,
+                                    backend: config?.graphics?.backend });
     this._physicsSystem = new PhysicsSystem({
       gravity: config?.physics?.gravity || [0, -9.81, 0]
     });

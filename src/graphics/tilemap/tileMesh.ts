@@ -16,6 +16,7 @@
 import { gl } from '../../graphics/renderer';
 import { GLState } from '../../graphics/systems/glState';
 import { frameStats } from '../../graphics/renderStats';
+import { ShaderManager } from '../../graphics/systems/shaderManager';
 import { TILE_VERTEX_LAYOUT } from '../rhi/vertexLayouts';
 import { applyVertexLayout } from '../rhi/webgl2/vertexArray';
 import { device } from '../rhi/webgl2/webgl2Device';
@@ -231,6 +232,14 @@ export class TileMesh {
     public draw(): void {
         if (this._indexCount === 0 || !this._vao) return;
         GLState.bindVAO(this._vao);
+        // Upload any pending uniform-block writes before drawing.
+        //
+        // A WGSL-authored program has no loose uniforms — naga puts them all in a std140 block that is
+        // written to a CPU buffer and uploaded on flush. `Mesh.draw` does this; this class has its own
+        // draw path and did not, so once tilemap.fs became tilemap.wgsl the transform block was never
+        // uploaded and the chunks drew against whatever the buffer was allocated with. It did not throw
+        // and it did not change a draw count — the tiles simply stopped appearing.
+        ShaderManager.Instance.flushBound();
         gl.drawElements(gl.TRIANGLES, this._indexCount, gl.UNSIGNED_SHORT, 0);
         frameStats.drawCalls++;
         frameStats.vertices += this._vertexCount;
@@ -241,6 +250,8 @@ export class TileMesh {
     public drawRange(indexOffset: number, indexCount: number): void {
         if (indexCount <= 0 || !this._vao) return;
         GLState.bindVAO(this._vao);
+        // Same reason as `draw` above.
+        ShaderManager.Instance.flushBound();
         gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, indexOffset * 2);
         frameStats.drawCalls++;
         frameStats.vertices += indexCount;

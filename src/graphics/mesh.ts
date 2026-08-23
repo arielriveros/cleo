@@ -1,5 +1,5 @@
 import { gl } from './glContext';
-import type { PrimitiveTopology } from './rhi/types';
+import type { PrimitiveTopology, IndexFormat } from './rhi/types';
 import { glTopology, isTriangleTopology } from './rhi/webgl2/glEnums';
 import { applyVertexLayout, clearVertexLayout } from './rhi/webgl2/vertexArray';
 // The backend buffer type, not the RHI `Buffer` interface: Mesh still builds its own VAO, which is a
@@ -380,5 +380,15 @@ export class Mesh {
     /** The device-owned vertex buffer. Was declared as a raw WebGLBuffer, which the empty-interface
      *  structural match let through even after the field became a wrapper. */
     public get vertexBuffer(): GpuBuffer { return this._vertexBuffer; }
+    /**
+     * The index buffer and how to read it, for a draw recorded through the RHI.
+     *
+     * `indexFormat` mirrors `_indexType`, which is chosen per upload by index range — a mesh over 65535
+     * vertices needs the wider type, and narrowing it silently scrambles geometry.
+     */
+    public get indexBuffer(): GpuBuffer | null { return this._indexBuffer; }
+    public get indexFormat(): IndexFormat { return this._indexType === gl.UNSIGNED_INT ? 'uint32' : 'uint16'; }
+    public get indexCount(): number { return this._indexCount; }
+    public get vertexCount(): number { return this._vertexCount; }
     public get isAnimated(): boolean { return this._isAnimated; }
 }

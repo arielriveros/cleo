@@ -172,6 +172,30 @@ export const ShaderStage = {
 export type ShaderStageFlags = number;
 
 /**
+ * One `@group(G) @binding(B)` a program declares, as reflected from its WGSL at build time.
+ *
+ * This is what makes a {@link BindGroup} satisfiable on both backends. WebGPU binds by group and
+ * binding directly. WebGL2 has neither concept, so its backend assigns a texture unit and sets the
+ * combined sampler uniform named by `glslName` — which is why the GLSL name travels alongside the WGSL
+ * one rather than being recomputed.
+ *
+ * A texture and its sampler share a `glslName`: WGSL keeps them apart, GLSL ES has only combined
+ * samplers, so `u_x_texture` and `u_x_sampler` are one `uniform sampler2D u_x`. The WebGL2 backend acts
+ * on the texture entry and skips the sampler one; WebGPU honours both.
+ */
+export interface ShaderResource {
+    readonly group: number;
+    readonly binding: number;
+    /** The identifier as written in WGSL. */
+    readonly name: string;
+    readonly kind: 'texture' | 'sampler' | 'uniform' | 'storage' | 'other';
+    /** The WGSL type — `texture_2d<f32>`, `sampler_comparison`, or a struct name. */
+    readonly type: string;
+    /** The name the generated GLSL uses. A texture/sampler pair collapses onto one. */
+    readonly glslName: string;
+}
+
+/**
  * Vertex attribute formats.
  *
  * The engine's own layouts are entirely float32 today — including bone indices, which ride as floats

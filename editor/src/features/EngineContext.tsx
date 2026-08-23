@@ -177,6 +177,7 @@ import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextur
 import { saveToStorage } from "../workers/workerClient";
 import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
+import { readBackendPreference } from './renderer/backendPreference';
 
 // Rasterise the light-probe glyph (an inner ring + a dashed outer ring, matching the inspector's
 // ProbeIcon) to a white-on-transparent PNG data URL, for use as the probe's viewport billboard texture.
@@ -4475,6 +4476,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           const engine = new CleoEngine({
               graphics: {
                   clearColor: EDITOR_CLEAR_COLOR,
+                  // A request, resolved against what this build and browser can provide — the renderer
+                  // reports the outcome through `backendFallbackReason`, which Renderer Settings shows.
+                  // Read here because a context's API cannot change once resources exist on it.
+                  backend: readBackendPreference(),
               },
           });
 

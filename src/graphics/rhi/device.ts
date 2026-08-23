@@ -16,7 +16,7 @@
 import type {
     TextureFormat, TextureDimension, TextureUsageFlags, BufferUsageFlags, SamplerDescriptor,
     VertexBufferLayout, PrimitiveState, DepthStencilState, ColorTargetState, RenderPassDescriptor,
-    ShaderStageFlags, IndexFormat,
+    ShaderStageFlags, IndexFormat, ShaderResource,
 } from './types';
 import type {
     Buffer, Texture, TextureView, Sampler, ShaderModule, BindGroup, BindGroupLayout,
@@ -122,15 +122,59 @@ export interface TextureDescriptor {
 
 export interface ShaderModuleDescriptor {
     label?: string;
+    /**
+     * Stages this module provides, ORed together.
+     *
+     * A WGSL module normally carries `VERTEX | FRAGMENT` — see the note on `source` for why the two
+     * stages cannot be split apart.
+     */
     stage: ShaderStageFlags;
     /**
-     * GLSL ES 3.00 source, with any `#include` already resolved.
+     * WGSL source, with any `#include` already expanded.
      *
-     * GLSL stays the source of truth for both backends: the WebGL2 device compiles it directly, and
-     * the WebGPU device translates it to WGSL. Keeping one shader tree is what lets user-authored
-     * custom materials — GLSL saved inside existing projects — keep working on either backend.
+     * **This is the reverse of what the plan originally assumed**, and the reversal was forced by
+     * measurement rather than preference: naga's GLSL *frontend* is Vulkan GLSL — no combined sampler
+     * types, no ES profile, no `precision` — so it cannot read the dialect this engine used to write.
+     * Its GLSL *backend* emits exactly that dialect, because that is the path wgpu itself takes to run
+     * WGSL on WebGL2. So WGSL became the source of truth, and the GLSL ES 300 the WebGL2 device
+     * compiles is generated from it at build time.
+     *
+     * One module holds BOTH entry points because naga derives varying names (`_vs2fs_location0`) from
+     * a module's location numbers, so the two stages only line up when they came from the same module.
+     * That is why a `.wgsl` import is one program rather than one stage, and why
+     * {@link RenderPipelineDescriptor} will usually be handed the same module twice.
+     *
+     * Custom materials are the exception that still travels the other way: users author GLSL, and the
+     * editor's Compile button translates it to WGSL once and stores the result, so no naga ever ships
+     * to a player.
      */
     source: string;
+    /**
+     * Entry-point function names by stage, as the module declares them.
+     *
+     * WebGPU needs the name at pipeline creation; there is no `main` convention to fall back on. The
+     * `.wgsl` loader already extracts these, so callers pass the import's `entryPoints` through.
+     */
+    entryPoints?: { vertex?: string; fragment?: string; compute?: string };
+    /**
+     * What this program binds where, as reflected from its WGSL at build time.
+     *
+     * Required by any module that will be used with bind groups. A hand-written GLSL program has none
+     * and can still be used for state and passes — it simply cannot be bound by group and binding, and
+     * cannot run on WebGPU either.
+     */
+    resources?: readonly ShaderResource[];
+    /**
+     * The name this program is registered under in `ShaderManager`.
+     *
+     * WebGL2 only, and a deliberate coupling rather than an oversight: the engine already links,
+     * reflects and caches every program through `Shader`/`ShaderManager`, so the WebGL2 backend reaches
+     * the existing one by name instead of duplicating all three. Binding through `ShaderManager` also
+     * keeps `setUniform` working (it needs `_boundShader` current) and keeps the harness's shader
+     * coverage measurement intact, since that wraps `ShaderManager.bind`. WebGPU ignores it and
+     * compiles `source`.
+     */
+    program?: string;
 }
 
 export interface RenderPipelineDescriptor {

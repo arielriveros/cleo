@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cleo WebGPU device check</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #202028; color: #ddd;
+               font: 13px ui-monospace, monospace; }
+  #log { padding: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<!--
+  Served over the `app://` scheme, which the driver registers as `secure: true`.
+
+  That is load-bearing, not incidental: WebGPU is only exposed in a secure context, so `navigator.gpu`
+  is undefined on a `data:` or plain `file://` page and the whole harness reports "no WebGPU" on a
+  machine that supports it perfectly well. This cost a wrong conclusion once already.
+-->
+<div id="log">running…</div>
+<script src="bundle.js"></script>
+<script>
+(function () {
+  var log = document.getElementById('log');
+  var tick = setInterval(function () {
+    if (!window.__gpuReady) return;
+    clearInterval(tick);
+    if (window.__gpuError) { log.textContent = 'ERROR\n' + window.__gpuError; return; }
+    log.textContent = (window.__gpuResults || []).map(function (r) {
+      return (r.pass ? 'PASS  ' : 'FAIL  ') + r.name + (r.detail ? '\n        ' + r.detail : '');
+    }).join('\n');
+  }, 100);
+})();
+</script>
+</body>
+</html>

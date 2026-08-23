@@ -6,8 +6,6 @@ import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
 import TilemapBrush from "./tilemap/TilemapBrush";
 import TilemapInspector from "./tilemap/TilemapInspector";
-import RendererOptions from "./renderer/RendererOptions";
-import RendererStats from "./renderer/RendererStats";
 import DebugOverlay from "./logger/DebugOverlay";
 import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
 import AnimationPlayer from "./animation/AnimationPlayer";
@@ -503,8 +501,6 @@ export default function EngineViewport() {
                 <LandscapeBrush viewportRef={viewportRef} />
                 <LandscapeInspector />
             </>}
-            {editorMode === 'renderer' && <RendererOptions />}
-            {editorMode === 'renderer' && <RendererStats />}
             {/* The graph is a full-canvas view, so everything that belongs to the 3D preview steps aside for
                 it — including the transport, which sits at z-20 against the graph's z-10 and would otherwise
                 float on top of it. The Animations|Graph switch is the way back and lives on the graph's own

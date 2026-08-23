@@ -101,7 +101,8 @@ export class AnimatedModel {
     private readonly _animations: Animation[] = [];
     
     // Initialization tracking
-    private _vaoInitialized: boolean = false;
+    /** Which attribute layout the VAO currently holds; see initializeVAO. */
+    private _vaoLayoutKey: string | null = null;
     private _isAnimated: boolean = false;
     
     constructor(
@@ -559,18 +560,46 @@ export class AnimatedModel {
     }
 
     /**
-     * Initialize VAO with shader attributes (called by renderer)
+     * Initialize the VAO for the attribute layout a particular program declares (called by renderer).
+     *
+     * Keyed by the LAYOUT rather than guarded by a once-only flag. The flag was wrong for any model
+     * whose passes disagree about attribute locations: the first caller won and every later call was
+     * silently dropped, so one of the two passes always read unbound attributes.
+     *
+     * That is not hypothetical — it is the unlit Basic family. Having no normal/tangent/bitangent, its
+     * skinned vertex shaders put bone data at locations 2 and 3, while `shadowMapSkinned` mirrors the
+     * LIT skinned layout and reads 5 and 6. Cascades run before the geometry pass, so the shadow
+     * program initialized the VAO and `basicGeometrySkinned` was then drawn against it (or the reverse,
+     * depending on which pass touched the model first) — GL_INVALID_OPERATION either way.
+     *
+     * Keying on the layout rather than removing the guard keeps the common path free: for the PBR and
+     * Blinn-Phong families the shadow and geometry programs declare the SAME locations, so the key
+     * matches and nothing is re-applied. Only a genuine layout change pays for a re-init.
      */
     public initializeVAO(shaderAttributes: any[]): void {
-        if (this._vaoInitialized) return;
-        
+        const key = AnimatedModel._layoutKey(shaderAttributes);
+        if (this._vaoLayoutKey === key) return;
+
         if (this.hasSkin && this._mesh.isAnimated) {
             this._mesh.initializeAnimatedVAO(shaderAttributes);
         } else {
             this._mesh.initializeVAO(shaderAttributes);
         }
-        
-        this._vaoInitialized = true;
+
+        this._vaoLayoutKey = key;
+    }
+
+    /**
+     * A stable identity for "which attributes at which locations".
+     *
+     * Sorted so two programs that reflect the same set in a different order — the enumeration order of
+     * `getActiveAttrib` is driver-dependent — compare equal and do not thrash the VAO.
+     */
+    private static _layoutKey(shaderAttributes: any[]): string {
+        return shaderAttributes
+            .map(a => `${a.name}@${a.location}`)
+            .sort()
+            .join(',');
     }
 
     // Getters

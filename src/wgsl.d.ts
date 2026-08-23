@@ -19,6 +19,53 @@ declare module '*.wgsl' {
         /** Entry-point function names by stage, as declared in the module. */
         readonly entryPoints: { vertex?: string; fragment?: string; compute?: string };
         /**
+         * Every `@group(G) @binding(B)` the module declares.
+         *
+         * This is what lets a `BindGroup` be satisfied on either backend. WebGPU binds by group and
+         * binding directly; WebGL2 has neither concept, so its device assigns a texture unit and sets
+         * the combined sampler uniform named by `glslName` — which is why the reflection carries the
+         * GLSL name rather than only the WGSL one. A texture/sampler pair shares one `glslName`
+         * (`u_x_texture` + `u_x_sampler` -> `u_x`), so the WebGL2 side acts on the texture entry and
+         * ignores its sampler.
+         */
+        readonly resources: readonly {
+            readonly group: number;
+            readonly binding: number;
+            /** The identifier as written in WGSL. */
+            readonly name: string;
+            readonly kind: 'texture' | 'sampler' | 'uniform' | 'storage' | 'other';
+            /** The WGSL type, e.g. `texture_2d<f32>`, `sampler_comparison`, or a struct name. */
+            readonly type: string;
+            /** The name the generated GLSL uses; a texture/sampler pair collapses onto one. */
+            readonly glslName: string;
+        }[];
+        /**
+         * The uniform-buffer resources, with the full byte layout of the struct each points at.
+         *
+         * WebGL2 ignores these and asks the driver instead; WebGPU has no reflection and needs them.
+         * Verified against a real driver by `tools/harness/uniformLayoutCheck.js`.
+         */
+        readonly uniformBlocks: readonly {
+            readonly group: number;
+            readonly binding: number;
+            readonly name: string;
+            readonly struct: string;
+            /** Bytes the block occupies — the size its uniform buffer must be allocated at. */
+            readonly size: number;
+            readonly members: readonly {
+                readonly name: string;
+                readonly type: string;
+                /** Byte offset within the block. */
+                readonly offset: number;
+                readonly size: number;
+                readonly align: number;
+                /** Bytes between array elements. Absent for a non-array. */
+                readonly arrayStride?: number;
+                /** Bytes between matrix columns. Absent for a non-matrix. */
+                readonly matrixStride?: number;
+            }[];
+        }[];
+        /**
          * The module's GLSL, reduced to a pasteable chunk — structs, uniforms, globals and functions,
          * with `#version`, `precision`, the fragment output and `main()` stripped.
          *

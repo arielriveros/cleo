@@ -1,17 +1,26 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { pathToFileURL } from 'node:url';
+import { resolveIncludes } from '../tools/shaderIncludes.mjs';
+import { translateWgsl } from '../tools/wgslTranslate.mjs';
 
 /**
  * Static guards on the shadow shader contract.
  *
- * None of these can be caught by the TypeScript build: GLSL is a string until a GL context compiles
- * it, and the two failures below are both silent-until-runtime. They are cheap regex sweeps over the
- * source tree, which is exactly what the risk is worth.
+ * None of these can be caught by the TypeScript build: a shader is a string until something compiles
+ * it, and every failure below is silent until runtime. They are cheap sweeps over the source tree,
+ * which is what the risk is worth.
+ *
+ * The library moved from `environment/shadows.glsl` to `wgsl/chunks/shadows.wgsl`, and the GLSL that
+ * custom materials paste at runtime is now GENERATED from it (see `shadowsChunk.wgsl` and
+ * `extractGlslChunk`). So there are two things to guard rather than one: the WGSL source, and the
+ * generated text that has to survive being concatenated into a program it knows nothing about.
  */
 
 const SHADERS = join(__dirname, '..', 'src', 'graphics', 'shaders');
-const SHADOWS_GLSL = join(SHADERS, 'environment', 'shadows.glsl');
+const SHADOWS_WGSL = join(SHADERS, 'wgsl', 'chunks', 'shadows.wgsl');
+const CHUNK_ENTRY = join(SHADERS, 'wgsl', 'shadowsChunk.wgsl');
 
 function walk(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
@@ -25,98 +34,83 @@ function walk(dir: string, out: string[] = []): string[] {
 const allShaders = walk(SHADERS);
 const read = (f: string) => readFileSync(f, 'utf-8');
 
-describe('shadows.glsl is self-contained', () => {
-    const src = read(SHADOWS_GLSL);
+/** The generated GLSL chunk, produced exactly the way the webpack loader produces it. */
+let generated: string;
 
-    it('has no #include of its own', () => {
-        // systems/customShaders.ts imports this file as a raw string and pastes it into programs it
-        // assembles at RUNTIME, where the build-time include resolver never runs. An #include here
-        // would survive verbatim into the GLSL and fail to compile — only for custom materials, and
-        // only in a browser.
-        expect(src).not.toMatch(/^\s*#include/m);
+beforeAll(async () => {
+    const composed = resolveIncludes(read(CHUNK_ENTRY), dirname(CHUNK_ENTRY), {
+        read: (p: string) => readFileSync(p, 'utf-8'),
+        resolve: (dir: string, rel: string) => join(dir, rel),
     });
+    const out: any = await translateWgsl(composed, 'shadowsChunk.wgsl');
+    generated = out.glslChunk;
+}, 60_000);
 
-    it('does not redeclare anything constants.glsl owns', () => {
-        // There are no include guards in this codebase, and every consumer already includes
-        // constants.glsl. A second `const int MAX_SPOTLIGHTS` is a compile error, not a warning.
+describe('the shadow library is self-contained', () => {
+    const src = () => read(SHADOWS_WGSL);
+
+    it('declares nothing constants.glsl owns', () => {
+        // There are no include guards anywhere in this codebase, and every consumer of the generated
+        // chunk also pulls in constants.glsl. A second `const int MAX_SPOTLIGHTS` is a compile error,
+        // not a warning — which is why the library carries its own copy under CLEO_MAX_SPOTLIGHTS.
         const constants = read(join(SHADERS, 'constants.glsl'));
-        for (const m of constants.matchAll(/const\s+\w+\s+(\w+)/g))
-            expect(src).not.toContain(`const int ${m[1]}`);
+        for (const m of constants.matchAll(/const\s+\w+\s+(\w+)/g)) {
+            expect(src(), m[1]).not.toContain(`const ${m[1]}:`);
+            expect(generated, m[1]).not.toContain(`const int ${m[1]} `);
+        }
     });
 
     it('keeps its spotlight array in step with constants.glsl', () => {
-        // shadows.glsl cannot read MAX_SPOTLIGHTS (see above), so it carries its own copy under a
+        // The library cannot read MAX_SPOTLIGHTS (see above), so it carries its own copy under a
         // different name. This is the only thing keeping the two honest.
         const declared = /const int MAX_SPOTLIGHTS = (\d+);/.exec(read(join(SHADERS, 'constants.glsl')));
-        const mirrored = /#define CLEO_MAX_SPOTLIGHTS (\d+)/.exec(src);
-        expect(declared).not.toBeNull();
-        expect(mirrored).not.toBeNull();
+        expect(declared, 'MAX_SPOTLIGHTS in constants.glsl').toBeTruthy();
+        const mirrored = /const CLEO_MAX_SPOTLIGHTS: i32 = (\d+);/.exec(src());
+        expect(mirrored, 'CLEO_MAX_SPOTLIGHTS in chunks/shadows.wgsl').toBeTruthy();
         expect(mirrored![1]).toBe(declared![1]);
     });
-});
 
-describe('the legacy single shadow map is gone', () => {
-    it('no shader declares fragPosLightSpace', () => {
-        // The varying was removed from every vertex shader. A fragment `in` with no matching vertex
-        // `out` is a LINK error in GLSL ES 3.00, so one straggler takes a whole material out.
-        for (const f of allShaders)
-            expect(`${f}: ${/^\s*(in|out)\s+vec4\s+fragPosLightSpace/m.test(read(f))}`).toBe(`${f}: false`);
-    });
-
-    it('no shader still samples a u_shadowMap', () => {
-        for (const f of allShaders) {
-            const src = read(f).replace(/\/\/.*$/gm, ''); // comments may still mention the old name
-            expect(`${f}: ${src.includes('u_shadowMap')}`).toBe(`${f}: false`);
-        }
-    });
-
-    it('the custom-material fallbacks do not reference the removed varying', () => {
-        // These are the shaders a custom material links when its own source fails to compile. If they
-        // reference a varying the vertex shader no longer emits, a compile error becomes a link error
-        // and the material renders nothing at all instead of magenta.
-        const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'systems', 'customShaders.ts'), 'utf-8');
-        const fallbacks = src.matchAll(/const FALLBACK_\w+_FS = `([\s\S]*?)`;/g);
-        let seen = 0;
-        for (const m of fallbacks) {
-            seen++;
-            expect(m[1]).not.toContain('fragPosLightSpace');
-        }
-        expect(seen).toBeGreaterThanOrEqual(2);
+    it('publishes the fragment coordinate through a module-scope var', () => {
+        // Only an entry point receives @builtin(position), so the per-pixel rotation cannot reach it
+        // directly. Losing this global would not fail to compile — `shadowCalculation()` would simply
+        // rotate every pixel's Poisson disk identically, which reads as banding rather than noise.
+        expect(src()).toMatch(/var<private> cleoFragCoord: vec2<f32>;/);
     });
 });
 
-describe('every shadow-sampling shader includes the shared block', () => {
-    // The point of the include is that there is exactly ONE implementation. A shader that calls into
-    // it without including it would not compile; a shader that hand-rolls its own would compile and
-    // silently drift — which is the state this replaced (five copies, each with its own hardcoded bias).
-    const CONSUMERS = [
-        'deferred/deferredLighting.fs',
-        'materials/pbr.fs',
-        'materials/default.fs',
-        'screen/volumetricGodRays.fs',
-    ];
+describe('the generated GLSL chunk stays pasteable', () => {
+    // It is concatenated into a program that already has a version directive, a precision block, its
+    // own fragment output and its own main().
+    it('carries no program scaffolding', () => {
+        expect(generated).not.toContain('#version');
+        expect(generated).not.toMatch(/^\s*precision\s/m);
+        expect(generated).not.toMatch(/^\s*layout\(location\s*=\s*\d+\)\s+out\b/m);
+        expect(generated).not.toMatch(/\bvoid main\s*\(/);
+    });
 
-    for (const rel of CONSUMERS) {
-        it(`${rel} includes environment/shadows.glsl`, () => {
-            expect(read(join(SHADERS, rel))).toMatch(/^#include ".*environment\/shadows\.glsl";/m);
-        });
-    }
+    it('exports every function its callers invoke', () => {
+        // naga emits only functions REACHABLE from an entry point, so a public function that
+        // shadowsChunk.wgsl stops calling is silently dropped from the chunk — and the failure lands
+        // in a user's custom material, at runtime, as an undeclared identifier.
+        for (const fn of ['directionalShadow', 'shadowVisibility', 'spotShadow', 'spotShadowFor',
+                          'cascadeDebugTint']) {
+            expect(generated, fn).toContain(fn + '(');
+        }
+    });
 
-    it('customShaders.ts imports it rather than copying it', () => {
-        // It now imports the GENERATED chunk rather than environment/shadows.glsl. Same contract, one
-        // step stronger: the library is authored once in chunks/shadows.wgsl and the GLSL half is
-        // produced at build time, so custom materials cannot drift from the engine's own shadows even
-        // in principle. tests/shadowLibraryParity.test.ts guards the two while both still exist.
+    it('is what customShaders.ts actually pastes', () => {
         const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'systems', 'customShaders.ts'), 'utf-8');
         expect(src).toContain("from '../shaders/wgsl/shadowsChunk.wgsl'");
         expect(src).toContain('ShadowsChunk.glslChunk');
         expect(src).toContain('${SHADOWS_SRC}');
     });
+});
 
-    it('no shader defines its own PCF loop over a shadow map', () => {
+describe('nothing reimplements shadow filtering', () => {
+    it('no shader defines its own PCF loop', () => {
         for (const f of allShaders) {
-            if (f === SHADOWS_GLSL) continue;
-            expect(`${f}: ${/float\s+pcf\s*\(/.test(read(f))}`).toBe(`${f}: false`);
+            if (f === SHADOWS_WGSL) continue;
+            expect(`${f}: ${/float\s+pcf\s*\(|fn\s+pcf\s*\(/.test(read(f))}`).toBe(`${f}: false`);
         }
     });
 });

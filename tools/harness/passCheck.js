@@ -17,6 +17,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { pathToFileURL } = require('url');
+const { compare, captureSignature } = require('./signature');
 
 const root = path.resolve(process.env.CLEO_MESH_DIR || path.join(__dirname, 'pages', 'mesh'));
 
@@ -58,6 +59,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // bloom is off exactly when `bloomIntensity` is 0. Asking for a key the renderer does not have is caught
 // by the `every setting exists` check rather than silently doing nothing.
 const DEFAULTS = {
+  // Debug channels blit an internal buffer instead of the composited image; the grid is editor chrome.
+  // Reset here so one configuration cannot leak into the next.
+  debugView: 'final', gridVisible: false,
   bloomIntensity: 0, bloomThreshold: 1,
   ssaoEnabled: false, ssaoRadius: 0.5, ssaoPower: 1.0, motionBlurEnabled: false,
   chromaticAberrationStrength: 0, shadowsEnabled: true, renderScale: 1, exposure: 2,
@@ -86,75 +90,22 @@ const CONFIGS = [
   { name: 'halfScale', patch: { renderScale: 0.5 } },
   // Deliberately excludes SSAO so this one CAN be exact: it exists to prove stacked passes compose,
   // and bloom + chromatic aberration are both deterministic.
+  // Debug channels and the grid: four more programs (debugView, shadowDebug, overdraw, grid) that no
+  // scene content is needed to reach — they are renderer state, so they cost nothing but a config each.
+  { name: 'debugAlbedo', patch: { debugView: 'albedo' } },
+  { name: 'debugNormal', patch: { debugView: 'normal' } },
+  // 'shadow' is the one channel drawn by the shadowDebug program rather than debugView.
+  { name: 'debugShadow', patch: { debugView: 'shadow' } },
+  // Overdraw re-rasterizes the scene additively into its own target, so unlike the other channels it
+  // costs an extra pass — and it is the only view of how many times each pixel was shaded.
+  { name: 'debugOverdraw', patch: { debugView: 'overdraw' } },
+  { name: 'grid', patch: { gridVisible: true } },
+  // Sky-atmosphere features. Gated on the sky NODE rather than the renderer, so they take `sky`
+  // patches: distance fog (skyFog) and raymarched light shafts (volumetricGodRays).
+  { name: 'skyFog', patch: {}, sky: { fogEnabled: true, fogDensity: 0.02, fogStart: 2, fogMaxOpacity: 0.9 } },
+  { name: 'godRays', patch: {}, sky: { godRaysEnabled: true } },
   { name: 'combined', patch: { bloomIntensity: 2, bloomThreshold: 0.4, chromaticAberrationStrength: 2, renderScale: 0.75 } },
 ];
-
-/**
- * Reduce a captured frame to an 8x8 grid of cells, two numbers each: mean luma and standard deviation.
- *
- * The mean alone is not enough, and this was measured rather than assumed — with mean-only signatures,
- * SSAO and a half-resolution render both came out *identical to base*. That is not because nothing
- * happened; it is because a blur preserves local means almost exactly. Since the passes most likely to
- * be converted to WGSL are blurs (bloom down/upsample, gaussian, SSAO blur, motion-blur gather), a
- * statistic blind to blur would have been a gate that could not fail.
- *
- * Standard deviation is the sharpness of a cell, so it moves when a blur radius changes, when an
- * upsample weight is wrong, or when a resolution-dependent pass reads the wrong texel size.
- */
-function signature(bitmap, width, height) {
-  const GRID = 8;
-  const cells = [];
-  const q = (v) => Math.min(255, Math.max(0, Math.round(v / 4) * 4)).toString(16).padStart(2, '0');
-
-  for (let gy = 0; gy < GRID; gy++) {
-    for (let gx = 0; gx < GRID; gx++) {
-      const x0 = Math.floor(gx * width / GRID), x1 = Math.floor((gx + 1) * width / GRID);
-      const y0 = Math.floor(gy * height / GRID), y1 = Math.floor((gy + 1) * height / GRID);
-      let sum = 0, sumSq = 0, n = 0;
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
-          const i = (y * width + x) * 4;               // BGRA
-          const luma = 0.2126 * bitmap[i + 2] + 0.7152 * bitmap[i + 1] + 0.0722 * bitmap[i];
-          sum += luma; sumSq += luma * luma; n++;
-        }
-      }
-      const mean = sum / Math.max(1, n);
-      // Scaled up, because a cell's deviation is small next to its mean and would otherwise quantise
-      // away entirely at the same step size.
-      const sd = Math.sqrt(Math.max(0, sumSq / Math.max(1, n) - mean * mean)) * 2;
-      cells.push(q(mean), q(sd));
-    }
-  }
-  return cells.join('');
-}
-
-// One quantisation step. SSAO rotates its sample kernel by a noise texture, so a handful of cells sit
-// exactly on a quantisation boundary and flip between recording and verifying — reproducibly, but
-// meaninglessly. Ignoring a single-step move keeps the gate usable; it costs almost no sensitivity,
-// because every real change measured here is far larger: bloom moves 64 cells by up to 40, chromatic
-// aberration by up to 96, dropping shadows by 24.
-const NOISE = 4;
-
-/**
- * Compare two signatures.
- *
- * `differing` counts every cell that moved at all — used to prove a pass DID something. `material`
- * counts only cells that moved by more than the noise floor, and is what a baseline mismatch is judged
- * on. Keeping both means "the pass ran" and "the pass still renders the same" stay separate questions.
- */
-function compare(a, b) {
-  let differing = 0, material = 0, worst = 0;
-  const values = a.length / 2;
-  for (let i = 0; i < values; i++) {
-    const x = parseInt(a.slice(i * 2, i * 2 + 2), 16);
-    const y = parseInt(b.slice(i * 2, i * 2 + 2), 16);
-    const delta = Math.abs(x - y);
-    if (delta > 0) differing++;
-    if (delta > NOISE) material++;
-    worst = Math.max(worst, delta);
-  }
-  return { differing, material, worst };
-}
 
 app.whenReady().then(async () => {
   protocol.handle('app', (request) => {
@@ -179,14 +130,7 @@ app.whenReady().then(async () => {
   }
   if (!ready) { check('scene built', false, 'timed out'); app.exit(1); return; }
 
-  const capture = async () => {
-    // capturePage returns the last COMPOSITED frame, so it lags a state change by one call.
-    await win.webContents.capturePage();
-    await sleep(300);
-    const img = await win.webContents.capturePage();
-    const size = img.getSize();
-    return signature(img.toBitmap(), size.width, size.height);
-  };
+  const capture = () => captureSignature(win, sleep);
 
   const baseline = (!writing && fs.existsSync(baselinePath))
     ? JSON.parse(fs.readFileSync(baselinePath, 'utf-8')) : null;
@@ -201,6 +145,8 @@ app.whenReady().then(async () => {
     if (ignored.length) check(`${cfg.name}: every setting exists on the renderer`, false, 'ignored: ' + ignored.join(', '));
 
     await js('window.__stopMotion()');
+    // Sky features are node state, so they must be reset between configurations like the renderer ones.
+    await js(`JSON.stringify(window.__setSky(${JSON.stringify({ fogEnabled: false, godRaysEnabled: false, ...(cfg.sky || {}) })}))`);
     await sleep(400);
     if (cfg.motion) { await js(`window.__startMotion(${cfg.motion})`); await sleep(400); }
     else await sleep(400);

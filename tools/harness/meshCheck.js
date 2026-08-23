@@ -11,6 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { pathToFileURL } = require('url');
+const { compare, captureSignature } = require('./signature');
 
 const root = path.resolve(process.env.CLEO_MESH_DIR || path.join(__dirname, 'pages', 'mesh'));
 
@@ -32,6 +33,7 @@ function stage(pageDir, files) {
 
 stage(root, [['dist/cleo.js', 'cleo.js']]);
 const shotDir = process.env.CLEO_SHOT_DIR || path.join(__dirname, 'shots');
+const shotName = process.env.CLEO_PIPELINE === 'forward' ? 'mesh.forward.png' : 'mesh.png';
 fs.mkdirSync(shotDir, { recursive: true });
 
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'cleo-mesh-')));
@@ -41,6 +43,7 @@ protocol.registerSchemesAsPrivileged([
 
 const results = [];
 const errors = [];
+const warnings = [];
 const check = (name, ok, detail) => {
   results.push({ ok: !!ok });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '   -> ' + String(detail ?? '')}`);
@@ -70,9 +73,22 @@ app.whenReady().then(async () => {
     backgroundColor: '#202028',
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
-  win.webContents.on('console-message', (_e, level, message) => { if (level === 3) errors.push(message); });
+  // Level 3 is an error, level 2 a warning. Warnings are collected separately rather than ignored:
+  // a shader that logs one per frame, or a few hundred at startup, is a real defect that no pixel
+  // check can see — and noise at that volume is how a genuine warning gets missed.
+  win.webContents.on('console-message', (_e, level, message) => {
+    if (level === 3) errors.push(message);
+    else if (level === 2) warnings.push(message);
+  });
 
-  await win.loadURL('app://mesh/index.html');
+  // CLEO_PIPELINE=forward runs the same scene through the forward renderer, which is the only way the
+  // forward material shaders (materials/pbr.fs, default.fs) get exercised at all.
+  // CLEO_EXTRAS bisects the material/topology grid; see `extras` in the page.
+  const params = new URLSearchParams();
+  if (process.env.CLEO_PIPELINE === 'forward') params.set('forward', '1');
+  if (process.env.CLEO_EXTRAS) params.set('extras', process.env.CLEO_EXTRAS);
+  const query = params.toString() ? '?' + params.toString() : '';
+  await win.loadURL('app://mesh/index.html' + query);
   const js = (src) => win.webContents.executeJavaScript(src);
 
   const ready = await until(() => js('window.__ready === true ? true : (window.__error ? { err: window.__error } : null)'), 45000);
@@ -89,13 +105,49 @@ app.whenReady().then(async () => {
   // nothing was submitted at all.
   check('triangles were submitted', stats && stats.triangles > 0, JSON.stringify(stats));
   if (stats) {
-    console.log(`      drawCalls=${stats.drawCalls} triangles=${stats.triangles} vertices=${stats.vertices} objects=${stats.objects} culled=${stats.culled} instanced=${stats.instancedDrawCalls} instances=${stats.instances}`);
+    console.log(`      drawCalls=${stats.drawCalls} rhi=${stats.rhiDrawCalls} triangles=${stats.triangles} vertices=${stats.vertices} objects=${stats.objects} culled=${stats.culled} instanced=${stats.instancedDrawCalls} instances=${stats.instances}`);
     console.log(`      shadedMpx=${(stats.shadedMpx ?? 0).toFixed?.(2) ?? stats.shadedMpx} stateChanges=${stats.stateChanges}`);
   }
 
   // The instanced path: four nodes sharing one Model must collapse into instanced draws, which is what
   // exercises the per-instance mat4 layout across attribute slots 5..8.
-  check('instanced draws happened', stats && stats.instancedDrawCalls > 0 && stats.instances >= 4,
+  // The frame stats, against a recorded baseline.
+  //
+  // These were printed for a human to eyeball, which is not a gate: through the whole WGSL migration
+  // the "byte-identical to the previous milestone" property rested on somebody noticing a changed
+  // number. Recorded here instead, so a conversion that quietly drops a draw call or a submesh fails.
+  //
+  //   re-record:  CLEO_MESH_BASELINE=write  (do this ONLY for a deliberate scene change)
+  const pipeline = await js('window.__pipeline').catch(() => 'deferred');
+  console.log('      pipeline=' + pipeline);
+  // Keyed by pipeline: forward draws each object with a material shader while deferred fills a
+  // G-buffer and lights it once, so the two legitimately submit different work.
+  const statsBaselinePath = path.join(__dirname, `meshBaseline.${pipeline}.json`);
+  // `rhiDrawCalls` is tracked for the same reason the others are, and one more: a draw that falls back
+  // from the RHI command model to `Mesh` produces identical pixels AND identical draw counts, so it is
+  // the only number that can catch that regression.
+  const TRACKED = ['drawCalls', 'triangles', 'vertices', 'objects', 'culled', 'instancedDrawCalls',
+                   'instances', 'rhiDrawCalls'];
+  const current = {};
+  for (const k of TRACKED) current[k] = stats[k];
+
+  if (process.env.CLEO_MESH_BASELINE === 'write') {
+    fs.writeFileSync(statsBaselinePath, JSON.stringify(current, null, 2));
+    console.log('      frame-stat baseline written to ' + statsBaselinePath);
+  } else if (fs.existsSync(statsBaselinePath)) {
+    const want = JSON.parse(fs.readFileSync(statsBaselinePath, 'utf-8'));
+    const drift = TRACKED.filter(k => want[k] !== current[k])
+                         .map(k => `${k}: ${want[k]} -> ${current[k]}`);
+    check('frame stats match the baseline', drift.length === 0, drift.join(', '));
+  } else {
+    check('frame stats have a baseline', false, 'no ' + path.basename(statsBaselinePath) + ' — run with CLEO_MESH_BASELINE=write');
+  }
+
+  // Instancing is a deferred-path feature here: the forward renderer draws these objects individually,
+  // so demanding an instanced draw in forward mode would fail for a reason that is not a defect.
+  if (pipeline === 'forward') {
+    console.log('      (skipping the instancing check — forward draws these objects individually)');
+  } else check('instanced draws happened', stats && stats.instancedDrawCalls > 0 && stats.instances >= 4,
         JSON.stringify(stats && { i: stats.instancedDrawCalls, n: stats.instances }));
 
   // Texture uploads: the scene has a mipmapped 2D image on two materials and a sky that bakes into a
@@ -173,10 +225,54 @@ app.whenReady().then(async () => {
           'the engine translated with no translator installed');
   }
 
+  // Did the probe actually bake? `probesForFrame` skips any probe without baked maps, so an unbaked
+  // one contributes nothing and looks exactly like broken IBL.
+  const probe = await js('JSON.stringify(window.__probeState())').then(JSON.parse).catch(() => null);
+  console.log('      probe: ' + JSON.stringify(probe));
+  check('light probe baked its cubemaps', !!probe && probe.baked === true, JSON.stringify(probe));
+
+  // Shading, against a recorded signature.
+  //
+  // Frame stats prove the right geometry was submitted; they say nothing about what came out. That gap
+  // mattered most for the forward pipeline, which the pass harness never exercises — converting
+  // materials/pbr.fs could have changed every lit pixel without moving a single number above.
+  const shadingPath = path.join(__dirname, `meshShading.${pipeline}.json`);
+  const sig = await captureSignature(win, sleep);
+  if (process.env.CLEO_MESH_BASELINE === 'write') {
+    fs.writeFileSync(shadingPath, JSON.stringify({ signature: sig }, null, 2));
+    console.log('      shading baseline written to ' + shadingPath);
+  } else if (fs.existsSync(shadingPath)) {
+    const want = JSON.parse(fs.readFileSync(shadingPath, 'utf-8')).signature;
+    const d = compare(want, sig);
+    // Name WHICH values moved, not just how many: cell N of the 8x8 grid, and whether it was the mean
+    // (even index) or the standard deviation (odd), which says "the colour shifted" versus "the
+    // sharpness changed" — very different causes.
+    const moved = [];
+    for (let i = 0; i < want.length / 2; i++) {
+      const a = parseInt(want.slice(i * 2, i * 2 + 2), 16);
+      const b = parseInt(sig.slice(i * 2, i * 2 + 2), 16);
+      if (Math.abs(a - b) > 4) moved.push(`cell${i >> 1}${i % 2 ? '.sd' : '.mean'} ${a}->${b}`);
+    }
+    check('shading matches the baseline', d.material === 0,
+          `${d.material}/128 values differ beyond the noise floor: ${moved.join(', ')}`);
+  } else {
+    check('shading has a baseline', false, 'no ' + path.basename(shadingPath));
+  }
+
+  // Shader warnings, of any kind.
+  //
+  // Nothing here throws, so a warning is often the ONLY signal that a uniform is not reaching the GPU —
+  // "type this block writer does not handle" means a value is silently never written. Volume matters
+  // too: uniform-alias registration once logged a few hundred warnings per shader, which is how a real
+  // one (`u_view` genuinely declared in two blocks, only one of them being written) went unnoticed.
+  const shaderWarnings = warnings.filter(w => /\[Shader\]/.test(w));
+  check('no shader warnings', shaderWarnings.length === 0,
+        shaderWarnings.length + ' warning(s), e.g. ' + (shaderWarnings[0] || '').slice(0, 140));
+
   check('no uncaught errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   const image = await win.webContents.capturePage();
-  const shotPath = path.join(shotDir, 'mesh.png');
+  const shotPath = path.join(shotDir, shotName);
   fs.writeFileSync(shotPath, image.toPNG());
   console.log('      screenshot: ' + shotPath);
 

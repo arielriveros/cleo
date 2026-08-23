@@ -59,6 +59,8 @@ export type { TerrainBaseType, TerrainFoliageRule, FoliageCollision, CustomBaseT
 export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment,
          setWgslTranslator, hasWgslTranslator, vulkanUnsupportedReason } from "./graphics/systems/customShaders";
 export type { ShaderDialect, WgslTranslator } from "./graphics/systems/customShaders";
+export { webgpuAvailableInBrowser, WEBGPU_IMPLEMENTED } from "./graphics/rhi/backendSelect";
+export type { BackendKind } from "./graphics/rhi/device";
 export { Renderer } from "./graphics/renderer";
 export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";

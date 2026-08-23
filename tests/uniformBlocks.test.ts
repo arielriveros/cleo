@@ -42,7 +42,7 @@ const m = (name: string, type: number, offset: number,
 
 const BLOCK: FakeBlock = {
     name: 'U_block_0Fragment',
-    dataSize: 208,
+    dataSize: 288,
     members: [
         m('U_block_0Fragment.u_data.u_exposure', GL.FLOAT, 0),
         m('U_block_0Fragment.u_data.u_flags', GL.INT, 4),
@@ -51,6 +51,15 @@ const BLOCK: FakeBlock = {
         // GL reports an array member's name with a trailing "[0]", which the registrar has to strip.
         m('U_block_0Fragment.u_data.u_kernel[0]', GL.FLOAT, 96, { size: 4, arrayStride: 16 }),
         m('U_block_0Fragment.u_data.u_normalMat', GL.FLOAT_MAT3, 160, { matrixStride: 16 }),
+        // naga ESCAPES a member name ending in a digit by appending an underscore, so GL reports
+        // `u_iblIntensity0_` for a member the engine authored as `u_iblIntensity0`.
+        m('U_block_0Fragment.u_data.u_iblIntensity0_', GL.FLOAT, 192),
+        // An array of light structs. Every element repeats the same field names, which is what made
+        // registering bare field names untenable.
+        m('U_block_0Fragment.u_data.u_pointLights[0].position', GL.FLOAT_VEC3, 208),
+        m('U_block_0Fragment.u_data.u_pointLights[0].diffuse', GL.FLOAT_VEC3, 224),
+        m('U_block_0Fragment.u_data.u_pointLights[1].position', GL.FLOAT_VEC3, 240),
+        m('U_block_0Fragment.u_data.u_pointLights[1].diffuse', GL.FLOAT_VEC3, 256),
     ],
 };
 
@@ -137,6 +146,48 @@ describe('UniformBlockSet — reflection', () => {
         expect(uploads[0].floats[0]).toBe(3);
     });
 
+    it('un-mangles the underscore naga appends to a digit-suffixed name', () => {
+        // This is not cosmetic. Without the alias, `setUniform('u_iblIntensity0', …)` resolves to
+        // nothing — no error, no warning, just a value that stays whatever the buffer was allocated
+        // with. That is how light probes stopped contributing: the intensity read as 0, and since an
+        // unbounded probe drives the fallback-ambient weight to zero, the ambient term vanished
+        // entirely rather than degrading.
+        const set = UniformBlockSet.reflect(install([BLOCK]))!;
+        expect(set.has('u_iblIntensity0')).toBe(true);
+        // The name GL actually reported still works too.
+        expect(set.has('u_iblIntensity0_')).toBe(true);
+
+        set.set('u_iblIntensity0', 0.75);
+        set.flush();
+        expect(uploads[0].floats[48]).toBe(0.75);   // byte 192
+    });
+
+    it('leaves a name whose digit is not final alone', () => {
+        // naga only escapes a TRAILING digit — `mid0dle` is emitted unchanged — so the alias must not
+        // fire for those.
+        const set = UniformBlockSet.reflect(install([BLOCK]))!;
+        expect(set.has('u_normalMat')).toBe(true);
+        expect(set.has('u_normalMa')).toBe(false);
+    });
+
+    it('resolves an array-of-structs member by the name the renderer builds', () => {
+        const set = UniformBlockSet.reflect(install([BLOCK]))!;
+        expect(set.has('u_pointLights[0].position')).toBe(true);
+        expect(set.has('u_pointLights[1].diffuse')).toBe(true);
+    });
+
+    it('does not register bare struct field names', () => {
+        // `position` and `diffuse` repeat in every element of every light array, so registering them
+        // would be a guaranteed collision — and it logged a few hundred ambiguity warnings per shader
+        // for aliases no call site would ever use. Every name the engine sets is `u_`-prefixed.
+        const set = UniformBlockSet.reflect(install([BLOCK]))!;
+        expect(set.has('position')).toBe(false);
+        expect(set.has('diffuse')).toBe(false);
+        // The genuinely useful aliases still resolve.
+        expect(set.has('u_pointLights[0].position')).toBe(true);
+        expect(set.has('u_exposure')).toBe(true);
+    });
+
     it('strips the "[0]" GL appends to an array member', () => {
         const set = UniformBlockSet.reflect(install([BLOCK]))!;
         expect(set.has('u_kernel')).toBe(true);
@@ -156,7 +207,35 @@ describe('UniformBlockSet — reflection', () => {
         expect(bindings[0].point).toBe(0);
     });
 
-    it('keeps the first claimant when two blocks share a short name', () => {
+    it('broadcasts a write to every block declaring the name', () => {
+        // naga emits one block per shader STAGE, so a program whose vertex stage needs u_view for its
+        // MVP and whose fragment stage needs it to select a shadow cascade has the matrix in both. The
+        // renderer sets `u_view` once and means both.
+        //
+        // This was found by a real bug: with one entry per name the vertex block won and the fragment's
+        // copy stayed zeroes, so viewDepth was always 0 and cascade 0 always selected. The scene was
+        // small enough that cascade 0 was the right answer anyway, so it rendered correctly by luck.
+        const vertexBlock: FakeBlock = {
+            name: 'T_block_0Vertex', dataSize: 64,
+            members: [m('T_block_0Vertex.u_transform.u_view', GL.FLOAT_MAT4, 0, { matrixStride: 16 })],
+        };
+        const fragmentBlock: FakeBlock = {
+            name: 'L_block_0Fragment', dataSize: 64,
+            members: [m('L_block_0Fragment.u_lighting.u_view', GL.FLOAT_MAT4, 0, { matrixStride: 16 })],
+        };
+        const set = UniformBlockSet.reflect(install([vertexBlock, fragmentBlock]))!;
+        expect(set.targetCount('u_view')).toBe(2);
+
+        const matrix = Array.from({ length: 16 }, (_, i) => i + 1);
+        set.set('u_view', matrix);
+        set.flush();
+
+        expect(uploads).toHaveLength(2);
+        expect([...uploads[0].floats.slice(0, 16)], 'vertex block').toEqual(matrix);
+        expect([...uploads[1].floats.slice(0, 16)], 'fragment block').toEqual(matrix);
+    });
+
+    it('still writes a single-block name exactly once', () => {
         // Ambiguity has to not clobber: the second block silently taking over `u_exposure` would send
         // one program's exposure into the other's buffer.
         const other: FakeBlock = {
@@ -166,19 +245,19 @@ describe('UniformBlockSet — reflection', () => {
         const set = UniformBlockSet.reflect(install([BLOCK, other]))!;
         set.set('u_exposure', 7);
         set.flush();
-        // Two blocks, but only the first one's buffer carries the value.
+        // Both blocks declare it, so both receive it.
         expect(uploads).toHaveLength(2);
         expect(uploads[0].floats[0]).toBe(7);
-        expect(uploads[1].floats[0]).toBe(0);
-        // The full name remains available as an unambiguous handle.
-        expect(set.has('V_block_0Fragment.u_other.u_exposure')).toBe(true);
+        expect(uploads[1].floats[0]).toBe(7);
+        // The full name still addresses exactly one of them.
+        expect(set.targetCount('V_block_0Fragment.u_other.u_exposure')).toBe(1);
     });
 });
 
 describe('UniformBlockSet — std140 writes', () => {
     it('places a scalar and a vec3 at their reported offsets', () => {
         const { upload } = written({ u_exposure: 2.5, u_tint: [0.25, 0.5, 0.75] });
-        expect(upload.byteLength).toBe(208);
+        expect(upload.byteLength).toBe(288);
         expect(upload.floats[0]).toBe(2.5);
         expect([...upload.floats.slice(4, 7)]).toEqual([0.25, 0.5, 0.75]);
     });

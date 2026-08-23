@@ -31,13 +31,12 @@ import { Frustum } from '../core/frustum';
 import { AnimatedModel } from './animatedModel';
 
 // Shaders Sources
-import BasicVertex from './shaders/materials/basic.vs'
-import BasicFragment from './shaders/materials/basic.fs'
-import BasicInstancedVertex from './shaders/materials/basicInstanced.vs'
-import BasicSkinnedVertex from './shaders/materials/basic_skinned.vs'
+import BasicProgram from './shaders/wgsl/basic.wgsl'
+import BasicInstancedProgram from './shaders/wgsl/basicInstanced.wgsl'
+import BasicSkinnedProgram from './shaders/wgsl/basicSkinned.wgsl'
 import DefaultVertex from './shaders/materials/default.vs'
-import DefaultFragment from './shaders/materials/default.fs'
-import DefaultSkinnedVertex from './shaders/materials/default_skinned.vs'
+import BlinnPhongProgram from './shaders/wgsl/blinnPhong.wgsl'
+import BlinnPhongSkinnedProgram from './shaders/wgsl/blinnPhongSkinned.wgsl'
 import OutlineVertex from './shaders/materials/outline.vs'
 import OutlineFragment from './shaders/materials/outline.fs'
 
@@ -46,58 +45,55 @@ import ShadowMapFragment from './shaders/environment/shadowMap.fs'
 import ShadowMapSkinnedProgram from './shaders/wgsl/shadowMapSkinned.wgsl'
 import ShadowMapInstancedVertex from './shaders/environment/shadowMapInstanced.vs'
 import ShadowMapCutoutFragment from './shaders/environment/shadowMapCutout.fs'
-import ShadowDebugFragment from './shaders/screen/shadowDebug.fs'
-import SkyboxVertex from './shaders/environment/skybox.vs'
-import SkyboxFragment from './shaders/environment/skybox.fs'
+import ShadowDebugProgram from './shaders/wgsl/shadowDebug.wgsl'
+import SkyboxProgram from './shaders/wgsl/skybox.wgsl'
 import VolumetricCloudsFragment from './shaders/environment/volumetricClouds.fs'
 import CloudNoiseBakeFragment from './shaders/environment/cloudNoiseBake.fs'
 import CloudTemporalResolveFragment from './shaders/environment/cloudTemporalResolve.fs'
 import CloudUpsampleFragment from './shaders/environment/cloudUpsample.fs'
 import SkyAtmosphereFragment from './shaders/environment/skyAtmosphere.fs'
 import ProbePreviewFragment from './shaders/environment/probePreview.fs'
-import SkyFogFragment from './shaders/screen/skyFog.fs'
+import SkyFogProgram from './shaders/wgsl/skyFog.wgsl'
 
 import ScreenVertex from './shaders/screen/screen.vs'
-import ScreenFragment from './shaders/screen/screen.fs'
 // First program authored in WGSL. The import is a whole PROGRAM — the loader translates both stages to
 // GLSL ES 300 at build time (tools/wgslTranslate.mjs) and carries the WGSL through for the WebGPU
 // backend. `screen.vs`/`screen.fs` above are still imported: 26 other programs pair that vertex shader
 // with their own fragment stage and have not moved yet.
 import ScreenProgram from './shaders/wgsl/screen.wgsl'
 import PresentProgram from './shaders/wgsl/present.wgsl'
-import PresentFragment from './shaders/screen/present.fs'
-import DebugViewFragment from './shaders/screen/debugView.fs'
-import OverdrawFragment from './shaders/screen/overdraw.fs'
+import DebugViewProgram from './shaders/wgsl/debugView.wgsl'
+import OverdrawProgram from './shaders/wgsl/overdraw.wgsl'
 import BloomProgram from './shaders/wgsl/bloom.wgsl'
 import BloomDownsampleProgram from './shaders/wgsl/bloomDownsample.wgsl'
 import BloomUpsampleProgram from './shaders/wgsl/bloomUpsample.wgsl'
-import GaussianBlurProgram from './shaders/wgsl/gaussianBlur.wgsl'
 import ChromaticAberrationProgram from './shaders/wgsl/chromaticAberration.wgsl'
 import ComposerProgram from './shaders/wgsl/composer.wgsl'
-import VolumetricGodRaysFragment from './shaders/screen/volumetricGodRays.fs'
-import GridFragment from './shaders/screen/grid.fs'
+import VolumetricGodRaysProgram from './shaders/wgsl/volumetricGodRays.wgsl'
+import GridProgram from './shaders/wgsl/grid.wgsl'
 import OutlinePostFragment from './shaders/screen/outline.fs'
 import MotionBlurVelocityProgram from './shaders/wgsl/motionBlurVelocity.wgsl'
 import MotionBlurTileMaxProgram from './shaders/wgsl/motionBlurTileMax.wgsl'
 import MotionBlurNeighborMaxProgram from './shaders/wgsl/motionBlurNeighborMax.wgsl'
 import MotionBlurGatherProgram from './shaders/wgsl/motionBlur.wgsl'
-import PBRVertex from './shaders/materials/pbr.vs'
-import PBRFragment from './shaders/materials/pbr.fs'
-import PBRSkinnedVertex from './shaders/materials/pbr_skinned.vs'
+import PBRProgram from './shaders/wgsl/pbr.wgsl'
+import PBRSkinnedProgram from './shaders/wgsl/pbrSkinned.wgsl'
 import TerrainForwardFragment from './shaders/materials/terrainForward.fs'
-import TilemapVertex from './shaders/materials/tilemap.vs'
-import TilemapFragment from './shaders/materials/tilemap.fs'
+import TilemapProgram from './shaders/wgsl/tilemap.wgsl'
 
 // Deferred pipeline shaders
 import GeometryPBRProgram from './shaders/wgsl/geometryPBR.wgsl'
 import GeometryPBRSkinnedProgram from './shaders/wgsl/geometryPBRSkinned.wgsl'
 import GeometryPBRInstancedProgram from './shaders/wgsl/geometryPBRInstanced.wgsl'
-import GeometryDefaultFragment from './shaders/deferred/geometryDefault.fs'
+import GeometryBlinnPhongProgram from './shaders/wgsl/geometryBlinnPhong.wgsl'
+import GeometryBlinnPhongSkinnedProgram from './shaders/wgsl/geometryBlinnPhongSkinned.wgsl'
+import GeometryBlinnPhongInstancedProgram from './shaders/wgsl/geometryBlinnPhongInstanced.wgsl'
 import GeometryTerrainFragment from './shaders/deferred/geometryTerrain.fs'
 import GeometryFoliageBillboardFragment from './shaders/deferred/geometryFoliageBillboard.fs'
-import GeometryBasicFragment from './shaders/deferred/geometryBasic.fs'
+import GeometryBasicProgram from './shaders/wgsl/geometryBasic.wgsl'
+import GeometryBasicSkinnedProgram from './shaders/wgsl/geometryBasicSkinned.wgsl'
 import GeometryInstancedVertex from './shaders/deferred/geometry_instanced.vs'
-import DeferredLightingFragment from './shaders/deferred/deferredLighting.fs'
+import DeferredLightingProgram from './shaders/wgsl/deferredLighting.wgsl'
 import SSAOProgram from './shaders/wgsl/ssao.wgsl'
 import SSAOBlurProgram from './shaders/wgsl/ssaoBlur.wgsl'
 
@@ -128,9 +124,16 @@ export { gl } from './glContext';
 import { gl, setGLContext } from './glContext';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities } from './rhi/device';
+import { resolveBackendRequest } from './rhi/backendSelect';
 import { WebGL2Device, setDevice, device } from './rhi/webgl2/webgl2Device';
 import type { WebGL2Buffer } from './rhi/webgl2/webgl2Device';
-import { BufferUsage } from './rhi/types';
+import { BufferUsage, ShaderStage, ADDITIVE_BLEND } from './rhi/types';
+import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology } from './rhi/types';
+import type { RenderPipeline, BindGroup, RenderTarget } from './rhi/resources';
+import type { RenderPassEncoder, CommandEncoder } from './rhi/device';
+import { packedModelLayout, instanceMatrixLayout } from './rhi/vertexLayouts';
+import { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
+import type { WebGL2RenderPassEncoder } from './rhi/webgl2/webgl2Commands';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
@@ -204,6 +207,15 @@ interface RendererConfig {
     shadowCascades?: number;
     /** Screen-space ambient occlusion (deferred path only, default true). */
     ssao?: boolean;
+    /**
+     * Which graphics API to ask for (default 'webgl2').
+     *
+     * A REQUEST, not a guarantee: `initialize` resolves it against what the browser and this build can
+     * actually provide and falls back to WebGL2, recording why in {@link backendFallbackReason}. The
+     * preference is honoured at device-acquisition time only, so changing it means constructing a new
+     * engine — there is no way to swap a live context's API underneath the resources built on it.
+     */
+    backend?: BackendKind;
 }
 
 /**
@@ -364,6 +376,7 @@ export class Renderer {
     private _canvas: HTMLCanvasElement;
     // Whether initialize() has acquired a device. Gates preInitialize and every GPU allocation.
     private _deviceReady: boolean = false;
+    private _backendFallbackReason: string | null = null;
     // Definite-assignment: written by initialize(), which every host awaits before using the renderer.
     private _capabilities!: DeviceCapabilities;
     // Definite-assignment: set by the `viewport` setter during engine initialization, before any render.
@@ -462,6 +475,15 @@ export class Renderer {
     // published games never pay for it.
     private _offscreenFBO: Framebuffer | null = null;
     private _presentTarget: Framebuffer | null = null;
+    /** 1x1 cube bound to unfilled IBL slots so no cube sampler is ever left unbound. */
+    private _fallbackCube!: Texture;
+    /** 1x1 white 2D texture, bound wherever a material declares a map it does not have. */
+    private _fallbackTexture!: Texture;
+
+    /** RHI pipelines for the fullscreen passes, by program + blend. See _fullscreenPipeline. */
+    private readonly _fullscreenPipelines = new Map<string, RenderPipeline>();
+    /** The encoder recording the pass currently open. See _beginFullscreenPass. */
+    private _passEncoder: CommandEncoder | null = null;
     // Separate 2:1 (non-square) target for the light-probe cubemap preview thumbnail. Allocated on first use.
     private _probePreviewFBO: Framebuffer | null = null;
 
@@ -753,6 +775,18 @@ export class Renderer {
 
     // Deferred pipeline state
     private _deferred: boolean;
+
+    /**
+     * Check `gl.getError()` once per frame and count what it reports. OFF by default.
+     *
+     * Opt-in because `getError` forces a synchronous round trip to the driver, which stalls the
+     * pipeline — fine for a test harness, not for a game loop. It exists because nothing else in this
+     * engine notices a GL error at draw time: the only checks are in the texture upload paths, and
+     * since `getError` reports a GLOBAL sticky flag, a draw-time error surfaced there as a texture
+     * failure at whatever unrelated call site happened to look next.
+     */
+    public debugGLErrors: boolean = false;
+    private _glErrorCount: number = 0;
     private _viewProj: mat4 = mat4.create();
     private _invViewProj: mat4 = mat4.create();
     // Previous frame's view-projection, used by the camera-reprojection motion blur pass.
@@ -850,6 +884,10 @@ export class Renderer {
     public async initialize(): Promise<void> {
         if (this._deviceReady) return;
 
+        this._backendFallbackReason = resolveBackendRequest(this._config.backend);
+        if (this._backendFallbackReason)
+            Logger.warn(`Falling back to WebGL2: ${this._backendFallbackReason}`, 'Runtime');
+
         const context = this._canvas.getContext('webgl2') as WebGL2RenderingContext | null;
         if (!context) throw new Error('WebGL context not available');
         setGLContext(context);
@@ -909,6 +947,18 @@ export class Renderer {
     /** Which graphics API is driving this renderer. */
     public get backend(): BackendKind { return this._capabilities?.backend ?? 'webgl2'; }
 
+    /** Which graphics API was ASKED for. Differs from {@link backend} when the request could not be met. */
+    public get requestedBackend(): BackendKind { return this._config.backend ?? 'webgl2'; }
+
+    /**
+     * Why {@link backend} is not {@link requestedBackend}, or null when the request was met.
+     *
+     * Surfaced rather than swallowed because the difference is invisible otherwise: a user who picks
+     * WebGPU and gets WebGL2 anyway is owed the reason, and "not implemented yet" and "your browser has
+     * no WebGPU" call for completely different responses.
+     */
+    public get backendFallbackReason(): string | null { return this._backendFallbackReason; }
+
     /**
      * The running device's real limits.
      *
@@ -938,35 +988,35 @@ export class Renderer {
         }
 
         // Material shaders
-        const basicShader = new Shader().create(BasicVertex, BasicFragment);
+        const basicShader = new Shader().create(BasicProgram.vertex!, BasicProgram.fragment!);
         // Forward unlit instanced shader for the editor skeleton overlay (many spheres/bones in one draw).
-        const basicInstancedShader = new Shader().create(BasicInstancedVertex, BasicFragment);
-        const defaultShader = new Shader().create(DefaultVertex, DefaultFragment);
-        const basicSkinnedShader = new Shader().create(BasicSkinnedVertex, BasicFragment);
-        const defaultSkinnedShader = new Shader().create(DefaultSkinnedVertex, DefaultFragment);
-        const pbrShader = new Shader().create(PBRVertex, PBRFragment);
-        const pbrSkinnedShader = new Shader().create(PBRSkinnedVertex, PBRFragment);
+        const basicInstancedShader = new Shader().create(BasicInstancedProgram.vertex!, BasicInstancedProgram.fragment!);
+        const defaultShader = new Shader().create(BlinnPhongProgram.vertex!, BlinnPhongProgram.fragment!);
+        const basicSkinnedShader = new Shader().create(BasicSkinnedProgram.vertex!, BasicSkinnedProgram.fragment!);
+        const defaultSkinnedShader = new Shader().create(BlinnPhongSkinnedProgram.vertex!, BlinnPhongSkinnedProgram.fragment!);
+        const pbrShader = new Shader().create(PBRProgram.vertex!, PBRProgram.fragment!);
+        const pbrSkinnedShader = new Shader().create(PBRSkinnedProgram.vertex!, PBRSkinnedProgram.fragment!);
         // Deferred geometry-pass shaders (reuse the material vertex shaders + G-buffer fragment shaders)
         const pbrGeometryShader = new Shader().create(GeometryPBRProgram.vertex!, GeometryPBRProgram.fragment!);
         const pbrGeometrySkinnedShader = new Shader().create(GeometryPBRSkinnedProgram.vertex!, GeometryPBRSkinnedProgram.fragment!);
-        const defaultGeometryShader = new Shader().create(DefaultVertex, GeometryDefaultFragment);
-        const defaultGeometrySkinnedShader = new Shader().create(DefaultSkinnedVertex, GeometryDefaultFragment);
-        const basicGeometryShader = new Shader().create(BasicVertex, GeometryBasicFragment);
-        const basicGeometrySkinnedShader = new Shader().create(BasicSkinnedVertex, GeometryBasicFragment);
+        const defaultGeometryShader = new Shader().create(GeometryBlinnPhongProgram.vertex!, GeometryBlinnPhongProgram.fragment!);
+        const defaultGeometrySkinnedShader = new Shader().create(GeometryBlinnPhongSkinnedProgram.vertex!, GeometryBlinnPhongSkinnedProgram.fragment!);
+        const basicGeometryShader = new Shader().create(GeometryBasicProgram.vertex!, GeometryBasicProgram.fragment!);
+        const basicGeometrySkinnedShader = new Shader().create(GeometryBasicSkinnedProgram.vertex!, GeometryBasicSkinnedProgram.fragment!);
         // Instanced geometry variants (pbr/default share the 14-float vertex layout)
         const pbrGeometryInstancedShader = new Shader().create(GeometryPBRInstancedProgram.vertex!, GeometryPBRInstancedProgram.fragment!);
-        const defaultGeometryInstancedShader = new Shader().create(GeometryInstancedVertex, GeometryDefaultFragment);
+        const defaultGeometryInstancedShader = new Shader().create(GeometryBlinnPhongInstancedProgram.vertex!, GeometryBlinnPhongInstancedProgram.fragment!);
         // Terrain splat geometry shader (reuses the default 14-float vertex layout).
         const terrainGeometryShader = new Shader().create(DefaultVertex, GeometryTerrainFragment);
         // Forward-lit terrain: used only by the light-probe capture (a forward pass), where the deferred
         // terrain G-buffer shader can't be lit. Same 14-float layout as the deferred terrain shader.
         const terrainForwardShader = new Shader().create(DefaultVertex, TerrainForwardFragment);
         // Tilemap chunks: a 2D-only pos/uv/colour layout of their own, not the 14-float model layout.
-        const tilemapShader = new Shader().create(TilemapVertex, TilemapFragment);
+        const tilemapShader = new Shader().create(TilemapProgram.vertex!, TilemapProgram.fragment!);
         // Instanced billboard foliage (grass) geometry shader.
         const foliageBillboardShader = new Shader().create(GeometryInstancedVertex, GeometryFoliageBillboardFragment);
         // Deferred lighting (fullscreen) shader
-        const deferredLightingShader = new Shader().create(ScreenVertex, DeferredLightingFragment);
+        const deferredLightingShader = new Shader().create(DeferredLightingProgram.vertex!, DeferredLightingProgram.fragment!);
         // SSAO (fullscreen) shaders
         const ssaoShader = new Shader().create(SSAOProgram.vertex!, SSAOProgram.fragment!);
         const ssaoBlurShader = new Shader().create(SSAOBlurProgram.vertex!, SSAOBlurProgram.fragment!);
@@ -980,7 +1030,7 @@ export class Renderer {
         const shadowMapSkinnedShader = new Shader().create(ShadowMapSkinnedProgram.vertex!, ShadowMapSkinnedProgram.fragment!);
         const shadowMapInstancedShader = new Shader().create(ShadowMapInstancedVertex, ShadowMapFragment);
         const shadowMapInstancedCutoutShader = new Shader().create(ShadowMapInstancedVertex, ShadowMapCutoutFragment);
-        const skybox = new Shader().create(SkyboxVertex, SkyboxFragment);
+        const skybox = new Shader().create(SkyboxProgram.vertex!, SkyboxProgram.fragment!);
         // Volumetric clouds (fullscreen raymarch, runs on the screen vertex shader)
         const volumetricCloudsShader = new Shader().create(ScreenVertex, VolumetricCloudsFragment);
         const cloudNoiseBakeShader = new Shader().create(ScreenVertex, CloudNoiseBakeFragment);
@@ -991,25 +1041,24 @@ export class Renderer {
         // Probe preview: equirectangular unwrap of a probe's captured cube for the editor thumbnail.
         const probePreviewShader = new Shader().create(ScreenVertex, ProbePreviewFragment);
         // Sky fog (fullscreen distance fog whose colour is sampled from the atmosphere cubemap)
-        const skyFogShader = new Shader().create(ScreenVertex, SkyFogFragment);
+        const skyFogShader = new Shader().create(SkyFogProgram.vertex!, SkyFogProgram.fragment!);
         // Screen shaders
         const screenShader = new Shader().create(ScreenProgram.vertex!, ScreenProgram.fragment!);
         // Final present: exposure -> tonemap -> sRGB (the single display resolve).
         const presentShader = new Shader().create(PresentProgram.vertex!, PresentProgram.fragment!);
-        const godRaysShader = new Shader().create(ScreenVertex, VolumetricGodRaysFragment);
-        const debugViewShader = new Shader().create(ScreenVertex, DebugViewFragment);
-        const shadowDebugShader = new Shader().create(ScreenVertex, ShadowDebugFragment);
+        const godRaysShader = new Shader().create(VolumetricGodRaysProgram.vertex!, VolumetricGodRaysProgram.fragment!);
+        const debugViewShader = new Shader().create(DebugViewProgram.vertex!, DebugViewProgram.fragment!);
+        const shadowDebugShader = new Shader().create(ShadowDebugProgram.vertex!, ShadowDebugProgram.fragment!);
         const bloomShader = new Shader().create(BloomProgram.vertex!, BloomProgram.fragment!);
-        const blurShader = new Shader().create(GaussianBlurProgram.vertex!, GaussianBlurProgram.fragment!);
         // Reuses the selection-mask vertex shader: it is the minimal MVP transform the mask pass
         // already drives over these same meshes, so no new vertex path is introduced.
-        const overdrawShader = new Shader().create(OutlineVertex, OverdrawFragment);
+        const overdrawShader = new Shader().create(OverdrawProgram.vertex!, OverdrawProgram.fragment!);
         const bloomDownsampleShader = new Shader().create(BloomDownsampleProgram.vertex!, BloomDownsampleProgram.fragment!);
         const bloomUpsampleShader = new Shader().create(BloomUpsampleProgram.vertex!, BloomUpsampleProgram.fragment!);
         const chromaticAbShader = new Shader().create(ChromaticAberrationProgram.vertex!, ChromaticAberrationProgram.fragment!);
         const composerShader = new Shader().create(ComposerProgram.vertex!, ComposerProgram.fragment!);
         // Editor infinite grid (fullscreen world-plane pass)
-        const gridShader = new Shader().create(ScreenVertex, GridFragment);
+        const gridShader = new Shader().create(GridProgram.vertex!, GridProgram.fragment!);
         // Outline: material shader stamps the selection silhouette into the mask; the screen shader
         // turns that mask into a border in a post pass.
         const outlineShader = new Shader().create(OutlineVertex, OutlineFragment);
@@ -1066,7 +1115,6 @@ export class Renderer {
         this._shaderManager.addShader('debugView', debugViewShader);
         this._shaderManager.addShader('shadowDebug', shadowDebugShader);
         this._shaderManager.addShader('bloom', bloomShader);
-        this._shaderManager.addShader('blur', blurShader);
         this._shaderManager.addShader('overdraw', overdrawShader);
         this._shaderManager.addShader('bloomDownsample', bloomDownsampleShader);
         this._shaderManager.addShader('bloomUpsample', bloomUpsampleShader);
@@ -1181,6 +1229,7 @@ export class Renderer {
 
         // Foliage GPU state must be current BEFORE the shadow pass, which can now draw it.
         this._ensureFoliageUploaded(scene);
+        this._checkGLErrors('framePrologue');
 
         this._shadowsActive = false;
         if (shadowLight && this._shadowsEnabled) {
@@ -1190,7 +1239,9 @@ export class Renderer {
                 this._shadowMapsDirty = true;
             }
         }
+        this._checkGLErrors('cascades');
         this._renderSpotShadows(scene);
+        this._checkGLErrors('spotShadows');
 
         if (!this._shadowsActive) {
             // No caster (or shadows switched off): the pass above is skipped, so the layers still hold
@@ -1204,9 +1255,11 @@ export class Renderer {
             this._renderDeferred(scene, shadowLight);
         else
             this._renderForward(scene, shadowLight);
+        this._checkGLErrors('scene');
 
         // Apply post processing
         this._applyPostProcessing(scene);
+        this._checkGLErrors('post');
 
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
         mat4.copy(this._prevViewProj, this._viewProj);
@@ -1450,6 +1503,7 @@ export class Renderer {
         // 1. Rasterize all opaque lit geometry into the G-buffer.
         gpuProfiler.beginPass('geometry');
         this._geometryPass(scene);
+        this._checkGLErrors('geometry');
         // 1b. Screen-space ambient occlusion from the G-buffer depth+normals.
         // Nothing in the G-buffer means every AO pixel would early-out to white and the lighting pass
         // discards those pixels anyway — so the whole pass is two draws producing an unread buffer.
@@ -1461,8 +1515,10 @@ export class Renderer {
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
         gpuProfiler.beginPass('lighting');
         this._deferredLightingPass(scene, shadowLight);
+        this._checkGLErrors('deferredLighting');
         // 3. Forward passes (skybox, transparent, sprites, outlines, gizmos) into the scene FBO.
         this._renderForwardOverlay(scene, shadowLight);
+        this._checkGLErrors('forwardOverlay');
         gpuProfiler.endPass();
     }
 
@@ -1480,11 +1536,10 @@ export class Renderer {
     }
 
     private _geometryPass(scene: Scene): void {
-        this._gBufferFBO.bind();
-        GLState.enable(gl.DEPTH_TEST);
-        GLState.depthMask(true);
-        GLState.disable(gl.BLEND);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        // One pass for every node: the target and its clear belong to the pass, while the per-draw
+        // state (which program, which cull mode, which textures) belongs to the pipelines and bind
+        // groups set inside it.
+        const pass = this._beginFullscreenPass(this._gBufferFBO.renderTarget, 'geometry', true);
 
         // Prevent a framebuffer feedback loop: the previous frame's deferred lighting pass leaves the
         // G-buffer's own textures bound to units 0-3 (the same units the material shaders' samplers
@@ -1540,13 +1595,14 @@ export class Renderer {
             const ka = shaderKey.get(a)!, kb = shaderKey.get(b)!;
             return ka < kb ? -1 : ka > kb ? 1 : 0;
         });
-        for (const node of singles) this._drawGeometryNode(node);
+        for (const node of singles) this._drawGeometryNode(pass, node);
 
         // Instanced groups (>=2 identical mesh+material), else fall back to a single draw.
         for (const group of instanceGroups.values()) {
-            if (group.length >= 2) this._drawInstancedGroup(group);
-            else this._drawGeometryNode(group[0]);
+            if (group.length >= 2) this._drawInstancedGroup(pass, group);
+            else this._drawGeometryNode(pass, group[0]);
         }
+        this._endFullscreenPass(pass);
 
         // Instanced foliage owned by landscapes (grass billboards + scattered mesh props).
         if (this._beginPass('foliage')) this._foliagePass(scene);
@@ -1799,6 +1855,62 @@ export class Renderer {
         return d2;
     }
 
+    /**
+     * WGSL reflection for the geometry programs, by the name they are registered under.
+     *
+     * `_geometryShaderFor` picks a program name at draw time, so the reflection it binds against has to
+     * be reachable by that same name — the fullscreen passes could pass their import in literally
+     * because each call site names one program.
+     */
+    private static readonly _GEOMETRY_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
+        pbrGeometry: GeometryPBRProgram,
+        pbrGeometrySkinned: GeometryPBRSkinnedProgram,
+        pbrGeometryInstanced: GeometryPBRInstancedProgram,
+        basicGeometry: GeometryBasicProgram,
+        basicGeometrySkinned: GeometryBasicSkinnedProgram,
+        blinn_phongGeometry: GeometryBlinnPhongProgram,
+        blinn_phongGeometrySkinned: GeometryBlinnPhongSkinnedProgram,
+        blinn_phongGeometryInstanced: GeometryBlinnPhongInstancedProgram,
+    };
+
+    /**
+     * `Material.config.side` as a cull mode.
+     *
+     * The mapping INVERTS, which is easy to get wrong: `side: 'front'` means "show the front faces", so
+     * the back ones are culled. `_applyCull` has always done this; naming it is what makes the pipeline
+     * descriptor say the same thing.
+     */
+    private static _cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode {
+        if (side === 'double') return 'none';
+        return side === 'back' ? 'front' : 'back';
+    }
+
+    /**
+     * A bind group over a material's textures, one entry per texture the SHADER declares.
+     *
+     * Every declared binding is filled, whether or not the material has that map: the shader gates on
+     * its `hasNormalMap`-style flags, but the sampler still has to point at a complete texture, and a
+     * bind group has no way to say "leave this one out". Missing maps therefore resolve to a 1x1 white
+     * fallback.
+     *
+     * That weakens, but does not yet remove, the reason `_geometryPass` scrubs texture units 0-7 by
+     * hand: a material on this path can no longer leave a G-buffer texture bound to a unit it samples,
+     * because it binds every one of them. Terrain and custom materials are still on the legacy path and
+     * bind only what they have, so the scrub stays until they move.
+     */
+    private _materialBindGroup(pipeline: RenderPipeline, material: Material): BindGroup {
+        const module = (pipeline as any).module as { resources: readonly ShaderResource[] };
+        const textures: Texture[] = [];
+        for (const resource of module.resources) {
+            if (resource.group !== 0 || resource.kind !== 'texture') continue;
+            const field = resource.glslName.replace(/^u_material_/, '');
+            const id = material.textures.get(field);
+            const texture = id ? TextureManager.Instance.getTexture(id) : null;
+            textures.push(texture ?? this._fallbackTexture);
+        }
+        return this._textureBindGroup(pipeline, 0, textures);
+    }
+
     private _geometryShaderFor(node: ModelNode): string {
         const type = node.model.material.type;
         // A deferred custom material is drawn with its own runtime-compiled G-buffer program.
@@ -1813,7 +1925,7 @@ export class Renderer {
         }
     }
 
-    private _drawGeometryNode(node: ModelNode): void {
+    private _drawGeometryNode(pass: RenderPassEncoder, node: ModelNode): void {
         const shaderType = this._geometryShaderFor(node);
         const animated = node.model instanceof AnimatedModel;
         if (animated)
@@ -1829,14 +1941,31 @@ export class Renderer {
         // One draw per submesh, sharing everything above: a merged model has one vertex buffer, one
         // world transform and one bone upload, and differs only in which material each index range uses.
         // Submeshes are constrained to a single material type, so the shader bound above stays correct.
-        this._drawSubmeshes(node, mat => {
+        const reflection = Renderer._GEOMETRY_PROGRAMS[shaderType];
+        this._drawSubmeshes(node, (mat) => {
+            // Terrain and custom materials keep the legacy path: both are hand-written GLSL with no
+            // WGSL reflection, so there is no bind-group layout to bind against.
             if (mat.type === 'terrain') {
                 this._shaderManager.setUniform('u_viewPos', this._activeCamera.position); // parallax view vector
                 this._applyTerrainMaterial(mat);
+                return false;
             }
-            else if (mat instanceof CustomMaterial) this._applyCustomMaterial(mat);
-            else this._applyMaterial(mat);
-        });
+            if (mat instanceof CustomMaterial) { this._applyCustomMaterial(mat); return false; }
+            if (!reflection) { this._applyMaterial(mat); return false; }
+
+            const pipeline = this._pipelineFor(shaderType, reflection, {
+                cullMode: Renderer._cullFor(mat.config.side),
+                depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                targets: 3,   // the G-buffer
+                topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
+                vertex: 'model',
+            });
+            pass.setPipeline(pipeline);
+            for (const [name, value] of mat.properties)
+                this._shaderManager.setUniform(`u_material.${name}`, value);
+            pass.setBindGroup(0, this._materialBindGroup(pipeline, mat));
+            return true;
+        }, pass);
         frameStats.objects++;
     }
 
@@ -1846,12 +1975,16 @@ export class Renderer {
      * The single-material case (every model that was not merged at import) takes the same path with one
      * range, so there is one implementation of "apply material, set cull, draw" rather than two.
      */
-    private _drawSubmeshes(node: ModelNode, bindMaterial: (material: Material) => void): void {
+    private _drawSubmeshes(node: ModelNode, bindMaterial: (material: Material) => boolean | void,
+                           pass?: RenderPassEncoder): void {
         const model = node.model;
         if (!model.hasSubmeshes) {
             const mat = model.material;
-            bindMaterial(mat);
-            this._applyCull(mat.config.side);
+            // A callback that set a PIPELINE has already fixed the cull mode; calling _applyCull after
+            // it would be harmless today and wrong the moment the two disagree.
+            const viaPipeline = !!bindMaterial(mat);
+            if (!viaPipeline) this._applyCull(mat.config.side);
+            if (viaPipeline && pass && this._recordDraw(pass, model.mesh, 0, 0)) return;
             model.mesh.draw(mat.config.wireframe ? 'line-list' : 'triangle-list');
             return;
         }
@@ -1860,14 +1993,33 @@ export class Renderer {
             // `materials` is parallel to `submeshes` by construction, but indexing it unguarded turns any
             // future disagreement into a mid-frame TypeError rather than a wrong colour. Slot 0 always exists.
             const mat = model.materials[i] ?? model.materials[0];
-            bindMaterial(mat);
-            this._applyCull(mat.config.side);
+            const viaPipeline = !!bindMaterial(mat);
+            if (!viaPipeline) this._applyCull(mat.config.side);
+            if (viaPipeline && pass
+                && this._recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
             model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
                 mat.config.wireframe ? 'line-list' : 'triangle-list');
         }
     }
 
-    private _drawInstancedGroup(group: ModelNode[]): void {
+    /**
+     * Record a mesh draw through the RHI, or report that this mesh still needs `Mesh` to do it.
+     *
+     * The vertex layout on the pipeline covers the interleaved model vertex and nothing else, so a mesh
+     * whose attributes live in extra buffers or extra index buffers is not expressible yet and falls
+     * back: SKINNED meshes (dedicated bone-index and bone-weight buffers) and LOD meshes (alternate
+     * index buffers over the same vertices). Returning false rather than throwing keeps the fallback a
+     * routine branch instead of a cliff — those paths move when their layouts move onto pipelines.
+     */
+    private _recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number): boolean {
+        if (mesh.isAnimated || mesh.hasLods || !mesh.indexBuffer) return false;
+        pass.setVertexBuffer(0, mesh.vertexBuffer);
+        pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
+        pass.drawIndexed(indexCount > 0 ? indexCount : mesh.indexCount, 1, firstIndex);
+        return true;
+    }
+
+    private _drawInstancedGroup(pass: RenderPassEncoder, group: ModelNode[]): void {
         const first = group[0];
         const type = first.model.material.type;
         const shaderType = type === 'blinn_phong' ? 'blinn_phongGeometryInstanced' : 'pbrGeometryInstanced';
@@ -1880,22 +2032,50 @@ export class Renderer {
         for (let i = 0; i < count; i++)
             this._instanceScratch.set(group[i].worldTransform, i * 16);
 
-        this._shaderManager.bind(shaderType);
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
-
-        this._applyMaterial(first.model.material);
-        this._applyCull(first.model.material.config.side);
+        const material = first.model.material;
+        const reflection = Renderer._GEOMETRY_PROGRAMS[shaderType];
+        if (reflection) {
+            const pipeline = this._pipelineFor(shaderType, reflection, {
+                cullMode: Renderer._cullFor(material.config.side),
+                depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                targets: 3,
+                topology: material.config.wireframe ? 'line-list' : 'triangle-list',
+                vertex: 'model+instance',
+            });
+            pass.setPipeline(pipeline);
+            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            for (const [name, value] of material.properties)
+                this._shaderManager.setUniform(`u_material.${name}`, value);
+            pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+        } else {
+            this._shaderManager.bind(shaderType);
+            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            this._applyMaterial(material);
+            this._applyCull(material.config.side);
+        }
 
         const mesh = first.model.mesh;
         device.reallocateBuffer(this._instanceBuffer as WebGL2Buffer, this._instanceScratch.subarray(0, needed));
-        mesh.setupInstanceMatrixBuffer(this._instanceBuffer as WebGL2Buffer, 5);
         const topology = first.model.material.config.wireframe ? 'line-list' : 'triangle-list';
-        mesh.drawInstanced(count, topology);
+
+        // Through the RHI when the mesh's whole layout fits on the pipeline. Note what this removes:
+        // the instance divisor is VAO state, and the legacy path had to tear it down afterwards or the
+        // next NON-instanced draw of the same (shared) mesh kept reading the instance buffer. A VAO
+        // keyed by pipeline AND buffers cannot have that problem — the instanced and non-instanced
+        // draws of one mesh simply use different VAOs.
+        if (reflection && !mesh.isAnimated && !mesh.hasLods && mesh.indexBuffer) {
+            pass.setVertexBuffer(0, mesh.vertexBuffer);
+            pass.setVertexBuffer(1, this._instanceBuffer as WebGL2Buffer);
+            pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
+            pass.drawIndexed(mesh.indexCount, count);
+        } else {
+            mesh.setupInstanceMatrixBuffer(this._instanceBuffer as WebGL2Buffer, 5);
+            mesh.drawInstanced(count, topology);
+            mesh.teardownInstanceMatrixBuffer(5);
+        }
         frameStats.objects += count; // each batched node is a distinct scene object
-        // Reset the per-instance divisor so a later non-instanced draw of this (possibly shared) mesh
-        // isn't left reading the instance buffer.
-        mesh.teardownInstanceMatrixBuffer(5);
     }
 
     /**
@@ -1924,29 +2104,27 @@ export class Renderer {
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this._sceneFBO.framebuffer);
         gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
 
-        this._sceneFBO.bind();
-        // Depth was blitted in; clear only color. Clear alpha to 0 so the background starts with an
-        // empty bloom mask (only drawn lit surfaces set alpha=1); restore the configured clear alpha after.
-        // Thumbnails clear to transparent black instead, so the clear color can't bleed a fringe into an
-        // image whose background is about to be made transparent.
-        GLState.disable(gl.DEPTH_TEST);
-        GLState.depthMask(false);
-        GLState.disable(gl.BLEND);
+        // Depth was blitted in; clear only colour. Alpha clears to 0 so the background starts with an
+        // empty bloom mask (only lit surfaces set alpha=1) — a named clearValue rather than the
+        // save/restore of the context clear colour this used to do by hand. Thumbnails clear to
+        // transparent black so no fringe bleeds into an image whose background is about to be
+        // made transparent.
         const cc = this.clearColor;
         const bg = this._thumbnailMode ? [0, 0, 0] : cc;
-        gl.clearColor(bg[0], bg[1], bg[2], 0.0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.clearColor(cc[0], cc[1], cc[2], cc[3] ?? 1);
+        // The shadow group is NOT migrated: `_uploadShadowUniforms` is shared with the forward passes
+        // and still binds at these two units by hand, so the allocator has to leave them alone.
+        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'deferredLighting', true,
+                                               [bg[0], bg[1], bg[2], 0.0], false,
+                                               [Renderer.SHADOW_UNIT, Renderer.SPOT_SHADOW_UNIT]);
+        const pipeline = this._fullscreenPipeline('deferredLighting', DeferredLightingProgram);
+        pass.setPipeline(pipeline);
 
-        this._shaderManager.bind('deferredLighting');
-        this._shaderManager.setUniform('u_gAlbedoMetallic', 0);
-        this._shaderManager.setUniform('u_gNormalRoughness', 1);
-        this._shaderManager.setUniform('u_gEmissiveAO', 2);
-        this._shaderManager.setUniform('u_gDepth', 3);
-        this._gBufferFBO.colors[0].bind(0);
-        this._gBufferFBO.colors[1].bind(1);
-        this._gBufferFBO.colors[2].bind(2);
-        this._gBufferFBO.depth.bind(3);
+        // Group 0: the G-buffer plus AO. SSAO always binds a complete texture even when disabled —
+        // the shader gates on u_ssaoEnabled, but the sampler still has to point somewhere valid.
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            this._gBufferFBO.colors[0], this._gBufferFBO.colors[1], this._gBufferFBO.colors[2],
+            this._gBufferFBO.depth, (this._ssaoResult ?? this._ssaoBlurFBO).colors[0],
+        ]));
 
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
@@ -1967,29 +2145,27 @@ export class Renderer {
         // Every sampler unit is assigned every frame (even when unused) so the cube samplers never
         // alias the 2D G-buffer samplers on unit 0 (which would be a draw-time type-collision error),
         // and every used cube slot is bound to SOME complete cubemap.
-        this._shaderManager.setUniform('u_irradiance0', 5);
-        this._shaderManager.setUniform('u_prefiltered0', 7);
-        this._shaderManager.setUniform('u_irradiance1', 8);
-        this._shaderManager.setUniform('u_prefiltered1', 13);
-        this._shaderManager.setUniform('u_envMap', 14);
-        this._shaderManager.setUniform('u_brdfLUT', 12);
-        this._brdfFBO.colors[0].bind(12);
         this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
-        scene.environmentMap?.bind(14);
         const probes = scene.probesForFrame(this._activeCamera.position, 2);
         this._shaderManager.setUniform('u_probeCount', probes.length);
+
+        // Group 2: the IBL cubes, the BRDF LUT and the environment fallback. Every slot resolves to a
+        // COMPLETE cubemap — the probe's, else the other probe's, else the scene environment, else the
+        // 1x1 fallback — because a bind group has no way to say "leave this one unbound".
+        const cubes: Texture[] = [];
+        for (let i = 0; i < 2; i++) {
+            const fill = probes[i] ?? probes[0] ?? null;
+            const irradiance = fill?.irradiance ?? scene.environmentMap ?? this._fallbackCube;
+            const prefiltered = fill?.prefiltered ?? scene.environmentMap ?? this._fallbackCube;
+            cubes.push(irradiance, prefiltered);
+        }
+        pass.setBindGroup(2, this._textureBindGroup(pipeline, 2, [
+            cubes[0], cubes[1], cubes[2], cubes[3],
+            this._brdfFBO.colors[0], scene.environmentMap ?? this._fallbackCube,
+        ]));
+
         for (let i = 0; i < 2; i++) {
             const slot = probes[i] ?? null;
-            const fill = slot ?? probes[0] ?? null; // keep unused slots bound to a complete cube
-            const irrUnit = i === 0 ? 5 : 8;
-            const prefUnit = i === 0 ? 7 : 13;
-            if (fill) {
-                fill.irradiance!.bind(irrUnit);
-                fill.prefiltered!.bind(prefUnit);
-            } else if (scene.environmentMap) {
-                scene.environmentMap.bind(irrUnit);
-                scene.environmentMap.bind(prefUnit);
-            }
             this._shaderManager.setUniform(`u_iblIntensity${i}`, slot ? slot.intensity : 0);
             this._shaderManager.setUniform(`u_probeUnbounded${i}`, slot ? !slot.bounded : false);
             this._shaderManager.setUniform(`u_probeInvVolume${i}`, slot && slot.bounded ? slot.invVolumeMatrix : Renderer._IDENTITY_MAT4);
@@ -1999,15 +2175,15 @@ export class Renderer {
         // SSAO (unit 4). Always bind a complete texture so the sampler is valid; the shader only
         // reads it when u_ssaoEnabled is true.
         this._shaderManager.setUniform('u_ssaoEnabled', this._ssaoEnabled);
-        this._shaderManager.setUniform('u_ssao', 4);
-        (this._ssaoResult ?? this._ssaoBlurFBO).colors[0].bind(4);
         // Texel size drives the depth-aware upsample. Zero when the AO buffer is already full
         // resolution, which tells the shader to take the plain (and then exact) bilinear fetch.
         this._shaderManager.setUniform('u_ssaoTexelSize',
             this._ssaoResolutionScale >= 0.999 ? [0, 0] : [1 / this._ssaoWidth, 1 / this._ssaoHeight]);
 
         this._drawFullscreen();
+        this._endFullscreenPass(pass);
 
+        // Still restored by hand: the passes that follow are on the legacy path and inherit this.
         GLState.depthMask(true);
         GLState.enable(gl.DEPTH_TEST);
     }
@@ -2156,19 +2332,15 @@ export class Renderer {
     // Screen-space ambient occlusion: raw pass from the G-buffer into _ssaoFBO, then a box blur into
     // _ssaoBlurFBO. Consumed by the deferred lighting pass (unit 4).
     private _ssaoPass(): void {
-        this._ssaoFBO.bind();
-        GLState.disable(gl.DEPTH_TEST);
-        GLState.depthMask(false);
-        GLState.disable(gl.BLEND);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-
-        this._shaderManager.bind('ssao');
-        this._shaderManager.setUniform('u_gNormalRoughness', 0);
-        this._shaderManager.setUniform('u_gDepth', 1);
-        this._shaderManager.setUniform('u_noise', 2);
-        this._gBufferFBO.colors[1].bind(0);
-        this._gBufferFBO.depth.bind(1);
-        this._ssaoNoise.bind(2);
+        // Depth off, depth writes off, no blend: all three are now the pipeline's, not three loose
+        // GLState calls that the pass had to remember to make and later undo.
+        const ssaoPass = this._beginFullscreenPass(this._ssaoFBO.renderTarget, 'ssao', true,
+                                                   undefined, false);
+        const ssaoPipeline = this._fullscreenPipeline('ssao', SSAOProgram);
+        ssaoPass.setPipeline(ssaoPipeline);
+        ssaoPass.setBindGroup(0, this._textureBindGroup(ssaoPipeline, 0, [
+            this._gBufferFBO.colors[1], this._gBufferFBO.depth, this._ssaoNoise,
+        ]));
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
@@ -2194,6 +2366,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_samples', this._ssaoKernel.subarray(0, this._ssaoSamples * 3));
 
         this._drawFullscreen();
+        this._endFullscreenPass(ssaoPass);
 
         // Blur to remove the tiled-noise pattern. Timed separately from the kernel pass above: the
         // two do very different work (a scattered dependent-fetch loop versus a small coherent box
@@ -2202,11 +2375,13 @@ export class Renderer {
         // cost, since a timer around a draw misses the FBO round trip that goes with it.
         this._ssaoResult = this._ssaoFBO;
         if (this._beginPass('ssao.blur')) {
-            this._ssaoBlurFBO.beginPass('ssao.blur', { color: true });
-            this._shaderManager.bind('ssaoBlur');
-            this._shaderManager.setUniform('u_ssao', 0);
-            this._ssaoFBO.colors[0].bind(0);
+            const blurPass = this._beginFullscreenPass(this._ssaoBlurFBO.renderTarget, 'ssao.blur',
+                                                       true, undefined, false);
+            const blurPipeline = this._fullscreenPipeline('ssaoBlur', SSAOBlurProgram);
+            blurPass.setPipeline(blurPipeline);
+            blurPass.setBindGroup(0, this._textureBindGroup(blurPipeline, 0, [this._ssaoFBO.colors[0]]));
             this._drawFullscreen();
+            this._endFullscreenPass(blurPass);
             this._ssaoResult = this._ssaoBlurFBO;
         }
 
@@ -2239,6 +2414,21 @@ export class Renderer {
 
         this._brdfFBO.create(Renderer.BRDF_LUT_SIZE, Renderer.BRDF_LUT_SIZE);
         this._renderBRDFLUT();
+
+        // A 1x1 complete cubemap, bound to any IBL slot a frame does not fill.
+        //
+        // The old code left such slots pointing at whatever the unit happened to hold, relying on the
+        // shader not reading them. A bind group cannot express "nothing": an unset sampler uniform
+        // stays 0 and aliases the 2D G-buffer sampler on unit 0, which IS a draw-time sampler-type
+        // collision. WebGPU is stricter still and rejects an unsatisfied binding outright. One tiny
+        // texture removes the whole class of problem.
+        this._fallbackCube = new Texture({ mipMap: false });
+        this._fallbackCube.createCubemapTarget(1, 1);
+
+        // White rather than black: a material with no base colour map multiplies by this, and black
+        // would render every untextured object invisible rather than merely unmapped.
+        this._fallbackTexture = new Texture({ mipMap: false });
+        this._fallbackTexture.createFromData(new Uint8Array([255, 255, 255, 255]), 1, 1);
     }
 
     private _renderBRDFLUT(): void {
@@ -3181,15 +3371,21 @@ export class Renderer {
     private _renderGrid(): void {
         if (!this._gridEnabled) return;
 
-        GLState.enable(gl.DEPTH_TEST);
-        GLState.depthMask(false);       // overlay: test against scene depth, don't write
-        GLState.enable(gl.BLEND);
-        GLState.disable(gl.CULL_FACE);
-        // Erase the bloom mask under the grid lines (RGB straight-alpha as usual, ALPHA *= 1 - coverage)
-        // so the grid never appears in the bloom pass, even when drawn over the bloom-eligible sky.
-        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
-
-        this._shaderManager.bind('grid');
+        // The first pipeline in the migration with DEPTH state, and it exercises three things the
+        // fullscreen passes never did: depth test on with writes off (a pure overlay), a blend whose
+        // alpha half differs from its colour half, and a compare function that is NOT the WebGPU
+        // default. `depthCompare` must be 'less-equal' because the engine sets `gl.depthFunc(LEQUAL)`
+        // exactly once at init and never changes it — a pipeline claiming 'less' would silently drop
+        // every coplanar fragment.
+        //
+        // The alpha half erases the bloom mask under the grid lines (ALPHA *= 1 - coverage) so the grid
+        // never appears in the bloom pass, even when drawn over the bloom-eligible sky.
+        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'grid', false);
+        const pipeline = this._fullscreenPipeline('grid', GridProgram, {
+            color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+            alpha: { srcFactor: 'zero', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+        }, { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' });
+        pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
         this._shaderManager.setUniform('u_viewProj', this._viewProj);
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
@@ -3211,8 +3407,10 @@ export class Renderer {
         this._shaderManager.setUniform('u_fadeFar', fadeFar);
 
         this._drawFullscreen();
+        this._endFullscreenPass(pass);
 
-        // Restore the default mask-preserving alpha blend for subsequent overlay passes.
+        // Still restored by hand: the overlay passes that follow are on the legacy path and inherit
+        // blend and depth-mask state rather than declaring their own.
         this._restoreDefaultBlend();
         GLState.depthMask(true);
     }
@@ -3556,6 +3754,141 @@ export class Renderer {
     private _drawFullscreen(): void {
         countFullscreenPass();
         this._screenQuad.draw();
+    }
+
+    /** The default framebuffer, at canvas resolution — what `Framebuffer.unbind()` used to select. */
+    private _screenTarget(): RenderTarget {
+        return new WebGL2RenderTarget(null, gl.canvas.width, gl.canvas.height, [], undefined, 'screen');
+    }
+
+    /**
+     * Open a fullscreen pass on `target`.
+     *
+     * The encoder is held on the renderer rather than returned, so `finish()` happens in
+     * {@link _endFullscreenPass} *after* the draws are recorded. That ordering is a no-op on WebGL2,
+     * which issues everything immediately — and load-bearing on WebGPU, which submits nothing until
+     * `finish()`. Getting it wrong here would work perfectly until the day the backend changed.
+     *
+     * One encoder per pass for now; one per FRAME is the shape WebGPU actually wants, and it arrives
+     * with the geometry passes when there is a frame boundary to hang it on.
+     */
+    private _beginFullscreenPass(target: RenderTarget, label: string, clear: boolean,
+                                 clearValue?: [number, number, number, number],
+                                 clearDepth: boolean = clear,
+                                 reservedUnits?: readonly number[]): RenderPassEncoder {
+        this._passEncoder = device.createCommandEncoder(label);
+        const pass = this._passEncoder.beginRenderPass(target, {
+            label,
+            colorAttachments: [{
+                target: 0,
+                loadOp: clear ? 'clear' : 'load',
+                storeOp: 'store',
+                // Absent means "the standing clear colour", which is what a bare `gl.clear` used. A
+                // named value goes through clearBufferfv instead and needs no save/restore of the
+                // context's colour — which is what the thumbnail path used to do by hand.
+                ...(clearValue ? { clearValue } : {}),
+            }],
+            // Separate from the colour op because several targets carry no depth at all and the passes
+            // that write them said `{ color: true }` — clearing depth there was never intended, even
+            // though on a depthless framebuffer it happens to be a no-op.
+            depthAttachment: { loadOp: clearDepth ? 'clear' : 'load', storeOp: 'store' },
+        });
+        if (reservedUnits) (pass as WebGL2RenderPassEncoder).reserveTextureUnits(reservedUnits);
+        return pass;
+    }
+
+    private _endFullscreenPass(pass: RenderPassEncoder): void {
+        pass.end();
+        this._passEncoder?.finish();
+        this._passEncoder = null;
+    }
+
+    /**
+     * The RHI pipeline for a fullscreen pass, built once per program + state combination.
+     *
+     * This is the seam the WebGPU port is being built through. A fullscreen pass used to be a program
+     * bind plus a scattering of `GLState` calls and `texture.bind(unit)` at the call site; a pipeline
+     * makes that state immutable and named, and a bind group makes the unit assignment the backend's
+     * business rather than the renderer's. WebGL2 translates both back into the deduped calls it always
+     * made, so nothing about the output changes — see `rhi/webgl2/webgl2Commands.ts`.
+     *
+     * Every fullscreen pass writes one target, never tests depth and never culls, so the descriptor is
+     * almost entirely fixed; blend is the one thing that varies (the bloom upsample chain is additive).
+     */
+    private _fullscreenPipeline(program: string, reflection: { resources: readonly ShaderResource[] },
+                                blend?: BlendState, depthStencil?: DepthStencilState): RenderPipeline {
+        return this._pipelineFor(program, reflection, { blend, depthStencil });
+    }
+
+    /**
+     * The RHI pipeline for `program` under a particular render state, built once per combination.
+     *
+     * Deliberately cached on a string key rather than rebuilt: the geometry pass asks for one per
+     * submesh per node, and a pipeline is pure data on WebGL2 — two draws wanting the same program and
+     * state must get the same object, or `RenderPipeline` identity stops meaning anything.
+     */
+    private _pipelineFor(program: string, reflection: { resources: readonly ShaderResource[] },
+                         options: { blend?: BlendState; depthStencil?: DepthStencilState;
+                                    cullMode?: CullMode; targets?: number;
+                                    topology?: PrimitiveTopology;
+                                    vertex?: false | 'model' | 'model+instance' } = {}): RenderPipeline {
+        const { blend, depthStencil, cullMode = 'none', targets = 1,
+                topology = 'triangle-list', vertex = false } = options;
+        const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
+                            + (blend ? '|' + JSON.stringify(blend) : '')
+                            + (depthStencil ? '|' + JSON.stringify(depthStencil) : '');
+        let pipeline = this._fullscreenPipelines.get(key);
+        if (!pipeline) {
+            const module = device.createShaderModule({
+                label: program,
+                program,
+                stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
+                // The WGSL is what WebGPU will compile; WebGL2 reaches the already-linked program by
+                // name and uses only the reflection.
+                source: '',
+                resources: reflection.resources,
+            });
+            pipeline = device.createRenderPipeline({
+                label: program,
+                vertex: module, fragment: module,
+                // The interleaved model vertex, over only the attributes this program declares. Empty
+                // for the fullscreen passes, whose shared quad still owns its own VAO.
+                // Slot 0 is the interleaved model vertex, over only the attributes this program
+                // declares. Slot 1 is the per-instance model matrix, spread across four attribute slots
+                // because neither API has a mat4 vertex format. Empty for the fullscreen passes, whose
+                // shared quad still owns its own VAO.
+                vertexLayouts: vertex
+                    ? [packedModelLayout(this._shaderManager.getShader(program).attributes),
+                       ...(vertex === 'model+instance' ? [instanceMatrixLayout(5)] : [])]
+                    : [],
+                primitive: { topology, cullMode, frontFace: 'ccw' },
+                ...(depthStencil ? { depthStencil } : {}),
+                colorTargets: Array.from({ length: targets },
+                                         () => ({ format: 'rgba8unorm' as const, ...(blend ? { blend } : {}) })),
+            });
+            this._fullscreenPipelines.set(key, pipeline);
+        }
+        return pipeline;
+    }
+
+    /**
+     * A bind group over this pass's textures, in binding order.
+     *
+     * Rebuilt per call on purpose for now: on WebGL2 a bind group is a plain object with no GPU
+     * allocation behind it, and the compose buffers ping-pong and are reallocated on every resize, so a
+     * cache would have to be invalidated more carefully than it would save. That inverts on WebGPU,
+     * where a `GPUBindGroup` is a real object — cache it when the WebGPU path needs it, not before.
+     */
+    private _textureBindGroup(pipeline: RenderPipeline, group: number, textures: Texture[]): BindGroup {
+        const layout = (pipeline as any).layoutForGroup(group);
+        if (!layout) throw new Error(`${pipeline.label}: no bind group layout for group ${group}`);
+        return device.createBindGroup({
+            label: `${pipeline.label}:group${group}`,
+            layout,
+            // Bindings are (texture, sampler) pairs, so the Nth texture is at binding 2N. The sampler
+            // half is deliberately not listed: this engine keeps filter and wrap state on the texture.
+            entries: textures.map((texture, i) => ({ binding: i * 2, textureView: texture.view })),
+        });
     }
 
     /**
@@ -4061,9 +4394,17 @@ export class Renderer {
             this._shaderManager.setUniform('u_model', node.worldTransform);
 
             if (skinned) {
-                // Ensure the full-attribute animated VAO exists (idempotent) so bone attributes are
-                // bound even if the shadow pass runs before the geometry pass on the first frame.
-                (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(this._geometryShaderFor(node)).attributes);
+                // Initialize the animated VAO from the program that is ABOUT TO DRAW IT, not from the
+                // node's geometry shader.
+                //
+                // Those two agree for the lit families — shadowMapSkinned deliberately mirrors
+                // default_skinned.vs, bone attributes at locations 5 and 6 — but NOT for the unlit
+                // Basic family, which has no normal/tangent/bitangent and therefore puts bone data at
+                // locations 2 and 3. Initializing from `basicGeometrySkinned` bound the bone buffers at
+                // 2/3 and then drew with a program reading 5/6, leaving those locations unbound:
+                // GL_INVALID_OPERATION in every cascade and spot-shadow pass, for every skinned model
+                // with a Basic material. Silent until the harness scene grew one.
+                (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(shaderType).attributes);
                 this._uploadBoneMatrices('shadowMapSkinned', node);
             }
 
@@ -4340,11 +4681,12 @@ export class Renderer {
             if (this._debugView === 'velocity' && this._hasPrevViewProj && this._beginPass('velocity'))
                 this._velocityPass();
             gpuProfiler.beginPass('present');
-            this._compose_FBOs[0].beginPass('compose', { color: true, depth: true });
-            this._shaderManager.bind('screen');
-            this._shaderManager.setUniform('u_screenTexture', 0);
-            this._sceneFBO.colors[0].bind();
+            const pass = this._beginFullscreenPass(this._compose_FBOs[0].renderTarget, 'compose', true);
+            const pipeline = this._fullscreenPipeline('screen', ScreenProgram);
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneFBO.colors[0]]));
             this._drawFullscreen();
+            this._endFullscreenPass(pass);
         }
         // Both branches above land the image in compose[0]; god rays and bloom keep it there.
         this._composeIndex = 0;
@@ -4366,22 +4708,38 @@ export class Renderer {
 
         // Render to screen using default framebuffer
         gpuProfiler.beginPass('present');
-        this._sceneFBO.unbind();
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         if (this._debugView === 'final') {
             if (this._outlineActive) {
                 // Composite the selection outline over the final image on the way to the screen.
+                // Still on the legacy path: outlinePost is hand-written GLSL with no WGSL reflection,
+                // so it has no bind-group layout to bind against.
+                this._sceneFBO.unbind();
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
                 this._outlinePass();
             } else {
                 // Single display resolve: exposure -> ACES -> sRGB on the linear-HDR composite.
-                this._shaderManager.bind('present');
+                //
+                // The first pass routed through the RHI command model. `setPipeline` binds the program
+                // and fixes the state; the bind group assigns the texture units. Uniform VALUES still
+                // travel by name through ShaderManager — that is by design, and survives the port: the
+                // backend decides how a named uniform reaches the GPU (a std140 block here, a mapped
+                // buffer on WebGPU), which is what keeps all 374 call sites unchanged.
+                const pass = this._beginFullscreenPass(this._screenTarget(), 'present', true);
+                const pipeline = this._fullscreenPipeline('present', PresentProgram);
+                pass.setPipeline(pipeline);
                 this._shaderManager.setUniform('u_exposure', this._exposure);
-                this._shaderManager.setUniform('u_screenTexture', 0);
-                // Opaque: GL uniforms persist across binds, so without this reset a preceding thumbnail
-                // capture would leave the flag on and punch the page background through the viewport.
+                // Opaque. The flag is reset rather than assumed because uniforms persist across binds,
+                // and a preceding thumbnail capture would otherwise leave it on and punch the page
+                // background through the viewport.
                 this._shaderManager.setUniform('u_alphaFromDepth', 0.0);
-                this._compose_FBOs[this._composeIndex].colors[0].bind();
+                // Both textures are bound even though only the first is read at alphaFromDepth 0:
+                // WebGPU requires every declared binding to be satisfied, and binding both here removes
+                // the stale-unit hazard that the old code left behind between the two present paths.
+                pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+                    this._compose_FBOs[this._composeIndex].colors[0], this._sceneFBO.depth,
+                ]));
                 this._drawFullscreen();
+                this._endFullscreenPass(pass);
             }
         } else {
             // Editor Renderer-mode: blit one internal buffer instead of the composited image.
@@ -4440,22 +4798,20 @@ export class Renderer {
      * the material editor's preview sphere uses.
      */
     private _presentThumbnail(): void {
-        const target = this._presentTarget!;
-        target.bind(); // also sets the viewport to the target's square size
-
-        const cc = this.clearColor;
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.clearColor(cc[0], cc[1], cc[2], cc[3] ?? 1);
-
-        this._shaderManager.bind('present');
+        // The same program and pipeline as the on-screen present — only the target, the clear colour
+        // and `u_alphaFromDepth` differ. Sharing the pipeline is the point: two call sites that used to
+        // set overlapping-but-not-identical uniform and unit state now cannot drift apart.
+        const pass = this._beginFullscreenPass(this._presentTarget!.renderTarget, 'presentThumbnail',
+                                               true, [0, 0, 0, 0]);
+        const pipeline = this._fullscreenPipeline('present', PresentProgram);
+        pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_exposure', this._exposure);
-        this._shaderManager.setUniform('u_screenTexture', 0);
-        this._shaderManager.setUniform('u_coverageDepth', 1);
         this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
-        this._sceneFBO.colors[0].bind(0);
-        this._sceneFBO.depth.bind(1);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            this._sceneFBO.colors[0], this._sceneFBO.depth,
+        ]));
         this._drawFullscreen();
+        this._endFullscreenPass(pass);
     }
 
     // Screen-space selection outline: draws a border just outside the silhouette mask over the
@@ -4554,7 +4910,16 @@ export class Renderer {
         // The cascades live in a TEXTURE_2D_ARRAY, which debugView.fs's single sampler2D cannot read,
         // so that one channel takes its own tiny program. 'cascades' needs no blit at all — it is a
         // tint applied inside the lighting shader itself (see u_debugCascades in shadows.glsl).
-        if (this._debugView === 'shadow') { this._blitShadowLayer(); return; }
+        //
+        // Still on the legacy path: it samples the cascade array through LayeredDepthFramebuffer, which
+        // hands out a texture unit rather than a `Texture`, so there is nothing to put in a bind group
+        // yet. It migrates when the three framebuffer classes collapse into RenderTarget.
+        if (this._debugView === 'shadow') {
+            this._sceneFBO.unbind();
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            this._blitShadowLayer();
+            return;
+        }
 
         // mode: 0 passthrough RGB · 1 normal remap · 2 alpha->grayscale · 3 depth · 4 red->grayscale
         let tex: Texture;
@@ -4584,12 +4949,14 @@ export class Renderer {
                 break;
             default:          tex = this._sceneFBO.colors[0];      mode = 0; break;
         }
-        this._shaderManager.bind('debugView');
-        this._shaderManager.setUniform('u_screenTexture', 0);
+        const pass = this._beginFullscreenPass(this._screenTarget(), 'debugView', true);
+        const pipeline = this._fullscreenPipeline('debugView', DebugViewProgram);
+        pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_mode', mode);
         this._shaderManager.setUniform('u_exposure', this._exposure); // used by the tonemapped channels
-        tex.bind();
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [tex]));
         this._drawFullscreen();
+        this._endFullscreenPass(pass);
     }
 
     /**
@@ -4614,8 +4981,10 @@ export class Renderer {
         // 1. Bright pass into the largest mip (half res). Also writes the scene passthrough into
         gpuProfiler.beginPass('bloom.bright');
         const mip0 = this._bloomMips[0];
-        mip0.beginPass('bloom.bright', { color: true });
-        this._shaderManager.bind('bloom');
+        const brightPass = this._beginFullscreenPass(mip0.renderTarget, 'bloom.bright', true,
+                                                     undefined, false);
+        const brightPipeline = this._fullscreenPipeline('bloom', BloomProgram);
+        brightPass.setPipeline(brightPipeline);
         // The bright pass reads pre-exposure linear radiance, so it needs the exposure to decide what
         // counts as bright — without it the threshold is compared against radiance ~3x darker than what
         // reaches the screen, and at the default 1.0 nothing in an ordinary scene ever clears it.
@@ -4627,22 +4996,25 @@ export class Renderer {
         // point-sample (see sourceBlockUV in bloom.fs).
         this._shaderManager.setUniform('u_srcTexelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
         this._shaderManager.setUniform('u_dstResolution', [mip0.width, mip0.height]);
-        this._shaderManager.setUniform('u_screenTexture', 0);
-        this._compose_FBOs[src].colors[0].bind(0);
         // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
-        // read it from the scene FBO directly, not the post-processed copy on unit 0).
-        this._shaderManager.setUniform('u_bloomMask', 1);
-        this._sceneFBO.colors[0].bind(1);
+        // read it from the scene FBO directly, not the post-processed copy the first entry names).
+        brightPass.setBindGroup(0, this._textureBindGroup(brightPipeline, 0, [
+            this._compose_FBOs[src].colors[0], this._sceneFBO.colors[0],
+        ]));
         this._drawFullscreen();
+        this._endFullscreenPass(brightPass);
 
         if (this._passEnabled['bloom.blur']) {
             // 2. Downsample: each level reads the one above it at twice the resolution.
             gpuProfiler.beginPass('bloom.blur');
-            this._shaderManager.bind('bloomDownsample');
-            this._shaderManager.setUniform('u_srcTexture', 0);
+            const downPipeline = this._fullscreenPipeline('bloomDownsample', BloomDownsampleProgram);
             for (let i = 1; i < this._bloomMips.length; i++) {
                 const from = this._bloomMips[i - 1];
-                this._bloomMips[i].bind();
+                // `loadOp: 'load'` — each level is fully overwritten by the draw, so clearing first
+                // would be a wasted write. That is what the bare `bind()` used to express implicitly.
+                const pass = this._beginFullscreenPass(this._bloomMips[i].renderTarget, 'bloom.blur',
+                                                       false, undefined, false);
+                pass.setPipeline(downPipeline);
                 this._shaderManager.setUniform('u_srcTexelSize', [1 / from.width, 1 / from.height]);
                 // Both grids: the mips halve with floor(), so an odd level is not exactly 2x the next
                 // and the kernel has to be snapped to the source grid rather than assuming the ratio.
@@ -4650,29 +5022,38 @@ export class Renderer {
                 // Karis average on the first step only — it tames fireflies but is not energy
                 // conserving, so applying it all the way down would visibly dim the bloom.
                 this._shaderManager.setUniform('u_karisAverage', i === 1);
-                from.colors[0].bind(0);
+                pass.setBindGroup(0, this._textureBindGroup(downPipeline, 0, [from.colors[0]]));
                 this._drawFullscreen();
+                this._endFullscreenPass(pass);
             }
 
             // 3. Upsample: additively blend each level onto the next larger one. GL_ONE/GL_ONE means
             //    the destination is accumulated in the blender rather than round-tripped through
             //    another sampler and a second set of targets.
-            GLState.enable(gl.BLEND);
-            gl.blendFunc(gl.ONE, gl.ONE);
-            gl.blendEquation(gl.FUNC_ADD);
-            this._shaderManager.bind('bloomUpsample');
-            this._shaderManager.setUniform('u_srcTexture', 0);
+            // Additive blend is now PIPELINE state rather than three loose GL calls around the loop.
+            // ADDITIVE_BLEND is the shared descriptor from rhi/types.ts, which spells out the alpha
+            // half as well as the colour half — a bare `blendFunc` that forgets alpha is exactly the
+            // bug that once made bloom emit nothing at all.
+            const upPipeline = this._fullscreenPipeline('bloomUpsample', BloomUpsampleProgram,
+                                                        ADDITIVE_BLEND);
             for (let i = this._bloomMips.length - 1; i > 0; i--) {
                 const from = this._bloomMips[i];
                 const to = this._bloomMips[i - 1];
-                to.bind();
+                // Accumulating INTO the destination, so it must be loaded, never cleared.
+                const pass = this._beginFullscreenPass(to.renderTarget, 'bloom.blur', false,
+                                                       undefined, false);
+                pass.setPipeline(upPipeline);
                 // Radius in the SOURCE mip's texels, so the spread is resolution-independent. Per axis:
                 // one value off the width alone is short by the aspect ratio vertically.
                 this._shaderManager.setUniform('u_filterRadius',
                     [Renderer.BLOOM_FILTER_RADIUS / from.width, Renderer.BLOOM_FILTER_RADIUS / from.height]);
-                from.colors[0].bind(0);
+                pass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [from.colors[0]]));
                 this._drawFullscreen();
+                this._endFullscreenPass(pass);
             }
+            // Still restored by hand: the passes that follow are on the legacy path and enable BLEND
+            // without setting the function, so they inherit whatever was left. Drop this once they are
+            // migrated and their own pipelines say what they need.
             GLState.disable(gl.BLEND);
             this._restoreDefaultBlend();
         }
@@ -4681,26 +5062,30 @@ export class Renderer {
         if (!this._passEnabled['bloom.composite']) return;
         gpuProfiler.beginPass('bloom.composite');
         const dst = 1 - src;
-        this._compose_FBOs[dst].beginPass('compose', { color: true, depth: true });
-        this._shaderManager.bind('composer');
-        this._shaderManager.setUniform('u_buffer1', 0);
-        this._compose_FBOs[src].colors[0].bind(0);
-        this._shaderManager.setUniform('u_buffer2', 1);
+        const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'compose', true);
+        const pipeline = this._fullscreenPipeline('composer', ComposerProgram);
+        pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
-        this._bloomMips[0].colors[0].bind(1);
+        // The unit numbers are gone: the bind group assigns them and sets u_buffer1/u_buffer2 from the
+        // shader's own reflection, so the order here is the order the shader declares.
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            this._compose_FBOs[src].colors[0], this._bloomMips[0].colors[0],
+        ]));
         this._drawFullscreen();
+        this._endFullscreenPass(pass);
         this._composeIndex = dst;
     }
 
     private _chromaticAberrationPass(): void {
         const src = this._composeIndex;
         const dst = 1 - src;
-        this._compose_FBOs[dst].beginPass('compose', { color: true, depth: true });
-        this._shaderManager.bind('chromaticAberration');
-        this._shaderManager.setUniform('u_screenTexture', 0);
-        this._compose_FBOs[src].colors[0].bind();
+        const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'compose', true);
+        const pipeline = this._fullscreenPipeline('chromaticAberration', ChromaticAberrationProgram);
+        pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._compose_FBOs[src].colors[0]]));
         this._drawFullscreen();
+        this._endFullscreenPass(pass);
         this._composeIndex = dst;
     }
 
@@ -4709,16 +5094,17 @@ export class Renderer {
     // units, clamped to one tile) in _velocityFBO. Also used standalone by the 'velocity' debug view.
     private _velocityPass(): void {
         const w = this._renderWidth, h = this._renderHeight;
-        this._velocityFBO.beginPass('velocity', { color: true, depth: true });
-        this._shaderManager.bind('motionBlurVelocity');
-        this._shaderManager.setUniform('u_gDepth', 0);
-        this._gBufferFBO.depth.bind(0);
+        const pass = this._beginFullscreenPass(this._velocityFBO.renderTarget, 'velocity', true);
+        const pipeline = this._fullscreenPipeline('motionBlurVelocity', MotionBlurVelocityProgram);
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._gBufferFBO.depth]));
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
         this._shaderManager.setUniform('u_prevViewProj', this._prevViewProj);
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_maxVelocityPx', Renderer.MOTION_BLUR_TILE);
         this._drawFullscreen();
+        this._endFullscreenPass(pass);
     }
 
     // UE5-style tile reconstruction motion blur: velocity -> TileMax -> NeighborMax -> jittered
@@ -4734,44 +5120,61 @@ export class Renderer {
         gpuProfiler.beginPass('motionBlur');
 
         // 2) TileMax: dominant velocity per KxK tile.
-        this._velocityTileFBO.beginPass('velocity.tile', { color: true, depth: true });
-        this._shaderManager.bind('motionBlurTileMax');
-        this._shaderManager.setUniform('u_velocity', 0);
-        this._velocityFBO.colors[0].bind(0);
+        const tilePass = this._beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
+        const tilePipeline = this._fullscreenPipeline('motionBlurTileMax', MotionBlurTileMaxProgram);
+        tilePass.setPipeline(tilePipeline);
+        tilePass.setBindGroup(0, this._textureBindGroup(tilePipeline, 0, [this._velocityFBO.colors[0]]));
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_tileSize', K);
         this._drawFullscreen();
+        this._endFullscreenPass(tilePass);
 
         // 3) NeighborMax: 3x3 dilation of the tile velocities.
-        this._velocityNeighborFBO.beginPass('velocity.neighbor', { color: true, depth: true });
-        this._shaderManager.bind('motionBlurNeighborMax');
-        this._shaderManager.setUniform('u_tileMax', 0);
-        this._velocityTileFBO.colors[0].bind(0);
+        const nbPass = this._beginFullscreenPass(this._velocityNeighborFBO.renderTarget, 'velocity.neighbor', true);
+        const nbPipeline = this._fullscreenPipeline('motionBlurNeighborMax', MotionBlurNeighborMaxProgram);
+        nbPass.setPipeline(nbPipeline);
+        nbPass.setBindGroup(0, this._textureBindGroup(nbPipeline, 0, [this._velocityTileFBO.colors[0]]));
         this._shaderManager.setUniform('u_tileTexelSize', [1 / this._velocityTileFBO.width, 1 / this._velocityTileFBO.height]);
         this._drawFullscreen();
+        this._endFullscreenPass(nbPass);
 
         // 4) Gather: reconstruct the blurred image into _compose_FBOs[0].
-        this._compose_FBOs[0].beginPass('compose', { color: true, depth: true });
-        this._shaderManager.bind('motionBlur');
-        this._shaderManager.setUniform('u_screenTexture', 0);
-        this._sceneFBO.colors[0].bind(0);
-        this._shaderManager.setUniform('u_velocity', 1);
-        this._velocityFBO.colors[0].bind(1);
-        this._shaderManager.setUniform('u_neighborMax', 2);
-        this._velocityNeighborFBO.colors[0].bind(2);
-        this._shaderManager.setUniform('u_gDepth', 3);
-        this._gBufferFBO.depth.bind(3);
+        const gatherPass = this._beginFullscreenPass(this._compose_FBOs[0].renderTarget, 'compose', true);
+        const gatherPipeline = this._fullscreenPipeline('motionBlur', MotionBlurGatherProgram);
+        gatherPass.setPipeline(gatherPipeline);
+        gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [
+            this._sceneFBO.colors[0], this._velocityFBO.colors[0],
+            this._velocityNeighborFBO.colors[0], this._gBufferFBO.depth,
+        ]));
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_samples', this._motionBlurSamples);
         this._shaderManager.setUniform('u_near', this._activeCamera.near);
         this._shaderManager.setUniform('u_far', this._activeCamera.far);
         this._drawFullscreen();
+        this._endFullscreenPass(gatherPass);
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
 
     /** Per-frame render statistics for the editor's performance HUD (last completed frame). */
+    /**
+     * Report and count any GL error raised since the last check, naming the stage that raised it.
+     *
+     * Split by stage rather than checked once per frame because `gl.getError()` clears the flag: a
+     * single check would say a frame had an error without saying which half, and the two halves are
+     * very different code. No-op unless {@link debugGLErrors} is on.
+     */
+    private _checkGLErrors(stage: string): void {
+        if (!this.debugGLErrors) return;
+        for (let i = 0; i < 8; i++) {
+            const error = gl.getError();
+            if (error === gl.NO_ERROR) return;
+            this._glErrorCount++;
+            Logger.error(`GL error ${error} raised during the ${stage} stage`, 'Renderer');
+        }
+    }
+
     public get stats() {
         return {
             drawCalls: frameStats.drawCalls,
@@ -4789,6 +5192,7 @@ export class Renderer {
             stateChangesSaved: frameStats.stateChangesSaved,
             frameMs: frameStats.frameMs,
             pipeline: this._deferred ? 'deferred' as const : 'forward' as const,
+            glErrors: this._glErrorCount,
             // Canvas size (what the display sees) and internal size (what the pipeline actually
             // shades) are different numbers once renderScale is below 1, and the gap between them is
             // exactly what the profiler panel is there to let you tune.

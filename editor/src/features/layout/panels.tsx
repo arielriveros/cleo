@@ -24,7 +24,8 @@ import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
 import ConsolePanel from '../logger/ConsolePanel';
-import ProfilerPanel from '../renderer/ProfilerPanel';
+import PerformancePanel from '../renderer/PerformancePanel';
+import RendererSettingsPanel from '../renderer/RendererSettingsPanel';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
 
@@ -178,13 +179,25 @@ function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachin
 // The tilemap editor's two panels. Shown only in tilemap mode — see hiddenPanelIds.
 function TilePalettePanel(_: IDockviewPanelProps) { return <TilePalette />; }
 function TilemapLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><TilemapLayersPanel /></SidePanel>; }
-// Render profiler. Owns its own scrolling (it is a long column of sections), so no SidePanel wrapper.
-// Renderer mode only, alongside the compact RendererStats HUD: the HUD answers "is the frame fast", this
-// answers "which pass is spending the time".
-function ProfilerDockPanel(_: IDockviewPanelProps) {
+// The two renderer-mode panels. Both own their scrolling (each is a long column of sections), so
+// neither takes a SidePanel wrapper.
+//
+// Performance absorbed the floating stats HUD that used to sit over the viewport: one sampling loop
+// instead of two over the same counters, and nothing covering the corner of the image in the one mode
+// whose purpose is looking at it. Renderer Settings is the former floating options overlay, for the
+// same reason — it was a 64-wide column pinned over the left of the viewport.
+function PerformanceDockPanel(_: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
-      <ProfilerPanel />
+      <PerformancePanel />
+    </div>
+  );
+}
+
+function RendererSettingsDockPanel(_: IDockviewPanelProps) {
+  return (
+    <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
+      <RendererSettingsPanel />
     </div>
   );
 }
@@ -215,5 +228,6 @@ export const dockComponents = {
   animField: AnimFieldPanel,
   tilePalette: TilePalettePanel,
   tilemapLayers: TilemapLayersDockPanel,
-  profiler: ProfilerDockPanel,
+  performance: PerformanceDockPanel,
+  rendererSettings: RendererSettingsDockPanel,
 };

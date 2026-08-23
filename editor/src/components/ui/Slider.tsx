@@ -15,6 +15,8 @@ export interface SliderProps {
   editable?: boolean;
   className?: string;
   labelClassName?: string;
+  /** Native tooltip covering the whole control. Falls back to the label text when omitted. */
+  title?: string;
 }
 
 /**
@@ -32,6 +34,7 @@ export function Slider({
   editable = true,
   className,
   labelClassName,
+  title,
 }: SliderProps) {
   const [editing, setEditing] = useState(false);
   const pct = max > min ? Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)) : 0;
@@ -44,8 +47,8 @@ export function Slider({
   };
 
   return (
-    <label className={cn('flex items-center gap-2 my-1', valueClass, className)}>
-      {label !== undefined && <span className={cn(labelClass, 'w-[70px] shrink-0 truncate', labelClassName)} title={typeof label === 'string' ? label : undefined}>{label}</span>}
+    <label className={cn('flex items-center gap-2 my-1', valueClass, className)} title={title}>
+      {label !== undefined && <span className={cn(labelClass, 'w-[70px] shrink-0 truncate', labelClassName)} title={title ?? (typeof label === 'string' ? label : undefined)}>{label}</span>}
       <input
         className='flex-1 min-w-0'
         style={{ ['--slider-fill' as any]: pct + '%' }}

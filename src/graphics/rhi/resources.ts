@@ -16,7 +16,7 @@
 import type {
     TextureFormat, TextureDimension, TextureUsageFlags, BufferUsageFlags,
     VertexBufferLayout, PrimitiveState, DepthStencilState, ColorTargetState,
-    ShaderStageFlags, SamplerDescriptor,
+    ShaderStageFlags, SamplerDescriptor, ShaderResource,
 } from './types';
 
 /** Common to every resource: a debug label and explicit disposal. */
@@ -64,15 +64,35 @@ export interface Sampler extends GpuResource {
 /**
  * A compiled shader module.
  *
- * On WebGL2 this wraps a compiled `WebGLShader`; on WebGPU a `GPUShaderModule` translated from the
- * same GLSL source. Compilation diagnostics are surfaced through `compilationInfo` rather than by
- * throwing, because the editor's custom-material UI shows the compiler log to the user and needs it
- * whether or not the compile succeeded.
+ * On WebGPU this wraps a `GPUShaderModule` built straight from the engine's WGSL; on WebGL2 it wraps
+ * the `WebGLShader` compiled from the GLSL ES 300 generated from that same WGSL at build time. One
+ * source tree, two dialects, neither hand-maintained.
+ *
+ * Compilation diagnostics are surfaced through `compilationInfo` rather than by throwing, because the
+ * editor's custom-material UI shows the compiler log to the user and needs it whether or not the
+ * compile succeeded.
  */
 export interface ShaderModule extends GpuResource {
+    /** Stages this module provides, ORed. A WGSL module usually carries vertex and fragment both. */
     readonly stage: ShaderStageFlags;
     /** Empty when the module compiled cleanly. */
     readonly compilationInfo: readonly string[];
+    /**
+     * Entry-point names by stage.
+     *
+     * WebGPU requires one at pipeline creation and has no `main` convention; WebGL2 ignores them
+     * because naga always emits `main`.
+     */
+    readonly entryPoints: {
+        readonly vertex?: string;
+        readonly fragment?: string;
+        readonly compute?: string;
+    };
+    /**
+     * What this program binds where. Empty for a hand-written GLSL program, which therefore cannot be
+     * used with bind groups — see {@link ShaderResource}.
+     */
+    readonly resources: readonly ShaderResource[];
 }
 
 /**

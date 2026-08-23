@@ -8,6 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { findStructs, layoutStruct, flattenLayout } from './wgslLayout.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -56,6 +57,97 @@ function structBody(wgsl, name) {
     return (wgsl.match(re) || [])[1] || '';
 }
 
+/** Line comments removed. Struct bodies here are heavily commented, and a `//` run can hide a field. */
+function stripLineComments(text) {
+    return text.replace(/\/\/[^\n]*/g, '');
+}
+
+/**
+ * Every `@group(G) @binding(B) var ...` a module declares.
+ *
+ * One scan serving two consumers, which is why it is a function rather than a regex repeated twice:
+ * {@link buildRenames} needs it to map naga's mangled identifiers back, and the RHI needs it as
+ * REFLECTION — a `BindGroup` has to know that binding 0 of group 0 is the texture the GLSL calls
+ * `u_screenTexture`, because the WebGL2 backend satisfies a bind group by assigning a texture unit and
+ * setting that sampler uniform by name.
+ *
+ * `glslName` is the name after a texture/sampler pair collapses. WGSL keeps the two apart; GLSL ES has
+ * only combined samplers, so `u_screenTexture_texture` at (0,0) and `u_screenTexture_sampler` at (0,1)
+ * are one `uniform sampler2D u_screenTexture`. Both entries therefore report the same `glslName`, and a
+ * WebGL2 bind group acts on the texture entry and ignores the sampler one.
+ */
+export function findResources(wgsl) {
+    const source = stripLineComments(wgsl);
+    const resource = /@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<([^>]*)>)?\s+([A-Za-z_]\w*)\s*:\s*([^;]+);/g;
+    const found = [];
+    for (const m of source.matchAll(resource)) {
+        const [, group, binding, addressSpace, name, rawType] = m;
+        const type = rawType.trim().replace(/\s+/g, ' ');
+        const space = (addressSpace || '').trim();
+
+        let kind;
+        if (/\buniform\b/.test(space)) kind = 'uniform';
+        else if (/\bstorage\b/.test(space)) kind = 'storage';
+        else if (/^sampler(_comparison)?$/.test(type)) kind = 'sampler';
+        else if (/^texture_/.test(type)) kind = 'texture';
+        else kind = 'other';
+
+        found.push({
+            group: Number(group),
+            binding: Number(binding),
+            name,
+            kind,
+            type,
+            glslName: name.replace(/_(texture|sampler)$/, ''),
+        });
+    }
+    return found;
+}
+
+/**
+ * The uniform-buffer resources, with the full byte layout of the struct each one points at.
+ *
+ * WebGL2 does not need this — it asks the driver for `UNIFORM_OFFSET` and friends, which is
+ * authoritative in a way a computed layout cannot be. WebGPU has no reflection at all: a uniform buffer
+ * is bytes, and the shader reads whatever sits at the offset its struct declares. So the offsets are
+ * computed here, from the WGSL uniform address space rules in `wgslLayout.mjs`.
+ *
+ * They are not taken on faith. `tools/harness/uniformLayoutCheck.js` compares every offset, array
+ * stride and matrix stride computed here against what a real driver reports for the same block, across
+ * every program in the engine. Where they disagree, the driver is right.
+ */
+export function findUniformBlocks(wgsl) {
+    const structs = findStructs(wgsl);
+    return findResources(wgsl)
+        .filter(r => r.kind === 'uniform')
+        .map((r) => {
+            const members = structs.get(r.type);
+            if (!members) return { group: r.group, binding: r.binding, name: r.name, struct: r.type, members: [], size: 0 };
+            const laid = layoutStruct(members, structs);
+            return {
+                group: r.group,
+                binding: r.binding,
+                name: r.name,
+                struct: r.type,
+                /** Bytes the whole block occupies, which is the uniform buffer's size. */
+                size: laid.size,
+                members: laid.members,
+                /**
+                 * Every writable leaf by full path, with the offset from the start of the BLOCK.
+                 *
+                 * Rooted at the VAR's name, so a path reads `u_material.opacity` or
+                 * `u_lighting.u_pointLights[3].ambient` — which is exactly what GL reflects, and what
+                 * the renderer passes to `setUniform` for the dotted cases. The shorter aliases the
+                 * renderer also uses (`u_exposure` for `u_present.u_exposure`) are resolved by suffix
+                 * registration at runtime, the same way `UniformBlockSet` already does it.
+                 *
+                 * `members` above stays struct-relative and is the wrong thing to write with.
+                 */
+                flat: flattenLayout(r.type, structs, r.name),
+            };
+        });
+}
+
 /**
  * naga's generated identifiers, mapped back to names this engine can use.
  *
@@ -72,17 +164,11 @@ function structBody(wgsl, name) {
 export function buildRenames(wgsl, entryPoints, label = 'shader') {
     const renames = new Map();
 
-    // Resources: `@group(G) @binding(B) var<...> name: type`.
-    //
-    // A texture/sampler pair collapses into ONE combined GLSL sampler, named after the TEXTURE's
-    // binding, so a `_texture` / `_sampler` suffix pair is stripped back to the shared base name:
-    // `u_screenTexture_texture` at (0,0) and `u_screenTexture_sampler` at (0,1) both become
-    // `u_screenTexture` — the name the renderer already sets.
-    const resource = /@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<[^>]*>)?\s+([A-Za-z_]\w*)/g;
-    for (const m of wgsl.matchAll(resource)) {
-        const base = m[3].replace(/_(texture|sampler)$/, '');
-        for (const suffix of ['vs', 'fs', 'cs']) renames.set('_group_' + m[1] + '_binding_' + m[2] + '_' + suffix, base);
-    }
+    // Resources: naga emits `_group_G_binding_B_<stage>` for each one. A texture/sampler pair collapses
+    // into ONE combined GLSL sampler, so both entries rename to the same `glslName` — see findResources.
+    for (const r of findResources(wgsl))
+        for (const suffix of ['vs', 'fs', 'cs'])
+            renames.set('_group_' + r.group + '_binding_' + r.binding + '_' + suffix, r.glslName);
 
     let vertexReturn = '';
     if (entryPoints.vertex) {
@@ -182,7 +268,9 @@ export async function translateWgsl(wgsl, label = 'shader') {
         throw new Error(label + ': no @vertex, @fragment or @compute entry point found');
 
     const renames = buildRenames(wgsl, entryPoints, label);
-    const out = { wgsl, entryPoints };
+    // Reflection rides along with the translation: both backends need to know what this program binds
+    // where, and deriving it from the same source at the same moment is what keeps it from drifting.
+    const out = { wgsl, entryPoints, resources: findResources(wgsl), uniformBlocks: findUniformBlocks(wgsl) };
     // A module marked `// @glsl-chunk` also exports a pasteable GLSL chunk. Opt-in via a
     // directive rather than always, because the extraction only makes sense for a module whose
     // entry point exists purely to keep its functions alive.

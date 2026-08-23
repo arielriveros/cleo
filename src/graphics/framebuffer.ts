@@ -2,6 +2,7 @@ import { gl } from './glContext';
 import { device } from './rhi/webgl2/webgl2Device';
 import type { ColorAttachmentDescriptor } from './rhi/types';
 import type { WebGL2Framebuffer } from './rhi/webgl2/webgl2Device';
+import { WebGL2RenderTarget, WebGL2TextureView } from './rhi/webgl2/webgl2Commands';
 import { Texture, TextureConfig } from './texture';
 import { Logger } from '../core/logger';
 import { setViewportSize } from './renderStats';
@@ -133,6 +134,20 @@ export class Framebuffer {
                     : undefined,
             },
         );
+    }
+
+    /**
+     * This framebuffer as an RHI render target.
+     *
+     * Rebuilt on demand rather than cached: `resize()` reallocates every attachment, and a cached
+     * target holding views of the old textures would keep rendering into storage nothing samples.
+     */
+    public get renderTarget(): WebGL2RenderTarget {
+        return new WebGL2RenderTarget(
+            this._id, this._width, this._height,
+            this._colors.map(c => new WebGL2TextureView(c.gpu)),
+            this._options.depth !== false ? new WebGL2TextureView(this._depth.gpu) : undefined,
+            'framebuffer');
     }
 
     /** Release the framebuffer object and every attachment it owns. */

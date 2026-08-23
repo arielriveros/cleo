@@ -1,7 +1,11 @@
 // Skinned depth-only shader for the shadow pass. Mirrors shadowMap.wgsl but applies linear-blend
 // skinning so a skinned mesh casts its ANIMATED-pose shadow instead of its static bind pose.
-// Uses the same explicit attribute locations as default_skinned.vs so it can draw the mesh's existing
-// animated VAO with no re-initialization.
+//
+// Bone attributes sit at locations 5 and 6, matching the LIT skinned families (chunks/skinnedVertex),
+// which leave 1-4 to normal/uv/tangent/bitangent. The unlit Basic family has none of those and packs
+// bone data at 2 and 3 instead — so this shader's layout is NOT universal, and the shadow pass must
+// initialize the animated VAO from THIS program rather than from the node's geometry shader. It used
+// to do the latter, which made every Basic-material skinned caster raise GL_INVALID_OPERATION.
 
 const MAX_BONES: i32 = 100;
 const MAX_BONE_INFLUENCE: i32 = 4;

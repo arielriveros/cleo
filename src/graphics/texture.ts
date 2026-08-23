@@ -5,6 +5,7 @@ import { resolveTextureFormat } from "./rhi/textureFormat";
 import { glTextureFormat, glTextureTarget, glAddressMode, glMinFilter } from "./rhi/webgl2/glEnums";
 import { device } from "./rhi/webgl2/webgl2Device";
 import { WebGL2Texture } from "./rhi/webgl2/webgl2Device";
+import { WebGL2TextureView } from "./rhi/webgl2/webgl2Commands";
 import { TextureUsage } from "./rhi/types";
 import type { TextureFormat, TextureDimension, AddressMode } from "./rhi/types";
 
@@ -392,6 +393,27 @@ export class Texture {
         return this._sourceUri;
     }
     public get texture(): WebGLTexture { return this._texture; }
+    /**
+     * The RHI texture underneath.
+     *
+     * Narrower than it looks: this is how a `Texture` becomes a `TextureView` and therefore a bind
+     * group entry. `texture` above hands out the raw WebGL handle and is the thing the RHI is meant
+     * to retire; this one hands out a resource the device already owns.
+     */
+    public get gpu(): WebGL2Texture { return this._gpu; }
+
+    /**
+     * This texture as an RHI view, created once and reused.
+     *
+     * Cached because the geometry pass builds a bind group per submesh per node — a fresh view object
+     * per draw is pure garbage on a path that runs hundreds of times a frame. Views hold no GPU
+     * resource on WebGL2, so one per texture is correct as well as cheap.
+     */
+    public get view(): WebGL2TextureView {
+        if (!this._view) this._view = new WebGL2TextureView(this._gpu);
+        return this._view;
+    }
+    private _view: WebGL2TextureView | null = null;
     public get config(): TextureConfig {
         return {
             flipY: this._flipY,

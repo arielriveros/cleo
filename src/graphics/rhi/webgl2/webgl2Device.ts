@@ -4,22 +4,35 @@ import { Logger } from '../../../core/logger';
 import { setViewportSize } from '../../renderStats';
 import { glBufferTarget, glBufferUsageHint, glTextureTarget } from './glEnums';
 import { detectWebGL2Capabilities } from './capabilities';
-import type { DeviceCapabilities, BackendKind, BufferDescriptor, TextureDescriptor } from '../device';
+import { applyVertexLayout } from './vertexArray';
+import {
+    WebGL2ShaderModule, WebGL2RenderPipeline, WebGL2BindGroup, WebGL2Sampler,
+    WebGL2TextureView, WebGL2CommandEncoder,
+} from './webgl2Commands';
+import type {
+    DeviceCapabilities, BackendKind, BufferDescriptor, TextureDescriptor,
+    ShaderModuleDescriptor, RenderPipelineDescriptor, BindGroupDescriptor,
+} from '../device';
 import type { RenderPassDescriptor } from '../types';
 import type { Buffer, Texture } from '../resources';
-import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags } from '../types';
+import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor } from '../types';
 import { textureByteSize } from '../types';
 
 /**
  * The WebGL2 implementation of the RHI device.
  *
  * Deliberately NOT declared `implements Device` yet. The interface in `../device.ts` describes the
- * finished thing — textures, samplers, pipelines, bind groups, render passes — and claiming it now
- * would mean a dozen methods that throw, which reads as "supported" to every caller and to the
- * compiler alike. Each resource type is added here as it is migrated off raw `gl.*`; when the last one
- * lands, the `implements` clause goes on and the interface starts being enforced.
+ * finished thing, and claiming it now would mean methods that throw — which reads as "supported" to
+ * every caller and to the compiler alike. Each capability is added here as the renderer is migrated off
+ * raw `gl.*`; when the last one lands, the `implements` clause goes on and the interface starts being
+ * enforced.
  *
- * Migrated so far: buffers, textures, framebuffers and render-pass boundaries.
+ * Migrated so far: buffers, textures, framebuffers, render-pass boundaries, and the command model —
+ * shader modules, pipelines, bind groups and pass encoders (see `webgl2Commands.ts`).
+ *
+ * Still missing, and each blocking a specific group of passes: vertex/index buffer state on the pass
+ * encoder (the geometry passes), `copyTextureToTexture` (the depth copy), `readPixels` (thumbnail
+ * capture), and `getCurrentSurfaceTarget`.
  */
 export class WebGL2Device {
     public readonly backend: BackendKind = 'webgl2';
@@ -29,6 +42,10 @@ export class WebGL2Device {
     private readonly _buffers = new Set<WebGL2Buffer>();
     private readonly _textures = new Set<WebGL2Texture>();
     private readonly _framebuffers = new Set<WebGL2Framebuffer>();
+    /** Deduped pipelines, keyed by program + state. See createRenderPipeline. */
+    private readonly _pipelines = new Map<string, WebGL2RenderPipeline>();
+    /** VAOs by pipeline and buffer set. See vertexArrayFor. */
+    private readonly _vertexArrays = new Map<WebGL2RenderPipeline, Map<string, WebGLVertexArrayObject>>();
 
     constructor(context: WebGL2RenderingContext) {
         this.capabilities = detectWebGL2Capabilities(context);
@@ -142,6 +159,98 @@ export class WebGL2Device {
         if (clearBits !== 0) gl.clear(clearBits);
     }
 
+    // --------------------------------------------------------------------------------------------
+    // The command model — pipelines, bind groups, encoders. See webgl2Commands.ts.
+    // --------------------------------------------------------------------------------------------
+
+    /**
+     * A handle to an already-registered program, plus its build-time reflection.
+     *
+     * Nothing is compiled here: `Renderer` links and registers every program through `Shader` and
+     * `ShaderManager` during initialization, and re-doing that inside the backend would duplicate the
+     * uniform reflection and std140 handling that the migration depends on.
+     */
+    public createShaderModule(descriptor: ShaderModuleDescriptor): WebGL2ShaderModule {
+        return new WebGL2ShaderModule(descriptor);
+    }
+
+    /**
+     * An immutable program + state bundle, deduped by descriptor.
+     *
+     * Cached because a pipeline is pure data on this backend — two passes asking for the same program
+     * and the same state must get the same object, or `RenderPipeline` identity stops meaning anything
+     * to a caller that compares them. The key is JSON of the state precisely because `rhi/types.ts`
+     * chose string unions over numeric enums.
+     */
+    public createRenderPipeline(descriptor: RenderPipelineDescriptor): WebGL2RenderPipeline {
+        const module = descriptor.vertex as WebGL2ShaderModule;
+        const key = JSON.stringify([
+            module.program, descriptor.primitive, descriptor.depthStencil ?? null, descriptor.colorTargets,
+        ]);
+        let pipeline = this._pipelines.get(key);
+        if (!pipeline) {
+            pipeline = new WebGL2RenderPipeline(descriptor);
+            this._pipelines.set(key, pipeline);
+        }
+        return pipeline;
+    }
+
+    public createBindGroup(descriptor: BindGroupDescriptor): WebGL2BindGroup {
+        return new WebGL2BindGroup(descriptor);
+    }
+
+    /** Recorded, not applied — this engine keeps filter and wrap state on the texture. See WebGL2Sampler. */
+    public createSampler(descriptor: SamplerDescriptor): WebGL2Sampler {
+        return new WebGL2Sampler({ ...descriptor });
+    }
+
+    public createTextureView(texture: WebGL2Texture, baseMipLevel: number = 0,
+                             baseArrayLayer: number = 0): WebGL2TextureView {
+        return new WebGL2TextureView(texture, baseMipLevel, baseArrayLayer);
+    }
+
+    /**
+     * The VAO that binds `buffers` through `pipeline`'s vertex layouts, built once per combination.
+     *
+     * WebGPU has no such object — a pipeline carries its vertex layouts and buffers are bound per draw.
+     * WebGL2 needs the two baked together, so this is where that difference lives. Keyed by pipeline
+     * AND buffers because the same mesh drawn by two programs needs two VAOs (their attribute locations
+     * differ) and the same program over two meshes likewise.
+     *
+     * Reallocating a buffer's storage keeps its handle, so a VAO survives `reallocateBuffer` — which is
+     * what terrain sculpting and the per-frame instance upload both do. Destroying a buffer does not
+     * invalidate the entry: the cache grows with mesh churn until the device is destroyed. That is worth
+     * fixing before this path carries a scene's whole draw list, and is called out rather than hidden.
+     */
+    public vertexArrayFor(pipeline: WebGL2RenderPipeline,
+                          buffers: readonly (WebGL2Buffer | null)[],
+                          indexBuffer: WebGL2Buffer | null): WebGLVertexArrayObject {
+        let byBuffers = this._vertexArrays.get(pipeline);
+        if (!byBuffers) { byBuffers = new Map(); this._vertexArrays.set(pipeline, byBuffers); }
+
+        const key = buffers.map(b => (b ? b.id : '-')).join(',') + '|' + (indexBuffer ? indexBuffer.id : '-');
+        let vao = byBuffers.get(key);
+        if (vao) return vao;
+
+        vao = gl.createVertexArray() as WebGLVertexArrayObject;
+        GLState.bindVAO(vao);
+        pipeline.vertexLayouts.forEach((layout, slot) => {
+            const buffer = buffers[slot];
+            if (buffer) applyVertexLayout(layout, buffer.handle);
+        });
+        // The element binding is VAO state, which is why it belongs here rather than at draw time.
+        if (indexBuffer) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.handle);
+        GLState.bindVAO(null);
+        byBuffers.set(key, vao);
+        return vao;
+    }
+
+    /** WebGL2 issues everything as it is recorded, so `finish()` is a no-op — see WebGL2CommandEncoder. */
+    public createCommandEncoder(_label?: string): WebGL2CommandEncoder {
+        return new WebGL2CommandEncoder((target, descriptor) =>
+            this.beginRenderPass(target as unknown as RenderPassTarget, descriptor));
+    }
+
     public destroy(): void {
         for (const framebuffer of [...this._framebuffers]) framebuffer.destroy();
         this._framebuffers.clear();
@@ -149,6 +258,10 @@ export class WebGL2Device {
         this._buffers.clear();
         for (const texture of [...this._textures]) texture.destroy();
         this._textures.clear();
+        this._pipelines.clear();
+        for (const byBuffers of this._vertexArrays.values())
+            for (const vao of byBuffers.values()) gl.deleteVertexArray(vao);
+        this._vertexArrays.clear();
     }
 }
 
@@ -159,6 +272,9 @@ export class WebGL2Device {
  * bound to a target and re-binding the same buffer elsewhere is a driver hazard, not a convenience.
  */
 export class WebGL2Buffer implements Buffer {
+    /** Stable identity, for cache keys. The WebGLBuffer handle is an opaque object and cannot be one. */
+    public readonly id: number = ++WebGL2Buffer._nextId;
+    private static _nextId = 0;
     public readonly label: string;
     public readonly usage: BufferUsageFlags;
     public readonly target: number;
@@ -331,6 +447,7 @@ export class WebGL2Texture implements Texture {
 
     /** Upload a 2D image, or allocate an empty 2D render target when `image` is null. */
     public upload2D(image: TexImageSource | null, width: number, height: number, mipMap: boolean): void {
+        this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
         if (image) gl.texImage2D(this.target, 0, this._internalFormat, this._glFormat, this._type, image);
         else gl.texImage2D(this.target, 0, this._internalFormat, width, height, 0, this._glFormat, this._type, null);
@@ -350,6 +467,7 @@ export class WebGL2Texture implements Texture {
 
     /** Upload all six cube faces, or allocate six empty ones when `images` is null. */
     public uploadCube(images: readonly TexImageSource[] | null, width: number, height: number, mipMap: boolean): void {
+        this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
         const faces = WebGL2Texture.cubeFaces();
         for (let i = 0; i < faces.length; i++) {
@@ -363,6 +481,7 @@ export class WebGL2Texture implements Texture {
 
     /** Upload one cube face. `face` is a GL face target from {@link cubeFaces}. */
     public uploadFace(face: number, image: TexImageSource, mipMap: boolean): void {
+        this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
         gl.texImage2D(face, 0, this._internalFormat, this._glFormat, this._type, image);
         if (mipMap) gl.generateMipmap(this.target);
@@ -374,6 +493,7 @@ export class WebGL2Texture implements Texture {
      * maps 1:1 to UVs — this is the editable-splat-map path, which `uploadRegion` then patches.
      */
     public uploadBytes(data: Uint8Array, width: number, height: number, wrapping: number): void {
+        this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         gl.texImage2D(this.target, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
         gl.texParameteri(this.target, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -406,6 +526,7 @@ export class WebGL2Texture implements Texture {
      * `framebufferTextureLayer`, which is how the volume gets filled — one fullscreen draw per slice.
      */
     public allocateVolume(width: number, height: number, depth: number, wrapping: number): void {
+        this._clearPendingErrors();
         gl.texStorage3D(gl.TEXTURE_3D, 1, this._internalFormat, width, height, depth);
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -425,6 +546,7 @@ export class WebGL2Texture implements Texture {
      * around and shadow the far side of the map with unrelated geometry.
      */
     public allocateDepthArray(size: number, layers: number, compare: boolean): void {
+        this._clearPendingErrors();
         gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, this._internalFormat, size, size, layers);
         const filter = compare ? gl.LINEAR : gl.NEAREST;
         gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, filter);
@@ -452,6 +574,22 @@ export class WebGL2Texture implements Texture {
 
     public generateMipmaps(): void { gl.generateMipmap(this.target); }
 
+    /**
+     * Drain any error already flagged, so a later `checkForErrors` cannot blame this texture for it.
+     *
+     * `gl.getError()` reports a GLOBAL sticky flag, not the result of the last call, so checking it
+     * after an upload reports whatever went wrong ANYWHERE since the previous check. That is not a
+     * theoretical worry: a draw-time INVALID_OPERATION once surfaced as "Error creating texture" from
+     * inside `Framebuffer.resize` and again from an async `image.onload`, neither of which could have
+     * caused it — and the real culprit went unnamed while two innocent call sites were accused.
+     */
+    private _clearPendingErrors(): void {
+        // Bounded: the queue can hold several, and a driver that always returns an error would
+        // otherwise spin here forever.
+        for (let i = 0; i < 8 && gl.getError() !== gl.NO_ERROR; i++) { /* drain */ }
+    }
+
+    /** Report a GL error raised since {@link _clearPendingErrors}, attributed to this texture. */
     public checkForErrors(): void {
         const error = gl.getError();
         if (error !== gl.NO_ERROR)

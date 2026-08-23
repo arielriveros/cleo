@@ -23,8 +23,22 @@ window.__error = null;
 
 (async () => {
   try {
-    const engine = new cleo.CleoEngine({ graphics: { clearColor: [0.08, 0.08, 0.11, 1.0] } });
-    await engine.initialize();
+    // `?forward=1` builds the same scene through the FORWARD renderer instead of the deferred one.
+    //
+    // The two are separate pipelines with separate shaders: deferred draws through geometryPBR into a
+    // G-buffer and lights it in deferredLighting, while forward runs materials/pbr.fs per object. A
+    // harness that only ever ran deferred left every forward material shader unexercised — converting
+    // one would change nothing any check could see. `_deferred` is construction-time config with no
+    // setter, so the mode is chosen here rather than toggled later.
+    const forwardMode = new URLSearchParams(location.search).get('forward') === '1';
+    const engine = new cleo.CleoEngine({
+      graphics: { clearColor: [0.08, 0.08, 0.11, 1.0], deferred: !forwardMode },
+    });
+    window.__pipeline = forwardMode ? 'forward' : 'deferred';
+    // `initialize()` arrived with async device acquisition (roadmap M0). Guarded so this page can also
+    // be pointed at an OLDER build of cleo.js — which is the whole mechanism behind an A/B against a
+    // previous commit: same scene, same driver, two engines.
+    if (typeof engine.initialize === 'function') await engine.initialize();
     engine.setViewport(document.getElementById('vp'));
 
     // A real texture, so the 2D upload path (texImage2D from an HTMLImageElement, sampler parameters,
@@ -61,6 +75,63 @@ window.__error = null;
     sun.setPosition([0, 1, 0]);
     sun.setRotation([100, 25, 0]);
     scene.addNode(sun);
+
+    // One object per MATERIAL MODEL, so every material shader family is actually drawn.
+    //
+    // The scene was all-PBR, which left the Blinn-Phong path (materials/default.fs, and its deferred
+    // twin geometryDefault.fs) and the unlit Basic path completely unexercised — converting either
+    // would have changed nothing any check could see. The Blinn-Phong one carries a specular tint and a
+    // texture so its Blinn specular term and its sRGB decode both matter.
+    const phong = new cleo.ModelNode('phong', new cleo.Model(
+      cleo.Geometry.Sphere(24, 0.55),   // (segments, radius) — NOT (radius, segments)
+      cleo.Material.Default({
+        diffuse: [0.85, 0.25, 0.35], specular: [1, 1, 1], ambient: [0.2, 0.06, 0.09],
+        shininess: 48, textures: { baseTexture: 'checker' },
+      }),
+    ));
+    phong.setPosition([1.5, 0.55, 1.1]);
+    scene.addNode(phong);
+
+    // Unlit: writes zero albedo + authored emissive, which is also what drives the bloom mask.
+    const unlit = new cleo.ModelNode('unlit', new cleo.Model(
+      cleo.Geometry.Cube(0.5, 0.5, 0.5),
+      cleo.Material.Basic({ color: [0.15, 0.95, 0.55] }),
+    ));
+    unlit.setPosition([2.6, 0.25, -0.9]);
+    scene.addNode(unlit);
+
+    // A baked light probe.
+    //
+    // Image-based lighting had NO coverage at all, which is how a probe regression could reach a user
+    // before any check noticed. The probe bakes an irradiance + prefiltered cube pair from the scene and
+    // the deferred lighting pass blends it in by volume containment, so this exercises the whole IBL
+    // path: the bake shaders (irradiance, prefilter, brdf) and the per-pixel probe blend.
+    const probe = new cleo.LightProbeNode('probe', { intensity: 1.0, mode: 'baked' });
+    probe.setPosition([0, 1.2, 0]);
+    scene.addNode(probe);
+    window.__probe = probe;
+
+    // A point light and a shadow-casting spot light.
+    //
+    // Not decoration: deferredLighting.fs loops over `u_pointLights[i]` / `u_spotlights[i]`, arrays of
+    // STRUCTS whose members the renderer uploads one field at a time by name. How GL reports the members
+    // of an array of structs is driver-dependent, and moving those arrays into a std140 block changes the
+    // reflected names — so without a light of each kind in the scene, converting that shader would leave
+    // both loops, and spot shadows with them, completely unverified.
+    const lamp = new cleo.LightNode('lamp', new cleo.PointLight({
+      diffuse: [1.0, 0.55, 0.2], specular: [1, 0.7, 0.4], ambient: [0, 0, 0],
+      constant: 1.0, linear: 0.14, quadratic: 0.07,
+    }));
+    lamp.setPosition([2.2, 1.1, 1.6]);
+    scene.addNode(lamp);
+
+    const spot = new cleo.LightNode('spot', new cleo.Spotlight({
+      diffuse: [0.35, 0.6, 1.0], specular: [0.4, 0.6, 1], ambient: [0, 0, 0],
+      constant: 1.0, linear: 0.09, quadratic: 0.02, cutOff: 22, outerCutOff: 34,
+    }), true);   // castShadows: exercises the spot-shadow atlas and spotShadowFor()
+    spot.setPosition([-2.6, 3.4, 2.2]);
+    spot.setRotation([125, -40, 0]);
+    scene.addNode(spot);
 
     // Cube: flat faces, sharp normals — a wrong stride turns it into spikes or nothing at all.
     const cube = new cleo.ModelNode('cube', new cleo.Model(
@@ -103,7 +174,7 @@ window.__error = null;
     // vertexAttribIPointer. Nothing else in this scene reaches initializeAnimatedVAO, and a wrapper
     // object passed where a raw WebGLBuffer was expected there threw only at runtime, only on a
     // skinned draw, and only once a shadow cascade asked for one.
-    try {
+    const addSkinned = (name, material, position) => {
       const geo = cleo.Geometry.Cube(0.8, 2.2, 0.8);
       const vertexCount = geo.positions.length / 3;
       // Two joints, weighted purely to joint 0 so the pose is the bind pose and the draw is comparable.
@@ -118,11 +189,51 @@ window.__error = null;
         ],
         skeleton: 0,
       };
-      const skinned = new cleo.AnimatedModel(geo, cleo.Material.PBR({ baseColor: [0.6, 0.85, 0.5], roughness: 0.6 }),
-                                             skin, boneIds, weights, []);
-      const skinnedNode = new cleo.ModelNode('skinned', skinned);
-      skinnedNode.setPosition([0, 1.1, -2.6]);
-      scene.addNode(skinnedNode);
+      const node = new cleo.ModelNode(name, new cleo.AnimatedModel(geo, material, skin, boneIds, weights, []));
+      node.setPosition(position);
+      scene.addNode(node);
+    };
+
+    /** N nodes sharing ONE Model, which is what the renderer groups into an instanced draw. */
+    const addInstanced = (name, model, count, origin, step) => {
+      for (let i = 0; i < count; i++) {
+        const n = new cleo.ModelNode(name + i, model);
+        n.setPosition([origin[0] + i * step, origin[1], origin[2]]);
+        scene.addNode(n);
+      }
+    };
+
+    try {
+      addSkinned('skinned', cleo.Material.PBR({ baseColor: [0.6, 0.85, 0.5], roughness: 0.6 }), [0, 1.1, -2.6]);
+
+      // Every material type crossed with every topology.
+      //
+      // Measuring which programs actually BIND (rather than merely compile) showed six of the converted
+      // shaders were never reached by this scene: the Basic and Blinn-Phong paths existed only as plain
+      // static models, so their skinned and instanced variants — separate programs with separate vertex
+      // stages — were converted to WGSL with nothing checking them. The material/topology grid below is
+      // what closes that, and it is deliberately exhaustive rather than "one more object": the gap was
+      // invisible precisely because the scene looked varied enough.
+      // `?extras=<bitmask>` selects which of the four to build, for bisecting a fault to one of them.
+      const extras = Number(new URLSearchParams(location.search).get('extras') ?? 15);
+
+      if (extras & 1) addSkinned('phongSkinned', cleo.Material.Default({
+        diffuse: [0.35, 0.55, 0.85], specular: [1, 1, 1], ambient: [0.08, 0.12, 0.2], shininess: 32,
+      }), [-2.2, 1.1, -2.6]);
+      if (extras & 2) addSkinned('basicSkinned', cleo.Material.Basic({ color: [0.95, 0.6, 0.15] }), [2.2, 1.1, -2.6]);
+
+      if (extras & 4) addInstanced('phongInst', new cleo.Model(
+        cleo.Geometry.Cube(0.4, 0.4, 0.4),
+        cleo.Material.Default({
+          diffuse: [0.9, 0.45, 0.7], specular: [0.8, 0.8, 0.8], ambient: [0.2, 0.1, 0.16], shininess: 24,
+        }),
+      ), 3, [-2.4, 0.22, 2.6], 1.3);
+
+      if (extras & 8) addInstanced('basicInst', new cleo.Model(
+        cleo.Geometry.Cube(0.35, 0.35, 0.35),
+        cleo.Material.Basic({ color: [0.2, 0.7, 0.95] }),
+      ), 3, [1.9, 0.2, 2.6], 1.0);
+
       window.__skinned = true;
     } catch (e) {
       window.__skinnedError = String((e && e.message) || e);
@@ -167,9 +278,68 @@ window.__error = null;
     // number of shadow-caster draws in any single frame depends on the frame index. That makes a
     // one-frame stat snapshot non-deterministic and useless for a before/after diff. Pin it.
     engine.renderer.shadowStagger = false;
+    // Draw-time GL errors are invisible otherwise: the engine's only error checks are in the texture
+    // upload paths, and `gl.getError` reports a global sticky flag, so a bad draw surfaced as a texture
+    // failure at whatever unrelated call site looked next. Costs a driver round trip per stage, which is
+    // why it is opt-in and enabled here rather than by default.
+    engine.renderer.debugGLErrors = true;
 
     window.__stats = () => ({ ...cleo.frameStats });
     window.__renderStats = () => ({ ...engine.renderer.stats });
+
+    // Which shader programs this scene actually compiled. ShaderManager keys its registry by the name
+    // the renderer asked for, so this answers "what did the screenshots exercise?" as a measurement
+    // rather than as a reading of the draw code. Private field on purpose — nothing ships this.
+    window.__shaderNames = () => Array.from(engine.renderer._shaderManager._shaders.keys()).sort();
+
+    // Which programs actually BIND, as opposed to merely compiling.
+    //
+    // `__shaderNames` answers "what did the renderer build for this scene", which turned out to be all
+    // 57 of them regardless of content — so it cannot tell you whether a shader contributes pixels.
+    // ShaderManager.bind is the one choke point every draw goes through, so wrapping it gives the real
+    // answer. Kept in the harness rather than the engine: this is a measurement, not a feature, and it
+    // has no business on the hot path of a shipped build.
+    const _shaderUse = new Set();
+    const _sm = engine.renderer._shaderManager;
+    const _bind = _sm.bind.bind(_sm);
+    _sm.bind = (name) => { _shaderUse.add(name); return _bind(name); };
+    window.__resetShaderUse = () => { _shaderUse.clear(); };
+
+    // The skeleton overlay is the ONLY consumer of the `basicInstanced` program — it draws joint
+    // spheres and bone connectors instanced, depth-test off, in the gizmo pass. Without it that shader
+    // was converted to WGSL with nothing exercising it. Off by default and enabled for one shot,
+    // because always-on-top geometry would alter every other shot in the gallery.
+    window.__setSkeletonOverlay = (on) => {
+      if (!on) { engine.renderer.setSkeletonOverlay(null); return; }
+      const m4 = cleo.Vec.mat4;
+      const at = (x, y, z, s) => {
+        const m = m4.create();
+        m4.translate(m, m, [x, y, z]);
+        m4.scale(m, m, [s, s, s]);
+        return m;
+      };
+      const joints = [at(-0.7, 2.0, 0, 0.12), at(0, 2.4, 0, 0.12), at(0.7, 2.0, 0, 0.12)];
+      const bones = [at(-0.35, 2.2, 0, 0.06), at(0.35, 2.2, 0, 0.06)];
+      const pack = (mats) => {
+        const out = new Float32Array(mats.length * 16);
+        mats.forEach((m, i) => out.set(m, i * 16));
+        return out;
+      };
+      engine.renderer.setSkeletonOverlay({
+        jointMatrices: pack(joints), jointCount: joints.length, jointColor: [1.0, 0.75, 0.1],
+        boneMatrices: pack(bones), boneCount: bones.length, boneColor: [0.2, 0.8, 1.0],
+      });
+    };
+    window.__shadersUsed = () => Array.from(_shaderUse).sort();
+
+    // Every program's uniform-block layout as the DRIVER reports it, for checking the offsets computed
+    // from the WGSL type rules. See tools/harness/uniformLayoutCheck.js.
+    window.__uniformLayouts = () => {
+      const out = {};
+      for (const [name, shader] of engine.renderer._shaderManager._shaders)
+        out[name] = shader.describeBlockLayout();
+      return out;
+    };
     window.__setExposure = (v) => { engine.renderer.exposure = v; };
 
     // Assign renderer feature toggles by name, so the driver can walk a table of configurations without
@@ -178,6 +348,14 @@ window.__error = null;
     window.__setRender = (patch) => {
       const applied = [];
       for (const key of Object.keys(patch)) {
+        // Some settings are methods rather than properties (the grid is set through setGridVisible /
+        // setGridPlane, and only mirrored back as a read-only getter), so prefer a matching setter.
+        const setter = 'set' + key.charAt(0).toUpperCase() + key.slice(1);
+        if (typeof engine.renderer[setter] === 'function') {
+          engine.renderer[setter](patch[key]);
+          applied.push(key);
+          continue;
+        }
         if (!(key in engine.renderer)) continue;
         engine.renderer[key] = patch[key];
         applied.push(key);
@@ -207,6 +385,31 @@ window.__error = null;
       motionHandle = null;
       camera.setPosition([4, 4, 4]);
     };
+    // Sky-atmosphere features, toggled per pass configuration.
+    //
+    // Distance fog and god rays are gated on the node, not the renderer, and both are off by default:
+    // enabling them in `base` would fold their cost and their look into every other measurement.
+    // Probe state, for the pass gate: intensity 0 is the control, so the configuration measures the
+    // probe's actual contribution rather than the scene's ambient.
+    window.__probeState = () => {
+      const p = window.__probe;
+      return p ? { baked: p.hasBakedMaps, bounded: p.bounded, intensity: p.intensity } : 'no probe';
+    };
+    window.__setProbe = (patch) => {
+      const p = window.__probe;
+      if (!p) return 'no probe';
+      for (const key of Object.keys(patch)) p[key] = patch[key];
+      return Object.keys(patch).join(',');
+    };
+
+    window.__setSky = (patch) => {
+      const node = scene.getNodeByName ? scene.getNodeByName('sky') : null;
+      const sky = node || [...(scene.nodes || [])].find(n => n && n.nodeType === 'skyAtmosphere');
+      if (!sky) return 'no sky node';
+      for (const key of Object.keys(patch)) sky[key] = patch[key];
+      return Object.keys(patch).join(',');
+    };
+
     window.__renderState = (keys) => {
       const out = {};
       for (const k of keys) out[k] = engine.renderer[k];

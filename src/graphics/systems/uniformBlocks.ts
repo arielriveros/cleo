@@ -28,6 +28,8 @@ import { BufferUsage } from '../rhi/types';
  */
 
 interface BlockMember {
+    /** The name GL reflected, before any suffix aliasing. Kept for layout verification. */
+    name: string;
     /** Byte offset of this member within its block. */
     offset: number;
     /** GL type enum (FLOAT, FLOAT_VEC3, FLOAT_MAT4, …). */
@@ -54,7 +56,16 @@ interface Block {
 
 export class UniformBlockSet {
     private readonly _blocks: Block[] = [];
-    private readonly _members = new Map<string, { block: Block; member: BlockMember }>();
+    /**
+     * Name -> every block member it refers to. A LIST, not a single entry.
+     *
+     * A name can legitimately land in more than one block: naga emits one block per shader stage, so
+     * a program whose vertex stage needs `u_view` for its MVP and whose fragment stage needs it to
+     * pick a shadow cascade has the same matrix in both. The renderer sets `u_view` once and means
+     * both — so a write broadcasts. Keeping one entry per name silently left the other block holding
+     * whatever it was initialised with, which for a view matrix is zeroes.
+     */
+    private readonly _members = new Map<string, { block: Block; member: BlockMember }[]>();
 
     private constructor() {}
 
@@ -109,6 +120,7 @@ export class UniformBlockSet {
             const info = gl.getActiveUniform(program, list[i]);
             if (!info) continue;
             const member: BlockMember = {
+                name: info.name,
                 offset: offsets[i],
                 type: info.type,
                 size: info.size,
@@ -131,36 +143,112 @@ export class UniformBlockSet {
      * segment — so registering only those two would leave every material uniform silently unset, which
      * looks exactly like a material rendering with default values.
      *
-     * First registration wins on a collision, and the loser is reported rather than dropped silently:
-     * two blocks sharing a suffix would otherwise route one program's writes into the other's buffer.
+     * A name landing in more than one block is normal rather than an error — see `_members` — so every
+     * match is recorded and a write reaches all of them.
      */
     private _register(reflectedName: string, block: Block, member: BlockMember): void {
         // GL appends "[0]" to the name of an array member.
         const full = reflectedName.replace(/\[0\]$/, '');
-        this._members.set(full, { block, member });
+        this._add(full, block, member);
+        this._registerSuffixes(full, block, member);
 
-        // Longest suffix first, so the most specific alias is the one that reports a collision.
+        // naga ESCAPES a member name that ends in a digit by appending an underscore, so `u_iblIntensity0`
+        // is emitted as `u_iblIntensity0_` and GL reports it that way. (It is a normalisation, not a
+        // quirk: a name already ending in `_` has it stripped, so the two forms can never collide.)
+        //
+        // The engine asks for the name it authored. Without the alias below, every uniform whose name
+        // ends in a digit silently resolves to nothing — which is not a compile error and not a warning,
+        // it is a value that stays whatever the buffer was allocated with. That is exactly how the light
+        // probes stopped contributing: `u_iblIntensity0` read as 0, and because an unbounded probe drives
+        // the fallback-ambient weight to zero, the ambient term vanished entirely instead of degrading.
+        const unmangled = full.replace(/(\d)_$/, '$1');
+        if (unmangled !== full) {
+            this._add(unmangled, block, member);
+            this._registerSuffixes(unmangled, block, member);
+        }
+    }
+
+    /** Register every dotted suffix of `full` that begins at a `u_` segment. */
+    private _registerSuffixes(full: string, block: Block, member: BlockMember): void {
         const parts = full.split('.');
         for (let i = 1; i < parts.length; i++) {
             const suffix = parts.slice(i).join('.');
-            if (this._members.has(suffix)) {
-                Logger.warn(
-                    `Uniform "${suffix}" is ambiguous — declared in more than one block. Set it by its ` +
-                    `full name to disambiguate.`, 'Shader');
-                continue;
-            }
-            this._members.set(suffix, { block, member });
+
+            // Only suffixes that begin at a `u_` name are worth registering. Every uniform this engine
+            // sets is `u_`-prefixed; the remaining segments are STRUCT FIELDS, which are never set by
+            // their bare name — the renderer says `u_dirLight.diffuse`, never `diffuse`.
+            //
+            // Registering them anyway was not merely useless, it was noisy in a way that hid real
+            // problems: `u_pointLights` is 16 elements and `u_spotlights` 8, all with a `position` and a
+            // `diffuse`, so every light shader logged a few hundred ambiguity warnings at startup for
+            // aliases nothing would ever ask for.
+            if (!suffix.startsWith('u_')) continue;
+
+            this._add(suffix, block, member);
         }
+    }
+
+    /** Append one target for `name`, ignoring an exact repeat of the same member. */
+    private _add(name: string, block: Block, member: BlockMember): void {
+        const list = this._members.get(name);
+        if (!list) { this._members.set(name, [{ block, member }]); return; }
+        if (list.some(e => e.block === block && e.member.offset === member.offset)) return;
+        list.push({ block, member });
+    }
+
+    /** @internal Diagnostic: the GL buffer backing each block, with the size GL reports for its store. */
+    /**
+     * Every reflected member, with the byte layout the DRIVER reports.
+     *
+     * Exists to be checked against the layout `tools/wgslLayout.mjs` computes from the WGSL type rules.
+     * WebGPU has no reflection, so those computed offsets are what a WebGPU uniform write will use —
+     * and the only way to know they are right is to compare them with a real driver's answer for the
+     * same struct. See `tools/harness/uniformLayoutCheck.js`.
+     */
+    public describeLayout(): { block: string; blockSize: number; name: string; offset: number;
+                               arrayStride: number; matrixStride: number }[] {
+        const seen = new Set<BlockMember>();
+        const out: { block: string; blockSize: number; name: string; offset: number;
+                     arrayStride: number; matrixStride: number }[] = [];
+        for (const entries of this._members.values()) {
+            for (const { block, member } of entries) {
+                if (seen.has(member)) continue;   // one member is registered under several aliases
+                seen.add(member);
+                out.push({
+                    block: block.name,
+                    blockSize: block.cpu.byteLength,
+                    name: member.name,
+                    offset: member.offset,
+                    arrayStride: member.arrayStride,
+                    matrixStride: member.matrixStride,
+                });
+            }
+        }
+        return out;
+    }
+
+    public describeBuffers(): string {
+        return this._blocks.map(b => {
+            gl.bindBuffer(gl.UNIFORM_BUFFER, b.buffer.handle);
+            const store = gl.getBufferParameter(gl.UNIFORM_BUFFER, gl.BUFFER_SIZE);
+            const bound = gl.getIndexedParameter(gl.UNIFORM_BUFFER_BINDING, b.bindingPoint);
+            return `${b.name}@${b.bindingPoint} cpu${b.cpu.byteLength} store${store} ${bound === b.buffer.handle ? 'MINE' : 'FOREIGN'}`;
+        }).join(' | ');
     }
 
     public has(name: string): boolean { return this._members.has(name); }
 
+    /** How many block members a name writes to. 1 for almost everything; 2 for a cross-stage uniform. */
+    public targetCount(name: string): number { return this._members.get(name)?.length ?? 0; }
+
     /** Write a value into its block's CPU buffer. Returns false when the name is not a block member. */
     public set(name: string, value: any): boolean {
-        const entry = this._members.get(name);
-        if (!entry) return false;
-        writeMember(entry.block, entry.member, value, name);
-        entry.block.dirty = true;
+        const targets = this._members.get(name);
+        if (!targets) return false;
+        for (const entry of targets) {
+            writeMember(entry.block, entry.member, value, name);
+            entry.block.dirty = true;
+        }
         return true;
     }
 

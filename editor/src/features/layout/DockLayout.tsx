@@ -37,11 +37,17 @@ const OLD_LAYOUT_KEY = 'cleo_project_layout';
 // `Scene Elements | UI Elements` tab pair above a Scene panel that holds the tree alone. It also makes the
 // Profiler renderer-mode-only (see hiddenPanelIds), deliberately dropping the v7 arrangement that kept
 // it visible during Play.
+//
+// v10 renames the 'profiler' panel to 'performance' — it absorbed the floating stats HUD — and adds
+// 'rendererSettings', which was the floating renderer options overlay. Both are renderer-mode only. A
+// stored v9 layout knows neither id, and its 'profiler' entry would resolve to a component that no
+// longer exists, so the bump discards it rather than restoring a broken tree.
 const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
   'cleo_dock_layout_v5', 'cleo_dock_layout_v6', 'cleo_dock_layout_v7', 'cleo_dock_layout_v8',
+  'cleo_dock_layout_v9',
 ];
-const LAYOUT_VERSION = 9;
+const LAYOUT_VERSION = 10;
 
 /**
  * One saved arrangement per editor mode.
@@ -123,6 +129,9 @@ const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
  */
 const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
 
+/** Renderer-mode panels: the performance readout and the render settings. Shown only there. */
+const RENDERER_PANELS = ['performance', 'rendererSettings'] as const;
+
 const CHROME_PANELS = [
   'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
   ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS, ...ADD_PANELS,
@@ -136,7 +145,7 @@ const PANEL_TITLES: Record<string, string> = {
   animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
   animField: 'Blend Space',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
-  profiler: 'Profiler',
+  performance: 'Performance', rendererSettings: 'Renderer Settings',
 };
 
 function panelTitle(id: string, mode: EditorMode): string {
@@ -208,13 +217,16 @@ function buildDefaultLayout(api: DockviewApi) {
       position: { referencePanel: 'properties', direction: 'within' },
     });
   }
-  // Docked with Properties on the right rail: it is a tall column of sections, which suits that
-  // rail's proportions, and it is NOT in CHROME_PANELS so it survives into Play and renderer mode
-  // where the rest of that tab strip is hidden.
-  api.addPanel({
-    id: 'profiler', component: 'profiler', title: PANEL_TITLES['profiler'],
-    position: { referencePanel: 'properties', direction: 'within' },
-  });
+  // Docked with Properties on the right rail: both are tall columns of sections, which suits that
+  // rail's proportions, and neither is in CHROME_PANELS so they survive into renderer mode where the
+  // rest of that tab strip is hidden. They share a tab strip there, reading `Performance | Renderer
+  // Settings` — the two halves of what renderer mode is for.
+  for (const id of RENDERER_PANELS) {
+    api.addPanel({
+      id, component: id, title: PANEL_TITLES[id],
+      position: { referencePanel: 'properties', direction: 'within' },
+    });
+  }
   scene.api.setActive();
   properties.api.setActive();
   // Logger and Assets keep renderer:'always' so the hidden tab stays in the DOM: unmounting the
@@ -298,13 +310,14 @@ function relayout(api: DockviewApi) {
  * when the UI panels were added. Here a group is hidden once, by default, and a mode opts out.
  */
 function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
-  // Renderer mode is the Profiler's one home, so it is the only branch that does not hide it.
+  // Renderer mode is the one home of both renderer panels, so it is the only branch that keeps them.
   if (mode === 'renderer') return CHROME_PANELS;
-  // Play strips the chrome AND the Profiler. This deliberately reverses the v7 arrangement (which kept the
-  // Profiler through Play so it could measure the running game) — renderer mode is now its only home.
-  if (playing) return [...CHROME_PANELS, 'profiler'];
+  // Play strips the chrome AND both renderer panels. This deliberately reverses the v7 arrangement
+  // (which kept the Profiler through Play so it could measure the running game) — renderer mode is now
+  // their only home.
+  if (playing) return [...CHROME_PANELS, ...RENDERER_PANELS];
 
-  const hidden = new Set<string>(['profiler']);
+  const hidden = new Set<string>(RENDERER_PANELS);
 
   // Mode-specific panels: hidden everywhere, revealed by the single mode that owns them.
   if (mode !== 'animation') for (const id of ANIMATION_PANELS) hidden.add(id);
