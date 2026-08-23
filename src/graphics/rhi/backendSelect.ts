@@ -24,17 +24,24 @@ export function webgpuAvailableInBrowser(): boolean {
 /**
  * Whether this build can RENDER A SCENE on WebGPU.
  *
- * Not the same question as "does a WebGPU device exist", and the difference is the whole reason this
- * constant is still false. `rhi/webgpu/webgpuDevice.ts` is a complete `Device` — buffers, textures,
- * samplers, shader modules, pipelines, bind groups, render passes, layered attachments and readback —
- * verified against a real driver by `tools/harness/webgpuCheck.js`, including two of the engine's own
- * `.wgsl` programs drawing pixel-exact output.
+ * Not the same question as "does a WebGPU device exist". `rhi/webgpu/webgpuDevice.ts` is a complete
+ * `Device` — buffers, textures, samplers, shader modules, pipelines, bind groups, render passes,
+ * layered attachments and readback — verified against a real driver by `tools/harness/webgpuCheck.js`,
+ * including two of the engine's own `.wgsl` programs drawing pixel-exact output.
  *
- * What does not exist is the path from a scene to that device: `renderer.ts` still issues ~160 raw
- * `gl.*` calls, so nothing above the RHI can be pointed at a second backend yet. Flipping this now
- * would trade an honest "not yet" for a black viewport.
+ * The DRAW path above it is portable now too: every draw in the harness scene goes through the RHI
+ * command model, and `renderer.ts` is down to a few dozen raw `gl.*` calls, none of them in a pass.
  *
- * Flip it when the renderer draws through `Device` rather than through `gl` — WEBGPU_ROADMAP.md M5/M6.
+ * What is still WebGL2-only is the SHADER and UNIFORM layer. `ShaderManager.bind(name)` selects a linked
+ * GL program, and ~330 `setUniform(name, value)` call sites in the renderer reach uniforms the way
+ * WebGL2 does: by name, into a std140 block whose member offsets the driver reports. WebGPU has no such
+ * reflection and no `useProgram` — a pipeline carries its own module, and uniforms are bytes written at
+ * offsets computed from the WGSL layout rules. Both halves of that already exist
+ * (`tools/wgslLayout.mjs` computes the offsets, `rhi/uniformSet.ts` writes by name, and
+ * `npm run harness:uniforms` checks all 1,697 members against a real driver); what does not exist is a
+ * `Shader` that routes to them instead of to `gl.uniform*`.
+ *
+ * Flipping this constant before that lands would trade an honest "not yet" for a black viewport.
  */
 export const WEBGPU_IMPLEMENTED = false;
 

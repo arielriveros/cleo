@@ -282,16 +282,21 @@ export interface BlendState {
 }
 
 /**
- * The engine's default: straight alpha-over for colour, with alpha itself accumulated separately.
+ * The engine's default: straight alpha-over for colour, and the destination alpha left ALONE.
  *
- * This is what `Renderer._restoreDefaultBlend` sets, and it is spelled out here rather than left to
- * each call site because the bloom mask contract depends on the alpha channel surviving the colour
- * blend intact — a bare `gl.blendFunc` restore that forgot the alpha half is precisely the bug that
+ * Exactly what `Renderer._restoreDefaultBlend` sets — `blendFuncSeparate(SRC_ALPHA,
+ * ONE_MINUS_SRC_ALPHA, ZERO, ONE)` — and it has to be, because the alpha channel of the scene buffer
+ * is the bloom mask, not coverage. `zero`/`one` on the alpha half IS what "surviving the colour blend
+ * intact" means: a bare `gl.blendFunc` restore that forgot the alpha half is precisely the bug that
  * once made bloom emit nothing at all.
+ *
+ * This constant previously said `one`/`one-minus-src-alpha` for alpha under that same comment, which
+ * would accumulate coverage into the mask and dim every bloom source behind a transparent object.
+ * Nothing used it yet, so the error was inert; the forward pass was the first thing to reach for it.
  */
 export const DEFAULT_BLEND: BlendState = {
     color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-    alpha: { srcFactor: 'one',       dstFactor: 'one-minus-src-alpha', operation: 'add' },
+    alpha: { srcFactor: 'zero',      dstFactor: 'one',                 operation: 'add' },
 };
 
 /** Additive, for the god-ray composite and the bloom upsample chain. */

@@ -99,9 +99,9 @@ export interface ShaderModule extends GpuResource {
  * What a shader stage expects to be bound, by group and binding index.
  *
  * WebGL2 has no such object — the layout is recovered by reflecting the linked program — so its
- * backend synthesises one and uses it to assign texture units. That indirection is the point: it is
- * what removes the hardcoded `SHADOW_UNIT = 6` / `SPOT_SHADOW_UNIT = 15` constants from renderer.ts
- * and, with them, the rule that a custom material silently drops every sampler past unit 15.
+ * backend synthesises one and uses it to assign texture units. That indirection was the point, and it
+ * paid: the hardcoded `SHADOW_UNIT = 6` / `SPOT_SHADOW_UNIT = 15` constants are gone from renderer.ts,
+ * and with them the rule that a custom material silently dropped every sampler past unit 15.
  */
 export interface BindGroupLayout extends GpuResource {
     readonly group: number;

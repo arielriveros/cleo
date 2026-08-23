@@ -423,6 +423,29 @@ struct Targets {
               'a depth-less pipeline against a depth target invalidates the command buffer');
     }
 
+    // --- reallocateBuffer ------------------------------------------------------------------------
+    //
+    // A GPUBuffer's size is fixed at creation, so growing one means destroying it and making another.
+    // The interface returns the buffer to use from now on for exactly that reason, and this is what
+    // proves the two cases behave the way the contract claims: a fit reuses the object, a grow does
+    // not, and both leave the CONTENTS correct.
+    {
+        const initial = new Uint32Array([1, 2, 3, 4]);
+        const buffer = device.createBuffer({ label: 'realloc', size: initial.byteLength,
+                                            usage: BufferUsage.STORAGE | BufferUsage.COPY_DST | BufferUsage.COPY_SRC });
+        const same = device.reallocateBuffer(buffer, initial);
+        check('reallocateBuffer reuses a buffer the data still fits', same === buffer,
+              same === buffer ? 'same object' : 'replaced unnecessarily');
+
+        const bigger = new Uint32Array(64).fill(7);
+        const grown = device.reallocateBuffer(same, bigger);
+        check('reallocateBuffer replaces a buffer the data outgrows', grown !== buffer,
+              grown !== buffer ? 'new object' : 'kept a buffer too small for the data');
+        check('the replacement is large enough', (grown as any).size >= bigger.byteLength,
+              (grown as any).size + ' >= ' + bigger.byteLength);
+        grown.destroy();
+    }
+
     device.destroy();
     return results;
 }

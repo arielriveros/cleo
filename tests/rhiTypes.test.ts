@@ -138,12 +138,20 @@ describe('usage flags', () => {
 });
 
 describe('blend presets', () => {
-    // The bloom mask contract: the default blend must NOT apply the colour source factor to alpha.
-    // A restore that collapses both halves into one src-alpha/one-minus-src-alpha pair is exactly the
-    // bug that once left bloom emitting nothing at all.
-    it('blends alpha separately from colour by default', () => {
-        expect(DEFAULT_BLEND.color.srcFactor).toBe('src-alpha');
-        expect(DEFAULT_BLEND.alpha.srcFactor).toBe('one');
+    // The bloom mask contract: the alpha channel of the scene buffer is the bloom mask, not coverage,
+    // so the default blend must leave the DESTINATION alpha exactly as it found it. That is zero/one —
+    // `dst = 0*src + 1*dst` — and it is what `Renderer._restoreDefaultBlend` has always set with
+    // `blendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ZERO, ONE)`.
+    //
+    // This asserted `one` until the forward pass became the first caller of the constant. Nothing
+    // used it before then, so the constant and this test agreed with each other and with nothing
+    // else; a transparent object would have accumulated coverage into the mask and dimmed every
+    // bloom source behind it.
+    it('leaves destination alpha untouched by default', () => {
+        expect(DEFAULT_BLEND.color).toEqual(
+            { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' });
+        expect(DEFAULT_BLEND.alpha).toEqual(
+            { srcFactor: 'zero', dstFactor: 'one', operation: 'add' });
         expect(DEFAULT_BLEND.alpha.srcFactor).not.toBe(DEFAULT_BLEND.color.srcFactor);
     });
 

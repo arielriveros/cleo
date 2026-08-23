@@ -33,7 +33,12 @@ function stage(pageDir, files) {
 
 stage(root, [['dist/cleo.js', 'cleo.js']]);
 const shotDir = process.env.CLEO_SHOT_DIR || path.join(__dirname, 'shots');
-const shotName = process.env.CLEO_PIPELINE === 'forward' ? 'mesh.forward.png' : 'mesh.png';
+// CLEO_SCENE=full adds the terrain/foliage/cloud content the base scene lacks. It gets its OWN
+// baselines and its own screenshot rather than replacing the base ones: a scene that grows and a
+// shader that regressed would otherwise be the same failure, and neither could be attributed.
+const scene = process.env.CLEO_SCENE === 'full' ? 'full' : 'base';
+const sceneTag = scene === 'base' ? '' : '.' + scene;
+const shotName = (process.env.CLEO_PIPELINE === 'forward' ? 'mesh.forward' : 'mesh') + sceneTag + '.png';
 fs.mkdirSync(shotDir, { recursive: true });
 
 // A FIXED profile directory, reused across runs.
@@ -96,6 +101,7 @@ app.whenReady().then(async () => {
   const params = new URLSearchParams();
   if (process.env.CLEO_PIPELINE === 'forward') params.set('forward', '1');
   if (process.env.CLEO_EXTRAS) params.set('extras', process.env.CLEO_EXTRAS);
+  if (scene !== 'base') params.set('scene', scene);
   const query = params.toString() ? '?' + params.toString() : '';
   await win.loadURL('app://mesh/index.html' + query);
   const js = (src) => win.webContents.executeJavaScript(src);
@@ -113,6 +119,63 @@ app.whenReady().then(async () => {
   // happen — this is not the check that catches it, the screenshot is — but zero triangles would mean
   // nothing was submitted at all.
   check('triangles were submitted', stats && stats.triangles > 0, JSON.stringify(stats));
+
+  // The `?scene=full` content, when it is on. Built inside a try/catch in the page so that a bad API
+  // call surfaces as a named failure here rather than as an empty screenshot.
+  if (scene === 'full') {
+    const sceneError = await js('window.__fullSceneError');
+    check('full scene built', !sceneError, String(sceneError || '').split('\n').slice(0, 6).join(' | '));
+    // Clouds OFF for everything that follows, back on for the sky check at the end.
+    //
+    // They contribute no pixels from this camera (the slab is behind every ray — see __lookUp), but the
+    // temporal reconstruction still runs, and it traces a different 1/16 Bayer slot each frame. Whatever
+    // it leaves behind therefore depends on which frame the capture lands on, and the shading signature
+    // drifted by 4/128 stddev cells between two runs of an unchanged build — in different cells each
+    // time. A baseline that moves on its own is worse than no baseline: it trains you to ignore it.
+    await js('window.__setClouds({ enabled: false })');
+
+    const foliage = await js('window.__foliageCounts ? window.__foliageCounts() : null');
+    console.log('      foliage: ' + JSON.stringify(foliage));
+    // Zero instances is the silent failure mode: the layers exist, the terrain draws, and the four
+    // instanced programs simply never bind — which looks like a pass everywhere except coverage.
+    check('foliage layers have instances',
+          Array.isArray(foliage) && foliage.length === 2 && foliage.every(f => f.count > 0),
+          JSON.stringify(foliage));
+
+    // Sprites reach the scene at all. They are the one draw path whose geometry is rebuilt on the CPU
+    // every frame (the camera-facing constraint rewrites the model matrix), so "it is in the list" and
+    // "it drew the right shape" are genuinely different questions — the signature answers the second.
+    const spriteCount = await js('window.__spriteCount ? window.__spriteCount() : -1');
+    check('sprites reached the scene', spriteCount === 2, 'scene.sprites.size = ' + spriteCount);
+
+    // The two always-on-top paths. Both are counted rather than eyeballed because both fail silently:
+    // a gizmo that loses its depth-test-off state is still drawn, just hidden behind the geometry it
+    // is supposed to annotate, and the skeleton overlay's two instanced draws simply stop appearing.
+    const gizmoCount = await js('window.__gizmoCount ? window.__gizmoCount() : -1');
+    check('gizmo reached the scene', gizmoCount === 1, 'isGizmo nodes = ' + gizmoCount);
+
+    // A screen-space custom material that actually DRAWS. The harness compiled all three custom
+    // preludes and drew none of them, so the runtime-compiled program, the ping-ponged compose
+    // buffers and the prelude's engine-then-user sampler ordering had no pixel coverage at all.
+    const screenMats = await js('window.__screenMaterialCount ? window.__screenMaterialCount() : -1');
+    check('screen material is on the camera', screenMats === 1,
+          'activeCamera.screenMaterials.length = ' + screenMats);
+
+    // Forward and deferred custom materials that RASTERISE. Both were compile-tested and neither was
+    // ever drawn, so their runtime-compiled programs — lighting, shadow lookups, user samplers — had
+    // no pixel coverage. Both sample a user texture unconditionally, so a material that is black
+    // because it is unlit and one that is black because its sampler is bound wrong stay distinguishable.
+    const customDrawn = await js('window.__customDrawn ? window.__customDrawn() : -1');
+    const customErr = await js('window.__customDrawError');
+    check('custom materials drew', customDrawn === 2, 'nodes=' + customDrawn + ' ' + (customErr || ''));
+
+    // `probePreview` targets its own FBO, so no viewport signature can ever cover it. Invoke it and
+    // assert on the returned PNG being a real image rather than the '' the early-outs return.
+    const preview = await js('window.__probePreview ? window.__probePreview(64) : null');
+    check('probe preview rendered',
+          typeof preview === 'string' && preview.startsWith('data:image/png') && preview.length > 500,
+          preview ? 'len=' + preview.length : String(preview));
+  }
   if (stats) {
     console.log(`      drawCalls=${stats.drawCalls} rhi=${stats.rhiDrawCalls} triangles=${stats.triangles} vertices=${stats.vertices} objects=${stats.objects} culled=${stats.culled} instanced=${stats.instancedDrawCalls} instances=${stats.instances}`);
     console.log(`      shadedMpx=${(stats.shadedMpx ?? 0).toFixed?.(2) ?? stats.shadedMpx} stateChanges=${stats.stateChanges}`);
@@ -131,7 +194,7 @@ app.whenReady().then(async () => {
   console.log('      pipeline=' + pipeline);
   // Keyed by pipeline: forward draws each object with a material shader while deferred fills a
   // G-buffer and lights it once, so the two legitimately submit different work.
-  const statsBaselinePath = path.join(__dirname, `meshBaseline.${pipeline}.json`);
+  const statsBaselinePath = path.join(__dirname, `meshBaseline.${pipeline}${sceneTag}.json`);
   // `rhiDrawCalls` is tracked for the same reason the others are, and one more: a draw that falls back
   // from the RHI command model to `Mesh` produces identical pixels AND identical draw counts, so it is
   // the only number that can catch that regression.
@@ -245,7 +308,7 @@ app.whenReady().then(async () => {
   // Frame stats prove the right geometry was submitted; they say nothing about what came out. That gap
   // mattered most for the forward pipeline, which the pass harness never exercises — converting
   // materials/pbr.fs could have changed every lit pixel without moving a single number above.
-  const shadingPath = path.join(__dirname, `meshShading.${pipeline}.json`);
+  const shadingPath = path.join(__dirname, `meshShading.${pipeline}${sceneTag}.json`);
   const sig = await captureSignature(win, sleep);
   if (process.env.CLEO_MESH_BASELINE === 'write') {
     fs.writeFileSync(shadingPath, JSON.stringify({ signature: sig }, null, 2));
@@ -268,6 +331,48 @@ app.whenReady().then(async () => {
     check('shading has a baseline', false, 'no ' + path.basename(shadingPath));
   }
 
+  // The volumetric clouds, which need their own view.
+  //
+  // Their slab sits at altitude 800..1500 and the scene camera is pitched 30 degrees down, so no view
+  // ray in the shot above ever points at it: the pass ran, bound its three programs and composited
+  // exactly nothing. That is the whole reason a bind counter is not a coverage measurement. Aim at the
+  // sky, hold the result to a signature, and — because the sky behind the clouds is white haze and the
+  // clouds are white, which moves the frame MEAN by about 0.1/255 — also prove the pass is what
+  // produced it by turning it off and requiring the picture to change.
+  //
+  // Done last, and restored afterwards, so the framing this needs cannot leak into any check above.
+  //
+  // Deferred only. The cloud pass reads the G-buffer depth to bound each ray and is dispatched from the
+  // deferred overlay, so under CLEO_PIPELINE=forward it never runs at all — asserting there would be
+  // asserting that a pass the pipeline does not have produces pixels.
+  if (scene === 'full' && pipeline === 'deferred') {
+    await js('window.__lookUp(true)');
+    await js('window.__setClouds({ enabled: true })');
+    const skySig = await captureSignature(win, sleep);
+
+    await js('window.__setClouds({ enabled: false })');
+    const noCloudSig = await captureSignature(win, sleep);
+    const delta = compare(skySig, noCloudSig);
+    check('the cloud pass visibly changes the sky', delta.material > 8,
+          delta.material + '/128 signature values move when the clouds are switched off');
+
+    await js('window.__setClouds({ enabled: true })');
+    await js('window.__lookUp(false)');
+
+    const cloudPath = path.join(__dirname, `meshClouds.${pipeline}.json`);
+    if (process.env.CLEO_MESH_BASELINE === 'write') {
+      fs.writeFileSync(cloudPath, JSON.stringify({ signature: skySig }, null, 2));
+      console.log('      cloud baseline written to ' + cloudPath);
+    } else if (fs.existsSync(cloudPath)) {
+      const want = JSON.parse(fs.readFileSync(cloudPath, 'utf-8')).signature;
+      const d = compare(want, skySig);
+      check('clouds match the baseline', d.material === 0,
+            d.material + '/128 values differ beyond the noise floor');
+    } else {
+      check('clouds have a baseline', false, 'no ' + path.basename(cloudPath));
+    }
+  }
+
   // Shader warnings, of any kind.
   //
   // Nothing here throws, so a warning is often the ONLY signal that a uniform is not reaching the GPU —
@@ -279,6 +384,12 @@ app.whenReady().then(async () => {
         shaderWarnings.length + ' warning(s), e.g. ' + (shaderWarnings[0] || '').slice(0, 140));
 
   check('no uncaught errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+
+  // Settle before the screenshot. The cloud check above re-aims the camera at the sky and puts it
+  // back, and a capture issued in the same tick as the restore photographs the frame BEFORE it —
+  // a picture of the sky filed as the scene shot. Nothing asserts on this image, which is exactly
+  // why it has to be right: it is what a human looks at when a signature moves.
+  for (let f = 0; f < 4; f++) { await win.webContents.capturePage(); await sleep(80); }
 
   const image = await win.webContents.capturePage();
   const shotPath = path.join(shotDir, shotName);

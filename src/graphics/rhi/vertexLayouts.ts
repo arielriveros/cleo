@@ -172,24 +172,36 @@ export function boneLayouts(attributes: readonly ReflectedAttribute[]): [VertexB
 /**
  * The interleaved model vertex, read by a program that may declare only part of it.
  *
- * Distinct from {@link packedModelLayout}, and the difference is a trap. `packedModelLayout` computes a
- * TIGHT stride from the attributes a program declares, which is correct only when the buffer was
- * written for exactly that program. Model meshes are not: `ModelNode.initializeModel` writes every one
- * of them with the full five-attribute vertex, 56 bytes, whatever draws it later.
+ * Two different programs are involved and conflating them is the trap this function exists to close:
  *
- * So a depth-only program that declares just `position` needs offsets from the FULL layout and a stride
- * of 56 — `packedModelLayout` would give it a stride of 12 and walk into the middle of the first
- * vertex's normal. That renders as geometry the right shape in roughly the right place, which is what
- * makes it worth naming: the shadow pass looked plausible and the shading signature caught it.
+ *   `builtWith`  the program the BUFFER was written for. `ModelNode.initializeModel` calls
+ *                `Geometry.getData` with exactly the attributes that program declares, so the stride
+ *                and the offsets are its business, not the caller's. A `basic` model is 20 bytes per
+ *                vertex (position + uv); a `pbr` one is 56 (all five). Pass null for an ANIMATED mesh,
+ *                which `createAnimated` always writes at the full 56 bytes whatever draws it.
+ *   `drawnBy`    the program doing the drawing, which supplies only the shader LOCATIONS, and may
+ *                declare a subset — a depth-only pass wants position out of a five-attribute vertex.
  *
- * Locations come from the DRAWING program; offsets and stride from the layout the buffer was built to.
+ * Getting `builtWith` wrong does not fail loudly. Reading a 20-byte buffer at a 56-byte stride walks
+ * every third vertex and renders geometry that is still the right colour in roughly the right place —
+ * a cube came out as a flat stretched bar, and only a pixel signature said so.
+ *
+ * The predecessor of this function hard-coded the full layout and was right for the lit families and
+ * silently wrong for the unlit one.
  */
-export function modelVertexLayout(attributes: readonly ReflectedAttribute[]): VertexBufferLayout {
+export function modelVertexLayout(drawnBy: readonly ReflectedAttribute[],
+                                  builtWith?: readonly ReflectedAttribute[] | null): VertexBufferLayout {
+    const base = builtWith ? packedModelLayout(builtWith) : MODEL_VERTEX_LAYOUT;
+    // Reflected names vary in spelling between programs (`uv` vs `a_texCoord`), so match through the
+    // canonical table rather than on the string.
     const declared = new Map<string, number>();
-    for (const attribute of attributes) declared.set(attribute.name, attribute.location);
+    for (const attribute of drawnBy) {
+        const canonical = BY_NAME.get(attribute.name);
+        if (canonical) declared.set(canonical.name, attribute.location);
+    }
     return {
-        ...MODEL_VERTEX_LAYOUT,
-        attributes: MODEL_VERTEX_LAYOUT.attributes
+        ...base,
+        attributes: base.attributes
             .filter(a => declared.has(a.name))
             .map(a => ({ ...a, shaderLocation: declared.get(a.name) as number })),
     };

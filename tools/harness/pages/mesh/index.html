@@ -35,11 +35,32 @@ window.__error = null;
       graphics: { clearColor: [0.08, 0.08, 0.11, 1.0], deferred: !forwardMode },
     });
     window.__pipeline = forwardMode ? 'forward' : 'deferred';
+    // Which programs actually BIND, as opposed to merely compiling.
+    //
+    // `__shaderNames` answers "what did the renderer build for this scene", which turned out to be all
+    // 57 of them regardless of content — so it cannot tell you whether a shader contributes pixels.
+    // ShaderManager.bind is the one choke point every draw goes through — the RHI pipelines route
+    // through it too — so wrapping it gives the real answer. Kept in the harness rather than the
+    // engine: this is a measurement, not a feature, and it has no business on the hot path of a
+    // shipped build.
+    //
+    // Installed HERE, before `initialize()`, because the one-shot bakes run during startup and never
+    // again: the shared BRDF integration LUT during renderer init, the IBL irradiance/prefilter
+    // convolutions and the cloud noise volume during scene start. Wrapping after `scene.start()` —
+    // where this used to live — missed every one of them, and they were reported as never binding.
+    const _shaderUse = new Set();
+    const _sm = engine.renderer._shaderManager;
+    const _bind = _sm.bind.bind(_sm);
+    _sm.bind = (name) => { _shaderUse.add(name); return _bind(name); };
+    window.__resetShaderUse = () => { _shaderUse.clear(); };
+    window.__shadersUsed = () => Array.from(_shaderUse).sort();
+
     // `initialize()` arrived with async device acquisition (roadmap M0). Guarded so this page can also
     // be pointed at an OLDER build of cleo.js — which is the whole mechanism behind an A/B against a
     // previous commit: same scene, same driver, two engines.
     if (typeof engine.initialize === 'function') await engine.initialize();
     engine.setViewport(document.getElementById('vp'));
+
 
     // A real texture, so the 2D upload path (texImage2D from an HTMLImageElement, sampler parameters,
     // mip generation) is actually exercised. Drawn here rather than embedded so the bytes are a valid
@@ -269,6 +290,186 @@ window.__error = null;
       window.__tilemapError = String((e && e.message) || e);
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // `?scene=full` — the content the base scene deliberately lacks.
+    //
+    // Terrain, foliage and volumetric clouds were the last shader families converted to WGSL and the
+    // ONLY ones in the whole migration never held to a pixel gate, because nothing in this scene
+    // contained them. They are opt-in rather than always-on for one reason: adding them to the default
+    // scene would move every existing baseline at once, and a baseline that moves for two reasons at
+    // the same time can no longer attribute either. This variant carries its own baselines instead.
+    //
+    // Everything here is DETERMINISTIC on purpose. Terrain height comes from a closed-form function and
+    // foliage instances from a fixed lattice rather than `scatterFoliage`, which draws from an unseeded
+    // RNG — a signature gate cannot hold a scene that reshuffles itself between runs.
+    // ---------------------------------------------------------------------------------------------
+    const fullScene = new URLSearchParams(location.search).get('scene') === 'full';
+    window.__sceneProfile = fullScene ? 'full' : 'base';
+    window.__fullSceneError = null;
+
+    if (fullScene) try {
+      // A seeded Math.random for the duration of this block, restored in the finally.
+      //
+      // FoliageLayer.pushInstance draws a yaw and a scale from Math.random per instance, so a scene
+      // built twice from identical code produced 250 differently-oriented, differently-sized props —
+      // enough to move 4-6 of the 128 signature values past the noise floor, in different cells every
+      // run. Within one run the picture was stable, which is what made it look like a real regression
+      // rather than a coin toss.
+      //
+      // Scoped to this block on purpose. Replacing Math.random for the whole page would also reseed the
+      // SSAO kernel and noise texture, which are built at renderer init and are baked into baselines
+      // recorded before any of this existed — a change with no upside here and a blast radius over
+      // every other check.
+      const _random = Math.random;
+      let _seed = 0x9e3779b9;
+      Math.random = () => {
+        // xorshift32: no library, no state beyond one word, and identical on every machine.
+        _seed ^= _seed << 13; _seed >>>= 0;
+        _seed ^= _seed >> 17;
+        _seed ^= _seed << 5;  _seed >>>= 0;
+        return _seed / 0x100000000;
+      };
+      try {
+      // Small and LOW-resolution. Resolution drives the heightfield grid and therefore the chunk count;
+      // a coarse grid is enough to exercise the splat blend and the LOD index buffers, which is what
+      // these shaders are being gated on — not visual quality.
+      const terrain = new cleo.Terrain({ size: 24, resolution: 33 });
+
+      // Sculpt through the PUBLIC brush rather than writing `terrain.heights` directly: the height array
+      // is exposed but the chunk-geometry refresh that follows a write is not, so a direct write would
+      // leave the GPU buffers holding the flat original. A flat terrain is also the degenerate case —
+      // constant slope means the height/slope masking in the terrain shaders never takes its branch.
+      const mounds = [[-6, 0, -6], [5, 0, -4], [0, 0, 5], [7, 0, 7], [-5, 0, 6]];
+      for (const p of mounds)
+        terrain.sculpt([p[0], 0, p[2]], { radius: 5, strength: 2.2, falloff: 0.7, mode: 'raise' }, 1);
+      terrain.sculpt([0, 0, 0], { radius: 6, strength: 1.0, falloff: 1.0, mode: 'smooth' }, 1);
+
+      const landscape = new cleo.LandscapeNode('landscape', terrain);
+      landscape.setPosition([0, -1.6, -4]);
+      scene.addNode(landscape);
+
+      // Foliage instances are placed on a fixed lattice via the layer's own push/commit, then Y-sampled
+      // off the sculpted surface. `castShadows` is opt-in per layer and off by default (it costs an
+      // instanced draw per layer per cascade), so it is set explicitly — without it the instanced depth
+      // programs never bind and half the point of adding foliage is lost.
+      const populate = (layer, step, inset) => {
+        const half = terrain.size / 2 - inset;
+        for (let z = -half; z <= half; z += step)
+          for (let x = -half; x <= half; x += step)
+            layer.pushInstance(x, terrain.heightAt(x, z) - 1.6, z - 4);
+        layer.commit();
+      };
+
+      // Billboard: camera-facing quads whose silhouette lives in the texture alpha, so they also drive
+      // the alpha-cutout depth program.
+      const grass = cleo.FoliageLayer.Billboard('grass', 'checker', { density: 0.4, minScale: 0.6, maxScale: 0.9 });
+      grass.castShadows = true;
+      terrain.addFoliage(grass);
+      populate(grass, 1.5, 1);
+
+      // Mesh: the non-billboard instanced path — a real model through the lit geometry program and the
+      // plain (non-cutout) instanced depth program.
+      const props = cleo.FoliageLayer.Mesh('props', new cleo.Model(
+        cleo.Geometry.Cube(0.3, 0.7, 0.3),
+        cleo.Material.PBR({ baseColor: [0.35, 0.28, 0.18], metallic: 0.0, roughness: 0.85 }),
+      ), { density: 0.08, minScale: 0.9, maxScale: 1.1 });
+      props.castShadows = true;
+      terrain.addFoliage(props);
+      populate(props, 4, 3);
+
+      window.__landscape = landscape;
+      window.__foliageCounts = () => terrain.foliage.map(f => ({ name: f.name, count: f.count }));
+
+      // Volumetric clouds. The raymarch runs against the scene depth after the skybox, so this needs no
+      // placement — the node carries its own slab altitudes.
+      //
+      // Every parameter that makes the frame depend on TIME is pinned. Wind drifts the noise field, and
+      // jitter dithers each ray's start from a per-frame seed; with either left on, two runs of the same
+      // scene produce different pixels and a signature baseline is meaningless. Temporal upscale stays
+      // ON — it is what binds cloudTemporalResolve and cloudUpsample, and with a static field its
+      // history converges instead of drifting.
+      //
+      // Coverage and density are pushed well above the defaults for the same reason the terrain is
+      // sculpted: a cloud layer too faint to see is a pass that cannot fail visibly, which is not a gate.
+      const clouds = new cleo.VolumetricCloudsNode('clouds', {
+        coverage: 0.75, density: 1.2, cloudType: 0.45, opacity: 1.0,
+        windSpeed: 0, jitter: false, temporalUpscale: true,
+      });
+      scene.addNode(clouds);
+
+      // Sprites. The engine ships them and NOTHING in this scene contained one, so every pixel the
+      // sprite path produces was ungated — including the camera-facing constraint, which is CPU-side
+      // matrix surgery no unit test covers either. Two of them, because the interesting difference is
+      // between the constraints: 'spherical' rebuilds the rotation from the camera basis every frame,
+      // 'free' uses the node's own transform, and a bug that drops the constraint makes the first look
+      // like the second — which is exactly how it failed once.
+      const spriteTiles = cleo.gridTileset('spritecheck.ts', 'checker', 8, 8);
+      const billboard = new cleo.SpriteNode('billboard',
+        new cleo.Sprite({ tileset: spriteTiles, tileIndex: 9, tint: [1.0, 0.5, 0.2] }), 'spherical');
+      billboard.setPosition([-2.2, 1.0, 1.6]);
+      scene.addNode(billboard);
+
+      const flat = new cleo.SpriteNode('flatSprite',
+        new cleo.Sprite({ tileset: spriteTiles, tileIndex: 18, tint: [0.3, 0.9, 1.0] }), 'free');
+      flat.setPosition([3.4, 1.4, 0.6]);
+      flat.setRotation([0, -40, 0]);
+      scene.addNode(flat);
+      window.__spriteCount = () => (engine.scene ? engine.scene.sprites.size : -1);
+
+      // A gizmo, and the skeleton overlay. Both draw ALWAYS ON TOP — depth test off — and neither had
+      // any pixel coverage: gizmos are editor-only and the overlay is opt-in, so the two draw paths
+      // that deliberately ignore the depth buffer were the two nothing checked. They also inherit
+      // cull and blend state from whatever drew last, which is precisely the kind of implicit
+      // dependency a migration to explicit pipeline state has to be able to see itself break.
+      const gizmo = new cleo.ModelNode('gizmo', new cleo.Model(
+        cleo.Geometry.Cube(0.9, 0.9, 0.9),
+        cleo.Material.Basic({ color: [1.0, 0.25, 0.55] }),
+      ));
+      // Deliberately BEHIND the spheres in depth: a gizmo that stops ignoring the depth buffer
+      // disappears behind them, which is the regression this position exists to make visible.
+      gizmo.setPosition([0.1, 0.9, -1.4]);
+      gizmo.isGizmo = true;
+      scene.addNode(gizmo);
+      window.__gizmoCount = () => {
+        let n = 0;
+        for (const m of (engine.scene ? engine.scene.models : [])) if (m.isGizmo) n++;
+        return n;
+      };
+
+      // A screen-space custom material on the active camera.
+      //
+      // The harness COMPILED all three custom preludes and drew none of them, so the whole
+      // screen-material chain — a runtime-compiled program, its ping-ponged compose buffers, and the
+      // engine + user sampler ordering its prelude declares — had no pixel coverage at all. This one
+      // uses BOTH engine samplers and a user sampler, because the ordering between them is exactly
+      // what a bind group derived from the prelude interface can get wrong.
+      const tint = cleo.CustomMaterial.Create('pbr', 'screen');
+      tint.uniforms = [{ name: 'mixAmount', type: 'float', value: 0.85 },
+                       { name: 'rampTex', type: 'sampler2D' }];
+      tint.textures.set('rampTex', 'checker');
+      tint.fragmentSource = [
+        'vec4 fragment() {',
+        '    vec3 src = texture(u_screenTexture, fragTexCoord).rgb;',
+        '    float d = texture(u_depth, fragTexCoord).r;',
+        '    vec3 ramp = texture(u_rampTex, fragTexCoord * 4.0).rgb;',
+        '    // Stepped on depth, not weighted by it: device depth is non-linear, so (1.0 - d) is',
+        '    // about 0.01 over most of a scene and a weighted mix is invisible. A step makes the',
+        '    // effect large where geometry is and exactly zero on the sky, which is what proves',
+        '    // u_depth is bound to the depth buffer and not to something else.',
+        '    float w = d < 1.0 ? u_mixAmount : 0.0;',
+        '    return vec4(mix(src, src * ramp * 2.0, w), 1.0);',
+        '}',
+      ].join(String.fromCharCode(10));
+      tint.refreshType();
+      camera.screenMaterials = [tint];
+      window.__screenMaterialCount = () => (engine.scene && engine.scene.activeCamera
+        ? engine.scene.activeCamera.screenMaterials.length : -1);
+      window.__clouds = clouds;
+      } finally { Math.random = _random; }
+    } catch (e) {
+      window.__fullSceneError = String((e && e.stack) || e);
+    }
+
     engine.setScene(scene);
     scene.start();
     engine.isPaused = false;
@@ -284,6 +485,21 @@ window.__error = null;
     // why it is opt-in and enabled here rather than by default.
     engine.renderer.debugGLErrors = true;
 
+    // The selection outline (`outline` writes the mask, `outlinePost` expands and composites it) draws
+    // only when the renderer HAS a selected node. Nothing in a harness scene ever set one, so both
+    // programs compiled and never drew a pixel in any capture. Pin a selection in the full profile.
+    if (fullScene) engine.renderer.setSelectedNode(cube.id);
+
+    // `probePreview` renders a baked probe's cubemap to an equirect strip for the editor's inspector.
+    // It is off-frame — it targets its own FBO — so it can never appear in a viewport signature and has
+    // to be invoked deliberately. Returns a data URL, or '' if the probe never baked.
+    window.__probePreview = (width) => engine.renderer.renderProbePreview(probe, width || 64);
+
+    // The renderer itself, for ad-hoc probing from a harness script. Every other hook here is a
+    // named operation; this one exists because diagnosing 'why did that pass not run' needs to read
+    // arbitrary renderer state, and a harness that cannot do that ends up guessing.
+    window.__renderer = engine.renderer;
+
     window.__stats = () => ({ ...cleo.frameStats });
     window.__renderStats = () => ({ ...engine.renderer.stats });
 
@@ -291,19 +507,6 @@ window.__error = null;
     // the renderer asked for, so this answers "what did the screenshots exercise?" as a measurement
     // rather than as a reading of the draw code. Private field on purpose — nothing ships this.
     window.__shaderNames = () => Array.from(engine.renderer._shaderManager._shaders.keys()).sort();
-
-    // Which programs actually BIND, as opposed to merely compiling.
-    //
-    // `__shaderNames` answers "what did the renderer build for this scene", which turned out to be all
-    // 57 of them regardless of content — so it cannot tell you whether a shader contributes pixels.
-    // ShaderManager.bind is the one choke point every draw goes through, so wrapping it gives the real
-    // answer. Kept in the harness rather than the engine: this is a measurement, not a feature, and it
-    // has no business on the hot path of a shipped build.
-    const _shaderUse = new Set();
-    const _sm = engine.renderer._shaderManager;
-    const _bind = _sm.bind.bind(_sm);
-    _sm.bind = (name) => { _shaderUse.add(name); return _bind(name); };
-    window.__resetShaderUse = () => { _shaderUse.clear(); };
 
     // The skeleton overlay is the ONLY consumer of the `basicInstanced` program — it draws joint
     // spheres and bone connectors instanced, depth-test off, in the gizmo pass. Without it that shader
@@ -318,8 +521,9 @@ window.__error = null;
         m4.scale(m, m, [s, s, s]);
         return m;
       };
-      const joints = [at(-0.7, 2.0, 0, 0.12), at(0, 2.4, 0, 0.12), at(0.7, 2.0, 0, 0.12)];
-      const bones = [at(-0.35, 2.2, 0, 0.06), at(0.35, 2.2, 0, 0.06)];
+
+      const joints = [at(-0.7, 2.0, 0, 0.30), at(0, 2.5, 0, 0.30), at(0.7, 2.0, 0, 0.30)];
+      const bones = [at(-0.35, 2.25, 0, 0.16), at(0.35, 2.25, 0, 0.16)];
       const pack = (mats) => {
         const out = new Float32Array(mats.length * 16);
         mats.forEach((m, i) => out.set(m, i * 16));
@@ -330,7 +534,12 @@ window.__error = null;
         boneMatrices: pack(bones), boneCount: bones.length, boneColor: [0.2, 0.8, 1.0],
       });
     };
-    window.__shadersUsed = () => Array.from(_shaderUse).sort();
+
+    // The skeleton overlay is `basicInstanced`'s only consumer and, like the gizmos, draws with the
+    // depth test off. captureGallery gives it a shot and programCoverage a bind, but neither is a
+    // signature — so on in the full profile, where it has one. The gallery still toggles it per shot,
+    // which overrides this.
+    if (fullScene) window.__setSkeletonOverlay(true);
 
     // Every program's uniform-block layout as the DRIVER reports it, for checking the offsets computed
     // from the WGSL type rules. See tools/harness/uniformLayoutCheck.js.
@@ -410,6 +619,28 @@ window.__error = null;
       return Object.keys(patch).join(',');
     };
 
+    // Aim the camera above the horizon.
+    //
+    // The cloud slab sits at altitude 800..1500 and the scene camera is pitched 30 degrees DOWN to
+    // frame the models, with a vertical half-FOV well under that — so no view ray in the normal shot
+    // ever has a positive y component, every ray misses the slab, and the raymarch returns zero for
+    // every pixel. The pass still binds and still runs, which is exactly why binding is not evidence:
+    // `volumetricClouds`, `cloudTemporalResolve` and `cloudUpsample` all showed up as covered while
+    // contributing nothing. Re-framing the whole scene around one pass would move every other check,
+    // so the sky is looked at on demand instead.
+    window.__lookUp = (on) => {
+      camera.setRotation(on ? [-22, -135, 0] : [30, -135, 0]);
+      return on ? 'up' : 'default';
+    };
+
+    // Cloud parameters, for A/B-ing the pass. The clouds are scene-node state rather than renderer
+    // state, so `__setRender` cannot reach them and neither could passCheck.
+    window.__setClouds = (patch) => {
+      if (!window.__clouds) return 'no cloud node';
+      for (const key of Object.keys(patch)) window.__clouds[key] = patch[key];
+      return Object.keys(patch).join(',');
+    };
+
     window.__renderState = (keys) => {
       const out = {};
       for (const k of keys) out[k] = engine.renderer[k];
@@ -454,24 +685,30 @@ vec4 fragment() {
         uniforms: [
           { name: 'base', type: 'vec3', value: [1, 1, 1] },
           { name: 'metal', type: 'float', value: 0 },
+          { name: 'detail', type: 'sampler2D' },
         ],
         body: `
 vec4 fragment() {
     vec3 n = getNormal();
+    vec3 d = texture(u_detail, fragTexCoord * 2.0).rgb;
     float sh = shadowCalculation();
     vec3 Lo = vec3(0.0);
-    accumulateLight(n, normalize(u_viewPos - fragPos), u_base, u_metal, 0.5,
+    accumulateLight(n, normalize(u_viewPos - fragPos), u_base * d, u_metal, 0.5,
                     normalize(-u_dirLight.direction), u_dirLight.diffuse * sh, Lo);
     float counts = float(u_numPointLights + u_numSpotlights);
-    return vec4(Lo + u_dirLight.ambient * u_base * counts * 0.0 + u_time * 0.0, 1.0);
+    // The detail texture is added unconditionally, not only through the lit term: a material that is
+    // black because it is unlit and one that is black because its sampler is bound wrong look the
+    // same, and only one of those is a regression.
+    return vec4(Lo + u_dirLight.ambient * u_base * counts * 0.0 + d * 0.6 + u_time * 0.0, 1.0);
 }
 `,
       },
       deferred: {
-        uniforms: [{ name: 'base', type: 'vec3', value: [1, 1, 1] }],
+        uniforms: [{ name: 'base', type: 'vec3', value: [1, 1, 1] },
+                   { name: 'detail', type: 'sampler2D' }],
         body: `
 void surface(inout Surface s) {
-    s.albedo = u_base;
+    s.albedo = u_base * texture(u_detail, fragTexCoord * 2.0).rgb;
     s.normal = getNormal();
     s.ao = 1.0;
 }
@@ -480,6 +717,38 @@ void surface(inout Surface s) {
       // Proves a failure is still reported rather than swallowed by the widened return shape.
       broken: { uniforms: [], body: 'vec4 fragment() { return notAThing(); }' },
     };
+
+    // Custom materials that DRAW, not merely compile.
+    //
+    // The three preludes were compile-tested and none of them was ever rasterised, so the runtime-
+    // compiled forward and deferred programs — their lighting, their shadow lookups and their user
+    // samplers — had no pixel coverage. Both use a user sampler as well as the engine built-ins,
+    // because a bind group has to get the engine-then-user ordering right and nothing else checks it.
+    if (fullScene) try {
+      const makeCustom = (mode, pos, color) => {
+        const spec = CUSTOM_SOURCES[mode];
+        const m = cleo.CustomMaterial.Create('pbr', mode);
+        m.uniforms = spec.uniforms.map(u => ({ ...u }));
+        m.fragmentSource = spec.body;
+        m.properties.set('base', color);
+        m.textures.set('detail', 'checker');
+        m.refreshType();
+        const node = new cleo.ModelNode(mode + 'Custom',
+          new cleo.Model(cleo.Geometry.Sphere(24, 0.5), m));
+        node.setPosition(pos);
+        scene.addNode(node);
+        return node;
+      };
+      makeCustom('forward', [-1.5, 0.55, 3.3], [1.0, 0.45, 0.15]);
+      makeCustom('deferred', [-0.2, 0.55, 3.6], [0.2, 0.9, 0.5]);
+      window.__customDrawn = () => {
+        let n = 0;
+        for (const m of (engine.scene ? engine.scene.models : [])) if (m.name.endsWith('Custom')) n++;
+        return n;
+      };
+    } catch (e) {
+      window.__customDrawError = String((e && e.stack) || e);
+    }
 
     window.__compileCustomOne = (mode) => {
       const spec = CUSTOM_SOURCES[mode];

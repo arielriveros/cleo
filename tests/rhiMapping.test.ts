@@ -7,6 +7,7 @@ import {
 } from '../src/graphics/rhi/webgl2/glEnums';
 import {
     MODEL_VERTEX_LAYOUT, TILE_VERTEX_LAYOUT, packedModelLayout, instanceMatrixLayout, isModelAttribute,
+    modelVertexLayout,
 } from '../src/graphics/rhi/vertexLayouts';
 import { resolveTextureFormat } from '../src/graphics/rhi/textureFormat';
 import { vertexFormatSize, BufferUsage } from '../src/graphics/rhi/types';
@@ -238,6 +239,60 @@ describe('vertexLayouts', () => {
         ]);
         expect(layout.attributes.map(a => a.name)).toEqual(['a_position']);
         expect(layout.arrayStride).toBe(12);
+    });
+
+    // modelVertexLayout takes TWO programs and conflating them is the bug these pin.
+    //
+    // `ModelNode.initializeModel` packs the vertex buffer to exactly the attributes the material's own
+    // program declares, so the stride is a property of the MATERIAL, not of whatever draws it later. A
+    // Basic model is 20 bytes; a PBR one is 56. Reading the former at the latter's stride does not
+    // throw — it walks every third vertex and draws a cube as a flat stretched bar.
+    const PBR_ATTRS = [
+        { name: 'a_position', location: 0 }, { name: 'a_normal', location: 1 },
+        { name: 'a_texCoord', location: 2 }, { name: 'a_tangent', location: 3 },
+        { name: 'a_bitangent', location: 4 },
+    ];
+    const BASIC_ATTRS = [{ name: 'position', location: 0 }, { name: 'texCoord', location: 1 }];
+    const DEPTH_ATTRS = [{ name: 'a_position', location: 0 }];
+
+    it('reads a Basic model at the stride its own program packed', () => {
+        const layout = modelVertexLayout(BASIC_ATTRS, BASIC_ATTRS);
+        expect(layout.arrayStride).toBe(20);
+        expect(layout.attributes.map(a => [a.name, a.shaderLocation, a.offset]))
+            .toEqual([['a_position', 0, 0], ['a_texCoord', 1, 12]]);
+    });
+
+    it('reads a PBR model at the full 56-byte stride', () => {
+        const layout = modelVertexLayout(PBR_ATTRS, PBR_ATTRS);
+        expect(layout.arrayStride).toBe(56);
+        expect(layout.attributes.map(a => a.offset)).toEqual([0, 12, 24, 32, 44]);
+    });
+
+    it('gives a depth-only program the offsets of the buffer it is reading, not its own', () => {
+        // Over a PBR buffer: stride 56, position at 0.
+        const overPBR = modelVertexLayout(DEPTH_ATTRS, PBR_ATTRS);
+        expect(overPBR.arrayStride).toBe(56);
+        expect(overPBR.attributes).toHaveLength(1);
+        // Over a Basic buffer the very same program needs stride 20 — which is why the pipeline cache
+        // has to key on the buffer's program as well as the drawing one.
+        const overBasic = modelVertexLayout(DEPTH_ATTRS, BASIC_ATTRS);
+        expect(overBasic.arrayStride).toBe(20);
+        expect(overBasic.attributes.map(a => a.offset)).toEqual([0]);
+    });
+
+    it('falls back to the full layout when no buffer program is named', () => {
+        // Skinned meshes are always written at the full 56 bytes by createAnimated, whatever draws them.
+        const layout = modelVertexLayout(DEPTH_ATTRS);
+        expect(layout.arrayStride).toBe(56);
+        expect(layout.attributes.map(a => [a.name, a.offset])).toEqual([['a_position', 0]]);
+    });
+
+    it('matches attribute spellings across the two programs', () => {
+        // The buffer program spells it `texCoord`, the drawing one `a_uv`; they are the same attribute
+        // and matching on the raw string would silently drop it.
+        const layout = modelVertexLayout([{ name: 'a_uv', location: 7 }], BASIC_ATTRS);
+        expect(layout.arrayStride).toBe(20);
+        expect(layout.attributes.map(a => [a.shaderLocation, a.offset])).toEqual([[7, 12]]);
     });
 
     it('spreads an instance matrix across four vec4 slots', () => {

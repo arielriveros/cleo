@@ -13,8 +13,11 @@
 // tile's resolved sort depth (row + anchorRow, plus zBias) rather than by its grid row is what makes a
 // two-cell-tall tree sort as one object at its trunk.
 
+// The last raw GL here is the two draw calls. They stay for the same reason Mesh's do: a draw belongs
+// on a render-pass encoder, and moving the 2D pass onto one is its own migration.
 import { gl } from '../../graphics/renderer';
 import { GLState } from '../../graphics/systems/glState';
+import { glTopology, glIndexType, indexByteSize } from '../rhi/webgl2/glEnums';
 import { frameStats } from '../../graphics/renderStats';
 import { ShaderManager } from '../../graphics/systems/shaderManager';
 import { TILE_VERTEX_LAYOUT } from '../rhi/vertexLayouts';
@@ -182,20 +185,20 @@ export class TileMesh {
 
     private _upload(verts: Float32Array, indices: Uint16Array): void {
         if (!this._vao) {
-            this._vao = gl.createVertexArray();
+            this._vao = device.createVertexArray();
             // COPY_DST on the vertex buffer: an animated chunk rewrites its UVs every frame through
             // `advanceAnimation`, which is what earns it a DYNAMIC_DRAW hint. Indices never change.
             this._vbo = device.createBuffer({ label: 'tileChunk.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
             this._ibo = device.createBuffer({ label: 'tileChunk.indices', size: 0, usage: BufferUsage.INDEX });
         }
         GLState.bindVAO(this._vao);
-        device.reallocateBuffer(this._vbo as WebGL2Buffer, verts);
+        this._vbo = device.reallocateBuffer(this._vbo as WebGL2Buffer, verts);
 
         // The layout is still this chunk's own — a tilemap vertex really is position/uv/colour, not the
         // model vertex — but the attribute binding is no longer a private copy of the same six calls.
         applyVertexLayout(TILE_VERTEX_LAYOUT, (this._vbo as WebGL2Buffer).handle);
 
-        device.reallocateBuffer(this._ibo as WebGL2Buffer, indices);
+        this._ibo = device.reallocateBuffer(this._ibo as WebGL2Buffer, indices);
         GLState.bindVAO(null);
     }
 
@@ -229,6 +232,16 @@ export class TileMesh {
         GLState.bindVAO(null);
     }
 
+    /**
+     * The chunk buffers, for a caller recording the draw through the RHI instead of calling `draw`.
+     *
+     * Exposed rather than adding a `drawViaPass` here because the pass encoder, the pipeline and the
+     * vertex layout all belong to the renderer; this class owns the buffers and nothing else about
+     * how a frame is recorded. Null until `build` has run.
+     */
+    public get vertexBuffer(): WebGL2Buffer | null { return this._vbo; }
+    public get indexBuffer(): WebGL2Buffer | null { return this._ibo; }
+
     public draw(): void {
         if (this._indexCount === 0 || !this._vao) return;
         GLState.bindVAO(this._vao);
@@ -240,7 +253,7 @@ export class TileMesh {
         // uploaded and the chunks drew against whatever the buffer was allocated with. It did not throw
         // and it did not change a draw count — the tiles simply stopped appearing.
         ShaderManager.Instance.flushBound();
-        gl.drawElements(gl.TRIANGLES, this._indexCount, gl.UNSIGNED_SHORT, 0);
+        gl.drawElements(glTopology('triangle-list'), this._indexCount, glIndexType('uint16'), 0);
         frameStats.drawCalls++;
         frameStats.vertices += this._vertexCount;
         frameStats.triangles += this._indexCount / 3;
@@ -252,7 +265,8 @@ export class TileMesh {
         GLState.bindVAO(this._vao);
         // Same reason as `draw` above.
         ShaderManager.Instance.flushBound();
-        gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, indexOffset * 2);
+        gl.drawElements(glTopology('triangle-list'), indexCount, glIndexType('uint16'),
+                        indexOffset * indexByteSize('uint16'));
         frameStats.drawCalls++;
         frameStats.vertices += indexCount;
         frameStats.triangles += indexCount / 3;
@@ -265,7 +279,7 @@ export class TileMesh {
             // GLState dedupes bindVertexArray by identity, so a deleted VAO left in its cache would make
             // the next bind of that handle a silent no-op.
             if (GLState.currentVAO === this._vao) GLState.reset();
-            gl.deleteVertexArray(this._vao);
+            device.deleteVertexArray(this._vao);
             this._vao = null;
         }
         this._verts = null;

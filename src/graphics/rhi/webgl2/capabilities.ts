@@ -10,10 +10,11 @@ import type { DeviceCapabilities } from '../device';
  * Everything here is queried rather than assumed — but the first thing the query established is that
  * the assumption was right. Measured on ANGLE/D3D11 (RTX 3060), `MAX_TEXTURE_IMAGE_UNITS` is exactly
  * 16: the ES 3.00 guaranteed minimum, not a floor the driver comfortably exceeds. So renderer.ts's
- * hardcoded `SHADOW_UNIT = 6` / `SPOT_SHADOW_UNIT = 15` are not over-cautious, the deferred pass
- * really does sit one unit from the ceiling on mainstream desktop hardware, and custom materials
- * really do have nowhere to put a sampler past 15. That budget does not loosen on WebGL2 anywhere;
- * only WebGPU's bind groups remove it.
+ * former `SHADOW_UNIT = 6` / `SPOT_SHADOW_UNIT = 15` were not over-cautious — the deferred pass
+ * really did sit one unit from the ceiling on mainstream desktop hardware, and custom materials
+ * really did have nowhere to put a sampler past 15. That budget does not loosen on WebGL2 anywhere;
+ * what removed the constants was moving unit assignment into the bind groups, which pack each pass
+ * from 0 instead of reserving numbers across the whole frame.
  *
  * Other measurements from the same device, for scale: maxTextureSize 16384, arrayLayers 2048,
  * colorAttachments 8, EXT_color_buffer_float and OES_texture_float_linear both present.

@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
     INDEX_16_LIMIT, GL_UNSIGNED_SHORT, GL_UNSIGNED_INT,
-    maxIndex, needs32Bit, createIndexArray, glTypeFor,
+    maxIndex, needs32Bit, createIndexArray, glTypeFor, indexFormatFor,
 } from '../src/graphics/indexFormat';
+import { glIndexType, indexByteSize } from '../src/graphics/rhi/webgl2/glEnums';
 
 /** Indices for a mesh whose highest vertex index is `max`. */
 const upTo = (max: number) => [0, 1, max];
@@ -97,5 +98,26 @@ describe('glTypeFor', () => {
     it('matches the WebGL spec enum values', () => {
         expect(GL_UNSIGNED_SHORT).toBe(5123);
         expect(GL_UNSIGNED_INT).toBe(5125);
+    });
+});
+
+describe('indexFormatFor', () => {
+    it('maps each array width to its RHI format', () => {
+        expect(indexFormatFor(new Uint16Array([0]))).toBe('uint16');
+        expect(indexFormatFor(new Uint32Array([0]))).toBe('uint32');
+    });
+
+    // `Mesh` used to hold the GL enum itself and now holds the RHI format, translating at the draw call.
+    // That is only safe if the round trip is the identity, which is what this pins: a mismatch would
+    // narrow 32-bit indices at draw time and scramble exactly the large meshes indexFormat.ts exists for.
+    it('round-trips through the WebGL2 enum table', () => {
+        for (const array of [new Uint16Array([0]), new Uint32Array([0])]) {
+            expect(glIndexType(indexFormatFor(array))).toBe(glTypeFor(array));
+        }
+    });
+
+    it('agrees with the element size the draw offset is computed from', () => {
+        expect(indexByteSize(indexFormatFor(new Uint16Array([0])))).toBe(2);
+        expect(indexByteSize(indexFormatFor(new Uint32Array([0])))).toBe(4);
     });
 });

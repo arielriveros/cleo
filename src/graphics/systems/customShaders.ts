@@ -10,6 +10,7 @@ import ShadowsChunk from '../shaders/wgsl/shadowsChunk.wgsl';
 // bias arithmetic is authored once. See tools/wgslTranslate.mjs `extractGlslChunk`.
 const SHADOWS_SRC = ShadowsChunk.glslChunk!;
 import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } from '../material';
+import type { ShaderResource } from '../rhi/types';
 
 // -----------------------------------------------------------------------------------------------
 // Runtime compilation of user-authored custom-material fragment shaders.
@@ -31,6 +32,26 @@ import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } 
 
 const MAX_POINT_LIGHTS = 16;
 const MAX_SPOTLIGHTS = 8;
+
+// --- sampler declaration primitives -------------------------------------------------------------
+//
+// Above the preludes because the preludes CALL them: the forward prelude generates its one engine
+// sampler line from FORWARD_ENGINE_SAMPLERS through `declareSamplers`, and that happens while this
+// module is still evaluating. A hoisted function declaration is fine there; the consts it reaches for
+// are not, and leaving them below produced a temporal-dead-zone ReferenceError that surfaced as the
+// whole `cleo` bundle failing to define itself.
+type SamplerType = 'sampler2D' | 'samplerCube' | 'sampler2DArray';
+interface SamplerDecl { name: string; type: SamplerType; comment?: string }
+
+/** The Vulkan-GLSL texture type and combined-sampler constructor behind each ES sampler type. */
+const SAMPLER_PARTS: Record<SamplerType, { texture: string; combined: string }> = {
+    sampler2D: { texture: 'texture2D', combined: 'sampler2D' },
+    samplerCube: { texture: 'textureCube', combined: 'samplerCube' },
+    sampler2DArray: { texture: 'texture2DArray', combined: 'sampler2DArray' },
+};
+
+
+const trailingComment = (comment?: string) => (comment ? ` // ${comment}` : '');
 
 /** Shared header: version, precision, varyings (from pbr.vs), color-space + light-count constants. */
 const COMMON_HEADER = `#version 300 es
@@ -66,6 +87,18 @@ vec3 toSrgb(vec3 c)   { return pow(c, vec3(1.0 / 2.2)); }
 
 vec3 getNormal() { return normalize(TBN[2]); }
 `;
+
+/**
+ * The forward prelude's engine samplers, as data.
+ *
+ * One entry, and it still earns being a list: the GLSL line inside LIGHTING_BLOCK is GENERATED from
+ * this, so the bind-group reflection below and the declaration the shader actually compiles cannot
+ * disagree about the name or the order. The deferred prelude has none — it is COMMON_HEADER only, and
+ * a G-buffer pass samples no environment.
+ */
+const FORWARD_ENGINE_SAMPLERS: SamplerDecl[] = [
+    { name: 'u_envMap', type: 'samplerCube' },
+];
 
 /** Lighting block (structs, uniforms, PBR/shadow helpers) — verbatim from pbr.fs, minus the u_material struct. */
 const LIGHTING_BLOCK = `
@@ -108,7 +141,7 @@ uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 uniform SpotLight  u_spotlights[MAX_SPOTLIGHTS];
 
 uniform bool u_useEnvMap;
-uniform samplerCube u_envMap;
+${declareSamplers(FORWARD_ENGINE_SAMPLERS, 'es300', 0, 0).glsl}
 uniform bool u_envMapLinear;   // true when u_envMap is a linear HDR probe cube (skip the sRGB decode)
 
 ${SHADOWS_SRC}
@@ -234,16 +267,8 @@ void main() {
 
 export type ShaderDialect = 'es300' | 'vulkan';
 
-type SamplerType = 'sampler2D' | 'samplerCube' | 'sampler2DArray';
 
 /** The Vulkan-GLSL texture type and combined-sampler constructor behind each ES sampler type. */
-const SAMPLER_PARTS: Record<SamplerType, { texture: string; combined: string }> = {
-    sampler2D: { texture: 'texture2D', combined: 'sampler2D' },
-    samplerCube: { texture: 'textureCube', combined: 'samplerCube' },
-    sampler2DArray: { texture: 'texture2DArray', combined: 'sampler2DArray' },
-};
-
-interface SamplerDecl { name: string; type: SamplerType; comment?: string }
 interface ValueDecl { name: string; type: string; comment?: string }
 
 /** Everything a prelude declares, spelled once and rendered into either dialect. */
@@ -257,7 +282,6 @@ interface PreludeInterface {
     body: string;
 }
 
-const trailingComment = (comment?: string) => (comment ? ` // ${comment}` : '');
 
 function versionHeader(dialect: ShaderDialect): string {
     // Vulkan GLSL has no `precision` at all — naga does not implement the qualifier, and 450 core has
@@ -393,6 +417,65 @@ function userValueDecls(uniforms: CustomUniform[]): ValueDecl[] {
     return uniforms
         .filter(u => u.name && GLSL_TYPE[u.type] && !isSamplerType(u.type))
         .map(u => ({ name: `u_${u.name}`, type: GLSL_TYPE[u.type] }));
+}
+
+/** The WGSL texture type behind each ES sampler type, for the reflection below. */
+const WGSL_TEXTURE: Record<SamplerType, string> = {
+    sampler2D: 'texture_2d<f32>',
+    samplerCube: 'texture_cube<f32>',
+    sampler2DArray: 'texture_2d_array<f32>',
+};
+
+/**
+ * A screen-mode custom program's group 0, as the RHI describes a bind group layout.
+ *
+ * Derived from the SAME interface description and the SAME `userSamplerDecls` that render the
+ * prelude, and walking bindings by twos exactly as `declareSamplers` does — because if the two ever
+ * disagreed, the bind group would point a sampler at the wrong texture and the material would render
+ * a plausible wrong picture rather than fail. There is no second copy of the ordering to drift.
+ *
+ * Screen mode only. The forward and deferred preludes are still hand-written template strings with no
+ * interface description to read, so they have nothing to reflect; they migrate when they gain one.
+ */
+export function screenShaderResources(uniforms: CustomUniform[]): ShaderResource[] {
+    return customShaderResources('screen', uniforms);
+}
+
+/**
+ * A custom program's bind-group layout, for any of the three render modes.
+ *
+ * Group 0 is the engine samplers the mode's prelude declares, then the user's, in declaration order
+ * and walking bindings by twos — exactly what `declareSamplers` does when it renders the same lists to
+ * GLSL. Deriving both from one list is the point: if they disagreed, the bind group would point a
+ * sampler at the wrong texture and the material would render a plausible wrong picture rather than
+ * fail.
+ *
+ * Group 3 is the shadow textures, and ONLY for the forward mode — it is the one prelude that pastes
+ * the shadow library. Those bindings are not re-declared here either: they come from the reflection
+ * of `shadowsChunk.wgsl` itself, the module whose GLSL the prelude pastes.
+ */
+export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUniform[]): ShaderResource[] {
+    const engine = mode === 'screen' ? SCREEN_INTERFACE.samplers
+                 : mode === 'forward' ? FORWARD_ENGINE_SAMPLERS
+                 : [];                       // deferred: COMMON_HEADER only, no engine samplers
+    const out: ShaderResource[] = [];
+    let binding = 0;
+    for (const s of [...engine, ...userSamplerDecls(uniforms)]) {
+        out.push({ group: 0, binding, name: s.name + '_texture', kind: 'texture',
+                   type: WGSL_TEXTURE[s.type], glslName: s.name });
+        out.push({ group: 0, binding: binding + 1, name: s.name + '_sampler', kind: 'sampler',
+                   type: 'sampler', glslName: s.name });
+        binding += 2;
+    }
+    if (mode === 'forward')
+        for (const r of ShadowsChunk.resources)
+            if (r.group === 3 && (r.kind === 'texture' || r.kind === 'sampler')) out.push(r);
+    return out;
+}
+
+/** The user samplers a screen material declares, in the order the prelude and the bind group use. */
+export function screenUserSamplerNames(uniforms: CustomUniform[]): string[] {
+    return userSamplerDecls(uniforms).map(s => s.name);
 }
 
 /** Auto-generated declarations from the user's uniform list, in the ES dialect. */

@@ -658,6 +658,31 @@ export class WebGPUDevice implements Device {
 
     // -- uploads ---------------------------------------------------------------------------------
 
+    /**
+     * Replace a buffer's contents, growing it if the data no longer fits.
+     *
+     * A `GPUBuffer`'s size is fixed at creation, so growing one means destroying it and making
+     * another — which is why this returns the buffer to use from now on rather than mutating in
+     * place. When the data still fits, the same buffer comes back and this is a plain queue write.
+     *
+     * Shrinking reuses the buffer too: the tail is simply not written, and nothing reads past the
+     * range a draw was told about. Reallocating on every shrink would churn allocations for a caller
+     * whose instance count merely dipped for a frame.
+     */
+    public reallocateBuffer(buffer: Buffer, data: ArrayBufferView): Buffer {
+        const existing = buffer as WebGPUBuffer;
+        if (data.byteLength <= existing.size) {
+            this.writeBuffer(existing, 0, data);
+            return existing;
+        }
+        const replacement = this.createBuffer({
+            label: existing.label, size: data.byteLength, usage: existing.usage,
+        });
+        existing.destroy();
+        this.writeBuffer(replacement, 0, data);
+        return replacement;
+    }
+
     public writeBuffer(buffer: Buffer, offset: number, data: ArrayBufferView): void {
         // `queue.writeBuffer` copies immediately from the caller's memory, so a typed array reused on
         // the next line is safe — unlike `mapAsync`, which is why uploads go through the queue here.

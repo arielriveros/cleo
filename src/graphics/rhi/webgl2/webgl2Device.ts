@@ -7,34 +7,31 @@ import { detectWebGL2Capabilities } from './capabilities';
 import { applyVertexLayout } from './vertexArray';
 import {
     WebGL2ShaderModule, WebGL2RenderPipeline, WebGL2BindGroup, WebGL2Sampler,
-    WebGL2TextureView, WebGL2CommandEncoder,
+    WebGL2TextureView, WebGL2CommandEncoder, WebGL2RenderTarget,
 } from './webgl2Commands';
 import type {
-    DeviceCapabilities, BackendKind, BufferDescriptor, TextureDescriptor,
-    ShaderModuleDescriptor, RenderPipelineDescriptor, BindGroupDescriptor,
+    Device, DeviceCapabilities, BackendKind, BufferDescriptor, TextureDescriptor,
+    ShaderModuleDescriptor, RenderPipelineDescriptor, BindGroupDescriptor, RenderTargetDescriptor,
 } from '../device';
 import type { RenderPassDescriptor } from '../types';
 import type { Buffer, Texture } from '../resources';
 import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor } from '../types';
-import { textureByteSize } from '../types';
+import { textureByteSize, TEXTURE_FORMAT_INFO, isDepthFormat } from '../types';
 
 /**
  * The WebGL2 implementation of the RHI device.
  *
- * Deliberately NOT declared `implements Device` yet. The interface in `../device.ts` describes the
- * finished thing, and claiming it now would mean methods that throw — which reads as "supported" to
- * every caller and to the compiler alike. Each capability is added here as the renderer is migrated off
- * raw `gl.*`; when the last one lands, the `implements` clause goes on and the interface starts being
- * enforced.
+ * Now declared `implements Device`: every method the interface names is real here, so the compiler
+ * enforces the contract rather than the header having to promise it. That clause was deliberately
+ * withheld while any of them would have had to throw — a stub reads as "supported" to a caller and to
+ * `tsc` alike — and it goes on now that `createRenderTarget`, `getCurrentSurfaceTarget`, `writeTexture`
+ * and `readPixels` are implemented.
  *
- * Migrated so far: buffers, textures, framebuffers, render-pass boundaries, and the command model —
- * shader modules, pipelines, bind groups and pass encoders (see `webgl2Commands.ts`).
- *
- * Still missing, and each blocking a specific group of passes: vertex/index buffer state on the pass
- * encoder (the geometry passes), `copyTextureToTexture` (the depth copy), `readPixels` (thumbnail
- * capture), and `getCurrentSurfaceTarget`.
+ * One gap remains, and it is on the command ENCODER rather than the device:
+ * `CommandEncoder.copyTextureToTexture` still throws, because the one copy the engine performs is a
+ * depth `blitFramebuffer` the renderer issues by hand.
  */
-export class WebGL2Device {
+export class WebGL2Device implements Device {
     public readonly backend: BackendKind = 'webgl2';
     public readonly capabilities: DeviceCapabilities;
 
@@ -46,9 +43,25 @@ export class WebGL2Device {
     private readonly _pipelines = new Map<string, WebGL2RenderPipeline>();
     /** VAOs by pipeline and buffer set. See vertexArrayFor. */
     private readonly _vertexArrays = new Map<WebGL2RenderPipeline, Map<string, WebGLVertexArrayObject>>();
+    /** VAOs a caller owns and binds itself — Mesh and TileMesh. See createVertexArray. */
+    private readonly _ownedVertexArrays = new Set<WebGLVertexArrayObject>();
+    /** Deduped render targets, keyed by their attachment set. See createRenderTarget. */
+    private readonly _renderTargets = new Map<string, WebGL2RenderTarget>();
+    /** Which target keys each texture appears in, so destroying it releases them. */
+    private readonly _targetsByTexture = new Map<number, Set<string>>();
+    /** The canvas this context draws to — the surface, in WebGPU's vocabulary. */
+    private readonly _canvas: HTMLCanvasElement | OffscreenCanvas;
+    /** One reusable handle to the default framebuffer. See getCurrentSurfaceTarget. */
+    private _surfaceTarget: WebGL2RenderTarget | null = null;
+    /** Scratch framebuffer for readback, created on first use. See readPixels. */
+    private _readbackFramebuffer: WebGL2Framebuffer | null = null;
+    /** Scratch read/draw framebuffers for copyTextureToTexture, created on first use. */
+    private _copyRead: WebGL2Framebuffer | null = null;
+    private _copyDraw: WebGL2Framebuffer | null = null;
 
     constructor(context: WebGL2RenderingContext) {
         this.capabilities = detectWebGL2Capabilities(context);
+        this._canvas = context.canvas;
     }
 
     /**
@@ -88,10 +101,13 @@ export class WebGL2Device {
      * A WebGPU backend has no direct equivalent and satisfies this by recreating the buffer, which is
      * why the size is allowed to change here and nowhere else.
      */
-    public reallocateBuffer(buffer: WebGL2Buffer, data: ArrayBufferView): void {
+    public reallocateBuffer(buffer: WebGL2Buffer, data: ArrayBufferView): WebGL2Buffer {
         gl.bindBuffer(buffer.target, buffer.handle);
         gl.bufferData(buffer.target, data, buffer.hint);
         buffer.setSize(data.byteLength);
+        // Always the same object here: `bufferData` re-specifies storage in place, so every existing
+        // VAO that references this buffer stays valid. See the interface for why it is returned.
+        return buffer;
     }
 
     /**
@@ -104,25 +120,117 @@ export class WebGL2Device {
      * {@link WebGL2Texture.setSize} once the upload knows them.
      */
     public createTexture(descriptor: TextureDescriptor): WebGL2Texture {
-        const texture = new WebGL2Texture(descriptor, () => this._textures.delete(texture));
+        const texture = new WebGL2Texture(descriptor, () => this._releaseTexture(texture));
         this._textures.add(texture);
         return texture;
     }
 
     /**
+     * Forget a destroyed texture, and tear down every render target that was still attached to it.
+     *
+     * The second half is what makes {@link createRenderTarget}'s cache safe to keep for the lifetime of
+     * the device. Without it a target would outlive its attachments — every IBL bake allocates fresh
+     * cubemaps and would strand 36 framebuffers pointing at deleted storage, which is a leak the GL
+     * driver reports as nothing at all.
+     */
+    private _releaseTexture(texture: WebGL2Texture): void {
+        this._textures.delete(texture);
+        const keys = this._targetsByTexture.get(texture.id);
+        if (!keys) return;
+        this._targetsByTexture.delete(texture.id);
+        for (const key of keys) {
+            const target = this._renderTargets.get(key);
+            if (!target) continue;
+            this._renderTargets.delete(key);
+            target.destroy();
+        }
+    }
+
+    /**
      * Allocate a framebuffer object.
      *
-     * The attachments are still the caller's business — `Framebuffer` attaches 2D colour targets,
-     * `CubeFramebuffer` swaps one face per draw, `LayeredDepthFramebuffer` points at one layer of an
-     * array — and those three shapes are exactly what a `RenderTarget` descriptor will unify later.
-     * What moves here now is the handle and the lifetime, which is what was actually leaking: only
-     * LayeredDepthFramebuffer ever deleted its own, so every other framebuffer the engine made lived
-     * until the context died.
+     * WebGL2-only, and no longer how the engine builds a render target: {@link createRenderTarget} owns
+     * the attachments, which is the half that used to be scattered across three engine classes.
+     *
+     * Two callers still attach by hand, and both have a reason. `Renderer._bakeCloudNoise` re-points
+     * one attachment at each of 128 slices of a volume, so a target per slice would mean 128
+     * framebuffers for a one-off bake. `TexturePacker` re-points its at whichever output texture it is
+     * writing, and those churn. Neither shape has a WebGPU equivalent — there, a render pass just names
+     * a different view — so both are on the list to move, not to keep.
      */
     public createFramebuffer(label: string = 'framebuffer'): WebGL2Framebuffer {
         const framebuffer = new WebGL2Framebuffer(label, () => this._framebuffers.delete(framebuffer));
         this._framebuffers.add(framebuffer);
         return framebuffer;
+    }
+
+    /**
+     * A render target over these attachments: a framebuffer with the views attached and validated.
+     *
+     * This is where `Framebuffer`, `CubeFramebuffer` and `LayeredDepthFramebuffer` converge. Each one
+     * reallocated its attachments differently — N 2D colour textures, one cube face swapped per draw,
+     * one layer of an immutable `texStorage3D` depth array — and every one of those is a `TextureView`
+     * with a mip level and an array layer. The attachment call is chosen from the view's texture
+     * DIMENSION rather than from a flag the caller passes, so a cube face and a cascade layer stop
+     * being different kinds of framebuffer and become different kinds of view.
+     *
+     * **Deduped by attachment set, and that is load-bearing rather than an optimisation.** WebGPU names
+     * its attachment views at `beginRenderPass` and keeps no framebuffer at all, so callers written for
+     * that model — the renderer's `.renderTarget` getters, called once per pass per frame — legitimately
+     * ask for the same target repeatedly. Creating a framebuffer per call would allocate one per pass
+     * per frame forever. The cache is evicted when an attachment texture is destroyed; see
+     * {@link _releaseTexture}.
+     */
+    public createRenderTarget(descriptor: RenderTargetDescriptor): WebGL2RenderTarget {
+        const colorViews = descriptor.colorViews as WebGL2TextureView[];
+        const depthView = descriptor.depthView as WebGL2TextureView | undefined;
+        const reference = colorViews[0] ?? depthView;
+        if (!reference) throw new Error('a render target needs at least one attachment');
+
+        const key = colorViews.map(viewKey).join(',') + '|' + (depthView ? viewKey(depthView) : '-');
+        const cached = this._renderTargets.get(key);
+        if (cached) return cached;
+
+        // Dimensions come from the attachment's mip level, not the texture's base size: a target for
+        // mip 2 of a 512px texture is 128px, and getting this wrong silently scissors every draw.
+        const width = Math.max(1, reference.texture.width >> reference.baseMipLevel);
+        const height = Math.max(1, reference.texture.height >> reference.baseMipLevel);
+
+        const label = descriptor.label ?? 'render-target';
+        const framebuffer = this.createFramebuffer(label);
+        framebuffer.bind();
+        colorViews.forEach((view, index) => framebuffer.attachColor(index, view));
+        if (depthView) framebuffer.attachDepth(depthView);
+        // Zero colour attachments is not a degenerate case but the shadow maps' normal one, and it needs
+        // BOTH draw and read buffers explicitly NONE or the framebuffer is incomplete — which drops
+        // every draw silently rather than raising anything.
+        framebuffer.setDrawBuffers(colorViews.length);
+        framebuffer.checkStatus('createRenderTarget');
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+        const target = new WebGL2RenderTarget(framebuffer, width, height, colorViews, depthView, label, true);
+        this._renderTargets.set(key, target);
+        for (const view of depthView ? [...colorViews, depthView] : colorViews) {
+            let keys = this._targetsByTexture.get(view.texture.id);
+            if (!keys) { keys = new Set(); this._targetsByTexture.set(view.texture.id, keys); }
+            keys.add(key);
+        }
+        return target;
+    }
+
+    /**
+     * The default framebuffer, at canvas resolution.
+     *
+     * WebGPU hands back a different swap-chain texture every frame, which is why the interface says to
+     * reacquire this rather than hold it. WebGL2 has no swap chain — framebuffer 0 is always there — so
+     * one object is reused and only its size is refreshed, which is what the canvas can actually change
+     * between calls. Callers written for the WebGPU rule work unchanged on both.
+     */
+    public getCurrentSurfaceTarget(): WebGL2RenderTarget {
+        const width = this._canvas.width, height = this._canvas.height;
+        if (!this._surfaceTarget || this._surfaceTarget.width !== width || this._surfaceTarget.height !== height)
+            this._surfaceTarget = new WebGL2RenderTarget(null, width, height, [], undefined, 'surface');
+        return this._surfaceTarget;
     }
 
     /**
@@ -140,15 +248,16 @@ export class WebGL2Device {
      * mobile GPU `'discard'` is what lets the driver skip writing a scratch target back out of tile
      * memory at all, and WebGPU exposes it directly.
      */
-    public beginRenderPass(target: RenderPassTarget, descriptor: RenderPassDescriptor): void {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer ? target.framebuffer.handle : null);
+    public beginRenderPass(target: WebGL2RenderTarget, descriptor: RenderPassDescriptor): void {
+        target.bind();
 
         // Render into ONE layer of an array depth target: the shadow cascades and the spot atlas.
         // WebGPU expresses this as a view with a `baseArrayLayer`; WebGL2 re-points the framebuffer's
         // depth attachment at the layer, which is what `LayeredDepthFramebuffer.bindLayer` did by hand.
         const layer = descriptor.depthAttachment?.baseArrayLayer;
-        if (layer !== undefined && target.framebuffer && target.depthTexture)
-            target.framebuffer.attachDepthLayer(target.depthTexture, layer);
+        const layered = target.depthTexture;
+        if (layer !== undefined && target.framebuffer && layered)
+            target.framebuffer.attachDepthLayer(layered, layer);
 
         // How many colour attachments the TARGET has — not how many the descriptor happens to mention.
         // Those differ: a pass descriptor names the attachments whose load op it cares about, and the
@@ -158,10 +267,7 @@ export class WebGL2Device {
         //
         // Zero is not a degenerate case but the shadow maps' normal one: with no colour attachment,
         // BOTH draw and read buffers must be explicitly NONE or the framebuffer is incomplete.
-        if (target.framebuffer && target.colorCount !== undefined)
-            target.framebuffer.setDrawBuffers(target.colorCount);
-        gl.viewport(0, 0, target.width, target.height);
-        setViewportSize(target.width, target.height);
+        if (target.framebuffer) target.framebuffer.setDrawBuffers(target.colorCount);
 
         let clearBits = 0;
         for (const attachment of descriptor.colorAttachments) {
@@ -268,13 +374,165 @@ export class WebGL2Device {
         return vao;
     }
 
+    // -- uploads and readback ---------------------------------------------------------------------
+
+    /**
+     * Write tightly packed texels into existing texture storage.
+     *
+     * `queue.writeTexture` on WebGPU, `texSubImage*` here, and identical in the one respect that
+     * matters: neither flips the rows. Every other upload path in this backend passes
+     * `UNPACK_FLIP_Y_WEBGL` because it is handed an `HTMLImageElement` whose rows run the other way;
+     * raw texel data does not, and flipping it would put the same bytes in different texels on the two
+     * backends.
+     */
+    public writeTexture(texture: WebGL2Texture, data: ArrayBufferView, width: number, height: number,
+                        mipLevel: number = 0, arrayLayer: number = 0): void {
+        texture.bindForUpload();
+        texture.write(data, width, height, mipLevel, arrayLayer);
+        texture.unbind();
+    }
+
+    /**
+     * Read a colour attachment back to the CPU.
+     *
+     * Resolves immediately: WebGL2 readback really is synchronous, and pretending otherwise would add
+     * a frame of latency for nothing. The signature is a promise because WebGPU's cannot be anything
+     * else — `copyTextureToBuffer` followed by `mapAsync` — and one honest signature for both backends
+     * beats two that diverge at exactly the call site that would then need rewriting.
+     *
+     * The view is attached to a scratch framebuffer rather than assuming it is already bound, so a
+     * caller need not have just finished rendering into it. Rows come back bottom-up, as `gl.readPixels`
+     * produces them; both backends leave the flip to the caller.
+     *
+     * Eight-bit colour only, and that is a real WebGL2 constraint rather than a shortcut: `RGBA` +
+     * `UNSIGNED_BYTE` is the one combination guaranteed against any renderable colour buffer, and it is
+     * INVALID against a float target — which is precisely why the renderer's thumbnail framebuffer is
+     * deliberately not `precision: 'high'`. Saying so here means a float readback fails with the reason
+     * rather than with `INVALID_OPERATION` from inside the driver.
+     */
+    public async readPixels(view: WebGL2TextureView, x: number, y: number,
+                            width: number, height: number): Promise<Uint8Array> {
+        return this.readPixelsSync(view, x, y, width, height);
+    }
+
+    /**
+     * The same readback, without the promise. WebGL2 only, and it exists because two engine callers
+     * genuinely are synchronous today: `Renderer.screenshotOffscreen` and `Renderer.renderProbePreview`
+     * both return a data URL from a straight-line call, and the editor's thumbnail capture is built on
+     * that. Threading `await` through those is a real API break (see the roadmap, M7.11) and belongs in
+     * its own change — but the GL work has no business staying in the renderer until then, so it lives
+     * here and {@link readPixels} is a thin wrapper over it. WebGPU has no counterpart and never will.
+     */
+    /**
+     * Copy a rectangle from one texture view to another.
+     *
+     * WebGPU has a real copy command; WebGL2 has `blitFramebuffer`, which needs the two textures
+     * attached to a READ and a DRAW framebuffer first. Two scratch framebuffers are kept for it
+     * rather than going through `createRenderTarget`: those are deduped and retained for the life of
+     * their attachments, and a copy is a transient thing whose source changes with every resize.
+     *
+     * The buffer bit is chosen from the DESTINATION's format, because that is what decides which
+     * attachment point the blit has to write — a depth texture blitted as colour is silently a no-op.
+     */
+    public copyTexture(source: WebGL2TextureView, destination: WebGL2TextureView,
+                       width: number, height: number): void {
+        if (!this._copyRead) this._copyRead = this.createFramebuffer('copyRead');
+        if (!this._copyDraw) this._copyDraw = this.createFramebuffer('copyDraw');
+        const depth = isDepthFormat(destination.texture.format);
+
+        // ATTACH FIRST, one framebuffer bound at a time.
+        //
+        // `framebufferTexture2D` writes to the DRAW binding — `gl.FRAMEBUFFER` is an alias for it —
+        // so attaching while READ and DRAW point at different objects lands BOTH attachments on the
+        // draw one. The read framebuffer then has no depth, the blit reads an incomplete framebuffer,
+        // and every later draw raises INVALID_FRAMEBUFFER_OPERATION rather than the blit itself
+        // failing where you could see it.
+        this._copyRead.bind();
+        if (depth) { this._copyRead.attachDepth(source); this._copyRead.setDrawBuffers(0); }
+        else { this._copyRead.attachColor(0, source); this._copyRead.setDrawBuffers(1); }
+
+        this._copyDraw.bind();
+        if (depth) { this._copyDraw.attachDepth(destination); this._copyDraw.setDrawBuffers(0); }
+        else { this._copyDraw.attachColor(0, destination); this._copyDraw.setDrawBuffers(1); }
+
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this._copyRead.handle);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this._copyDraw.handle);
+        gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                           depth ? gl.DEPTH_BUFFER_BIT : gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
+    public readPixelsSync(view: WebGL2TextureView, x: number, y: number,
+                          width: number, height: number): Uint8Array {
+        const format = view.texture.format;
+        if (isDepthFormat(format)) throw new Error(`readPixels cannot read the depth format ${format}`);
+        if (TEXTURE_FORMAT_INFO[format].bytesPerTexel !== 4)
+            throw new Error(`readPixels needs an 8-bit colour target on WebGL2; this one is ${format}`);
+
+        if (!this._readbackFramebuffer) this._readbackFramebuffer = this.createFramebuffer('readback');
+        const framebuffer = this._readbackFramebuffer;
+        framebuffer.bind();
+        framebuffer.attachColor(0, view);
+        framebuffer.setDrawBuffers(1);
+        gl.readBuffer(gl.COLOR_ATTACHMENT0);
+
+        const out = new Uint8Array(width * height * 4);
+        gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, out);
+
+        // Detach before unbinding, so the scratch framebuffer never holds a reference that would keep a
+        // deleted texture's storage alive — or, worse, be read back on the next call.
+        framebuffer.detachColor(0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return out;
+    }
+
+    // -- vertex state owned by a caller ------------------------------------------------------------
+
+    /**
+     * A vertex array object, owned by the caller.
+     *
+     * WebGL2-only, and it has no WebGPU counterpart at all — there a pipeline carries its vertex layouts
+     * and buffers are bound per draw, which is what {@link vertexArrayFor} builds for draws recorded
+     * through a pass encoder. This is the OTHER kind: `Mesh` and `TileMesh` still own a VAO each and
+     * bind it themselves. Tracked so `destroy()` releases one the caller forgot, which is the same
+     * reason buffers and textures are tracked.
+     */
+    public createVertexArray(): WebGLVertexArrayObject {
+        const vao = gl.createVertexArray() as WebGLVertexArrayObject;
+        this._ownedVertexArrays.add(vao);
+        return vao;
+    }
+
+    public deleteVertexArray(vao: WebGLVertexArrayObject): void {
+        this._ownedVertexArrays.delete(vao);
+        gl.deleteVertexArray(vao);
+    }
+
+    /**
+     * Point the current VAO's element binding at `buffer`.
+     *
+     * The element binding is VAO state rather than global state, which is exactly why this exists as a
+     * call at all: a mesh with LOD levels has several index buffers over one vertex buffer, and
+     * selecting a level means re-pointing this. `RenderPassEncoder.setIndexBuffer` is the same idea for
+     * draws recorded through the RHI.
+     */
+    public bindIndexBuffer(buffer: WebGL2Buffer): void {
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer.handle);
+    }
+
     /** WebGL2 issues everything as it is recorded, so `finish()` is a no-op — see WebGL2CommandEncoder. */
     public createCommandEncoder(_label?: string): WebGL2CommandEncoder {
         return new WebGL2CommandEncoder((target, descriptor) =>
-            this.beginRenderPass(target as unknown as RenderPassTarget, descriptor));
+            this.beginRenderPass(target as WebGL2RenderTarget, descriptor));
     }
 
     public destroy(): void {
+        // Targets first: each owns a framebuffer, and destroying it removes it from `_framebuffers`.
+        for (const target of [...this._renderTargets.values()]) target.destroy();
+        this._renderTargets.clear();
+        this._targetsByTexture.clear();
+        this._surfaceTarget = null;
+        this._readbackFramebuffer = null;
         for (const framebuffer of [...this._framebuffers]) framebuffer.destroy();
         this._framebuffers.clear();
         for (const buffer of [...this._buffers]) buffer.destroy();
@@ -285,6 +543,8 @@ export class WebGL2Device {
         for (const byBuffers of this._vertexArrays.values())
             for (const vao of byBuffers.values()) gl.deleteVertexArray(vao);
         this._vertexArrays.clear();
+        for (const vao of this._ownedVertexArrays) gl.deleteVertexArray(vao);
+        this._ownedVertexArrays.clear();
     }
 }
 
@@ -364,6 +624,9 @@ export class WebGL2Buffer implements Buffer {
  * itself as 16-bit — inflating the reported total by 2x exactly when memory pressure mattered most.
  */
 export class WebGL2Texture implements Texture {
+    /** Stable identity, for cache keys — see {@link viewKey}. A WebGLTexture handle cannot be one. */
+    public readonly id: number = ++WebGL2Texture._nextId;
+    private static _nextId = 0;
     public readonly label: string;
     public readonly format: TextureFormat;
     public readonly dimension: TextureDimension;
@@ -531,6 +794,36 @@ export class WebGL2Texture implements Texture {
         gl.texSubImage2D(this.target, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
     }
 
+    /**
+     * Write tightly packed texels into one mip level, and one layer or cube face, of existing storage.
+     *
+     * The WebGL2 half of {@link WebGL2Device.writeTexture}. Never flipped: `queue.writeTexture` has no
+     * flip and neither does this, so the same bytes land in the same texels on both backends — a
+     * difference that would otherwise show up only as an upside-down texture in one build.
+     *
+     * A sub-image, never an allocation. `arrayLayer` selects a cube FACE on a cubemap and a layer or
+     * slice on an array or volume, which is the same distinction {@link WebGL2Framebuffer.attachColor}
+     * makes for the other direction.
+     */
+    public write(data: ArrayBufferView, width: number, height: number,
+                 mipLevel: number, arrayLayer: number): void {
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        switch (this.dimension) {
+            case 'cube':
+                gl.texSubImage2D(WebGL2Texture.cubeFaces()[arrayLayer], mipLevel, 0, 0, width, height,
+                                 this._glFormat, this._type, data);
+                break;
+            case '2d-array':
+            case '3d':
+                gl.texSubImage3D(this.target, mipLevel, 0, 0, arrayLayer, width, height, 1,
+                                 this._glFormat, this._type, data);
+                break;
+            default:
+                gl.texSubImage2D(this.target, mipLevel, 0, 0, width, height,
+                                 this._glFormat, this._type, data);
+        }
+    }
+
     /** Immutable storage for a renderable cubemap: `levels` mips per face. */
     public allocateCube(size: number, levels: number): void {
         gl.texStorage2D(gl.TEXTURE_CUBE_MAP, levels, this._internalFormat, size, size);
@@ -635,31 +928,22 @@ export class WebGL2Texture implements Texture {
 }
 
 /**
- * A framebuffer object.
+ * The identity of a view, for the render-target cache.
  *
- * Thin on purpose: in WebGL2 a framebuffer really is just a name that attachments hang off, and the
- * three classes above it attach very different things. Giving it a device-owned identity is what lets
- * the attachment shapes converge on one `RenderTarget` descriptor later without also having to move
- * every attachment call in the same change.
+ * Texture id rather than the `WebGLTexture` object because a handle is opaque and cannot be part of a
+ * string key — the same reason {@link WebGL2Buffer} carries an id for the VAO cache.
  */
-/**
- * What a render pass draws into: a framebuffer and its size, or `null` for the default framebuffer.
- *
- * Deliberately not the full RHI `RenderTarget` yet — that names its attachments as texture views, and
- * the three framebuffer classes still own their own attachment wiring. This is the part every pass
- * needs today, and it is what the engine-level Framebuffer/CubeFramebuffer/LayeredDepthFramebuffer
- * hand over when they open a pass.
- */
-export interface RenderPassTarget {
-    readonly framebuffer: WebGL2Framebuffer | null;
-    readonly width: number;
-    readonly height: number;
-    /** The array depth texture, when a pass renders into one of its layers. See beginRenderPass. */
-    readonly depthTexture?: WebGLTexture | null;
-    /** Colour attachments this target has. Absent for a caller that manages draw buffers itself. */
-    readonly colorCount?: number;
+function viewKey(view: WebGL2TextureView): string {
+    return `${view.texture.id}:${view.baseMipLevel}:${view.baseArrayLayer}`;
 }
 
+/**
+ * A framebuffer object.
+ *
+ * Thin on purpose: in WebGL2 a framebuffer really is just a name that attachments hang off. What hangs
+ * off it now is decided by {@link WebGL2Device.createRenderTarget} from the DIMENSION of each view's
+ * texture, which is what let the engine's three framebuffer classes collapse into one shape.
+ */
 export class WebGL2Framebuffer {
     public readonly label: string;
 
@@ -674,6 +958,44 @@ export class WebGL2Framebuffer {
 
     /** Make this the current draw target. Viewport and clears are a pass concern — see beginRenderPass. */
     public bind(): void { gl.bindFramebuffer(gl.FRAMEBUFFER, this.handle); }
+
+    /**
+     * Attach a colour view, picking the entry point from the view's texture dimension.
+     *
+     * The dispatch is the whole collapse: a 2D target, a cube FACE and one LAYER of an array are three
+     * WebGL2 calls but one WebGPU concept, and choosing between them from the texture rather than from a
+     * caller-supplied flag is what removed the need for three framebuffer classes.
+     */
+    public attachColor(index: number, view: WebGL2TextureView): void {
+        const texture = view.texture;
+        switch (texture.dimension) {
+            case 'cube':
+                this.attachColorCubeFace(index, texture.handle, view.baseArrayLayer, view.baseMipLevel);
+                break;
+            case '2d-array':
+            case '3d':
+                this.attachColorLayer(index, texture.handle, view.baseArrayLayer, view.baseMipLevel);
+                break;
+            default:
+                this.attachColor2D(index, texture.handle, view.baseMipLevel);
+        }
+    }
+
+    /** Attach a depth view. The same dispatch as {@link attachColor}; a cube depth face is not a case
+     *  the engine has, so it is not silently mis-attached — it throws. */
+    public attachDepth(view: WebGL2TextureView): void {
+        const texture = view.texture;
+        switch (texture.dimension) {
+            case '2d-array':
+            case '3d':
+                this.attachDepthLayer(texture.handle, view.baseArrayLayer, view.baseMipLevel);
+                break;
+            case 'cube':
+                throw new Error(`Framebuffer "${this.label}": a cube face cannot be a depth attachment`);
+            default:
+                this.attachDepth2D(texture.handle, view.baseMipLevel);
+        }
+    }
 
     /** Attach a 2D colour target. `mip` selects a level of a mipmapped target. */
     public attachColor2D(index: number, texture: WebGLTexture, mip: number = 0): void {
@@ -694,6 +1016,11 @@ export class WebGL2Framebuffer {
      */
     public attachColorLayer(index: number, texture: WebGLTexture, layer: number, mip: number = 0): void {
         gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + index, texture, mip, layer);
+    }
+
+    /** Release colour attachment `index`. Used by the readback scratch framebuffer between calls. */
+    public detachColor(index: number): void {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + index, gl.TEXTURE_2D, null, 0);
     }
 
     public attachDepth2D(texture: WebGLTexture, mip: number = 0): void {

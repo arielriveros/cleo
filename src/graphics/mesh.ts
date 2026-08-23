@@ -1,7 +1,10 @@
+// The last raw GL in this file is the six draw calls below. They stay because a draw belongs on a
+// render-pass encoder (`RenderPassEncoder.drawIndexed`), not on a device method invented to hold it —
+// and moving Mesh onto the encoder is the geometry-pass migration, not this one.
 import { gl } from './glContext';
 import type { PrimitiveTopology, IndexFormat } from './rhi/types';
-import { glTopology, isTriangleTopology } from './rhi/webgl2/glEnums';
-import { applyVertexLayout, clearVertexLayout } from './rhi/webgl2/vertexArray';
+import { glTopology, isTriangleTopology, glIndexType, indexByteSize } from './rhi/webgl2/glEnums';
+import { applyVertexLayout, clearVertexLayout, applyReflectedAttribute } from './rhi/webgl2/vertexArray';
 // The backend buffer type, not the RHI `Buffer` interface: Mesh still builds its own VAO, which is a
 // WebGL2-only construct that needs the raw handle. It becomes `Buffer` once render pipelines take over
 // vertex-layout ownership and the VAO disappears (M5).
@@ -15,7 +18,7 @@ import {
 import { GLState } from './systems/glState';
 import { ShaderManager } from './systems/shaderManager';
 import { frameStats } from './renderStats';
-import { createIndexArray, glTypeFor } from './indexFormat';
+import { createIndexArray, indexFormatFor } from './indexFormat';
 
 /** Interleaved vertex data. `Float32Array` is the fast path — it is uploaded without a copy. */
 export type VertexData = Float32Array | number[];
@@ -34,22 +37,23 @@ export class Mesh {
     private _boneWeightsBuffer: GpuBuffer | null;
     private _vertexCount: number;
     private _indexCount: number;
-    // GL element type of _indexBuffer — UNSIGNED_SHORT or UNSIGNED_INT, chosen per upload by index range.
-    // Meshes over 65535 vertices need the wider type; narrowing them was silently scrambling geometry.
-    private _indexType: number;
+    // How to read _indexBuffer — uint16 or uint32, chosen per upload by index range. Meshes over 65535
+    // vertices need the wider type; narrowing them was silently scrambling geometry. Held as the RHI's
+    // format rather than the GL enum, so the only place the two meet is the draw call itself.
+    private _indexFormat: IndexFormat;
     private _isAnimated: boolean;
     // Alternate index buffers over the SAME vertex buffer (level 0 = the base one). Terrain LOD only.
     private _lodBuffers: GpuBuffer[] = [];
     private _lodCounts: number[] = [];
-    // Element type per LOD level, parallel to _lodCounts. Levels index the same vertex buffer as the base,
+    // Index format per LOD level, parallel to _lodCounts. Levels index the same vertex buffer as the base,
     // so they can never need a wider type than it — but create() does not keep the base index array, so a
     // single per-mesh type could never be widened after the fact if that assumption ever broke. Per-level
     // costs a 3-entry array and mirrors the _lodBuffers/_lodCounts level-0 aliasing exactly.
-    private _lodTypes: number[] = [];
+    private _lodFormats: IndexFormat[] = [];
     private _lod: number = 0;
 
     constructor() {
-        this._vertexArray = gl.createVertexArray() as WebGLVertexArrayObject;
+        this._vertexArray = device.createVertexArray();
         // VERTEX | COPY_DST: the geometry is written after creation, and terrain sculpting rewrites it
         // in place through updateVertexData — which is also what earns it a DYNAMIC_DRAW hint.
         this._vertexBuffer = device.createBuffer({ label: 'mesh.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
@@ -58,7 +62,7 @@ export class Mesh {
         this._boneWeightsBuffer = null;
         this._vertexCount = 0;
         this._indexCount = 0;
-        this._indexType = gl.UNSIGNED_SHORT;
+        this._indexFormat = 'uint16';
         this._isAnimated = false;
     }
 
@@ -66,7 +70,7 @@ export class Mesh {
         GLState.bindVAO(this._vertexArray);
 
         // No copy when the caller already has a Float32Array — which Geometry.getData now returns.
-        device.reallocateBuffer(this._vertexBuffer, asF32(vertices));
+        this._vertexBuffer = device.reallocateBuffer(this._vertexBuffer, asF32(vertices));
         this._vertexCount = vertex_count;
 
         // `indices.length`, not just `indices`: an empty array is truthy, so a geometry with no indices
@@ -74,9 +78,9 @@ export class Mesh {
         // The draw paths already gate on `_indexCount > 0`, so this only skips the pointless allocation.
         if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
-            this._indexType = glTypeFor(data);
+            this._indexFormat = indexFormatFor(data);
             this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX });
-            device.reallocateBuffer(this._indexBuffer, data);
+            this._indexBuffer = device.reallocateBuffer(this._indexBuffer, data);
             this._indexCount = indices.length;
         }
 
@@ -104,27 +108,27 @@ export class Mesh {
         GLState.bindVAO(this._vertexArray);
         
         // Create and bind main vertex buffer (positions, normals, uvs, tangents, bitangents)
-        device.reallocateBuffer(this._vertexBuffer, new Float32Array(vertices));
+        this._vertexBuffer = device.reallocateBuffer(this._vertexBuffer, new Float32Array(vertices));
         this._vertexCount = vertex_count;
 
         // Create and bind bone indices buffer
         const boneIndexData = new Int32Array(boneIndices);
         this._boneIndicesBuffer = device.createBuffer({ label: 'mesh.boneIndices', size: 0, usage: BufferUsage.VERTEX });
-        device.reallocateBuffer(this._boneIndicesBuffer, boneIndexData);
+        this._boneIndicesBuffer = device.reallocateBuffer(this._boneIndicesBuffer, boneIndexData);
 
         // Create and bind bone weights buffer
         const boneWeightData = new Float32Array(boneWeights);
         this._boneWeightsBuffer = device.createBuffer({ label: 'mesh.boneWeights', size: 0, usage: BufferUsage.VERTEX });
-        device.reallocateBuffer(this._boneWeightsBuffer, boneWeightData);
+        this._boneWeightsBuffer = device.reallocateBuffer(this._boneWeightsBuffer, boneWeightData);
 
         // `indices.length`, not just `indices`: an empty array is truthy, so a geometry with no indices
         // used to allocate a zero-length index buffer that no draw could ever use — and that nothing frees.
         // The draw paths already gate on `_indexCount > 0`, so this only skips the pointless allocation.
         if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
-            this._indexType = glTypeFor(data);
+            this._indexFormat = indexFormatFor(data);
             this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX });
-            device.reallocateBuffer(this._indexBuffer, data);
+            this._indexBuffer = device.reallocateBuffer(this._indexBuffer, data);
             this._indexCount = indices.length;
         }
 
@@ -148,20 +152,20 @@ export class Mesh {
         for (let i = 1; i < this._lodBuffers.length; i++) this._lodBuffers[i].destroy();
         this._lodBuffers = [this._indexBuffer];
         this._lodCounts = [this._indexCount];
-        this._lodTypes = [this._indexType];
+        this._lodFormats = [this._indexFormat];
         for (const indices of levels) {
             const data = createIndexArray(indices);
-            const buffer = device.createBuffer({ label: 'mesh.lodIndices', size: 0, usage: BufferUsage.INDEX });
-            device.reallocateBuffer(buffer, data);
+            let buffer = device.createBuffer({ label: 'mesh.lodIndices', size: 0, usage: BufferUsage.INDEX });
+            buffer = device.reallocateBuffer(buffer, data) as typeof buffer;
             this._lodBuffers.push(buffer);
             this._lodCounts.push(indices.length);
-            this._lodTypes.push(glTypeFor(data));
+            this._lodFormats.push(indexFormatFor(data));
         }
         this._lod = Math.min(this._lod, this._lodBuffers.length - 1);
 
         // Leave this VAO pointing at a valid index buffer (the uploads left the last level bound); every
         // subsequent draw re-binds the selected level anyway, since `hasLods` is now true.
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod].handle);
+        device.bindIndexBuffer(this._lodBuffers[this._lod]);
         GLState.bindVAO(null);
     }
 
@@ -183,7 +187,7 @@ export class Mesh {
         for (let i = 1; i < this._lodBuffers.length; i++) this._lodBuffers[i].destroy();
         this._lodBuffers = [];
         this._lodCounts = [];
-        this._lodTypes = [];
+        this._lodFormats = [];
         this._lod = 0;
 
         if (this._indexBuffer) { this._indexBuffer.destroy(); this._indexBuffer = null; }
@@ -195,7 +199,7 @@ export class Mesh {
             // Same trap as the shader program: GLState dedupes bindVertexArray by identity, so a deleted
             // VAO left in the cache would make the next bind of it a no-op.
             if (GLState.currentVAO === this._vertexArray) GLState.reset();
-            gl.deleteVertexArray(this._vertexArray);
+            device.deleteVertexArray(this._vertexArray);
             this._vertexArray = null!;
         }
 
@@ -217,9 +221,9 @@ export class Mesh {
         // With LODs, the element binding is VAO state that the last draw may have left on another level,
         // so the selected level's buffer is (re)bound every draw.
         if (this.hasLods) {
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[this._lod].handle);
+            device.bindIndexBuffer(this._lodBuffers[this._lod]);
             const lodCount = this._lodCounts[this._lod];
-            gl.drawElements(mode, lodCount, this._lodTypes[this._lod], 0);
+            gl.drawElements(mode, lodCount, glIndexType(this._lodFormats[this._lod]), 0);
             frameStats.drawCalls++;
             frameStats.vertices += lodCount;
             if (triangles) frameStats.triangles += lodCount / 3;
@@ -227,7 +231,7 @@ export class Mesh {
         }
         const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
         if (this._indexBuffer && this._indexCount > 0)
-            gl.drawElements(mode, this._indexCount, this._indexType, 0);
+            gl.drawElements(mode, this._indexCount, glIndexType(this._indexFormat), 0);
         else
             gl.drawArrays(mode, 0, this._vertexCount);
         // Perf stats: every GL draw funnels through here (incl. fullscreen post-process quads).
@@ -248,9 +252,9 @@ export class Mesh {
         if (indexCount <= 0 || !this._indexBuffer || this._indexCount <= 0) return;
         GLState.bindVAO(this._vertexArray);
         ShaderManager.Instance.flushBound();
-        if (this.hasLods) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._lodBuffers[0].handle);
-        const bytesPerIndex = this._indexType === gl.UNSIGNED_SHORT ? 2 : 4;
-        gl.drawElements(glTopology(topology), indexCount, this._indexType, indexOffset * bytesPerIndex);
+        if (this.hasLods) device.bindIndexBuffer(this._lodBuffers[0]);
+        const byteOffset = indexOffset * indexByteSize(this._indexFormat);
+        gl.drawElements(glTopology(topology), indexCount, glIndexType(this._indexFormat), byteOffset);
         frameStats.drawCalls++;
         frameStats.vertices += indexCount;
         if (isTriangleTopology(topology)) frameStats.triangles += indexCount / 3;
@@ -260,11 +264,11 @@ export class Mesh {
         GLState.bindVAO(this._vertexArray);
         ShaderManager.Instance.flushBound();
         const mode = glTopology(topology);
-        // Note this path ignores LODs entirely — it always draws the base index buffer, so _indexType
-        // (level 0's type) is the right one to read. Pre-existing behaviour; foliage never sets LODs.
+        // Note this path ignores LODs entirely — it always draws the base index buffer, so _indexFormat
+        // (level 0's format) is the right one to read. Pre-existing behaviour; foliage never sets LODs.
         const count = (this._indexBuffer && this._indexCount > 0) ? this._indexCount : this._vertexCount;
         if (this._indexBuffer && this._indexCount > 0)
-            gl.drawElementsInstanced(mode, this._indexCount, this._indexType, 0, instanceCount);
+            gl.drawElementsInstanced(mode, this._indexCount, glIndexType(this._indexFormat), 0, instanceCount);
         else
             gl.drawArraysInstanced(mode, 0, this._vertexCount, instanceCount);
         // Perf stats: instanced draws (PBR batches + foliage).
@@ -287,8 +291,7 @@ export class Mesh {
         // Fallback for any non-standard attribute: trust the reflected layout.
         for (const attr of attributes) {
             if (isModelAttribute(attr.name)) continue;
-            gl.enableVertexAttribArray(attr.location);
-            gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
+            applyReflectedAttribute(attr.location, attr.layout);
         }
 
         GLState.bindVAO(null);
@@ -322,8 +325,7 @@ export class Mesh {
             const name: string = attr.name;
             if (name === 'a_boneIds' || name === 'a_weights') continue; // dedicated buffers, below
             if (MODEL_VERTEX_LAYOUT.attributes.some(a => a.name === name)) continue;
-            gl.enableVertexAttribArray(attr.location);
-            gl.vertexAttribPointer(attr.location, attr.layout.size, attr.layout.type, false, attr.layout.stride, attr.layout.offset);
+            applyReflectedAttribute(attr.location, attr.layout);
         }
 
         // Find the bone attributes in the shader
@@ -383,11 +385,11 @@ export class Mesh {
     /**
      * The index buffer and how to read it, for a draw recorded through the RHI.
      *
-     * `indexFormat` mirrors `_indexType`, which is chosen per upload by index range — a mesh over 65535
-     * vertices needs the wider type, and narrowing it silently scrambles geometry.
+     * The format is chosen per upload by index range — a mesh over 65535 vertices needs the wider type,
+     * and narrowing it silently scrambles geometry.
      */
     public get indexBuffer(): GpuBuffer | null { return this._indexBuffer; }
-    public get indexFormat(): IndexFormat { return this._indexType === gl.UNSIGNED_INT ? 'uint32' : 'uint16'; }
+    public get indexFormat(): IndexFormat { return this._indexFormat; }
     public get indexCount(): number { return this._indexCount; }
     /** The dedicated bone buffers, for a skinned draw recorded through the RHI. */
     public get boneIndicesBuffer(): GpuBuffer | null { return this._boneIndicesBuffer; }
@@ -405,8 +407,7 @@ export class Mesh {
         return this.hasLods ? this._lodCounts[this._lod] : this._indexCount;
     }
     public get activeIndexFormat(): IndexFormat {
-        const type = this.hasLods ? this._lodTypes[this._lod] : this._indexType;
-        return type === gl.UNSIGNED_INT ? 'uint32' : 'uint16';
+        return this.hasLods ? this._lodFormats[this._lod] : this._indexFormat;
     }
     public get vertexCount(): number { return this._vertexCount; }
     public get isAnimated(): boolean { return this._isAnimated; }

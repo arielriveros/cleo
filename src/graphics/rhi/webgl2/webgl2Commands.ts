@@ -30,9 +30,9 @@ import {
     glCompare, glBlendFactor, glBlendOperation, glCullMode, glFrontFace,
     glTopology, glIndexType, indexByteSize, isTriangleTopology,
 } from './glEnums';
-import { frameStats } from '../../renderStats';
+import { frameStats, setViewportSize } from '../../renderStats';
 import { device } from './webgl2Device';
-import type { WebGL2Texture, WebGL2Buffer } from './webgl2Device';
+import type { WebGL2Texture, WebGL2Buffer, WebGL2Framebuffer } from './webgl2Device';
 import type {
     RenderPipelineDescriptor, BindGroupDescriptor, ShaderModuleDescriptor,
     RenderPassEncoder, CommandEncoder,
@@ -220,28 +220,63 @@ export class WebGL2Sampler implements Sampler {
 /**
  * A render target: a framebuffer plus the views attached to it.
  *
- * Carries `framebuffer`/`width`/`height` as well as the RHI's `colorViews`/`depthView` because the pass
- * boundary still binds by framebuffer handle. The views are what a *later* migration will attach with,
- * once `Framebuffer`, `CubeFramebuffer` and `LayeredDepthFramebuffer` collapse into this one shape.
+ * This is what `Framebuffer`, `CubeFramebuffer` and `LayeredDepthFramebuffer` all collapse into. The
+ * three existed separately because each reallocated its attachments differently — N 2D colour targets,
+ * one cube face swapped per draw, one layer of an immutable depth array — and under the RHI that
+ * difference is nothing more than which {@link WebGL2TextureView}s are attached. Build one through
+ * {@link WebGL2Device.createRenderTarget}, which owns the framebuffer and the attachment calls.
  *
- * A `framebuffer` of null is the default framebuffer — the screen.
+ * A `framebuffer` of null is the default framebuffer — the screen. That is the one target nothing
+ * allocates, which is why `owned` is false for it and for it alone.
  */
 export class WebGL2RenderTarget implements RenderTarget {
     public readonly label: string;
-    constructor(public readonly framebuffer: { handle: WebGLFramebuffer } | null,
+    constructor(public readonly framebuffer: WebGL2Framebuffer | null,
                 public readonly width: number,
                 public readonly height: number,
                 public readonly colorViews: readonly WebGL2TextureView[] = [],
                 public readonly depthView: WebGL2TextureView | undefined = undefined,
                 label: string = 'render-target',
-                /** Raw handle of an ARRAY depth texture, for a pass that renders into one layer. */
-                public readonly depthTexture: WebGLTexture | null = null) {
+                /** Whether destroying this target releases the framebuffer object underneath it. */
+                private readonly _owned: boolean = false) {
         this.label = label;
     }
 
     /** What the pass should set draw buffers to. See WebGL2Device.beginRenderPass. */
     public get colorCount(): number { return this.colorViews.length; }
-    public destroy(): void { /* the framebuffer and its attachments are owned elsewhere */ }
+
+    /**
+     * Raw handle of a LAYERED depth attachment, for a pass that renders into one of its layers.
+     *
+     * Only an array or volume depth texture has one: a plain 2D depth attachment is already the whole
+     * thing and `depthAttachment.baseArrayLayer` means nothing against it. Returning null there is what
+     * keeps `beginRenderPass` from re-pointing an attachment that has no layers to point at.
+     */
+    public get depthTexture(): WebGLTexture | null {
+        if (!this.depthView) return null;
+        const dimension = this.depthView.texture.dimension;
+        return dimension === '2d-array' || dimension === '3d' ? this.depthView.texture.handle : null;
+    }
+
+    /**
+     * Make this the current draw target.
+     *
+     * The viewport comes with it by default, because a target and the viewport that covers it were only
+     * ever separate by accident — `Framebuffer.bind()` always set both, and every caller that forgot
+     * inherited the previous pass's size. `setViewport: false` is for the callers that deliberately
+     * drive a viewport of their own: the cube convolutions, which draw one mip at a time.
+     */
+    public bind(setViewport: boolean = true): void {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer ? this.framebuffer.handle : null);
+        if (!setViewport) return;
+        gl.viewport(0, 0, this.width, this.height);
+        setViewportSize(this.width, this.height);
+    }
+
+    /** Releases the framebuffer object only. The attachments belong to whoever allocated the textures. */
+    public destroy(): void {
+        if (this._owned) this.framebuffer?.destroy();
+    }
 }
 
 export class WebGL2BindGroup implements BindGroup {
@@ -260,8 +295,8 @@ export class WebGL2BindGroup implements BindGroup {
      *
      * Returns the next free unit so a pass can bind several groups without them colliding. Unit
      * assignment being the backend's business rather than the renderer's is the entire point of the
-     * exercise: it is what retires `SHADOW_UNIT = 6` / `SPOT_SHADOW_UNIT = 15` and the rule that a
-     * custom material silently drops every sampler past unit 15.
+     * exercise: it is what retired `SHADOW_UNIT = 6` / `SPOT_SHADOW_UNIT = 15` and the rule that a
+     * custom material silently dropped every sampler past unit 15.
      */
     public apply(shader: Shader, allocate: () => number): void {
         const module = this.layout.module;
@@ -293,8 +328,6 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
     private _pipeline: WebGL2RenderPipeline | null = null;
     /** Next free texture unit. Groups bind consecutively from 0, in the order they are set. */
     private _nextUnit = 0;
-    /** Units the caller has claimed outside the bind-group system. See reserveTextureUnits. */
-    private readonly _reserved = new Set<number>();
     /** Vertex buffers by slot, matching the pipeline's vertexLayouts. */
     private readonly _vertexBuffers: (WebGL2Buffer | null)[] = [];
     private _indexBuffer: WebGL2Buffer | null = null;
@@ -313,22 +346,14 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
     }
 
     /**
-     * Keep these texture units out of the allocator for this pass.
+     * Hand out the next texture unit.
      *
-     * Transitional, and it exists for exactly one situation: a pass whose bindings are PARTLY migrated.
-     * `deferredLighting` binds its G-buffer and IBL groups here while its shadow group is still bound by
-     * `_uploadShadowUniforms` at the renderer's hardcoded units — a helper shared with the forward
-     * passes, so it cannot move until they do. Without this the allocator would hand a cube texture the
-     * unit the shadow array already occupies: not a subtle error, a draw-time sampler-type collision.
-     *
-     * Delete this the moment nothing binds a texture unit outside a bind group.
+     * Reset to 0 by every `setPipeline`, so units are a PASS's business and no caller's. This used to
+     * skip a reserved set, because `SHADOW_UNIT = 6` and `SPOT_SHADOW_UNIT = 15` were bound by hand
+     * for the passes that had not migrated yet; every draw goes through a bind group now, so there is
+     * nothing left to step around.
      */
-    public reserveTextureUnits(units: readonly number[]): void {
-        for (const unit of units) this._reserved.add(unit);
-    }
-
     private _allocateUnit(): number {
-        while (this._reserved.has(this._nextUnit)) this._nextUnit++;
         return this._nextUnit++;
     }
 
@@ -412,8 +437,9 @@ export class WebGL2CommandEncoder implements CommandEncoder {
         return new WebGL2RenderPassEncoder();
     }
 
-    public copyTextureToTexture(): void {
-        throw new Error('WebGL2 RHI: use Framebuffer blit until copies are modelled');
+    public copyTextureToTexture(source: TextureView, destination: TextureView,
+                                width: number, height: number): void {
+        device.copyTexture(source as WebGL2TextureView, destination as WebGL2TextureView, width, height);
     }
 
     public finish(): void { /* WebGL2 issued everything as it was recorded */ }

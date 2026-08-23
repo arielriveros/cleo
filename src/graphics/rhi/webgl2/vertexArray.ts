@@ -52,3 +52,22 @@ export function clearVertexLayout(layout: VertexBufferLayout): void {
         gl.disableVertexAttribArray(attribute.shaderLocation);
     }
 }
+
+/**
+ * Bind one attribute straight from a linked program's REFLECTED layout, bypassing the declared one.
+ *
+ * The fallback path in `Mesh`, for an attribute the engine's own vertex layouts do not describe — a
+ * custom material declaring something the standard model vertex has no name for. `layout.type` is a raw
+ * GL enum read back from `getActiveAttrib`, which is exactly why this cannot go through
+ * {@link applyVertexLayout}: there is no `VertexFormat` to name it with.
+ *
+ * It has no WebGPU counterpart and cannot get one — a pipeline there must declare every attribute's
+ * format up front. An attribute reached this way is therefore WebGL2-only by construction, and saying so
+ * here is better than the two hand-inlined copies that used to sit in mesh.ts saying nothing.
+ */
+export function applyReflectedAttribute(
+    location: number, layout: { size: number; type: number; stride: number; offset: number },
+): void {
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, layout.size, layout.type, false, layout.stride, layout.offset);
+}

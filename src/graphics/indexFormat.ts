@@ -11,6 +11,8 @@
 // triangles with nothing logged. The glTF loader had already decoded 32-bit indices correctly; the data
 // was only destroyed on upload.
 
+import type { IndexFormat } from './rhi/types';
+
 /**
  * First index value that `UNSIGNED_SHORT` cannot carry — 65535, not 65536.
  *
@@ -74,4 +76,16 @@ export function createIndexArray(indices: ArrayLike<number>): Uint16Array | Uint
 /** The GL element type matching an array from {@link createIndexArray}. */
 export function glTypeFor(array: Uint16Array | Uint32Array): number {
     return array instanceof Uint32Array ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
+}
+
+/**
+ * The RHI index format matching an array from {@link createIndexArray}.
+ *
+ * The backend-neutral counterpart of {@link glTypeFor}, and the one meshes now carry: a `Mesh` used to
+ * hold the GL enum itself, which made `Mesh.indexFormat` a translation back out of a value that had no
+ * meaning on any other backend. `glTypeFor` stays because the GL enums are still what the WebGL2 draw
+ * path needs, and `rhi/webgl2/glEnums.ts` derives them from this.
+ */
+export function indexFormatFor(array: Uint16Array | Uint32Array): IndexFormat {
+    return array instanceof Uint32Array ? 'uint32' : 'uint16';
 }

@@ -49,8 +49,14 @@ app.whenReady().then(async () => {
     const win = new BrowserWindow({ width: 900, height: 700, show: false, webPreferences: { contextIsolation: true } });
     const consoleErrors = [];
     win.webContents.on('console-message', (_e, level, message) => {
-        // Electron's own insecure-CSP notice is not ours and fires on every page.
-        if (level >= 2 && !message.includes('Electron Security Warning')) consoleErrors.push(message.slice(0, 300));
+        // Notices that are Chromium's, not ours, and fire regardless of what this page does:
+        //   - the insecure-CSP warning, on every Electron page;
+        //   - powerPreference being ignored by requestAdapter on Windows (crbug.com/369219127). The
+        //     engine asks for 'high-performance' and that ask is correct; the platform simply does not
+        //     honour it yet, so the adapter is whichever one Windows picks. Worth knowing, not a failure
+        //     of the device tier, and it would otherwise fail every run on this OS.
+        const NOISE = ['Electron Security Warning', 'powerPreference option is currently ignored'];
+        if (level >= 2 && !NOISE.some(n => message.includes(n))) consoleErrors.push(message.slice(0, 300));
     });
     win.webContents.on('render-process-gone', (_e, details) => {
         console.log('!! renderer gone ' + JSON.stringify(details));

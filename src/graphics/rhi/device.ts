@@ -33,10 +33,10 @@ export type BackendKind = 'webgl2' | 'webgpu';
  * bearing today and simply have nowhere to live:
  *
  * - `maxSamplersPerStage` is the 16-texture-unit budget that ES 3.00 guarantees. renderer.ts encodes
- *   it as two hand-tuned constants (`SHADOW_UNIT = 6`, `SPOT_SHADOW_UNIT = 15`) with a comment
- *   explaining that the deferred pass sits at 15 of 16, and `_applyCustomMaterial` silently drops any
- *   user sampler that would land past unit 15. Under WebGPU that ceiling is gone; under WebGL2 it is
- *   whatever the driver reports, which is often higher than 16.
+ *   it as two hand-tuned constants (`SHADOW_UNIT = 6`, `SPOT_SHADOW_UNIT = 15`), and
+ *   `_applyCustomMaterial` silently dropped any user sampler that would land past unit 15. Both are
+ *   gone: every draw assigns units through a bind group now, so the budget is the backend's business
+ *   — whatever the driver reports on WebGL2, and no ceiling at all on WebGPU.
  * - `floatRenderable` / `floatFilterable` are the `EXT_color_buffer_float` and
  *   `OES_texture_float_linear` pair. The first is a hard `throw` in `preInitialize` today; the second
  *   is checked in texture.ts and, when absent, silently demotes every `precision: 'high'` target to
@@ -264,6 +264,20 @@ export interface Device {
     getCurrentSurfaceTarget(): RenderTarget;
 
     writeBuffer(buffer: Buffer, offset: number, data: ArrayBufferView): void;
+
+    /**
+     * Replace a buffer's contents, resizing it if the data no longer fits.
+     *
+     * **Returns the buffer to use from now on, which may not be the one passed in.** WebGL2 can
+     * re-specify storage on the same object with `bufferData`; a `GPUBuffer`'s size is fixed at
+     * creation, so growing one there means destroying it and making another. Modelling that as a
+     * return value rather than hiding it is the point: a caller that keeps its old handle would be
+     * holding a destroyed buffer on one backend and a live one on the other, and only one of those
+     * fails where you can see it.
+     *
+     * Callers that never resize should use {@link writeBuffer}, which is a plain upload on both.
+     */
+    reallocateBuffer(buffer: Buffer, data: ArrayBufferView): Buffer;
     writeTexture(texture: Texture, data: ArrayBufferView, width: number, height: number,
                  mipLevel?: number, arrayLayer?: number): void;
 

@@ -183,6 +183,12 @@ export class Texture {
     /** Release whichever unit this texture was last bound to. */
     public unbind(): void { this._gpu.unbind(); }
 
+    /** Close an upload: record the dimensions it established, then release the upload unit. */
+    private _finishUpload(): void {
+        this._syncGpuSize();
+        this.unbind();
+    }
+
     public create(data: HTMLImageElement | CubemapFaces | null, width: number = 0, height: number = 0): void {
         this._gpu.bindForUpload();
         this._data = data;
@@ -203,7 +209,7 @@ export class Texture {
 
                 if (!img.complete || img.naturalWidth === 0) {
                     Logger.error('Image not properly loaded before texture creation', 'Texture');
-                    this.unbind();
+                    this._finishUpload();
                     return;
                 }
             }
@@ -219,7 +225,7 @@ export class Texture {
             this._gpu.uploadCube(images, this._width, this._height, this._mipMap);
         }
 
-        this.unbind();
+        this._finishUpload();
     }
 
     /**
@@ -232,7 +238,7 @@ export class Texture {
         this._width = width;
         this._height = height;
         this._gpu.uploadBytes(data, width, height, glAddressMode(ADDRESS_MODES[wrapping]));
-        this.unbind();
+        this._finishUpload();
     }
 
     /** Upload a sub-rectangle of RGBA bytes (row-major, tightly packed) into an existing data texture. */
@@ -254,7 +260,7 @@ export class Texture {
             this._height = data.height;
         }
         this._gpu.upload2D(data, this._width, this._height, this._mipMap);
-        this.unbind();
+        this._finishUpload();
     }
 
     public updateFace(face: 'posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ', data: HTMLImageElement): void {
@@ -270,7 +276,7 @@ export class Texture {
         this._width = data.width;
         this._height = data.height;
         this._gpu.uploadFace(WebGL2Texture.cubeFaces()[order.indexOf(face)], data, this._mipMap);
-        this.unbind();
+        this._finishUpload();
     }
 
     /**
@@ -284,7 +290,7 @@ export class Texture {
         this._height = size;
         this._mipMap = levels > 1;
         this._gpu.allocateCube(size, levels);
-        this.unbind();
+        this._finishUpload();
     }
 
     /**
@@ -305,7 +311,7 @@ export class Texture {
         this._depth = depth;
         this._mipMap = false; // a tiling noise field wants a single level; mips would blur the tile seams
         this._gpu.allocateVolume(width, height, depth, glAddressMode(ADDRESS_MODES[wrapping]));
-        this.unbind();
+        this._finishUpload();
     }
 
     /**
@@ -329,7 +335,7 @@ export class Texture {
         this._depth = layers;
         this._mipMap = false;
         this._gpu.allocateDepthArray(size, layers, compare);
-        this.unbind();
+        this._finishUpload();
     }
 
     /** Toggle hardware depth comparison on a depth array/2D target. */
@@ -442,8 +448,12 @@ export class Texture {
     /**
      * Push the dimensions the upload paths established into the device texture.
      *
-     * Done on read rather than at every assignment: `_width`/`_height`/`_depth`/`_mipMap` are written
-     * from six different upload entry points, and mirroring each one is six chances to miss one.
+     * `_width`/`_height`/`_depth`/`_mipMap` are written from eight different upload entry points, and
+     * this used to run lazily on the `byteSize` read so none of them had to remember. That stopped being
+     * viable the moment a `TextureView` became a render-target attachment: `createRenderTarget` sizes
+     * the target from `view.texture.width`, and a texture nobody had asked the byte size of still
+     * reported 0 — which makes every pass into it a 1x1 viewport. So the sync is eager now, through the
+     * one exit {@link _finishUpload} that every upload path already shared.
      */
     private _syncGpuSize(): void {
         const slices = (this._gpu.dimension === '3d' || this._gpu.dimension === '2d-array')
