@@ -57,9 +57,15 @@ function structBody(wgsl, name) {
     return (wgsl.match(re) || [])[1] || '';
 }
 
-/** Line comments removed. Struct bodies here are heavily commented, and a `//` run can hide a field. */
+/**
+ * Comments removed, both kinds.
+ *
+ * Resource declarations and struct bodies here are heavily commented, and a comment can hide a
+ * declaration — or, for a BLOCK comment inside a struct, be split on its own commas into phantom
+ * fields with names taken from the prose.
+ */
 function stripLineComments(text) {
-    return text.replace(/\/\/[^\n]*/g, '');
+    return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 }
 
 /**

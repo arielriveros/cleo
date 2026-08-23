@@ -233,9 +233,14 @@ export class WebGL2RenderTarget implements RenderTarget {
                 public readonly height: number,
                 public readonly colorViews: readonly WebGL2TextureView[] = [],
                 public readonly depthView: WebGL2TextureView | undefined = undefined,
-                label: string = 'render-target') {
+                label: string = 'render-target',
+                /** Raw handle of an ARRAY depth texture, for a pass that renders into one layer. */
+                public readonly depthTexture: WebGLTexture | null = null) {
         this.label = label;
     }
+
+    /** What the pass should set draw buffers to. See WebGL2Device.beginRenderPass. */
+    public get colorCount(): number { return this.colorViews.length; }
     public destroy(): void { /* the framebuffer and its attachments are owned elsewhere */ }
 }
 

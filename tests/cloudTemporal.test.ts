@@ -9,20 +9,26 @@ import { join } from 'node:path';
 
 const SRC = join(__dirname, '..', 'src');
 const renderer = readFileSync(join(SRC, 'graphics', 'renderer.ts'), 'utf8');
-const resolveShader = readFileSync(join(SRC, 'graphics', 'shaders', 'environment', 'cloudTemporalResolve.fs'), 'utf8');
-const cloudShader = readFileSync(join(SRC, 'graphics', 'shaders', 'environment', 'volumetricClouds.fs'), 'utf8');
+// The cloud shaders are authored in WGSL now; the GLSL WebGL2 runs is generated from these at build
+// time. Every assertion below moved with them, so they still pin the same behaviour — but against the
+// source somebody edits rather than against generated text.
+const WGSL = join(SRC, 'graphics', 'shaders', 'wgsl');
+const resolveShader = readFileSync(join(WGSL, 'cloudTemporalResolve.wgsl'), 'utf8');
+const cloudShader = readFileSync(join(WGSL, 'volumetricClouds.wgsl'), 'utf8');
 
 /**
  * Pull an integer list out of a source file given the identifier that introduces it.
  *
- * Handles both the TS form (`X = [ ... ]`) and GLSL's constructor form (`X[16] = int[16]( ... )`) by
- * starting at the `=` and skipping any `int[N]` type prefix — otherwise the array-size brackets in
- * the GLSL declaration parse as the list itself.
+ * Handles the TS form (`X = [ ... ]`) and both shader constructor forms — GLSL's
+ * `X[16] = int[16]( ... )` and WGSL's `X = array<i32, 16>( ... )` — by starting at the `=` and
+ * skipping any type prefix, which would otherwise parse as the list itself.
  */
 function parseIntList(source: string, marker: string): number[] {
     const at = source.indexOf(marker);
     expect(at, `marker not found: ${marker}`).toBeGreaterThan(-1);
-    const body = source.slice(source.indexOf('=', at) + 1).replace(/^\s*int\s*\[\s*\d+\s*\]/, '');
+    const body = source.slice(source.indexOf('=', at) + 1)
+        .replace(/^\s*int\s*\[\s*\d+\s*\]/, '')
+        .replace(/^\s*array\s*<[^>]*>/, '');
     const openParen = body.indexOf('(');
     const openBracket = body.indexOf('[');
     const open = openParen >= 0 && (openBracket < 0 || openParen < openBracket) ? openParen : openBracket;
@@ -77,25 +83,28 @@ describe('cloud noise sampling', () => {
         // The dither must NOT redraw at random every frame. The temporal resolve accumulates over a
         // 16-frame Bayer cycle, so a per-frame random offset never averages out — it is simply frozen
         // into history and reads as grain over everything, including the meshes underneath.
-        expect(cloudShader).toMatch(/float ign\(vec2 p\)/);
-        expect(cloudShader).toMatch(/uniform int\s+u_jitterSlot/);
+        expect(cloudShader).toMatch(/fn ign\(p: vec2<f32>\)/);
+        expect(cloudShader).toMatch(/u_jitterSlot: i32/);
         expect(cloudShader).toMatch(/ign\(jitterPx\)/);
         expect(cloudShader).toMatch(/u_jitterSlot/);
         // u_time drives the wind, and must not creep back into the dither.
         expect(cloudShader).not.toMatch(/jitter\s*=[^;]*u_time/);
-        expect(cloudShader).not.toMatch(/hash13\s*\(/);
+        expect(cloudShader).not.toMatch(/\bhash13\s*\(/);
     });
 
     it('keys the dither to the reconstructed full-resolution pixel, not gl_FragCoord', () => {
         // In temporal mode gl_FragCoord is the TRACE buffer's coordinate (1/4 per axis), so keying
         // off it gives one full-res pixel an unrelated offset every time its block comes up — the
         // exact thing the accumulation cannot converge.
-        expect(cloudShader).toMatch(/jitterPx\s*=\s*u_temporal\s*\?\s*floor\(uv \* u_traceResolution \* 4\.0\)/);
+        // WGSL has no ternary, so the same decision is an `if`. What matters is unchanged: the key is
+        // the reconstructed full-resolution pixel, and it is gated on temporal mode.
+        expect(cloudShader).toMatch(/jitterPx = floor\(uv \* u_cloud\.u_traceResolution \* 4\.0\)/);
+        expect(cloudShader).toMatch(/u_cloud\.u_temporal != 0.*jitterPx = floor/);
     });
 
     it('samples both baked volumes', () => {
-        expect(cloudShader).toMatch(/uniform sampler3D u_baseNoise/);
-        expect(cloudShader).toMatch(/uniform sampler3D u_detailNoise/);
+        expect(cloudShader).toMatch(/u_baseNoise_texture: texture_3d<f32>/);
+        expect(cloudShader).toMatch(/u_detailNoise_texture: texture_3d<f32>/);
     });
 });
 
@@ -128,8 +137,8 @@ describe('temporal resolve depth rejection', () => {
         // This shipped as a dead uniform: declared with a comment promising disocclusion rejection,
         // bound by the renderer, and never read. The result was cloud radiance reprojected onto mesh
         // pixels and held there for up to 16 frames. A declaration alone must not pass again.
-        expect(resolveShader).toMatch(/uniform sampler2D u_gDepth/);
-        const reads = resolveShader.match(/texture\(u_gDepth/g) ?? [];
+        expect(resolveShader).toMatch(/u_gDepth_texture: texture_2d<f32>/);
+        const reads = resolveShader.match(/textureSample\(u_gDepth_texture/g) ?? [];
         expect(reads.length).toBeGreaterThan(0);
     });
 
@@ -149,7 +158,7 @@ describe('temporal resolve depth rejection', () => {
         // that a mesh 20m out and the sky behind it differ by a few thousandths, so any usable
         // epsilon still admits the sky. Compare whether each ray reached the cloud layer instead.
         expect(resolveShader).toMatch(/nbReaches\s*=\s*slabT < geometryDistance/);
-        expect(resolveShader).toMatch(/if \(nbReaches != reachesSlab\) continue/);
+        expect(resolveShader).toMatch(/if \(nbReaches != reachesSlab\) \{ continue; \}/);
     });
 
     it('accumulates on traced pixels instead of replacing', () => {
@@ -164,30 +173,33 @@ describe('temporal resolve depth rejection', () => {
         // u_traceResolution * 4. Dividing by the wrong one puts every depth fetch a fraction of a
         // block away from the sample it describes, and the depth test then rejects valid neighbours
         // along every edge — the same trap the u_traceResolution uniform comment warns about.
-        const fn = /vec2 traceSampleUV\([^)]*\)\s*\{([\s\S]*?)\}/.exec(resolveShader);
+        const fn = /fn traceSampleUV\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(resolveShader);
         expect(fn, 'traceSampleUV not found').not.toBeNull();
         expect(fn![1]).toContain('u_traceResolution * 4.0');
-        expect(fn![1]).not.toMatch(/u_resolution/);
+        // Anchored on a preceding character the longer name cannot supply. This read
+        // /\bu_resolution\b/ until its two escapes were saved as literal backspace bytes, after which it
+        // matched a control character followed by the name — never present, so it passed vacuously.
+        expect(fn![1]).not.toMatch(/[^e]u_resolution/);
     });
 });
 
 describe('cloud composite upsample', () => {
-    const upsampleShader = readFileSync(join(SRC, 'graphics', 'shaders', 'environment', 'cloudUpsample.fs'), 'utf8');
+    const upsampleShader = readFileSync(join(WGSL, 'cloudUpsample.wgsl'), 'utf8');
 
     it('decides occlusion at full resolution, not from the low-res alpha', () => {
         // One cloud texel covers a 2x2 screen block at scale 0.5 (4x4 at the low tiers) and its
         // occlusion came from a single depth sample at its centre. No filter can recover a silhouette
         // from that, so the composite re-runs the slab test per full-res pixel and hard-zeroes the
         // occluded ones. Without this the cloud halos every mesh and its edge crawls on the cloud grid.
-        expect(upsampleShader).toMatch(/bool reachesSlab\(vec2 uv\)/);
-        expect(upsampleShader).toMatch(/if \(!reachesSlab\(fragTexCoord\)\) \{ fragColor = vec4\(0\.0\); return; \}/);
+        expect(upsampleShader).toMatch(/fn reachesSlab\(uv: vec2<f32>\) -> bool/);
+        expect(upsampleShader).toMatch(/if \(!reachesSlab\(in\.uv\)\) \{ return vec4<f32>\(0\.0\); \}/);
     });
 
     it('gathers discrete texels and rejects the occluded ones', () => {
         // texelFetch, not texture(): the cloud targets are LINEAR-filtered, so a UV fetch would have
         // already blended neighbouring texels together before any weighting could reject them.
-        expect(upsampleShader).toMatch(/texelFetch\(u_clouds/);
-        expect(upsampleShader).not.toMatch(/texture\(u_clouds/);
+        expect(upsampleShader).toMatch(/textureLoad\(u_clouds_texture/);
+        expect(upsampleShader).not.toMatch(/textureSample\(u_clouds_texture/);
         // Renormalising over the surviving texels is what stops a dark notch hugging each silhouette.
         expect(upsampleShader).toMatch(/sum \/ weightSum/);
     });
@@ -197,7 +209,9 @@ describe('cloud composite upsample', () => {
         // separating a mesh from the sky behind it is not expressible as a relative tolerance. See the
         // same argument in cloudTemporalResolve.fs.
         expect(upsampleShader).not.toMatch(/TOLERANCE/);
-        expect(upsampleShader).not.toMatch(/#include/);
+        // The WGSL tree DOES use #include — for the shared fullscreen vertex chunk — so the check
+        // narrows to what it was actually guarding: no shared UPSAMPLE helper sneaking back in.
+        expect(upsampleShader).not.toMatch(/#include[^\n]*upsample/i);
         expect(existsSync(join(SRC, 'graphics', 'shaders', 'screen', 'depthAwareUpsample.glsl'))).toBe(false);
     });
 
@@ -215,9 +229,9 @@ describe('premultiplied alpha in the temporal resolve', () => {
         // GLSL clamp on a vec4 is per-component, so clamping a premultiplied sample can raise rgb
         // toward hi while dropping a toward lo, leaving rgb > a — a colour its own alpha cannot
         // represent, which composites as a bright fringe along every cloud edge.
-        expect(resolveShader).toMatch(/vec4 clampSample\(vec4 s\)/);
-        expect(resolveShader).toMatch(/vec3 unpremultiply\(vec4 s\)/);
-        expect(resolveShader).toMatch(/return vec4\(c \* a, a\);/);
+        expect(resolveShader).toMatch(/fn clampSample\(s: vec4<f32>, b: ClampBounds\)/);
+        expect(resolveShader).toMatch(/fn unpremultiply\(s: vec4<f32>\) -> vec3<f32>/);
+        expect(resolveShader).toMatch(/return vec4<f32>\(c \* a, a\);/);
         // No raw vec4 clamp against premultiplied bounds may remain.
         expect(resolveShader).not.toMatch(/clamp\([^)]*,\s*lo,\s*hi\)/);
     });

@@ -27,6 +27,21 @@ describe('splitStructMembers', () => {
         expect(splitStructMembers('a: f32; b: f32;').map(m => m.name)).toEqual(['a', 'b']);
     });
 
+    it('is not confused by a block comment inside the struct', () => {
+        // A doc comment contains commas, and the splitter divides on commas — so an unstripped `/** */`
+        // became several phantom members named after the prose, and the first one to reach `layoutOf`
+        // failed with "unknown struct which of u_src0..3 to read". Line comments alone were stripped
+        // until a struct was written with doc comments on its fields.
+        const structs = findStructs(`
+struct Packed {
+    /** Per destination channel (x=r, y=g, z=b, w=a): which source to read, or -1 for a constant. */
+    u_srcIndex: vec4<i32>,
+    // A line comment, with a comma, for good measure.
+    u_const: vec4<f32>,
+};`);
+        expect(structs.get('Packed')!.map(m => m.name)).toEqual(['u_srcIndex', 'u_const']);
+    });
+
     it('records layout attributes rather than silently ignoring them', () => {
         const [member] = splitStructMembers('@align(32) @size(64) padded: vec3<f32>,');
         expect(member.name).toBe('padded');

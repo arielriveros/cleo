@@ -34,28 +34,24 @@ import { AnimatedModel } from './animatedModel';
 import BasicProgram from './shaders/wgsl/basic.wgsl'
 import BasicInstancedProgram from './shaders/wgsl/basicInstanced.wgsl'
 import BasicSkinnedProgram from './shaders/wgsl/basicSkinned.wgsl'
-import DefaultVertex from './shaders/materials/default.vs'
 import BlinnPhongProgram from './shaders/wgsl/blinnPhong.wgsl'
 import BlinnPhongSkinnedProgram from './shaders/wgsl/blinnPhongSkinned.wgsl'
-import OutlineVertex from './shaders/materials/outline.vs'
-import OutlineFragment from './shaders/materials/outline.fs'
+import OutlineProgram from './shaders/wgsl/outline.wgsl'
 
 import ShadowMapProgram from './shaders/wgsl/shadowMap.wgsl'
-import ShadowMapFragment from './shaders/environment/shadowMap.fs'
 import ShadowMapSkinnedProgram from './shaders/wgsl/shadowMapSkinned.wgsl'
-import ShadowMapInstancedVertex from './shaders/environment/shadowMapInstanced.vs'
-import ShadowMapCutoutFragment from './shaders/environment/shadowMapCutout.fs'
+import ShadowMapInstancedProgram from './shaders/wgsl/shadowMapInstanced.wgsl'
+import ShadowMapInstancedCutoutProgram from './shaders/wgsl/shadowMapInstancedCutout.wgsl'
 import ShadowDebugProgram from './shaders/wgsl/shadowDebug.wgsl'
 import SkyboxProgram from './shaders/wgsl/skybox.wgsl'
-import VolumetricCloudsFragment from './shaders/environment/volumetricClouds.fs'
-import CloudNoiseBakeFragment from './shaders/environment/cloudNoiseBake.fs'
-import CloudTemporalResolveFragment from './shaders/environment/cloudTemporalResolve.fs'
-import CloudUpsampleFragment from './shaders/environment/cloudUpsample.fs'
-import SkyAtmosphereFragment from './shaders/environment/skyAtmosphere.fs'
-import ProbePreviewFragment from './shaders/environment/probePreview.fs'
+import VolumetricCloudsProgram from './shaders/wgsl/volumetricClouds.wgsl'
+import CloudNoiseBakeProgram from './shaders/wgsl/cloudNoiseBake.wgsl'
+import CloudTemporalResolveProgram from './shaders/wgsl/cloudTemporalResolve.wgsl'
+import CloudUpsampleProgram from './shaders/wgsl/cloudUpsample.wgsl'
+import SkyAtmosphereProgram from './shaders/wgsl/skyAtmosphere.wgsl'
+import ProbePreviewProgram from './shaders/wgsl/probePreview.wgsl'
 import SkyFogProgram from './shaders/wgsl/skyFog.wgsl'
 
-import ScreenVertex from './shaders/screen/screen.vs'
 // First program authored in WGSL. The import is a whole PROGRAM — the loader translates both stages to
 // GLSL ES 300 at build time (tools/wgslTranslate.mjs) and carries the WGSL through for the WebGPU
 // backend. `screen.vs`/`screen.fs` above are still imported: 26 other programs pair that vertex shader
@@ -71,14 +67,14 @@ import ChromaticAberrationProgram from './shaders/wgsl/chromaticAberration.wgsl'
 import ComposerProgram from './shaders/wgsl/composer.wgsl'
 import VolumetricGodRaysProgram from './shaders/wgsl/volumetricGodRays.wgsl'
 import GridProgram from './shaders/wgsl/grid.wgsl'
-import OutlinePostFragment from './shaders/screen/outline.fs'
+import OutlinePostProgram from './shaders/wgsl/outlinePost.wgsl'
 import MotionBlurVelocityProgram from './shaders/wgsl/motionBlurVelocity.wgsl'
 import MotionBlurTileMaxProgram from './shaders/wgsl/motionBlurTileMax.wgsl'
 import MotionBlurNeighborMaxProgram from './shaders/wgsl/motionBlurNeighborMax.wgsl'
 import MotionBlurGatherProgram from './shaders/wgsl/motionBlur.wgsl'
 import PBRProgram from './shaders/wgsl/pbr.wgsl'
 import PBRSkinnedProgram from './shaders/wgsl/pbrSkinned.wgsl'
-import TerrainForwardFragment from './shaders/materials/terrainForward.fs'
+import TerrainForwardProgram from './shaders/wgsl/terrainForward.wgsl'
 import TilemapProgram from './shaders/wgsl/tilemap.wgsl'
 
 // Deferred pipeline shaders
@@ -88,20 +84,18 @@ import GeometryPBRInstancedProgram from './shaders/wgsl/geometryPBRInstanced.wgs
 import GeometryBlinnPhongProgram from './shaders/wgsl/geometryBlinnPhong.wgsl'
 import GeometryBlinnPhongSkinnedProgram from './shaders/wgsl/geometryBlinnPhongSkinned.wgsl'
 import GeometryBlinnPhongInstancedProgram from './shaders/wgsl/geometryBlinnPhongInstanced.wgsl'
-import GeometryTerrainFragment from './shaders/deferred/geometryTerrain.fs'
-import GeometryFoliageBillboardFragment from './shaders/deferred/geometryFoliageBillboard.fs'
+import GeometryTerrainProgram from './shaders/wgsl/geometryTerrain.wgsl'
+import GeometryFoliageBillboardProgram from './shaders/wgsl/geometryFoliageBillboard.wgsl'
 import GeometryBasicProgram from './shaders/wgsl/geometryBasic.wgsl'
 import GeometryBasicSkinnedProgram from './shaders/wgsl/geometryBasicSkinned.wgsl'
-import GeometryInstancedVertex from './shaders/deferred/geometry_instanced.vs'
 import DeferredLightingProgram from './shaders/wgsl/deferredLighting.wgsl'
 import SSAOProgram from './shaders/wgsl/ssao.wgsl'
 import SSAOBlurProgram from './shaders/wgsl/ssaoBlur.wgsl'
 
 // IBL (image-based lighting) precompute shaders
-import CubeVertex from './shaders/ibl/cube.vs'
-import IrradianceFragment from './shaders/ibl/irradiance.fs'
-import PrefilterFragment from './shaders/ibl/prefilter.fs'
-import BRDFFragment from './shaders/ibl/brdf.fs'
+import IrradianceProgram from './shaders/wgsl/irradiance.wgsl'
+import PrefilterProgram from './shaders/wgsl/prefilter.wgsl'
+import BRDFProgram from './shaders/wgsl/brdf.wgsl'
 
 import { GLState } from './systems/glState';
 import { Texture } from './texture';
@@ -128,10 +122,10 @@ import { resolveBackendRequest } from './rhi/backendSelect';
 import { WebGL2Device, setDevice, device } from './rhi/webgl2/webgl2Device';
 import type { WebGL2Buffer } from './rhi/webgl2/webgl2Device';
 import { BufferUsage, ShaderStage, ADDITIVE_BLEND } from './rhi/types';
-import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology } from './rhi/types';
+import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout } from './rhi/types';
 import type { RenderPipeline, BindGroup, RenderTarget } from './rhi/resources';
 import type { RenderPassEncoder, CommandEncoder } from './rhi/device';
-import { packedModelLayout, instanceMatrixLayout } from './rhi/vertexLayouts';
+import { modelVertexLayout, instanceMatrixLayout, boneLayouts } from './rhi/vertexLayouts';
 import { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 import type { WebGL2RenderPassEncoder } from './rhi/webgl2/webgl2Commands';
 
@@ -1007,39 +1001,39 @@ export class Renderer {
         const pbrGeometryInstancedShader = new Shader().create(GeometryPBRInstancedProgram.vertex!, GeometryPBRInstancedProgram.fragment!);
         const defaultGeometryInstancedShader = new Shader().create(GeometryBlinnPhongInstancedProgram.vertex!, GeometryBlinnPhongInstancedProgram.fragment!);
         // Terrain splat geometry shader (reuses the default 14-float vertex layout).
-        const terrainGeometryShader = new Shader().create(DefaultVertex, GeometryTerrainFragment);
+        const terrainGeometryShader = new Shader().create(GeometryTerrainProgram.vertex!, GeometryTerrainProgram.fragment!);
         // Forward-lit terrain: used only by the light-probe capture (a forward pass), where the deferred
         // terrain G-buffer shader can't be lit. Same 14-float layout as the deferred terrain shader.
-        const terrainForwardShader = new Shader().create(DefaultVertex, TerrainForwardFragment);
+        const terrainForwardShader = new Shader().create(TerrainForwardProgram.vertex!, TerrainForwardProgram.fragment!);
         // Tilemap chunks: a 2D-only pos/uv/colour layout of their own, not the 14-float model layout.
         const tilemapShader = new Shader().create(TilemapProgram.vertex!, TilemapProgram.fragment!);
         // Instanced billboard foliage (grass) geometry shader.
-        const foliageBillboardShader = new Shader().create(GeometryInstancedVertex, GeometryFoliageBillboardFragment);
+        const foliageBillboardShader = new Shader().create(GeometryFoliageBillboardProgram.vertex!, GeometryFoliageBillboardProgram.fragment!);
         // Deferred lighting (fullscreen) shader
         const deferredLightingShader = new Shader().create(DeferredLightingProgram.vertex!, DeferredLightingProgram.fragment!);
         // SSAO (fullscreen) shaders
         const ssaoShader = new Shader().create(SSAOProgram.vertex!, SSAOProgram.fragment!);
         const ssaoBlurShader = new Shader().create(SSAOBlurProgram.vertex!, SSAOBlurProgram.fragment!);
         // IBL precompute shaders
-        const irradianceShader = new Shader().create(CubeVertex, IrradianceFragment);
-        const prefilterShader = new Shader().create(CubeVertex, PrefilterFragment);
-        const brdfShader = new Shader().create(ScreenVertex, BRDFFragment);
+        const irradianceShader = new Shader().create(IrradianceProgram.vertex!, IrradianceProgram.fragment!);
+        const prefilterShader = new Shader().create(PrefilterProgram.vertex!, PrefilterProgram.fragment!);
+        const brdfShader = new Shader().create(BRDFProgram.vertex!, BRDFProgram.fragment!);
         // Environment shaders
         const shadowMapShader = new Shader().create(ShadowMapProgram.vertex!, ShadowMapProgram.fragment!);
         // Skinned depth shader so animated meshes cast their animated-pose shadow (not the bind pose).
         const shadowMapSkinnedShader = new Shader().create(ShadowMapSkinnedProgram.vertex!, ShadowMapSkinnedProgram.fragment!);
-        const shadowMapInstancedShader = new Shader().create(ShadowMapInstancedVertex, ShadowMapFragment);
-        const shadowMapInstancedCutoutShader = new Shader().create(ShadowMapInstancedVertex, ShadowMapCutoutFragment);
+        const shadowMapInstancedShader = new Shader().create(ShadowMapInstancedProgram.vertex!, ShadowMapInstancedProgram.fragment!);
+        const shadowMapInstancedCutoutShader = new Shader().create(ShadowMapInstancedCutoutProgram.vertex!, ShadowMapInstancedCutoutProgram.fragment!);
         const skybox = new Shader().create(SkyboxProgram.vertex!, SkyboxProgram.fragment!);
         // Volumetric clouds (fullscreen raymarch, runs on the screen vertex shader)
-        const volumetricCloudsShader = new Shader().create(ScreenVertex, VolumetricCloudsFragment);
-        const cloudNoiseBakeShader = new Shader().create(ScreenVertex, CloudNoiseBakeFragment);
-        const cloudTemporalResolveShader = new Shader().create(ScreenVertex, CloudTemporalResolveFragment);
-        const cloudUpsampleShader = new Shader().create(ScreenVertex, CloudUpsampleFragment);
+        const volumetricCloudsShader = new Shader().create(VolumetricCloudsProgram.vertex!, VolumetricCloudsProgram.fragment!);
+        const cloudNoiseBakeShader = new Shader().create(CloudNoiseBakeProgram.vertex!, CloudNoiseBakeProgram.fragment!);
+        const cloudTemporalResolveShader = new Shader().create(CloudTemporalResolveProgram.vertex!, CloudTemporalResolveProgram.fragment!);
+        const cloudUpsampleShader = new Shader().create(CloudUpsampleProgram.vertex!, CloudUpsampleProgram.fragment!);
         // Sky atmosphere (per-direction Nishita scattering, baked into a cubemap via the IBL cube VS)
-        const skyAtmosphereShader = new Shader().create(CubeVertex, SkyAtmosphereFragment);
+        const skyAtmosphereShader = new Shader().create(SkyAtmosphereProgram.vertex!, SkyAtmosphereProgram.fragment!);
         // Probe preview: equirectangular unwrap of a probe's captured cube for the editor thumbnail.
-        const probePreviewShader = new Shader().create(ScreenVertex, ProbePreviewFragment);
+        const probePreviewShader = new Shader().create(ProbePreviewProgram.vertex!, ProbePreviewProgram.fragment!);
         // Sky fog (fullscreen distance fog whose colour is sampled from the atmosphere cubemap)
         const skyFogShader = new Shader().create(SkyFogProgram.vertex!, SkyFogProgram.fragment!);
         // Screen shaders
@@ -1061,8 +1055,8 @@ export class Renderer {
         const gridShader = new Shader().create(GridProgram.vertex!, GridProgram.fragment!);
         // Outline: material shader stamps the selection silhouette into the mask; the screen shader
         // turns that mask into a border in a post pass.
-        const outlineShader = new Shader().create(OutlineVertex, OutlineFragment);
-        const outlinePostShader = new Shader().create(ScreenVertex, OutlinePostFragment);
+        const outlineShader = new Shader().create(OutlineProgram.vertex!, OutlineProgram.fragment!);
+        const outlinePostShader = new Shader().create(OutlinePostProgram.vertex!, OutlinePostProgram.fragment!);
         // Motion blur (camera reprojection): velocity -> tile max -> neighbor max -> gather.
         const motionBlurVelocityShader = new Shader().create(MotionBlurVelocityProgram.vertex!, MotionBlurVelocityProgram.fragment!);
         const motionBlurTileMaxShader = new Shader().create(MotionBlurTileMaxProgram.vertex!, MotionBlurTileMaxProgram.fragment!);
@@ -1862,6 +1856,12 @@ export class Renderer {
      * be reachable by that same name — the fullscreen passes could pass their import in literally
      * because each call site names one program.
      */
+    /** WGSL reflection for the depth-only shadow programs, reachable by the name the pass picks. */
+    private static readonly _SHADOW_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
+        shadowMap: ShadowMapProgram,
+        shadowMapSkinned: ShadowMapSkinnedProgram,
+    };
+
     private static readonly _GEOMETRY_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
         pbrGeometry: GeometryPBRProgram,
         pbrGeometrySkinned: GeometryPBRSkinnedProgram,
@@ -1883,6 +1883,27 @@ export class Renderer {
     private static _cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode {
         if (side === 'double') return 'none';
         return side === 'back' ? 'front' : 'back';
+    }
+
+    /**
+     * Vertex layouts for a program, by the shape of mesh it will draw.
+     *
+     * Slot 0 is always the interleaved model vertex; slot 1 is the per-instance matrix or the bone
+     * indices, and slot 2 the bone weights. The SKINNED case does not pack slot 0 tightly — a skinned
+     * mesh's buffer always carries the full five-attribute vertex (`createAnimated` writes all of it),
+     * so the offsets have to be the full layout's over whatever subset the program declares.
+     */
+    private _vertexLayoutsFor(program: string, shape: 'model' | 'model+instance' | 'model+skin'): VertexBufferLayout[] {
+        const attributes = this._shaderManager.getShader(program).attributes;
+        // Always the FULL model vertex, never the packed one: every model mesh is written with all five
+        // attributes regardless of what draws it, so a program declaring a subset still has to read at
+        // the full layout's stride. See modelVertexLayout.
+        const model = modelVertexLayout(attributes);
+        if (shape === 'model+skin') {
+            const bones = boneLayouts(attributes);
+            return bones ? [model, bones[0], bones[1]] : [model];
+        }
+        return shape === 'model+instance' ? [model, instanceMatrixLayout(5)] : [model];
     }
 
     /**
@@ -1958,7 +1979,7 @@ export class Renderer {
                 depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                 targets: 3,   // the G-buffer
                 topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
-                vertex: 'model',
+                vertex: animated ? 'model+skin' : 'model',
             });
             pass.setPipeline(pipeline);
             for (const [name, value] of mat.properties)
@@ -2012,10 +2033,19 @@ export class Renderer {
      * routine branch instead of a cliff — those paths move when their layouts move onto pipelines.
      */
     private _recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number): boolean {
-        if (mesh.isAnimated || mesh.hasLods || !mesh.indexBuffer) return false;
+        const indices = mesh.activeIndexBuffer;
+        if (!indices) return false;   // non-indexed meshes still draw arrays through Mesh
         pass.setVertexBuffer(0, mesh.vertexBuffer);
-        pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
-        pass.drawIndexed(indexCount > 0 ? indexCount : mesh.indexCount, 1, firstIndex);
+        if (mesh.isAnimated) {
+            // Bone data rides in dedicated buffers rather than the interleaved vertex, so it is two
+            // more slots — at the locations THIS program declares, which differ between the lit and
+            // unlit families. See boneLayouts.
+            if (!mesh.boneIndicesBuffer || !mesh.boneWeightsBuffer) return false;
+            pass.setVertexBuffer(1, mesh.boneIndicesBuffer);
+            pass.setVertexBuffer(2, mesh.boneWeightsBuffer);
+        }
+        pass.setIndexBuffer(indices, mesh.activeIndexFormat);
+        pass.drawIndexed(indexCount > 0 ? indexCount : mesh.activeIndexCount, 1, firstIndex);
         return true;
     }
 
@@ -3804,6 +3834,23 @@ export class Renderer {
     }
 
     /**
+     * Open a depth-only pass into one layer of an array target: a shadow cascade, or a spot slot.
+     *
+     * No colour attachments at all, which is what distinguishes it from every other pass here — the
+     * shadow maps have none. The LAYER is the descriptor's, not the target's: WebGPU says the same
+     * thing with a view's `baseArrayLayer`, and the WebGL2 device re-points the framebuffer's depth
+     * attachment to match.
+     */
+    private _beginDepthPass(target: RenderTarget, label: string, layer: number): RenderPassEncoder {
+        this._passEncoder = device.createCommandEncoder(label);
+        return this._passEncoder.beginRenderPass(target, {
+            label,
+            colorAttachments: [],
+            depthAttachment: { loadOp: 'clear', storeOp: 'store', baseArrayLayer: layer },
+        });
+    }
+
+    /**
      * The RHI pipeline for a fullscreen pass, built once per program + state combination.
      *
      * This is the seam the WebGPU port is being built through. A fullscreen pass used to be a program
@@ -3831,7 +3878,7 @@ export class Renderer {
                          options: { blend?: BlendState; depthStencil?: DepthStencilState;
                                     cullMode?: CullMode; targets?: number;
                                     topology?: PrimitiveTopology;
-                                    vertex?: false | 'model' | 'model+instance' } = {}): RenderPipeline {
+                                    vertex?: false | 'model' | 'model+instance' | 'model+skin' } = {}): RenderPipeline {
         const { blend, depthStencil, cullMode = 'none', targets = 1,
                 topology = 'triangle-list', vertex = false } = options;
         const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
@@ -3857,10 +3904,7 @@ export class Renderer {
                 // declares. Slot 1 is the per-instance model matrix, spread across four attribute slots
                 // because neither API has a mat4 vertex format. Empty for the fullscreen passes, whose
                 // shared quad still owns its own VAO.
-                vertexLayouts: vertex
-                    ? [packedModelLayout(this._shaderManager.getShader(program).attributes),
-                       ...(vertex === 'model+instance' ? [instanceMatrixLayout(5)] : [])]
-                    : [],
+                vertexLayouts: vertex ? this._vertexLayoutsFor(program, vertex) : [],
                 primitive: { topology, cullMode, frontFace: 'ccw' },
                 ...(depthStencil ? { depthStencil } : {}),
                 colorTargets: Array.from({ length: targets },
@@ -4360,7 +4404,7 @@ export class Renderer {
      * follows the animated pose; everything else uses the plain depth shader. Shared by the single
      * shadow map and each cascade.
      */
-    private _renderShadowCasters(models: Set<ModelNode>, lightSpace: mat4): void {
+    private _renderShadowCasters(pass: RenderPassEncoder, models: Set<ModelNode>, lightSpace: mat4): void {
         let bound: 'shadowMap' | 'shadowMapSkinned' | null = null;
         // Cull against the LIGHT's frustum, not the camera's. This pass used to walk every model in
         // the scene once per cascade with no spatial test at all, while the colour pass did cull —
@@ -4385,8 +4429,17 @@ export class Renderer {
             const shaderType = skinned ? 'shadowMapSkinned' : 'shadowMap';
 
             // Uniforms live per-program, so (re)set u_lightSpace whenever the bound program changes.
+            // The pipeline carries the state the pass used to set by hand — depth on, depth writes on,
+            // and FRONT-face culling, which is what pushes shadow acne onto surfaces the camera cannot
+            // see.
+            const pipeline = this._pipelineFor(shaderType, Renderer._SHADOW_PROGRAMS[shaderType], {
+                cullMode: 'front',
+                depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                targets: 0,
+                vertex: skinned ? 'model+skin' : 'model',
+            });
+            pass.setPipeline(pipeline);
             if (shaderType !== bound) {
-                this._shaderManager.bind(shaderType);
                 this._shaderManager.setUniform('u_lightSpace', lightSpace);
                 bound = shaderType;
             }
@@ -4412,12 +4465,14 @@ export class Renderer {
             // ONE call. Only when some submesh opts out of shadows does this fall back to ranges.
             const casters = node.model.materials;
             if (!node.model.hasSubmeshes || casters.every(m => m.config.castShadow && !m.config.wireframe)) {
-                node.model.mesh.draw('triangle-list');
+                if (!this._recordDraw(pass, node.model.mesh, 0, 0))
+                    node.model.mesh.draw('triangle-list');
             } else {
                 const submeshes = node.model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
                     const caster = casters[i] ?? casters[0];   // see _drawSubmeshes: never index past the array
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
+                    if (this._recordDraw(pass, node.model.mesh, submeshes[i].start, submeshes[i].count)) continue;
                     node.model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');
                 }
             }
@@ -4484,9 +4539,9 @@ export class Renderer {
             // distance, because a perspective map's texel grows as it goes.
             this._spotShadowTexelScalePacked[layer] = (2 * Math.tan(halfFov)) / this._spotShadowResolution;
 
-            this._spotShadowFBO.bindLayer(layer);
-            gl.clear(gl.DEPTH_BUFFER_BIT);
-            this._renderShadowCasters(scene.models, this._spotShadowMatrices[layer]);
+            const pass = this._beginDepthPass(this._spotShadowFBO.renderTarget, 'spotShadow', layer);
+            this._renderShadowCasters(pass, scene.models, this._spotShadowMatrices[layer]);
+            this._endFullscreenPass(pass);
         }
 
         this._spotShadowFBO.unbind();
@@ -4541,9 +4596,9 @@ export class Renderer {
             this._cascadeDepthScales[i] = cascadeDepthScale(fit.depthRange);
             this._cascadeTexelSizes[i] = fit.texelWorldSize;
 
-            this._shadowCascadeFBO.bindLayer(i);
-            gl.clear(gl.DEPTH_BUFFER_BIT);
-            this._renderShadowCasters(models, this._cascadeMatrices[i]);
+            const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', i);
+            this._renderShadowCasters(pass, models, this._cascadeMatrices[i]);
+            this._endFullscreenPass(pass);
             // _renderShadowCasters leaves _shadowFrustum set to this cascade, which is what the
             // foliage cull below tests against.
             this._foliageShadowPass(scene, this._cascadeMatrices[i]);

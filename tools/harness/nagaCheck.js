@@ -28,7 +28,16 @@ stage(root, [
   ['src/graphics/rhi/webgpu/naga/nagaGlsl.js', 'naga/nagaGlsl.js'],
   ['src/graphics/rhi/webgpu/naga/nagaGlsl_bg.wasm', 'naga/nagaGlsl_bg.wasm'],
 ]);
-app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'cleo-naga-')));
+// A FIXED profile directory, reused across runs.
+//
+// It was `mkdtempSync`, which leaves the profile behind on every run because these scripts end
+// with `app.exit()` and never clean up. Several hundred harness runs filled the system drive to
+// zero bytes free — Electron writes a real Chromium profile in there, several megabytes each.
+// A fixed path is also faster to start, and these run sequentially so there is nothing to collide
+// with.
+const profileDir = path.join(os.tmpdir(), 'cleo-naga-profile');
+fs.mkdirSync(profileDir, { recursive: true });
+app.setPath('userData', profileDir);
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);

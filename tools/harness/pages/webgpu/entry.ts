@@ -11,6 +11,7 @@
 
 import { acquireWebGPUDevice, type WebGPUDevice } from '../../../../src/graphics/rhi/webgpu/webgpuDevice';
 import { BufferUsage, TextureUsage, ShaderStage, type VertexBufferLayout } from '../../../../src/graphics/rhi/types';
+import { UniformSet } from '../../../../src/graphics/rhi/uniformSet';
 import type { Texture, TextureView, ShaderModule } from '../../../../src/graphics/rhi/resources';
 import ScreenProgram from '../../../../src/graphics/shaders/wgsl/screen.wgsl';
 import PresentProgram from '../../../../src/graphics/shaders/wgsl/present.wgsl';
@@ -197,9 +198,16 @@ async function run(): Promise<CheckResult[]> {
         const source = uploadTexture(device, flat, SIZE, 'hdr');
         const depth = uploadTexture(device, flat, SIZE, 'coverage');
 
+        // The uniform buffer is sized and addressed entirely from the BUILD-TIME layout — no hand-
+        // written offsets, no `new Float32Array([exposure, 0])` that happens to match the struct.
+        const block = PresentProgram.uniformBlocks[0];
         const uniforms = device.createBuffer({
-            label: 'present-uniforms', size: 8, usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
+            label: 'present-uniforms', size: block.size, usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
         });
+        const uniformSet = new UniformSet(block, uniforms);
+        check('the present block layout arrived with the shader',
+              block.size >= 8 && block.flat.length === 2,
+              `size=${block.size} members=[${block.flat.map(m => m.name + '@' + m.offset).join(', ')}]`);
 
         const group0 = device.createBindGroup({
             layout: pipeline.bindGroupLayouts[0],
@@ -216,7 +224,12 @@ async function run(): Promise<CheckResult[]> {
         });
 
         const draw = async (exposure: number): Promise<Uint8Array> => {
-            device.writeBuffer(uniforms, 0, new Float32Array([exposure, 0]));
+            // BY NAME, through the alias the renderer actually uses — the layout knows this member as
+            // `u_present.u_exposure`. This is the whole chain under test: name -> offset -> buffer ->
+            // what the shader reads.
+            if (!uniformSet.set('u_exposure', exposure)) throw new Error('u_exposure did not resolve');
+            uniformSet.set('u_alphaFromDepth', 0);
+            uniformSet.flush(device);
             const target = makeTarget(device, SIZE, `present-${exposure}`);
             const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
             const encoder = device.createCommandEncoder('present');
@@ -247,8 +260,16 @@ async function run(): Promise<CheckResult[]> {
         const linear = 128 / 255;
         const expected = Math.round(cpuTonemap(linear, 1) * 255);
         const delta = Math.abs(lit[0] - expected);
-        check('exposure 1 matches the CPU tonemap', delta <= 1,
-              `shader=${lit[0]} cpu=${expected} delta=${delta}`);
+        check('a uniform set BY NAME reaches the shader on WebGPU', delta <= 1,
+              `u_exposure=1 via UniformSet -> shader=${lit[0]} cpu=${expected} delta=${delta}`);
+
+        // Two different values through the same path, so a buffer that simply held the right bytes by
+        // luck (or was never written at all) cannot pass.
+        const dim = await draw(0.25);
+        const expectedDim = Math.round(cpuTonemap(linear, 0.25) * 255);
+        check('a second value writes to the same offset', Math.abs(dim[0] - expectedDim) <= 1,
+              `u_exposure=0.25 -> shader=${dim[0]} cpu=${expectedDim}`);
+        check('the two exposures differ', dim[0] < lit[0], `${dim[0]} < ${lit[0]}`);
     }
 
     // -- 3. render into ONE layer of an array texture (the shadow-cascade shape) -----------------

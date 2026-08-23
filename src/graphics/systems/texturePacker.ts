@@ -10,8 +10,7 @@ import { TextureManager } from "./textureManager";
 import { setViewportSize } from "../renderStats";
 import { Logger } from "../../core/logger";
 import { cyrb53 } from "../material";
-import ScreenVertex from '../shaders/screen/screen.vs';
-import ChannelPackFragment from '../shaders/screen/channelPack.fs';
+import ChannelPackProgram from '../shaders/wgsl/channelPack.wgsl';
 import type { Material } from "../material";
 
 // -------------------------------------------------------------------------------------------------
@@ -401,7 +400,7 @@ export class TexturePacker {
     private _ensureShader(): Shader {
         const existing = ShaderManager.Instance.find('channelPack');
         if (existing) return existing;
-        const shader = new Shader().create(ScreenVertex, ChannelPackFragment);
+        const shader = new Shader().create(ChannelPackProgram.vertex!, ChannelPackProgram.fragment!);
         ShaderManager.Instance.addShader('channelPack', shader);
         return shader;
     }

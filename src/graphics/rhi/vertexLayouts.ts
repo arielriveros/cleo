@@ -147,6 +147,55 @@ export const BONE_WEIGHT_LAYOUT: VertexBufferLayout = {
 };
 
 /**
+ * The two bone layouts, at the locations a particular program declares them.
+ *
+ * The locations are NOT fixed, which is the whole reason this is a function. The lit skinned families
+ * put bone data at 5 and 6, after normal/uv/tangent/bitangent; the unlit Basic family has none of those
+ * and uses 2 and 3. Binding one family's buffers at the other's locations leaves the attributes unbound
+ * — GL_INVALID_OPERATION on the draw, and the reason `AnimatedModel` keys its VAO by layout.
+ *
+ * Returns null when the program declares no bone attributes, which is every non-skinned program.
+ */
+export function boneLayouts(attributes: readonly ReflectedAttribute[]): [VertexBufferLayout, VertexBufferLayout] | null {
+    let indices = -1, weights = -1;
+    for (const attribute of attributes) {
+        if (attribute.name === 'a_boneIds') indices = attribute.location;
+        else if (attribute.name === 'a_weights') weights = attribute.location;
+    }
+    if (indices < 0 || weights < 0) return null;
+    return [
+        { ...BONE_INDEX_LAYOUT, attributes: [{ ...BONE_INDEX_LAYOUT.attributes[0], shaderLocation: indices }] },
+        { ...BONE_WEIGHT_LAYOUT, attributes: [{ ...BONE_WEIGHT_LAYOUT.attributes[0], shaderLocation: weights }] },
+    ];
+}
+
+/**
+ * The interleaved model vertex, read by a program that may declare only part of it.
+ *
+ * Distinct from {@link packedModelLayout}, and the difference is a trap. `packedModelLayout` computes a
+ * TIGHT stride from the attributes a program declares, which is correct only when the buffer was
+ * written for exactly that program. Model meshes are not: `ModelNode.initializeModel` writes every one
+ * of them with the full five-attribute vertex, 56 bytes, whatever draws it later.
+ *
+ * So a depth-only program that declares just `position` needs offsets from the FULL layout and a stride
+ * of 56 — `packedModelLayout` would give it a stride of 12 and walk into the middle of the first
+ * vertex's normal. That renders as geometry the right shape in roughly the right place, which is what
+ * makes it worth naming: the shadow pass looked plausible and the shading signature caught it.
+ *
+ * Locations come from the DRAWING program; offsets and stride from the layout the buffer was built to.
+ */
+export function modelVertexLayout(attributes: readonly ReflectedAttribute[]): VertexBufferLayout {
+    const declared = new Map<string, number>();
+    for (const attribute of attributes) declared.set(attribute.name, attribute.location);
+    return {
+        ...MODEL_VERTEX_LAYOUT,
+        attributes: MODEL_VERTEX_LAYOUT.attributes
+            .filter(a => declared.has(a.name))
+            .map(a => ({ ...a, shaderLocation: declared.get(a.name) as number })),
+    };
+}
+
+/**
  * The tilemap chunk vertex: position.xy | uv.xy | colour.rgba, 8 floats and a 32-byte stride.
  *
  * Genuinely different from the model vertex, and deliberately so — per-cell tint and opacity need a

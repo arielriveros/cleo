@@ -389,6 +389,25 @@ export class Mesh {
     public get indexBuffer(): GpuBuffer | null { return this._indexBuffer; }
     public get indexFormat(): IndexFormat { return this._indexType === gl.UNSIGNED_INT ? 'uint32' : 'uint16'; }
     public get indexCount(): number { return this._indexCount; }
+    /** The dedicated bone buffers, for a skinned draw recorded through the RHI. */
+    public get boneIndicesBuffer(): GpuBuffer | null { return this._boneIndicesBuffer; }
+    public get boneWeightsBuffer(): GpuBuffer | null { return this._boneWeightsBuffer; }
+    /**
+     * The index buffer for the ACTIVE LOD level, with its count and type.
+     *
+     * LOD levels are alternate index buffers over the same vertices, so only the element binding
+     * changes between them — which is exactly what `setIndexBuffer` expresses.
+     */
+    public get activeIndexBuffer(): GpuBuffer | null {
+        return this.hasLods ? this._lodBuffers[this._lod] : this._indexBuffer;
+    }
+    public get activeIndexCount(): number {
+        return this.hasLods ? this._lodCounts[this._lod] : this._indexCount;
+    }
+    public get activeIndexFormat(): IndexFormat {
+        const type = this.hasLods ? this._lodTypes[this._lod] : this._indexType;
+        return type === gl.UNSIGNED_INT ? 'uint32' : 'uint16';
+    }
     public get vertexCount(): number { return this._vertexCount; }
     public get isAnimated(): boolean { return this._isAnimated; }
 }

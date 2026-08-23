@@ -142,6 +142,24 @@ export class WebGL2Device {
      */
     public beginRenderPass(target: RenderPassTarget, descriptor: RenderPassDescriptor): void {
         gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer ? target.framebuffer.handle : null);
+
+        // Render into ONE layer of an array depth target: the shadow cascades and the spot atlas.
+        // WebGPU expresses this as a view with a `baseArrayLayer`; WebGL2 re-points the framebuffer's
+        // depth attachment at the layer, which is what `LayeredDepthFramebuffer.bindLayer` did by hand.
+        const layer = descriptor.depthAttachment?.baseArrayLayer;
+        if (layer !== undefined && target.framebuffer && target.depthTexture)
+            target.framebuffer.attachDepthLayer(target.depthTexture, layer);
+
+        // How many colour attachments the TARGET has — not how many the descriptor happens to mention.
+        // Those differ: a pass descriptor names the attachments whose load op it cares about, and the
+        // fullscreen helper names exactly one even when drawing into the 3-attachment G-buffer. Taking
+        // the count from the descriptor set draw buffers to 1 there and threw away the normal and
+        // emissive targets — a spectacular failure, but one that renders rather than throwing.
+        //
+        // Zero is not a degenerate case but the shadow maps' normal one: with no colour attachment,
+        // BOTH draw and read buffers must be explicitly NONE or the framebuffer is incomplete.
+        if (target.framebuffer && target.colorCount !== undefined)
+            target.framebuffer.setDrawBuffers(target.colorCount);
         gl.viewport(0, 0, target.width, target.height);
         setViewportSize(target.width, target.height);
 
@@ -156,6 +174,11 @@ export class WebGL2Device {
                 gl.clearBufferfv(gl.DEPTH, 0, [descriptor.depthAttachment.clearValue]);
             else clearBits |= gl.DEPTH_BUFFER_BIT;
         }
+        // A GL depth clear is MASKED by `depthMask`; WebGPU's `loadOp: 'clear'` is not. Without this the
+        // clear silently does nothing whenever the previous pass left depth writes off — and a pass
+        // beginning with stale depth is exactly the failure the load op exists to prevent. Forcing the
+        // mask here also means a pass no longer depends on inherited state to honour its own descriptor.
+        if ((clearBits & gl.DEPTH_BUFFER_BIT) !== 0) GLState.depthMask(true);
         if (clearBits !== 0) gl.clear(clearBits);
     }
 
@@ -631,6 +654,10 @@ export interface RenderPassTarget {
     readonly framebuffer: WebGL2Framebuffer | null;
     readonly width: number;
     readonly height: number;
+    /** The array depth texture, when a pass renders into one of its layers. See beginRenderPass. */
+    readonly depthTexture?: WebGLTexture | null;
+    /** Colour attachments this target has. Absent for a caller that manages draw buffers itself. */
+    readonly colorCount?: number;
 }
 
 export class WebGL2Framebuffer {

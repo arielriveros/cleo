@@ -5,6 +5,7 @@ import { GLState } from './systems/glState';
 import { Logger } from '../core/logger';
 import { setViewportSize } from './renderStats';
 import { Texture } from './texture';
+import { WebGL2RenderTarget, WebGL2TextureView } from './rhi/webgl2/webgl2Commands';
 
 /**
  * A depth-only framebuffer that renders into successive LAYERS of one `TEXTURE_2D_ARRAY`.
@@ -95,6 +96,16 @@ export class LayeredDepthFramebuffer {
     public delete(): void {
         this._texture.delete();
         this._id.destroy();
+    }
+
+    /**
+     * This array as an RHI render target. Which LAYER a pass writes is the pass descriptor's business
+     * (`depthAttachment.baseArrayLayer`), not the target's — the same split WebGPU makes.
+     */
+    public get renderTarget(): WebGL2RenderTarget {
+        return new WebGL2RenderTarget(this._id, this._size, this._size, [],
+                                      new WebGL2TextureView(this._texture.gpu), 'shadow-array',
+                                      this._texture.texture);
     }
 
     public get texture(): Texture { return this._texture; }

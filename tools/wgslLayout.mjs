@@ -69,9 +69,21 @@ export function splitStructMembers(body) {
     }).filter(Boolean);
 }
 
+/**
+ * Comments removed, BOTH kinds.
+ *
+ * Block comments matter as much as line comments here. The member splitter divides on commas, and a
+ * doc comment inside a struct body contains them — so one comment became several phantom members with
+ * names like "which of u_src0..3 to read". Line comments alone sufficed until a struct was written
+ * with doc comments on its fields, which is a normal thing to want.
+ */
+function stripComments(text) {
+    return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
 /** Every `struct Name { ... }` in a module, as a map of name to member list. */
 export function findStructs(wgsl) {
-    const source = wgsl.replace(/\/\/[^\n]*/g, '');
+    const source = stripComments(wgsl);
     const structs = new Map();
     for (const m of source.matchAll(/struct\s+([A-Za-z_]\w*)\s*\{([\s\S]*?)\}/g))
         structs.set(m[1], splitStructMembers(m[2]));
