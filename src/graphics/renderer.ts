@@ -4570,17 +4570,33 @@ export class Renderer {
         this._passEncoder = device.createCommandEncoder(label);
         // So `_pipelineFor` can read the formats it has to agree with. Same lifetime as the encoder.
         this._passTarget = target;
-        const pass = this._passEncoder.beginRenderPass(target, {
-            label,
-            colorAttachments: [{
+        // EVERY colour attachment when clearing to the standing colour, not just the first.
+        //
+        // This is what WebGL2 already does and what the descriptor had never said: a bare
+        // `gl.clear(COLOR_BUFFER_BIT)` clears every attached draw buffer, while WebGPU clears exactly
+        // the attachments the pass names and LOADS the rest. So the G-buffer's normal and emissive
+        // targets kept the previous frame's contents on one backend and were wiped on the other — most
+        // visibly in their alpha, which carries roughness and ambient occlusion: the background read
+        // 1.0 on WebGL2 and 0.0 on WebGPU.
+        //
+        // A NAMED clearValue keeps clearing attachment 0 alone, because that is also what WebGL2 does
+        // with it: `clearBufferfv` names its target and never touches the others.
+        const colorAttachments = (clear && !clearValue)
+            ? target.colorViews.map((_view, index) => ({
+                target: index, loadOp: 'clear' as const, storeOp: 'store' as const,
+            }))
+            : [{
                 target: 0,
-                loadOp: clear ? 'clear' : 'load',
-                storeOp: 'store',
+                loadOp: (clear ? 'clear' : 'load') as 'clear' | 'load',
+                storeOp: 'store' as const,
                 // Absent means "the standing clear colour", which is what a bare `gl.clear` used. A
                 // named value goes through clearBufferfv instead and needs no save/restore of the
                 // context's colour — which is what the thumbnail path used to do by hand.
                 ...(clearValue ? { clearValue } : {}),
-            }],
+            }];
+        const pass = this._passEncoder.beginRenderPass(target, {
+            label,
+            colorAttachments,
             // Separate from the colour op because several targets carry no depth at all and the passes
             // that write them said `{ color: true }` — clearing depth there was never intended, even
             // though on a depthless framebuffer it happens to be a no-op.
