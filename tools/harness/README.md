@@ -132,6 +132,22 @@ The second half of the run loads the same page with `?backend=webgl2` and assert
 
 - `pages/*/cleo.js` and `pages/naga/naga/` are staged copies, rewritten on every run. They are ignored by
   git; the sources are `dist/` and `src/graphics/rhi/webgpu/naga/`.
+- **Two committed WebGL2 baselines do not reproduce on every machine, and that is not a code
+  regression.** `passBaseline.json`'s `bloom` entry and `meshShading.deferred.json` both fail here in a
+  way that reproduces at `203bbaf` — before any of the WebGPU parity work — with a freshly deleted
+  Chromium profile, a fresh build, and the window shown rather than hidden. The deferred shading
+  signature is consistently ~6 of 128 values out, always the same cells, always in the direction of
+  less local contrast. The adapter is a single Intel Arc 140T; there is no second GPU to have switched
+  to.
+
+  So before reading a red `harness:mesh` or `harness:pass` as "my change moved WebGL2", **run the same
+  driver at HEAD as a control and compare the two failure lines to each other**, not to the committed
+  baseline. Identical cells and identical deltas mean the change moved nothing. Do NOT re-record either
+  baseline to make the run green: what they were recorded against is exactly the thing that needs
+  finding out.
+
+  `backendDiff.js` is immune to this and is the signal to trust meanwhile — it compares two windows
+  inside one session, so anything machine-dependent is shared by both and cancels.
 - `mesh:full` on the deferred pipeline has a known INTERMITTENT 2-cell difference (`cell21.sd`,
   `cell23.sd`, each ~8 low). It predates the WebGPU work and reproduces with every WebGPU change
   reverted. The likely mechanism is the volumetric clouds' Bayer 1/16 temporal resolve, which needs
