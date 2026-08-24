@@ -2871,6 +2871,11 @@ export class Renderer {
     private _initializeIBL(): void {
         // 90-degree perspective for cube-face rendering (camera sits inside the unit cube).
         mat4.perspective(this._captureProj, Math.PI / 2, 1, 0.1, 10);
+        // EXPERIMENT: flip Y on WebGPU. Framebuffer row 0 is the BOTTOM on WebGL2 and the TOP on
+        // WebGPU, so identical clip-space geometry lands vertically mirrored in memory. Everything
+        // sampled by UV survives that, because the screen quad's V coordinates undo it once at
+        // present. A CUBEMAP does not: it is sampled by direction.
+        if (device.backend === 'webgpu') this._captureProj[5] *= -1;
         for (const f of Renderer._CUBE_FACES) {
             const view = mat4.create();
             mat4.lookAt(view, [0, 0, 0], f.dir, f.up);
