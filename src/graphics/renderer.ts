@@ -4664,9 +4664,19 @@ export class Renderer {
         //
         // A NAMED clearValue keeps clearing attachment 0 alone, because that is also what WebGL2 does
         // with it: `clearBufferfv` names its target and never touches the others.
+        // The standing clear colour, named rather than implied.
+        //
+        // "No clearValue" used to mean "whatever `gl.clearColor` was last set to" — context state that
+        // WebGPU has no equivalent for, so a pass that relied on it cleared to transparent black there
+        // instead. The G-buffer's background was the project's clear colour on one backend and 0 on the
+        // other, which is most of a debug channel's screen.
+        const standing = this.clearColor;
+        const standingValue: [number, number, number, number] =
+            [standing[0], standing[1], standing[2], standing[3] ?? 1];
         const colorAttachments = (clear && !clearValue)
             ? target.colorViews.map((_view, index) => ({
                 target: index, loadOp: 'clear' as const, storeOp: 'store' as const,
+                clearValue: standingValue,
             }))
             : [{
                 target: 0,
