@@ -42,12 +42,23 @@ import { WebGPUShaderProgram } from './webgpuShaderProgram';
 import type { PrimitiveTopology,
     TextureFormat, TextureDimension, TextureUsageFlags, BufferUsageFlags, SamplerDescriptor,
     VertexBufferLayout, PrimitiveState, DepthStencilState, ColorTargetState, RenderPassDescriptor,
-    ShaderStageFlags, IndexFormat, BlendState, ShaderResource, TextureConfigureDescriptor,
+    ShaderStageFlags, IndexFormat, BlendState, ShaderResource, TextureConfigureDescriptor, AddressMode,
 } from '../types';
 import { TEXTURE_FORMAT_INFO, textureByteSize, isDepthFormat, ShaderStage, TextureUsage,
          isTriangleTopology } from '../types';
 
 const SCOPE = 'WebGPU';
+
+/**
+ * What a texture is sampled with until `configure` says otherwise.
+ *
+ * Only the fields the sampler is built from matter here; `format` and `isDepth` are answered by the
+ * texture itself in `_samplerFor`. It exists so `uploadBytes` can record an address mode on a texture
+ * that was never configured, rather than dropping it.
+ */
+const DEFAULT_SAMPLING: TextureConfigureDescriptor = {
+    format: 'rgba8unorm', addressMode: 'clamp-to-edge', minFilter: 'linear', flipY: false, isDepth: false,
+};
 
 /**
  * `copyTextureToBuffer` requires each row to start on a 256-byte boundary.
@@ -320,8 +331,23 @@ class WebGPUTexture implements Texture {
         if (mipMap && this.mipLevelCount > 1) this.generateMipmaps();
     }
 
-    public uploadBytes(data: Uint8Array, width: number, height: number): void {
+    /**
+     * Raw RGBA8 bytes, and the ADDRESS MODE they are to be sampled with.
+     *
+     * The wrapping argument used to be omitted here — TypeScript lets a method with fewer parameters
+     * satisfy an interface, so dropping it compiled cleanly and silently. WebGL2 sets it on the texture
+     * with `texParameteri`; this backend keeps sampler state in `_config`, so an omitted argument left
+     * the default `clamp-to-edge` in place.
+     *
+     * The one caller that passes anything else is the SSAO rotation noise, a 4x4 texture sampled at
+     * `uv * screenSize / 4` and therefore entirely dependent on repeating. Clamped, every pixel read
+     * the same edge texel, every kernel got the same rotation, and any surface whose normal happened to
+     * align with it produced a degenerate tangent basis — which is why the whole floor came back fully
+     * occluded on WebGPU and softly shaded on WebGL2.
+     */
+    public uploadBytes(data: Uint8Array, width: number, height: number, wrapping: AddressMode): void {
         this.uploadRegion(0, 0, width, height, data);
+        this._config = { ...(this._config ?? DEFAULT_SAMPLING), addressMode: wrapping };
     }
 
     public uploadRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
