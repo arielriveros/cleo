@@ -308,14 +308,46 @@ function applyRenames(glsl, renames) {
  * expected sample types (Float)"). So the declaration is driven by one backend and has to be walked
  * back for the other, which is exactly what this file is for.
  */
+/** WGSL depth texture type -> the GLSL sampler naga writes for it, and the one a PLAIN read needs. */
+const DEPTH_SAMPLERS = {
+    'texture_depth_2d':       { shadow: 'sampler2DShadow',      plain: 'sampler2D' },
+    'texture_depth_2d_array': { shadow: 'sampler2DArrayShadow', plain: 'sampler2DArray' },
+    'texture_depth_cube':     { shadow: 'samplerCubeShadow',    plain: 'samplerCube' },
+};
+
 function fixPlainDepthSamplers(glsl, resources) {
+    // Which depth textures are read PLAINLY, decided by the sampler each is paired with rather than by
+    // the texture's own type. WGSL splits texture from sampler, so at the point naga emits the
+    // declaration it cannot know which it will be, and it picks the conservative reading. The engine
+    // knows: a `sampler_comparison` is a shadow test, a plain `sampler` is a value read.
+    //
+    // Keying on the PAIRING rather than on the type is what makes this general. The first version
+    // matched `texture_depth_2d` literally, which was right for the nine G-buffer depth bindings and
+    // silently wrong the moment `shadowDebug` became a depth ARRAY read with a plain sampler — it kept
+    // its `sampler2DArrayShadow` declaration, which has no `textureLod` overload in ES 300.
+    const comparison = new Set(resources
+        .filter(r => r.kind === 'sampler' && r.type === 'sampler_comparison')
+        .map(r => r.glslName));
+
     let out = glsl;
     for (const resource of resources) {
-        if (resource.type !== 'texture_depth_2d') continue;
+        const spelling = DEPTH_SAMPLERS[resource.type];
+        if (!spelling || comparison.has(resource.glslName)) continue;
         const name = resource.glslName;
-        out = out.replace(new RegExp('sampler2DShadow(\\s+)' + name + '\\b', 'g'), 'sampler2D$1' + name);
-        out = out.replace(new RegExp('(textureLod\\(' + name + ',[^;]*?),\\s*0\\)', 'g'), '$1, 0.0).x');
+        out = out.replace(new RegExp(spelling.shadow + String.raw`(\s+)` + name + String.raw`\b`, 'g'),
+                          spelling.plain + '$1' + name);
+        // WGSL requires an INTEGER exact level for a depth texture where GLSL's `textureLod` takes a
+        // float, and sampling one yields a bare f32 in WGSL against a vec4 from a GLSL sampler.
+        out = out.replace(new RegExp(String.raw`(textureLod\(` + name + String.raw`,[^;]*?),\s*0\)`, 'g'),
+                          '$1, 0.0).x');
     }
+
+    // `textureLod` on a shadow sampler is the one thing this extension exists for. With every shadow
+    // declaration rewritten away it is not merely unnecessary: `require` on an extension the driver may
+    // not have is itself a compile error, so a shader that no longer needs it must not ask for it.
+    if (!/sampler\w*Shadow\b/.test(out))
+        out = out.replace(/^[ \t]*#extension[ \t]+GL_EXT_texture_shadow_lod[ \t]*:[ \t]*\w+[ \t]*\r?\n/m, '');
+
     return out;
 }
 

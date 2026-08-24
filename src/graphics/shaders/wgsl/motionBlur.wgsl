@@ -66,7 +66,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(centerColor, 1.0);
     }
 
-    let vC = textureSample(u_velocity_texture, u_velocity_sampler, uv).xy;
+    // `textureSampleLevel(..., 0.0)`, not `textureSample`, from here down.
+    //
+    // Everything below the early return above is in NON-UNIFORM control flow — whether a fragment gets
+    // here depends on its own tile velocity — and WGSL forbids an implicit-LOD sample there, because
+    // the derivative it would need is only defined across a quad that took the same branch. Dawn
+    // refuses the whole module ("'textureSample' must only be called from uniform control flow"), and
+    // an invalid module means an invalid pipeline, which means every draw recorded against it silently
+    // does nothing. WebGL2 has no such rule, which is why it never complained.
+    //
+    // The explicit level is not a behaviour change: these are screen-sized post targets with no mip
+    // chain, so level 0 is what the implicit form already resolved to. Same fix, same reason, as the
+    // one `ssao` and `deferredLighting` already carry.
+    let vC = textureSampleLevel(u_velocity_texture, u_velocity_sampler, uv, 0.0).xy;
     let vClen = max(length(vC * u_mb.u_screenSize), 0.5);
     let centerDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0));
 
@@ -85,7 +97,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let t = mix(-1.0, 1.0, (f32(i) + jitter + 1.0) / (f32(samples) + 1.0));
         let sampleUV = uv + vN * t;
 
-        let vS = textureSample(u_velocity_texture, u_velocity_sampler, sampleUV).xy;
+        let vS = textureSampleLevel(u_velocity_texture, u_velocity_sampler, sampleUV, 0.0).xy;
         let vSlen = max(length(vS * u_mb.u_screenSize), 0.5);
         let sampleDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, sampleUV, 0));
 
@@ -100,7 +112,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     cylinder(dist, vSlen) * cylinder(dist, vClen) * 2.0; // both blurry, similar depth
 
         weight += alpha;
-        result += textureSample(u_screenTexture_texture, u_screenTexture_sampler, sampleUV).rgb * alpha;
+        result += textureSampleLevel(u_screenTexture_texture, u_screenTexture_sampler, sampleUV, 0.0).rgb * alpha;
     }
 
     return vec4<f32>(result / weight, 1.0);

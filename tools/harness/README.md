@@ -1,6 +1,6 @@
 # Real-GPU harnesses
 
-Three Electron drivers that render through a real WebGL2 driver and check the result. They exist because
+Electron drivers that render through a real driver and check the result. They exist because
 the unit suite is DOM-free and therefore has no GL context at all: everything below is a class of bug
 `npm test` and `tsc` structurally cannot see.
 
@@ -75,6 +75,43 @@ It also asserts that **no WGSL is produced when no translator is installed** —
 has become reachable from the engine bundle and every published game is carrying 1.3 MB of shader
 compiler.
 
+### `backendDiff.js` — WebGL2 against WebGPU, configuration by configuration
+
+Every other driver measures ONE backend. `webgpuBootCheck.js` gets closest — it renders the same scene
+on both and compares the compressed size of the result — but a single scalar can only say "about two
+percent off", and two percent has no owner.
+
+This one loads the mesh page twice, once per backend, drives both through the SAME list of renderer
+configurations (`passConfigs.js`, shared with `passCheck.js`, plus the thirteen `DebugView` channels the
+baselined list does not reach) and diffs the 8×8 signatures per configuration. A difference then arrives
+named: `debugCascades` disagrees, `debugNormal` does not.
+
+It compares the two backends **against each other**, never against a stored picture. Recording a WebGPU
+baseline today would freeze today's bugs as correct — the exact failure that let `basicSkinned` render
+as a torn fan with a green gate, because the baseline had captured the corruption.
+
+`backendDiff.json` is therefore a **ratchet**, not a baseline: per configuration, how many of the 128
+values differ. A number may only go DOWN. It records how far apart the backends are today and refuses to
+let them drift further, without ever claiming the current difference is correct.
+
+```sh
+npm run harness:backenddiff                       # verify
+CLEO_BACKEND_DIFF=write npm run harness:backenddiff   # record, after a change that earned it
+CLEO_DIFF_SHOT=<config> npm run harness:backenddiff   # write both backends' PNG for one config
+```
+
+Two things make it trustworthy, and both were needed:
+
+- **`?seed=1`** on the page installs a deterministic `Math.random` BEFORE the engine is constructed, so
+  the two renderers build the same SSAO kernel and rotation noise. Without it `ssao` and `debugSSAO`
+  differ for a reason that is about neither backend. Opt-in, so no existing baseline moves. With it the
+  whole run is byte-reproducible.
+- **Both windows are checked for the backend they actually got.** A request can be refused, and every
+  signature would then match perfectly for the worst possible reason.
+
+Motion-dependent configurations are reported but not gated: they are phase-dependent, which no seed
+fixes.
+
 ### `webgpuBootCheck.js` — engine startup on a WebGPU device
 
 `webgpuCheck.js` proves the RHI's `WebGPUDevice` works against a real driver. This one drives the
@@ -95,6 +132,12 @@ The second half of the run loads the same page with `?backend=webgl2` and assert
 
 - `pages/*/cleo.js` and `pages/naga/naga/` are staged copies, rewritten on every run. They are ignored by
   git; the sources are `dist/` and `src/graphics/rhi/webgpu/naga/`.
+- `mesh:full` on the deferred pipeline has a known INTERMITTENT 2-cell difference (`cell21.sd`,
+  `cell23.sd`, each ~8 low). It predates the WebGPU work and reproduces with every WebGPU change
+  reverted. The likely mechanism is the volumetric clouds' Bayer 1/16 temporal resolve, which needs
+  sixteen frames to converge and only gets as many as a hidden window's throttled `requestAnimationFrame`
+  delivers — a less-converged cloud has less local contrast, which is exactly the direction the two
+  cells move. Re-run before believing it.
 - `passBaseline.json` **is** committed — it is the reference the gate compares against. So is
   `webgpuBoot.json`, which is a ratchet rather than a recording: never re-record it to make a red run
   green, and never edit it without the port that moved it in the same commit.

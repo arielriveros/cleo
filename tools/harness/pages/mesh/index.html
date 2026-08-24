@@ -36,6 +36,27 @@ window.__error = null;
     // `?cleoWebgpuProbe=1`, which the engine reads straight off location.search and this page
     // therefore never has to forward. See tools/harness/webgpuBootCheck.js.
     const backend = new URLSearchParams(location.search).get('backend') || undefined;
+    // `?seed=1` — a deterministic Math.random for the WHOLE page, installed BEFORE the engine exists.
+    //
+    // Opt-in, and that is the entire design. The full-scene block below seeds only itself, and says
+    // why: a page-wide seed also reseeds the SSAO hemisphere kernel and its 4x4 rotation-noise
+    // texture, which are built at renderer construction and are baked into baselines recorded before
+    // any of this existed. So the default is untouched and every existing baseline stays valid.
+    //
+    // What it buys is the one thing the cross-backend diff cannot get any other way: two windows, two
+    // renderers, ONE SSAO kernel. Without it `ssao` and `debugSSAO` differ between the backends for a
+    // reason that has nothing to do with either backend, and the only honest thing to do with them is
+    // not compare them at all. See tools/harness/backendDiff.js.
+    if (new URLSearchParams(location.search).get('seed') === '1') {
+      let seed = 0x9e3779b9;
+      Math.random = () => {
+        // xorshift32: no library, no state beyond one word, and identical on every machine.
+        seed ^= seed << 13; seed >>>= 0;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;  seed >>>= 0;
+        return seed / 0x100000000;
+      };
+    }
     const engine = new cleo.CleoEngine({
       graphics: { clearColor: [0.08, 0.08, 0.11, 1.0], deferred: !forwardMode, backend },
     });
