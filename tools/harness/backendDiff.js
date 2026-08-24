@@ -116,11 +116,12 @@ async function runBackend(backend) {
   if (got !== backend) return null;
 
   const capture = () => captureSignature(win, sleep);
-  // `CLEO_DIFF_SHOT=<config>` writes the SAME configuration from both backends, side by side on disk.
+  // `CLEO_DIFF_SHOT=<config>[,<config>...]` writes the SAME configurations from both backends, side
+  // by side on disk.
   // The ranked table says which configuration disagrees; it cannot say how, and a delta cannot be
   // looked at. Two PNGs named for their backend can.
   const onShot = async (name) => {
-    if (process.env.CLEO_DIFF_SHOT !== name) return;
+    if (!(process.env.CLEO_DIFF_SHOT || '').split(',').includes(name)) return;
     const img = await win.webContents.capturePage();
     const out = path.join(__dirname, 'shots', `diff-${name}-${backend}.png`);
     fs.mkdirSync(path.dirname(out), { recursive: true });
@@ -183,6 +184,24 @@ app.whenReady().then(async () => {
                 `worst ${String(d.worst).padStart(3)}${tag}`);
   }
   console.log('');
+
+  // Frame stats beside the signature, for every configuration where the two disagree on WORK rather
+  // than on shading. A signature says the pictures differ; this says whether the same passes even ran.
+  const statLine = (r, n) => {
+    const s = r.stats[n] || {};
+    return `${s.drawCalls ?? '?'}d/${s.fullscreenPasses ?? '?'}f`;
+  };
+  const workDiffers = ALL.filter(c => {
+    const a = reference.stats[c.name] || {}, b = subject.stats[c.name] || {};
+    return a.drawCalls !== b.drawCalls || a.fullscreenPasses !== b.fullscreenPasses;
+  });
+  if (workDiffers.length) {
+    console.log('  configurations where the two backends submit DIFFERENT work (draws/fullscreen passes):');
+    for (const c of workDiffers)
+      console.log(`      ${String(c.name).padEnd(18)} webgl2 ${statLine(reference, c.name).padEnd(10)}` +
+                  `webgpu ${statLine(subject, c.name)}`);
+    console.log('');
+  }
 
   const matching = ranked.filter(([n, d]) => !MOTION_DEPENDENT.has(n) && d.material === 0).length;
   const gated = ranked.filter(([n]) => !MOTION_DEPENDENT.has(n)).length;
