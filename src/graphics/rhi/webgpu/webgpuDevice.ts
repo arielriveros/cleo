@@ -19,6 +19,7 @@
 import { Logger } from '../../../core/logger';
 import { frameStats, setViewportSize } from '../../renderStats';
 import { ShaderManager } from '../../systems/shaderManager';
+import { samplerBindingsOf, declaredGroupsOf } from './wgslBindings';
 import {
     gpuTextureFormat, rhiTextureFormat, gpuTextureDimension, gpuViewDimension, layersForDimension,
     gpuBufferUsage, gpuTextureUsage, gpuAddressMode, gpuFilterMode, gpuCompare,
@@ -57,6 +58,14 @@ const SCOPE = 'WebGPU';
  * readback asynchronous for both backends rather than only for this one.
  */
 const COPY_BYTES_PER_ROW_ALIGNMENT = 256;
+
+/**
+ * Distinct uniform slot signatures one program may keep bind groups for before the cache is dropped.
+ *
+ * Sized well above the busiest pass — the geometry pass draws a few hundred objects at most, and the
+ * cache is per program, so the real occupancy is the draws of one program in one pass.
+ */
+const UNIFORM_BIND_GROUP_CACHE_CAP = 4096;
 
 function alignUp(value: number, alignment: number): number {
     return Math.ceil(value / alignment) * alignment;
@@ -522,6 +531,15 @@ class WebGPUShaderModule implements ShaderModule {
      * is exact: `@group(N)` is the only way to declare one in WGSL.
      */
     public readonly groups: readonly number[];
+    /**
+     * `group -> the bindings in it this module declares as a SAMPLER`.
+     *
+     * Read off the SOURCE rather than off `descriptor.resources`, because a module can legitimately
+     * arrive without reflection — the harness builds several straight from a WGSL string, and a
+     * custom material assembled at runtime has none — and this has to be right for those too. See
+     * {@link samplerBindingsOf} for what `createBindGroup` does with it.
+     */
+    public readonly samplerBindings: ReadonlyMap<number, ReadonlySet<number>>;
 
     constructor(device: GPUDevice, descriptor: ShaderModuleDescriptor) {
         this.label = descriptor.label ?? 'shader';
@@ -531,9 +549,8 @@ class WebGPUShaderModule implements ShaderModule {
         this.resources = descriptor.resources ?? [];
         this.handle = device.createShaderModule({ label: this.label, code: descriptor.source });
 
-        const seen = new Set<number>();
-        for (const match of descriptor.source.matchAll(/@group\(\s*(\d+)\s*\)/g)) seen.add(Number(match[1]));
-        this.groups = Array.from(seen).sort((a, b) => a - b);
+        this.groups = declaredGroupsOf(descriptor.source);
+        this.samplerBindings = samplerBindingsOf(descriptor.source);
     }
 
     /**
@@ -557,10 +574,20 @@ class WebGPUShaderModule implements ShaderModule {
 
 class WebGPUBindGroupLayout implements BindGroupLayout {
     public readonly label: string;
-    constructor(public readonly group: number, public readonly handle: GPUBindGroupLayout, label: string) {
+    constructor(public readonly group: number, public readonly handle: GPUBindGroupLayout, label: string,
+                /** Bindings in this group the shaders declare as a sampler. See `createBindGroup`. */
+                public readonly samplerBindings: ReadonlySet<number> = new Set()) {
         this.label = label;
     }
     public destroy(): void { /* owned by the pipeline that produced it */ }
+}
+
+/** The sampler bindings `group` has across every module a pipeline was built from. */
+function samplerBindingsIn(group: number, modules: readonly WebGPUShaderModule[]): Set<number> {
+    const merged = new Set<number>();
+    for (const module of modules)
+        for (const binding of module.samplerBindings.get(group) ?? []) merged.add(binding);
+    return merged;
 }
 
 class WebGPUBindGroup implements BindGroup {
@@ -598,7 +625,7 @@ class WebGPURenderPipeline implements RenderPipeline {
     public readonly emptyGroups: readonly number[];
 
     constructor(descriptor: RenderPipelineDescriptor, handle: GPURenderPipeline,
-                groups: readonly number[]) {
+                groups: readonly number[], modules: readonly WebGPUShaderModule[]) {
         this.resources = (descriptor.vertex as WebGPUShaderModule).resources;
         this.program = (descriptor.vertex as WebGPUShaderModule).program;
         this.label = descriptor.label ?? 'pipeline';
@@ -608,7 +635,8 @@ class WebGPURenderPipeline implements RenderPipeline {
         this.colorTargets = descriptor.colorTargets;
         this.handle = handle;
         this.bindGroupLayouts = groups.map(
-            g => new WebGPUBindGroupLayout(g, handle.getBindGroupLayout(g), `${this.label}:group${g}`));
+            g => new WebGPUBindGroupLayout(g, handle.getBindGroupLayout(g), `${this.label}:group${g}`,
+                                           samplerBindingsIn(g, modules)));
         const highest = groups.length ? Math.max(...groups) : -1;
         const gaps: number[] = [];
         for (let g = 0; g < highest; g++) if (!groups.includes(g)) gaps.push(g);
@@ -621,11 +649,17 @@ class WebGPURenderPipeline implements RenderPipeline {
     }
 
     /**
-     * Bind groups over `program`'s uniform blocks, one per group this pipeline actually declares.
+     * Bind groups over `program`'s uniform blocks AT THEIR CURRENT SLOTS, one per group this pipeline
+     * declares.
      *
-     * Cached per program, because both halves are stable: a `ProgramUniforms` allocates its buffers
-     * once, and a pipeline's layouts never change. Without the cache this would allocate a bind group
-     * per draw on a path that runs hundreds of times a frame.
+     * A block is an arena and each draw reads a different slot of it (see `UniformSet`), so a bind
+     * group names a byte range rather than a buffer: `{ buffer, offset, size }`. Two draws that left
+     * every block on the same slot share one; a draw that advanced any block gets its own.
+     *
+     * **Cached by the slot signature, not by the program.** Caching by program was correct while every
+     * draw read offset 0 — and that was the bug: twenty objects, twenty writes, one struct, so all
+     * twenty draws rendered the last one. The signature also carries each arena's generation, because a
+     * grown arena is a different `GPUBuffer` and a bind group names the buffer, not the block.
      *
      * A block whose group this pipeline does not declare is skipped rather than bound - the engine
      * numbers groups by ROLE, and a program's `ProgramUniforms` describes the whole module while a
@@ -633,39 +667,57 @@ class WebGPURenderPipeline implements RenderPipeline {
      */
     public uniformGroupsFor(program: WebGPUShaderProgram,
                             device: GPUDevice): readonly { group: number; handle: GPUBindGroup }[] {
-        let groups = this._uniformGroups.get(program);
-        if (!groups) {
-            // Grouped by GROUP INDEX, not one bind group per block. A group can declare several
-            // bindings - the lit families put more than one block in the same group - and WebGPU
-            // rejects a bind group whose entry count does not match its layout exactly ("Number of
-            // entries (1) did not match the expected number of entries (2)"), so every block sharing an
-            // index has to arrive in the same bind group.
-            const byGroup = new Map<number, { binding: number; buffer: WebGPUBuffer }[]>();
-            for (const set of program.uniforms.blocks) {
-                if (!this.layoutForGroup(set.layout.group)) continue;
-                const entries = byGroup.get(set.layout.group) ?? [];
-                entries.push({ binding: set.layout.binding, buffer: set.buffer as WebGPUBuffer });
-                byGroup.set(set.layout.group, entries);
-            }
-            groups = [];
-            for (const [group, entries] of byGroup) {
-                groups.push({
-                    group,
-                    handle: device.createBindGroup({
-                        label: `${this.label}<-${program.label}:uniforms${group}`,
-                        layout: this.layoutForGroup(group)!.handle,
-                        entries: entries.map(e => ({
-                            binding: e.binding, resource: { buffer: e.buffer.handle },
-                        })),
-                    }),
-                });
-            }
-            this._uniformGroups.set(program, groups);
+        let cache = this._uniformGroups.get(program);
+        if (!cache) { cache = new Map(); this._uniformGroups.set(program, cache); }
+
+        const signature = program.uniforms.bindingSignature();
+        const cached = cache.get(signature);
+        if (cached) return cached;
+
+        // Grouped by GROUP INDEX, not one bind group per block. A group can declare several
+        // bindings - the lit families put more than one block in the same group - and WebGPU
+        // rejects a bind group whose entry count does not match its layout exactly ("Number of
+        // entries (1) did not match the expected number of entries (2)"), so every block sharing an
+        // index has to arrive in the same bind group.
+        const byGroup = new Map<number, GPUBindGroupEntry[]>();
+        for (const set of program.uniforms.blocks) {
+            if (!this.layoutForGroup(set.layout.group)) continue;
+            const entries = byGroup.get(set.layout.group) ?? [];
+            entries.push({
+                binding: set.layout.binding,
+                // `size` is the BLOCK, not the arena. Without it the binding would span every slot,
+                // which both overruns `maxUniformBufferBindingSize` and makes the shader read slot 0
+                // whatever offset it was given.
+                resource: {
+                    buffer: (set.buffer as WebGPUBuffer).handle,
+                    offset: set.byteOffset,
+                    size: set.layout.size,
+                },
+            });
+            byGroup.set(set.layout.group, entries);
         }
+
+        const groups: { group: number; handle: GPUBindGroup }[] = [];
+        for (const [group, entries] of byGroup) {
+            groups.push({
+                group,
+                handle: device.createBindGroup({
+                    label: `${this.label}<-${program.label}:uniforms${group}@${signature}`,
+                    layout: this.layoutForGroup(group)!.handle,
+                    entries,
+                }),
+            });
+        }
+
+        // The signature space is bounded — slots reset at every submit, so a program cycles through
+        // the same handful of tuples pass after pass. The cap is insurance against a shape nobody
+        // predicted, not a working eviction policy: dropping the map costs one rebuild per signature.
+        if (cache.size >= UNIFORM_BIND_GROUP_CACHE_CAP) cache.clear();
+        cache.set(signature, groups);
         return groups;
     }
     private readonly _uniformGroups =
-        new WeakMap<WebGPUShaderProgram, { group: number; handle: GPUBindGroup }[]>();
+        new WeakMap<WebGPUShaderProgram, Map<string, { group: number; handle: GPUBindGroup }[]>>();
 
     public destroy(): void { /* released with the device */ }
 }
@@ -685,11 +737,12 @@ class WebGPUComputePipeline implements ComputePipeline {
     public readonly handle: GPUComputePipeline;
 
     constructor(descriptor: ComputePipelineDescriptor, handle: GPUComputePipeline,
-                groups: readonly number[]) {
+                groups: readonly number[], module: WebGPUShaderModule) {
         this.label = descriptor.label ?? 'compute-pipeline';
         this.handle = handle;
         this.bindGroupLayouts = groups.map(
-            g => new WebGPUBindGroupLayout(g, handle.getBindGroupLayout(g), `${this.label}:group${g}`));
+            g => new WebGPUBindGroupLayout(g, handle.getBindGroupLayout(g), `${this.label}:group${g}`,
+                                           samplerBindingsIn(g, [module])));
     }
 
     public destroy(): void { /* released with the device */ }
@@ -758,7 +811,11 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
         // into one program's buffers while the draw read another's; the driver reported it as
         // "Binding size (192) ... is smaller than the minimum binding size (6528)", and the bind group
         // labels showed it outright once they named both sides: `shadowMap<-tilemap:uniforms1`.
-        ShaderManager.Instance.bind(p.program);
+        // `bindIfRegistered`, not `bind`: a pipeline built straight from a shader module has no
+        // engine-level program, and that is a pipeline with no uniforms rather than an error. Binding
+        // nothing is the right answer there — `_flushUniforms` returns early on a null binding, where
+        // leaving the previous pass's program bound would feed this pipeline another program's buffers.
+        ShaderManager.Instance.bindIfRegistered(p.program);
         this._pipeline = p;
     }
     /** Remembered from `setPipeline` so the draw can bind against it. See `_flushUniforms`. */
@@ -1067,7 +1124,18 @@ class WebGPUCommandEncoder implements CommandEncoder {
     private readonly _timedPasses: string[] = [];
 
     constructor(private readonly _device: GPUDevice,
-                private readonly _timestamps: TimestampCollector | null, label?: string) {
+                private readonly _timestamps: TimestampCollector | null,
+                /**
+                 * Called after `queue.submit`, to release every uniform slot this submission read.
+                 *
+                 * The reset point is exactly here and nowhere earlier. `queue.writeBuffer` is ordered on
+                 * the QUEUE timeline, so a write issued after a submit lands after every command that
+                 * submit contained — which is what makes a slot safe to reuse. Reset a frame boundary
+                 * instead and a pass with more draws than the arena has slots would rewrite a value an
+                 * already-recorded draw has not read yet.
+                 */
+                private readonly _onSubmit: () => void = () => {},
+                label?: string) {
         this._encoder = _device.createCommandEncoder({ label: label ?? 'commands' });
     }
 
@@ -1179,6 +1247,7 @@ class WebGPUCommandEncoder implements CommandEncoder {
         // to share a command buffer with the passes whose timestamps it is resolving.
         this._timestamps?.recordResolve(this._encoder, this._timedPasses);
         this._device.queue.submit([this._encoder.finish()]);
+        this._onSubmit();
     }
 }
 
@@ -1380,9 +1449,35 @@ export class WebGPUDevice implements Device {
         if (!descriptor.vertexInputs || !descriptor.uniformBlocks)
             throw new Error(`${descriptor.label}: WebGPU needs the build-time vertex inputs and ` +
                             'uniform-block layouts; this program has neither (a runtime-assembled GLSL shader?)');
-        return new WebGPUShaderProgram(this, descriptor.label, descriptor.vertexInputs,
-                                       descriptor.uniformBlocks as UniformBlockLayout[]);
+        const program = new WebGPUShaderProgram(this, descriptor.label, descriptor.vertexInputs,
+                                               descriptor.uniformBlocks as UniformBlockLayout[],
+                                               this._device.limits.minUniformBufferOffsetAlignment,
+                                               p => this._programs.delete(p));
+        // Registered so `releaseUniformSlots` can reach it. The device owns the submission, and the
+        // submission is what makes a slot reusable, so the device is where the list belongs — a
+        // program has no way to know when the queue drained.
+        this._programs.add(program);
+        return program;
     }
+
+    /**
+     * Free every program's uniform slots. Called after each `queue.submit`.
+     *
+     * See {@link UniformSet.resetCursor} for why this is safe only here: a slot holds the value one
+     * recorded draw will read, and stays claimed until the command buffer containing that draw has
+     * been handed to the queue.
+     */
+    public releaseUniformSlots(): void {
+        for (const program of this._programs) program.uniforms.resetCursors();
+    }
+    /**
+     * Every program built on this device.
+     *
+     * A strong set on purpose. Programs are registered at creation and removed at `dispose`, and the
+     * renderer holds all 56 of them for the life of the device; a weak one would risk a program being
+     * collected between its last draw and the reset that has to reach it.
+     */
+    private readonly _programs = new Set<WebGPUShaderProgram>();
 
     public createShaderModule(descriptor: ShaderModuleDescriptor): ShaderModule {
         // Refuse an empty module by name rather than compiling nothing and failing at pipeline creation
@@ -1453,7 +1548,7 @@ export class WebGPUDevice implements Device {
         // `layout: 'auto'` derives the bind-group layouts from the shaders, so the groups a pipeline has
         // are the union of what its two modules declare — and asking for any other index throws.
         const groups = Array.from(new Set([...vertex.groups, ...fragment.groups])).sort((a, b) => a - b);
-        return new WebGPURenderPipeline(descriptor, handle, groups);
+        return new WebGPURenderPipeline(descriptor, handle, groups, [vertex, fragment]);
     }
 
     public createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline {
@@ -1469,7 +1564,7 @@ export class WebGPUDevice implements Device {
                 entryPoint: module.entryPoints.compute,
             },
         });
-        return new WebGPUComputePipeline(descriptor, handle, module.groups);
+        return new WebGPUComputePipeline(descriptor, handle, module.groups, module);
     }
 
     public createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
@@ -1500,10 +1595,25 @@ export class WebGPUDevice implements Device {
         // the engine's model is that a texture carries its own sampling state, and a draw site should
         // not have to learn otherwise to satisfy one backend. `WebGPUTexture.samplingConfig` is exactly
         // that state, recorded by `configure()`.
+        // Only where the caller left the slot empty. A caller that DID pass its own sampler - the
+        // device harness does, and so would anything binding a sampler that is not a texture's own -
+        // otherwise ends up with two entries at the same binding, and WebGPU rejects the whole bind
+        // group on the count ("Number of entries (3) did not match the expected number of entries
+        // (2)"). That invalidates the command buffer, so the pass does not even clear and the target
+        // reads back as zeros - which looks like a shader that produced nothing rather than a bind
+        // group that was never valid.
+        const declared = new Set(descriptor.entries.map(e => e.binding));
         const withSamplers: BindGroupEntry[] = [];
         for (const entry of descriptor.entries) {
             withSamplers.push(entry);
             if (!('textureView' in entry)) continue;
+            // Two ways this must NOT fire, both of which produce an entry count the layout does not
+            // expect - and WebGPU rejects the bind group on the count alone, which invalidates the
+            // whole command buffer, so the pass does not even clear and the target reads back as zeros:
+            //   - the caller passed its OWN sampler for the slot;
+            //   - the shader declares no sampler there at all, which is every `textureLoad` read.
+            if (declared.has(entry.binding + 1)) continue;
+            if (!layout.samplerBindings.has(entry.binding + 1)) continue;
             const texture = (entry.textureView as WebGPUTextureView).texture;
             withSamplers.push({ binding: entry.binding + 1, sampler: this._samplerFor(texture) });
         }
@@ -1627,7 +1737,8 @@ export class WebGPUDevice implements Device {
     // -- commands --------------------------------------------------------------------------------
 
     public createCommandEncoder(label?: string): CommandEncoder {
-        return new WebGPUCommandEncoder(this._device, this._timestamps, label);
+        return new WebGPUCommandEncoder(this._device, this._timestamps,
+                                        () => this.releaseUniformSlots(), label);
     }
 
     /** See {@link Device.setTimestampCollection}. Everything it needs lives in `TimestampCollector`. */

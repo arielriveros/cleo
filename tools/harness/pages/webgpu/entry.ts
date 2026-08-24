@@ -13,8 +13,9 @@ import { acquireWebGPUDevice, type WebGPUDevice } from '../../../../src/graphics
 import { BufferUsage, TextureUsage, ShaderStage, type VertexBufferLayout } from '../../../../src/graphics/rhi/types';
 import { UniformSet, ProgramUniforms } from '../../../../src/graphics/rhi/uniformSet';
 import { WebGPUShaderProgram } from '../../../../src/graphics/rhi/webgpu/webgpuShaderProgram';
+import { ShaderManager } from '../../../../src/graphics/systems/shaderManager';
 import type { Texture, TextureView, ShaderModule, BindGroup, RenderPipeline } from '../../../../src/graphics/rhi/resources';
-import type { RenderPassEncoder } from '../../../../src/graphics/rhi/device';
+import type { RenderPassEncoder, BindGroupEntry } from '../../../../src/graphics/rhi/device';
 import ScreenProgram from '../../../../src/graphics/shaders/wgsl/screen.wgsl';
 import PresentProgram from '../../../../src/graphics/shaders/wgsl/present.wgsl';
 import OutlineProgram from '../../../../src/graphics/shaders/wgsl/outline.wgsl';
@@ -189,6 +190,17 @@ function uploadTexture(device: WebGPUDevice, data: Uint8Array, size: number, lab
 }
 
 /** A colour target that can be both drawn into and read back. */
+/**
+ * The bind-group entry for one uniform block, AT THE SLOT IT IS CURRENTLY WRITTEN TO.
+ *
+ * A `UniformSet` is an arena of slots, not a struct — see `rhi/uniformSet.ts`. Naming the buffer alone
+ * would bind slot 0, which is right for the first draw of a pass and wrong for every one after it.
+ */
+function uniformEntry(set: UniformSet): BindGroupEntry {
+    return { binding: set.layout.binding, buffer: set.buffer,
+             offset: set.byteOffset, size: set.layout.size };
+}
+
 function makeTarget(device: WebGPUDevice, size: number, label: string): { texture: Texture; view: TextureView } {
     const texture = device.createTexture({
         label, format: 'rgba8unorm', dimension: '2d', width: size, height: size,
@@ -305,15 +317,24 @@ async function run(): Promise<CheckResult[]> {
         const flat = new Uint8Array(SIZE * SIZE * 4);
         for (let i = 0; i < flat.length; i += 4) { flat[i] = 128; flat[i + 1] = 128; flat[i + 2] = 128; flat[i + 3] = 255; }
         const source = uploadTexture(device, flat, SIZE, 'hdr');
-        const depth = uploadTexture(device, flat, SIZE, 'coverage');
+        // A REAL depth texture, empty. `u_coverageDepth` is declared `texture_depth_2d` — a depth
+        // format is the only thing that satisfies that binding, and an rgba8 stand-in is refused
+        // ("None of the supported sample types (Float|UnfilterableFloat) ... match the expected sample
+        // types (Depth)"), which invalidates the bind group and with it the whole command buffer, so
+        // the pass does not even clear and the target reads back as zeros. Its CONTENTS do not matter
+        // here: the draw below sets `u_alphaFromDepth` to 0, so nothing samples it.
+        const depth = device.createTexture({
+            label: 'coverage', format: 'depth24plus', dimension: '2d', width: SIZE, height: SIZE,
+            usage: TextureUsage.TEXTURE_BINDING | TextureUsage.RENDER_ATTACHMENT,
+        });
 
         // The uniform buffer is sized and addressed entirely from the BUILD-TIME layout — no hand-
         // written offsets, no `new Float32Array([exposure, 0])` that happens to match the struct.
         const block = PresentProgram.uniformBlocks[0];
-        const uniforms = device.createBuffer({
-            label: 'present-uniforms', size: block.size, usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
-        });
-        const uniformSet = new UniformSet(block, uniforms);
+        // The set owns its own ARENA now - one buffer holding many slots - because a draw reads the
+        // slot it was given rather than whatever the last write left at offset 0. Nothing here has to
+        // know how many slots there are; it asks the set where its current value is.
+        const uniformSet = new UniformSet(block, device, 256, 'present');
         check('the present block layout arrived with the shader',
               block.size >= 8 && block.flat.length === 2,
               `size=${block.size} members=[${block.flat.map(m => m.name + '@' + m.offset).join(', ')}]`);
@@ -327,10 +348,6 @@ async function run(): Promise<CheckResult[]> {
                 { binding: 3, sampler: nearest },
             ],
         });
-        const group1 = device.createBindGroup({
-            layout: pipeline.bindGroupLayouts[1],
-            entries: [{ binding: 0, buffer: uniforms }],
-        });
 
         const draw = async (exposure: number): Promise<Uint8Array> => {
             // BY NAME, through the alias the renderer actually uses — the layout knows this member as
@@ -339,6 +356,14 @@ async function run(): Promise<CheckResult[]> {
             if (!uniformSet.set('u_exposure', exposure)) throw new Error('u_exposure did not resolve');
             uniformSet.set('u_alphaFromDepth', 0);
             uniformSet.flush(device);
+            // Built AFTER the flush, over the slot the flush just claimed. This is exactly what
+            // `WebGPURenderPipeline.uniformGroupsFor` does per draw in the renderer, and the reason
+            // it does: a bind group naming offset 0 would read whichever value was written last.
+            const group1 = device.createBindGroup({
+                layout: pipeline.bindGroupLayouts[1],
+                entries: [{ binding: 0, buffer: uniformSet.buffer,
+                            offset: uniformSet.byteOffset, size: block.size }],
+            });
             const target = makeTarget(device, SIZE, `present-${exposure}`);
             const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
             const encoder = device.createCommandEncoder('present');
@@ -534,10 +559,16 @@ struct Targets {
 
     // --- 6. a program with TWO uniform blocks, written by name ------------------------------------
     //
-    // `outline` is the cleanest case in the engine: matrices in group 1, a colour in group 2, and no
-    // textures at all. That separation is what makes the test sharp — group 1 decides WHERE the
-    // triangle lands and group 2 decides WHAT COLOUR it is, so a name routed to the wrong block does
-    // not merely shade differently, it moves the geometry or leaves it black.
+    // `outline` is the cleanest case in the engine: two blocks and no textures at all. One holds the
+    // matrices and decides WHERE the triangle lands; the other holds the colour and decides what it
+    // looks like — so a name routed to the wrong block does not merely shade differently, it moves the
+    // geometry or leaves it black.
+    //
+    // Both blocks sit in GROUP 1, at bindings 0 and 1. They used to be groups 1 and 2, and this section
+    // still said so long after the 6 -> 4 bind-group merge moved every uniform block into one group —
+    // which is why it threw rather than failing: `forGroup(2)` is undefined now. A group holding several
+    // blocks is the case the renderer actually has, and WebGPU rejects a bind group whose entry count
+    // does not match its layout, so the two have to arrive together.
     //
     // This is the piece the renderer needs and did not have: `UniformSet` knows one block, and a
     // program has several.
@@ -556,9 +587,16 @@ struct Targets {
         });
 
         const program = new ProgramUniforms(device, OutlineProgram.uniformBlocks, 'outline');
-        check('the outline program declares two uniform blocks',
-              program.blocks.length === 2 && !!program.forGroup(1) && !!program.forGroup(2),
-              program.blocks.map(b => 'g' + b.layout.group + ':' + b.layout.name).join(' '));
+        check('the outline program declares two uniform blocks, both in group 1',
+              program.blocks.length === 2 && program.blocks.every(b => b.layout.group === 1)
+              && new Set(program.blocks.map(b => b.layout.binding)).size === 2,
+              program.blocks.map(b => 'g' + b.layout.group + 'b' + b.layout.binding + ':' + b.layout.name).join(' '));
+
+        /** The one bind group `outline` needs: every block it declares, at its current slot. */
+        const outlineGroup = (uniforms: ProgramUniforms) => device.createBindGroup({
+            layout: pipeline.bindGroupLayouts.find(l => l.group === 1)!,
+            entries: uniforms.blocks.map(uniformEntry),
+        });
 
         // A full-viewport triangle in clip space, with identity view/projection.
         const IDENTITY = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
@@ -583,18 +621,14 @@ struct Targets {
 
             const target = makeTarget(device, SIZE, 'outline');
             const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
-            const groups = [1, 2].map(g => device.createBindGroup({
-                layout: pipeline.bindGroupLayouts.find(l => l.group === g)!,
-                entries: [{ binding: 0, buffer: program.forGroup(g)!.buffer }],
-            }));
+            const group1 = outlineGroup(program);
             const encoder = device.createCommandEncoder('outline');
             const pass = encoder.beginRenderPass(renderTarget, {
                 label: 'outline',
                 colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
             });
             pass.setPipeline(pipeline);
-            pass.setBindGroup(1, groups[0]);
-            pass.setBindGroup(2, groups[1]);
+            pass.setBindGroup(1, group1);
             pass.setVertexBuffer(0, vbo);
             pass.draw(3);
             pass.end();
@@ -604,9 +638,9 @@ struct Targets {
             return pixels;
         };
 
-        // Group 2 decides the colour.
+        // The second block decides the colour.
         const red = await drawOutline([1, 0, 0], 1);
-        check('a name routed to group 2 colours the fragment',
+        check('a name routed to the colour block colours the fragment',
               red[0] === 255 && red[1] === 0 && red[2] === 0,
               `rgb=(${red[0]},${red[1]},${red[2]})`);
         const teal = await drawOutline([0, 0.5, 1], 1);
@@ -614,11 +648,12 @@ struct Targets {
               teal[0] === 0 && Math.abs(teal[2] - 255) <= 1,
               `rgb=(${teal[0]},${teal[1]},${teal[2]})`);
 
-        // Group 1 decides the geometry. Scaling the model matrix to a quarter pulls the triangle off
-        // the top-right corner, so that texel goes back to the clear colour while the origin stays lit.
+        // The transform block decides the geometry. Scaling the model matrix to a quarter pulls the
+        // triangle off the top-right corner, so that texel goes back to the clear colour while the
+        // origin stays lit.
         const shrunk = await drawOutline([0, 0.5, 1], 0.25);
         const corner = ((SIZE - 1) * SIZE + (SIZE - 1)) * 4;
-        check('a name routed to group 1 moves the geometry',
+        check('a name routed to the transform block moves the geometry',
               shrunk[corner + 2] === 0 && teal[corner + 2] > 200,
               `corner blue: full=${teal[corner + 2]} shrunk=${shrunk[corner + 2]}`);
 
@@ -657,18 +692,14 @@ struct Targets {
 
             const target = makeTarget(device, SIZE, 'outline-iface');
             const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
-            const groups = [1, 2].map(g => device.createBindGroup({
-                layout: pipeline.bindGroupLayouts.find(l => l.group === g)!,
-                entries: [{ binding: 0, buffer: gpuProgram.uniforms.forGroup(g)!.buffer }],
-            }));
+            const group1 = outlineGroup(gpuProgram.uniforms);
             const encoder = device.createCommandEncoder('outline-iface');
             const pass = encoder.beginRenderPass(renderTarget, {
                 label: 'outline-iface',
                 colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
             });
             pass.setPipeline(pipeline);
-            pass.setBindGroup(1, groups[0]);
-            pass.setBindGroup(2, groups[1]);
+            pass.setBindGroup(1, group1);
             pass.setVertexBuffer(0, vbo);
             pass.draw(3);
             pass.end();
@@ -684,6 +715,59 @@ struct Targets {
                   (gpuProgram.describeBlockLayout() as any[]).length === 2,
                   JSON.stringify((gpuProgram.describeBlockLayout() as any[]).map(b => b.name)));
 
+            gpuProgram.dispose();
+        }
+
+        // --- TWO DRAWS IN ONE PASS, through the renderer's own path ------------------------------
+        //
+        // The check this backend was missing, and the reason a complete WebGPU frame rendered a scene
+        // with most of its objects absent. `queue.writeBuffer` is ordered against the SUBMIT, not
+        // against the commands already recorded, so a pass that wrote `u_model` before each of twenty
+        // draws gave all twenty the LAST value. Every single-draw check above passed throughout.
+        //
+        // Driven through `ShaderManager` + `pass.setPipeline` + `pass.draw` rather than by building
+        // bind groups here, because the aliasing lived in `WebGPURenderPassEncoder._flushUniforms` and
+        // a check that binds by hand cannot see it.
+        {
+            const gpuProgram = device.createShaderProgram({ label: 'outline', ...OutlineProgram });
+            ShaderManager.Instance.addShader('outline', gpuProgram);
+
+            const target = makeTarget(device, SIZE, 'outline-multidraw');
+            const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
+            const encoder = device.createCommandEncoder('outline-multidraw');
+            const pass = encoder.beginRenderPass(renderTarget, {
+                label: 'outline-multidraw',
+                colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
+            });
+            pass.setPipeline(pipeline);
+            pass.setVertexBuffer(0, vbo);
+            // A scissor per draw, so the two land in different halves of the same attachment. The
+            // alternative — two model matrices putting the geometry in different places — would test
+            // the same thing, but a colour that is simply wrong is easier to read than geometry that
+            // is in the wrong place.
+            const half = SIZE / 2;
+            for (const [x, color] of [[0, [1, 0, 0]], [half, [0, 0, 1]]] as [number, number[]][]) {
+                gpuProgram.setUniform('u_model', [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+                gpuProgram.setUniform('u_view', IDENTITY);
+                gpuProgram.setUniform('u_projection', IDENTITY);
+                gpuProgram.setUniform('u_outlineColor', color);
+                pass.setScissor(x, 0, half, SIZE);
+                pass.draw(3);
+            }
+            pass.end();
+            encoder.finish();
+            const px = await device.readPixels(target.view, 0, 0, SIZE, SIZE);
+            target.texture.destroy();
+
+            const left = 0, right = half * 4;
+            check('two draws in ONE pass keep their own uniforms',
+                  px[left] === 255 && px[left + 2] === 0
+                  && px[right] === 0 && px[right + 2] === 255,
+                  `left=(${px[left]},${px[left + 1]},${px[left + 2]}) ` +
+                  `right=(${px[right]},${px[right + 1]},${px[right + 2]}) — ` +
+                  'both blue means every draw in the pass read the LAST uniform write');
+
+            ShaderManager.Instance.removeShader('outline');
             gpuProgram.dispose();
         }
 

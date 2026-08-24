@@ -21,7 +21,14 @@ function fakeDevice() {
     };
 }
 
-const BUFFER = { label: 'test', size: 256, usage: 0, destroy() {} } as Buffer;
+/**
+ * A device that hands out plain buffer records. `UniformSet` allocates its own arena now, so a caller
+ * supplies a device rather than a buffer.
+ */
+const ALLOCATOR = {
+    createBuffer: (d: any) => ({ label: d.label, size: d.size, usage: d.usage, destroy() {} } as Buffer),
+    writeBuffer: () => { /* construction never uploads */ },
+} as any;
 
 function layout(flat: UniformBlockLayout['flat'], size = 256): UniformBlockLayout {
     return { name: 'u_test', group: 1, binding: 0, size, flat };
@@ -45,7 +52,7 @@ describe('scalars and vectors', () => {
         const set = new UniformSet(layout([
             { name: 'u_test.u_exposure', type: 'f32', offset: 0, size: 4 },
             { name: 'u_test.u_alpha', type: 'f32', offset: 4, size: 4 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         expect(set.set('u_test.u_exposure', 2.5)).toBe(true);
         set.set('u_test.u_alpha', 1);
         const floats = floatsOf(set);
@@ -59,7 +66,7 @@ describe('scalars and vectors', () => {
         const set = new UniformSet(layout([
             { name: 'u_test.u_color', type: 'vec3<f32>', offset: 0, size: 12 },
             { name: 'u_test.u_scale', type: 'f32', offset: 12, size: 4 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         set.set('u_test.u_scale', 9);
         set.set('u_test.u_color', [1, 2, 3]);
         const floats = floatsOf(set);
@@ -70,7 +77,7 @@ describe('scalars and vectors', () => {
         // A flag stored as i32 must be written as bits, not converted — 1.0 as a float is 0x3f800000.
         const set = new UniformSet(layout([
             { name: 'u_test.u_enabled', type: 'i32', offset: 0, size: 4 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         set.set('u_test.u_enabled', true);
         expect(intsOf(set)[0]).toBe(1);
     });
@@ -80,7 +87,7 @@ describe('matrices', () => {
     it('writes a mat4x4 as sixteen contiguous floats', () => {
         const set = new UniformSet(layout([
             { name: 'u_test.u_model', type: 'mat4x4<f32>', offset: 0, size: 64, matrixStride: 16 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         const m = new Float32Array(16).map((_, i) => i + 1);
         set.set('u_test.u_model', m);
         expect([...floatsOf(set).slice(0, 16)]).toEqual([...m]);
@@ -90,7 +97,7 @@ describe('matrices', () => {
         // Three columns of vec3, each 16-byte aligned: floats 0-2, 4-6, 8-10, with 3/7/11 untouched.
         const set = new UniformSet(layout([
             { name: 'u_test.u_normal', type: 'mat3x3<f32>', offset: 0, size: 48, matrixStride: 16 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         set.set('u_test.u_normal', [1, 2, 3, 4, 5, 6, 7, 8, 9]);
         const f = floatsOf(set);
         expect([...f.slice(0, 12)]).toEqual([1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 0]);
@@ -101,7 +108,7 @@ describe('arrays', () => {
     it('spaces elements by the array stride', () => {
         const set = new UniformSet(layout([
             { name: 'u_test.u_splits', type: 'array<vec4<f32>, 3>', offset: 0, size: 48, arrayStride: 16 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         set.set('u_test.u_splits', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         expect([...floatsOf(set).slice(0, 12)]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     });
@@ -111,7 +118,7 @@ describe('arrays', () => {
         // would put every value where the shader is not looking.
         const set = new UniformSet(layout([
             { name: 'u_test.u_values', type: 'array<f32, 3>', offset: 0, size: 48, arrayStride: 16 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         set.set('u_test.u_values', [7, 8, 9]);
         const f = floatsOf(set);
         expect([f[0], f[4], f[8]]).toEqual([7, 8, 9]);
@@ -121,7 +128,7 @@ describe('arrays', () => {
         // The SSAO kernel depends on this: it uploads only the samples in use, not all 64.
         const set = new UniformSet(layout([
             { name: 'u_test.u_samples', type: 'array<vec4<f32>, 4>', offset: 0, size: 64, arrayStride: 16 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         set.set('u_test.u_samples', [1, 1, 1, 1, 2, 2, 2, 2]);
         const f = floatsOf(set);
         expect([...f.slice(0, 8)]).toEqual([1, 1, 1, 1, 2, 2, 2, 2]);
@@ -135,7 +142,7 @@ describe('name resolution', () => {
         // `u_present.u_exposure`. The same suffix aliasing UniformBlockSet applies on WebGL2.
         const set = new UniformSet(layout([
             { name: 'u_present.u_exposure', type: 'f32', offset: 0, size: 4 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         expect(set.has('u_exposure')).toBe(true);
         expect(set.set('u_exposure', 3)).toBe(true);
         expect(floatsOf(set)[0]).toBe(3);
@@ -144,14 +151,14 @@ describe('name resolution', () => {
     it('reports a miss rather than throwing, so a caller can try another block', () => {
         const set = new UniformSet(layout([
             { name: 'u_test.u_a', type: 'f32', offset: 0, size: 4 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         expect(set.set('u_nothing', 1)).toBe(false);
     });
 
     it('resolves an array-of-struct member by its leaf name', () => {
         const set = new UniformSet(layout([
             { name: 'u_l.u_pointLights[1].position', type: 'vec3<f32>', offset: 32, size: 12 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         expect(set.has('u_pointLights[1].position')).toBe(true);
         set.set('u_pointLights[1].position', [4, 5, 6]);
         expect([...floatsOf(set).slice(8, 11)]).toEqual([4, 5, 6]);
@@ -162,7 +169,7 @@ describe('uploads', () => {
     it('uploads once per flush and only when dirty', () => {
         const set = new UniformSet(layout([
             { name: 'u_test.u_a', type: 'f32', offset: 0, size: 4 },
-        ]), BUFFER);
+        ]), ALLOCATOR);
         const { device, uploads } = fakeDevice();
         set.set('u_test.u_a', 1);
         set.set('u_test.u_a', 2);
@@ -201,16 +208,23 @@ describe('ProgramUniforms', () => {
         const uploads = new Map<string, Uint8Array>();
         const device = {
             createBuffer: (d: any) => ({ label: d.label, size: d.size, usage: d.usage, destroy() {} }),
+            // Keyed by the BLOCK, not the buffer label: an arena's label carries its slot count
+            // (`outline:u_transform[64]`), which is an allocation detail these tests do not pin.
             writeBuffer: (b: any, _o: number, data: ArrayBufferView) =>
-                uploads.set(b.label, new Uint8Array(data.buffer.slice(0))),
+                uploads.set(String(b.label).replace(/\[\d+\]$/, ''), new Uint8Array(data.buffer.slice(0))),
         } as any;
         return { device, uploads, program: new ProgramUniforms(device, [TRANSFORM, MATERIAL], 'outline') };
     }
 
-    it('allocates one buffer per block, sized to the block', () => {
+    it('allocates one ARENA per block, a whole number of aligned slots', () => {
         const { program } = twoBlockProgram();
-        expect(program.blocks.map(b => b.buffer.size)).toEqual([64, 32]);
-        expect(program.blocks.map(b => b.buffer.label)).toEqual(['outline:u_transform', 'outline:u_material']);
+        // 64 and 32 bytes both round up to one 256-byte slot, and a small block gets the initial
+        // 64-slot arena. The size is slots x slotSize, not the block size: successive values of the
+        // same block have to land at different offsets or a multi-draw pass reads only the last one.
+        expect(program.blocks.map(b => b.slotSize)).toEqual([256, 256]);
+        expect(program.blocks.map(b => b.buffer.size)).toEqual([64 * 256, 64 * 256]);
+        expect(program.blocks.map(b => b.buffer.label))
+            .toEqual(['outline:u_transform[64]', 'outline:u_material[64]']);
     });
 
     it('finds a block by the group it is bound at', () => {
@@ -262,5 +276,96 @@ describe('ProgramUniforms', () => {
         program.set('u_color', [1, 1, 1]);
         program.flush(device);
         expect([...uploads.keys()]).toEqual(['outline:u_material']);
+    });
+});
+
+/**
+ * The arena.
+ *
+ * `queue.writeBuffer` is ordered against the SUBMIT, not against the commands already recorded, so a
+ * pass that writes `u_model` before each of twenty draws would give all twenty the LAST value — the
+ * defect that made a complete WebGPU frame render a scene with most of its objects missing. Each write
+ * that follows a draw therefore lands in a fresh slot, and the bind group for that draw names it.
+ */
+describe('slots', () => {
+    /** A device that hands out buffer records and remembers every (buffer, offset) written. */
+    function arenaDevice() {
+        const writes: { label: string; offset: number }[] = [];
+        const device = {
+            createBuffer: (d: any) => ({ label: d.label, size: d.size, usage: d.usage, destroy() {} }),
+            writeBuffer: (b: any, offset: number) => writes.push({ label: b.label, offset }),
+        } as any;
+        return { device, writes };
+    }
+
+    const BLOCK: UniformBlockLayout = layout([
+        { name: 'u_test.u_value', type: 'f32', offset: 0, size: 4 },
+    ], 64);
+
+    it('advances a slot for every value that changed', () => {
+        const { device, writes } = arenaDevice();
+        const set = new UniformSet(BLOCK, device, 256, 'p');
+        for (const v of [1, 2, 3]) { set.set('u_value', v); set.flush(device); }
+        expect(writes.map(w => w.offset)).toEqual([0, 256, 512]);
+    });
+
+    it('keeps its slot while nothing changes', () => {
+        // A per-PASS block — the lights, the camera — must not consume one slot per draw.
+        const { device, writes } = arenaDevice();
+        const set = new UniformSet(BLOCK, device, 256, 'p');
+        set.set('u_value', 1);
+        set.flush(device);
+        set.flush(device);
+        set.flush(device);
+        expect(writes.map(w => w.offset)).toEqual([0]);
+        expect(set.byteOffset).toBe(0);
+    });
+
+    it('spaces slots by the ALIGNMENT the adapter reports, not by the block size', () => {
+        const { device, writes } = arenaDevice();
+        const set = new UniformSet(BLOCK, device, 32, 'p');
+        expect(set.slotSize).toBe(64);        // 64-byte block, 32-byte alignment — already aligned
+        set.set('u_value', 1); set.flush(device);
+        set.set('u_value', 2); set.flush(device);
+        expect(writes.map(w => w.offset)).toEqual([0, 64]);
+    });
+
+    it('releases every slot on reset, and only then reuses offset 0', () => {
+        const { device, writes } = arenaDevice();
+        const set = new UniformSet(BLOCK, device, 256, 'p');
+        set.set('u_value', 1); set.flush(device);
+        set.set('u_value', 2); set.flush(device);
+        set.resetCursor();
+        set.flush(device);
+        expect(writes.map(w => w.offset)).toEqual([0, 256, 0]);
+    });
+
+    it('grows into a NEW buffer rather than wrapping onto a slot still in use', () => {
+        const { device } = arenaDevice();
+        // 16 KB budget over 256-byte slots caps at the 64-slot initial size.
+        const set = new UniformSet(BLOCK, device, 256, 'p');
+        const first = set.buffer;
+        expect(set.generation).toBe(0);
+        for (let i = 0; i < 64; i++) { set.set('u_value', i); set.flush(device); }
+        expect(set.buffer).toBe(first);        // exactly full, nothing wasted
+        set.set('u_value', 64); set.flush(device);
+        expect(set.buffer).not.toBe(first);
+        expect(set.generation).toBe(1);
+        expect(set.buffer.size).toBe(128 * 256);
+        // Back to the first slot — of the NEW buffer. The old one stays alive for the bind groups
+        // already recorded against it, which is why it is never destroyed here.
+        expect(set.byteOffset).toBe(0);
+    });
+
+    it('signs a program by the slot and generation of every block', () => {
+        const { device } = arenaDevice();
+        const program = new ProgramUniforms(device, [BLOCK], 'p');
+        program.flush(device);
+        const first = program.bindingSignature();
+        program.flush(device);
+        expect(program.bindingSignature()).toBe(first);   // nothing changed, same bind group
+        program.set('u_value', 7);
+        program.flush(device);
+        expect(program.bindingSignature()).not.toBe(first);
     });
 });

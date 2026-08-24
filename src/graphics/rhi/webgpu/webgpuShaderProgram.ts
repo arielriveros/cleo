@@ -57,7 +57,17 @@ export class WebGPUShaderProgram implements ShaderProgram {
 
     constructor(private readonly _device: Device, label: string,
                 vertexInputs: readonly WgslVertexInput[],
-                blocks: readonly UniformBlockLayout[]) {
+                blocks: readonly UniformBlockLayout[],
+                /**
+                 * `minUniformBufferOffsetAlignment`, from the adapter.
+                 *
+                 * Passed in rather than assumed because it is what a uniform ARENA's slots are spaced
+                 * by, and spacing them by the spec maximum on an adapter that reports 32 would waste
+                 * eight times the memory for no reason.
+                 */
+                uniformOffsetAlignment?: number,
+                /** Told when this program is disposed, so the device can drop it from its registry. */
+                private readonly _onDispose?: (program: WebGPUShaderProgram) => void) {
         this.attributes = vertexInputs.map(input => {
             const format = VERTEX_FORMATS[input.type];
             if (!format)
@@ -73,7 +83,7 @@ export class WebGPUShaderProgram implements ShaderProgram {
             };
         });
         this.label = label;
-        this._uniforms = new ProgramUniforms(_device, blocks, label);
+        this._uniforms = new ProgramUniforms(_device, blocks, label, uniformOffsetAlignment);
     }
 
     /** The blocks, so a caller can build the uniform bind groups from their buffers. */
@@ -111,5 +121,6 @@ export class WebGPUShaderProgram implements ShaderProgram {
         if (this._disposed) return;
         this._disposed = true;
         this._uniforms.destroy();
+        this._onDispose?.(this);
     }
 }

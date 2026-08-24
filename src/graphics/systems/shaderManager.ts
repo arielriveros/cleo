@@ -50,6 +50,27 @@ export class ShaderManager {
         this._boundShader.use();
     }
 
+    /**
+     * Bind `name` if it is registered, and bind NOTHING if it is not. Returns whether it was.
+     *
+     * For the WebGPU pass encoder, which binds the program a pipeline names on every `setPipeline`.
+     * A pipeline can legitimately have no engine-level program behind it — one built straight from a
+     * shader module, which is what the device-tier harness does and what any future device-level test
+     * would do — and `bind` throwing turns that into a dead run rather than a pipeline with no
+     * uniforms to flush.
+     *
+     * Clearing the binding is the load-bearing half. Leaving the previous pass's program bound is
+     * exactly the failure `WebGPURenderPassEncoder._flushUniforms` documents: uniforms written for one
+     * program, read by a draw recorded against another, reported by the driver as a binding-size
+     * mismatch a long way from the pass that caused it.
+     */
+    public bindIfRegistered(name: string): boolean {
+        const shader = this._shaders.get(name);
+        this._boundShader = shader ?? null;
+        shader?.use();
+        return !!shader;
+    }
+
     public setUniform(name: string, value: any): void {
         if (!this._boundShader) throw new Error("No shader bound");
         this._boundShader.setUniform(name, value);

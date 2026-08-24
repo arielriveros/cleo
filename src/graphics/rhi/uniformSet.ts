@@ -9,6 +9,12 @@
  * The point of the exercise is that `setUniform('u_exposure', 2.0)` keeps working. ~380 call sites in
  * `renderer.ts` pass values by name and must not learn which backend they are talking to, so the
  * name-to-offset step is the backend's problem, and this is where it is solved for WebGPU.
+ *
+ * **A block is an ARENA of slots, not a single struct.** `queue.writeBuffer` is ordered against the
+ * SUBMIT, not against the commands already recorded — so a pass that draws twenty objects, writing
+ * `u_model` before each one, would have every one of those draws read the LAST value written, and the
+ * pass would render twenty copies of the last object. So a write that follows a draw lands in a FRESH
+ * slot, and the bind group for that draw names the slot's byte offset. See {@link UniformSet}.
  */
 
 import type { Device } from './device';
@@ -53,6 +59,26 @@ interface WriteShape {
 const VECTOR = /^vec([234])<\s*([a-z0-9]+)\s*>$/;
 const MATRIX = /^mat([234])x([234])<\s*([a-z0-9]+)\s*>$/;
 const ARRAY = /^array<\s*([\s\S]+)\s*>$/;
+
+/**
+ * The offset alignment WebGPU requires of a uniform binding, when the caller supplies none.
+ *
+ * The real value comes off `GPUSupportedLimits.minUniformBufferOffsetAlignment`. 256 is the spec's
+ * DEFAULT — the largest an adapter may report — so it is safe everywhere and merely wasteful on one
+ * that would have accepted less.
+ */
+export const DEFAULT_UNIFORM_OFFSET_ALIGNMENT = 256;
+
+/** Bytes a fresh arena aims at. A big block gets fewer slots for it, and grows if it needs more. */
+const ARENA_BUDGET_BYTES = 16384;
+/** Slots a fresh arena starts with, whatever the budget works out to. */
+const MIN_ARENA_SLOTS = 8;
+/** Slots a fresh arena starts with at most. Past this it grows on demand instead of guessing. */
+const MAX_INITIAL_ARENA_SLOTS = 64;
+
+function alignUp(value: number, alignment: number): number {
+    return Math.ceil(value / alignment) * alignment;
+}
 
 function isInteger(scalar: string): boolean { return scalar === 'i32' || scalar === 'u32'; }
 
@@ -108,22 +134,50 @@ function shapeOf(member: UniformMember): WriteShape {
 }
 
 /**
- * A CPU-side uniform buffer written by name and uploaded when dirty.
+ * A CPU-side uniform block, and the GPU ARENA its successive values are written into.
  *
- * One per uniform block. Uploads happen in {@link flush}, immediately before the draw that reads them,
- * rather than on every `set` — a pass that writes a dozen members costs one upload, not a dozen.
+ * One per uniform block. The CPU half is a plain `ArrayBuffer` written by name; the GPU half is a
+ * buffer holding `slots` copies of the block, and {@link flush} moves to a fresh slot whenever the
+ * contents changed since the last draw read them.
+ *
+ * **Why a slot rather than one struct.** `queue.writeBuffer` is ordered on the QUEUE timeline — against
+ * the submit, not against the commands already recorded in the encoder. Overwriting one struct per draw
+ * therefore does not give each draw its own value; it gives every draw in the submission the last one.
+ * Slots are what make "set `u_model`, draw, set `u_model`, draw" mean what it says, and they are why
+ * the ~380 `setUniform` call sites above this could stay exactly as they were.
+ *
+ * The cursor is reset by the backend after each `queue.submit` — at that point every command that could
+ * read a slot has been enqueued, so the slots are free again. See `WebGPUCommandEncoder.finish`.
  */
 export class UniformSet {
     private readonly _cpu: ArrayBuffer;
     private readonly _floats: Float32Array;
     private readonly _ints: Int32Array;
     private readonly _shapes = new Map<string, WriteShape>();
+    private readonly _label: string;
     private _dirty = true;
 
-    constructor(public readonly layout: UniformBlockLayout, public readonly buffer: Buffer) {
+    /** Bytes per slot: the block rounded up to the adapter's uniform-offset alignment. */
+    public readonly slotSize: number;
+    private _buffer: Buffer;
+    private _slots: number;
+    /** Slot holding this block's current value, or -1 when nothing has been written since the reset. */
+    private _cursor = -1;
+    /** Bumped whenever {@link buffer} becomes a different object, so bind groups over it get rebuilt. */
+    private _generation = 0;
+
+    constructor(public readonly layout: UniformBlockLayout, device: Device,
+                alignment: number = DEFAULT_UNIFORM_OFFSET_ALIGNMENT, label = 'program') {
         this._cpu = new ArrayBuffer(layout.size);
         this._floats = new Float32Array(this._cpu);
         this._ints = new Int32Array(this._cpu);
+
+        this.slotSize = alignUp(layout.size, alignment);
+        this._slots = Math.max(MIN_ARENA_SLOTS,
+                               Math.min(MAX_INITIAL_ARENA_SLOTS,
+                                        Math.floor(ARENA_BUDGET_BYTES / this.slotSize)));
+        this._label = `${label}:${layout.name}`;
+        this._buffer = this._allocate(device);
 
         for (const member of layout.flat) {
             const shape = shapeOf(member);
@@ -136,7 +190,24 @@ export class UniformSet {
         }
     }
 
+    private _allocate(device: Device): Buffer {
+        return device.createBuffer({
+            label: `${this._label}[${this._slots}]`,
+            size: this._slots * this.slotSize,
+            usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
+        });
+    }
+
     public has(name: string): boolean { return this._shapes.has(name); }
+
+    /** The arena. A bind group over it names {@link byteOffset} and the block's own `layout.size`. */
+    public get buffer(): Buffer { return this._buffer; }
+    /** Byte offset of the slot the next draw should read. */
+    public get byteOffset(): number { return Math.max(0, this._cursor) * this.slotSize; }
+    /** Slot index — half of a bind-group cache key. */
+    public get slot(): number { return this._cursor; }
+    /** See {@link _generation} — the other half of that key. */
+    public get generation(): number { return this._generation; }
 
     /**
      * Write a value by name. Returns false when this block declares no such member, so a caller can
@@ -164,12 +235,50 @@ export class UniformSet {
         return true;
     }
 
-    /** Upload if anything changed since the last call. */
+    /**
+     * Move to a fresh slot and upload, if anything changed since the last draw read this block.
+     *
+     * An unchanged block keeps its slot, which is what stops a per-PASS block — the lights, the camera,
+     * the cascade matrices — from consuming one slot per draw. A changed one advances, because the draw
+     * already recorded against the previous slot must keep reading the value it was given.
+     */
     public flush(device: Device): void {
-        if (!this._dirty) return;
+        if (!this._dirty && this._cursor >= 0) return;
         this._dirty = false;
-        device.writeBuffer(this.buffer, 0, new Uint8Array(this._cpu));
+        if (this._cursor + 1 >= this._slots) this._grow(device);
+        else this._cursor++;
+        device.writeBuffer(this._buffer, this._cursor * this.slotSize, new Uint8Array(this._cpu));
     }
+
+    /**
+     * Double the arena and start again at its first slot.
+     *
+     * The OLD buffer is deliberately not destroyed: draws already recorded in this submission hold bind
+     * groups over it and must keep reading it until the queue drains. Dropping the reference is enough
+     * — those bind groups keep it alive, and it is collected once they are not. Growth doubles, so it
+     * happens a handful of times per arena for the life of the process.
+     */
+    private _grow(device: Device): void {
+        this._slots *= 2;
+        this._buffer = this._allocate(device);
+        this._generation++;
+        this._cursor = 0;
+    }
+
+    /**
+     * Release every slot.
+     *
+     * Called after `queue.submit`, where it is safe by construction: `writeBuffer` is ordered on the
+     * queue timeline, so anything written after a submit lands after every command that submit
+     * contained. Before it, reusing a slot would rewrite a value a recorded draw has not read yet —
+     * which is the entire bug this class exists to fix.
+     */
+    public resetCursor(): void {
+        this._cursor = -1;
+        this._dirty = true;
+    }
+
+    public destroy(): void { this._buffer.destroy(); }
 }
 
 /**
@@ -192,15 +301,9 @@ export class ProgramUniforms {
     /** Resolved name -> set, memoised. A miss is cached as null so a stray name costs one search. */
     private readonly _route = new Map<string, UniformSet | null>();
 
-    constructor(device: Device, blocks: readonly UniformBlockLayout[], label = 'program') {
-        for (const block of blocks) {
-            const buffer = device.createBuffer({
-                label: `${label}:${block.name}`,
-                size: block.size,
-                usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
-            });
-            this._sets.push(new UniformSet(block, buffer));
-        }
+    constructor(device: Device, blocks: readonly UniformBlockLayout[], label = 'program',
+                alignment: number = DEFAULT_UNIFORM_OFFSET_ALIGNMENT) {
+        for (const block of blocks) this._sets.push(new UniformSet(block, device, alignment, label));
     }
 
     /** The blocks, in declaration order. */
@@ -231,13 +334,31 @@ export class ProgramUniforms {
         return false;
     }
 
-    /** Upload every block that changed. One call before a draw, not one per member. */
+    /** Upload every block that changed, each into a fresh slot. One call, immediately before a draw. */
     public flush(device: Device): void {
         for (const set of this._sets) set.flush(device);
     }
 
+    /** Release every block's slots. See {@link UniformSet.resetCursor}. */
+    public resetCursors(): void {
+        for (const set of this._sets) set.resetCursor();
+    }
+
+    /**
+     * Which slot of which arena every block is currently reading from.
+     *
+     * The cache key for a bind group built over these blocks: two draws with the same signature share
+     * one, and a draw that advanced any block gets its own. The generation rides along because a grown
+     * arena is a different `GPUBuffer`, and a bind group names the buffer, not the block.
+     */
+    public bindingSignature(): string {
+        let key = '';
+        for (const set of this._sets) key += set.slot + ':' + set.generation + ',';
+        return key;
+    }
+
     public destroy(): void {
-        for (const set of this._sets) set.buffer.destroy();
+        for (const set of this._sets) set.destroy();
         this._sets.length = 0;
         this._route.clear();
     }
