@@ -1926,7 +1926,7 @@ export class Renderer {
 
                         if (!bound) {
                             pass.setPipeline(pipeline);
-                            this._shaderManager.setUniform('u_lightSpace', lightSpace);
+                            this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
                             if (billboard) {
                                 const tex = layer.textureId
                                     ? TextureManager.Instance.getTexture(layer.textureId) : null;
@@ -2011,7 +2011,7 @@ export class Renderer {
                                                      : Renderer._GEOMETRY_PROGRAMS[shaderType];
                         this._shaderManager.bind(shaderType);
                         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-                        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+                        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
                         const pipeline = this._pipelineFor(shaderType, reflection, {
                             // Billboard cross quads are two-sided; a mesh prop keeps its material side.
                             cullMode: billboard ? 'none' : Renderer._cullFor(model.material.config.side),
@@ -2106,6 +2106,43 @@ export class Renderer {
      * deliberate — cloud coverage IS meant to reach the mask — and it is the one place in the engine
      * where the two halves agree.
      */
+    /**
+     * A projection as the CURRENT BACKEND's clip space wants its Z.
+     *
+     * WebGL2's clip volume is -w <= z <= w and the depth buffer stores (z/w + 1) / 2. WebGPU's is
+     * 0 <= z <= w and it stores z/w directly. Rendering a GL-convention projection on WebGPU therefore
+     * stores a DIFFERENT number for the same geometry — and clips anything nearer than the midpoint of
+     * the range, which in this engine's frusta is only the first fraction of a unit, which is why
+     * nothing visibly disappeared.
+     *
+     * Depth TESTING never noticed, because it is a comparison and both sides moved together. Every pass
+     * that READS the depth buffer did: SSAO, god rays, distance fog, motion blur, the cloud occlusion
+     * and the depth debug channel all reconstruct a position from it, and they were reading a number
+     * half a range out.
+     *
+     * The multiply is exactly what `mat4.perspectiveZO` is to `mat4.perspective`, and it has a property
+     * worth stating: the resulting NDC z EQUALS what WebGL2 stores. So the depth buffers of the two
+     * backends now hold the same values, every `depth * 2.0 - 1.0` in the shader tree keeps decoding
+     * them correctly, and `u_invViewProj` stays the inverse of the GL-convention matrix on both.
+     *
+     * RENDER with this; RECONSTRUCT and COMPARE with the original. Anything that transforms geometry
+     * into clip space takes the adjusted form (`u_projection`, `u_lightSpace`, the cube-capture
+     * projection); anything a shader inverts or looks up with — `u_invViewProj`, the cascade matrices,
+     * the CPU frustum used for culling — stays as it was.
+     *
+     * One scratch, deliberately: every caller hands the result straight to `setUniform`, which copies
+     * it into the program's CPU-side block before anything else can call this again.
+     */
+    private _clipProjection(projection: mat4): mat4 {
+        if (device.backend !== 'webgpu') return projection;
+        mat4.multiply(this._clipProjScratch, Renderer._CLIP_Z_ZERO_TO_ONE, projection);
+        return this._clipProjScratch;
+    }
+    private readonly _clipProjScratch: mat4 = mat4.create();
+    /** z' = (z + w) / 2, column-major. See {@link _clipProjection}. */
+    private static readonly _CLIP_Z_ZERO_TO_ONE: mat4 =
+        mat4.fromValues(1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 0.5, 0,  0, 0, 0.5, 1);
+
     /** Additive accumulation: every fragment adds its increment, and nothing occludes anything. */
     private static readonly _OVERDRAW_BLEND: BlendState = {
         color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
@@ -2305,7 +2342,7 @@ export class Renderer {
 
         this._shaderManager.bind(shaderType);
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
         this._shaderManager.setUniform('u_model', node.worldTransform);
 
         if (animated) this._uploadBoneMatrices(shaderType, node);
@@ -2490,14 +2527,14 @@ export class Renderer {
             });
             pass.setPipeline(pipeline);
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
             for (const [name, value] of material.properties)
                 this._shaderManager.setUniform(`u_material.${name}`, value);
             pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
         } else {
             this._shaderManager.bind(shaderType);
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
             this._applyMaterial(material);
             this._applyCull(material.config.side);
         }
@@ -2838,7 +2875,7 @@ export class Renderer {
         ]));
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
         mat4.invert(this._invProjection, this._activeCamera.projectionMatrix);
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
         this._shaderManager.setUniform('u_noiseScale', [this._ssaoWidth / 4, this._ssaoHeight / 4]);
@@ -2972,7 +3009,7 @@ export class Renderer {
                                                                     // only; see _initializeIBL.
                                                                     builtFor: 'irradiance',
                                                                     target: faceTarget });
-        this._shaderManager.setUniform('u_projection', this._captureProj);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._captureProj));
         if (perFace) perFace();
         for (let face = 0; face < 6; face++) {
             const pass = this._beginFullscreenPass(
@@ -3289,7 +3326,7 @@ export class Renderer {
                                               { cullMode: 'none', vertex: 'model',
                                                 builtFor: 'irradiance',
                                                 target: this._cubeFBO.targetFor(cube, 0, 0, false) });
-        this._shaderManager.setUniform('u_projection', this._captureProj);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._captureProj));
         this._shaderManager.setUniform('u_sunDir', sun);
         this._shaderManager.setUniform('u_sunColor', node.sunColor);
         this._shaderManager.setUniform('u_sunIntensity', node.sunIntensity);
@@ -3419,7 +3456,7 @@ export class Renderer {
         });
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_view', view);
-        this._shaderManager.setUniform('u_projection', proj);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(proj));
         this._shaderManager.setUniform('u_linearInput', linearInput);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cubemap]));
         if (!this._recordDraw(pass, mesh, 0, 0)) mesh.draw();
@@ -4298,7 +4335,7 @@ export class Renderer {
         if (pipeline) pass!.setPipeline(pipeline);
         this._shaderManager.bind('tilemap');
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
 
         // Chunk meshes are built in MAP-LOCAL space (cellToWorld with no origin applied), so the node's
         // world position belongs here — reading it straight off the node rather than from tilemap.origin
@@ -5153,7 +5190,7 @@ export class Renderer {
         } catch (_) {}
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
 
         // Per-draw light-probe selection for forward-lit meshes: the probe whose volume contains THIS
@@ -5304,7 +5341,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_uvScale', [u1 - u0, v1 - v0]);
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
         
         // constraint the sprite to always face the camera based on the node's constraints
@@ -5426,7 +5463,7 @@ export class Renderer {
             });
             pass.setPipeline(pipeline);
             if (shaderType !== bound) {
-                this._shaderManager.setUniform('u_lightSpace', lightSpace);
+                this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
                 bound = shaderType;
             }
 
@@ -5950,7 +5987,7 @@ export class Renderer {
         this._shaderManager.bind('overdraw');
         this._shaderManager.setUniform('u_increment', 1 / Renderer.OVERDRAW_MAX);
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
 
         for (const node of scene.models) {
             if (!node.visible || (node as any).isGizmo) continue;
@@ -6821,7 +6858,7 @@ export class Renderer {
                 { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' };
             this._shaderManager.bind('outline');
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
             this._shaderManager.setUniform('u_outlineColor', [1.0, 1.0, 1.0]); // white silhouette
 
             // One pipeline per SOURCE material, not one for the pass.
@@ -6914,7 +6951,7 @@ export class Renderer {
             if (pipeline) pass.setPipeline(pipeline);
 
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+            this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
             this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
 
             // Set Transform related uniforms
@@ -6985,7 +7022,7 @@ export class Renderer {
         }) : null;
         if (pipeline) pass!.setPipeline(pipeline);
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
+        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
 
         const drawSet = (mesh: Mesh, matrices: Float32Array, count: number, color: [number, number, number]) => {
             if (count <= 0) return;
