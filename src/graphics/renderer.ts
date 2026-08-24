@@ -1395,7 +1395,11 @@ export class Renderer {
         const view = this._activeCamera.viewMatrix;
         const proj = this._activeCamera.projectionMatrix;
         mat4.multiply(this._viewProj, proj, view);
+        // `_viewProj` itself stays untouched — the culling frustum below is built from it, and that is
+        // CPU-side geometry with no screen-space convention in it at all. Only the inverse, which
+        // exists solely so a fullscreen pass can turn a uv back into a world position, carries the flip.
         mat4.invert(this._invViewProj, this._viewProj);
+        this._uvConsuming(this._invViewProj, this._invViewProj);
         this._frustum.setFromViewProjection(this._viewProj);
 
         // Pick each terrain chunk's detail level for this camera. Before the shadow passes, so the
@@ -2139,6 +2143,40 @@ export class Renderer {
         return this._clipProjScratch;
     }
     private readonly _clipProjScratch: mat4 = mat4.create();
+
+    /**
+     * The screen-space Y flip, for matrices that cross between a fullscreen pass's UV and clip space.
+     *
+     * The shared screen quad pairs clip-space y = -1 with v = 0 on WebGL2 and with v = 1 on WebGPU,
+     * because a GL texture's v = 0 is its bottom row and a WebGPU texture's is its top. That single
+     * difference is what keeps every fullscreen pass reading the texels it wrote — and it means the
+     * relationship between `in.uv` and clip space is MIRRORED between the backends.
+     *
+     * Every reconstruction in the shader tree spells that relationship out literally as
+     * `vec4(uv * 2.0 - 1.0, ...)`, which is right on WebGL2 and upside down on WebGPU. Rather than
+     * teach a dozen shaders which backend they are on, the flip is folded into the MATRIX they
+     * multiply by, where it costs nothing at runtime and cannot be applied twice:
+     *
+     *  - a matrix that CONSUMES a clip vector built from `uv` — `u_invViewProj`, `u_invProjection` —
+     *    is post-multiplied, so the y it receives is negated before the inverse sees it;
+     *  - a matrix that PRODUCES a clip vector to be read back as a uv — SSAO's `u_projection`, the
+     *    velocity pass's `u_prevViewProj` — is pre-multiplied, so the y it emits is negated before
+     *    `* 0.5 + 0.5` turns it into a texture coordinate.
+     *
+     * Both are the identity on WebGL2.
+     */
+    private _uvConsuming(out: mat4, inverse: mat4): mat4 {
+        if (device.backend !== 'webgpu') return inverse === out ? out : (mat4.copy(out, inverse), out);
+        return mat4.multiply(out, inverse, Renderer._FLIP_SCREEN_Y);
+    }
+    private _uvProducing(matrix: mat4): mat4 {
+        if (device.backend !== 'webgpu') return matrix;
+        return mat4.multiply(this._uvProjScratch, Renderer._FLIP_SCREEN_Y, matrix);
+    }
+    private readonly _uvProjScratch: mat4 = mat4.create();
+    /** diag(1, -1, 1, 1). See {@link _uvConsuming}. */
+    private static readonly _FLIP_SCREEN_Y: mat4 =
+        mat4.fromValues(1, 0, 0, 0,  0, -1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1);
     /** z' = (z + w) / 2, column-major. See {@link _clipProjection}. */
     private static readonly _CLIP_Z_ZERO_TO_ONE: mat4 =
         mat4.fromValues(1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 0.5, 0,  0, 0, 0.5, 1);
@@ -2875,8 +2913,16 @@ export class Renderer {
         ]));
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
+        // The UNADJUSTED projection, unlike every mesh pass. SSAO is a fullscreen pass: its vertex
+        // stage emits a quad and never uses this, while its FRAGMENT stage projects each kernel sample
+        // back to screen space and compares the result against the stored depth. That is a lookup, not
+        // a rasterisation, so it belongs on the side of the rule that reconstructs — see
+        // `_clipProjection`. Handing it the zero-to-one form made every comparison land half a range
+        // out and the whole floor read as fully occluded.
+        this._shaderManager.setUniform('u_projection',
+                                       this._uvProducing(this._activeCamera.projectionMatrix));
         mat4.invert(this._invProjection, this._activeCamera.projectionMatrix);
+        this._uvConsuming(this._invProjection, this._invProjection);
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
         this._shaderManager.setUniform('u_noiseScale', [this._ssaoWidth / 4, this._ssaoHeight / 4]);
         this._shaderManager.setUniform('u_radius', this._ssaoRadius);
@@ -4077,7 +4123,7 @@ export class Renderer {
             this._cloudTraceFBO.colors[0], prev.colors[0], this._gBufferFBO.depth,
         ]));
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-        this._shaderManager.setUniform('u_prevViewProj', this._prevViewProj);
+        this._shaderManager.setUniform('u_prevViewProj', this._uvProducing(this._prevViewProj));
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
         this._shaderManager.setUniform('u_resolution', [w, h]);
         this._shaderManager.setUniform('u_traceResolution', [tw, th]);
@@ -6229,7 +6275,7 @@ export class Renderer {
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._gBufferFBO.depth]));
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-        this._shaderManager.setUniform('u_prevViewProj', this._prevViewProj);
+        this._shaderManager.setUniform('u_prevViewProj', this._uvProducing(this._prevViewProj));
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_maxVelocityPx', Renderer.MOTION_BLUR_TILE);
