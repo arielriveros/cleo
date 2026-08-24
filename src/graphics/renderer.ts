@@ -2139,9 +2139,24 @@ export class Renderer {
      */
     private _clipProjection(projection: mat4): mat4 {
         if (device.backend !== 'webgpu') return projection;
-        mat4.multiply(this._clipProjScratch, Renderer._CLIP_Z_ZERO_TO_ONE, projection);
+        // While capturing a CUBE FACE, Y is inverted as well - the same inversion `_initializeIBL`
+        // bakes into `_captureProj` for the sky and IBL convolutions. A cube face's storage has to
+        // match the cubemap layout, and on WebGPU that means rendering it upside down; the probe
+        // capture is the only cube-face render that goes through a normal camera rather than
+        // `_captureProj`, so it is the only one that needs to be told.
+        const source = this._cubeFaceCapture
+            ? mat4.multiply(this._cubeFaceScratch, Renderer._FLIP_SCREEN_Y, projection)
+            : projection;
+        mat4.multiply(this._clipProjScratch, Renderer._CLIP_Z_ZERO_TO_ONE, source);
         return this._clipProjScratch;
     }
+    /**
+     * True only while the probe capture is rendering into cube faces. See `_clipProjection` and the
+     * `frontFace` in `_pipelineFor`: inverting Y also reverses triangle winding, so a pass that flips
+     * has to say the opposite face is the front one or every solid renders inside out.
+     */
+    private _cubeFaceCapture = false;
+    private readonly _cubeFaceScratch: mat4 = mat4.create();
     private readonly _clipProjScratch: mat4 = mat4.create();
 
     /**
@@ -3150,6 +3165,10 @@ export class Renderer {
         const probePos = probe.worldPosition;
         const eye = vec3.create();
         const clear = this._config.clearColor || [0, 0, 0, 1];
+        // Every draw below writes a CUBE FACE. See `_clipProjection`: on WebGPU that needs the same
+        // Y inversion `_captureProj` carries for the sky and IBL bakes, and the reversed winding that
+        // comes with it. Restored in the `finally` at the end of the capture.
+        this._cubeFaceCapture = true;
         for (let face = 0; face < 6; face++) {
             const f = Renderer._CUBE_FACES[face];
             const dir = vec3.fromValues(f.dir[0], f.dir[1], f.dir[2]);
@@ -3186,6 +3205,9 @@ export class Renderer {
             this._endFullscreenPass(pass);
         }
 
+        // Cleared before `bakeIBL` below, which renders its own cube faces through `_captureProj` -
+        // that matrix already carries the inversion, and applying it twice would undo it.
+        this._cubeFaceCapture = false;
         this._activeCamera = prevCamera;
         // The epilogue `unbind()` that used to be here is gone: it ran after the pass had ended,
         // and the next RHI pass rebinds its own target and viewport from inside `beginRenderPass`.
@@ -4814,8 +4836,11 @@ export class Renderer {
             ?? (depthFormat ? { format: depthFormat, depthWriteEnabled: false,
                                 depthCompare: 'always' as const } : undefined);
 
+        // Only WebGPU has a front-face to get wrong here: WebGL2 keeps its own winding state and the
+        // cube-face capture never changed it.
+        const cubeFace = this._cubeFaceCapture && device.backend === 'webgpu';
         const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
-                            + '|' + (builtFor ?? '')
+                            + '|' + (builtFor ?? '') + (cubeFace ? '|cw' : '')
                             + '|' + colorFormats.join(',')
                             + (blend ? '|' + JSON.stringify(blend) : '')
                             + (resolvedDepth ? '|' + JSON.stringify(resolvedDepth) : '');
@@ -4853,7 +4878,9 @@ export class Renderer {
                 vertexLayouts: vertex
                     ? this._vertexLayoutsFor(program, vertex, builtFor)
                     : screenQuadLayout(this._shaderManager.getShader(program).attributes),
-                primitive: { topology, cullMode, frontFace: 'ccw' },
+                // A Y-inverted projection reverses winding, so a cube-face capture calls the other
+                // side the front. Part of the cache key below for the same reason the cull mode is.
+                primitive: { topology, cullMode, frontFace: cubeFace ? 'cw' : 'ccw' },
                 ...(resolvedDepth ? { depthStencil: resolvedDepth } : {}),
                 colorTargets: Array.from({ length: targets }, (_unused, i) => ({
                     // `rgba8unorm` only when there is no target to ask - the legacy fallback, and the
