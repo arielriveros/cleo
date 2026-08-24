@@ -3,7 +3,7 @@
 #include "./chunks/fullscreen.wgsl"
 
 // device depth from the G-buffer
-@group(0) @binding(0) var u_gDepth_texture: texture_2d<f32>;
+@group(0) @binding(0) var u_gDepth_texture: texture_depth_2d;
 @group(0) @binding(1) var u_gDepth_sampler: sampler;
 
 struct VelocityUniforms {
@@ -26,7 +26,7 @@ fn reconstructWorldPos(uv: vec2<f32>, depth: f32) -> vec3<f32> {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Reconstruct this pixel's world position. Background (no geometry, depth == 1.0) is treated as a
     // point on the far plane so the sky still blurs under camera rotation.
-    let depth = min(textureSample(u_gDepth_texture, u_gDepth_sampler, in.uv).r, 0.999999);
+    let depth = min(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, in.uv, 0), 0.999999);
     let worldPos = reconstructWorldPos(in.uv, depth);
 
     // Where did this world point sit on screen last frame?

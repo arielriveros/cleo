@@ -30,7 +30,7 @@
 @group(0) @binding(1) var u_trace_sampler: sampler;
 @group(0) @binding(2) var u_history_texture: texture_2d<f32>;   // last frame's resolved result
 @group(0) @binding(3) var u_history_sampler: sampler;
-@group(0) @binding(4) var u_gDepth_texture: texture_2d<f32>;    // scene depth, to reject occluded reprojection
+@group(0) @binding(4) var u_gDepth_texture: texture_depth_2d;    // scene depth, to reject occluded reprojection
 @group(0) @binding(5) var u_gDepth_sampler: sampler;
 
 struct CloudResolveUniforms {
@@ -159,7 +159,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // How far this pixel's ray got before solid geometry stopped it, read from the same depth buffer
     // the raymarch bounded its rays against.
     let sceneDist = geometryDistance(
-        textureSample(u_gDepth_texture, u_gDepth_sampler, in.uv).r, in.uv);
+        textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, in.uv, 0), in.uv);
     let reachesSlab = slabT < sceneDist;
 
     // Fallback for every path that cannot use history (first frame, camera cut, occlusion, off-screen
@@ -201,7 +201,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             // Reuse this pixel's slabT: over one block the anchor distance barely moves, and the test
             // is a threshold rather than a measurement.
             let nbReaches = slabT < geometryDistance(
-                textureSample(u_gDepth_texture, u_gDepth_sampler, nbUV).r, nbUV);
+                textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, nbUV, 0), nbUV);
             if (nbReaches != reachesSlab) { continue; }   // saw something else: not a valid bound
             let sN = textureSample(u_trace_texture, u_trace_sampler,
                                    traceUV + vec2<f32>(f32(x), f32(y)) * traceTexel);

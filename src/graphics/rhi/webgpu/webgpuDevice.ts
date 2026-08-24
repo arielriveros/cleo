@@ -327,7 +327,21 @@ class WebGPUTexture implements Texture {
     public allocateVolume(width: number, height: number): void {
         this._requireSize(width, height, 'allocateVolume');
     }
-    public allocateDepthArray(size: number): void { this._requireSize(size, size, 'allocateDepthArray'); }
+    /**
+     * The size is already satisfied by `setSize`; the COMPARISON FLAG is not, and it is the whole
+     * reason this call still carries an argument on this backend.
+     *
+     * WebGL2 stamps `TEXTURE_COMPARE_MODE` onto the texture object here. On WebGPU a comparison sampler
+     * is a SAMPLER, not texture state, so the flag is recorded for `_samplerFor` to pair with. Dropping
+     * it - which this did - left every shadow binding holding an ordinary filtering sampler against a
+     * `sampler_comparison` declaration, and WebGPU refuses that outright: "Non-comparison sampler is
+     * incompatible with comparison sampler binding". Both shadow maps are affected, cascades and the
+     * spot atlas, because both declare `texture_depth_2d_array` + `sampler_comparison`.
+     */
+    public allocateDepthArray(size: number, _layers: number, compare: boolean = true): void {
+        this._requireSize(size, size, 'allocateDepthArray');
+        this.setCompareMode(compare);
+    }
 
     /**
      * Assert that `setSize` already allocated what this call is about to assume, rather than no-opping.
@@ -486,6 +500,14 @@ class WebGPUSampler implements Sampler {
 
 class WebGPUShaderModule implements ShaderModule {
     public readonly label: string;
+    /**
+     * The engine-facing program NAME, which is what `ShaderManager` is keyed by.
+     *
+     * `WebGL2ShaderModule` has carried this all along and `WebGL2RenderPipeline.apply` uses it to bind
+     * the program; this backend had no equivalent, which is why `ShaderManager.bound` could be a
+     * different program than the pipeline about to draw. See `setPipeline`.
+     */
+    public readonly program: string;
     public readonly stage: ShaderStageFlags;
     public readonly entryPoints: { readonly vertex?: string; readonly fragment?: string; readonly compute?: string };
     /** Build-time reflection of what this program binds. Empty when the caller supplied none. */
@@ -503,6 +525,7 @@ class WebGPUShaderModule implements ShaderModule {
 
     constructor(device: GPUDevice, descriptor: ShaderModuleDescriptor) {
         this.label = descriptor.label ?? 'shader';
+        this.program = descriptor.program ?? this.label;
         this.stage = descriptor.stage;
         this.entryPoints = { ...(descriptor.entryPoints ?? {}) };
         this.resources = descriptor.resources ?? [];
@@ -552,6 +575,8 @@ class WebGPUBindGroup implements BindGroup {
 
 class WebGPURenderPipeline implements RenderPipeline {
     public readonly label: string;
+    /** The program this pipeline draws with. See `WebGPURenderPassEncoder.setPipeline`. */
+    public readonly program: string;
     public readonly vertexLayouts: readonly VertexBufferLayout[];
     public readonly primitive: Readonly<PrimitiveState>;
     public readonly depthStencil?: Readonly<DepthStencilState>;
@@ -575,6 +600,7 @@ class WebGPURenderPipeline implements RenderPipeline {
     constructor(descriptor: RenderPipelineDescriptor, handle: GPURenderPipeline,
                 groups: readonly number[]) {
         this.resources = (descriptor.vertex as WebGPUShaderModule).resources;
+        this.program = (descriptor.vertex as WebGPUShaderModule).program;
         this.label = descriptor.label ?? 'pipeline';
         this.vertexLayouts = descriptor.vertexLayouts;
         this.primitive = descriptor.primitive;
@@ -626,7 +652,7 @@ class WebGPURenderPipeline implements RenderPipeline {
                 groups.push({
                     group,
                     handle: device.createBindGroup({
-                        label: `${this.label}:uniforms${group}`,
+                        label: `${this.label}<-${program.label}:uniforms${group}`,
                         layout: this.layoutForGroup(group)!.handle,
                         entries: entries.map(e => ({
                             binding: e.binding, resource: { buffer: e.buffer.handle },
@@ -711,7 +737,7 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
                 layout: p.handle.getBindGroupLayout(group), entries: [],
             }));
 
-        // The bound program's UNIFORM blocks, as bind groups.
+        // The uniform blocks are NOT bound here - see `_flushUniforms`, which does it at draw time.
         //
         // WebGL2 has nothing to do here: `Shader` uploads its std140 blocks to global UNIFORM_BUFFER
         // binding points and the draw finds them. WebGPU has no globals - a uniform buffer reaches a
@@ -722,14 +748,21 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
         // Done HERE rather than at the ~330 `setUniform` call sites, which is the migration's standing
         // constraint: a draw site should not have to know which groups its shader declares. The encoder
         // already reaches `ShaderManager` for the WebGL2 flush; this is the same reach.
-        const program = ShaderManager.Instance.bound;
-        if (program instanceof WebGPUShaderProgram)
-            for (const { group, handle } of p.uniformGroupsFor(program, this._device))
-                this._pass.setBindGroup(group, handle);
-        this._program = program;
+        // Bind the program, the same way `WebGL2RenderPipeline.apply` does with
+        // `ShaderManager.Instance.bind(this.module.program)`.
+        //
+        // Not a nicety: several passes NEVER call `bind` themselves and rely entirely on this. The
+        // shadow pass is the clearest - it selects `shadowMap` or `shadowMapSkinned`, calls
+        // `setPipeline`, and then sets `u_lightSpace` and `u_model` straight onto "the bound program",
+        // which on this backend was still whatever the previous pass left behind. The uniforms went
+        // into one program's buffers while the draw read another's; the driver reported it as
+        // "Binding size (192) ... is smaller than the minimum binding size (6528)", and the bind group
+        // labels showed it outright once they named both sides: `shadowMap<-tilemap:uniforms1`.
+        ShaderManager.Instance.bind(p.program);
+        this._pipeline = p;
     }
-    /** Remembered from `setPipeline` so the draw can flush its writes. See `_flushUniforms`. */
-    private _program: ShaderProgram | null = null;
+    /** Remembered from `setPipeline` so the draw can bind against it. See `_flushUniforms`. */
+    private _pipeline: WebGPURenderPipeline | null = null;
 
     /**
      * Upload whatever the pass wrote since the last draw.
@@ -746,7 +779,24 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
      * expects and what the engine has no notion of yet.
      */
     private _flushUniforms(): void {
-        if (this._program) this._program.flushUniformBlocks();
+        // The program is read HERE, at the draw, not at `setPipeline`.
+        //
+        // `setPipeline` runs before the engine has finished setting up the draw, and the program bound
+        // at that moment is frequently the PREVIOUS pass's. Binding uniform groups there fed a pipeline
+        // another program's buffers - visible in the labels as `shadowMap` holding
+        // `tilemap:u_transform`, and reported by the driver as "Binding size (192) is smaller than the
+        // minimum binding size (6528)", because the buffer bound was the wrong struct entirely.
+        //
+        // At the draw the bound program is by definition the one about to run, which is also exactly
+        // what WebGL2 means by it: `ShaderManager.flushBound()` in `WebGL2RenderPassEncoder._beginDraw`
+        // reads the same thing at the same moment. The bind groups are cached per program on the
+        // pipeline, so re-binding per draw costs a lookup and a `setBindGroup`, not an allocation.
+        const program = ShaderManager.Instance.bound;
+        if (!program) return;
+        program.flushUniformBlocks();
+        if (this._pipeline && program instanceof WebGPUShaderProgram)
+            for (const { group, handle } of this._pipeline.uniformGroupsFor(program, this._device))
+                this._pass.setBindGroup(group, handle);
     }
 
     public setBindGroup(group: number, bindGroup: BindGroup, dynamicOffsets?: readonly number[]): void {
@@ -1287,17 +1337,24 @@ export class WebGPUDevice implements Device {
      */
     private _samplerFor(texture: WebGPUTexture): Sampler {
         const c = texture.samplingConfig;
-        const compare = isDepthFormat(texture.format) && texture.compareEnabled;
-        const key = c ? `${c.addressMode}|${c.minFilter}|${compare}` : `default|${compare}`;
+        const depth = isDepthFormat(texture.format);
+        const compare = depth && texture.compareEnabled;
+        // A depth texture may only be FILTERED through a comparison sampler. Sampled ordinarily - which
+        // is what every screen-space pass does with the G-buffer depth - it must take a non-filtering
+        // sampler, or WebGPU refuses the bind group. WebGL2 has no such rule, so the linear filter that
+        // was being requested here was silently fine there and fatal on this backend.
+        const filter = depth && !compare ? 'nearest' as const
+                     : (c?.minFilter === 'nearest' ? 'nearest' as const : 'linear' as const);
+        const key = c ? `${c.addressMode}|${filter}|${compare}` : `default|${filter}|${compare}`;
         let sampler = this._samplers.get(key);
         if (!sampler) {
             sampler = this.createSampler({
                 addressModeU: c?.addressMode ?? 'clamp-to-edge',
                 addressModeV: c?.addressMode ?? 'clamp-to-edge',
                 addressModeW: c?.addressMode ?? 'clamp-to-edge',
-                magFilter: c?.minFilter === 'nearest' ? 'nearest' : 'linear',
-                minFilter: c?.minFilter === 'nearest' ? 'nearest' : 'linear',
-                mipmapFilter: c?.minFilter === 'linear-mipmap-linear' ? 'linear' : 'nearest',
+                magFilter: filter,
+                minFilter: filter,
+                mipmapFilter: !depth && c?.minFilter === 'linear-mipmap-linear' ? 'linear' : 'nearest',
                 ...(compare ? { compare: 'less' as const } : {}),
             });
             this._samplers.set(key, sampler);

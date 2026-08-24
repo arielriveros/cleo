@@ -9,7 +9,7 @@
 
 #include "./chunks/fullscreen.wgsl"
 
-@group(0) @binding(0) var u_gDepth_texture: texture_2d<f32>;        // scene depth (opaque), background 1.0
+@group(0) @binding(0) var u_gDepth_texture: texture_depth_2d;        // scene depth (opaque), background 1.0
 @group(0) @binding(1) var u_gDepth_sampler: sampler;
 // baked sky cubemap (display-referred), sampled for the fog colour
 @group(0) @binding(2) var u_atmosphere_texture: texture_cube<f32>;
@@ -39,7 +39,7 @@ fn reconstructWorldPos(uv: vec2<f32>, depth: f32) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let depth = textureSample(u_gDepth_texture, u_gDepth_sampler, in.uv).r;
+    let depth = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, in.uv, 0);
     // Sky: already the atmosphere colour, so do not fog it. The margin below 1.0 guards against anything
     // that rasterizes at forced far depth (NDC z = w) leaving pixels a float-epsilon short of the clear
     // value — fogging those produces a z-fighting-like shimmer. Real geometry that close to the far

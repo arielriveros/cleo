@@ -24,7 +24,7 @@ const AO_DEPTH_TOLERANCE: f32 = 0.02;
 @group(0) @binding(3) var u_gNormalRoughness_sampler: sampler;
 @group(0) @binding(4) var u_gEmissiveAO_texture: texture_2d<f32>;        // rgb = emissive, a = ao
 @group(0) @binding(5) var u_gEmissiveAO_sampler: sampler;
-@group(0) @binding(6) var u_gDepth_texture: texture_2d<f32>;             // non-linear depth
+@group(0) @binding(6) var u_gDepth_texture: texture_depth_2d;             // non-linear depth
 @group(0) @binding(7) var u_gDepth_sampler: sampler;
 @group(0) @binding(8) var u_ssao_texture: texture_2d<f32>;
 @group(0) @binding(9) var u_ssao_sampler: sampler;
@@ -114,11 +114,11 @@ fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
             metallic: f32, roughness: f32, F0: vec3<f32>) -> vec3<f32> {
     let F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
     let kD = (vec3<f32>(1.0) - F) * (1.0 - metallic);
-    let diffuseIBL = textureSample(irr, irrSampler, N).rgb * albedo;
+    let diffuseIBL = textureSampleLevel(irr, irrSampler, N, 0.0).rgb * albedo;
     let R = reflect(-V, N);
     let prefiltered = textureSampleLevel(pref, prefSampler, R, roughness * MAX_REFLECTION_LOD).rgb;
-    let brdf = textureSample(u_brdfLUT_texture, u_brdfLUT_sampler,
-                             vec2<f32>(max(dot(N, V), 0.0), roughness)).rg;
+    let brdf = textureSampleLevel(u_brdfLUT_texture, u_brdfLUT_sampler,
+                                  vec2<f32>(max(dot(N, V), 0.0), roughness), 0.0).rg;
     let specularIBL = prefiltered * (F * brdf.x + brdf.y);
     return kD * diffuseIBL + specularIBL;
 }
@@ -136,10 +136,16 @@ fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
  * Skipped entirely when the AO buffer is already full resolution — there is nothing to reconstruct, and
  * the hardware bilinear fetch is exact.
  */
+// `textureSampleLevel`, not `textureSample`: this helper is reached from a loop and from behind
+// an early return, which WGSL treats as NON-UNIFORM control flow - and implicit-LOD sampling is
+// only legal in uniform control flow, so Dawn refuses the whole module with "'textureSample' must
+// only be called from uniform control flow". An invalid module means an invalid pipeline, and an
+// invalid pipeline draws nothing while its pass still clears. Explicit level 0 is exactly what the
+// implicit form resolved to anyway: every texture sampled here is screen-sized and un-mipped.
 fn sampleAO(uv: vec2<f32>, centerDepth: f32) -> f32 {
     if (u_lighting.u_ssaoEnabled == 0) { return 1.0; }
     if (u_lighting.u_ssaoTexelSize.x <= 0.0) {
-        return textureSample(u_ssao_texture, u_ssao_sampler, uv).r;   // full-res: nothing to do
+        return textureSampleLevel(u_ssao_texture, u_ssao_sampler, uv, 0.0).r;   // full-res: nothing to do
     }
 
     // The four AO texels surrounding this pixel, and the depths they were computed from.
@@ -155,11 +161,11 @@ fn sampleAO(uv: vec2<f32>, centerDepth: f32) -> f32 {
 
     for (var i = 0; i < 4; i++) {
         let tapUV = uv + offsets[i] * u_lighting.u_ssaoTexelSize;
-        let ao = textureSample(u_ssao_texture, u_ssao_sampler, tapUV).r;
+        let ao = textureSampleLevel(u_ssao_texture, u_ssao_sampler, tapUV, 0.0).r;
         // Compare in linear-ish terms: raw device depth is wildly non-linear, so a fixed epsilon on it
         // would be far too strict near the camera and far too loose in the distance. Dividing by the
         // centre depth makes the tolerance relative, which behaves at both ends.
-        let d = textureSample(u_gDepth_texture, u_gDepth_sampler, tapUV).r;
+        let d = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, tapUV, 0);
         let delta = abs(d - centerDepth) / max(centerDepth, 1e-5);
 
         if (delta < nearestDelta) { nearestDelta = delta; nearest = ao; }
@@ -182,13 +188,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     cleoFragCoord = in.position.xy;
 
     let uv = in.uv;
-    let depth = textureSample(u_gDepth_texture, u_gDepth_sampler, uv).r;
+    let depth = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0);
     // Background (no geometry) — leave for the skybox pass.
     if (depth >= 1.0) { discard; }
 
-    let albedoMetallic = textureSample(u_gAlbedoMetallic_texture, u_gAlbedoMetallic_sampler, uv);
-    let normalRoughness = textureSample(u_gNormalRoughness_texture, u_gNormalRoughness_sampler, uv);
-    let emissiveAO = textureSample(u_gEmissiveAO_texture, u_gEmissiveAO_sampler, uv);
+    let albedoMetallic = textureSampleLevel(u_gAlbedoMetallic_texture,
+                                        u_gAlbedoMetallic_sampler, uv, 0.0);
+    let normalRoughness = textureSampleLevel(u_gNormalRoughness_texture,
+                                         u_gNormalRoughness_sampler, uv, 0.0);
+    let emissiveAO = textureSampleLevel(u_gEmissiveAO_texture, u_gEmissiveAO_sampler, uv, 0.0);
 
     let albedo = albedoMetallic.rgb;
     let metallic = albedoMetallic.a;

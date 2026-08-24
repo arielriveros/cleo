@@ -16,7 +16,7 @@ const PI: f32 = 3.14159265359;
 const MAX_STEPS: i32 = 192;
 const MAX_LIGHT_STEPS: i32 = 12;
 
-@group(0) @binding(0) var u_gDepth_texture: texture_2d<f32>;     // device depth (occlusion bound)
+@group(0) @binding(0) var u_gDepth_texture: texture_depth_2d;     // device depth (occlusion bound)
 @group(0) @binding(1) var u_gDepth_sampler: sampler;
 // Baked tileable volumes, replacing the multi-octave hash FBM this shader used to evaluate inline —
 // ~32 hash+lerp taps for the base field and ~24 more for detail, PER SAMPLE, with the secondary
@@ -191,7 +191,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let rd = normalize(fW.xyz / fW.w - ro);
 
     // 2. Occlusion bound: distance to solid geometry (background depth == 1.0 means infinite).
-    let depth = textureSample(u_gDepth_texture, u_gDepth_sampler, uv).r;
+    let depth = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0);
     var sceneDist = u_cloud.u_maxDistance;
     if (depth < 1.0) {
         sceneDist = min(sceneDist, length(reconstructWorldPos(depth, uv) - u_cloud.u_viewPos));

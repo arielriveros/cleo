@@ -137,8 +137,13 @@ describe('temporal resolve depth rejection', () => {
         // This shipped as a dead uniform: declared with a comment promising disocclusion rejection,
         // bound by the renderer, and never read. The result was cloud radiance reprojected onto mesh
         // pixels and held there for up to 16 frames. A declaration alone must not pass again.
-        expect(resolveShader).toMatch(/u_gDepth_texture: texture_2d<f32>/);
-        const reads = resolveShader.match(/textureSample\(u_gDepth_texture/g) ?? [];
+        // `texture_depth_2d`, not `texture_2d<f32>`: a depth-format texture cannot satisfy a
+        // filterable-float binding on WebGPU. The intent of this assertion is unchanged - the
+        // declaration must exist AND be read, which the next expectation checks.
+        expect(resolveShader).toMatch(/u_gDepth_texture: texture_depth_2d/);
+        // `textureSampleLevel` now, because a depth texture takes an explicit level - the point of
+        // the assertion is that the depth is READ, whichever sampling form does it.
+        const reads = resolveShader.match(/textureSample(Level)?\(u_gDepth_texture/g) ?? [];
         expect(reads.length).toBeGreaterThan(0);
     });
 

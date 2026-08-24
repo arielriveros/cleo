@@ -21,7 +21,7 @@ struct PresentUniforms {
 
 @group(0) @binding(0) var u_screenTexture_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
-@group(0) @binding(2) var u_coverageDepth_texture: texture_2d<f32>;
+@group(0) @binding(2) var u_coverageDepth_texture: texture_depth_2d;
 @group(0) @binding(3) var u_coverageDepth_sampler: sampler;
 @group(1) @binding(0) var<uniform> u_present: PresentUniforms;
 
@@ -31,7 +31,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var alpha = 1.0;
     if (u_present.u_alphaFromDepth > 0.5) {
-        let coverage = textureSample(u_coverageDepth_texture, u_coverageDepth_sampler, in.uv).r;
+        let coverage = textureSampleLevel(u_coverageDepth_texture, u_coverageDepth_sampler, in.uv, 0);
         alpha = select(0.0, 1.0, coverage < 1.0);
     }
 

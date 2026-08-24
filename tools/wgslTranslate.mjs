@@ -286,6 +286,40 @@ function applyRenames(glsl, renames) {
 }
 
 /**
+ * Undo naga's assumption that every `texture_depth_2d` is a SHADOW sampler.
+ *
+ * WGSL splits the texture from the sampler, so at the point naga emits the declaration it cannot know
+ * whether a `texture_depth_2d` will be paired with a `sampler` or a `sampler_comparison`. It picks the
+ * conservative reading and writes `sampler2DShadow` — and GLSL ES 300 has no `textureLod` overload for
+ * a shadow sampler, so the program fails to compile with "no matching overloaded function found".
+ *
+ * The engine does know: these bindings are the G-buffer depth, read as an ordinary value by the
+ * screen-space passes, never compared. The COMPARISON depth textures are the shadow maps, which are
+ * `texture_depth_2d_array` + `sampler_comparison` and are left completely alone here — naga's
+ * `sampler2DArrayShadow` is right for those.
+ *
+ * Two more spellings have to be walked back with it. WGSL requires an INTEGER exact level for a depth
+ * texture where GLSL's `textureLod` takes a float; and sampling a depth texture yields a bare `f32`
+ * in WGSL but a `vec4` from a GLSL `sampler2D`, so the result needs `.x` or the assignment fails
+ * with "'=' : dimension mismatch".
+ *
+ * WGSL declares this type only because WebGPU insists on it — a depth-format texture cannot satisfy a
+ * `texture_2d<f32>` binding ("None of the supported sample types (UnfilterableFloat|Depth) match the
+ * expected sample types (Float)"). So the declaration is driven by one backend and has to be walked
+ * back for the other, which is exactly what this file is for.
+ */
+function fixPlainDepthSamplers(glsl, resources) {
+    let out = glsl;
+    for (const resource of resources) {
+        if (resource.type !== 'texture_depth_2d') continue;
+        const name = resource.glslName;
+        out = out.replace(new RegExp('sampler2DShadow(\\s+)' + name + '\\b', 'g'), 'sampler2D$1' + name);
+        out = out.replace(new RegExp('(textureLod\\(' + name + ',[^;]*?),\\s*0\\)', 'g'), '$1, 0.0).x');
+    }
+    return out;
+}
+
+/**
  * Translate one WGSL module into the GLSL its declared stages need.
  *
  * Returns `{ wgsl, vertex?, fragment?, entryPoints }`. The WGSL is carried through unchanged so the
@@ -318,7 +352,8 @@ export async function translateWgsl(wgsl, label = 'shader') {
         const entry = entryPoints[stage];
         if (!entry) continue;
         try {
-            out[stage] = applyRenames(mod.wgsl_to_glsl(wgsl, stage, entry), renames);
+            out[stage] = fixPlainDepthSamplers(
+                applyRenames(mod.wgsl_to_glsl(wgsl, stage, entry), renames), out.resources);
         } catch (e) {
             // naga's diagnostics carry the WGSL span, which is what the author actually wrote — worth
             // far more than a line number in generated GLSL nobody has seen.

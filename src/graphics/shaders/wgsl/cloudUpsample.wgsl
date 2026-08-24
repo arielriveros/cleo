@@ -32,7 +32,7 @@
 
 @group(0) @binding(0) var u_clouds_texture: texture_2d<f32>;   // the reduced-resolution cloud image
 @group(0) @binding(1) var u_clouds_sampler: sampler;
-@group(0) @binding(2) var u_gDepth_texture: texture_2d<f32>;   // the depth the raymarch bounded against
+@group(0) @binding(2) var u_gDepth_texture: texture_depth_2d;   // the depth the raymarch bounded against
 @group(0) @binding(3) var u_gDepth_sampler: sampler;
 
 struct CloudUpsampleUniforms {
@@ -48,7 +48,7 @@ struct CloudUpsampleUniforms {
 
 /** Distance from the camera to solid geometry at `uv`, or "infinite" where the background shows. */
 fn geometryDistance(uv: vec2<f32>) -> f32 {
-    let depth = textureSample(u_gDepth_texture, u_gDepth_sampler, uv).r;
+    let depth = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0);
     if (depth >= 1.0) { return 1e30; }
     let clip = vec4<f32>(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     let world = u_up.u_invViewProj * clip;

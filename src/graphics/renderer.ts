@@ -1328,9 +1328,25 @@ export class Renderer {
         this._velocityTileFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
         this._velocityNeighborFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
         
-        // Create screen quad to render framebuffer to
+        // Create screen quad to render framebuffer to.
+        //
+        // The V coordinates differ by BACKEND, and this is the only place that difference exists.
+        //
+        // A GL texture's v=0 is its BOTTOM row; a WebGPU texture's v=0 is its TOP row. Clip space is the
+        // same in both (y=-1 is the bottom of the viewport), so a quad that pairs y=-1 with v=0 maps the
+        // texture's bottom row to the bottom of the screen on WebGL2 and its TOP row to the bottom of
+        // the screen on WebGPU - the whole image upside down. Every fullscreen pass shares this quad, so
+        // getting it right here fixes the chain uniformly instead of flipping somewhere at the end and
+        // hoping the number of passes stays odd.
+        //
+        // Nothing else needs a flip: with the quad agreeing with its own API about which row is which,
+        // a pass reads and writes the same texels on both backends, and the G-buffer that the geometry
+        // pass rasterised is indexed correctly by all of them.
+        const v0 = device.backend === 'webgl2' ? 0 : 1;   // the V that belongs with clip-space y = -1
+        const v1 = 1 - v0;
         this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
-        this._screenQuad.create([-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1 ], 12, [0, 1, 2, 0, 2, 3]);
+        this._screenQuad.create([-1, -1, 0, 0, v0,  1, -1, 0, 1, v0,
+                                  1,  1, 0, 1, v1, -1,  1, 0, 0, v1], 12, [0, 1, 2, 0, 2, 3]);
 
         // IBL setup (BRDF LUT is rendered on the screen quad, so this must run after it exists).
         this._initializeIBL();
@@ -1480,18 +1496,25 @@ export class Renderer {
     /**
      * Turn a readback into a base64 PNG data URL, flipping Y on the way.
      *
-     * Both readback paths below need exactly this and had their own copy. The flip is not optional:
-     * `readPixels` reports rows bottom-up (GL's origin is bottom-left) and a canvas is top-down, so an
-     * unflipped thumbnail is upside down — which on a sphere or a symmetric prop is easy to miss.
+     * Both readback paths below need exactly this and had their own copy. The flip is not optional on
+     * WebGL2: `readPixels` reports rows bottom-up (GL's origin is bottom-left) and a canvas is top-down,
+     * so an unflipped thumbnail is upside down — which on a sphere or a symmetric prop is easy to miss.
      * `putImageData` writes straight (non-premultiplied) alpha, which PNG preserves.
+     *
+     * And it is not optional to SKIP it on WebGPU, whose origin is top-left: `copyTextureToBuffer`
+     * already hands back the row order a canvas wants, so flipping there inverts a correct image. This
+     * is the whole reason the first rendered WebGPU frame came out upside down — the render was right
+     * and the encoder was wrong, which is worth knowing because "the image is flipped" reads like a
+     * projection or winding problem and sends you looking in entirely the wrong place.
      */
     private static _encodePNG(pixels: Uint8Array, width: number, height: number): string {
         const out = document.createElement('canvas');
         out.width = width; out.height = height;
         const ctx = out.getContext('2d')!;
         const img = ctx.createImageData(width, height);
+        const bottomUp = device.backend === 'webgl2';
         for (let y = 0; y < height; y++) {
-            const src = (height - 1 - y) * width * 4;
+            const src = (bottomUp ? height - 1 - y : y) * width * 4;
             img.data.set(pixels.subarray(src, src + width * 4), y * width * 4);
         }
         ctx.putImageData(img, 0, 0);
@@ -6012,13 +6035,19 @@ export class Renderer {
         if (this._passEnabled['bloom.blur']) {
             // 2. Downsample: each level reads the one above it at twice the resolution.
             gpuProfiler.beginPass('bloom.blur');
-            const downPipeline = this._fullscreenPipeline('bloomDownsample', BloomDownsampleProgram);
             for (let i = 1; i < this._bloomMips.length; i++) {
                 const from = this._bloomMips[i - 1];
                 // `loadOp: 'load'` — each level is fully overwritten by the draw, so clearing first
                 // would be a wasted write. That is what the bare `bind()` used to express implicitly.
                 const pass = this._beginFullscreenPass(this._bloomMips[i].renderTarget, 'bloom.blur',
                                                        false, undefined, false);
+                // Built INSIDE the pass, not hoisted above the loop. `_pipelineFor` reads its colour
+                // format off `_passTarget`, which only exists between begin and end — hoisted, it saw
+                // no target and fell back to `rgba8unorm` while these mips are `rgba16float`. WebGL2
+                // never reads the format, so the mismatch was invisible there; WebGPU rejects the draw
+                // with "Attachment state of [RenderPipeline] is not compatible with [RenderPassEncoder]".
+                // Not a per-iteration cost: pipelines are cached, and the format is part of the key.
+                const downPipeline = this._fullscreenPipeline('bloomDownsample', BloomDownsampleProgram);
                 pass.setPipeline(downPipeline);
                 this._shaderManager.setUniform('u_srcTexelSize', [1 / from.width, 1 / from.height]);
                 // Both grids: the mips halve with floor(), so an odd level is not exactly 2x the next
@@ -6039,14 +6068,15 @@ export class Renderer {
             // ADDITIVE_BLEND is the shared descriptor from rhi/types.ts, which spells out the alpha
             // half as well as the colour half — a bare `blendFunc` that forgets alpha is exactly the
             // bug that once made bloom emit nothing at all.
-            const upPipeline = this._fullscreenPipeline('bloomUpsample', BloomUpsampleProgram,
-                                                        ADDITIVE_BLEND);
             for (let i = this._bloomMips.length - 1; i > 0; i--) {
                 const from = this._bloomMips[i];
                 const to = this._bloomMips[i - 1];
                 // Accumulating INTO the destination, so it must be loaded, never cleared.
                 const pass = this._beginFullscreenPass(to.renderTarget, 'bloom.blur', false,
                                                        undefined, false);
+                // Inside the pass, for the format reason spelled out on the downsample loop above.
+                const upPipeline = this._fullscreenPipeline('bloomUpsample', BloomUpsampleProgram,
+                                                            ADDITIVE_BLEND);
                 pass.setPipeline(upPipeline);
                 // Radius in the SOURCE mip's texels, so the spread is resolution-independent. Per axis:
                 // one value off the width alone is short by the aspect ratio vertically.

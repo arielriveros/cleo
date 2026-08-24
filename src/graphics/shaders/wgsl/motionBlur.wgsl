@@ -16,7 +16,7 @@ const SOFT_Z_EXTENT: f32 = 1.0;
 @group(0) @binding(3) var u_velocity_sampler: sampler;
 @group(0) @binding(4) var u_neighborMax_texture: texture_2d<f32>;     // tile-res dilated velocity (UV)
 @group(0) @binding(5) var u_neighborMax_sampler: sampler;
-@group(0) @binding(6) var u_gDepth_texture: texture_2d<f32>;          // device depth
+@group(0) @binding(6) var u_gDepth_texture: texture_depth_2d;          // device depth
 @group(0) @binding(7) var u_gDepth_sampler: sampler;
 
 struct MotionBlurUniforms {
@@ -68,7 +68,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let vC = textureSample(u_velocity_texture, u_velocity_sampler, uv).xy;
     let vClen = max(length(vC * u_mb.u_screenSize), 0.5);
-    let centerDepth = linearizeDepth(textureSample(u_gDepth_texture, u_gDepth_sampler, uv).r);
+    let centerDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0));
 
     // `in.position` is the fragment coordinate — WGSL's gl_FragCoord.
     let jitter = interleavedGradientNoise(in.position.xy) - 0.5;
@@ -87,7 +87,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         let vS = textureSample(u_velocity_texture, u_velocity_sampler, sampleUV).xy;
         let vSlen = max(length(vS * u_mb.u_screenSize), 0.5);
-        let sampleDepth = linearizeDepth(textureSample(u_gDepth_texture, u_gDepth_sampler, sampleUV).r);
+        let sampleDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, sampleUV, 0));
 
         let dist = abs(t) * vNlen;
 

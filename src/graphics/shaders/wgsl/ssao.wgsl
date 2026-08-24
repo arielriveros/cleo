@@ -8,7 +8,7 @@
 
 @group(0) @binding(0) var u_gNormalRoughness_texture: texture_2d<f32>;  // rgb = world-space normal
 @group(0) @binding(1) var u_gNormalRoughness_sampler: sampler;
-@group(0) @binding(2) var u_gDepth_texture: texture_2d<f32>;            // non-linear device depth
+@group(0) @binding(2) var u_gDepth_texture: texture_depth_2d;            // non-linear device depth
 @group(0) @binding(3) var u_gDepth_sampler: sampler;
 @group(0) @binding(4) var u_noise_texture: texture_2d<f32>;             // 4x4 tiled rotation noise
 @group(0) @binding(5) var u_noise_sampler: sampler;
@@ -41,8 +41,14 @@ struct SSAOUniforms {
  * kernel sample per pixel, so at the old 64 samples that was 128 mat4 multiplies for every pixel on
  * screen, to arrive at exactly the same view-space point.
  */
+// `textureSampleLevel`, not `textureSample`: this helper is reached from a loop and from behind
+// an early return, which WGSL treats as NON-UNIFORM control flow - and implicit-LOD sampling is
+// only legal in uniform control flow, so Dawn refuses the whole module with "'textureSample' must
+// only be called from uniform control flow". An invalid module means an invalid pipeline, and an
+// invalid pipeline draws nothing while its pass still clears. Explicit level 0 is exactly what the
+// implicit form resolved to anyway: every texture sampled here is screen-sized and un-mipped.
 fn viewPosFromUV(uv: vec2<f32>) -> vec3<f32> {
-    let d = textureSample(u_gDepth_texture, u_gDepth_sampler, uv).r;
+    let d = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0);
     let clip = vec4<f32>(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
     let view = u_ssao.u_invProjection * clip;
     return view.xyz / view.w;
@@ -50,12 +56,13 @@ fn viewPosFromUV(uv: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let depth = textureSample(u_gDepth_texture, u_gDepth_sampler, in.uv).r;
+    let depth = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, in.uv, 0);
     // Background (no geometry) is never occluded.
     if (depth >= 1.0) { return vec4<f32>(1.0); }
 
     let fragPos = viewPosFromUV(in.uv);
-    let normalW = textureSample(u_gNormalRoughness_texture, u_gNormalRoughness_sampler, in.uv).rgb;
+    let normalW = textureSampleLevel(u_gNormalRoughness_texture, u_gNormalRoughness_sampler,
+                                 in.uv, 0.0).rgb;
     if (dot(normalW, normalW) < 1e-6) { return vec4<f32>(1.0); }
 
     // The rotation part of the view matrix. WGSL has no mat3(mat4) narrowing constructor, so the three
@@ -64,7 +71,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(viewRot * normalize(normalW));
 
     // Per-fragment random rotation of the kernel, tiled across the screen.
-    let noise = textureSample(u_noise_texture, u_noise_sampler, in.uv * u_ssao.u_noiseScale).xy;
+    let noise = textureSampleLevel(u_noise_texture, u_noise_sampler,
+                               in.uv * u_ssao.u_noiseScale, 0.0).xy;
     let randomVec = normalize(vec3<f32>(noise * 2.0 - 1.0, 0.0));
     let tangent = normalize(randomVec - normal * dot(randomVec, normal));
     let bitangent = cross(normal, tangent);

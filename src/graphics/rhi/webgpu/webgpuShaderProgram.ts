@@ -50,6 +50,11 @@ export class WebGPUShaderProgram implements ShaderProgram {
     private readonly _uniforms: ProgramUniforms;
     private _disposed = false;
 
+    /** The program name. Kept so a bind group built from this program can SAY so - see
+     *  `WebGPURenderPipeline.uniformGroupsFor`, where a label naming only the pipeline once hid a
+     *  pipeline being fed another program's uniform buffers. */
+    public readonly label: string;
+
     constructor(private readonly _device: Device, label: string,
                 vertexInputs: readonly WgslVertexInput[],
                 blocks: readonly UniformBlockLayout[]) {
@@ -67,6 +72,7 @@ export class WebGPUShaderProgram implements ShaderProgram {
                 // wants, and WebGPU carries vertex formats on the pipeline instead.
             };
         });
+        this.label = label;
         this._uniforms = new ProgramUniforms(_device, blocks, label);
     }
 

@@ -260,13 +260,32 @@ app.whenReady().then(async () => {
                 + ' const fb = r._gBufferFBO; if (!fb || !fb.colors) return "no gbuffer";'
                 + ' const out = [];'
                 + ' for (let i = 0; i < fb.colors.length; i++) {'
-                + '   const px = await r.device.readPixels(fb.colors[i].attachmentView, 0, 0, 32, 32);'
+                + '   const t = fb.colors[i];'
+                + '   const cx = Math.max(0, (t.width >> 1) - 16), cy = Math.max(0, (t.height >> 1) - 16);'
+                + '   const px = await r.device.readPixels(t.attachmentView, cx, cy, 32, 32);'
                 + '   let nz = 0, mx = 0;'
                 + '   for (let k = 0; k < px.length; k++) { if (px[k]) nz++; if (px[k] > mx) mx = px[k]; }'
                 + '   out.push("c" + i + ":nz=" + nz + "/" + px.length + ",max=" + mx); }'
                 + ' return out.join(" "); }'
                 + ' catch (err) { return "threw: " + err.message; } })()');
             console.log('      g-buffer after a frame: ' + gbuf);
+            // One stage further down the chain. The G-buffer is populated now, so if the scene buffer
+            // that deferred lighting writes is still empty, the break has moved to the lighting pass.
+            const litChain = await js(
+                '(async () => { try { const r = window.__renderer;'
+                + ' const out = [];'
+                + ' for (const [name, fb] of [["scene", r._sceneFBO], ["compose", r._compose_FBOs'
+                + '   && r._compose_FBOs[0]]]) {'
+                + '   if (!fb || !fb.colors || !fb.colors[0]) { out.push(name + ":absent"); continue; }'
+                + '   const t = fb.colors[0];'
+                + '   const cx = Math.max(0, (t.width >> 1) - 16), cy = Math.max(0, (t.height >> 1) - 16);'
+                + '   const px = await r.device.readPixels(t.attachmentView, cx, cy, 32, 32);'
+                + '   let nz = 0, mx = 0;'
+                + '   for (let k = 0; k < px.length; k++) { if (px[k]) nz++; if (px[k] > mx) mx = px[k]; }'
+                + '   out.push(name + ":nz=" + nz + "/" + px.length + ",max=" + mx); }'
+                + ' return out.join(" "); }'
+                + ' catch (err) { return "threw: " + err.message; } })()');
+            console.log('      after lighting/compose: ' + litChain);
             // RAW WebGPU: a hardcoded triangle on the engine's own GPUDevice, bypassing every part of
             // the engine's draw path. This is the bisect. Red pixels mean the device, the queue, the
             // pipeline and the readback are all sound and the fault is in what the ENGINE feeds them;
@@ -543,7 +562,8 @@ app.whenReady().then(async () => {
                 '(async () => { try { const r = window.__renderer; const dev = r.device._device;'
                 + ' const RBP = GPUCommandEncoder.prototype.beginRenderPass; let stamped = 0;'
                 + ' GPUCommandEncoder.prototype.beginRenderPass = function (d) {'
-                + '   if (d.colorAttachments && d.colorAttachments.length >= 3) {'
+                + '   if (d.colorAttachments && d.colorAttachments.length >= 3'
+                + '       && d.label === "geometry") {'
                 + '     stamped++;'
                 + '     const c = d.colorAttachments.map(function (a, i) {'
                 + '       return i === 0 ? Object.assign({}, a, { loadOp: "clear",'
@@ -608,14 +628,65 @@ app.whenReady().then(async () => {
                 + '   () => requestAnimationFrame(r2))));'
                 + ' dev.onuncapturederror = prev;'
                 + ' const tally = new Map();'
+                + ' const isConsequence = function (m) {'
+                + '   return m.indexOf("[Invalid") === 0; };'
                 + ' for (const m of errs) {'
                 + '   const k = m.split(String.fromCharCode(10))[0].slice(0, 130);'
+                + '   if (isConsequence(k)) continue;'
                 + '   tally.set(k, (tally.get(k) || 0) + 1); }'
                 + ' const rows = Array.from(tally.entries()).sort(function (a, b) { return b[1] - a[1]; });'
-                + ' return "total=" + errs.length + " ;; " + rows.slice(0, 8).map(function (x) {'
+                + ' const deep = errs.filter(function (m) {'
+                + '   return m.indexOf("uniform control flow") >= 0'
+                + '     || m.indexOf("sample types") >= 0; })'
+                + '   .map(function (m) { return m.split(String.fromCharCode(10))'
+                + '     .filter(function (l) { return l.indexOf("ShaderModule") >= 0'
+                + '       || l.indexOf("RenderPipeline") >= 0 || l.indexOf("BindGroup") >= 0'
+                + '       || l.indexOf("error") >= 0; }).join(" / ").slice(0, 220); });'
+                + ' const uniq = Array.from(new Set(deep));'
+                + ' return "DEEP:: " + uniq.join(" ;; ") + " ;; total=" + errs.length'
+                + '   + " ;; " + rows.slice(0, 8).map(function (x) {'
                 + '   return x[1] + "x " + x[0]; }).join(" ;; "); }'
                 + ' catch (err) { return "threw: " + err.message; } })()');
             console.log('      uncaptured error tally: ' + limits);
+            // The error gives a line number in the COMPOSED module, which no source file has. Capture
+            // the module text the device was actually handed and print the offending line.
+            const offending = await js(
+                '(async () => { try { const r = window.__renderer; const dev = r.device._device;'
+                + ' const real = dev.createShaderModule.bind(dev); const src = new Map();'
+                + ' dev.createShaderModule = function (d) {'
+                + '   if (d.label) src.set(d.label, d.code); return real(d); };'
+                + ' r._fullscreenPipelines.clear();'
+                + ' await new Promise(r2 => requestAnimationFrame(() => requestAnimationFrame(r2)));'
+                + ' dev.createShaderModule = real;'
+                + ' const want = [["ssao", 100], ["deferredLighting", 525]];'
+                + ' const out = [];'
+                + ' for (const [label, line] of want) {'
+                + '   const code = src.get(label);'
+                + '   if (!code) { out.push(label + ": not captured"); continue; }'
+                + '   const lines = code.split(String.fromCharCode(10));'
+                + '   out.push(label + " :" + line + " => " + (lines[line - 1] || "").trim().slice(0, 150)); }'
+                + ' return out.join("  ;;  "); }'
+                + ' catch (err) { return "threw: " + err.message; } })()');
+            console.log('      offending source lines: ' + offending);
+            // Which buffer is landing on which binding inside the merged group 1? The error says a
+            // 192-byte u_transform is on a binding whose declared struct is much larger, so print the
+            // entries the engine actually passes, with the buffer labels and sizes.
+            const bgEntries = await js(
+                '(async () => { try { const r = window.__renderer; const dev = r.device._device;'
+                + ' const real = dev.createBindGroup.bind(dev); const rec = [];'
+                + ' dev.createBindGroup = function (d) {'
+                + '   if (d.label && d.label.indexOf(":uniforms") >= 0 && rec.length < 6) {'
+                + '     rec.push(d.label + " {" + (d.entries || []).map(function (e) {'
+                + '       const b = e.resource && e.resource.buffer;'
+                + '       return "b" + e.binding + "=" + (b ? (b.label || "?") + ":" + b.size : "?");'
+                + '     }).join(", ") + "}"); }'
+                + '   return real(d); };'
+                + ' r._fullscreenPipelines.clear();'
+                + ' await new Promise(r2 => requestAnimationFrame(() => requestAnimationFrame(r2)));'
+                + ' dev.createBindGroup = real;'
+                + ' return rec.length ? rec.join("  ;;  ") : "none captured"; }'
+                + ' catch (err) { return "threw: " + err.message; } })()');
+            console.log('      uniform group entries: ' + bgEntries);
             const lim2 = await js(
                 '(async () => { try {'
                 + ' const a = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });'
