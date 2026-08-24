@@ -47,7 +47,7 @@ struct BlinnPhongMaterial {
     hasNormalMap: i32,
     hasMaskMap: i32,
 };
-@group(2) @binding(0) var<uniform> u_material: BlinnPhongMaterial;
+@group(1) @binding(1) var<uniform> u_material: BlinnPhongMaterial;
 
 struct BlinnPhongLighting {
     u_view: mat4x4<f32>,        // only to get the view-space depth that selects a cascade
@@ -60,7 +60,7 @@ struct BlinnPhongLighting {
     u_useEnvMap: i32,
     u_envMapLinear: i32,        // env cube is linear HDR (a light probe) -> skip the sRGB decode
 };
-@group(5) @binding(0) var<uniform> u_lighting: BlinnPhongLighting;
+@group(1) @binding(3) var<uniform> u_lighting: BlinnPhongLighting;
 
 // Per-light functions return direct diffuse + specular only. Ambient is applied once in the entry point
 // (a single term), not accumulated per light — otherwise ambient scales with the light count.

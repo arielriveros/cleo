@@ -64,6 +64,15 @@ export class ShaderManager {
      */
     public flushBound(): void { this._boundShader?.flushUniformBlocks(); }
 
+    /**
+     * The currently bound program, or null.
+     *
+     * Exposed for the WebGPU pass encoder, which has to BIND that program's uniform blocks as bind
+     * groups - WebGL2 uploads them to global binding points and needs no such step. Read-only on
+     * purpose: `bind(name)` stays the only way to change it.
+     */
+    public get bound(): ShaderProgram | null { return this._boundShader; }
+
     public get registeredShaders(): string[] {
         return Array.from(this._shaders.keys());
     }

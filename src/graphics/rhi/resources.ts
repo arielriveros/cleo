@@ -97,6 +97,15 @@ export interface Texture extends GpuResource {
      * assertion rather than a setter.
      */
     setSize(width: number, height: number, depthOrArrayLayers?: number, mipLevelCount?: number): void;
+    /**
+     * Bumped whenever the underlying handle is REPLACED, never on a write.
+     *
+     * WebGL2 re-specifies storage in place and keeps its texture object, so this is constant there. A
+     * `GPUTexture` fixes its size at creation, so resizing one means destroying it and making another -
+     * and every {@link TextureView} taken from the old one then refers to storage that no longer
+     * exists. This is how a cache notices. See `WebGPUTexture.setSize`.
+     */
+    readonly generation: number;
 }
 
 /**
@@ -110,6 +119,15 @@ export interface TextureView extends GpuResource {
     readonly texture: Texture;
     readonly baseMipLevel: number;
     readonly baseArrayLayer: number;
+    /**
+     * The texture's {@link Texture.generation} when this view was taken.
+     *
+     * A view is only valid for the storage it was made from. Recording which generation that was is
+     * what lets a caller that CACHES a view notice the storage underneath it has been replaced -
+     * comparing against `texture.generation` costs one number and cannot go stale, whereas comparing
+     * dimensions duplicates a condition that lives somewhere else.
+     */
+    readonly generation: number;
 }
 
 export interface Sampler extends GpuResource {
@@ -190,6 +208,18 @@ export interface RenderPipeline extends GpuResource {
     readonly colorTargets: readonly ColorTargetState[];
     /** Layouts this pipeline binds, indexed by group. */
     readonly bindGroupLayouts: readonly BindGroupLayout[];
+    /**
+     * What this pipeline's shader declares, by group and binding.
+     *
+     * A layout says how many entries a group takes; this says what they MEAN — which is what a caller
+     * assembling a material bind group needs in order to know that binding 4 wants the normal map and
+     * binding 8 wants the environment cube.
+     *
+     * It was reached as `(pipeline as any).module.resources`, which is a property only the WebGL2
+     * pipeline has. Same shape as every other blind spot in this port: an untyped cast that the backend
+     * it was written against happens to satisfy.
+     */
+    readonly resources: readonly ShaderResource[];
 }
 
 /**

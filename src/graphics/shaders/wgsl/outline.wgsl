@@ -21,7 +21,7 @@ struct OutlineTransform {
 struct OutlineUniforms {
     u_outlineColor: vec3<f32>,
 };
-@group(2) @binding(0) var<uniform> u_outline: OutlineUniforms;
+@group(1) @binding(1) var<uniform> u_outline: OutlineUniforms;
 
 @vertex
 fn vs_main(

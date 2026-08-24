@@ -1,10 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import {
-    GL_ENUMS, glTopology, isTriangleTopology, glCompare, glBlendFactor, glBlendOperation,
-    glCullMode, glFrontFace, glAddressMode, glMagFilter, glMinFilter,
-    glIndexType, indexByteSize, glTextureTarget, glTextureFormat, glVertexFormat,
-    glBufferTarget, glBufferUsageHint,
-} from '../src/graphics/rhi/webgl2/glEnums';
+import { GL_ENUMS, glTopology, glCompare, glBlendFactor, glBlendOperation, glCullMode, glFrontFace, glAddressMode, glMagFilter, glMinFilter, glIndexType, indexByteSize, glTextureTarget, glTextureFormat, glVertexFormat, glBufferTarget, glBufferUsageHint } from '../src/graphics/rhi/webgl2/glEnums';
+// Moved out of the WebGL2 backend: it asks about the RHI's own topology union, and the WebGPU
+// encoder counts triangles too, so leaving it there would have meant one backend importing the other.
+import { isTriangleTopology } from '../src/graphics/rhi/types';
 import {
     MODEL_VERTEX_LAYOUT, TILE_VERTEX_LAYOUT, packedModelLayout, instanceMatrixLayout, isModelAttribute,
     modelVertexLayout,
@@ -60,12 +58,18 @@ describe('glEnums — pipeline state', () => {
         expect(glBlendOperation('max')).toBe(GL_ENUMS.MAX);
     });
 
-    // 'none' is not a cull face, it is disabling the whole test — there is no enum for it, so the
-    // caller has to branch. Returning null forces that rather than inventing a mode.
-    it('returns null for cull mode none', () => {
+    // 'none' is not a cull face, it is disabling the whole test — there is nothing to return for it, so
+    // the caller has to branch. Returning null forces that rather than inventing a mode.
+    //
+    // It returns the SIDE rather than a GL enum since WebGPU arrived: `GLState.cullFace(gl.BACK)`
+    // evaluated `gl.BACK` at the call site, so it threw on a backend with no context before any guard
+    // inside GLState could run. `CullMode` and `GLState.cullFace`'s argument are now the same union, so
+    // this function is a null check with a name rather than a translation — and the GL constants live
+    // only in the one file allowed to know them.
+    it('returns null for cull mode none, and the side otherwise', () => {
         expect(glCullMode('none')).toBeNull();
-        expect(glCullMode('front')).toBe(GL_ENUMS.FRONT);
-        expect(glCullMode('back')).toBe(GL_ENUMS.BACK);
+        expect(glCullMode('front')).toBe('front');
+        expect(glCullMode('back')).toBe('back');
     });
 
     it('maps winding order', () => {

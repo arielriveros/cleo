@@ -247,7 +247,12 @@ describe('bloom mask blend state', () => {
         // and since all three run in post-processing, the wrong state survived into the next frame and
         // sky fog / transparents / sprites / gizmos then eroded the mask instead of preserving it.
         expect(renderer).not.toMatch(/gl\.blendFunc\(gl\.SRC_ALPHA/);
-        expect(renderer).toMatch(/private _restoreDefaultBlend\(\): void \{\s*gl\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
+        // Matched on the CALL rather than on the whole method body: the body gained a `if (!gl) return`
+        // guard when WebGPU arrived (there is no standing blend func to restore on a backend where a
+        // pipeline carries its own), and pinning the exact text made this fail for a reason that has
+        // nothing to do with the mask it protects.
+        expect(renderer).toMatch(
+            /_restoreDefaultBlend\(\): void \{[\s\S]{0,400}?gl\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
     });
 
     it('does not let a quality tier destroy the authored bloom intensity', () => {

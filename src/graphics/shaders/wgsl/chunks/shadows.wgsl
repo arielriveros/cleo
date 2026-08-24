@@ -68,7 +68,7 @@ struct ShadowUniforms {
     u_debugCascades: i32,                       // tint by selected cascade instead of shading
     u_spotShadowsEnabled: i32,
 };
-@group(4) @binding(0) var<uniform> u_shadow: ShadowUniforms;
+@group(1) @binding(2) var<uniform> u_shadow: ShadowUniforms;
 
 /**
  * The fragment coordinate, published by the entry point.

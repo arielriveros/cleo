@@ -30,7 +30,7 @@ struct TerrainLightingUniforms {
     u_numPointLights: i32,
     u_numSpotlights: i32,
 };
-@group(3) @binding(0) var<uniform> u_lighting: TerrainLightingUniforms;
+@group(1) @binding(3) var<uniform> u_lighting: TerrainLightingUniforms;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {

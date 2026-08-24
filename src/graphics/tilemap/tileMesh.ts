@@ -24,6 +24,8 @@ import { TILE_VERTEX_LAYOUT } from '../rhi/vertexLayouts';
 import { applyVertexLayout } from '../rhi/webgl2/vertexArray';
 import { glDevice } from '../rhi/webgl2/webgl2Device';
 import type { WebGL2Buffer } from '../rhi/webgl2/webgl2Device';
+import { device } from '../rhi/deviceHandle';
+import type { Buffer as RhiBuffer } from '../rhi/resources';
 import { BufferUsage } from '../rhi/types';
 import { GridSpec, cellSortY, cellToWorld } from './cellMath';
 import { CELL_EMPTY, CHUNK_SIZE, TileChunk, cellFlipX, cellFlipY, cellRot90, cellTile } from './chunk';
@@ -64,8 +66,8 @@ interface AnimatedRef {
 
 export class TileMesh {
     private _vao: WebGLVertexArrayObject | null = null;
-    private _vbo: WebGL2Buffer | null = null;
-    private _ibo: WebGL2Buffer | null = null;
+    private _vbo: RhiBuffer | null = null;
+    private _ibo: RhiBuffer | null = null;
     private _indexCount = 0;
     private _vertexCount = 0;
     private _bands: DepthBand[] = [];
@@ -184,22 +186,30 @@ export class TileMesh {
     }
 
     private _upload(verts: Float32Array, indices: Uint16Array): void {
-        if (!this._vao) {
+        // The VAO is WebGL2-only decoration on this class too: the RHI draw path builds its own from
+        // the pipeline's layout (`vertexArrayFor`), and only `draw`/`drawRange` below read this one.
+        // Same split as `Mesh` — the buffers are portable, the vertex-array object is not.
+        const webgl2 = device.backend === 'webgl2';
+        if (webgl2 && !this._vao) {
             this._vao = glDevice().createVertexArray();
             // COPY_DST on the vertex buffer: an animated chunk rewrites its UVs every frame through
             // `advanceAnimation`, which is what earns it a DYNAMIC_DRAW hint. Indices never change.
-            this._vbo = glDevice().createBuffer({ label: 'tileChunk.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
-            this._ibo = glDevice().createBuffer({ label: 'tileChunk.indices', size: 0, usage: BufferUsage.INDEX });
         }
-        GLState.bindVAO(this._vao);
-        this._vbo = glDevice().reallocateBuffer(this._vbo as WebGL2Buffer, verts);
+        if (!this._vbo) {
+            this._vbo = device.createBuffer({ label: 'tileChunk.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+            this._ibo = device.createBuffer({ label: 'tileChunk.indices', size: 0, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
+        }
+        // ELEMENT_ARRAY_BUFFER is VAO state on WebGL2, so the index upload below has to land in
+        // this chunk's own VAO rather than whatever was current. WebGPU has neither.
+        if (webgl2) GLState.bindVAO(this._vao);
+        this._vbo = device.reallocateBuffer(this._vbo!, verts);
 
         // The layout is still this chunk's own — a tilemap vertex really is position/uv/colour, not the
         // model vertex — but the attribute binding is no longer a private copy of the same six calls.
-        applyVertexLayout(TILE_VERTEX_LAYOUT, (this._vbo as WebGL2Buffer).handle);
+        if (webgl2) applyVertexLayout(TILE_VERTEX_LAYOUT, (this._vbo as WebGL2Buffer).handle);
 
-        this._ibo = glDevice().reallocateBuffer(this._ibo as WebGL2Buffer, indices);
-        GLState.bindVAO(null);
+        this._ibo = device.reallocateBuffer(this._ibo!, indices);
+        if (webgl2) GLState.bindVAO(null);
     }
 
     /**
@@ -227,9 +237,9 @@ export class TileMesh {
                 this._verts[base + 3] = uvScratch[1] + t * (uvScratch[3] - uvScratch[1]);
             }
         }
-        GLState.bindVAO(this._vao);
-        glDevice().writeBuffer(this._vbo as WebGL2Buffer, 0, this._verts);
-        GLState.bindVAO(null);
+        if (device.backend === 'webgl2') GLState.bindVAO(this._vao);
+        device.writeBuffer(this._vbo!, 0, this._verts);
+        if (device.backend === 'webgl2') GLState.bindVAO(null);
     }
 
     /**
@@ -239,8 +249,8 @@ export class TileMesh {
      * vertex layout all belong to the renderer; this class owns the buffers and nothing else about
      * how a frame is recorded. Null until `build` has run.
      */
-    public get vertexBuffer(): WebGL2Buffer | null { return this._vbo; }
-    public get indexBuffer(): WebGL2Buffer | null { return this._ibo; }
+    public get vertexBuffer(): RhiBuffer | null { return this._vbo; }
+    public get indexBuffer(): RhiBuffer | null { return this._ibo; }
 
     public draw(): void {
         if (this._indexCount === 0 || !this._vao) return;

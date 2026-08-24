@@ -28,9 +28,10 @@ import { ShaderManager } from '../../systems/shaderManager';
 import type { Shader } from '../../shader';
 import {
     glCompare, glBlendFactor, glBlendOperation, glCullMode, glFrontFace,
-    glTopology, glIndexType, indexByteSize, isTriangleTopology,
+    glTopology, glIndexType, indexByteSize,
 } from './glEnums';
 import { frameStats, setViewportSize } from '../../renderStats';
+import { isTriangleTopology } from '../types';
 import { glDevice } from './webgl2Device';
 import type { WebGL2Texture, WebGL2Buffer, WebGL2Framebuffer } from './webgl2Device';
 import type {
@@ -119,6 +120,8 @@ export class WebGL2RenderPipeline implements RenderPipeline {
     public readonly colorTargets: readonly ColorTargetState[];
     public readonly bindGroupLayouts: readonly WebGL2BindGroupLayout[];
     public readonly module: WebGL2ShaderModule;
+    /** See the interface. Forwarded from the module this pipeline was built with. */
+    public get resources(): readonly ShaderResource[] { return this.module.resources; }
 
     constructor(descriptor: RenderPipelineDescriptor) {
         this.label = descriptor.label ?? 'pipeline';
@@ -142,21 +145,31 @@ export class WebGL2RenderPipeline implements RenderPipeline {
         // Through ShaderManager, not Shader.use(): see the note at the top of this file.
         ShaderManager.Instance.bind(this.module.program);
 
-        if (this.depthStencil) {
-            GLState.enable(gl.DEPTH_TEST);
-            GLState.depthMask(this.depthStencil.depthWriteEnabled);
-            gl.depthFunc(glCompare(this.depthStencil.depthCompare));
+        // `always` + no writes IS "no depth interaction", and must take the branch below rather than
+        // this one.
+        //
+        // WebGPU requires a pipeline to declare depth state whenever its pass has a depth attachment,
+        // so the renderer synthesises that pair for every fullscreen pass. Handling it here rather than
+        // there is what keeps `gl.depthFunc` from being issued at all: `depthFunc` is CONTEXT state, not
+        // pass state, so setting it would leak past this pipeline into whatever legacy draw came next -
+        // which still relies on the standing LEQUAL from `_configureDefaultState`.
+        const noDepth = !this.depthStencil
+            || (this.depthStencil.depthCompare === 'always' && !this.depthStencil.depthWriteEnabled);
+        if (!noDepth) {
+            GLState.depthTest(true);
+            GLState.depthMask(this.depthStencil!.depthWriteEnabled);
+            gl.depthFunc(glCompare(this.depthStencil!.depthCompare));
         } else {
             // No depth state means no depth interaction at all. Masking as well as disabling matters:
             // DEPTH_TEST off still lets writes through on some drivers, and a fullscreen pass that
             // stamped the depth buffer would break every later pass that reads it.
-            GLState.disable(gl.DEPTH_TEST);
+            GLState.depthTest(false);
             GLState.depthMask(false);
         }
 
         const cull = glCullMode(this.primitive.cullMode);
-        if (cull === null) GLState.disable(gl.CULL_FACE);
-        else { GLState.enable(gl.CULL_FACE); GLState.cullFace(cull); }
+        if (cull === null) GLState.cull(false);
+        else { GLState.cull(true); GLState.cullFace(cull); }
         gl.frontFace(glFrontFace(this.primitive.frontFace));
 
         // WebGL2 blends globally, so target 0 decides. Every pass in this engine that blends writes one
@@ -168,14 +181,14 @@ export class WebGL2RenderPipeline implements RenderPipeline {
 
         const blend = this.colorTargets[0]?.blend;
         if (blend) {
-            GLState.enable(gl.BLEND);
+            GLState.blend(true);
             gl.blendFuncSeparate(
                 glBlendFactor(blend.color.srcFactor), glBlendFactor(blend.color.dstFactor),
                 glBlendFactor(blend.alpha.srcFactor), glBlendFactor(blend.alpha.dstFactor));
             gl.blendEquationSeparate(
                 glBlendOperation(blend.color.operation), glBlendOperation(blend.alpha.operation));
         } else {
-            GLState.disable(gl.BLEND);
+            GLState.blend(false);
         }
 
         const mask = this.colorTargets[0]?.writeMask;
@@ -203,7 +216,10 @@ export class WebGL2TextureView implements TextureView {
                 public readonly baseMipLevel: number = 0,
                 public readonly baseArrayLayer: number = 0) {
         this.label = `${texture.label}:view`;
+        this.generation = texture.generation;
     }
+    /** Constant here - this backend never replaces a texture object. See the interface. */
+    public readonly generation: number;
     public bind(unit: number): void { this.texture.bind(unit); }
     public destroy(): void { /* the texture owns the storage */ }
 }

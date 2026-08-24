@@ -14,7 +14,7 @@ struct BasicGeometryMaterial {
     opacity: f32,
     hasTexture: i32,
 };
-@group(2) @binding(0) var<uniform> u_material: BasicGeometryMaterial;
+@group(1) @binding(1) var<uniform> u_material: BasicGeometryMaterial;
 
 struct GBuffer {
     @location(0) gAlbedoMetallic: vec4<f32>,    // rgb = albedo (0 => unlit), a = metallic

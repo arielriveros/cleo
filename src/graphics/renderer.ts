@@ -134,7 +134,7 @@ import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND } from './rhi/t
 import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout } from './rhi/types';
 import type { RenderPipeline, BindGroup, RenderTarget } from './rhi/resources';
 import type { RenderPassEncoder, CommandEncoder } from './rhi/device';
-import { modelVertexLayout, instanceMatrixLayout, boneLayouts, TILE_VERTEX_LAYOUT } from './rhi/vertexLayouts';
+import { modelVertexLayout, instanceMatrixLayout, boneLayouts, screenQuadLayout, TILE_VERTEX_LAYOUT } from './rhi/vertexLayouts';
 import type { WebGL2RenderPassEncoder } from './rhi/webgl2/webgl2Commands';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
@@ -499,6 +499,8 @@ export class Renderer {
      * loops, and the two are set from the same expression.
      */
     private _forwardDepthWrite = true;
+    /** The target of the open pass, for `_pipelineFor` to derive attachment formats from. */
+    private _passTarget: RenderTarget | null = null;
     private _passEncoder: CommandEncoder | null = null;
     // Separate 2:1 (non-square) target for the light-probe cubemap preview thumbnail. Allocated on first use.
     private _probePreviewFBO: Framebuffer | null = null;
@@ -902,6 +904,8 @@ export class Renderer {
 
     /** Whether the `firstFrame` probe stage has been taken — see {@link render}. */
     private _firstFrameStaged: boolean = false;
+    /** Set once `firstFrame` completes: after that `_stage` is a pass-through. See `_stage`. */
+    private _probeComplete: boolean = false;
 
     /**
      * Acquire the GPU device and allocate every render target.
@@ -1013,6 +1017,10 @@ export class Renderer {
      * saying why, which is precisely the shape of the bug engine.ts used to have.
      */
     private _stage<T>(name: string, body: () => T): T {
+        // Only until the probe has seen a whole frame. `_render`'s phases are staged too, and without
+        // this `reached` would grow by eight entries per frame forever — a measurement that costs
+        // memory is not one you leave switched on.
+        if (this._probeComplete) return body();
         try {
             const result = body();
             if (result instanceof Promise)
@@ -1164,8 +1172,8 @@ export class Renderer {
         const clearColor = this._config.clearColor || [0.0, 0.0, 0.0, 1.0];
         gl.clearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
-        GLState.enable(gl.DEPTH_TEST);
-        GLState.enable(gl.BLEND);
+        GLState.depthTest(true);
+        GLState.blend(true);
         gl.depthFunc(gl.LEQUAL);
         this._restoreDefaultBlend();
         gl.drawingBufferColorSpace = 'srgb';
@@ -1347,7 +1355,9 @@ export class Renderer {
     public render(scene: Scene): void {
         if (this._firstFrameStaged) return this._render(scene);
         this._firstFrameStaged = true;
-        return this._stage('firstFrame', () => this._render(scene));
+        const result = this._stage('firstFrame', () => this._render(scene));
+        this._probeComplete = true;
+        return result;
     }
 
     private _render(scene: Scene): void {
@@ -1363,7 +1373,7 @@ export class Renderer {
 
         // Combine each material's separate metallic/roughness/occlusion (and specular/reflectivity) maps
         // into the single packed texture the shaders sample. Before any pass binds a material.
-        this._ensurePackedTextures(scene);
+        this._stage('frame.packTextures', () => this._ensurePackedTextures(scene));
 
         // Cache view/projection/inverse and update the culling frustum for this frame
         const view = this._activeCamera.viewMatrix;
@@ -1406,37 +1416,40 @@ export class Renderer {
         this._shadowLight = shadowLight; // post passes (volumetric god rays) need the sun
 
         // Foliage GPU state must be current BEFORE the shadow pass, which can now draw it.
-        this._ensureFoliageUploaded(scene);
+        this._stage('frame.foliage', () => this._ensureFoliageUploaded(scene));
         this._checkGLErrors('framePrologue');
 
         this._shadowsActive = false;
         if (shadowLight && this._shadowsEnabled) {
             if (this._beginPass('shadows.cascades')) {
-                this._renderCascades(scene, shadowLight);
+                this._stage('frame.cascades', () => this._renderCascades(scene, shadowLight!));
                 this._shadowsActive = true;
                 this._shadowMapsDirty = true;
             }
         }
         this._checkGLErrors('cascades');
-        this._renderSpotShadows(scene);
+        this._stage('frame.spotShadows', () => this._renderSpotShadows(scene));
         this._checkGLErrors('spotShadows');
 
+        // Staged individually rather than as one `frame.shadows`: the three shadow paths are mutually
+        // exclusive and each fails differently, so collapsing them would tell you a frame died in
+        // "shadows" without saying which of the three ran.
         if (!this._shadowsActive) {
             // No caster (or shadows switched off): the pass above is skipped, so the layers still hold
             // the LAST scene's depth — and every lighting shader samples them regardless. That leaked a
             // ghost shadow of the previous scene into every preview render (asset thumbnails are
             // throwaway scenes whose lights deliberately don't cast). Clear to the far plane, once.
-            this._clearShadowMaps();
+            this._stage('frame.clearShadows', () => this._clearShadowMaps());
         }
 
-        if (this._deferred)
-            this._renderDeferred(scene, shadowLight);
-        else
-            this._renderForward(scene, shadowLight);
+        this._stage('frame.scene', () => {
+            if (this._deferred) this._renderDeferred(scene, shadowLight);
+            else this._renderForward(scene, shadowLight);
+        });
         this._checkGLErrors('scene');
 
         // Apply post processing
-        this._applyPostProcessing(scene);
+        this._stage('frame.post', () => this._applyPostProcessing(scene));
         this._checkGLErrors('post');
 
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
@@ -1521,7 +1534,7 @@ export class Renderer {
             this._resizeBuffers(prevW, prevH); // hand the pipeline back to the live viewport
         }
 
-        const pixels = await device.readPixels(this._offscreenFBO.colors[0].view, 0, 0, size, size);
+        const pixels = await device.readPixels(this._offscreenFBO.colors[0].attachmentView, 0, 0, size, size);
         return Renderer._encodePNG(pixels, size, size); // already square — no crop
     }
 
@@ -1557,7 +1570,7 @@ export class Renderer {
         // viewport, not the preview's 2:1 one.
         this._setViewport(this._renderWidth, this._renderHeight);
 
-        const pixels = await device.readPixels(this._probePreviewFBO.colors[0].view, 0, 0, w, h);
+        const pixels = await device.readPixels(this._probePreviewFBO.colors[0].attachmentView, 0, 0, w, h);
         return Renderer._encodePNG(pixels, w, h);
     }
 
@@ -1709,14 +1722,14 @@ export class Renderer {
         // groups set inside it.
         const pass = this._beginFullscreenPass(this._gBufferFBO.renderTarget, 'geometry', true);
 
-        // Prevent a framebuffer feedback loop: the previous frame's deferred lighting pass leaves the
-        // G-buffer's own textures bound to units 0-3 (the same units the material shaders' samplers
-        // reference). A textureless material never rebinds those units, so drawing into the G-buffer
-        // with them still bound is an INVALID_OPERATION and the draw is dropped (the object vanishes).
-        // Clear the material sampler units so no G-buffer texture is bound while we write to it.
-        // Must go through GLState, not raw gl calls: the cache would otherwise still believe last
-        // frame's textures are bound here and elide the rebinds that follow, sampling black.
-        for (let u = 0; u < 8; u++) GLState.bindTexture(u, gl.TEXTURE_2D, null);
+        // The G-buffer's own textures were left bound to units 0-3 by the previous frame's lighting
+        // pass, and a material that binds no texture never rebinds those units — so drawing INTO the
+        // G-buffer with them still bound is an INVALID_OPERATION and the draw is silently dropped.
+        //
+        // Deleted rather than guarded: this is a WebGL2 feedback hazard that cannot exist where a bind
+        // group names its resources per draw, and the units are now cleared by the bind group the
+        // geometry pass sets anyway. Kept as a note because the failure it prevented — objects
+        // vanishing from the G-buffer — is not one anybody would guess at.
 
         // Collect visible, opaque, non-gizmo models.
         const singles: ModelNode[] = [];
@@ -1832,7 +1845,7 @@ export class Renderer {
                 // every sub-model of every level, in both the colour and the shadow pass.
                 for (const cell of layer.cells) {
                     if (!cell.glBuffer)
-                        cell.glBuffer = device.createBuffer({ label: 'foliage.cellMatrices', size: 0, usage: BufferUsage.VERTEX });
+                        cell.glBuffer = device.createBuffer({ label: 'foliage.cellMatrices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
                     if (cell.uploadedVersion !== layer.version) {
                         cell.glBuffer = device.reallocateBuffer(cell.glBuffer, cell.matrices);
                         cell.uploadedVersion = layer.version;
@@ -2176,9 +2189,8 @@ export class Renderer {
      */
     private _materialBindGroup(pipeline: RenderPipeline, material: Material,
                                envCube?: Texture | null): BindGroup {
-        const module = (pipeline as any).module as { resources: readonly ShaderResource[] };
         const textures: Texture[] = [];
-        for (const resource of module.resources) {
+        for (const resource of pipeline.resources) {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
             // The forward programs carry the environment cube in group 0 alongside the material maps.
             // It is not a material texture and must not be looked up as one: the lookup would miss and
@@ -2220,9 +2232,8 @@ export class Renderer {
      */
     private _customBindGroup(pipeline: RenderPipeline, material: CustomMaterial,
                              envCube?: Texture | null): BindGroup {
-        const module = (pipeline as any).module as { resources: readonly ShaderResource[] };
         const textures: Texture[] = [];
-        for (const resource of module.resources) {
+        for (const resource of pipeline.resources) {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
             if (resource.glslName === 'u_envMap') { textures.push(envCube ?? this._fallbackCube); continue; }
             const id = material.textures.get(resource.glslName.replace(/^u_/, ''));
@@ -2233,9 +2244,8 @@ export class Renderer {
     }
 
     private _terrainBindGroup(pipeline: RenderPipeline, material: Material): BindGroup {
-        const module = (pipeline as any).module as { resources: readonly ShaderResource[] };
         const textures: Texture[] = [];
-        for (const resource of module.resources) {
+        for (const resource of pipeline.resources) {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
             const id = material.textures.get(resource.glslName);
             const texture = id ? TextureManager.Instance.getTexture(id) : null;
@@ -2501,6 +2511,9 @@ export class Renderer {
      * eroded the bloom mask instead of preserving it. One definition means it cannot drift again.
      */
     private _restoreDefaultBlend(): void {
+        // Standing context state, which WebGPU does not have — a pipeline carries its own blend. The
+        // callers are legacy paths restoring what they disturbed; they go when those do.
+        if (!gl) return;
         gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     }
 
@@ -2594,7 +2607,7 @@ export class Renderer {
 
         // Still restored by hand: the passes that follow are on the legacy path and inherit this.
         GLState.depthMask(true);
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
     }
 
     /**
@@ -2673,8 +2686,7 @@ export class Renderer {
      * group two textures for bindings that are not textures at all.
      */
     private _declaresShadowGroup(pipeline: RenderPipeline): boolean {
-        const module = (pipeline as any).module as { resources: readonly ShaderResource[] };
-        return module.resources.some(r => r.group === 3 && r.glslName === 'u_shadowCascades');
+        return pipeline.resources.some(r => r.group === 3 && r.glslName === 'u_shadowCascades');
     }
 
     private _shadowBindGroup(pipeline: RenderPipeline): BindGroup {
@@ -2824,7 +2836,7 @@ export class Renderer {
         }
 
         GLState.depthMask(true);
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -2912,10 +2924,10 @@ export class Renderer {
 
     /** Convolve a source environment cubemap into diffuse-irradiance and prefiltered-specular cubemaps. */
     public bakeIBL(sourceCube: Texture, sourceRes: number): { irradiance: Texture, prefiltered: Texture } {
-        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthTest(false);
         GLState.depthMask(false);
-        GLState.disable(gl.BLEND);
-        GLState.disable(gl.CULL_FACE);
+        GLState.blend(false);
+        GLState.cull(false);
 
         // Diffuse irradiance (small, no mips).
         const irradiance = new Texture({ target: 'cubemap', precision: 'high', mipMap: false });
@@ -2935,10 +2947,11 @@ export class Renderer {
             });
         }
 
-        this._cubeFBO.unbind();
+        // The epilogue `unbind()` that used to be here is gone: it ran after the pass had ended,
+        // and the next RHI pass rebinds its own target and viewport from inside `beginRenderPass`.
         this._setViewport(this._renderWidth, this._renderHeight);
         GLState.depthMask(true);
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
         return { irradiance, prefiltered };
     }
 
@@ -3014,7 +3027,8 @@ export class Renderer {
         }
 
         this._activeCamera = prevCamera;
-        this._cubeFBO.unbind();
+        // The epilogue `unbind()` that used to be here is gone: it ran after the pass had ended,
+        // and the next RHI pass rebinds its own target and viewport from inside `beginRenderPass`.
         sourceCube.generateMipmaps();
 
         const { irradiance, prefiltered } = this.bakeIBL(sourceCube, res);
@@ -3161,7 +3175,7 @@ export class Renderer {
         // gl.blendFunc here would silently overwrite for the rest of the frame and the next one.
         // Still restored by hand: the passes that follow this one are on the legacy path and inherit
         // the blend state. A pipeline sets it for its own draws and makes no promise about the next.
-        GLState.disable(gl.BLEND);
+        GLState.blend(false);
         this._restoreDefaultBlend();
     }
 
@@ -3193,19 +3207,23 @@ export class Renderer {
         }
         const cube = node.cubemap!;
 
-        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthTest(false);
         GLState.depthMask(false);
-        GLState.disable(gl.BLEND);
-        GLState.disable(gl.CULL_FACE);
+        GLState.blend(false);
+        GLState.cull(false);
 
         this._shaderManager.bind('skyAtmosphere');
         // One pipeline for all six faces — same program, same state, only the target and `u_view`
         // change. `builtFor: 'irradiance'` for the same reason `_convolveCubeFaces` says it: the unit
         // cube is initialised from the irradiance program's attributes and carries position only, so
         // its stride comes from THAT program rather than from whichever one is drawing it.
+        // `target` explicitly: this pipeline is built BEFORE any pass opens, so `_passTarget` is null
+        // and the attachment formats would fall back to the legacy `rgba8unorm` guess. All six faces
+        // are the same cube at the same mip, so face 0 speaks for the set.
         const skyPipeline = this._pipelineFor('skyAtmosphere', SkyAtmosphereProgram,
                                               { cullMode: 'none', vertex: 'model',
-                                                builtFor: 'irradiance' });
+                                                builtFor: 'irradiance',
+                                                target: this._cubeFBO.targetFor(cube, 0, 0, false) });
         this._shaderManager.setUniform('u_projection', this._captureProj);
         this._shaderManager.setUniform('u_sunDir', sun);
         this._shaderManager.setUniform('u_sunColor', node.sunColor);
@@ -3237,10 +3255,11 @@ export class Renderer {
             this._endFullscreenPass(pass);
         }
         cube.generateMipmaps();
-        this._cubeFBO.unbind();
+        // The epilogue `unbind()` that used to be here is gone: it ran after the pass had ended,
+        // and the next RHI pass rebinds its own target and viewport from inside `beginRenderPass`.
         this._setViewport(this._renderWidth, this._renderHeight);
         GLState.depthMask(true);
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
 
         node.markBaked(sun);
     }
@@ -3267,7 +3286,7 @@ export class Renderer {
      */
     private _copyDepth(source: Texture, destination: Texture, width: number, height: number): void {
         const encoder = device.createCommandEncoder('copyDepth');
-        encoder.copyTextureToTexture(source.view, destination.view, width, height);
+        encoder.copyTextureToTexture(source.attachmentView, destination.attachmentView, width, height);
         encoder.finish();
     }
 
@@ -3303,8 +3322,8 @@ export class Renderer {
         this._endFullscreenPass(pass);
 
         // Restore the state the following overlay passes expect.
-        GLState.disable(gl.BLEND);
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.blend(false);
+        GLState.depthTest(true);
         GLState.depthMask(true);
     }
 
@@ -3371,7 +3390,7 @@ export class Renderer {
     /** Forward passes drawn on top of the deferred-lit scene: skybox, transparent models, sprites, editor overlays. */
     private _renderForwardOverlay(scene: Scene, shadowLight: LightNode | null): void {
         this._sceneFBO.bind();
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
         GLState.depthMask(true);
 
         // Collect the forward-rendered models: transparent (any material), opaque Default (Blinn-Phong,
@@ -3443,7 +3462,7 @@ export class Renderer {
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
         // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
         GLState.depthMask(true);
-        GLState.disable(gl.BLEND);
+        GLState.blend(false);
         gpuProfiler.beginPass('forwardOpaque');
         this._forwardDepthWrite = true;
         this._runForwardQueue('forwardOpaque', opaqueForwardQueue);
@@ -3515,9 +3534,9 @@ export class Renderer {
         if (!this._cloudBaseNoise || !this._cloudDetailNoise) return;
 
         // Fullscreen overlay: no depth test/write (occlusion handled via the depth texture), alpha blend.
-        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthTest(false);
         GLState.depthMask(false);
-        GLState.enable(gl.BLEND);
+        GLState.blend(true);
         // Composite cloud coverage into the bloom-mask alpha (clouds are bloom-eligible) instead of the
         // default mask-preserving alpha blend. The shader outputs PREMULTIPLIED color, so both RGB and
         // the bloom-mask ALPHA use ONE, ONE_MINUS_SRC_ALPHA (premultiplied "over"); mathematically
@@ -3529,8 +3548,12 @@ export class Renderer {
         // and upsample then read. The helpers open their own passes and re-apply both; the uniforms
         // below are written once, by name, into the program this binds.
         this._shaderManager.bind('volumetricClouds');
+        // `target` explicitly, for the same reason the sky bake passes one: this single pipeline is
+        // reused across the full-res, reduced-res and Bayer trace targets, and it is built before any
+        // of their passes open. They share the scene buffer's float format, so it speaks for all three.
         const rayPipeline = this._fullscreenPipeline('volumetricClouds', VolumetricCloudsProgram,
-                                                     Renderer._CLOUD_BLEND);
+                                                     Renderer._CLOUD_BLEND, undefined,
+                                                     this._sceneFBO.renderTarget);
         const rayGroup = (pipe: RenderPipeline) => this._textureBindGroup(pipe, 0, [
             this._gBufferFBO.depth, this._cloudBaseNoise!, this._cloudDetailNoise!,
         ]);
@@ -3676,8 +3699,8 @@ export class Renderer {
         // Restore the state the following opaque/transparent overlay passes expect (incl. the default
         // mask-preserving alpha blend so later overlays don't clobber the bloom mask).
         this._restoreDefaultBlend();
-        GLState.disable(gl.BLEND);
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.blend(false);
+        GLState.depthTest(true);
         GLState.depthMask(true);
     }
 
@@ -3847,8 +3870,8 @@ export class Renderer {
             }
         };
 
-        GLState.disable(gl.DEPTH_TEST);
-        GLState.disable(gl.BLEND);
+        GLState.depthTest(false);
+        GLState.blend(false);
         GLState.depthMask(false);
 
         this._cloudBaseNoise = new Texture({ target: 'texture3D', mipMap: false, wrapping: 'repeat' });
@@ -4147,7 +4170,7 @@ export class Renderer {
 
         // Draw state is set once for the whole list rather than restored per item the way _renderSprite
         // does: depth testing stays on so 3D geometry still occludes, but nothing here writes depth.
-        GLState.enable(gl.BLEND);
+        GLState.blend(true);
         GLState.depthMask(false);
         const pass = this._begin2DPass();
         for (const item of list) {
@@ -4359,12 +4382,12 @@ export class Renderer {
     private _applyCull(side: 'front' | 'back' | 'double' | undefined): void {
         switch (side) {
             case 'back':
-                GLState.enable(gl.CULL_FACE); GLState.cullFace(gl.FRONT); break;
+                GLState.cull(true); GLState.cullFace('front'); break;
             case 'double':
-                GLState.disable(gl.CULL_FACE); break;
+                GLState.cull(false); break;
             case 'front':
             default:
-                GLState.enable(gl.CULL_FACE); GLState.cullFace(gl.BACK); break;
+                GLState.cull(true); GLState.cullFace('back'); break;
         }
     }
 
@@ -4410,7 +4433,10 @@ export class Renderer {
      * pixel count without the call sites having to repeat the dimensions.
      */
     private _setViewport(width: number, height: number): void {
-        gl.viewport(0, 0, width, height);
+        // The GL call is WebGL2's alone: a viewport is PASS state on WebGPU, set by the pass encoder
+        // from its target's dimensions. `setViewportSize` is not skipped, because `renderStats` charges
+        // fullscreen passes by area on both backends and a missing size would silently zero `shadedMpx`.
+        if (gl) gl.viewport(0, 0, width, height);
         setViewportSize(width, height);
     }
 
@@ -4477,6 +4503,8 @@ export class Renderer {
                                  clearValue?: [number, number, number, number],
                                  clearDepth: boolean = clear): RenderPassEncoder {
         this._passEncoder = device.createCommandEncoder(label);
+        // So `_pipelineFor` can read the formats it has to agree with. Same lifetime as the encoder.
+        this._passTarget = target;
         const pass = this._passEncoder.beginRenderPass(target, {
             label,
             colorAttachments: [{
@@ -4500,6 +4528,7 @@ export class Renderer {
         pass.end();
         this._passEncoder?.finish();
         this._passEncoder = null;
+        this._passTarget = null;
     }
 
     /**
@@ -4512,6 +4541,7 @@ export class Renderer {
      */
     private _beginDepthPass(target: RenderTarget, label: string, layer: number): RenderPassEncoder {
         this._passEncoder = device.createCommandEncoder(label);
+        this._passTarget = target;
         return this._passEncoder.beginRenderPass(target, {
             label,
             colorAttachments: [],
@@ -4531,14 +4561,19 @@ export class Renderer {
      * Every fullscreen pass writes one target, never tests depth and never culls, so the descriptor is
      * almost entirely fixed; blend is the one thing that varies (the bloom upsample chain is additive).
      */
-    private _fullscreenPipeline(program: string, reflection: { resources: readonly ShaderResource[] },
-                                blend?: BlendState, depthStencil?: DepthStencilState): RenderPipeline {
+    private _fullscreenPipeline(program: string,
+                                reflection: { resources: readonly ShaderResource[]; wgsl?: string;
+                                              entryPoints?: { vertex?: string; fragment?: string;
+                                                              compute?: string } },
+                                blend?: BlendState, depthStencil?: DepthStencilState,
+                                target?: RenderTarget | null): RenderPipeline {
         // The shared screen quad is position + texCoord interleaved, 20 bytes — which is exactly what
         // `packedModelLayout` produces for a program declaring those two, so `builtFor: program` says
         // "the buffer was written for this program's own attributes" and needs no special case. It has
         // to be here rather than left empty: a pipeline with no vertex layouts records a draw that
         // binds no attributes at all.
-        return this._pipelineFor(program, reflection, { blend, depthStencil, vertex: 'model', builtFor: program });
+        return this._pipelineFor(program, reflection,
+                                 { blend, depthStencil, vertex: 'model', builtFor: program, target });
     }
 
     /**
@@ -4548,45 +4583,97 @@ export class Renderer {
      * submesh per node, and a pipeline is pure data on WebGL2 — two draws wanting the same program and
      * state must get the same object, or `RenderPipeline` identity stops meaning anything.
      */
-    private _pipelineFor(program: string, reflection: { resources: readonly ShaderResource[] },
+    private _pipelineFor(program: string,
+                         reflection: { resources: readonly ShaderResource[]; wgsl?: string;
+                                       entryPoints?: { vertex?: string; fragment?: string;
+                                                       compute?: string } },
                          options: { blend?: BlendState; depthStencil?: DepthStencilState;
                                     cullMode?: CullMode; targets?: number;
                                     topology?: PrimitiveTopology;
                                     vertex?: false | 'model' | 'model+instance' | 'model+skin' | 'tile';
-                                    builtFor?: string | null } = {}): RenderPipeline {
+                                    builtFor?: string | null;
+                                    /**
+                                     * The target this pipeline will draw into, when it is built BEFORE
+                                     * the pass is opened. 38 of 40 sites open the pass first and can
+                                     * leave this to `_passTarget`; the sky-atmosphere bake (one
+                                     * pipeline across six faces) and the cloud raymarch (one across
+                                     * three targets) cannot.
+                                     */
+                                    target?: RenderTarget | null } = {}): RenderPipeline {
         const { blend, depthStencil, cullMode = 'none', targets = 1,
                 topology = 'triangle-list', vertex = false, builtFor = null } = options;
         // `builtFor` is part of the key: one shadow program draws over buffers of several different
         // strides, so the same program legitimately needs more than one vertex layout.
+        // The ATTACHMENT FORMATS are part of the pipeline, and WebGPU rejects a pipeline whose targets
+        // disagree with the pass it is used in. They used to be hardcoded `rgba8unorm` with no depth
+        // state at all, which WebGL2 never reads - the same blind spot that let a WebGL2 view travel to
+        // a WebGPU `beginRenderPass`. Derived from the target the caller is about to draw into, so the
+        // two cannot drift.
+        const target = options.target ?? this._passTarget;
+        const colorFormats = target
+            ? target.colorViews.slice(0, targets).map(v => v.texture.format)
+            : [];
+        // A caller that named its own depth state keeps it; otherwise it comes from the target, because
+        // `_beginFullscreenPass` always declares a depth attachment and WebGPU requires the pipeline to
+        // match one that exists.
+        const depthFormat = target?.depthView?.texture.format;
+        // The synthesised default is "no depth interaction", NOT the depth-test defaults. WebGPU
+        // requires a pipeline to declare depth state when the pass has a depth attachment, and
+        // `_beginFullscreenPass` always declares one; WebGL2 previously took the no-depthStencil branch
+        // for these same pipelines, which disables DEPTH_TEST and masks writes. Synthesising anything
+        // else would silently make every fullscreen post pass depth-test and stamp the depth buffer.
+        // `WebGL2RenderPipeline.apply` maps this exact pair back onto that branch.
+        const resolvedDepth = depthStencil
+            ?? (depthFormat ? { format: depthFormat, depthWriteEnabled: false,
+                                depthCompare: 'always' as const } : undefined);
+
         const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
                             + '|' + (builtFor ?? '')
+                            + '|' + colorFormats.join(',')
                             + (blend ? '|' + JSON.stringify(blend) : '')
-                            + (depthStencil ? '|' + JSON.stringify(depthStencil) : '');
+                            + (resolvedDepth ? '|' + JSON.stringify(resolvedDepth) : '');
         let pipeline = this._fullscreenPipelines.get(key);
         if (!pipeline) {
             const module = device.createShaderModule({
                 label: program,
                 program,
                 stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
-                // The WGSL is what WebGPU will compile; WebGL2 reaches the already-linked program by
-                // name and uses only the reflection.
-                source: '',
+                // The WGSL is what WebGPU compiles; WebGL2 reaches the already-linked program by name
+                // and uses only the reflection. Optional because one caller has no WGSL at all - a
+                // custom material assembled from a user's GLSL at runtime - and the WebGPU backend
+                // refuses that by name rather than compiling an empty module.
+                source: reflection.wgsl ?? '',
+                ...(reflection.entryPoints ? { entryPoints: reflection.entryPoints } : {}),
                 resources: reflection.resources,
             });
             pipeline = device.createRenderPipeline({
                 label: program,
                 vertex: module, fragment: module,
-                // The interleaved model vertex, over only the attributes this program declares. Empty
-                // for the fullscreen passes, whose shared quad still owns its own VAO.
                 // Slot 0 is the interleaved model vertex, over only the attributes this program
                 // declares. Slot 1 is the per-instance model matrix, spread across four attribute slots
-                // because neither API has a mat4 vertex format. Empty for the fullscreen passes, whose
-                // shared quad still owns its own VAO.
-                vertexLayouts: vertex ? this._vertexLayoutsFor(program, vertex, builtFor) : [],
+                // because neither API has a mat4 vertex format.
+                //
+                // With no `vertex` shape this is a fullscreen pass, and it gets the SCREEN QUAD's
+                // layout rather than nothing. It used to get `[]`, on the grounds that the shared quad
+                // owns its own VAO - true on WebGL2, and meaningless on WebGPU, which has no VAO. A
+                // pipeline whose vertex stage reads `@location(0)` with an empty buffer list is
+                // invalid, so every screen-space pass failed to build and every draw recorded against
+                // it was dropped, while the pass still performed its CLEAR. That is the whole reason a
+                // WebGPU frame counted the right number of draws and rendered nothing.
+                //
+                // `screenQuadLayout` returns a LIST so it can still answer "none" for a stage that
+                // declares no vertex attributes at all; a zero-stride layout would be rejected.
+                vertexLayouts: vertex
+                    ? this._vertexLayoutsFor(program, vertex, builtFor)
+                    : screenQuadLayout(this._shaderManager.getShader(program).attributes),
                 primitive: { topology, cullMode, frontFace: 'ccw' },
-                ...(depthStencil ? { depthStencil } : {}),
-                colorTargets: Array.from({ length: targets },
-                                         () => ({ format: 'rgba8unorm' as const, ...(blend ? { blend } : {}) })),
+                ...(resolvedDepth ? { depthStencil: resolvedDepth } : {}),
+                colorTargets: Array.from({ length: targets }, (_unused, i) => ({
+                    // `rgba8unorm` only when there is no target to ask - the legacy fallback, and the
+                    // shape every one of these used to have unconditionally.
+                    format: colorFormats[i] ?? ('rgba8unorm' as const),
+                    ...(blend ? { blend } : {}),
+                })),
             });
             this._fullscreenPipelines.set(key, pipeline);
         }
@@ -4609,7 +4696,7 @@ export class Renderer {
             layout,
             // Bindings are (texture, sampler) pairs, so the Nth texture is at binding 2N. The sampler
             // half is deliberately not listed: this engine keeps filter and wrap state on the texture.
-            entries: textures.map((texture, i) => ({ binding: i * 2, textureView: texture.view })),
+            entries: textures.map((texture, i) => ({ binding: i * 2, textureView: texture.sampledView })),
         });
     }
 
@@ -5025,7 +5112,7 @@ export class Renderer {
 
         // Control blending per material. On the RHI path this is pipeline state instead — set from the
         // same `materialConfig.transparent`, so the two agree by construction.
-        if (!viaRHI) GLState.setEnabled(gl.BLEND, materialConfig.transparent === true);
+        if (!viaRHI) GLState.blend(materialConfig.transparent === true);
 
         // Set material uniforms + bind textures, once per submesh.
         this._drawSubmeshes(node, mat => {
@@ -5186,7 +5273,7 @@ export class Renderer {
         // Sprites are always transparent
         this._shaderManager.setUniform('u_isTransparent', true);
         if (!pipeline) {
-            GLState.enable(gl.BLEND);
+            GLState.blend(true);
             // Don't write to depth for blended sprites to avoid occluding later sprites
             GLState.depthMask(false);
             this._applyCull(materialConfig.side);
@@ -5328,10 +5415,10 @@ export class Renderer {
         }
         if (!this._beginPass('shadows.spot')) return;
 
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
         GLState.depthMask(true);
-        GLState.enable(gl.CULL_FACE);
-        GLState.cullFace(gl.FRONT);
+        GLState.cull(true);
+        GLState.cullFace('front');
 
         for (const node of casters) {
             const layer = this._spotSlots.layerOf(node.id);
@@ -5362,8 +5449,9 @@ export class Renderer {
             this._endFullscreenPass(pass);
         }
 
-        this._spotShadowFBO.unbind();
-        GLState.cullFace(gl.BACK);
+        // The epilogue `unbind()` that used to be here is gone: it ran after the pass had ended,
+        // and the next RHI pass rebinds its own target and viewport from inside `beginRenderPass`.
+        GLState.cullFace('back');
         this._spotShadowsActive = true;
         this._spotShadowsDirty = true;
 
@@ -5386,12 +5474,12 @@ export class Renderer {
         const splits = computeCascadeSplits(cam.near, shadowFar, this._cascadeCount,
                                             this._shadowSplitLambda, this._csmSplits);
 
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
         GLState.depthMask(true);
-        GLState.enable(gl.CULL_FACE);
+        GLState.cull(true);
         // Front-face culling: rasterize back faces into the depth map so the recorded occluder depth
         // sits behind the lit surface, which is what keeps a small bias from producing acne.
-        GLState.cullFace(gl.FRONT);
+        GLState.cullFace('front');
 
         for (let i = 0; i < this._cascadeCount; i++) {
             const nearD = i === 0 ? cam.near : splits[i - 1];
@@ -5422,8 +5510,9 @@ export class Renderer {
             this._foliageShadowPass(scene, this._cascadeMatrices[i], pass);
             this._endFullscreenPass(pass);
         }
-        this._shadowCascadeFBO.unbind();
-        GLState.cullFace(gl.BACK);
+        // The epilogue `unbind()` that used to be here is gone: it ran after the pass had ended,
+        // and the next RHI pass rebinds its own target and viewport from inside `beginRenderPass`.
+        GLState.cullFace('back');
 
         this._packCascadeUniforms();
         this._shadowFullUpdate = false;
@@ -5531,8 +5620,8 @@ export class Renderer {
 
     private _applyPostProcessing(scene: Scene): void {
         // Fullscreen post passes want a known, blend-free, depth-write state.
-        GLState.disable(gl.BLEND);
-        GLState.disable(gl.DEPTH_TEST);
+        GLState.blend(false);
+        GLState.depthTest(false);
         GLState.depthMask(true);
 
         // Thumbnail capture resolves the lit scene straight into the offscreen target and stops: no bloom,
@@ -5773,10 +5862,10 @@ export class Renderer {
         const cc = this.clearColor;
         gl.clearColor(cc[0], cc[1], cc[2], cc[3] ?? 1);
 
-        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthTest(false);
         GLState.depthMask(false);
-        GLState.disable(gl.CULL_FACE);
-        GLState.enable(gl.BLEND);
+        GLState.cull(false);
+        GLState.blend(true);
         gl.blendFunc(gl.ONE, gl.ONE);
         gl.blendEquation(gl.FUNC_ADD);
 
@@ -5792,11 +5881,11 @@ export class Renderer {
             node.model.mesh.draw();
         }
 
-        GLState.disable(gl.BLEND);
+        GLState.blend(false);
         this._restoreDefaultBlend();
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
         GLState.depthMask(true);
-        GLState.enable(gl.CULL_FACE);
+        GLState.cull(true);
 
         this._overdrawFBO.unbind();
     }
@@ -5970,7 +6059,7 @@ export class Renderer {
             // Still restored by hand: the passes that follow are on the legacy path and enable BLEND
             // without setting the function, so they inherit whatever was left. Drop this once they are
             // migrated and their own pipelines say what they need.
-            GLState.disable(gl.BLEND);
+            GLState.blend(false);
             this._restoreDefaultBlend();
         }
 
@@ -6082,7 +6171,11 @@ export class Renderer {
      * very different code. No-op unless {@link debugGLErrors} is on.
      */
     private _checkGLErrors(stage: string): void {
-        if (!this.debugGLErrors) return;
+        // `gl` as well as the flag: `getError` is a WebGL2 concept with no WebGPU counterpart — that
+        // backend reports through `uncapturederror` instead, which the device already handles. The mesh
+        // harness turns `debugGLErrors` ON, so without this the check threw on every frame and the game
+        // loop (which logs and does NOT reschedule) died silently after the first one.
+        if (!this.debugGLErrors || !gl) return;
         for (let i = 0; i < 8; i++) {
             const error = gl.getError();
             if (error === gl.NO_ERROR) return;
@@ -6758,7 +6851,7 @@ export class Renderer {
 
         this._endFullscreenPass(pass);
         // Depth testing back on for whatever draws next, which is still on the legacy path.
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
     }
 
     /** Editor: set (or clear) the instanced skeleton overlay drawn in the gizmo pass. */

@@ -16,7 +16,7 @@ struct PrefilterUniforms {
     /** Source cube face resolution, for the firefly-reducing mip selection below. */
     u_resolution: f32,
 };
-@group(2) @binding(0) var<uniform> u_prefilter: PrefilterUniforms;
+@group(1) @binding(1) var<uniform> u_prefilter: PrefilterUniforms;
 
 fn distributionGGX(n: vec3<f32>, h: vec3<f32>, roughness: f32) -> f32 {
     let a = roughness * roughness;

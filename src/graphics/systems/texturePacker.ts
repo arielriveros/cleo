@@ -357,10 +357,10 @@ export class TexturePacker {
         const srcChannel = channels.map(source => 'constant' in source ? 0 : source.channel);
         const constants = channels.map(source => 'constant' in source ? source.constant : 0);
 
-        GLState.disable(gl.DEPTH_TEST);
+        GLState.depthTest(false);
         GLState.depthMask(false);
-        GLState.disable(gl.BLEND);
-        GLState.disable(gl.CULL_FACE);
+        GLState.blend(false);
+        GLState.cull(false);
         gl.viewport(0, 0, width, height);
         setViewportSize(width, height);
 
@@ -378,7 +378,7 @@ export class TexturePacker {
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         GLState.depthMask(true);
-        GLState.enable(gl.DEPTH_TEST);
+        GLState.depthTest(true);
         // Every subsequent pass sets its own viewport when it binds a target; restoring the canvas size
         // here would be wrong while an offscreen capture is in flight.
 

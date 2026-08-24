@@ -93,16 +93,6 @@ const TOPOLOGY: Readonly<Record<PrimitiveTopology, number>> = {
 };
 export function glTopology(topology: PrimitiveTopology): number { return TOPOLOGY[topology]; }
 
-/**
- * Whether a topology rasterises triangles.
- *
- * `Mesh.draw` needs this for its triangle counter, which previously read `mode === gl.TRIANGLES` —
- * a comparison that silently under-counted every strip. Asking the question by name rather than by
- * enum equality is what fixes it.
- */
-export function isTriangleTopology(topology: PrimitiveTopology): boolean {
-    return topology === 'triangle-list' || topology === 'triangle-strip';
-}
 
 const COMPARE: Readonly<Record<CompareFunction, number>> = {
     'never': GL.NEVER, 'less': GL.LESS, 'equal': GL.EQUAL, 'less-equal': GL.LEQUAL,
@@ -129,8 +119,16 @@ export function glBlendOperation(operation: BlendOperation): number { return BLE
  * Face to cull. `'none'` has no enum of its own — it is `gl.disable(CULL_FACE)` — so it maps to null
  * and the caller must branch rather than pass a mode.
  */
-export function glCullMode(cull: CullMode): number | null {
-    return cull === 'none' ? null : cull === 'front' ? GL.FRONT : GL.BACK;
+/**
+ * The side to cull, or null for none.
+ *
+ * Returns the SIDE rather than the GL enum, because `GLState.cullFace` takes a side now - a call site
+ * holding `gl.BACK` evaluates it before any guard can run, which is what made every one of them fatal
+ * on a backend with no context. `CullMode` and the argument are the same union, so this is a null check
+ * with a name rather than a translation.
+ */
+export function glCullMode(cull: CullMode): 'front' | 'back' | null {
+    return cull === 'none' ? null : cull;
 }
 
 export function glFrontFace(face: FrontFace): number { return face === 'cw' ? GL.CW : GL.CCW; }

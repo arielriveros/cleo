@@ -752,6 +752,13 @@ export class WebGL2Texture implements Texture {
     public get mipLevelCount(): number { return this._mipLevelCount; }
 
     /** Record the dimensions an upload just established. */
+    /**
+     * Always 0: this backend re-specifies storage in place and never replaces the texture object, so a
+     * view taken at any point stays valid for the life of the texture. See the interface for why the
+     * number exists at all.
+     */
+    public readonly generation = 0;
+
     public setSize(width: number, height: number, depthOrArrayLayers: number = 1, mipLevelCount: number = 1): void {
         this._width = width;
         this._height = height;

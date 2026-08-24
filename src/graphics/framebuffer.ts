@@ -92,12 +92,20 @@ export class Framebuffer {
      * state. See the `glDevice()` worklist for the rest of that set.
      */
     public bind(): Framebuffer {
+        // A no-op off WebGL2, and deliberately not a stub. There is nothing to make current where a
+        // target is named by the pass that opens it. This is NOT hiding a failure: every remaining
+        // caller precedes a LEGACY draw, and that draw fails loudly on its own the moment it is
+        // reached — which is the right place to fail, because it names the draw rather than the bind.
+        if (device.backend !== 'webgl2') return this;
         (this.renderTarget as WebGL2RenderTarget).bind();
         return this;
     }
 
     /** Hand the canvas back the draw target — the default framebuffer, at its own resolution. */
     public unbind(): Framebuffer {
+        if (device.backend !== 'webgl2') return this;   // see Framebuffer.bind
+
+        if (device.backend !== 'webgl2') return this instanceof Framebuffer ? this : undefined as never;
         glDevice().getCurrentSurfaceTarget().bind();
         return this;
     }
@@ -124,8 +132,8 @@ export class Framebuffer {
     public get renderTarget(): RenderTarget {
         return device.createRenderTarget({
             label: 'framebuffer',
-            colorViews: this._colors.map(c => c.view),
-            depthView: this._depth ? this._depth.view : undefined,
+            colorViews: this._colors.map(c => c.attachmentView),
+            depthView: this._depth ? this._depth.attachmentView : undefined,
         });
     }
 

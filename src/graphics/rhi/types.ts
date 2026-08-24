@@ -317,6 +317,21 @@ export const DEFAULT_BLEND: BlendState = {
 };
 
 /** Additive, for the god-ray composite and the bloom upsample chain. */
+/**
+ * Whether a topology rasterises triangles.
+ *
+ * Lives here rather than in a backend because it is a question about the RHI's own topology union,
+ * and BOTH backends count triangles now — it used to sit in `webgl2/glEnums.ts`, which meant the
+ * WebGPU encoder would have had to import from the WebGL2 backend to keep the same counter.
+ *
+ * `Mesh.draw` needs this for its triangle counter, which previously read `mode === gl.TRIANGLES` —
+ * a comparison that silently under-counted every strip. Asking the question by name rather than by
+ * enum equality is what fixes it.
+ */
+export function isTriangleTopology(topology: PrimitiveTopology): boolean {
+    return topology === 'triangle-list' || topology === 'triangle-strip';
+}
+
 export const ADDITIVE_BLEND: BlendState = {
     color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
     alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },

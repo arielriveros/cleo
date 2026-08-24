@@ -35,7 +35,7 @@ struct PBRMaterial {
     hasNormalMap: i32,
     hasEmissiveMap: i32,
 };
-@group(2) @binding(0) var<uniform> u_material: PBRMaterial;
+@group(1) @binding(1) var<uniform> u_material: PBRMaterial;
 
 struct GBuffer {
     @location(0) gAlbedoMetallic: vec4<f32>,    // rgb = albedo, a = metallic

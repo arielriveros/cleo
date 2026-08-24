@@ -91,7 +91,7 @@ struct TerrainUniforms {
     u_auto2: i32,
     u_auto3: i32,
 };
-@group(2) @binding(0) var<uniform> u_terrain: TerrainUniforms;
+@group(1) @binding(1) var<uniform> u_terrain: TerrainUniforms;
 
 /** One layer's weighted contribution, before the divide by the total weight. */
 struct LayerAccum {

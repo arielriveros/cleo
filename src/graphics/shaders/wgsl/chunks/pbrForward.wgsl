@@ -41,7 +41,7 @@ struct PBRMaterial {
     hasNormalMap: i32,
     hasEmissiveMap: i32,
 };
-@group(2) @binding(0) var<uniform> u_material: PBRMaterial;
+@group(1) @binding(1) var<uniform> u_material: PBRMaterial;
 
 struct ForwardLighting {
     u_view: mat4x4<f32>,        // only to get the view-space depth that selects a cascade
@@ -55,7 +55,7 @@ struct ForwardLighting {
     u_envMapLinear: i32,        // env cube is linear HDR (a light probe) -> skip the sRGB decode
     u_isTransparent: i32,       // set by the renderer from material.config.transparent
 };
-@group(5) @binding(0) var<uniform> u_lighting: ForwardLighting;
+@group(1) @binding(3) var<uniform> u_lighting: ForwardLighting;
 
 fn getNormal(in: VertexOutput) -> vec3<f32> {
     let tbn = tbnOf(in);

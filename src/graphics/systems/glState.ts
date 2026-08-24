@@ -19,6 +19,7 @@ class GLStateCache {
     private _boundTextures: Map<number, WebGLTexture | null> = new Map();
 
     public useProgram(program: WebGLProgram | null): void {
+        if (!gl) return;
         if (this._program !== program) {
             gl.useProgram(program);
             this._program = program;
@@ -32,6 +33,7 @@ class GLStateCache {
     public get currentVAO(): WebGLVertexArrayObject | null { return this._vao; }
 
     public bindVAO(vao: WebGLVertexArrayObject | null): void {
+        if (!gl) return;
         if (this._vao !== vao) {
             gl.bindVertexArray(vao);
             this._vao = vao;
@@ -40,6 +42,7 @@ class GLStateCache {
     }
 
     public enable(cap: number): void {
+        if (!gl) return;
         if (this._caps.get(cap) !== true) {
             gl.enable(cap);
             this._caps.set(cap, true);
@@ -48,6 +51,7 @@ class GLStateCache {
     }
 
     public disable(cap: number): void {
+        if (!gl) return;
         if (this._caps.get(cap) !== false) {
             gl.disable(cap);
             this._caps.set(cap, false);
@@ -56,10 +60,21 @@ class GLStateCache {
     }
 
     public setEnabled(cap: number, enabled: boolean): void {
+        if (!gl) return;
         if (enabled) this.enable(cap); else this.disable(cap);
     }
 
-    public cullFace(mode: number): void {
+    /**
+     * Which face to cull, named rather than an enum.
+     *
+     * `GLState.cullFace(gl.BACK)` evaluated `gl.BACK` at the CALL SITE, so it threw on a backend with no
+     * context before the guard below could run - the same reason `enable`/`disable` became
+     * `depthTest`/`blend`/`cull`. The GL constants are inlined here because this file is the one place
+     * that is allowed to know them.
+     */
+    public cullFace(side: 'front' | 'back'): void {
+        const mode = side === 'front' ? 0x0404 /* FRONT */ : 0x0405 /* BACK */;
+        if (!gl) return;
         if (this._cullFace !== mode) {
             gl.cullFace(mode);
             this._cullFace = mode;
@@ -68,6 +83,7 @@ class GLStateCache {
     }
 
     public depthMask(flag: boolean): void {
+        if (!gl) return;
         if (this._depthMask !== flag) {
             gl.depthMask(flag);
             this._depthMask = flag;
@@ -85,6 +101,7 @@ class GLStateCache {
      * bound to the same unit as the previous draw.
      */
     public bindTexture(unit: number, target: number, texture: WebGLTexture | null): void {
+        if (!gl) return;
         if (this._boundTextures.get(unit) !== texture) {
             if (this._activeTexture !== unit) {
                 gl.activeTexture(gl.TEXTURE0 + unit);
@@ -104,6 +121,7 @@ class GLStateCache {
      * already matches, which would send the upload to a different unit's texture.
      */
     public bindTextureForced(unit: number, target: number, texture: WebGLTexture | null): void {
+        if (!gl) return;
         gl.activeTexture(gl.TEXTURE0 + unit);
         this._activeTexture = unit;
         gl.bindTexture(target, texture);
@@ -112,6 +130,22 @@ class GLStateCache {
     }
 
     /** Invalidate the whole cache (e.g. after code paths that change GL state directly). */
+    /**
+     * Depth testing on or off.
+     *
+     * Named rather than enum-taking, and that is the whole point: `GLState.enable(gl.DEPTH_TEST)`
+     * evaluates `gl.DEPTH_TEST` at the CALL SITE, so on a backend where `gl` is undefined it throws
+     * before this class is entered and the guards above never run. A named method is the only shape
+     * that lets a guard do its job.
+     */
+    public depthTest(on: boolean): void { this.setEnabled(0x0B71 /* DEPTH_TEST */, on); }
+
+    /** Blending on or off. See {@link depthTest} for why this is not an enum. */
+    public blend(on: boolean): void { this.setEnabled(0x0BE2 /* BLEND */, on); }
+
+    /** Face culling on or off. See {@link depthTest} for why this is not an enum. */
+    public cull(on: boolean): void { this.setEnabled(0x0B44 /* CULL_FACE */, on); }
+
     public reset(): void {
         this._program = null;
         this._vao = null;

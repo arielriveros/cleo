@@ -44,19 +44,22 @@ export class CubeFramebuffer {
      * stated rather than the interface widened to hide it.
      */
     public bindFace(cube: Texture, face: number, mip: number = 0, withDepth: boolean = false, size: number = 0): void {
+        if (device.backend !== 'webgl2') return;   // see Framebuffer.bind
         (this._target(cube, face, mip, withDepth, size) as WebGL2RenderTarget).bind(false);
     }
 
     /** Hand the draw target back to the canvas. The viewport is the caller's — see bindFace. */
     public unbind(): void {
+        if (device.backend !== 'webgl2') return;   // see Framebuffer.bind
+
         glDevice().getCurrentSurfaceTarget().bind(false);
     }
 
     private _target(cube: Texture, face: number, mip: number, withDepth: boolean, size: number): RenderTarget {
         return device.createRenderTarget({
             label: 'cubeFramebuffer',
-            colorViews: [device.createTextureView(cube.gpu, mip, face)],
-            depthView: withDepth ? this._depthFor(size).view : undefined,
+            colorViews: [device.createTextureView(cube.rhiTexture, mip, face)],
+            depthView: withDepth ? this._depthFor(size).attachmentView : undefined,
         });
     }
 

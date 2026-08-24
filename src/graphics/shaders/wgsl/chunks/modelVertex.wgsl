@@ -13,6 +13,29 @@
 
 #include "./modelVarying.wgsl"
 
+// GROUP 1 IS EVERY UNIFORM BLOCK, one role per binding:
+//
+//   @binding(0)  transform      (this struct)
+//   @binding(1)  material       (per-material constants)
+//   @binding(2)  shadow         (chunks/shadows.wgsl)
+//   @binding(3)  lighting       (the forward light list)
+//
+// Textures keep their own groups and are NOT numbered by this table: 0 material/G-buffer maps,
+// 2 light-probe cubes, 3 shadow maps. Those are built by hand in the renderer against a literal group
+// index, so moving them would mean moving call sites; the uniform blocks are bound from reflection and
+// move for free.
+//
+// The roles used to have a group EACH - 0 textures, 1 transform, 2 material, 3 shadows, 4 shadow
+// uniforms, 5 lighting - which is how a lit program came to declare group 5. `maxBindGroups` defaults
+// to 4 and adapters commonly report 4 as their MAXIMUM, so it cannot be requested up. Dawn then rejects
+// the pipeline outright ("uses a binding with a group decoration (5) that exceeds the maximum (4)"),
+// and an invalid pipeline is not an error at draw time - the draws recorded against it simply do
+// nothing while the pass still performs its clear. That is a frame that counts the right number of
+// draw calls and renders nothing at all.
+//
+// A binding is per-role rather than packed densely so that a shader using only some roles still agrees
+// with every other shader about what @binding(2) means.
+
 struct ModelTransform {
     u_model: mat4x4<f32>,
     u_view: mat4x4<f32>,

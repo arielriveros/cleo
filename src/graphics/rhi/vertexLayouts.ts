@@ -107,6 +107,30 @@ function buildLayout(attributes: readonly ReflectedAttribute[]): VertexBufferLay
 }
 
 /**
+ * The shared fullscreen quad: position, then uv, interleaved - 20 bytes.
+ *
+ * The arithmetic is `packedModelLayout`'s, unchanged, because the quad IS a two-attribute model
+ * vertex: `MODEL_ATTRIBUTES` orders position before texCoord, so the offsets fall out as 0 and 12 and
+ * the stride as 20 - exactly what `Renderer._screenQuad` uploads.
+ *
+ * It carries its own name because the caller's QUESTION is different. `packedModelLayout` is asked how
+ * a mesh is packed. This is asked whether a program consumes the screen quad at all, and returns a list
+ * so it can answer "no": a stage that declares no vertex attributes must get NO layout rather than a
+ * zero-stride one, which WebGPU rejects.
+ *
+ * Why this exists at all: fullscreen pipelines used to be built with `vertexLayouts: []` on the grounds
+ * that "the shared quad still owns its own VAO". That is true on WebGL2 and meaningless on WebGPU,
+ * which has no VAO - a pipeline whose vertex stage reads `@location(0)` with an empty buffer list is
+ * invalid, so every screen-space pass failed to build and every one of its draws was dropped. The pass
+ * still ran its CLEAR, which is why the symptom was a frame that counted the right number of draws and
+ * rendered nothing.
+ */
+export function screenQuadLayout(attributes: readonly ReflectedAttribute[]): VertexBufferLayout[] {
+    const layout = buildLayout(attributes);
+    return layout.attributes.length > 0 ? [layout] : [];
+}
+
+/**
  * Per-instance model matrix: a mat4 spread across four consecutive attribute slots.
  *
  * Neither API has a mat4 vertex format — both consume one as four vec4s — so the four-slot expansion

@@ -29,7 +29,7 @@ struct BlinnPhongGeometryMaterial {
     hasEmissiveMap: i32,
     hasMaskMap: i32,
 };
-@group(2) @binding(0) var<uniform> u_material: BlinnPhongGeometryMaterial;
+@group(1) @binding(1) var<uniform> u_material: BlinnPhongGeometryMaterial;
 
 struct GBuffer {
     @location(0) gAlbedoMetallic: vec4<f32>,    // rgb = albedo, a = metallic

@@ -3,7 +3,8 @@
 // and moving Mesh onto the encoder is the geometry-pass migration, not this one.
 import { gl } from './glContext';
 import type { PrimitiveTopology, IndexFormat } from './rhi/types';
-import { glTopology, isTriangleTopology, glIndexType, indexByteSize } from './rhi/webgl2/glEnums';
+import { glTopology, glIndexType, indexByteSize } from './rhi/webgl2/glEnums';
+import { isTriangleTopology } from './rhi/types';
 import { applyVertexLayout, clearVertexLayout, applyReflectedAttribute } from './rhi/webgl2/vertexArray';
 // The backend buffer type, not the RHI `Buffer` interface: Mesh still builds its own VAO, which is a
 // WebGL2-only construct that needs the raw handle. It becomes `Buffer` once render pipelines take over
@@ -108,7 +109,7 @@ export class Mesh {
         if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
             this._indexFormat = indexFormatFor(data);
-            this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX });
+            this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
             this._indexBuffer = device.reallocateBuffer(this._indexBuffer, data);
             this._indexCount = indices.length;
         }
@@ -142,12 +143,12 @@ export class Mesh {
 
         // Create and bind bone indices buffer
         const boneIndexData = new Int32Array(boneIndices);
-        this._boneIndicesBuffer = device.createBuffer({ label: 'mesh.boneIndices', size: 0, usage: BufferUsage.VERTEX });
+        this._boneIndicesBuffer = device.createBuffer({ label: 'mesh.boneIndices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
         this._boneIndicesBuffer = device.reallocateBuffer(this._boneIndicesBuffer, boneIndexData);
 
         // Create and bind bone weights buffer
         const boneWeightData = new Float32Array(boneWeights);
-        this._boneWeightsBuffer = device.createBuffer({ label: 'mesh.boneWeights', size: 0, usage: BufferUsage.VERTEX });
+        this._boneWeightsBuffer = device.createBuffer({ label: 'mesh.boneWeights', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
         this._boneWeightsBuffer = device.reallocateBuffer(this._boneWeightsBuffer, boneWeightData);
 
         // `indices.length`, not just `indices`: an empty array is truthy, so a geometry with no indices
@@ -156,7 +157,7 @@ export class Mesh {
         if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
             this._indexFormat = indexFormatFor(data);
-            this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX });
+            this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
             this._indexBuffer = device.reallocateBuffer(this._indexBuffer, data);
             this._indexCount = indices.length;
         }
@@ -184,7 +185,7 @@ export class Mesh {
         this._lodFormats = [this._indexFormat];
         for (const indices of levels) {
             const data = createIndexArray(indices);
-            let buffer = device.createBuffer({ label: 'mesh.lodIndices', size: 0, usage: BufferUsage.INDEX });
+            let buffer = device.createBuffer({ label: 'mesh.lodIndices', size: 0, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
             buffer = device.reallocateBuffer(buffer, data) as typeof buffer;
             this._lodBuffers.push(buffer);
             this._lodCounts.push(indices.length);
@@ -334,6 +335,7 @@ export class Mesh {
     }
 
     public initializeAnimatedVAO(attributes: any): void {
+        if (device.backend !== 'webgl2') return;   // see initializeVAO
         if (!this._isAnimated || !this._boneIndicesBuffer || !this._boneWeightsBuffer) {
             throw new Error('Mesh is not animated or bone buffers are not initialized');
         }

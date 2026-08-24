@@ -4,6 +4,7 @@ import { Logger } from "../core/logger";
 import { resolveTextureFormat } from "./rhi/textureFormat";
 import { glTextureFormat, glTextureTarget, glAddressMode, glMinFilter } from "./rhi/webgl2/glEnums";
 import { device } from "./rhi/deviceHandle";
+import type { TextureView as RhiTextureView } from './rhi/resources';
 import { WebGL2Texture } from "./rhi/webgl2/webgl2Device";
 import type { Texture as RhiTexture } from "./rhi/resources";
 import { WebGL2TextureView } from "./rhi/webgl2/webgl2Commands";
@@ -198,11 +199,17 @@ export class Texture {
             ...(size?.depth !== undefined ? { depthOrArrayLayers: size.depth } : {}),
             usage: this._usage === 'depth'
                 ? TextureUsage.RENDER_ATTACHMENT | TextureUsage.TEXTURE_BINDING
+                  | TextureUsage.COPY_SRC | TextureUsage.COPY_DST   // _copyDepth blits between targets
                 // STORAGE_BINDING REPLACES the attachment usage rather than joining it: nothing draws
                 // into a storage texture, and asking for both narrows the formats WebGPU will accept.
                 : options?.storage
                     ? TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST | TextureUsage.STORAGE_BINDING
-                    : TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST | TextureUsage.RENDER_ATTACHMENT,
+                    // COPY_SRC as well, because a colour target can be READ BACK: thumbnails, the probe
+                    // preview, the depth blit. WebGL2 needs no such declaration - anything attached to a
+                    // framebuffer can be `readPixels`'d - so its absence here was invisible until
+                    // `copyTextureToBuffer` started refusing on the other backend.
+                    : TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST
+                      | TextureUsage.RENDER_ATTACHMENT | TextureUsage.COPY_SRC,
         });
 
         const triple = glTextureFormat(resolved.format);
@@ -422,6 +429,9 @@ export class Texture {
     }
 
     public delete(): void {
+        // Before the destroy, and not only for tidiness: a memoised view outlives the storage it names,
+        // and handing one out afterwards is a use-after-free the type system cannot see.
+        this._views = null;
         this._gpu.destroy();
         if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
     }
@@ -468,14 +478,6 @@ export class Texture {
         return this._sourceUri;
     }
     public get texture(): WebGLTexture { return this._texture; }
-    /**
-     * The RHI texture underneath.
-     *
-     * Narrower than it looks: this is how a `Texture` becomes a `TextureView` and therefore a bind
-     * group entry. `texture` above hands out the raw WebGL handle and is the thing the RHI is meant
-     * to retire; this one hands out a resource the device already owns.
-     */
-    public get gpu(): WebGL2Texture { return this._gpu as WebGL2Texture; }
 
     /**
      * The device-owned texture, typed as the RHI describes one.
@@ -487,17 +489,56 @@ export class Texture {
     public get rhiTexture(): RhiTexture { return this._gpu; }
 
     /**
-     * This texture as an RHI view, created once and reused.
+     * This texture as a render ATTACHMENT: mip 0, layer 0.
      *
-     * Cached because the geometry pass builds a bind group per submesh per node — a fresh view object
-     * per draw is pure garbage on a path that runs hundreds of times a frame. Views hold no GPU
-     * resource on WebGL2, so one per texture is correct as well as cheap.
+     * Split from {@link sampledView} because the two are different objects on WebGPU and the difference
+     * is not cosmetic. An attachment view must name exactly one mip and one layer - that is how a
+     * shadow cascade or a cube face becomes a target - while a sampled view must span the whole texture
+     * and keep its own dimension, or a `texture_cube` binding gets a `2d` view of face 0 and a mipped
+     * texture goes unfiltered at distance.
+     *
+     * This replaced a single `view` accessor that returned a CONCRETE `WebGL2TextureView` through an
+     * unchecked cast. Nothing caught it because `WebGL2Device.beginRenderPass` never reads a view at
+     * all - it works off a pre-built framebuffer - so the wrong class travelled all the way to
+     * WebGPU's `beginRenderPass`, which reads `view.handle` and got `undefined`.
      */
-    public get view(): WebGL2TextureView {
-        if (!this._view) this._view = new WebGL2TextureView(this._gpu as WebGL2Texture);
-        return this._view;
+    public get attachmentView(): RhiTextureView {
+        return this._cachedView('attachment');
     }
-    private _view: WebGL2TextureView | null = null;
+
+    /** This texture as something to SAMPLE: every mip, every layer, its own view dimension. */
+    public get sampledView(): RhiTextureView {
+        return this._cachedView('sampled');
+    }
+
+    /**
+     * Both views, memoised until the storage underneath them is replaced.
+     *
+     * Cached because the geometry pass builds a bind group per submesh per node - a fresh view object
+     * per draw is pure garbage on a path that runs hundreds of times a frame.
+     *
+     * Keyed on `generation` rather than on dimensions: a `GPUTexture` is destroyed and recreated by
+     * `setSize`, and every view taken from the old one then refers to storage that no longer exists.
+     * Comparing dimensions here would duplicate the exact condition inside `WebGPUTexture.setSize`, in
+     * a different file, with nothing checking the two agree.
+     */
+    private _cachedView(role: 'attachment' | 'sampled'): RhiTextureView {
+        const generation = this._gpu.generation;
+        if (this._views && this._views.generation !== generation) this._views = null;
+        if (!this._views) this._views = { generation, attachment: null, sampled: null };
+        const cached = this._views[role];
+        if (cached) return cached;
+        const made = role === 'attachment'
+            ? device.createTextureView(this._gpu)
+            : device.createWholeTextureView(this._gpu);
+        this._views[role] = made;
+        return made;
+    }
+    private _views: {
+        generation: number;
+        attachment: RhiTextureView | null;
+        sampled: RhiTextureView | null;
+    } | null = null;
     public get config(): TextureConfig {
         return {
             flipY: this._flipY,

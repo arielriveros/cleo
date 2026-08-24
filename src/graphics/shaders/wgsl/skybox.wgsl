@@ -22,7 +22,7 @@ struct SkyboxUniforms {
     // i32 rather than bool: WGSL forbids bool in a uniform buffer.
     u_linearInput: i32,
 };
-@group(2) @binding(0) var<uniform> u_sky: SkyboxUniforms;
+@group(1) @binding(1) var<uniform> u_sky: SkyboxUniforms;
 
 @vertex
 fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {

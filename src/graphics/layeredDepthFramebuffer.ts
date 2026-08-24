@@ -40,6 +40,8 @@ export class LayeredDepthFramebuffer {
     }
 
     public unbind(): void {
+        if (device.backend !== 'webgl2') return;   // see Framebuffer.bind
+
         glDevice().getCurrentSurfaceTarget().bind();
     }
 
@@ -68,7 +70,8 @@ export class LayeredDepthFramebuffer {
             }).end();
         }
         encoder.finish();
-        this.unbind();
+        // No trailing `unbind()`: the clears above are RHI passes and the next pass binds its own
+        // target. That call was the last thing keeping this method off the interface.
     }
 
     /**
@@ -90,7 +93,7 @@ export class LayeredDepthFramebuffer {
         return device.createRenderTarget({
             label: 'shadow-array',
             colorViews: [],
-            depthView: this._texture.view,
+            depthView: this._texture.attachmentView,
         });
     }
 
