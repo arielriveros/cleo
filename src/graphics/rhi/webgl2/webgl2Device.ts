@@ -348,8 +348,23 @@ export class WebGL2Device implements Device {
      */
     public createRenderPipeline(descriptor: RenderPipelineDescriptor): WebGL2RenderPipeline {
         const module = descriptor.vertex as WebGL2ShaderModule;
+        // `vertexLayouts` is part of the key, and leaving it out was a real rendering bug.
+        //
+        // One program legitimately draws buffers of DIFFERENT strides: `modelVertexLayout` derives the
+        // layout from the program the BUFFER was packed for, so `overdraw` over a Basic model is 20
+        // bytes per vertex and over a PBR one is 56. Keyed without it, the first pipeline built for a
+        // program was handed back for every later stride, and `vertexArrayFor` — which reads its
+        // layouts off the pipeline — then configured every mesh at that first stride. Reading a
+        // 20-byte vertex at 56 walks every third vertex, which draws the mesh as a splayed triangle
+        // fan.
+        //
+        // It hid for as long as it did because the passes with this shape draw ONE object in the test
+        // scenes: the selection outline outlines a single selected node, so only ever one stride is
+        // requested and the dedup never bites. The overdraw channel draws every model in the scene,
+        // which is what finally crossed two families through one program.
         const key = JSON.stringify([
             module.program, descriptor.primitive, descriptor.depthStencil ?? null, descriptor.colorTargets,
+            descriptor.vertexLayouts,
         ]);
         let pipeline = this._pipelines.get(key);
         if (!pipeline) {
