@@ -2927,10 +2927,24 @@ export class Renderer {
         // re-points its colour attachment at each one, and `createRenderTarget` dedupes them so six
         // faces cost six cached framebuffers rather than six per bake.
         this._shaderManager.bind(shaderName);
+        // One pipeline across six faces, so it has to be TOLD which target it will draw into - the same
+        // reason the sky-atmosphere bake and the cloud raymarch pass one. Without it `_pipelineFor`
+        // falls back to `_passTarget`, which at this moment is whatever the previous pass left, and the
+        // colour format it derives is wrong: WebGPU validates the whole attachment state and refuses
+        // the pipeline ("Attachment state of [RenderPipeline \"irradiance\"] is not compatible with
+        // [RenderPassEncoder \"iblConvolve\"]"), which leaves the irradiance and prefiltered cubes
+        // holding nothing but their clear - and the chrome sphere that samples them invisible. WebGL2
+        // never read the formats at all, which is why this survived.
+        //
+        // Face 0's target stands for all six: they differ only in which layer they view, and
+        // `createRenderTarget` dedupes, so asking for it here costs nothing the loop was not going to
+        // pay anyway.
+        const faceTarget = this._cubeFBO.targetFor(target, 0, mip, false, size);
         const pipeline = this._pipelineFor(shaderName, reflection, { cullMode: 'none', vertex: 'model',
                                                                     // The unit cube carries position
                                                                     // only; see _initializeIBL.
-                                                                    builtFor: 'irradiance' });
+                                                                    builtFor: 'irradiance',
+                                                                    target: faceTarget });
         this._shaderManager.setUniform('u_projection', this._captureProj);
         if (perFace) perFace();
         for (let face = 0; face < 6; face++) {
