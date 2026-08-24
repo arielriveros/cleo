@@ -6,6 +6,15 @@
 
 @group(0) @binding(0) var u_screenTexture_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
+// The depth channel needs its OWN binding, and it is bound on every frame rather than only for mode 3.
+//
+// A depth-format texture cannot satisfy a `texture_2d<f32>` declaration - WebGPU refuses the bind group
+// ("None of the supported sample types (UnfilterableFloat|Depth) ... match the expected sample types
+// (Float)"), which invalidates the command buffer and blanks the channel. WebGL2 accepted the same
+// texture through the colour sampler, which is why one binding served every mode for as long as it did.
+// Always bound because WebGPU requires every declared binding to be present; the other modes ignore it.
+@group(0) @binding(2) var u_gDepth_texture: texture_depth_2d;
+@group(0) @binding(3) var u_gDepth_sampler: sampler;
 
 struct DebugViewUniforms {
     u_exposure: f32,    // for the tonemapped (linear-HDR) channels
@@ -38,8 +47,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (mode == 1) { return vec4<f32>(t.rgb * 0.5 + 0.5, 1.0); }
     // Scalar packed in the alpha channel (metallic / roughness / ambient occlusion).
     if (mode == 2) { return vec4<f32>(vec3<f32>(t.a), 1.0); }
-    // Non-linear depth in .r; a contrast curve spreads the far-weighted range so structure shows.
-    if (mode == 3) { return vec4<f32>(vec3<f32>(pow(t.r, 40.0)), 1.0); }
+    // Non-linear depth; a contrast curve spreads the far-weighted range so structure shows. Read from
+    // the dedicated depth binding, and with an explicit INTEGER level, which is what WGSL requires of a
+    // depth texture.
+    if (mode == 3) {
+        let d = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, in.uv, 0);
+        return vec4<f32>(vec3<f32>(pow(d, 40.0)), 1.0);
+    }
     // Single-channel value in .r (SSAO occlusion factor).
     if (mode == 4) { return vec4<f32>(vec3<f32>(t.r), 1.0); }
     // Motion-blur velocity (screen-space, small UV units in .rg). Amplify + bias so it is visible.

@@ -13,7 +13,9 @@
 const MAX_STEPS: i32 = 128;
 const PI: f32 = 3.14159265359;
 
-@group(0) @binding(0) var u_depth_texture: texture_2d<f32>;   // opaque scene depth; 1.0 = sky
+// A DEPTH texture, declared as one. The renderer binds `_sceneDepthFBO.depth`, and a depth format
+// cannot satisfy a `texture_2d<f32>` binding on WebGPU — the bind group is refused and the pass blanks.
+@group(0) @binding(0) var u_depth_texture: texture_depth_2d;   // opaque scene depth; 1.0 = sky
 @group(0) @binding(1) var u_depth_sampler: sampler;
 
 struct GodRayUniforms {
@@ -62,7 +64,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The shadow library reads the fragment coordinate through a module-scope global.
     cleoFragCoord = in.position.xy;
 
-    let depth = textureSample(u_depth_texture, u_depth_sampler, in.uv).r;
+    // An INTEGER level and no `.r`: sampling a depth texture yields a bare f32 in WGSL.
+    let depth = textureSampleLevel(u_depth_texture, u_depth_sampler, in.uv, 0);
 
     // View ray: through this pixel, capped by opaque geometry (or u_maxDistance against the sky).
     var sampleDepth = 0.9999;

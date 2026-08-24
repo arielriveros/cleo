@@ -2718,9 +2718,25 @@ export class Renderer {
         return pipeline.resources.some(r => r.group === 3 && r.glslName === 'u_shadowCascades');
     }
 
-    private _shadowBindGroup(pipeline: RenderPipeline): BindGroup {
-        return this._textureBindGroup(pipeline, 3,
-            [this._shadowCascadeFBO.texture, this._spotShadowFBO.texture]);
+    /**
+     * The shadow maps: the cascade array, and the spot atlas for programs that sample it.
+     *
+     * `withSpot` is stated by the caller rather than inferred, because there is no way to ask. Every
+     * includer of `chunks/shadows.wgsl` DECLARES both arrays — it is one self-contained library — but
+     * a program that never calls the spot path has that binding dead-code eliminated out of the layout
+     * WebGPU derives from the shader. Binding it anyway is not a spare texture unit there, it is a bind
+     * group with more entries than its layout has ("Number of entries (4) did not match the expected
+     * number of entries (2)"), which invalidates the command buffer and blanks the pass.
+     *
+     * Volumetric god rays are the one such program: they march the SUN's cascades and nothing else.
+     * WebGL2 does not care either way — an unsampled sampler uniform costs a texture unit and nothing
+     * more — which is why this only ever mattered on the other backend.
+     */
+    private _shadowBindGroup(pipeline: RenderPipeline, withSpot: boolean = true): BindGroup {
+        const textures = withSpot
+            ? [this._shadowCascadeFBO.texture, this._spotShadowFBO.texture]
+            : [this._shadowCascadeFBO.texture];
+        return this._textureBindGroup(pipeline, 3, textures);
     }
 
     /** Repack the per-cascade arrays into the upload buffers. Called once, after the cascade pass. */
@@ -3200,7 +3216,8 @@ export class Renderer {
         // With no caster the cascade lookups all return "lit" and the shafts degrade to uniform haze,
         // which is why this pass needs no shadow-present branch of its own any more.
         this._uploadShadowUniforms('godRays');
-        rayPass.setBindGroup(3, this._shadowBindGroup(rayPipeline));
+        // Sun cascades only — see `_shadowBindGroup`. The shafts come from the directional light.
+        rayPass.setBindGroup(3, this._shadowBindGroup(rayPipeline, false));
         this._drawFullscreen(rayPass);
         this._endFullscreenPass(rayPass);
 
@@ -5981,7 +5998,9 @@ export class Renderer {
             case 'roughness': tex = this._gBufferFBO.colors[1];    mode = 2; break;
             case 'emissive':  tex = this._gBufferFBO.colors[2];    mode = 0; break;
             case 'ao':        tex = this._gBufferFBO.colors[2];    mode = 2; break;
-            case 'depth':     tex = this._gBufferFBO.depth;        mode = 3; break;
+            // Mode 3 reads its own `texture_depth_2d` binding rather than this one — a depth texture
+            // cannot satisfy a colour sampler on WebGPU. The colour slot still needs SOMETHING valid.
+            case 'depth':     tex = this._gBufferFBO.colors[0];    mode = 3; break;
             case 'ssao':      tex = this._ssaoBlurFBO.colors[0];   mode = 4; break;
             case 'bloom':     tex = this._bloomMips[0].colors[0];  mode = 6; break;
             // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
@@ -6003,7 +6022,9 @@ export class Renderer {
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_mode', mode);
         this._shaderManager.setUniform('u_exposure', this._exposure); // used by the tonemapped channels
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [tex]));
+        // The depth attachment rides along on every channel, because WebGPU requires every binding the
+        // shader declares to be present and only mode 3 actually reads it.
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [tex, this._gBufferFBO.depth]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
     }
