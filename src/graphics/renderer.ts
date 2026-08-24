@@ -5067,11 +5067,21 @@ export class Renderer {
     private _renderScene(scene: Scene): void {
         this._sceneFBO.bind();
         this._setViewport(this._renderWidth, this._renderHeight);
-        // Thumbnails clear to transparent black (and skip the sky below) so only geometry ends up opaque.
-        const fwdCC = this.clearColor;
-        if (this._thumbnailMode) gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        if (this._thumbnailMode) gl.clearColor(fwdCC[0], fwdCC[1], fwdCC[2], fwdCC[3] ?? 1);
+        // The frame's clear, as a PASS rather than a bare `gl.clear`.
+        //
+        // This was the last raw-GL statement on the forward path, and `gl` is undefined on WebGPU, so
+        // the whole pipeline threw here on the first frame — and the game loop logs a frame error
+        // without rescheduling, so the forward renderer produced one clear-coloured image and then
+        // nothing at all. Every configuration of the cross-backend diff reported the same 69 draws and
+        // zero fullscreen passes, which is how it was found.
+        //
+        // A pass of its own because the sky below deliberately LOADS: the clear belongs to the frame,
+        // not to the sky, and a thumbnail skips the sky entirely while still needing the buffer cleared.
+        // Thumbnails clear to transparent black so only geometry ends up opaque.
+        const scenePass = this._beginFullscreenPass(
+            this._sceneFBO.renderTarget, 'sceneClear', true,
+            this._thumbnailMode ? [0, 0, 0, 0] : undefined, true);
+        this._endFullscreenPass(scenePass);
 
         // Sky background. Depth writes off: the sky renders at NDC z = w and interpolation error
         // would write some pixels a hair below 1.0, breaking the "depth == 1.0 means sky" contract
