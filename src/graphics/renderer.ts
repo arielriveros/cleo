@@ -46,6 +46,9 @@ import ShadowDebugProgram from './shaders/wgsl/shadowDebug.wgsl'
 import SkyboxProgram from './shaders/wgsl/skybox.wgsl'
 import VolumetricCloudsProgram from './shaders/wgsl/volumetricClouds.wgsl'
 import CloudNoiseBakeProgram from './shaders/wgsl/cloudNoiseBake.wgsl'
+// Compute-only, so it has no GLSL half and never enters the ShaderManager program table: it is
+// compiled straight to a device shader module by _bakeCloudNoiseCompute. See the file's header.
+import CloudNoiseBakeComputeProgram from './shaders/wgsl/cloudNoiseBakeCompute.wgsl'
 import CloudTemporalResolveProgram from './shaders/wgsl/cloudTemporalResolve.wgsl'
 import CloudUpsampleProgram from './shaders/wgsl/cloudUpsample.wgsl'
 import SkyAtmosphereProgram from './shaders/wgsl/skyAtmosphere.wgsl'
@@ -106,7 +109,7 @@ import { TexturePacker } from './systems/texturePacker';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats, countFullscreenPass, setViewportSize } from './renderStats';
-import { gpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
+import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { buildSSAOKernel } from './ssaoKernel';
 import { TerrainLodSettings } from '../terrain/terrain';
 import type { FoliageCell } from '../terrain/foliage';
@@ -119,9 +122,14 @@ import { gl, setGLContext } from './glContext';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities, Device } from './rhi/device';
 import { resolveBackendRequest } from './rhi/backendSelect';
+import type { DeviceProbe } from './rhi/backendSelect';
+// The WebGPU device is imported unconditionally and that is deliberate: it is ~1% of the bundle, it
+// pulls in no naga/wasm (translation is a BUILD step — see tools/wgslTranslate.mjs), and a dynamic
+// import here would make acquisition failure and chunk-load failure the same observable event.
+import { acquireWebGPUDevice } from './rhi/webgpu/webgpuDevice';
 import { WebGL2Device, glDevice } from './rhi/webgl2/webgl2Device';
 import { setDevice, device } from './rhi/deviceHandle';
-import type { WebGL2Buffer } from './rhi/webgl2/webgl2Device';
+import type { Buffer as RhiBuffer } from './rhi/resources';
 import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND } from './rhi/types';
 import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout } from './rhi/types';
 import type { RenderPipeline, BindGroup, RenderTarget } from './rhi/resources';
@@ -823,14 +831,18 @@ export class Renderer {
     // Reused scratch to avoid per-frame allocations
     private _boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
     private _boneIdentityScratch: Float32Array;
-    private _instanceBuffer: WebGL2Buffer | null = null;
+    // The RHI `Buffer`, not the WebGL2 one. These feed `Mesh.setupInstanceMatrixBuffer` and
+    // `RenderPassEncoder.setVertexBuffer`, both of which take the interface now that `Mesh` holds
+    // its buffers that way; only the legacy VAO path inside `Mesh` still needs a raw handle, and it
+    // casts there.
+    private _instanceBuffer: RhiBuffer | null = null;
     private _instanceScratch: Float32Array = new Float32Array(16 * 64);
 
     // Editor skeleton overlay: drawn instanced + always-on-top in the gizmo pass (set by the editor).
     private _skeletonOverlay: SkeletonOverlay | null = null;
     private _overlaySphereMesh: Mesh | null = null;
     private _overlayBoneMesh: Mesh | null = null;
-    private _overlayInstanceBuffer: WebGL2Buffer | null = null;
+    private _overlayInstanceBuffer: RhiBuffer | null = null;
 
     // Object -> stable id (for grouping identical mesh+material into instanced draws)
     private _objIds: WeakMap<object, number> = new WeakMap();
@@ -871,6 +883,27 @@ export class Renderer {
     }
 
     /**
+     * In-flight `initialize()`, and NOT a duplicate of `_deviceReady`.
+     *
+     * `_deviceReady` answers "did a previous call FINISH". This answers "is one still running", which
+     * only became a real question when acquisition became genuinely asynchronous. On WebGL2 it cannot
+     * happen — `getContext` is synchronous, so a second caller cannot run before the first is past it
+     * — but `acquireWebGPUDevice` awaits twice (`requestAdapter`, then `requestDevice`), and two hosts
+     * that each "ensure initialized" (an editor viewport mounting, and `run()` on an embedder that
+     * never awaited) interleave in that gap. Without this they acquire two devices and allocate two
+     * sets of render targets, of which only the second is reachable. Both callers get the SAME promise.
+     */
+    private _initializing: Promise<void> | null = null;
+
+    /** See {@link deviceProbe}. Mutated in place by {@link _stage}. */
+    private _deviceProbe: DeviceProbe = {
+        requested: 'webgl2', acquired: null, fallbackReason: null, reached: [], failedAt: null,
+    };
+
+    /** Whether the `firstFrame` probe stage has been taken — see {@link render}. */
+    private _firstFrameStaged: boolean = false;
+
+    /**
      * Acquire the GPU device and allocate every render target.
      *
      * Must complete before any other GPU resource — a Texture, a Mesh, a Shader — is constructed
@@ -878,43 +911,151 @@ export class Renderer {
      *
      * This used to be the tail of the constructor, and moving it out is what makes a second backend
      * possible at all: `navigator.gpu.requestAdapter()` and `adapter.requestDevice()` are both
-     * promises, and a constructor cannot await one. WebGL2's `getContext` is synchronous, so today
-     * this resolves on a microtask — but callers must treat it as genuinely asynchronous, because
-     * under WebGPU it will not.
+     * promises, and a constructor cannot await one. On WebGL2 it still resolves on a microtask; on
+     * WebGPU it does not, which is what the `_initializing` guard above exists for.
      *
-     * The framebuffer allocations came along because they had no choice: `new Framebuffer(...)` calls
-     * `gl.createFramebuffer()` in its own constructor, and `new Texture(...)` / `new Mesh()` likewise
-     * call `gl.createTexture()` / `gl.createVertexArray()`. None of them can exist before a device does.
+     * The framebuffer allocations came along because they had no choice — but not for the reason this
+     * docstring used to give. `new Framebuffer(...)` does NOT call `gl.createFramebuffer()`: allocation
+     * is in `create()`. What the constructors DO reach is `new Texture(...)`, which calls
+     * `device.createTexture({ width: 0, height: 0 })` per attachment, and `new Mesh()`, which calls
+     * `glDevice().createVertexArray()`. That makes the ORDER below load-bearing for the boot probe
+     * rather than incidental: on WebGPU the mesh throws outright (there is no VAO), while each of the
+     * ~25 zero-sized `createTexture` calls fires an `uncapturederror` instead of throwing — so if the
+     * targets went first the probe would report a wall of driver noise and no failing stage. Hence the
+     * screen quad is a stage of its own, ahead of them.
      *
      * Idempotent — a second call is a no-op, so a host that awaits this and then calls `run()` (which
      * also ensures initialization) does not end up with two sets of targets.
      */
-    public async initialize(): Promise<void> {
-        if (this._deviceReady) return;
+    public initialize(): Promise<void> {
+        if (this._deviceReady) return Promise.resolve();
+        // What gets stored is the promise `.finally` RETURNS, not the one it was called on, so the
+        // second caller receives an object that settles at the same moment the first caller's does.
+        // Cleared on failure as well as success: a failed acquisition is retryable, and parking the
+        // rejected promise here would make every later attempt fail with the original error.
+        if (!this._initializing)
+            this._initializing = this._initializeOnce().finally(() => { this._initializing = null; });
+        return this._initializing;
+    }
 
+    private async _initializeOnce(): Promise<void> {
+        this._deviceProbe.requested = this._config.backend ?? 'webgl2';
+
+        const gpu = await this._stage('device', () => this._acquireDevice());
+        // Published through a live binding so the low-level wrappers can reach the device without
+        // importing the renderer.
+        setDevice(gpu);
+        this._capabilities = gpu.capabilities;
+        this._deviceProbe.acquired = gpu.backend;
+        this._deviceProbe.fallbackReason = this._backendFallbackReason;
+
+        // Install the profiler backend for whichever device we got, while the context is fresh. Cheap,
+        // and it means `gpuProfilingAvailable` is answerable before the first frame rather than after
+        // it. `gl` is deliberately read only on the WebGL2 branch: on the WebGPU path the live binding
+        // is `undefined` (a canvas hosts one context type), and null is what the profiler wants to be
+        // told rather than a stub to reach through.
+        this._stage('profiler', () => {
+            initializeGpuProfiler(gpu, gpu.backend === 'webgl2' ? gl : null);
+        });
+
+        this._stage('screenQuad', () => { this._screenQuad = new Mesh(); });
+        this._stage('framebuffers', () => this._allocateTargets());
+
+        this._deviceReady = true;
+        Logger.info(`Graphics device ready — ${describeCapabilities(this._capabilities)}`, 'Runtime');
+    }
+
+    /**
+     * Pick a device for the requested backend, falling back to WebGL2 with a stated reason.
+     *
+     * Split out because it is the ONLY part of startup that differs per backend — everything after it
+     * is allocation against whatever this returned. Keeping the two together is what made a WebGPU
+     * device unreachable in practice: acquisition was three unconditional lines in the middle of
+     * twenty-five allocations, with nowhere to put a second one.
+     */
+    private async _acquireDevice(): Promise<Device> {
         this._backendFallbackReason = resolveBackendRequest(this._config.backend);
-        if (this._backendFallbackReason)
+        if (this._backendFallbackReason) {
             Logger.warn(`Falling back to WebGL2: ${this._backendFallbackReason}`, 'Runtime');
+        } else if (this._config.backend === 'webgpu') {
+            const gpu = await acquireWebGPUDevice({ canvas: this._canvas, powerPreference: 'high-performance' });
+            if (gpu) return gpu;
+            // acquireWebGPUDevice returns null — having already logged the specific cause — for every
+            // ordinary "this machine cannot" outcome: no adapter, a blocklisted driver, a refused
+            // device. Falling through to WebGL2 is the answer to all three, not an error.
+            this._backendFallbackReason = 'WebGPU device acquisition failed — see the log above';
+        }
 
         const context = this._canvas.getContext('webgl2') as WebGL2RenderingContext | null;
         if (!context) throw new Error('WebGL context not available');
+        // The WebGL2 BRANCH ONLY. A canvas hosts exactly one context type, so on the WebGPU path there
+        // is no WebGL2 context to publish and none should be faked: `gl` stays `undefined` and the
+        // first raw `gl.*` call throws with a stack naming the line that has not been ported. That is
+        // the intended second stop, and it is strictly more useful than a stub that returns zeroes.
         setGLContext(context);
 
         // The RHI device. It reads the hardware's real limits once, while the context is fresh and
         // before anything has had a chance to depend on a guessed value — see rhi/webgl2/capabilities.ts
-        // for why every field is queried rather than assumed. Published through a live binding so the
-        // low-level wrappers can reach it without importing the renderer.
-        const gpu = new WebGL2Device(context);
-        setDevice(gpu);
-        this._capabilities = gpu.capabilities;
+        // for why every field is queried rather than assumed.
+        return new WebGL2Device(context);
+    }
 
-        // Resolve the timer-query extension while we have the fresh context. Cheap, and it means
-        // `gpuProfilingAvailable` is answerable before the first frame rather than after it.
-        gpuProfiler.initialize(context);
+    /**
+     * Run one named startup stage, recording whether it was reached.
+     *
+     * Takes a synchronous body and a promise-returning one through the same call, because the stages
+     * are genuinely mixed (acquisition awaits, allocation does not) and two helpers would mean two
+     * places for the bookkeeping to drift apart. A promise records LATE, when it settles — recording
+     * on return would mark a stage reached before it had run.
+     *
+     * Re-throws in every case. This is a MEASUREMENT of a failure, never a handler for one: a stage
+     * that swallowed its error would leave a half-built renderer with `deviceReady` false and nothing
+     * saying why, which is precisely the shape of the bug engine.ts used to have.
+     */
+    private _stage<T>(name: string, body: () => T): T {
+        try {
+            const result = body();
+            if (result instanceof Promise)
+                return result.then(
+                    value => { this._deviceProbe.reached.push(name); return value; },
+                    error => { this._recordStageFailure(name, error); throw error; },
+                ) as unknown as T;
+            this._deviceProbe.reached.push(name);
+            return result;
+        } catch (error) {
+            this._recordStageFailure(name, error);
+            throw error;
+        }
+    }
 
-        this._screenQuad = new Mesh();
+    /** First failure only — the ones after it are consequences, and overwriting loses the cause. */
+    private _recordStageFailure(stage: string, error: unknown): void {
+        if (this._deviceProbe.failedAt) return;
+        this._deviceProbe.failedAt = {
+            stage,
+            message: error instanceof Error ? error.message : String(error),
+            // The stack is the whole point on the WebGPU path: 'a WebGL2-only path was reached' names
+            // the rule that was broken but not the call that broke it, and the call is the work item.
+            stack: (error instanceof Error && error.stack) ? error.stack : '',
+        };
+    }
 
-        // Create framebuffers
+    /**
+     * How far startup got on this backend, and where it stopped. See {@link DeviceProbe}.
+     *
+     * Read by `tools/harness/webgpuBootCheck.js`, which ratchets on `failedAt.stage`. The live object
+     * rather than a copy: a harness reads it across a structured clone anyway, and an engine consumer
+     * that mutates a measurement has a larger problem than this getter.
+     */
+    public get deviceProbe(): DeviceProbe { return this._deviceProbe; }
+
+    /**
+     * Allocate every render target, against whatever device {@link _acquireDevice} returned.
+     *
+     * Nothing in here is backend-aware and nothing in here should become so: these are `Framebuffer`s,
+     * and the porting work belongs inside those rather than in this list.
+     */
+    private _allocateTargets(): void {
         this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._sceneDepthFBO = new Framebuffer({ usage: 'depth' });
         this._shadowCascadeFBO = new LayeredDepthFramebuffer();
@@ -944,9 +1085,6 @@ export class Renderer {
         this._brdfFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Selection outline silhouette mask (low precision, no mipmaps).
         this._outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
-
-        this._deviceReady = true;
-        Logger.info(`Graphics device ready — ${describeCapabilities(this._capabilities)}`, 'Runtime');
     }
 
     /** Whether {@link initialize} has completed and GPU resources may be created. */
@@ -978,9 +1116,51 @@ export class Renderer {
         return this._capabilities;
     }
 
+    /**
+     * Bring the acquired device to the state every pass assumes, then build every program.
+     *
+     * Two probe stages rather than one, because they fail for completely different reasons: the state
+     * block is raw `gl.*` and dies immediately on any non-WebGL2 device, while program creation goes
+     * through `device.createShaderProgram` and is already portable. Collapsing them would report the
+     * portable half as broken whenever the unportable half was.
+     */
     public preInitialize(): void {
         if (!this._deviceReady)
             throw new Error('Renderer.preInitialize() called before initialize() — await the device first');
+        this._stage('preInitialize', () => this._configureDefaultState());
+        this._stage('programs', () => this._createPrograms());
+    }
+
+    /**
+     * The default GL state, unchanged and deliberately still raw `gl.*`.
+     *
+     * Not made backend-aware here. Under WebGPU this throws on the first `gl.clearColor` with a stack,
+     * which is the correct SECOND stop for the boot probe — an honest "this is not ported" beats a
+     * silent no-op that lets startup continue into a black frame nobody can attribute.
+     */
+    private _configureDefaultState(): void {
+        // The capability question first, and through the DEVICE rather than a second `getExtension`.
+        //
+        // This used to be a raw `gl.getExtension('EXT_color_buffer_float')` — which asks exactly what
+        // `capabilities.floatRenderable` already answers, on a backend where the answer is always yes.
+        // Two sources for one fact, and only one of them existed on WebGPU. The pipeline allocates HDR
+        // targets unconditionally, so a device that cannot render to them is still fatal; it just says
+        // so in the vocabulary both backends speak.
+        if (!this._capabilities?.floatRenderable) {
+            const msg = 'Rendering to floating point textures is not supported on this platform';
+            Logger.error(msg);
+            throw new Error(msg);
+        }
+
+        // Everything below is the WebGL2 context's STANDING state, which is a concept WebGPU does not
+        // have: there is no global depth func or blend enable to set once at boot, because a pipeline
+        // carries its own and a pass carries its own clear. So this is not "not ported yet" — it is
+        // WebGL2 setup with no counterpart, and the guard says which.
+        //
+        // It survives on WebGL2 because the legacy draw paths still inherit it. It goes away with the
+        // last draw that is not recorded against a pass encoder — the same set `Mesh` sits at the
+        // centre of.
+        if (device.backend !== 'webgl2') return;
         const clearColor = this._config.clearColor || [0.0, 0.0, 0.0, 1.0];
         gl.clearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
         gl.clear(gl.COLOR_BUFFER_BIT);
@@ -989,12 +1169,15 @@ export class Renderer {
         gl.depthFunc(gl.LEQUAL);
         this._restoreDefaultBlend();
         gl.drawingBufferColorSpace = 'srgb';
-        if (!gl.getExtension('EXT_color_buffer_float')) {
-            const msg = 'Rendering to floating point textures is not supported on this platform';
-            Logger.error(msg)
-            throw new Error(msg);
-        }
+    }
 
+    /**
+     * Every program, then the framebuffer allocations and one-shot bakes that depend on them.
+     *
+     * Split out of `preInitialize` verbatim — no line inside moved — so the probe can name the two
+     * halves separately. See {@link preInitialize}.
+     */
+    private _createPrograms(): void {
         // Every program the renderer registers, by the name `ShaderManager` knows it as.
         //
         // This was 55 `new Shader().create(...)` locals followed by 56 `addShader` calls naming each
@@ -1117,7 +1300,7 @@ export class Renderer {
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
         // VERTEX | COPY_DST: rewritten every frame with the batch's world matrices, which is what
         // earns it a DYNAMIC_DRAW hint.
-        this._instanceBuffer = glDevice().createBuffer({ label: 'renderer.instanceMatrices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+        this._instanceBuffer = device.createBuffer({ label: 'renderer.instanceMatrices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
 
         // Config wins if given; otherwise the quality tier's value (2048 at the 'high' default),
         // not the old hard-coded 4096 per cascade.
@@ -1149,7 +1332,25 @@ export class Renderer {
         Logger.info('Renderer ready')
     }
 
+    /**
+     * Draw one frame.
+     *
+     * The wrapper exists for the boot probe's last stage. `firstFrame` is deliberately the one stage
+     * recorded outside startup: a device that acquires, allocates and links every program but throws
+     * on its first draw is still a device that does not work, and every earlier stage would have
+     * reported success. Recorded THROUGH `_stage` rather than as a flag so that a first frame which
+     * throws lands in `failedAt` with its stack, which is the case worth having.
+     *
+     * One extra call per frame after that, and a predicted branch — the alternative was a probe that
+     * stops one step short of the only thing anybody cares about.
+     */
     public render(scene: Scene): void {
+        if (this._firstFrameStaged) return this._render(scene);
+        this._firstFrameStaged = true;
+        return this._stage('firstFrame', () => this._render(scene));
+    }
+
+    private _render(scene: Scene): void {
         // Set active camera
         if (!scene.activeCamera) return;
         this._activeCamera = scene.activeCamera.camera;
@@ -1631,9 +1832,9 @@ export class Renderer {
                 // every sub-model of every level, in both the colour and the shadow pass.
                 for (const cell of layer.cells) {
                     if (!cell.glBuffer)
-                        cell.glBuffer = glDevice().createBuffer({ label: 'foliage.cellMatrices', size: 0, usage: BufferUsage.VERTEX });
+                        cell.glBuffer = device.createBuffer({ label: 'foliage.cellMatrices', size: 0, usage: BufferUsage.VERTEX });
                     if (cell.uploadedVersion !== layer.version) {
-                        cell.glBuffer = glDevice().reallocateBuffer(cell.glBuffer, cell.matrices);
+                        cell.glBuffer = device.reallocateBuffer(cell.glBuffer, cell.matrices);
                         cell.uploadedVersion = layer.version;
                     }
                 }
@@ -1797,7 +1998,7 @@ export class Renderer {
                         }
 
                         for (const cell of cells) {
-                            const instances = cell.glBuffer as WebGL2Buffer;
+                            const instances = cell.glBuffer!;
                             if (!this._recordFoliageDraw(pass, model.mesh, instances, cell.count)) {
                                 model.mesh.setupInstanceMatrixBuffer(instances, 5);
                                 model.mesh.drawInstanced(cell.count);
@@ -2215,7 +2416,7 @@ export class Renderer {
      * billboard program that declares fewer.
      */
     private _recordFoliageDraw(pass: RenderPassEncoder, mesh: Mesh,
-                               instances: WebGL2Buffer, count: number): boolean {
+                               instances: RhiBuffer, count: number): boolean {
         if (mesh.isAnimated || mesh.hasLods || !mesh.indexBuffer) return false;
         pass.setVertexBuffer(0, mesh.vertexBuffer);
         pass.setVertexBuffer(1, instances);
@@ -2263,7 +2464,7 @@ export class Renderer {
         }
 
         const mesh = first.model.mesh;
-        this._instanceBuffer = glDevice().reallocateBuffer(this._instanceBuffer!,
+        this._instanceBuffer = device.reallocateBuffer(this._instanceBuffer!,
                                                        this._instanceScratch.subarray(0, needed));
         const topology = first.model.material.config.wireframe ? 'line-list' : 'triangle-list';
 
@@ -3484,18 +3685,127 @@ export class Renderer {
      * Bake the tileable 3D noise volumes the cloud raymarch samples. Idempotent and lazy — called from
      * the cloud pass, so a project without clouds never allocates the ~8MB or pays the bake.
      *
-     * Rendered rather than computed on the CPU: a 128³ RGBA field is 2M voxels, and filling it in JS
-     * with a multi-octave FBM per channel is on the order of 10^8 hash evaluations — seconds of
+     * On the GPU rather than on the CPU either way: a 128³ RGBA field is 2M voxels, and filling it in
+     * JS with a multi-octave FBM per channel is on the order of 10^8 hash evaluations — seconds of
      * blocked startup. As slice-by-slice draws it is ~2M fragments in total, i.e. about one frame.
      *
-     * Uses a private framebuffer with `framebufferTextureLayer` rather than the `Framebuffer` class:
-     * that class owns a fixed set of 2D attachments and reallocates them on resize, which is the
-     * opposite of what attaching successive layers of one immutable volume needs.
+     * Two implementations, picked on `capabilities.hasCompute`, because a 3D texture is the one thing
+     * the two backends cannot fill the same way — see each method for its half of the reason. They
+     * share the field itself through `chunks/cloudNoiseField.wgsl`.
+     *
+     * (Correcting a number this comment used to carry: the raster path's slice count is 128 + 32, not
+     * "128 + 64" — `CLOUD_DETAIL_NOISE_SIZE` is 32 — so it is 160 attachment re-points, not ~192.)
      */
     private _bakeCloudNoise(): void {
         if (this._cloudNoiseBaked) return;
         this._cloudNoiseBaked = true; // set first: a failed bake must not retry every frame
 
+        // `hasCompute`, not `backend === 'webgpu'` and not a build constant. The question the branch
+        // actually asks is "can this device run a dispatch", and that is the field that answers it —
+        // a backend name is a proxy that would have to be revisited the moment a third one appears.
+        if (device.capabilities.hasCompute) this._bakeCloudNoiseCompute();
+        else this._bakeCloudNoiseRaster();
+    }
+
+    /**
+     * The WebGPU bake: one dispatch per volume, writing a `texture_storage_3d`.
+     *
+     * Structurally different from {@link _bakeCloudNoiseRaster} rather than a port of it, because a
+     * WebGPU render attachment must be a 2D or 2D-array view and a 3D texture's z-slice is neither —
+     * there is no arrangement of render passes that fills a volume. The field itself is shared: both
+     * shaders include `chunks/cloudNoiseField.wgsl`, so the only thing that can differ between the two
+     * paths is where a texel's lattice position comes from.
+     *
+     * MEASURED AGREEMENT, and why it is not exactness. `textureStore` to an `rgba8unorm` and a
+     * fragment write to an RGBA8 attachment both round to nearest, from the same float value computed
+     * by the same code — but the two rounding steps live in different parts of the driver and a
+     * half-ULP difference upstream lands on either side of a .5. So the two fields agree to about a
+     * least-significant bit, not bit-for-bit; `harness:webgpu` gates the compute output against a
+     * CPU twin of `cloudNoiseTexel` at +/-2 LSB for that reason.
+     */
+    private _bakeCloudNoiseCompute(): void {
+        const module = device.createShaderModule({
+            label: 'cloudNoiseBakeCompute',
+            stage: ShaderStage.COMPUTE,
+            source: CloudNoiseBakeComputeProgram.wgsl,
+            entryPoints: CloudNoiseBakeComputeProgram.entryPoints,
+            resources: CloudNoiseBakeComputeProgram.resources,
+        });
+        const pipeline = device.createComputePipeline({ label: 'cloudNoiseBake', compute: module });
+
+        const encoder = device.createCommandEncoder('cloudNoiseBake');
+        const bake = (tex: Texture, size: number, period: number, octaves: number, detail: boolean) => {
+            // ONE BUFFER PER VOLUME, and this is the deferred-model trap the RHI's CommandEncoder
+            // docstring warns about rather than a style choice. Both dispatches are recorded into one
+            // encoder and submitted together, and `writeBuffer` is queued — so a single reused buffer
+            // would take BOTH writes before either dispatch ran, and both volumes would be baked with
+            // the detail settings. Two buffers is 32 bytes for a one-off bake; the alternative is two
+            // submissions, which costs more and reads worse.
+            //
+            // f32, f32, i32, i32 — 16 bytes, every member 4-aligned, so the struct needs no padding
+            // and the two views can share the backing ArrayBuffer.
+            const uniformBytes = new ArrayBuffer(16);
+            new Float32Array(uniformBytes).set([size, period]);
+            new Int32Array(uniformBytes, 8).set([octaves, detail ? 1 : 0]);
+            const uniforms = device.createBuffer({
+                label: `cloudNoiseBake.uniforms.${detail ? 'detail' : 'base'}`, size: 16,
+                usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
+            });
+            device.writeBuffer(uniforms, 0, new Uint8Array(uniformBytes));
+
+            const pass = encoder.beginComputePass(`cloudNoiseBake.${detail ? 'detail' : 'base'}`);
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, device.createBindGroup({
+                label: 'cloudNoiseBake',
+                layout: pipeline.bindGroupLayouts[0],
+                entries: [
+                    { binding: 0, buffer: uniforms },
+                    // The WHOLE view, not `createTextureView`'s: that one narrows a 3D texture to a
+                    // `2d` view of one z-slice, which `texture_storage_3d` rejects at bind time.
+                    { binding: 1, storageTextureView: device.createWholeTextureView(tex.rhiTexture) },
+                ],
+            }));
+            // Workgroup COUNTS. @workgroup_size(4,4,4) covers 4 texels per axis; both sizes the
+            // renderer bakes divide exactly, and the shader guards the remainder regardless.
+            const groups = Math.ceil(size / 4);
+            pass.dispatchWorkgroups(groups, groups, groups);
+            pass.end();
+        };
+
+        // `size` on the config, not a later `createVolume()`: a GPUTexture's dimensions are fixed at
+        // creation, and the WebGPU backend's allocate paths say so by throwing. `storage` swaps the
+        // render-attachment usage this texture will never need for the STORAGE_BINDING it will.
+        const volume = (size: number) => new Texture({
+            target: 'texture3D', mipMap: false, wrapping: 'repeat', storage: true,
+            size: { width: size, height: size, depth: size },
+        });
+
+        this._cloudBaseNoise = volume(Renderer.CLOUD_BASE_NOISE_SIZE);
+        bake(this._cloudBaseNoise, Renderer.CLOUD_BASE_NOISE_SIZE, Renderer.CLOUD_BASE_NOISE_PERIOD, 4, false);
+
+        this._cloudDetailNoise = volume(Renderer.CLOUD_DETAIL_NOISE_SIZE);
+        bake(this._cloudDetailNoise, Renderer.CLOUD_DETAIL_NOISE_SIZE, Renderer.CLOUD_DETAIL_NOISE_PERIOD, 3, true);
+
+        // One submission for both volumes: the dispatches are independent, and nothing reads the
+        // volumes until a later frame's cloud pass samples them.
+        encoder.finish();
+        Logger.info('Baked cloud noise volumes (compute)', 'Renderer');
+    }
+
+    /**
+     * The WebGL2 bake: a fullscreen draw per z-slice, with the attachment re-pointed between them.
+     *
+     * Moved out of `_bakeCloudNoise` UNCHANGED when the compute path landed, deliberately down to the
+     * whitespace: this body's output is pinned by three recorded pixel signatures
+     * (`meshClouds.deferred`, `meshShading.deferred.full`, `meshBaseline.deferred.full`), and moving
+     * it verbatim is what makes "WebGL2 did not move" something the harness can check rather than
+     * something the diff has to be trusted about.
+     */
+    private _bakeCloudNoiseRaster(): void {
+        // Uses a private framebuffer with `framebufferTextureLayer` rather than the `Framebuffer`
+        // class: that class owns a fixed set of 2D attachments and reallocates them on resize, which
+        // is the opposite of what attaching successive layers of one immutable volume needs.
+        //
         // Deliberately NOT an RHI render pass, and it never will be one.
         //
         // A render attachment in WebGPU must be a 2D or 2D-array view; a 3D texture's z-slice cannot
@@ -5245,6 +5555,11 @@ export class Renderer {
             if (this._debugView === 'velocity' && this._hasPrevViewProj && this._beginPass('velocity'))
                 this._velocityPass();
             gpuProfiler.beginPass('present');
+            // The last remaining `compose` label, and unambiguous now that it is: the bloom composite,
+            // the chromatic-aberration pass and the motion-blur gather all used to answer to this same
+            // name, which on a per-pass backend means three different costs arriving under one row.
+            // They are `bloom.composite`, `chromatic` and `motionBlur`; this one is the plain scene
+            // copy, and PASS_LABEL_TO_SCOPE files it under `present` — the scope opened right above.
             const pass = this._beginFullscreenPass(this._compose_FBOs[0].renderTarget, 'compose', true);
             const pipeline = this._fullscreenPipeline('screen', ScreenProgram);
             pass.setPipeline(pipeline);
@@ -5663,7 +5978,7 @@ export class Renderer {
         if (!this._passEnabled['bloom.composite']) return;
         gpuProfiler.beginPass('bloom.composite');
         const dst = 1 - src;
-        const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'compose', true);
+        const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'bloom.composite', true);
         const pipeline = this._fullscreenPipeline('composer', ComposerProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
@@ -5680,7 +5995,7 @@ export class Renderer {
     private _chromaticAberrationPass(): void {
         const src = this._composeIndex;
         const dst = 1 - src;
-        const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'compose', true);
+        const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'chromatic', true);
         const pipeline = this._fullscreenPipeline('chromaticAberration', ChromaticAberrationProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
@@ -5740,7 +6055,7 @@ export class Renderer {
         this._endFullscreenPass(nbPass);
 
         // 4) Gather: reconstruct the blurred image into _compose_FBOs[0].
-        const gatherPass = this._beginFullscreenPass(this._compose_FBOs[0].renderTarget, 'compose', true);
+        const gatherPass = this._beginFullscreenPass(this._compose_FBOs[0].renderTarget, 'motionBlur', true);
         const gatherPipeline = this._fullscreenPipeline('motionBlur', MotionBlurGatherProgram);
         gatherPass.setPipeline(gatherPipeline);
         gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [
@@ -5817,7 +6132,12 @@ export class Renderer {
     public get gpuProfilingEnabled(): boolean { return gpuProfiler.enabled; }
     public set gpuProfilingEnabled(v: boolean) { gpuProfiler.enabled = v; }
 
-    /** True when the driver actually exposes `EXT_disjoint_timer_query_webgl2`. */
+    /**
+     * True when this device can actually time passes — `EXT_disjoint_timer_query_webgl2` on WebGL2,
+     * the `timestamp-query` feature on WebGPU. `gpuProfiler.unavailableReason` says which one is
+     * missing when it is false; the panel shows that string rather than naming an extension that does
+     * not exist on half the backends.
+     */
     public get gpuProfilingAvailable(): boolean { return gpuProfiler.available; }
 
     /** Live view of the per-pass kill switches. Mutate through `setPassEnabled`. */
@@ -6461,7 +6781,7 @@ export class Renderer {
         if (!this._overlaySphereMesh) this._overlaySphereMesh = build(Geometry.Sphere(8, 1));
         if (!this._overlayBoneMesh) this._overlayBoneMesh = build(Geometry.Cube(1, 1, 1));
         if (!this._overlayInstanceBuffer)
-            this._overlayInstanceBuffer = glDevice().createBuffer({ label: 'renderer.overlayInstances', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+            this._overlayInstanceBuffer = device.createBuffer({ label: 'renderer.overlayInstances', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
     }
 
     private _drawSkeletonOverlay(pass?: RenderPassEncoder, depthStencil?: DepthStencilState): void {
@@ -6494,18 +6814,18 @@ export class Renderer {
             // Reassigned through the field, not the local: on WebGPU a grown buffer is a NEW one,
             // and the local alias would leave the next frame writing into a destroyed handle.
             buf = this._overlayInstanceBuffer =
-                device.reallocateBuffer(buf!, matrices.subarray(0, count * 16)) as WebGL2Buffer;
+                device.reallocateBuffer(buf!, matrices.subarray(0, count * 16));
             if (pipeline && mesh.indexBuffer) {
                 // No bind group: `basicInstanced` samples `u_material_texture` only when hasTexture is
                 // set, and the overlay never sets it — but the sampler still has to reference a
                 // complete texture, so the group is bound with the 1x1 fallback.
                 pass!.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._fallbackTexture]));
                 pass!.setVertexBuffer(0, mesh.vertexBuffer);
-                pass!.setVertexBuffer(1, buf);
+                pass!.setVertexBuffer(1, buf!);
                 pass!.setIndexBuffer(mesh.indexBuffer, mesh.activeIndexFormat);
                 pass!.drawIndexed(mesh.activeIndexCount, count);
             } else {
-                mesh.setupInstanceMatrixBuffer(buf, 5);
+                mesh.setupInstanceMatrixBuffer(buf!, 5);
                 mesh.drawInstanced(count, 'triangle-list');
                 mesh.teardownInstanceMatrixBuffer(5);
             }

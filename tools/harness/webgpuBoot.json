@@ -1,0 +1,20 @@
+{
+  "why": "The ratchet for tools/harness/webgpuBootCheck.js. Engine startup on a WebGPU device is EXPECTED to fail; this records where. Move it forward in the commit that ports the owner named in `blockedBy`, never to make a red run go green.",
+  "stage": "programs",
+  "reached": [
+    "device",
+    "profiler",
+    "screenQuad",
+    "framebuffers",
+    "preInitialize"
+  ],
+  "blockedBy": "_initializeIBL -> _renderBRDFLUT -> _beginFullscreenPass -> beginRenderPass, rejected on its colorAttachment. The engine now builds a REAL render pass on WebGPU and the driver refuses it - a different class of blocker from the ones before, because there is nothing left to port here, only something to get right. Likely the render target: `Framebuffer` derives its views from `Texture.view`, which is a memoised WebGL2TextureView and cannot be what a GPUTexture needs.",
+  "next": "Framebuffer view derivation on WebGPU, then whatever the next pass refuses. From here the ratchet stops measuring \"how much is ported\" and starts measuring \"how much renders\".",
+  "reason": "gpuValidation",
+  "history": [
+    "screenQuad — new Mesh() called glDevice().createVertexArray(); the VAO is lazy now and mesh.ts went 19 glDevice() sites -> 5, all inside legacy draw paths.",
+    "preInitialize — _configureDefaultState was raw gl.clearColor/depthFunc plus a second getExtension('EXT_color_buffer_float'). The capability check goes through capabilities.floatRenderable (both backends answer it); the rest is WebGL2 standing state with no WebGPU counterpart and is guarded as such, not ported.",
+    "programs (creationSize) -> the general Texture sizing reform. `graphics/texture.ts` now syncs its dimensions into the device BEFORE every upload, and `WebGPUTexture.setSize` reallocates the GPUTexture when they change - the analogue of `reallocateBuffer`, same wrapper, new handle. The allocate-shaped calls assert the size instead of throwing.",
+    "programs (glDevice) -> Texture.bind/unbind, Mesh.initializeVAO/initializeAnimatedVAO/setupInstanceMatrixBuffer/teardownInstanceMatrixBuffer and the renderer instance buffers. All either guarded off WebGL2 (a texture unit and a VAO are concepts WebGPU does not have) or widened to the RHI Buffer interface. `_finishUpload` calling `unbind` after every upload was the sharpest of these: a legacy epilogue killing a path that had otherwise completed."
+  ]
+}

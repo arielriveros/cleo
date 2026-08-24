@@ -19,6 +19,22 @@ import type { DeviceCapabilities } from '../device';
  * Other measurements from the same device, for scale: maxTextureSize 16384, arrayLayers 2048,
  * colorAttachments 8, EXT_color_buffer_float and OES_texture_float_linear both present.
  */
+/**
+ * The GPU timer-query extension, or null when the driver/browser withholds it.
+ *
+ * The one place that asks. `hasTimestampQuery` below and `WebGL2GpuProfiler.initialize` both used to
+ * call `getExtension` themselves, which is two lookups that can disagree about whether timing is
+ * possible — the capability said yes while the profiler said no, or the reverse, with nothing
+ * reconciling them. The profiler needs the OBJECT (for `TIME_ELAPSED_EXT` and `GPU_DISJOINT_EXT`),
+ * not just the boolean, which is why this returns it rather than being folded into the capability.
+ *
+ * Typed `any` because lib.dom has no interface for it: it is an extension, and its two constants are
+ * the entire API surface anything here uses.
+ */
+export function timerQueryExtension(gl: WebGL2RenderingContext): any {
+    return gl.getExtension('EXT_disjoint_timer_query_webgl2');
+}
+
 export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapabilities {
     // Both are optional on real hardware and they fail independently — a device can render to a float
     // target while refusing to sample it with anything but NEAREST. texture.ts already requires BOTH
@@ -53,7 +69,7 @@ export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapa
         // these is a WebGPU-only path by construction.
         hasCompute: false,
         hasStorageBuffers: false,
-        hasTimestampQuery: gl.getExtension('EXT_disjoint_timer_query_webgl2') !== null,
+        hasTimestampQuery: timerQueryExtension(gl) !== null,
 
         maxAnisotropy,
         // WebGL2 always presents through the canvas's own RGBA8 drawing buffer; there is no swap-chain

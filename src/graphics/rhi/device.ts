@@ -20,7 +20,7 @@ import type {
 } from './types';
 import type {
     Buffer, Texture, TextureView, Sampler, ShaderModule, BindGroup, BindGroupLayout,
-    RenderPipeline, RenderTarget,
+    RenderPipeline, RenderTarget, ComputePipeline,
 } from './resources';
 import type { ShaderProgram, ShaderProgramDescriptor } from './shaderProgram';
 
@@ -188,16 +188,37 @@ export interface RenderPipelineDescriptor {
     colorTargets: ColorTargetState[];
 }
 
+/**
+ * A compute pipeline is a module and nothing else.
+ *
+ * No `layout` field: both backends that could implement this derive the bind-group layouts from the
+ * module's own `@group`/`@binding` declarations, exactly as {@link RenderPipelineDescriptor} does.
+ */
+export interface ComputePipelineDescriptor {
+    label?: string;
+    compute: ShaderModule;
+}
+
 export interface RenderTargetDescriptor {
     label?: string;
     colorViews: TextureView[];
     depthView?: TextureView;
 }
 
-/** One entry in a bind group: a buffer range, a sampled texture, or a sampler. */
+/** One entry in a bind group: a buffer range, a sampled texture, a storage texture, or a sampler. */
 export type BindGroupEntry =
     | { binding: number; buffer: Buffer; offset?: number; size?: number }
     | { binding: number; textureView: TextureView }
+    /**
+     * A texture bound for WRITING by a compute shader (`texture_storage_*`).
+     *
+     * A separate arm rather than a flag on `textureView` because the two are not the same operation
+     * on either backend. WebGPU takes the same `resource: view.handle` but validates the texture
+     * against `STORAGE_BINDING` usage and the shader's declared format; WebGL2 has no storage
+     * textures at all, so its bind group can THROW on this arm instead of silently assigning a
+     * texture unit and producing a bind group that would never write anything.
+     */
+    | { binding: number; storageTextureView: TextureView }
     | { binding: number; sampler: Sampler };
 
 export interface BindGroupDescriptor {
@@ -238,8 +259,31 @@ export interface RenderPassEncoder {
  * `finish()` is a no-op. Callers must write for the deferred model, because it is the one that
  * constrains — a WebGL2-shaped caller that reads back a result mid-frame would deadlock on WebGPU.
  */
+/**
+ * Records dispatches inside one compute pass.
+ *
+ * As narrow as the engine's single compute workload needs and no narrower: no indirect dispatch, no
+ * dynamic offsets, no `timestampWrites`. Each of those is a real WebGPU feature and each would be
+ * dead code with one caller — the cloud-noise bake, which runs once at startup.
+ */
+export interface ComputePassEncoder {
+    setPipeline(pipeline: ComputePipeline): void;
+    setBindGroup(group: number, bindGroup: BindGroup): void;
+    /** Workgroup COUNTS, not thread counts — the module's `@workgroup_size` supplies the rest. */
+    dispatchWorkgroups(x: number, y?: number, z?: number): void;
+    end(): void;
+}
+
 export interface CommandEncoder {
     beginRenderPass(target: RenderTarget, descriptor: RenderPassDescriptor): RenderPassEncoder;
+    /**
+     * Open a compute pass. Throws on WebGL2, which has no compute stage in any form.
+     *
+     * Gate the call on `capabilities.hasCompute` rather than on the backend name: that is the field
+     * that actually answers the question, and it keeps the choice honest if a backend ever reports
+     * compute for another reason.
+     */
+    beginComputePass(label?: string): ComputePassEncoder;
     copyTextureToTexture(source: TextureView, destination: TextureView, width: number, height: number): void;
     finish(): void;
 }
@@ -255,6 +299,17 @@ export interface Device {
     createBuffer(descriptor: BufferDescriptor): Buffer;
     createTexture(descriptor: TextureDescriptor): Texture;
     createTextureView(texture: Texture, baseMipLevel?: number, baseArrayLayer?: number): TextureView;
+
+    /**
+     * A view of the WHOLE texture — every mip, every layer, the texture's own view dimension.
+     *
+     * The counterpart to {@link createTextureView}, which narrows to one mip and one layer so a
+     * cascade or a cube face can be an attachment. That narrowing is exactly what a 3D texture
+     * cannot survive: it produces a `2d` view of one z-slice, and `texture_storage_3d` rejects it.
+     * A shader sampling a cube or a cascade array wants the same whole-texture view for the opposite
+     * reason — the declared type has to match what was bound.
+     */
+    createWholeTextureView(texture: Texture): TextureView;
     createSampler(descriptor: SamplerDescriptor): Sampler;
     createShaderModule(descriptor: ShaderModuleDescriptor): ShaderModule;
 
@@ -268,6 +323,14 @@ export interface Device {
      */
     createShaderProgram(descriptor: ShaderProgramDescriptor): ShaderProgram;
     createRenderPipeline(descriptor: RenderPipelineDescriptor): RenderPipeline;
+    /**
+     * Build a compute pipeline. Throws on WebGL2 — see {@link DeviceCapabilities.hasCompute}.
+     *
+     * Interface-complete rather than backend-conditional, and throwing rather than silently handing
+     * back something inert: a caller that reached here without checking `hasCompute` has a bug, and
+     * the throw is what says so at the call that made it.
+     */
+    createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline;
     createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget;
     createBindGroup(descriptor: BindGroupDescriptor): BindGroup;
 
@@ -324,6 +387,35 @@ export interface Device {
      * game-loop frame arriving during the readback finds the live viewport, not a retargeted one.
      */
     readPixels(view: TextureView, x: number, y: number, width: number, height: number): Promise<Uint8Array>;
+
+    /**
+     * Switch per-pass GPU timing on or off, and say where results go.
+     *
+     * The whole of the timing machinery is BELOW this line: a `GPUQuerySet`, a `QUERY_RESOLVE` buffer
+     * and a `MAP_READ` staging ring on WebGPU, nothing at all on WebGL2. Two methods reach the RHI
+     * because two is what the profiler needs — a switch and a pump — and because a query set is not
+     * something above the RHI should be able to name. In particular `BufferUsage` gains nothing:
+     * QUERY_RESOLVE never appears in a descriptor a caller writes.
+     *
+     * `sink` is called once per timed pass, with the pass's `RenderPassDescriptor.label` and its
+     * elapsed GPU time in milliseconds, from inside {@link collectTimestamps} and nowhere else. It is
+     * therefore synchronous with respect to the caller's frame even though the measurement is not.
+     *
+     * A no-op on WebGL2, deliberately rather than by omission: that backend's profiler wraps arbitrary
+     * SCOPES in `TIME_ELAPSED` queries and does not go through the RHI at all — see gpuProfiler.ts for
+     * why the two are different name spaces rather than one.
+     */
+    setTimestampCollection(enabled: boolean, sink: (label: string, ms: number) => void): void;
+
+    /**
+     * Deliver whatever timings have already come back, and start reading whatever is newly finished.
+     *
+     * NEVER waits on the GPU. Reading a timestamp in the frame that issued it would stall the CPU on
+     * the GPU, which is precisely the cost being measured — the same discipline the WebGL2 profiler
+     * keeps with `QUERY_RESULT_AVAILABLE`. Results consequently arrive one to three frames late, and a
+     * call that finds nothing ready is the ordinary case, not an error.
+     */
+    collectTimestamps(): void;
 
     /** Release the device and everything still alive on it. */
     destroy(): void;

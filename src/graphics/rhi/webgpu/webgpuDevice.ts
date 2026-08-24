@@ -28,10 +28,11 @@ import type {
     Device, DeviceCapabilities, BackendKind, BufferDescriptor, TextureDescriptor,
     ShaderModuleDescriptor, RenderPipelineDescriptor, RenderTargetDescriptor,
     BindGroupDescriptor, CommandEncoder, RenderPassEncoder,
+    ComputePipelineDescriptor, ComputePassEncoder,
 } from '../device';
 import type {
     Buffer, Texture, TextureView, Sampler, ShaderModule, BindGroup, BindGroupLayout,
-    RenderPipeline, RenderTarget,
+    RenderPipeline, RenderTarget, ComputePipeline,
 } from '../resources';
 import type { ShaderProgram, ShaderProgramDescriptor } from '../shaderProgram';
 import type { UniformBlockLayout } from '../uniformSet';
@@ -95,19 +96,25 @@ class WebGPUTexture implements Texture {
     public readonly label: string;
     public readonly format: TextureFormat;
     public readonly dimension: TextureDimension;
-    public readonly width: number;
-    public readonly height: number;
-    public readonly depthOrArrayLayers: number;
-    public readonly mipLevelCount: number;
+    // Mutable, unlike their WebGL2 counterparts, because `setSize` REPLACES the GPUTexture - see there.
+    public width: number;
+    public height: number;
+    public depthOrArrayLayers: number;
+    public mipLevelCount: number;
     public readonly usage: TextureUsageFlags;
-    public readonly handle: GPUTexture;
+    public handle: GPUTexture;
     /** False for the swap-chain texture, which the surface owns and recycles. */
     private readonly _owned: boolean;
     private _destroyed = false;
 
+    /** The descriptor this was built from, so `setSize` can rebuild from it with new dimensions. */
+    private readonly _descriptor: TextureDescriptor;
+
     constructor(descriptor: TextureDescriptor, handle: GPUTexture, owned: boolean,
                 private readonly _queue: GPUQueue,
-                private readonly _onDestroy: () => void) {
+                private readonly _onDestroy: () => void,
+                private readonly _recreate: ((d: TextureDescriptor) => GPUTexture) | null = null) {
+        this._descriptor = descriptor;
         this.label = descriptor.label ?? 'texture';
         this.format = descriptor.format;
         this.dimension = descriptor.dimension ?? '2d';
@@ -140,14 +147,17 @@ class WebGPUTexture implements Texture {
     public get samplingConfig(): TextureConfigureDescriptor | null { return this._config; }
 
     public upload2D(image: TexImageSource | null, width: number, height: number, mipMap: boolean): void {
-        if (!image) return this._needsCreationTimeSize('upload2D(null)');
+        // A null image means "allocate, do not fill", which `setSize` has already done by the time this
+        // runs - `graphics/texture.ts` syncs the dimensions into the device BEFORE uploading, precisely
+        // so this backend has storage to write into.
+        if (!image) return this._requireSize(width, height, 'upload2D(null)');
         this._copyExternal(image, width, height, 0, 0);
         if (mipMap && this.mipLevelCount > 1) this.generateMipmaps();
     }
 
     public uploadCube(images: readonly TexImageSource[] | null, width: number, height: number,
                       mipMap: boolean): void {
-        if (!images) return this._needsCreationTimeSize('uploadCube(null)');
+        if (!images) return this._requireSize(width, height, 'uploadCube(null)');
         for (let face = 0; face < 6; face++) this._copyExternal(images[face], width, height, 0, face);
         if (mipMap && this.mipLevelCount > 1) this.generateMipmaps();
     }
@@ -169,9 +179,25 @@ class WebGPUTexture implements Texture {
             { width, height, depthOrArrayLayers: 1 });
     }
 
-    public allocateCube(): void { this._needsCreationTimeSize('allocateCube'); }
-    public allocateVolume(): void { this._needsCreationTimeSize('allocateVolume'); }
-    public allocateDepthArray(): void { this._needsCreationTimeSize('allocateDepthArray'); }
+    public allocateCube(size: number): void { this._requireSize(size, size, 'allocateCube'); }
+    public allocateVolume(width: number, height: number): void {
+        this._requireSize(width, height, 'allocateVolume');
+    }
+    public allocateDepthArray(size: number): void { this._requireSize(size, size, 'allocateDepthArray'); }
+
+    /**
+     * Assert that `setSize` already allocated what this call is about to assume, rather than no-opping.
+     *
+     * These calls are satisfied before they run, so the honest body is empty - but an empty body is also
+     * what a caller that FORGOT to sync would see, and the symptom of that is a texture full of nothing
+     * surfacing several passes later. Checking costs two comparisons and turns it into a message naming
+     * the call that was unsatisfied.
+     */
+    private _requireSize(width: number, height: number, operation: string): void {
+        if (this.width === width && this.height === height) return;
+        throw new Error(`${this.label}: ${operation} expects storage at ${width}x${height}, but this ` +
+                        `texture is ${this.width}x${this.height} - call setSize before uploading`);
+    }
 
     /**
      * A comparison sampler is a SAMPLER on this backend, not texture state.
@@ -199,10 +225,41 @@ class WebGPUTexture implements Texture {
     }
 
     /** The size is fixed at creation here; this asserts agreement rather than setting anything. */
-    public setSize(width: number, height: number): void {
-        if (width !== this.width || height !== this.height)
-            throw new Error(`${this.label}: a GPUTexture cannot be resized (${this.width}x${this.height}` +
-                            ` -> ${width}x${height}); create a new one`);
+    /**
+     * Give this texture storage at these dimensions, REPLACING the `GPUTexture` when they change.
+     *
+     * A `GPUTexture` fixes its size at creation and cannot be resized, so this is the WebGPU analogue of
+     * `reallocateBuffer`: same wrapper, new handle. It exists because the engine's `graphics/texture.ts`
+     * creates every texture at 0x0 and learns its dimensions later - from an upload, a `createVolume`, a
+     * `Framebuffer.resize`. On WebGL2 that is free (`texImage2D` re-specifies storage in place and
+     * `setSize` only records the numbers); here it is an allocation, and this is where it happens.
+     *
+     * The wrapper survives, so anything holding a `Texture` keeps working. A `TextureView` does NOT -
+     * it wraps the old `GPUTexture` - which is why the engine asks for its render targets through
+     * `Framebuffer.renderTarget` on every pass rather than caching one, and why the device evicts
+     * targets whose attachments are destroyed.
+     */
+    public setSize(width: number, height: number, depthOrArrayLayers: number = 1,
+                   mipLevelCount: number = 1): void {
+        const layers = layersForDimension(this.dimension, depthOrArrayLayers);
+        if (width === this.width && height === this.height
+            && layers === this.depthOrArrayLayers && mipLevelCount === this.mipLevelCount) return;
+        if (!this._owned || !this._recreate)
+            throw new Error(`${this.label}: cannot be resized (${this.width}x${this.height} -> ` +
+                            `${width}x${height}) - it is not owned by this device`);
+        // Zero is how the engine spells "not sized yet"; allocating it is a validation error, and the
+        // caller is about to come back with real numbers.
+        if (width <= 0 || height <= 0) return;
+
+        this.handle.destroy();
+        this.width = width;
+        this.height = height;
+        this.depthOrArrayLayers = layers;
+        this.mipLevelCount = mipLevelCount;
+        this.handle = this._recreate({
+            ...this._descriptor,
+            width, height, depthOrArrayLayers: layers, mipLevelCount,
+        });
     }
 
     private _copyExternal(source: TexImageSource, width: number, height: number,
@@ -387,6 +444,31 @@ class WebGPURenderPipeline implements RenderPipeline {
     public destroy(): void { /* released with the device */ }
 }
 
+/**
+ * A compute pipeline: the module, and the bind-group layouts `layout: 'auto'` derived from it.
+ *
+ * No `emptyGroups` counterpart to {@link WebGPURenderPipeline}'s, and that is not an omission. The
+ * gap-filling exists because the engine's RASTER shaders number their groups by role (0 textures,
+ * 1 transform, 2 material, ...) and so leave holes below their highest index. The one compute module
+ * uses group 0 and only group 0, so there is no hole to fill — and inventing the machinery for a case
+ * that does not occur would be guessing at what a second compute shader might do.
+ */
+class WebGPUComputePipeline implements ComputePipeline {
+    public readonly label: string;
+    public readonly bindGroupLayouts: readonly WebGPUBindGroupLayout[];
+    public readonly handle: GPUComputePipeline;
+
+    constructor(descriptor: ComputePipelineDescriptor, handle: GPUComputePipeline,
+                groups: readonly number[]) {
+        this.label = descriptor.label ?? 'compute-pipeline';
+        this.handle = handle;
+        this.bindGroupLayouts = groups.map(
+            g => new WebGPUBindGroupLayout(g, handle.getBindGroupLayout(g), `${this.label}:group${g}`));
+    }
+
+    public destroy(): void { /* released with the device */ }
+}
+
 class WebGPURenderTarget implements RenderTarget {
     public readonly label: string;
     constructor(public readonly colorViews: readonly WebGPUTextureView[],
@@ -464,11 +546,213 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
     }
 }
 
+/**
+ * Records dispatches inside one compute pass.
+ *
+ * Thin to the point of being uninteresting, which is the point: everything that makes the render-pass
+ * encoder above non-trivial — empty bind groups for skipped role indices, viewport and scissor state,
+ * two draw forms — has no compute analogue here.
+ */
+class WebGPUComputePassEncoder implements ComputePassEncoder {
+    private _ended = false;
+
+    constructor(private readonly _pass: GPUComputePassEncoder) {}
+
+    public setPipeline(pipeline: ComputePipeline): void {
+        this._pass.setPipeline((pipeline as WebGPUComputePipeline).handle);
+    }
+
+    public setBindGroup(group: number, bindGroup: BindGroup): void {
+        this._pass.setBindGroup(group, (bindGroup as WebGPUBindGroup).handle);
+    }
+
+    public dispatchWorkgroups(x: number, y: number = 1, z: number = 1): void {
+        this._pass.dispatchWorkgroups(x, y, z);
+    }
+
+    public end(): void {
+        if (this._ended) return;
+        this._ended = true;
+        this._pass.end();
+    }
+}
+
+/** `0n` is a syntax error at this project's `target: es6`; the call form is not. */
+const BIGINT_ZERO = BigInt(0);
+/** How many timestamps the query set holds: two per pass, so 64 passes in one submission. */
+const TIMESTAMP_QUERY_CAPACITY = 128;
+/** One `u64` per timestamp. */
+const TIMESTAMP_BYTES = 8;
+/**
+ * Staging buffers in flight at once.
+ *
+ * Sized for the shape the renderer actually has TODAY: `_beginFullscreenPass` opens one command
+ * encoder per pass, so a frame is ~35 separate submissions and each one that carries a timed pass
+ * wants a staging buffer. Eight is a little over a fifth of that on purpose — a `mapAsync` resolves
+ * within a frame or two, so the ring recycles far faster than it fills, and running out simply drops
+ * that submission's timings rather than growing the pool without bound. Dropping is the correct
+ * failure: a timing that had to wait for memory is not a timing of the GPU any more.
+ */
+const TIMESTAMP_STAGING_RING = 8;
+
+interface TimestampStaging {
+    buffer: GPUBuffer;
+    /** Pass labels in query order, so index 2i/2i+1 is `labels[i]`'s begin/end. */
+    labels: string[];
+    state: 'free' | 'submitted' | 'mapping' | 'ready';
+}
+
+/**
+ * The device's timestamp-query machinery: a `GPUQuerySet`, the `QUERY_RESOLVE` buffer it resolves
+ * into, and a small `MAP_READ` staging ring the results are copied to for reading.
+ *
+ * Entirely internal to this file. Above the RHI the only two spellings are
+ * `Device.setTimestampCollection` and `Device.collectTimestamps`, because a query set is not something
+ * the renderer or the profiler should be able to name.
+ *
+ * TIMEBASE. WebGPU timestamps are nanoseconds since an unspecified epoch, and only differences are
+ * meaningful — so a pass's cost is `end - begin` on the same query set, which is exactly what
+ * `timestampWrites` gives. Browsers quantise the values (Chrome to ~100µs unless the origin trial for
+ * finer resolution is on), so a pass under that is reported as 0 rather than as noise; that is a real
+ * limit of the measurement and not something to smooth over here.
+ *
+ * QUERY INDEX REUSE is safe even though every submission restarts at 0. Queue submissions execute in
+ * order, and each encoder's `resolveQuerySet` is recorded immediately after its own passes, so the
+ * next submission's writes cannot overtake the previous one's resolve.
+ */
+class TimestampCollector {
+    private _querySet: GPUQuerySet | null = null;
+    private _resolve: GPUBuffer | null = null;
+    private _ring: TimestampStaging[] = [];
+    private _sink: ((label: string, ms: number) => void) | null = null;
+    private _enabled = false;
+
+    constructor(private readonly _device: GPUDevice, private readonly _supported: boolean) {}
+
+    /** True when a pass should be given `timestampWrites`. */
+    public get active(): boolean { return this._enabled; }
+    public get querySet(): GPUQuerySet | null { return this._querySet; }
+
+    public setEnabled(enabled: boolean, sink: (label: string, ms: number) => void): void {
+        this._sink = sink;
+        const on = enabled && this._supported;
+        if (on === this._enabled) return;
+        this._enabled = on;
+        if (on) this._allocate();
+        // Resources are NOT released on disable. Re-enabling is a checkbox in the profiler panel, and
+        // a staging buffer that is still `mapping` when its owner is destroyed rejects its own
+        // `mapAsync` — the drain below has to be able to finish for anything already submitted.
+    }
+
+    private _allocate(): void {
+        if (this._querySet) return;
+        this._querySet = this._device.createQuerySet({
+            label: 'timestamps', type: 'timestamp', count: TIMESTAMP_QUERY_CAPACITY,
+        });
+        this._resolve = this._device.createBuffer({
+            label: 'timestamp-resolve',
+            size: TIMESTAMP_QUERY_CAPACITY * TIMESTAMP_BYTES,
+            usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+        });
+        for (let i = 0; i < TIMESTAMP_STAGING_RING; i++) {
+            this._ring.push({
+                buffer: this._device.createBuffer({
+                    label: `timestamp-staging-${i}`,
+                    size: TIMESTAMP_QUERY_CAPACITY * TIMESTAMP_BYTES,
+                    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+                }),
+                labels: [],
+                state: 'free',
+            });
+        }
+    }
+
+    /**
+     * Record the resolve + copy for one finished encoder, if a staging buffer is free.
+     *
+     * Must run BEFORE the encoder is submitted — `resolveQuerySet` is a command, not a queue
+     * operation, and it has to sit in the same command buffer as the passes it is resolving.
+     */
+    public recordResolve(encoder: GPUCommandEncoder, labels: string[]): void {
+        if (!this._enabled || !this._querySet || !this._resolve || labels.length === 0) return;
+        const staging = this._ring.find(entry => entry.state === 'free');
+        if (!staging) return;   // ring saturated: drop this submission's timings, never stall for one
+
+        const count = labels.length * 2;
+        encoder.resolveQuerySet(this._querySet, 0, count, this._resolve, 0);
+        encoder.copyBufferToBuffer(this._resolve, 0, staging.buffer, 0, count * TIMESTAMP_BYTES);
+        staging.labels = labels;
+        staging.state = 'submitted';
+    }
+
+    /**
+     * Deliver what is ready and start mapping what is newly submitted. Never waits — see
+     * `Device.collectTimestamps`.
+     */
+    public collect(): void {
+        if (!this._querySet) return;
+        for (const entry of this._ring) {
+            if (entry.state === 'ready') {
+                this._drain(entry);
+            } else if (entry.state === 'submitted') {
+                entry.state = 'mapping';
+                // `mapAsync` resolves only once the submission that wrote the buffer has completed, so
+                // this IS the "has it finished" test — asked without blocking on the answer. The
+                // rejection path matters: a device loss or a destroy rejects every outstanding map, and
+                // an unhandled rejection here would surface as a page-level error from a profiler that
+                // is meant to be invisible when off.
+                entry.buffer.mapAsync(GPUMapMode.READ).then(
+                    () => { entry.state = 'ready'; },
+                    () => { entry.labels = []; entry.state = 'free'; },
+                );
+            }
+        }
+    }
+
+    private _drain(entry: TimestampStaging): void {
+        const times = new BigUint64Array(entry.buffer.getMappedRange());
+        if (this._sink) {
+            for (let i = 0; i < entry.labels.length; i++) {
+                const begin = times[i * 2], end = times[i * 2 + 1];
+                // Drop only what is not a measurement: an untouched pair of slots (both exactly zero
+                // — the driver is allowed to leave them alone) and an end before its begin.
+                //
+                // A pass whose end EQUALS its begin is reported, as 0.000ms, and that is not a bug to
+                // filter out. MEASURED on this driver: an empty clear pass reads back a zero delta
+                // every time, because browsers quantise timestamps — Chrome to ~100µs unless the
+                // fine-resolution origin trial is on — so anything under the quantum lands on the same
+                // tick at both ends. Dropping those made a cheap pass VANISH from the profiler rather
+                // than show up as "below the measurement floor", which is the more misleading of the
+                // two readings and is what the first version of this line did.
+                if (end < begin || (end === BIGINT_ZERO && begin === BIGINT_ZERO)) continue;
+                this._sink(entry.labels[i], Number(end - begin) / 1e6);
+            }
+        }
+        entry.buffer.unmap();
+        entry.labels = [];
+        entry.state = 'free';
+    }
+
+    public destroy(): void {
+        this._enabled = false;
+        this._sink = null;
+        this._querySet?.destroy();
+        this._querySet = null;
+        this._resolve?.destroy();
+        this._resolve = null;
+        for (const entry of this._ring) entry.buffer.destroy();
+        this._ring.length = 0;
+    }
+}
+
 class WebGPUCommandEncoder implements CommandEncoder {
     private readonly _encoder: GPUCommandEncoder;
     private _finished = false;
+    /** Labels of the passes in this encoder that were given `timestampWrites`, in query order. */
+    private readonly _timedPasses: string[] = [];
 
-    constructor(private readonly _device: GPUDevice, label?: string) {
+    constructor(private readonly _device: GPUDevice,
+                private readonly _timestamps: TimestampCollector | null, label?: string) {
         this._encoder = _device.createCommandEncoder({ label: label ?? 'commands' });
     }
 
@@ -507,10 +791,29 @@ class WebGPUCommandEncoder implements CommandEncoder {
         }
 
         setViewportSize(rt.width, rt.height);
+
+        // GPU timing, when the profiler has it switched on. A timestamp can only be attached to a
+        // pass — there is no WebGPU spelling for "time this span of the frame" — so the pass LABEL is
+        // the only name a cost can be reported under, and gpuProfiler.ts maps it back onto a scope
+        // name where that is honest. The pair is claimed here and resolved in `finish()`; a pass past
+        // the query set's capacity is simply untimed rather than an error.
+        const timestamps = this._timestamps;
+        const queryIndex = this._timedPasses.length * 2;
+        const timed = timestamps?.active && timestamps.querySet !== null
+                      && queryIndex + 1 < TIMESTAMP_QUERY_CAPACITY;
+        if (timed) this._timedPasses.push(descriptor.label);
+
         return new WebGPURenderPassEncoder(this._encoder.beginRenderPass({
             label: descriptor.label,
             colorAttachments,
             ...(depthStencilAttachment ? { depthStencilAttachment } : {}),
+            ...(timed ? {
+                timestampWrites: {
+                    querySet: timestamps!.querySet!,
+                    beginningOfPassWriteIndex: queryIndex,
+                    endOfPassWriteIndex: queryIndex + 1,
+                },
+            } : {}),
         }), this._device);
     }
 
@@ -525,9 +828,25 @@ class WebGPUCommandEncoder implements CommandEncoder {
         );
     }
 
+    /**
+     * Open a compute pass.
+     *
+     * Placed between the copy and the finish deliberately: a dispatch is recorded work like any other,
+     * so it shares this encoder's submission and orders against the passes around it. No
+     * `timestampWrites` — WebGPU would accept them on a compute pass, but the profiler above the RHI
+     * reports render passes, and the one compute workload the engine has runs once at startup.
+     */
+    public beginComputePass(label?: string): ComputePassEncoder {
+        return new WebGPUComputePassEncoder(
+            this._encoder.beginComputePass({ label: label ?? 'compute' }));
+    }
+
     public finish(): void {
         if (this._finished) return;
         this._finished = true;
+        // Before the submit, and in this encoder: `resolveQuerySet` is a recorded command, so it has
+        // to share a command buffer with the passes whose timestamps it is resolving.
+        this._timestamps?.recordResolve(this._encoder, this._timedPasses);
         this._device.queue.submit([this._encoder.finish()]);
     }
 }
@@ -563,6 +882,7 @@ export class WebGPUDevice implements Device {
     private readonly _textures = new Set<WebGPUTexture>();
     private _surfaceFormat: TextureFormat;
     private _destroyed = false;
+    private readonly _timestamps: TimestampCollector;
 
     constructor(
         private readonly _device: GPUDevice,
@@ -573,6 +893,7 @@ export class WebGPUDevice implements Device {
     ) {
         this.capabilities = capabilities;
         this._surfaceFormat = surfaceFormat;
+        this._timestamps = new TimestampCollector(_device, capabilities.hasTimestampQuery);
 
         // Nothing in WebGPU throws at the call site; validation errors arrive here. Without this the
         // first wrong descriptor produces a blank frame and no message at all.
@@ -596,18 +917,27 @@ export class WebGPUDevice implements Device {
         return buffer;
     }
 
-    public createTexture(descriptor: TextureDescriptor): Texture {
+    /** The raw allocation, shared by `createTexture` and by `WebGPUTexture.setSize` re-creating one. */
+    private _createGpuTexture(descriptor: TextureDescriptor): GPUTexture {
         const dimension = descriptor.dimension ?? '2d';
-        const layers = layersForDimension(dimension, descriptor.depthOrArrayLayers);
-        const handle = this._device.createTexture({
+        return this._device.createTexture({
             label: descriptor.label ?? 'texture',
             format: gpuTextureFormat(descriptor.format),
             dimension: gpuTextureDimension(dimension),
-            size: { width: descriptor.width, height: descriptor.height, depthOrArrayLayers: layers },
+            size: {
+                width: descriptor.width, height: descriptor.height,
+                depthOrArrayLayers: layersForDimension(dimension, descriptor.depthOrArrayLayers),
+            },
             mipLevelCount: Math.max(1, descriptor.mipLevelCount ?? 1),
             usage: gpuTextureUsage(descriptor.usage),
         });
-        const texture = new WebGPUTexture(descriptor, handle, true, this._device.queue, () => this._textures.delete(texture));
+    }
+
+    public createTexture(descriptor: TextureDescriptor): Texture {
+        const handle = this._createGpuTexture(descriptor);
+        const texture = new WebGPUTexture(descriptor, handle, true, this._device.queue,
+                                          () => this._textures.delete(texture),
+                                          d => this._createGpuTexture(d));
         this._textures.add(texture);
         return texture;
     }
@@ -634,13 +964,16 @@ export class WebGPUDevice implements Device {
     }
 
     /**
-     * A view of the whole texture, as a shader samples it.
+     * A view of the whole texture: every mip, every layer, the texture's own view dimension.
      *
      * Distinct from {@link createTextureView}, which narrows to one mip and one layer for use as an
-     * attachment. Sampling a cascade array or a cube needs the opposite: every layer, every mip, and
-     * the texture's own view dimension.
+     * attachment. Sampling a cascade array or a cube needs the opposite, and so does binding a 3D
+     * texture as `texture_storage_3d` — the narrowed view is a `2d` view of one z-slice, which the
+     * storage-texture binding rejects outright. That second use is why this is on the `Device`
+     * interface now rather than a WebGPU-only extra: the cloud-noise compute bake cannot be written
+     * without it.
      */
-    public createSamplingView(texture: Texture): TextureView {
+    public createWholeTextureView(texture: Texture): TextureView {
         const tex = texture as WebGPUTexture;
         return new WebGPUTextureView(tex, 0, 0, tex.handle.createView({
             label: `${tex.label}[sampled]`,
@@ -738,6 +1071,22 @@ export class WebGPUDevice implements Device {
         return new WebGPURenderPipeline(descriptor, handle, groups);
     }
 
+    public createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline {
+        const module = descriptor.compute as WebGPUShaderModule;
+        const handle = this._device.createComputePipeline({
+            label: descriptor.label ?? 'compute-pipeline',
+            layout: 'auto',
+            compute: {
+                module: module.handle,
+                // No `cs_main` fallback to match the vertex/fragment ones above: those exist because
+                // 55 hand-registered raster programs share a naming convention, and a compute module
+                // that reaches here without its entry point named has nothing to fall back ON.
+                entryPoint: module.entryPoints.compute,
+            },
+        });
+        return new WebGPUComputePipeline(descriptor, handle, module.groups);
+    }
+
     public createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
         const colorViews = descriptor.colorViews as WebGPUTextureView[];
         const depthView = descriptor.depthView as WebGPUTextureView | undefined;
@@ -767,6 +1116,14 @@ export class WebGPUDevice implements Device {
             }
             if ('textureView' in entry) {
                 return { binding: entry.binding, resource: (entry.textureView as WebGPUTextureView).handle };
+            }
+            // A storage texture binds as the same `GPUTextureView` a sampled one does — the arms
+            // differ because WebGL2 has to be able to refuse this one, not because WebGPU treats it
+            // differently. What WebGPU does check is that the texture carries STORAGE_BINDING usage
+            // and that the view's dimension matches the shader's `texture_storage_*` type, which is
+            // what `createWholeTextureView` is for on a 3D volume.
+            if ('storageTextureView' in entry) {
+                return { binding: entry.binding, resource: (entry.storageTextureView as WebGPUTextureView).handle };
             }
             return { binding: entry.binding, resource: (entry.sampler as WebGPUSampler).handle };
         });
@@ -864,8 +1221,16 @@ export class WebGPUDevice implements Device {
     // -- commands --------------------------------------------------------------------------------
 
     public createCommandEncoder(label?: string): CommandEncoder {
-        return new WebGPUCommandEncoder(this._device, label);
+        return new WebGPUCommandEncoder(this._device, this._timestamps, label);
     }
+
+    /** See {@link Device.setTimestampCollection}. Everything it needs lives in `TimestampCollector`. */
+    public setTimestampCollection(enabled: boolean, sink: (label: string, ms: number) => void): void {
+        this._timestamps.setEnabled(enabled, sink);
+    }
+
+    /** See {@link Device.collectTimestamps}. */
+    public collectTimestamps(): void { this._timestamps.collect(); }
 
     /**
      * Read a colour attachment back to the CPU.
@@ -919,6 +1284,7 @@ export class WebGPUDevice implements Device {
     public destroy(): void {
         if (this._destroyed) return;
         this._destroyed = true;
+        this._timestamps.destroy();
         for (const buffer of Array.from(this._buffers)) buffer.destroy();
         for (const texture of Array.from(this._textures)) texture.destroy();
         this._device.destroy();

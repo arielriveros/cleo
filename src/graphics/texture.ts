@@ -61,6 +61,31 @@ export interface TextureConfig {
      * extensions degrades to RGBA8 exactly as `precision: 'high'` does. See rhi/textureFormat.ts.
      */
     format?: TextureFormat;
+    /**
+     * Dimensions to allocate at CREATION, rather than whenever an upload gets around to it.
+     *
+     * Every other path here allocates lazily because that is how WebGL2 works: `texImage2D` and
+     * `texStorage3D` both establish storage long after `createTexture`, so `new Texture(...)` asks
+     * the device for a 0x0 and the uploads correct it. A `GPUTexture` cannot work that way — its size
+     * is fixed when it is made, and the WebGPU backend's upload entry points say so by throwing.
+     *
+     * This is the narrow declarative escape hatch for the one texture that has to be right up front:
+     * the cloud-noise volume, which on WebGPU is filled by a compute dispatch and so is never
+     * "uploaded" at all. It is NOT the general fix — the rest of the engine still allocates through
+     * its uploads, and reforming that is a separate piece of work.
+     */
+    size?: { width: number; height: number; depth?: number };
+    /**
+     * Allocate this texture so a compute shader can WRITE it (`texture_storage_*`).
+     *
+     * Exclusive with render-attachment usage rather than additive: a storage texture is never drawn
+     * into, and WebGPU refuses some format/usage combinations that carry both. Requires {@link size},
+     * since a storage binding needs real dimensions before anything can be dispatched against it.
+     *
+     * Ignored on WebGL2, which has no storage textures — `createVolume()` there still runs
+     * `texStorage3D` exactly as it always did.
+     */
+    storage?: boolean;
 }
 
 /**
@@ -156,14 +181,28 @@ export class Texture {
         this._resolvedFormat = resolved.format;
         if (resolved.downgraded) reportFloatDowngrade(resolved.requested, resolved.format);
 
+        // Dimensions up front when the caller named them — see TextureConfig.size. Recorded on the
+        // wrapper too, so `byteSize` and the eager `_syncGpuSize` agree with what the device holds
+        // for a texture that will never travel an upload path.
+        const size = options?.size;
+        if (size) {
+            this._width = size.width;
+            this._height = size.height;
+            this._depth = size.depth ?? 0;
+        }
         this._gpu = device.createTexture({
             label: 'texture',
             format: resolved.format,
             dimension,
-            width: 0, height: 0,
+            width: size?.width ?? 0, height: size?.height ?? 0,
+            ...(size?.depth !== undefined ? { depthOrArrayLayers: size.depth } : {}),
             usage: this._usage === 'depth'
                 ? TextureUsage.RENDER_ATTACHMENT | TextureUsage.TEXTURE_BINDING
-                : TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST | TextureUsage.RENDER_ATTACHMENT,
+                // STORAGE_BINDING REPLACES the attachment usage rather than joining it: nothing draws
+                // into a storage texture, and asking for both narrows the formats WebGPU will accept.
+                : options?.storage
+                    ? TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST | TextureUsage.STORAGE_BINDING
+                    : TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST | TextureUsage.RENDER_ATTACHMENT,
         });
 
         const triple = glTextureFormat(resolved.format);
@@ -200,10 +239,23 @@ export class Texture {
      * through bind groups instead. The remaining callers are the legacy material-application paths;
      * they go when those do.
      */
-    public bind(slot: number = 0): void { (this._gpu as WebGL2Texture).bind(slot); }
+    public bind(slot: number = 0): void {
+        if (device.backend !== 'webgl2') return;
+        (this._gpu as WebGL2Texture).bind(slot);
+    }
 
-    /** Release whichever unit this texture was last bound to. */
-    public unbind(): void { (this._gpu as WebGL2Texture).unbind(); }
+    /**
+     * Release whichever unit this texture was last bound to.
+     *
+     * A no-op off WebGL2, and that guard is not a stub. `_finishUpload` calls this after EVERY upload,
+     * so without it the first texture any backend without units allocates dies on `unbind is not a
+     * function` - a legacy epilogue killing a path that had otherwise completed. There is no unit to
+     * release when bind groups name their resources directly.
+     */
+    public unbind(): void {
+        if (device.backend !== 'webgl2') return;
+        (this._gpu as WebGL2Texture).unbind();
+    }
 
     /** Close an upload: record the dimensions it established, then release the upload unit. */
     private _finishUpload(): void {
@@ -215,6 +267,7 @@ export class Texture {
         this._data = data;
         this._width = width;
         this._height = height;
+        this._syncGpuSize();   // allocate before uploading - see _syncGpuSize
 
         if (this._gpu.dimension === '2d') {
             const img = data as HTMLImageElement | null;
@@ -257,6 +310,7 @@ export class Texture {
         this._data = null;
         this._width = width;
         this._height = height;
+        this._syncGpuSize();   // allocate before uploading - see _syncGpuSize
         this._gpu.uploadBytes(data, width, height, ADDRESS_MODES[wrapping]);
         this._finishUpload();
     }
@@ -305,6 +359,7 @@ export class Texture {
         this._width = size;
         this._height = size;
         this._mipMap = levels > 1;
+        this._syncGpuSize();   // allocate before uploading - see _syncGpuSize
         this._gpu.allocateCube(size, levels);
         this._finishUpload();
     }
@@ -325,6 +380,7 @@ export class Texture {
         this._height = height;
         this._depth = depth;
         this._mipMap = false; // a tiling noise field wants a single level; mips would blur the tile seams
+        this._syncGpuSize();   // allocate before uploading - see _syncGpuSize
         this._gpu.allocateVolume(width, height, depth, ADDRESS_MODES[wrapping]);
         this._finishUpload();
     }
@@ -348,6 +404,7 @@ export class Texture {
         this._height = size;
         this._depth = layers;
         this._mipMap = false;
+        this._syncGpuSize();   // allocate before uploading - see _syncGpuSize
         this._gpu.allocateDepthArray(size, layers, compare);
         this._finishUpload();
     }
@@ -421,6 +478,15 @@ export class Texture {
     public get gpu(): WebGL2Texture { return this._gpu as WebGL2Texture; }
 
     /**
+     * The device-owned texture, typed as the RHI describes one.
+     *
+     * The portable half of `gpu` above, which casts to the WebGL2 class and is what the unmigrated
+     * upload callers still need. Anything that only has to hand the texture back to the device — a
+     * bind group entry, a view — should read this instead, and the compute cloud-noise bake does.
+     */
+    public get rhiTexture(): RhiTexture { return this._gpu; }
+
+    /**
      * This texture as an RHI view, created once and reused.
      *
      * Cached because the geometry pass builds a bind group per submesh per node — a fresh view object
@@ -466,6 +532,16 @@ export class Texture {
      * the target from `view.texture.width`, and a texture nobody had asked the byte size of still
      * reported 0 — which makes every pass into it a 1x1 viewport. So the sync is eager now, through the
      * one exit {@link _finishUpload} that every upload path already shared.
+     */
+    /**
+     * Push the dimensions this wrapper holds into the device texture.
+     *
+     * Called BEFORE every upload as well as after, and the before is the load-bearing one. WebGL2 learns
+     * a texture's size from the upload itself (`texImage2D` both allocates and fills), so this was only
+     * ever bookkeeping there - `WebGL2Texture.setSize` records four numbers and touches no GL. A
+     * `GPUTexture` fixes its size at creation and cannot be resized, so on WebGPU this call IS the
+     * allocation, and an upload that ran first would have nothing to write into. Every allocate path
+     * below therefore sets `_width`/`_height`/`_depth` and syncs before handing the data over.
      */
     private _syncGpuSize(): void {
         const slices = (this._gpu.dimension === '3d' || this._gpu.dimension === '2d-array')

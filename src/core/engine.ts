@@ -64,6 +64,11 @@ export class CleoEngine {
 
   private _paused: boolean = true;
 
+  /**
+   * Why {@link initialize} failed, or null. See {@link initializeError}.
+   */
+  private _initializeError: Error | null = null;
+
   public onUpdate: (delta: number, time: number) => void;
   public onPreInitialize: () => Promise<void>;
   public onPostInitialize: () => void;
@@ -115,6 +120,12 @@ export class CleoEngine {
    * is why both hosts await it immediately after `new CleoEngine(...)` and before they load anything.
    *
    * Idempotent, and still called by `run()` for embedders that never awaited it.
+   *
+   * REJECTS on failure. It used to catch everything and only log, which left `_ready === false` and no
+   * signal at all: an awaiting host carried on and built a scene against a renderer with no device, and
+   * the first symptom was an unrelated exception several hundred lines later. The log stays — it is
+   * what a user pastes — but the error is also stored on {@link initializeError} and re-thrown, so a
+   * host can say "the engine did not start" instead of showing an empty viewport.
    */
   public async initialize(): Promise<void> {
     try {
@@ -136,8 +147,19 @@ export class CleoEngine {
       Logger.info('Engine Ready')
     } catch (e) {
       Logger.error(e);
+      this._initializeError = e instanceof Error ? e : new Error(String(e));
+      throw e;
     }
   }
+
+  /**
+   * The error that stopped {@link initialize}, or null.
+   *
+   * A host that awaits `initialize()` gets this as a rejection and does not need it. A host that only
+   * calls `run()` never sees the rejection at all, because that path is fire-and-forget — this is where
+   * it can find out. `renderer.deviceProbe` says at which STAGE it happened.
+   */
+  public get initializeError(): Error | null { return this._initializeError; }
 
   public run(): void {
     try {
@@ -147,7 +169,12 @@ export class CleoEngine {
         // not up yet, and running the loop against a renderer with no context would throw on the first
         // draw. Start the loop when the device lands instead. Hosts that DID await fall through to the
         // synchronous path below and start immediately, exactly as before.
-        void this.initialize().then(() => this._startLoop());
+        // The `.catch` is not decoration: initialize() re-throws now, and an un-caught rejection on a
+        // fire-and-forget promise is an unhandled rejection — reported by the host, attributed to
+        // nothing, and in a packaged Electron build shown to nobody. Logged here, and left on
+        // `initializeError` for whoever asks. The loop is simply never started, which is correct: there
+        // is no device to draw with.
+        void this.initialize().then(() => this._startLoop()).catch((e) => Logger.error(e));
         return;
       }
 

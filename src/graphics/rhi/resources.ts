@@ -166,6 +166,23 @@ export interface BindGroup extends GpuResource {
     readonly layout: BindGroupLayout;
 }
 
+/**
+ * An immutable compute program.
+ *
+ * Separate from {@link RenderPipeline} rather than a mode of it because the two share nothing a
+ * caller can set: no vertex layouts, no primitive state, no colour targets, no depth state. All a
+ * dispatch needs is the module and the layouts its bind groups have to satisfy.
+ *
+ * Deliberately minimal, and meant to stay that way. The engine has exactly ONE compute workload —
+ * the cloud-noise volume bake, which a render pass cannot express on WebGPU because an attachment
+ * must be a 2D or 2D-array view and a 3D texture's z-slice is neither. Building a general compute
+ * system on the strength of one bake would be designing against a sample of one.
+ */
+export interface ComputePipeline extends GpuResource {
+    /** Layouts this pipeline binds, indexed by group. */
+    readonly bindGroupLayouts: readonly BindGroupLayout[];
+}
+
 export interface RenderPipeline extends GpuResource {
     readonly vertexLayouts: readonly VertexBufferLayout[];
     readonly primitive: Readonly<PrimitiveState>;

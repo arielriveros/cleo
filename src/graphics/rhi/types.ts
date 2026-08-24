@@ -390,8 +390,15 @@ export interface DepthAttachmentDescriptor {
 
 export interface RenderPassDescriptor {
     /**
-     * Name matching a `RenderPass` in gpuProfiler.ts, so a pass boundary and a profiler scope are one
-     * thing rather than two lists that drift apart.
+     * What this pass is called. Debug marker, GPU-timing row, and the key the profiler attributes cost
+     * under on WebGPU.
+     *
+     * NOT the same name space as `RenderPass` in gpuProfiler.ts, which is what this used to claim. The
+     * renderer passes ~40 distinct labels and there are 29 profiler scopes, overlapping in roughly 20
+     * names: several passes share one scope (the three motion-blur passes), several scopes contain no
+     * pass at all (`frameEnd`), and several passes sit in no scope (`brdf`, `outline`, `shadow.clear`).
+     * `PASS_LABEL_TO_SCOPE` is the actual correspondence, and it is a partial map on purpose —
+     * anything not in it is reported as `pass:<label>` rather than filed under a scope it is not in.
      */
     label: string;
     colorAttachments: ColorAttachmentDescriptor[];

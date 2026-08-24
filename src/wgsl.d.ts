@@ -14,8 +14,10 @@ declare module '*.wgsl' {
         readonly vertex?: string;
         /** GLSL ES 300 for the fragment stage, when the module declares a `@fragment` entry point. */
         readonly fragment?: string;
-        /** GLSL ES 300 for the compute stage. WebGL2 has no compute; present for completeness. */
-        readonly compute?: string;
+        // There is deliberately NO `compute` GLSL here. naga's GLSL backend targets ES 300, which has
+        // no compute stage, so the translator never sends one through it — see tools/wgslTranslate.mjs.
+        // A compute module is WGSL-only, and `entryPoints.compute` below is the whole of what WebGPU
+        // needs from it.
         /** Entry-point function names by stage, as declared in the module. */
         readonly entryPoints: { vertex?: string; fragment?: string; compute?: string };
         /**

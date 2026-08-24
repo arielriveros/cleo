@@ -14,8 +14,11 @@ import Sparkline from './Sparkline';
 //
 // Cost is attributed two independent ways, because neither is always available or always sufficient:
 //
-//  1. GPU timer queries (EXT_disjoint_timer_query_webgl2) give a direct per-pass number, but the
-//     extension is gated by driver and browser flags and is simply absent on some machines.
+//  1. GPU timers give a direct per-pass number, but they are gated by the backend: WebGL2 needs
+//     EXT_disjoint_timer_query_webgl2 (driver and browser flags both withhold it) and WebGPU needs the
+//     adapter's `timestamp-query` feature. `gpuProfiler.unavailableReason` names whichever is missing,
+//     and `gpuProfiler.attribution` says which NAME SPACE the rows are in — WebGL2 times renderer
+//     scopes, WebGPU times render passes, and they are not the same list (see gpuProfiler.ts).
 //  2. Per-pass kill switches measure a pass's MARGINAL cost by removing it and watching the frame
 //     time. That needs no extension, and it captures downstream savings (bandwidth, dependent passes)
 //     that a timer wrapped around the draw call does not.
@@ -331,7 +334,7 @@ export default function PerformancePanel() {
         {d.gpuOn
           ? <Row label='Render (GPU)' value={`${fmt(d.gpuMs)} ms`} hl={d.gpuMs > budgetMs} />
           : <Row label='Render (GPU)' value={d.gpuAvailable ? 'off' : 'n/a'}
-                 title={d.gpuAvailable ? 'Enable timer queries under GPU passes.' : 'EXT_disjoint_timer_query_webgl2 is unavailable on this driver/browser.'} />}
+                 title={d.gpuAvailable ? 'Enable timer queries under GPU passes.' : (gpuProfiler.unavailableReason ?? 'GPU timing is unavailable.')} />}
         {/* Split rather than one total on purpose: `step` is cannon's solver (the part a worker could
             take off this thread) while `write-back` is scene-graph sync that would stay here regardless. */}
         <Row label='Physics' value={`${fmt(d.physicsMs)} ms`} hl={d.physicsMs > 5}
@@ -370,10 +373,24 @@ export default function PerformancePanel() {
           label='Timer queries'
           checked={enabled}
           onChange={v => { gpuProfiler.enabled = v; setEnabled(v); }}
-          title='EXT_disjoint_timer_query_webgl2. Wraps each pass in a GPU timer.'
+          title={gpuProfiler.attribution === 'passes'
+            ? 'WebGPU timestamp queries. Times each render pass at its own pass boundary.'
+            : 'EXT_disjoint_timer_query_webgl2. Wraps each renderer scope in a GPU timer.'}
         />
         {!gpuProfiler.available && (
-          <Hint>Timer queries are unavailable on this driver/browser — use the pass switches below.</Hint>
+          <Hint>{gpuProfiler.unavailableReason ?? 'GPU timing is unavailable here.'} Use the pass switches below.</Hint>
+        )}
+        {/* One line, driven by `attribution`. The two backends do not measure the same thing and the
+            rows are not interchangeable between them, so a reader comparing a WebGPU capture against a
+            WebGL2 one needs to be told before they draw a conclusion from the difference. */}
+        {gpuProfiler.available && gpuProfiler.attribution === 'passes' && (
+          <Hint>
+            Rows are render PASSES, not the renderer scopes WebGL2 times. Passes with no matching scope
+            appear as <code>pass:…</code>; <code>frameEnd</code> has no row because per-pass timestamps
+            already exclude the driver's end-of-frame drain it exists to absorb. Absolute values run
+            high — the renderer submits one command buffer per pass today, so each pass pays a
+            submission at both ends of its own window. Compare passes with each other, not with WebGL2.
+          </Hint>
         )}
         {enabled && gpuProfiler.available && rows.length === 0 &&
           <div className='text-muted mt-2'>waiting for results…</div>}
@@ -492,7 +509,9 @@ export default function PerformancePanel() {
       <Section
         title='Pass switches'
         hint={"Turn a pass off and watch the frame graph. The drop is that pass's true marginal cost, "
-            + 'including downstream savings a GPU timer around the draw call would not capture.'}
+            + 'including downstream savings a GPU timer around the draw call would not capture. The '
+            + 'list is the same on every backend on purpose: bisection is exactly the fallback for a '
+            + 'cost the timers cannot see, so it must not shrink where the timers are weaker.'}
       >
         <div className='grid grid-cols-2 gap-x-3'>
           {TOGGLEABLE_PASSES.map(name => (

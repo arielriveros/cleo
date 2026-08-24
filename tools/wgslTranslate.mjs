@@ -307,7 +307,14 @@ export async function translateWgsl(wgsl, label = 'shader') {
     // directive rather than always, because the extraction only makes sense for a module whose
     // entry point exists purely to keep its functions alive.
     const isLibrary = /^[ \t]*\/\/[ \t]*@glsl-chunk[ \t]*$/m.test(wgsl);
-    for (const stage of ['vertex', 'fragment', 'compute']) {
+    // Only the two RASTER stages, and `compute` is missing on purpose rather than by oversight.
+    //
+    // naga's GLSL backend here targets ES 300, which has no compute stage at all — it rejects the
+    // translation outright. So the moment any `.wgsl` declares `@compute`, sending that stage through
+    // this loop breaks the BUILD, for both backends, over a stage WebGL2 could never have run. The
+    // WGSL is carried through untouched either way, which is all the WebGPU backend needs; a compute
+    // module simply has no GLSL half, and `WgslProgram` no longer pretends otherwise.
+    for (const stage of ['vertex', 'fragment']) {
         const entry = entryPoints[stage];
         if (!entry) continue;
         try {

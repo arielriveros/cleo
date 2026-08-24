@@ -38,25 +38,76 @@ export function webgpuAvailableInBrowser(): boolean {
  * `setUniform` by name into the right group on a real adapter. The swap chain is done too: the surface
  * is on the interface and the harness reads back a pass that drew into it.
  *
- * What is left is the RESOURCE layer, and it is a short, specific list — every remaining WebGL2-only
- * call in the engine is a `glDevice()` site, 40 of them:
+ * What is left is the RESOURCE layer, and it is a short, specific list - every remaining WebGL2-only
+ * call in the engine is a `glDevice()` site, 21 of them:
  *
- *   - `Mesh` (19) owns a `WebGLVertexArrayObject` and hands raw `WebGLBuffer` handles to
- *     `vertexAttribPointer`. WebGPU has no VAO; the pipeline carries the layout. This one is on the
- *     path of every draw, so it is the blocker that matters. `TileMesh` (7) is the same shape.
+ *   - `TileMesh` (7) owns a `WebGLVertexArrayObject` and hands raw `WebGLBuffer` handles to
+ *     `vertexAttribPointer`. WebGPU has no VAO; the pipeline carries the layout. `Mesh` was the same
+ *     shape and was 19 of these; its VAO is LAZY now and its whole VAO-configuration family is guarded
+ *     off WebGL2, leaving 5 sites inside legacy draw paths WebGPU never takes.
  *   - `uniformBlocks` (2, the global UNIFORM_BUFFER binding points), `webgl2Commands` (2, inside the
- *     backend), `texturePacker` (1), and the renderer's own 6 (vertex-layout buffers + the cloud-noise
- *     bake framebuffer).
- *   - The three framebuffer wrappers are down to ONE call each, all the same one: `unbind()`, which
- *     restores the default framebuffer. That is the legacy bind model, and it is a symptom rather than
- *     a cause — every remaining caller is a draw or clear issued OUTSIDE a pass, which is the same set
- *     `Mesh` sits at the centre of. Port the draws and these go with them.
- *   - `Renderer.initialize` acquires a WebGL2 context unconditionally and never calls
- *     `acquireWebGPUDevice`.
+ *     backend), `texturePacker` (1), the renderer's own 2, and the three framebuffer wrappers (1 each,
+ *     all `unbind()` - the legacy bind model).
+ *
+ * `Renderer.initialize` acquires a real WebGPU device and startup now runs all the way through program
+ * creation and into `_initializeIBL`, where the FIRST REAL RENDER PASS is built and the driver refuses
+ * its colour attachment. That is a different class of blocker from the ones before it: nothing left to
+ * port, only something to get right. `harness:webgpu:boot` ratchets on it and `webgpuBoot.json` carries
+ * the history of every stage this has moved through.
  *
  * Flipping this constant before those land would trade an honest "not yet" for a black viewport.
  */
 export const WEBGPU_IMPLEMENTED = false;
+
+/**
+ * May a WebGPU device be ACQUIRED, even though the renderer cannot yet draw through one?
+ *
+ * A strictly narrower question than {@link WEBGPU_IMPLEMENTED}, and it needs its own answer: acquisition
+ * is the first link in the chain and it cannot be exercised end-to-end while the only gate on it is the
+ * flag that also promises a rendered frame. Everything downstream — the boot probe, the per-stage
+ * failure record, the ratchet in `tools/harness/webgpuBoot.json` — is unreachable code until this
+ * returns true for someone.
+ *
+ * A RUNTIME hatch rather than a build constant, deliberately. A second bundle-time flag would have to be
+ * kept in step with this one in webpack, in the editor's dev server and in the harness's own build; a
+ * query parameter is reachable from all three plus an address bar, with nothing to keep in step. It is
+ * not wired to any editor UI, and `WEBGPU_IMPLEMENTED` still gates what users are offered — a hatch that
+ * shows up in a settings dropdown is not a hatch.
+ */
+export function webgpuAcquisitionAllowed(): boolean {
+    if (WEBGPU_IMPLEMENTED) return true;
+    if (typeof window === 'undefined') return false;
+    return (window as unknown as { __CLEO_WEBGPU_PROBE?: boolean }).__CLEO_WEBGPU_PROBE === true
+        || new URLSearchParams(window.location.search).get('cleoWebgpuProbe') === '1';
+}
+
+/**
+ * How far a backend request actually got, and where it stopped.
+ *
+ * Lives here rather than on the renderer because it describes the OUTCOME of the selection this module
+ * performs, and because `renderer.ts` cannot declare a module-scope interface without the declaration
+ * landing in the middle of a 6,000-line class file.
+ *
+ * The value of recording stages rather than a single boolean is the ratchet: on WebGPU, initialization
+ * is expected to fail, and which stage it fails AT is the migration's actual progress metric. A gate
+ * that only asked "did it work" would read false for the whole port and then true once, telling you
+ * nothing on any day in between.
+ */
+export interface DeviceProbe {
+    /** The backend that was asked for. */
+    requested: BackendKind;
+    /** The backend that was acquired, or null when acquisition itself never completed. */
+    acquired: BackendKind | null;
+    /** Why {@link acquired} differs from {@link requested}, or null when the request was met. */
+    fallbackReason: string | null;
+    /**
+     * Stage names completed, in order: `device`, `profiler`, `screenQuad`, `framebuffers`,
+     * `preInitialize`, `programs`, `firstFrame`.
+     */
+    reached: string[];
+    /** The first stage that threw, with the stack — null while nothing has. */
+    failedAt: { stage: string; message: string; stack: string } | null;
+}
 
 /**
  * Resolve a backend request. Returns null when it can be honoured, or the reason it cannot.
@@ -70,7 +121,10 @@ export function resolveBackendRequest(requested: BackendKind | undefined): strin
 
     if (!webgpuAvailableInBrowser())
         return 'this browser does not expose navigator.gpu';
-    if (!WEBGPU_IMPLEMENTED)
+    // The narrower predicate, not WEBGPU_IMPLEMENTED: acquiring a device is a step the probe is allowed
+    // to take before drawing through one works. The message is unchanged for everybody else, because for
+    // everybody else nothing about the answer has changed.
+    if (!webgpuAcquisitionAllowed())
         return 'the WebGPU device works, but the renderer does not draw through it yet';
     return null;
 }

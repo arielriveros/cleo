@@ -12,7 +12,9 @@ import {
 import type {
     Device, DeviceCapabilities, BackendKind, BufferDescriptor, TextureDescriptor,
     ShaderModuleDescriptor, RenderPipelineDescriptor, BindGroupDescriptor, RenderTargetDescriptor,
+    ComputePipelineDescriptor,
 } from '../device';
+import type { ComputePipeline } from '../resources';
 import type { RenderPassDescriptor } from '../types';
 import type { Buffer, Texture } from '../resources';
 import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor, AddressMode, TextureConfigureDescriptor } from '../types';
@@ -372,6 +374,34 @@ export class WebGL2Device implements Device {
     }
 
     /**
+     * The same object as {@link createTextureView} with no narrowing, and that is the honest answer
+     * here rather than a shortcut.
+     *
+     * The distinction the interface draws — a whole-texture view versus one mip of one layer — is a
+     * WebGPU one. This backend has no view object at all: a `WebGL2TextureView` is a texture handle
+     * plus the mip and layer that `framebufferTextureLayer` will be given when it becomes an
+     * attachment, and sampling always binds the whole texture to a unit regardless. So base 0 of
+     * layer 0 IS the whole texture from a sampler's point of view.
+     */
+    public createWholeTextureView(texture: WebGL2Texture): WebGL2TextureView {
+        return new WebGL2TextureView(texture, 0, 0);
+    }
+
+    /**
+     * Refused, in the same voice as {@link glDevice}.
+     *
+     * WebGL2 has no compute stage in any form — not an extension, not an emulation. The engine's one
+     * compute workload (the cloud-noise volume bake) has a complete raster path for exactly this
+     * reason and picks between them on `capabilities.hasCompute`, which is a hardcoded `false` here.
+     * Reaching this method means a caller skipped that check, so it throws rather than returning
+     * something inert that would fail later and further away.
+     */
+    public createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline {
+        throw new Error(`${descriptor.label ?? 'compute pipeline'}: WebGL2 has no compute stage — ` +
+                        'gate this path on capabilities.hasCompute');
+    }
+
+    /**
      * The VAO that binds `buffers` through `pipeline`'s vertex layouts, built once per combination.
      *
      * WebGPU has no such object — a pipeline carries its vertex layouts and buffers are bound per draw.
@@ -554,6 +584,21 @@ export class WebGL2Device implements Device {
     public bindIndexBuffer(buffer: WebGL2Buffer): void {
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer.handle);
     }
+
+    /**
+     * No-op, and not a gap. WebGL2's per-pass timing does not go through the RHI at all: the profiler
+     * wraps `EXT_disjoint_timer_query_webgl2` `TIME_ELAPSED` queries around renderer-defined SCOPES,
+     * which are not render passes and have no descriptor to hang a `timestampWrites` off. See the
+     * two-name-space note at the top of gpuProfiler.ts.
+     *
+     * Implemented rather than omitted so the interface stays complete on both backends — and a plain
+     * no-op rather than a `glDevice()`-style throw, because the profiler calls these unconditionally
+     * once a device exists and "this backend times differently" is not an unported call site.
+     */
+    public setTimestampCollection(_enabled: boolean, _sink: (label: string, ms: number) => void): void {}
+
+    /** No-op. See {@link setTimestampCollection}. */
+    public collectTimestamps(): void {}
 
     /** WebGL2 issues everything as it is recorded, so `finish()` is a no-op — see WebGL2CommandEncoder. */
     public createCommandEncoder(_label?: string): WebGL2CommandEncoder {

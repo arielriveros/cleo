@@ -35,7 +35,7 @@ import { glDevice } from './webgl2Device';
 import type { WebGL2Texture, WebGL2Buffer, WebGL2Framebuffer } from './webgl2Device';
 import type {
     RenderPipelineDescriptor, BindGroupDescriptor, ShaderModuleDescriptor,
-    RenderPassEncoder, CommandEncoder,
+    RenderPassEncoder, CommandEncoder, ComputePassEncoder,
 } from '../device';
 import type {
     ShaderModule, RenderPipeline, RenderTarget, TextureView, Sampler,
@@ -311,6 +311,12 @@ export class WebGL2BindGroup implements BindGroup {
         for (const entry of this._entries) {
             if ('sampler' in entry) continue;   // see WebGL2Sampler — the texture carries its own state
             if ('buffer' in entry) continue;    // uniform blocks still flow through Shader.setUniform
+            // A storage texture is a WRITE binding, and there is nothing on this backend that could
+            // satisfy it. Assigning it a texture unit like a sampled texture would build a bind group
+            // that validates and then writes nothing at all, which is the failure mode the separate
+            // `storageTextureView` arm exists to make impossible.
+            if ('storageTextureView' in entry)
+                throw new Error(`${this.label}: WebGL2 has no storage textures (binding ${entry.binding})`);
 
             const name = module.glslNameFor(this.layout.group, entry.binding);
             if (!name)
@@ -442,6 +448,17 @@ export class WebGL2CommandEncoder implements CommandEncoder {
     public beginRenderPass(target: RenderTarget, descriptor: any): RenderPassEncoder {
         this._beginPass(target, descriptor);
         return new WebGL2RenderPassEncoder();
+    }
+
+    /**
+     * Refused, in the same voice as `glDevice()` and `WebGL2Device.createComputePipeline`.
+     *
+     * There is no compute stage on this backend to open a pass for. A caller that reached here
+     * skipped the `capabilities.hasCompute` check the RHI documents on `beginComputePass`.
+     */
+    public beginComputePass(label?: string): ComputePassEncoder {
+        throw new Error(`${label ?? 'compute pass'}: WebGL2 has no compute stage — ` +
+                        'gate this path on capabilities.hasCompute');
     }
 
     public copyTextureToTexture(source: TextureView, destination: TextureView,

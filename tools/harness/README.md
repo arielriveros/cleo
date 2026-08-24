@@ -75,10 +75,28 @@ It also asserts that **no WGSL is produced when no translator is installed** —
 has become reachable from the engine bundle and every published game is carrying 1.3 MB of shader
 compiler.
 
+### `webgpuBootCheck.js` — engine startup on a WebGPU device
+
+`webgpuCheck.js` proves the RHI's `WebGPUDevice` works against a real driver. This one drives the
+ENGINE's own startup at it — `?backend=webgpu&cleoWebgpuProbe=1` on the mesh page — and reads
+`renderer.deviceProbe`, which records the stage startup reached and the stage it died at.
+
+It is a **ratchet**, not a pass/fail on the port being finished: startup is expected to fail on WebGPU
+today, and `webgpuBoot.json` records exactly where. Porting a resource owner moves the failure forward
+and that file is edited in the same commit, so the progress is a reviewable diff. It catches the two
+things a boolean cannot — a failure that moves BACKWARDS, and one that moves forward without anybody
+writing it down. It also catches the failure mode that motivated the whole check: acquisition silently
+falling back to WebGL2 while every WebGPU-shaped assertion still passes against a WebGL2 device.
+
+The second half of the run loads the same page with `?backend=webgl2` and asserts it still reaches
+`firstFrame`. That is the control — device acquisition is the only code path that ships.
+
 ## Notes
 
 - `pages/*/cleo.js` and `pages/naga/naga/` are staged copies, rewritten on every run. They are ignored by
   git; the sources are `dist/` and `src/graphics/rhi/webgpu/naga/`.
-- `passBaseline.json` **is** committed — it is the reference the gate compares against.
+- `passBaseline.json` **is** committed — it is the reference the gate compares against. So is
+  `webgpuBoot.json`, which is a ratchet rather than a recording: never re-record it to make a red run
+  green, and never edit it without the port that moved it in the same commit.
 - The mesh harness pins `shadowStagger = false`. Staggered cascades make a single-frame stat snapshot
   depend on the frame index, which would make the baseline meaningless.

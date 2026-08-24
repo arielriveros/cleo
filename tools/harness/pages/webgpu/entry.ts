@@ -13,10 +13,13 @@ import { acquireWebGPUDevice, type WebGPUDevice } from '../../../../src/graphics
 import { BufferUsage, TextureUsage, ShaderStage, type VertexBufferLayout } from '../../../../src/graphics/rhi/types';
 import { UniformSet, ProgramUniforms } from '../../../../src/graphics/rhi/uniformSet';
 import { WebGPUShaderProgram } from '../../../../src/graphics/rhi/webgpu/webgpuShaderProgram';
-import type { Texture, TextureView, ShaderModule } from '../../../../src/graphics/rhi/resources';
+import type { Texture, TextureView, ShaderModule, BindGroup, RenderPipeline } from '../../../../src/graphics/rhi/resources';
+import type { RenderPassEncoder } from '../../../../src/graphics/rhi/device';
 import ScreenProgram from '../../../../src/graphics/shaders/wgsl/screen.wgsl';
 import PresentProgram from '../../../../src/graphics/shaders/wgsl/present.wgsl';
 import OutlineProgram from '../../../../src/graphics/shaders/wgsl/outline.wgsl';
+import CloudNoiseBakeProgram from '../../../../src/graphics/shaders/wgsl/cloudNoiseBake.wgsl';
+import CloudNoiseBakeComputeProgram from '../../../../src/graphics/shaders/wgsl/cloudNoiseBakeCompute.wgsl';
 
 interface CheckResult { name: string; pass: boolean; detail: string; }
 
@@ -84,6 +87,86 @@ function cpuTonemap(channel: number, exposure: number): number {
     const a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
     const mapped = Math.min(1, Math.max(0, (x * (a * x + b)) / (x * (c * x + d) + e)));
     return Math.pow(mapped, 1 / 2.2);
+}
+
+/**
+ * The CPU twin of `chunks/cloudNoiseField.wgsl`, in single precision.
+ *
+ * Every arithmetic step goes through `Math.fround`, and that is not fussiness. `hashCell` ends in
+ * `fract((c.x + c.y) * c.z)` over a value of order 18000, where an f32 ULP is about 0.002 — so a twin
+ * computed in JS's native f64 lands on the other side of an integer boundary now and then and the
+ * fract result differs by nearly 1.0 for that cell. Emulating f32 keeps the two on the same side of
+ * those boundaries, which is what makes a tight per-texel tolerance meaningful rather than lucky.
+ */
+const f = Math.fround;
+const fract = (x: number) => f(x - Math.floor(x));
+
+function hashCell(cx: number, cy: number, cz: number): number {
+    let x = fract(f(cx * 0.1031)), y = fract(f(cy * 0.1031)), z = fract(f(cz * 0.1031));
+    // dot(c, c.zyx + 31.32)
+    const d = f(f(f(x * f(z + 31.32)) + f(y * f(y + 31.32))) + f(z * f(x + 31.32)));
+    x = f(x + d); y = f(y + d); z = f(z + d);
+    return fract(f(f(x + y) * z));
+}
+
+/** WGSL `%` on floats is the remainder, which for the non-negative values here is a plain fmod. */
+const rem = (x: number, y: number) => f(x - f(y * Math.trunc(f(x / y))));
+
+function valueNoiseTiled(px: number, py: number, pz: number, period: number): number {
+    const ix = Math.floor(px), iy = Math.floor(py), iz = Math.floor(pz);
+    let fx = fract(px), fy = fract(py), fz = fract(pz);
+    const smooth = (t: number) => f(f(t * t) * f(3 - f(2 * t)));
+    fx = smooth(fx); fy = smooth(fy); fz = smooth(fz);
+
+    const i0 = [rem(ix, period), rem(iy, period), rem(iz, period)];
+    const i1 = [rem(ix + 1, period), rem(iy + 1, period), rem(iz + 1, period)];
+
+    const n000 = hashCell(i0[0], i0[1], i0[2]);
+    const n100 = hashCell(i1[0], i0[1], i0[2]);
+    const n010 = hashCell(i0[0], i1[1], i0[2]);
+    const n110 = hashCell(i1[0], i1[1], i0[2]);
+    const n001 = hashCell(i0[0], i0[1], i1[2]);
+    const n101 = hashCell(i1[0], i0[1], i1[2]);
+    const n011 = hashCell(i0[0], i1[1], i1[2]);
+    const n111 = hashCell(i1[0], i1[1], i1[2]);
+
+    // WGSL `mix(a, b, t)` is `a + t * (b - a)`, and the spelling matters at this precision.
+    const mix = (a: number, b: number, t: number) => f(a + f(t * f(b - a)));
+    const nx00 = mix(n000, n100, fx), nx10 = mix(n010, n110, fx);
+    const nx01 = mix(n001, n101, fx), nx11 = mix(n011, n111, fx);
+    return mix(mix(nx00, nx10, fy), mix(nx01, nx11, fy), fz);
+}
+
+function fbmTiled(px: number, py: number, pz: number, period: number, octaves: number): number {
+    let sum = 0, amp = 0.5, norm = 0, per = period;
+    for (let i = 0; i < 6; i++) {
+        if (i >= octaves) break;
+        const scale = f(per / period);
+        sum = f(sum + f(amp * valueNoiseTiled(f(px * scale), f(py * scale), f(pz * scale), per)));
+        norm = f(norm + amp);
+        per = f(per * 2);
+        amp = f(amp * 0.5);
+    }
+    return f(sum / Math.max(norm, 1e-5));
+}
+
+/** The twin of `cloudNoiseTexel`, hardcoded 3/3/2 detail branch and all. */
+function cloudNoiseTexel(px: number, py: number, pz: number,
+                                period: number, octaves: number, detail: number): number[] {
+    if (detail !== 0) {
+        return [
+            fbmTiled(px, py, pz, period, 3),
+            fbmTiled(f(px * 2), f(py * 2), f(pz * 2), f(period * 2), 3),
+            fbmTiled(f(px * 4), f(py * 4), f(pz * 4), f(period * 4), 2),
+            1.0,
+        ];
+    }
+    return [
+        fbmTiled(px, py, pz, period, octaves),
+        fbmTiled(f(px * 2), f(py * 2), f(pz * 2), f(period * 2), 3),
+        fbmTiled(f(px * 4), f(py * 4), f(pz * 4), f(period * 4), 3),
+        valueNoiseTiled(f(px * 2), f(py * 2), f(pz * 2), f(period * 2)),
+    ];
 }
 
 function makeModule(device: WebGPUDevice, program: { wgsl: string; entryPoints: any }, label: string): ShaderModule {
@@ -169,7 +252,7 @@ async function run(): Promise<CheckResult[]> {
         const bindGroup = device.createBindGroup({
             layout: pipeline.bindGroupLayouts[0],
             entries: [
-                { binding: 0, textureView: device.createSamplingView(source) },
+                { binding: 0, textureView: device.createWholeTextureView(source) },
                 { binding: 1, sampler: nearest },
             ],
         });
@@ -238,9 +321,9 @@ async function run(): Promise<CheckResult[]> {
         const group0 = device.createBindGroup({
             layout: pipeline.bindGroupLayouts[0],
             entries: [
-                { binding: 0, textureView: device.createSamplingView(source) },
+                { binding: 0, textureView: device.createWholeTextureView(source) },
                 { binding: 1, sampler: nearest },
-                { binding: 2, textureView: device.createSamplingView(depth) },
+                { binding: 2, textureView: device.createWholeTextureView(depth) },
                 { binding: 3, sampler: nearest },
             ],
         });
@@ -679,6 +762,415 @@ struct Targets {
         check('the surface follows a canvas resize',
               after.width === SURFACE_W * 2 && after.height === SURFACE_H + 17,
               `${after.width}x${after.height}, canvas ${surfaceCanvas.width}x${surfaceCanvas.height}`);
+    }
+
+    // --- timestamp queries -----------------------------------------------------------------------
+    //
+    // The GPU-timing tier: `Device.setTimestampCollection` + `Device.collectTimestamps`, exercised
+    // through the interface exactly as `gpuProfiler`'s WebGPU backend uses them. Everything else about
+    // the profiler is object graphs and is covered in tests/gpuProfiler.test.ts; what needs a driver
+    // is whether a `GPUQuerySet` written by `timestampWrites` resolves into readable numbers at all.
+    //
+    // REPORTED, NEVER ASSERTED ON PRESENCE. `timestamp-query` is an optional feature and an adapter is
+    // free to withhold it — Chrome gates it behind a flag on some platforms and it is commonly absent
+    // in headless or software configurations. A gate that failed on its absence would be failing on
+    // the hardware it ran on, so the availability line is always a pass and only the BEHAVIOUR checks
+    // (which run when the feature is there) can fail.
+    {
+        check('timestamp-query availability (reported, not required)', true,
+              caps.hasTimestampQuery ? 'feature present — timing checks below ran'
+                                     : 'feature absent on this adapter — timing checks skipped');
+
+        if (caps.hasTimestampQuery) {
+            const collected: [string, number][] = [];
+            device.setTimestampCollection(true, (label, ms) => collected.push([label, ms]));
+
+            // Two passes of deliberately different cost, on one target, in a known order. `ts.cheap`
+            // clears and draws nothing; `ts.expensive` blits over a 512x512 target a thousand times.
+            // The ORDER is what makes the labels checkable: were the begin/end query indices paired
+            // wrongly, the two costs would swap or blend into each other.
+            const LOAD_SIZE = 512, LOAD_DRAWS = 400;
+            const module = makeModule(device, ScreenProgram, 'screen.wgsl');
+            const pipeline = device.createRenderPipeline({
+                label: 'timestamp-load',
+                vertex: module, fragment: module,
+                vertexLayouts: [QUAD_LAYOUT],
+                primitive: { topology: 'triangle-strip', cullMode: 'none', frontFace: 'ccw' },
+                colorTargets: [{ format: 'rgba8unorm' }],
+            });
+            const source = uploadTexture(device, pattern, SIZE, 'timestamp-src');
+            const target = makeTarget(device, LOAD_SIZE, 'timestamp-dst');
+            const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
+            const bindGroup = device.createBindGroup({
+                layout: pipeline.bindGroupLayouts[0],
+                entries: [
+                    { binding: 0, textureView: device.createWholeTextureView(source) },
+                    { binding: 1, sampler: nearest },
+                ],
+            });
+
+            const encoder = device.createCommandEncoder('timestamps');
+            const cheap = encoder.beginRenderPass(renderTarget, {
+                label: 'ts.cheap',
+                colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
+            });
+            cheap.end();
+
+            const expensive = encoder.beginRenderPass(renderTarget, {
+                label: 'ts.expensive',
+                colorAttachments: [{ target: 0, loadOp: 'load', storeOp: 'store' }],
+            });
+            expensive.setPipeline(pipeline);
+            expensive.setBindGroup(0, bindGroup);
+            expensive.setVertexBuffer(0, quad);
+            // ~100 megatexels of fill. One blit is nowhere near the browser's timestamp
+            // quantisation floor (Chrome rounds to ~100µs without the fine-resolution origin trial),
+            // so the difference has to be made out of real work rather than expected from one draw.
+            for (let i = 0; i < LOAD_DRAWS; i++) expensive.draw(4);
+            expensive.end();
+            encoder.finish();
+
+            // Never wait on the GPU — pump the drain the way the profiler does, once per frame, until
+            // the results turn up or the budget runs out. `mapAsync` resolves on a task, so this has
+            // to yield to the event loop between pumps; a busy loop would spin forever.
+            for (let attempt = 0; attempt < 240 && collected.length < 2; attempt++) {
+                device.collectTimestamps();
+                await new Promise(resolve => requestAnimationFrame(() => resolve(null)));
+            }
+
+            check('two timed passes come back, labelled and in the order they were recorded',
+                  collected.length === 2 && collected[0][0] === 'ts.cheap'
+                      && collected[1][0] === 'ts.expensive',
+                  collected.map(([label, ms]) => label + '=' + ms.toFixed(4) + 'ms').join(' ')
+                      || 'nothing drained within 240 frames');
+
+            if (collected.length === 2) {
+                const cheapMs = collected[0][1], expensiveMs = collected[1][1];
+                // Ordered and nonzero at the expensive end. NOT a ratio, and deliberately NOT
+                // `cheapMs > 0`: MEASURED here, the empty clear reads back exactly 0.0000ms, because
+                // browsers quantise timestamps (Chrome to ~100µs) and both ends of a sub-quantum pass
+                // land on the same tick. Zero is the honest report for "below the measurement floor",
+                // so the only claim worth asserting is that four hundred fullscreen blits cost
+                // strictly more than an empty clear.
+                check('the expensive pass costs strictly more than the cheap one',
+                      expensiveMs > 0 && expensiveMs > cheapMs,
+                      'cheap=' + cheapMs.toFixed(4) + 'ms expensive=' + expensiveMs.toFixed(4)
+                          + 'ms — a 0.0000 cheap reading is the quantisation floor, not a lost sample');
+            }
+
+            // Switching collection off has to stop it at the DEVICE, not merely at the profiler: a
+            // pass recorded afterwards must carry no `timestampWrites` and drain nothing. The sink is
+            // deliberately the same appending one, so a device that kept recording would be caught
+            // here rather than silently swallowed by a no-op sink.
+            device.setTimestampCollection(false, (label, ms) => collected.push([label, ms]));
+            collected.length = 0;
+            const after = device.createCommandEncoder('timestamps-off');
+            after.beginRenderPass(renderTarget, {
+                label: 'ts.off',
+                colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
+            }).end();
+            after.finish();
+            for (let attempt = 0; attempt < 8; attempt++) {
+                device.collectTimestamps();
+                await new Promise(resolve => requestAnimationFrame(() => resolve(null)));
+            }
+            check('collection off stops the device recording timestamps', collected.length === 0,
+                  collected.length === 0 ? 'nothing drained'
+                                         : 'drained ' + collected.length + ' unexpectedly');
+
+            target.texture.destroy();
+            source.destroy();
+        }
+    }
+
+    // -- 9. compute tier: the cloud-noise volume bake --------------------------------------------
+    //
+    // The one workload in this engine that a render pass cannot express. A WebGPU colour attachment
+    // must be a 2D or 2D-array view, and a 3D texture's z-slice is neither, so the WebGL2 bake — a
+    // fullscreen draw per slice with `framebufferTextureLayer` re-pointing the attachment — has no
+    // WebGPU spelling at all. `cloudNoiseBakeCompute.wgsl` writes the same volume as a
+    // `texture_storage_3d` in one dispatch instead.
+    //
+    // Four claims are under test and they fail in different ways:
+    //   a. the RHI compute surface works end to end (module -> pipeline -> storage bind -> dispatch);
+    //   b. the compute field matches the RASTER field — the same `cloudNoiseBake.wgsl` the WebGL2
+    //      renderer bakes with, run here into an ordinary 2D target, which WebGPU is perfectly happy
+    //      to do. That is what "the two backends produce the same clouds" actually means;
+    //   c. both match an independent CPU twin, which is the only one of the three that can catch the
+    //      two shaders drifting TOGETHER — they share a chunk, so (b) would call that a pass;
+    //   d. TWO volumes with different settings, recorded on ONE encoder, each come out with its own
+    //      settings. That is not a hypothetical: the renderer's first draft shared a single uniform
+    //      buffer between the base and detail dispatches, and because `writeBuffer` is queued and the
+    //      encoder is submitted once, BOTH writes landed before either dispatch ran and both volumes
+    //      were baked as detail. It is invisible to a one-volume check.
+    {
+        const V = 16;                       // volume edge; a multiple of the 4x4x4 workgroup
+        // The two volumes the renderer bakes, in miniature. Different in every field that matters, so
+        // a mixed-up uniform buffer cannot produce a passing result by coincidence.
+        const BASE = { period: 4, octaves: 4, detail: 0 };
+        const DETAIL = { period: 8, octaves: 3, detail: 1 };
+        // Slices to check. 0 and V-1 are where a half-texel offset shows up first: the whole
+        // compute-vs-raster question is whether `(gid + 0.5) / size` reproduces the raster path's
+        // fragment-centre uv and the renderer's `(z + 0.5) / size` slice uniform.
+        const SLICES = [0, 1, V / 2, V - 1];
+
+        interface NoiseSettings { period: number; octaves: number; detail: number; }
+
+        /** The 16-byte uniform block both bake shaders declare: two f32 then two i32, no padding. */
+        const noiseUniforms = (first: number, s: NoiseSettings): Uint8Array => {
+            const bytes = new ArrayBuffer(16);
+            new Float32Array(bytes).set([first, s.period]);
+            new Int32Array(bytes, 8).set([s.octaves, s.detail]);
+            return new Uint8Array(bytes);
+        };
+
+        const computeModule = device.createShaderModule({
+            label: 'cloudNoiseBakeCompute.wgsl',
+            stage: ShaderStage.COMPUTE,
+            source: CloudNoiseBakeComputeProgram.wgsl,
+            entryPoints: CloudNoiseBakeComputeProgram.entryPoints,
+            resources: CloudNoiseBakeComputeProgram.resources,
+        });
+        check('the compute module declares a compute stage and no raster stage',
+              computeModule.entryPoints.compute === 'cs_main' && !computeModule.entryPoints.vertex
+                  && !computeModule.entryPoints.fragment,
+              'entryPoints=' + JSON.stringify(computeModule.entryPoints));
+
+        const computePipeline = device.createComputePipeline({
+            label: 'cloudNoiseBake', compute: computeModule,
+        });
+        check('a compute pipeline exposes the one bind group its module declares',
+              computePipeline.bindGroupLayouts.length === 1
+                  && computePipeline.bindGroupLayouts[0].group === 0,
+              'groups=[' + computePipeline.bindGroupLayouts.map(l => l.group).join(',') + ']');
+
+        // Both volumes on ONE encoder, exactly as the renderer records them — see claim (d) above.
+        const dispatch = device.createCommandEncoder('cloudNoiseBake');
+        const bakeVolume = (label: string, settings: NoiseSettings): Texture => {
+            // STORAGE_BINDING and no RENDER_ATTACHMENT — the exclusivity `TextureConfig.storage`
+            // encodes: nothing ever draws into one of these.
+            const texture = device.createTexture({
+                label, format: 'rgba8unorm', dimension: '3d',
+                width: V, height: V, depthOrArrayLayers: V,
+                usage: TextureUsage.TEXTURE_BINDING | TextureUsage.STORAGE_BINDING,
+            });
+            const uniforms = device.createBuffer({
+                label: label + '-uniforms', size: 16,
+                usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
+            });
+            device.writeBuffer(uniforms, 0, noiseUniforms(V, settings));
+
+            const pass = dispatch.beginComputePass(label);
+            pass.setPipeline(computePipeline);
+            // The whole-texture view is the load-bearing part. `createTextureView` narrows a 3D
+            // texture to a `2d` view of layer 0 and `texture_storage_3d` rejects that — the gap
+            // `createWholeTextureView` was promoted onto the `Device` interface to close.
+            pass.setBindGroup(0, device.createBindGroup({
+                label,
+                layout: computePipeline.bindGroupLayouts[0],
+                entries: [
+                    { binding: 0, buffer: uniforms },
+                    { binding: 1, storageTextureView: device.createWholeTextureView(texture) },
+                ],
+            }));
+            pass.dispatchWorkgroups(V / 4, V / 4, V / 4);
+            pass.end();
+            return texture;
+        };
+        const baseVolume = bakeVolume('cloudNoise.base', BASE);
+        const detailVolume = bakeVolume('cloudNoise.detail', DETAIL);
+        dispatch.finish();
+
+        // Reading a 3D texture back: `textureLoad` at the fragment's own integer coordinates, into a
+        // VxV 2D target. Deliberately a load and not a sampler — a load is exact, so the RGBA8 that
+        // comes back IS the byte that was stored rather than a filtered reconstruction of it, and the
+        // comparison below is then about the bake rather than about sampling.
+        const READBACK_WGSL = [
+            'struct VOut { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> };',
+            '@vertex fn vs_main(@location(0) p: vec3<f32>, @location(1) uv: vec2<f32>) -> VOut {',
+            '    var out: VOut; out.position = vec4<f32>(p, 1.0); out.uv = uv; return out;',
+            '}',
+            '@group(0) @binding(0) var u_volume: texture_3d<f32>;',
+            'struct SliceUniforms { z: i32 };',
+            '@group(1) @binding(0) var<uniform> u_slice: SliceUniforms;',
+            '@fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {',
+            '    let xy = vec2<i32>(in.position.xy);',
+            '    return textureLoad(u_volume, vec3<i32>(xy.x, xy.y, u_slice.z), 0);',
+            '}',
+        ].join('\n');
+        const readbackModule = device.createShaderModule({
+            label: 'volume-readback', stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
+            source: READBACK_WGSL, entryPoints: { vertex: 'vs_main', fragment: 'fs_main' },
+        });
+        const readbackPipeline = device.createRenderPipeline({
+            label: 'volume-readback',
+            vertex: readbackModule, fragment: readbackModule,
+            vertexLayouts: [QUAD_LAYOUT],
+            primitive: { topology: 'triangle-strip', cullMode: 'none', frontFace: 'ccw' },
+            colorTargets: [{ format: 'rgba8unorm' }],
+        });
+        const sliceUniforms = device.createBuffer({
+            label: 'slice', size: 16, usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
+        });
+        const sliceGroup = device.createBindGroup({
+            layout: readbackPipeline.bindGroupLayouts.filter(l => l.group === 1)[0],
+            entries: [{ binding: 0, buffer: sliceUniforms }],
+        });
+        const volumeGroup = (texture: Texture) => device.createBindGroup({
+            layout: readbackPipeline.bindGroupLayouts.filter(l => l.group === 0)[0],
+            entries: [{ binding: 0, textureView: device.createWholeTextureView(texture) }],
+        });
+        const baseGroup = volumeGroup(baseVolume), detailGroup = volumeGroup(detailVolume);
+
+        // The RASTER shader, on a 2D target. `cloudNoiseBake.wgsl` declares group 1 only, so the
+        // pipeline's group 0 is one of the empty ones `setPipeline` fills in for it.
+        const rasterModule = makeModule(device, CloudNoiseBakeProgram, 'cloudNoiseBake.wgsl');
+        const rasterPipeline = device.createRenderPipeline({
+            label: 'cloudNoiseBake-raster',
+            vertex: rasterModule, fragment: rasterModule,
+            vertexLayouts: [QUAD_LAYOUT],
+            primitive: { topology: 'triangle-strip', cullMode: 'none', frontFace: 'ccw' },
+            colorTargets: [{ format: 'rgba8unorm' }],
+        });
+        const rasterUniforms = device.createBuffer({
+            label: 'cloudNoiseBake-raster-uniforms', size: 16,
+            usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
+        });
+        const rasterGroup = device.createBindGroup({
+            layout: rasterPipeline.bindGroupLayouts.filter(l => l.group === 1)[0],
+            entries: [{ binding: 0, buffer: rasterUniforms }],
+        });
+
+        /** Draw one VxV pass into a fresh target and read it back. */
+        const drawAndRead = async (label: string, pipeline: RenderPipeline,
+                                   bind: (pass: RenderPassEncoder) => void): Promise<Uint8Array> => {
+            const target = makeTarget(device, V, label);
+            const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
+            const encoder = device.createCommandEncoder(label);
+            const pass = encoder.beginRenderPass(renderTarget, {
+                label,
+                colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [1, 0, 1, 1] }],
+            });
+            pass.setPipeline(pipeline);
+            bind(pass);
+            pass.setVertexBuffer(0, quad);
+            pass.draw(4);
+            pass.end();
+            encoder.finish();
+            const pixels = await device.readPixels(target.view, 0, 0, V, V);
+            target.texture.destroy();
+            return pixels;
+        };
+
+        /** One VxV slice of a baked volume, read straight back. */
+        const readComputedSlice = async (group: BindGroup, z: number): Promise<Uint8Array> => {
+            device.writeBuffer(sliceUniforms, 0, new Int32Array([z, 0, 0, 0]));
+            return drawAndRead('volume-readback-z' + z, readbackPipeline, (pass) => {
+                pass.setBindGroup(0, group);
+                pass.setBindGroup(1, sliceGroup);
+            });
+        };
+
+        /** The same slice, produced by the raster shader into a 2D target. */
+        const readRasterSlice = async (z: number, settings: NoiseSettings): Promise<Uint8Array> => {
+            device.writeBuffer(rasterUniforms, 0, noiseUniforms((z + 0.5) / V, settings));
+            return drawAndRead('cloudNoiseBake-raster-z' + z, rasterPipeline,
+                               (pass) => { pass.setBindGroup(1, rasterGroup); });
+        };
+
+        interface Agreement {
+            maxComputeVsRaster: number; maxComputeVsCpu: number; maxRasterVsCpu: number;
+            outliers: number; compared: number; nonZero: number; histogram: number[]; worst: string;
+        }
+
+        const compare = async (group: BindGroup, settings: NoiseSettings): Promise<Agreement> => {
+            const a: Agreement = {
+                maxComputeVsRaster: 0, maxComputeVsCpu: 0, maxRasterVsCpu: 0,
+                outliers: 0, compared: 0, nonZero: 0, histogram: new Array(64).fill(0), worst: '',
+            };
+            for (const z of SLICES) {
+                const computed = await readComputedSlice(group, z);
+                const rastered = await readRasterSlice(z, settings);
+                for (let y = 0; y < V; y++) {
+                    for (let x = 0; x < V; x++) {
+                        const i = (y * V + x) * 4;
+                        const expected = cloudNoiseTexel(
+                            ((x + 0.5) / V) * settings.period, ((y + 0.5) / V) * settings.period,
+                            ((z + 0.5) / V) * settings.period,
+                            settings.period, settings.octaves, settings.detail);
+                        for (let c = 0; c < 4; c++) {
+                            const cpu = Math.round(Math.min(1, Math.max(0, expected[c])) * 255);
+                            const dComputeRaster = Math.abs(computed[i + c] - rastered[i + c]);
+                            const dComputeCpu = Math.abs(computed[i + c] - cpu);
+                            const dRasterCpu = Math.abs(rastered[i + c] - cpu);
+                            a.maxComputeVsRaster = Math.max(a.maxComputeVsRaster, dComputeRaster);
+                            a.maxRasterVsCpu = Math.max(a.maxRasterVsCpu, dRasterCpu);
+                            if (dComputeCpu > a.maxComputeVsCpu) {
+                                a.maxComputeVsCpu = dComputeCpu;
+                                a.worst = 'worst at (' + x + ',' + y + ',' + z + ') ch' + c
+                                        + ' compute=' + computed[i + c] + ' raster=' + rastered[i + c]
+                                        + ' cpu=' + cpu;
+                            }
+                            if (dComputeCpu > 2) a.outliers++;
+                            a.histogram[Math.min(dComputeCpu, 63)]++;
+                            if (computed[i + c] !== 0) a.nonZero++;
+                            a.compared++;
+                        }
+                    }
+                }
+            }
+            return a;
+        };
+
+        const base = await compare(baseGroup, BASE);
+        const detail = await compare(detailGroup, DETAIL);
+
+        // Guards the tolerances below from passing on an all-zero volume: a dispatch that never ran
+        // leaves the texture cleared, and "0 differs from 0 by 0" would sail through a comparison
+        // between two paths that had both failed the same way.
+        check('both dispatches wrote their volume rather than leaving it cleared',
+              base.compared === SLICES.length * V * V * 4
+                  && base.nonZero > base.compared * 0.9 && detail.nonZero > detail.compared * 0.9,
+              'base ' + base.nonZero + '/' + base.compared + ' nonzero, detail '
+                  + detail.nonZero + '/' + detail.compared + ' nonzero, slices [' + SLICES.join(',') + ']');
+
+        // +/-1 LSB is the floor, not a hope: `textureStore` to rgba8unorm and a fragment write to an
+        // RGBA8 attachment both round to nearest from the same f32, but the two rounding steps are
+        // different parts of the driver, so a half-ULP difference upstream lands either side of a .5.
+        check('the compute field matches the raster field to within 1 LSB',
+              base.maxComputeVsRaster <= 1 && detail.maxComputeVsRaster <= 1,
+              'max channel difference: base = ' + base.maxComputeVsRaster + '/255, detail = '
+                  + detail.maxComputeVsRaster + '/255');
+
+        // The independent statement, and claim (d) with it: the two volumes are compared against a
+        // twin evaluated with THEIR OWN settings, so a shared uniform buffer that let the second
+        // dispatch's write reach the first fails here rather than silently baking two detail volumes.
+        //
+        // WHY A DISTRIBUTION AND NOT A MAXIMUM. `hashCell` ends in `fract((c.x + c.y) * c.z)` over a
+        // value of order 18000, where one f32 ULP is about 0.002. A single-precision twin therefore
+        // reproduces the GPU almost everywhere and then, for the occasional lattice cell whose product
+        // sits within an ULP of an integer, lands on the OTHER side of the fract and differs by nearly
+        // a whole hash. That is a property of the hash, not a defect in either implementation, and no
+        // amount of care in the twin removes it.
+        //
+        // MEASURED on this adapter over 4096 channels per volume (4 slices of a 16³ volume): the base
+        // field came back 3855 exact, 240 off by one, and exactly ONE at 36. So the gate is "99.9%
+        // within 2 LSB", which that distribution clears by a factor of forty while every failure worth
+        // catching blows straight through it: a dropped half-texel offset moves essentially every
+        // channel, and so does a wrong octave count, a mis-ordered fbm band or a swapped uniform.
+        const report = (label: string, a: Agreement) =>
+            label + ': outliers ' + a.outliers + '/' + a.compared + ', hist '
+                  + a.histogram.map((n, d) => n ? d + ':' + n : '').filter(Boolean).join(',')
+                  + (a.worst ? ' (' + a.worst + ')' : '');
+        const budget = base.compared / 1000;
+        check('both volumes match an independent CPU twin of cloudNoiseTexel (99.9% within 2 LSB)',
+              base.outliers <= budget && detail.outliers <= budget
+                  && base.maxRasterVsCpu === base.maxComputeVsCpu
+                  && detail.maxRasterVsCpu === detail.maxComputeVsCpu,
+              report('base', base) + ' | ' + report('detail', detail) + ' | budget ' + budget);
+
+        baseVolume.destroy();
+        detailVolume.destroy();
     }
 
     device.destroy();

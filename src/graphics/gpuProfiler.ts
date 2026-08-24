@@ -1,12 +1,29 @@
 // Per-pass GPU timing for the render pipeline, read by the editor's profiler panel and performance
-// HUD. Standalone (imports nothing engine-specific, takes its GL context by injection) so it can be
-// used from anywhere without a circular import, and so the ring-buffer/percentile maths is testable
-// in the DOM-free vitest suite — same arrangement as renderStats.ts / sceneStats.ts / physicsStats.ts.
+// HUD. Standalone (imports nothing engine-specific beyond the RHI's types, takes its device and its
+// GL context by injection) so it can be used from anywhere without a circular import, and so the
+// ring-buffer/percentile maths is testable in the DOM-free vitest suite — same arrangement as
+// renderStats.ts / sceneStats.ts / physicsStats.ts.
 //
-// WHY THIS EXISTS: `frameStats.frameMs` measures wall-clock inside Renderer.render(), but WebGL is
-// asynchronous — render() returns as soon as the commands are queued, long before the GPU has drawn
-// anything. On a fill-rate-bound frame the CPU numbers all look healthy and the entire cost lands in
-// the HUD's "Unattributed" row. Timer queries are the only way to see it from inside the page.
+// WHY THIS EXISTS: `frameStats.frameMs` measures wall-clock inside Renderer.render(), but a graphics
+// API is asynchronous — render() returns as soon as the commands are queued, long before the GPU has
+// drawn anything. On a fill-rate-bound frame the CPU numbers all look healthy and the entire cost
+// lands in the HUD's "Unattributed" row. GPU timers are the only way to see it from inside the page.
+//
+// TWO BACKENDS THAT DO NOT MEASURE THE SAME THING. This is the fact the whole file is shaped around:
+//
+//  - WebGL2 (`EXT_disjoint_timer_query_webgl2`) times an arbitrary SCOPE: a `TIME_ELAPSED` window the
+//    renderer opens and closes around whatever it likes. The 29 names in `RENDER_PASSES` are those
+//    windows, and several of them span many render passes (`bloom.blur` covers the whole ping-pong
+//    chain) while others span none at all (`frameEnd` deliberately wraps nothing but the drain).
+//  - WebGPU times exactly one thing: a render PASS, through `timestampWrites` in the pass descriptor.
+//    There is no way to open a timer around a span of the frame that is not a pass.
+//
+// The ratios between the two name spaces are 1:0, 1:1, 1:N and N:1, so the readouts are labelled as
+// two different row sets rather than pretending to be one — see `attribution` and
+// `PASS_LABEL_TO_SCOPE`. Anything else would put a WebGL2 scope's name on a WebGPU pass's cost.
+
+import type { Device } from './rhi/device';
+import { timerQueryExtension } from './rhi/webgl2/capabilities';
 
 /** Timings for one named pass. `ms` is the most recent completed frame; `avgMs` is smoothed. */
 export interface PassTiming {
@@ -71,6 +88,77 @@ export const TOGGLEABLE_PASSES: RenderPass[] = [
     'transparent', '2d', 'gizmos', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
 ];
+
+/**
+ * Render-pass LABEL (`RenderPassDescriptor.label`) -> the WebGL2 profiler SCOPE that contains it.
+ *
+ * The two name spaces are not the same list and never were: the renderer passes ~40 distinct labels
+ * and `RENDER_PASSES` holds 29 scopes, with roughly 20 names in common. `types.ts` used to claim they
+ * matched; the vitest in tests/gpuProfilerLabels.test.ts is what makes this table's half of that claim
+ * true, by scanning renderer.ts's source for the literals it actually passes.
+ *
+ * Only two kinds of entry are allowed, and the test enforces the second half of each:
+ *
+ *  - an EXACT correspondence — one pass, one scope, same cost (`geometry`, `ssao.blur`, `present`);
+ *  - an UNAMBIGUOUS SUM — every pass mapped to a scope lies inside that scope on WebGL2, so adding
+ *    them up reproduces what the scope already measured (`velocity.tile` + `velocity.neighbor` +
+ *    `motionBlur` are the three passes inside the `motionBlur` scope).
+ *
+ * A label that is NOT here is reported as `pass:<label>` rather than guessed at. That is deliberate:
+ * several passes (`brdf`, `outline`, `probePreview`, `cloudTrace`, `shadow.clear`) sit in no WebGL2
+ * scope at all, so there is no scope name that could honestly carry their cost. They show up as new
+ * rows on WebGPU that WebGL2 never had — extra information, not a mislabelled one.
+ */
+export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
+    // Exact: the label and the scope are the same span of work.
+    geometry: 'geometry',
+    foliage: 'foliage',
+    ssao: 'ssao',
+    'ssao.blur': 'ssao.blur',
+    sky: 'sky',
+    clouds: 'clouds',
+    'clouds.resolve': 'clouds.resolve',
+    skyFog: 'skyFog',
+    grid: 'grid',
+    '2d': '2d',
+    gizmos: 'gizmos',
+    outlineMask: 'outlineMask',
+    velocity: 'velocity',
+    godRays: 'godRays',
+    'bloom.bright': 'bloom.bright',
+    'bloom.blur': 'bloom.blur',
+    'bloom.composite': 'bloom.composite',
+    chromatic: 'chromatic',
+    motionBlur: 'motionBlur',
+    present: 'present',
+    forwardOpaque: 'forwardOpaque',
+    transparent: 'transparent',
+
+    // Renamed but still one-to-one: the pass label and the scope name simply differ.
+    cascade: 'shadows.cascades',
+    spotShadow: 'shadows.spot',
+    deferredLighting: 'lighting',
+    screenMaterial: 'screenMaterials',
+    skyAtmosphereBake: 'sky.bake',
+
+    // Unambiguous sums. Each of these runs inside the named scope on WebGL2, so N passes add up to
+    // the one number that scope already reported.
+    iblConvolve: 'ibl.bake',
+    probeCapture: 'ibl.bake',
+    godRaysUpsample: 'godRays',
+    'velocity.tile': 'motionBlur',
+    'velocity.neighbor': 'motionBlur',
+    // The scene -> compose[0] copy. It is the only remaining `compose` label (the three ambiguous ones
+    // became `bloom.composite`, `chromatic` and `motionBlur`), and on WebGL2 it is timed under a
+    // `present` scope opened immediately before it — `present` is already reported twice per frame
+    // there, once for this copy and once for the display resolve.
+    compose: 'present',
+};
+
+/** The scope a pass label reports under, or a `pass:` row of its own when there is no honest scope. */
+export function scopeForPassLabel(label: string): string {
+    return PASS_LABEL_TO_SCOPE[label] ?? `pass:${label}`;
+}
 
 // How much weight a new sample carries in the EMA. Low enough that a single hitching frame does not
 // dominate the readout, high enough that toggling a pass off is visibly reflected within ~1/4 second.
@@ -187,6 +275,57 @@ interface Scope { name: string; query: WebGLQuery; }
 interface PendingFrame { scopes: Scope[]; }
 
 /**
+ * What the renderer, the HUD and the profiler panel talk to. One of these is live at a time, chosen
+ * by {@link initializeGpuProfiler} once the device is known.
+ *
+ * The two extra members beyond "today's profiler" are the ones that stop the UI from lying:
+ *
+ *  - `attribution` says which name space the rows are in. `'scopes'` are the renderer-defined
+ *    `RENDER_PASSES` windows; `'passes'` are real render passes, mapped onto a scope name where the
+ *    correspondence is honest and reported as `pass:<label>` where it is not.
+ *  - `unavailableReason` says why `available` is false, in words a user can act on. There are now
+ *    three distinct reasons (no device yet, no extension, no `timestamp-query` feature) and the panel
+ *    used to hardcode one extension name for all of them.
+ */
+export interface GpuProfilerBackend {
+    readonly available: boolean;
+    enabled: boolean;
+    readonly totalMs: number;
+    readonly passes: PassTiming[];
+    readonly attribution: 'scopes' | 'passes';
+    readonly unavailableReason: string | null;
+    historyFor(name: string): Ring | null;
+    beginPass(name: RenderPass | string): void;
+    endPass(): void;
+    endFrame(): void;
+    reset(): void;
+}
+
+/**
+ * The backend before a device exists, and the backend on any device that cannot time anything.
+ *
+ * Not a special case anywhere else in the file: every entry point stays callable and does nothing, so
+ * the renderer's ~30 call sites need no guard and the panel's fallback (A/B pass bisection through
+ * `Renderer.passEnabled`, which needs no GPU timer at all) is reached through the ordinary
+ * `available === false` path.
+ */
+export class NullGpuProfiler implements GpuProfilerBackend {
+    public enabled = false;
+    public readonly available = false;
+    public readonly attribution = 'scopes' as const;
+
+    constructor(public readonly unavailableReason: string) {}
+
+    public get totalMs(): number { return 0; }
+    public get passes(): PassTiming[] { return []; }
+    public historyFor(_name: string): Ring | null { return null; }
+    public beginPass(_name: RenderPass | string): void {}
+    public endPass(): void {}
+    public endFrame(): void {}
+    public reset(): void {}
+}
+
+/**
  * GPU timer-query profiler over `EXT_disjoint_timer_query_webgl2`.
  *
  * Results are collected N frames late and never waited on: reading a query result in the frame that
@@ -199,7 +338,7 @@ interface PendingFrame { scopes: Scope[]; }
  * every method is a no-op; the profiler UI falls back to A/B pass bisection via
  * `Renderer.passEnabled`, which needs no extension.
  */
-export class GpuProfiler {
+export class WebGL2GpuProfiler implements GpuProfilerBackend {
     private _gl: WebGL2RenderingContext | null = null;
     private _ext: any = null;
     private _enabled = false;
@@ -221,14 +360,32 @@ export class GpuProfiler {
     /** Resolved frames since construction/reset; the clock `PassTiming.lastSeenFrame` is measured on. */
     private _resolvedFrames = 0;
 
-    /** Called once from Renderer.preInitialize. Safe to call again (re-resolves the extension). */
+    /**
+     * Called once from `initializeGpuProfiler`, itself called from `Renderer.initialize()` (NOT from
+     * `preInitialize`, which is what this used to say). Safe to call again — it re-resolves the
+     * extension, and `getExtension` returns the same object for the same context.
+     *
+     * The extension comes from `timerQueryExtension` rather than a `getExtension` call of its own:
+     * `detectWebGL2Capabilities` already asks the same question to fill `hasTimestampQuery`, and two
+     * independent lookups are two things that can disagree about whether timing is possible.
+     */
     public initialize(context: WebGL2RenderingContext): void {
         this._gl = context;
-        this._ext = context.getExtension('EXT_disjoint_timer_query_webgl2');
+        this._ext = timerQueryExtension(context);
     }
 
     /** True when timer queries can actually be issued. False means the UI must fall back to bisection. */
     public get available(): boolean { return this._ext !== null && this._gl !== null; }
+
+    /** WebGL2 times renderer-defined scopes, not render passes. See the file header. */
+    public readonly attribution = 'scopes' as const;
+
+    public get unavailableReason(): string | null {
+        if (this.available) return null;
+        return this._gl === null
+            ? 'The profiler has no WebGL2 context yet.'
+            : 'EXT_disjoint_timer_query_webgl2 is unavailable on this driver/browser.';
+    }
 
     public get enabled(): boolean { return this._enabled; }
     public set enabled(v: boolean) {
@@ -373,4 +530,215 @@ export class GpuProfiler {
     }
 }
 
-export const gpuProfiler = new GpuProfiler();
+/**
+ * Pass-timing bookkeeping, shared by nothing.
+ *
+ * A near-copy of the four members `WebGL2GpuProfiler` keeps for the same job. That duplication is
+ * deliberate and temporary: the WebGL2 class's body was carried across the two-backend split
+ * BYTE-IDENTICAL, so that a WebGL2 regression could not possibly originate in this change. Unifying
+ * the two is a follow-up with its own gate run, not a free-rider on this one.
+ */
+class PassTimingTable {
+    private _timings = new Map<string, PassTiming>();
+    private _history = new Map<string, Ring>();
+    private _resolvedFrames = 0;
+
+    public get passes(): PassTiming[] {
+        const cutoff = this._resolvedFrames - STALE_PASS_FRAMES;
+        return [...this._timings.values()]
+            .filter(t => t.lastSeenFrame >= cutoff)
+            .sort((a, b) => b.avgMs - a.avgMs);
+    }
+
+    public historyFor(name: string): Ring | null { return this._history.get(name) ?? null; }
+
+    /** Close one resolved frame: `samples` is scope -> summed milliseconds for that frame. */
+    public recordFrame(samples: Map<string, number>): void {
+        this._resolvedFrames++;
+        for (const [name, ms] of samples) {
+            let t = this._timings.get(name);
+            if (!t) {
+                t = { name, ms, avgMs: ms, maxMs: ms, samples: 0, lastSeenFrame: this._resolvedFrames };
+                this._timings.set(name, t);
+                this._history.set(name, new Ring(HISTORY_FRAMES));
+            }
+            t.lastSeenFrame = this._resolvedFrames;
+            t.ms = ms;
+            t.avgMs += (ms - t.avgMs) * EMA_ALPHA;
+            if (ms > t.maxMs) t.maxMs = ms;
+            t.samples++;
+            this._history.get(name)!.push(ms);
+        }
+    }
+
+    public reset(): void {
+        this._timings.clear();
+        for (const ring of this._history.values()) ring.clear();
+        this._history.clear();
+        this._resolvedFrames = 0;
+    }
+}
+
+/**
+ * GPU timing over WebGPU timestamp queries.
+ *
+ * Everything API-specific — the `GPUQuerySet`, the `QUERY_RESOLVE` buffer, the `MAP_READ` staging
+ * ring — is inside `WebGPUDevice`, behind exactly two RHI methods. This class is only the frame
+ * bookkeeping: turn collection on, pump the drain once a frame, and fold whatever came back into the
+ * same `PassTiming` rows the panel already knows how to draw.
+ *
+ * `beginPass`/`endPass` are NO-OPS here, and that is the whole shape of the mismatch. A WebGPU
+ * timestamp can only be attached to a render pass, so the renderer's scope calls have nothing to
+ * attach to; the labels come from `RenderPassDescriptor.label` instead, and `PASS_LABEL_TO_SCOPE`
+ * turns them back into scope names where that is honest.
+ *
+ * WHAT IS LOST relative to WebGL2, stated plainly because the panel says the same thing:
+ *
+ *  - `frameEnd` — a sacrificial scope that exists only to absorb the driver's end-of-frame drain out
+ *    of `present`. Per-pass timestamps already exclude the drain, so there is nothing to absorb. A
+ *    gain, not a gap.
+ *  - Every scope with no render pass under it produces no row. Today that is only `frameEnd`:
+ *    `forwardOpaque` and `transparent` DO open passes of those names (`_runForwardQueue` labels its
+ *    pass with the queue name), so they survive — including in `_renderForward`, the forward
+ *    pipeline's path, which has no profiler scope calls at all and therefore reports MORE here than
+ *    on WebGL2.
+ *
+ * KNOWN MEASUREMENT BIAS, do not "correct" it with a subtracted constant. `_beginFullscreenPass`
+ * creates one `CommandEncoder` per pass, so a frame is ~35 separate submissions and every pass pays a
+ * submission's start-up at both ends of its own timestamp window. The honest fix is the encoder-per-
+ * frame change `renderer.ts:_beginFullscreenPass` already flags in its docstring — one encoder opened
+ * at the top of `_render` and finished after the present pass — at which point these numbers become
+ * comparable to the WebGL2 ones without anything here changing.
+ */
+export class WebGPUGpuProfiler implements GpuProfilerBackend {
+    public readonly attribution = 'passes' as const;
+
+    private _table = new PassTimingTable();
+    private _enabled = false;
+    private _lastFrameTotal = 0;
+    /** Scope -> summed ms drained since the last `endFrame`. Reused rather than reallocated. */
+    private _accumulated = new Map<string, number>();
+
+    constructor(private readonly _device: Device) {}
+
+    public get available(): boolean { return this._device.capabilities.hasTimestampQuery; }
+
+    public get unavailableReason(): string | null {
+        return this.available
+            ? null
+            : 'The WebGPU adapter does not offer the timestamp-query feature.';
+    }
+
+    public get enabled(): boolean { return this._enabled; }
+    public set enabled(v: boolean) {
+        if (this._enabled === v) return;
+        this._enabled = v;
+        this._device.setTimestampCollection(v && this.available, (label, ms) => {
+            const scope = scopeForPassLabel(label);
+            this._accumulated.set(scope, (this._accumulated.get(scope) ?? 0) + ms);
+        });
+        if (!v) this._accumulated.clear();
+    }
+
+    public get totalMs(): number { return this._lastFrameTotal; }
+    public get passes(): PassTiming[] { return this._table.passes; }
+    public historyFor(name: string): Ring | null { return this._table.historyFor(name); }
+
+    public beginPass(_name: RenderPass | string): void {}
+    public endPass(): void {}
+
+    /**
+     * Pump the drain and close one reported frame.
+     *
+     * `collectTimestamps` never waits on the GPU — it maps whatever has already finished and returns
+     * — so what arrives during any one call is "the passes that completed since last time", lagging
+     * the frame that issued them by one to three frames exactly as the WebGL2 path does. A call that
+     * drains nothing closes no frame, which is what keeps a stalled driver from ageing every row out
+     * of the readout via `STALE_PASS_FRAMES` while the picture is still being drawn.
+     */
+    public endFrame(): void {
+        if (!this._enabled || !this.available) return;
+        this._device.collectTimestamps();
+        if (this._accumulated.size === 0) return;
+
+        let total = 0;
+        for (const ms of this._accumulated.values()) total += ms;
+        this._lastFrameTotal = total;
+        this._table.recordFrame(this._accumulated);
+        this._accumulated.clear();
+    }
+
+    public reset(): void {
+        this._table.reset();
+        this._accumulated.clear();
+        this._lastFrameTotal = 0;
+    }
+}
+
+const NO_DEVICE_REASON = 'No graphics device has been acquired yet.';
+
+/**
+ * The singleton every caller holds, delegating to whichever backend the device chose.
+ *
+ * A facade rather than a re-exported variable because the ~30 renderer call sites, `engine.ts` and
+ * the editor panel all captured `gpuProfiler` at import time, long before a device exists. Swapping
+ * the object they hold is not possible; swapping what it forwards to is.
+ */
+export class GpuProfilerFacade implements GpuProfilerBackend {
+    private _backend: GpuProfilerBackend = new NullGpuProfiler(NO_DEVICE_REASON);
+
+    /** The live backend. For tests, and for anything that needs to know which one is running. */
+    public get backend(): GpuProfilerBackend { return this._backend; }
+
+    public useBackend(backend: GpuProfilerBackend): void {
+        // Carry the switch across, and turn the OLD one off first. On WebGPU `enabled = false` is what
+        // releases the device's collection sink, and a backend left enabled behind the facade would go
+        // on filling a map nothing reads.
+        const wasEnabled = this._backend.enabled;
+        this._backend.enabled = false;
+        this._backend = backend;
+        backend.enabled = wasEnabled;
+    }
+
+    public get available(): boolean { return this._backend.available; }
+    public get attribution(): 'scopes' | 'passes' { return this._backend.attribution; }
+    public get unavailableReason(): string | null { return this._backend.unavailableReason; }
+
+    public get enabled(): boolean { return this._backend.enabled; }
+    public set enabled(v: boolean) { this._backend.enabled = v; }
+
+    public get totalMs(): number { return this._backend.totalMs; }
+    public get passes(): PassTiming[] { return this._backend.passes; }
+    public historyFor(name: string): Ring | null { return this._backend.historyFor(name); }
+    public beginPass(name: RenderPass | string): void { this._backend.beginPass(name); }
+    public endPass(): void { this._backend.endPass(); }
+    public endFrame(): void { this._backend.endFrame(); }
+    public reset(): void { this._backend.reset(); }
+}
+
+export const gpuProfiler = new GpuProfilerFacade();
+
+/**
+ * Choose and install the backend for the device that was just acquired. Called once, from
+ * `Renderer.initialize()`.
+ *
+ * `glContext` is separate from `device` rather than read off it because a canvas hosts exactly one
+ * context type: on the WebGPU path there IS no `WebGL2RenderingContext` anywhere, and null is the
+ * accurate thing to pass rather than a stub to reach through. Passing null with a WebGL2 device is
+ * not an error either — it simply leaves the profiler unavailable with a reason that says so.
+ */
+export function initializeGpuProfiler(device: Device,
+                                      glContext: WebGL2RenderingContext | null): void {
+    if (device.backend === 'webgpu') {
+        gpuProfiler.useBackend(new WebGPUGpuProfiler(device));
+        return;
+    }
+    if (!glContext) {
+        gpuProfiler.useBackend(new NullGpuProfiler('The profiler has no WebGL2 context yet.'));
+        return;
+    }
+    const backend = new WebGL2GpuProfiler();
+    backend.initialize(glContext);
+    gpuProfiler.useBackend(backend);
+}
+

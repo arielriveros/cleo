@@ -31,9 +31,18 @@ window.__error = null;
     // one would change nothing any check could see. `_deferred` is construction-time config with no
     // setter, so the mode is chosen here rather than toggled later.
     const forwardMode = new URLSearchParams(location.search).get('forward') === '1';
+    // `?backend=webgpu` asks for a WebGPU device instead of WebGL2 — a REQUEST, which
+    // resolveBackendRequest still gets the last word on. The gate it checks is opened by
+    // `?cleoWebgpuProbe=1`, which the engine reads straight off location.search and this page
+    // therefore never has to forward. See tools/harness/webgpuBootCheck.js.
+    const backend = new URLSearchParams(location.search).get('backend') || undefined;
     const engine = new cleo.CleoEngine({
-      graphics: { clearColor: [0.08, 0.08, 0.11, 1.0], deferred: !forwardMode },
+      graphics: { clearColor: [0.08, 0.08, 0.11, 1.0], deferred: !forwardMode, backend },
     });
+    // Exposed BEFORE initialize(), which can now REJECT. deviceProbe is only interesting when startup
+    // failed, and the __renderer assignment further down never runs in that case.
+    window.__engine = engine;
+    window.__renderer = engine.renderer;
     window.__pipeline = forwardMode ? 'forward' : 'deferred';
     // Which programs actually BIND, as opposed to merely compiling.
     //
