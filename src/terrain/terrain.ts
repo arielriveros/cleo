@@ -310,6 +310,11 @@ export class Terrain {
             }
         }
         this._updateChunkBounds(chunk);
+        // `_updateChunkBounds` only feeds terrain LOD. The geometry keeps its own cached bounding
+        // sphere/box (and BVH) for frustum culling and picking, and the loop above just moved every
+        // vertex under it — without this the chunk keeps its pre-sculpt sphere and a raised hill can be
+        // culled while it is on screen, or missed by a raycast.
+        g.invalidateBounds();
         chunk.dirty = true;
     }
 

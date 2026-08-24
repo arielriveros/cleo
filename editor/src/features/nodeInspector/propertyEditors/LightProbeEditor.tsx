@@ -59,7 +59,10 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
   const refreshPreview = useCallback(() => {
     const renderer = instance?.renderer;
     if (!renderer) return;
-    setPreviewSrc(renderer.renderProbePreview(props.node, 256));
+    // The readback is async (a WebGPU one is a buffer map and cannot be otherwise), so this resolves a
+    // frame or two later. Nothing here depends on the timing: an empty src just shows no preview until
+    // it lands, and a stale resolve is overwritten by the next refresh.
+    void renderer.renderProbePreview(props.node, 256).then(setPreviewSrc);
   }, [instance, props.node]);
 
   // On select / node change: one deferred refresh (a freshly-added probe bakes on the next engine frame).

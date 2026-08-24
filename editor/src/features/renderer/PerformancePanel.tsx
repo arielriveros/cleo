@@ -47,6 +47,23 @@ const QUALITY_OPTIONS = [
 
 type PassRow = { name: string; avgMs: number; maxMs: number };
 
+// Counters sampled EVERY frame and reported as mean + range, not grabbed once per refresh.
+//
+// A single raw frame is a badly misleading sample of these. Shadow cascades are staggered on a 4-frame
+// cycle (cascade 1 every 2nd frame, cascade 2 every 4th), each cascade being a full re-draw of every
+// caster — so draw calls and triangles genuinely swing several-fold frame to frame. Read one frame in
+// fifteen, at an interval unrelated to that cycle, and a perfectly regular pattern looks like noise:
+// "draw calls jump between 91 and 213 with a still camera" is the same 4-frame cycle sampled at random
+// phases. The range makes it legible.
+const RANGED = ['drawCalls', 'instancedDrawCalls', 'objects', 'instances', 'triangles',
+                'culledObjects', 'culledInstances', 'fullscreenPasses', 'shadedMpx',
+                'stateChanges', 'stateChangesSaved'] as const;
+type RangedKey = typeof RANGED[number];
+type Range = { min: number; max: number; mean: number };
+
+const ZERO_RANGE: Range = { min: 0, max: 0, mean: 0 };
+const EMPTY_RANGES = Object.fromEntries(RANGED.map(k => [k, ZERO_RANGE])) as Record<RangedKey, Range>;
+
 function Row(props: { label: string; value: string; hl?: boolean; title?: string }) {
   return (
     <div className='flex justify-between gap-3 leading-5' title={props.title}>
@@ -56,13 +73,25 @@ function Row(props: { label: string; value: string; hl?: boolean; title?: string
   );
 }
 
+/** Mean over the refresh window, with the min-max spread beside it when the counter actually moved. */
+function RangeRow(props: { label: string; r: Range; dp?: number; unit?: string; hl?: boolean; title?: string }) {
+  const { r, dp = 0, unit = '' } = props;
+  const f = (x: number) => (dp > 0 ? fmt(x, dp) : Math.round(x).toLocaleString());
+  return (
+    <div className='flex justify-between gap-3 leading-5' title={props.title}>
+      <span className='text-muted'>{props.label}</span>
+      <span className={`font-mono tabular-nums ${props.hl ? 'text-success font-semibold' : ''}`}>
+        {f(r.mean)}{unit}
+        {r.max > r.min && <span className='text-muted ml-1.5'>{f(r.min)}–{f(r.max)}{unit}</span>}
+      </span>
+    </div>
+  );
+}
+
 /** Everything the panel samples once per refresh, in one shape so one loop can fill it. */
 type Sample = {
   fps: number; frameMs: number; p50: number; p95: number; worst: number;
   cpuMs: number; gpuMs: number; gpuAvailable: boolean; gpuOn: boolean;
-  drawCalls: number; instancedDrawCalls: number; objects: number; instances: number;
-  triangles: number; culled: number; fullscreenPasses: number; shadedMpx: number;
-  stateChanges: number; stateChangesSaved: number;
   physicsMs: number; stepMs: number; writeBackMs: number; rayMs: number; rayCount: number;
   bodies: number; contacts: number;
   sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; nodes: number;
@@ -76,9 +105,6 @@ type Sample = {
 const EMPTY: Sample = {
   fps: 0, frameMs: 0, p50: 0, p95: 0, worst: 0,
   cpuMs: 0, gpuMs: 0, gpuAvailable: false, gpuOn: false,
-  drawCalls: 0, instancedDrawCalls: 0, objects: 0, instances: 0,
-  triangles: 0, culled: 0, fullscreenPasses: 0, shadedMpx: 0,
-  stateChanges: 0, stateChangesSaved: 0,
   physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0, bodies: 0, contacts: 0,
   sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, nodes: 0,
   textures: 0, textureMB: 0, gpuMB: 0, heapUsedMB: null, heapLimitMB: null,
@@ -102,11 +128,14 @@ export default function PerformancePanel() {
 
   const [rows, setRows] = useState<PassRow[]>([]);
   const [d, setD] = useState<Sample>(EMPTY);
+  const [r, setR] = useState<Record<RangedKey, Range>>(EMPTY_RANGES);
   const [history, setHistory] = useState<number[]>([]);
 
   const frames = useRef(0);
   const acc = useRef(0);
   const last = useRef(performance.now());
+  /** Per-counter accumulator for the current refresh window; drained and zeroed on each boundary. */
+  const bins = useRef(RANGED.map(() => ({ min: Infinity, max: -Infinity, sum: 0, n: 0 })));
 
   // Seed the mirrors once the renderer exists.
   useEffect(() => {
@@ -123,6 +152,24 @@ export default function PerformancePanel() {
       acc.current += now - last.current;
       last.current = now;
       frames.current++;
+
+      // Sample the geometry/fill counters EVERY frame, not once per refresh — see RANGED above for why
+      // one raw frame is a misleading sample of a staggered-cascade workload. `stateChanges` comes from
+      // frameStats rather than renderer.stats only because that is where it already came from.
+      {
+        const s: any = renderer?.stats ?? null;
+        for (let i = 0; i < RANGED.length; i++) {
+          const key = RANGED[i];
+          const v = key === 'stateChanges' || key === 'stateChangesSaved'
+            ? frameStats[key]
+            : (s?.[key] ?? 0);
+          const bin = bins.current[i];
+          if (v < bin.min) bin.min = v;
+          if (v > bin.max) bin.max = v;
+          bin.sum += v;
+          bin.n++;
+        }
+      }
 
       // All rAF callbacks fire once per display frame, so this interval IS the real frame rate. The
       // history ring behind the percentiles is filled by the engine's game loop, not here — this
@@ -154,16 +201,6 @@ export default function PerformancePanel() {
           gpuMs: gpuProfiler.totalMs,
           gpuAvailable: gpuProfiler.available,
           gpuOn: gpuProfiler.enabled,
-          drawCalls: stats?.drawCalls ?? 0,
-          instancedDrawCalls: stats?.instancedDrawCalls ?? 0,
-          objects: stats?.objects ?? 0,
-          instances: stats?.instances ?? 0,
-          triangles: stats?.triangles ?? 0,
-          culled: stats?.culled ?? 0,
-          fullscreenPasses: stats?.fullscreenPasses ?? 0,
-          shadedMpx: stats?.shadedMpx ?? 0,
-          stateChanges: frameStats.stateChanges,
-          stateChangesSaved: frameStats.stateChangesSaved,
           physicsMs: phys?.totalMs ?? 0,
           stepMs: phys?.stepMs ?? 0,
           writeBackMs: phys?.writeBackMs ?? 0,
@@ -192,6 +229,16 @@ export default function PerformancePanel() {
           pipeline: stats?.pipeline ?? '—',
           backend: renderer?.backend ?? '—',
         });
+        const drained: any = {};
+        for (let i = 0; i < RANGED.length; i++) {
+          const bin = bins.current[i];
+          drained[RANGED[i]] = bin.n > 0
+            ? { min: bin.min, max: bin.max, mean: bin.sum / bin.n }
+            : ZERO_RANGE;
+          bin.min = Infinity; bin.max = -Infinity; bin.sum = 0; bin.n = 0;
+        }
+        setR(drained as Record<RangedKey, Range>);
+
         setHistory(frameHistory.frame.toArray());
         frames.current = 0;
         acc.current = 0;
@@ -226,7 +273,12 @@ export default function PerformancePanel() {
     const lines = [
       `frame ${fmt(d.frameMs)}ms (${fmt(d.fps, 0)} fps) - p50 ${fmt(d.p50)} - p95 ${fmt(d.p95)} - worst ${fmt(d.worst)}`,
       `cpu render ${fmt(d.cpuMs)}ms - gpu ${fmt(d.gpuMs)}ms`,
-      `draws ${d.drawCalls} - screen passes ${d.fullscreenPasses} - fill ${fmt(d.shadedMpx, 1)} Mpx`,
+      // Ranges, not a single frame: a staggered-cascade scene reads very differently depending on which
+      // frame you happen to catch, and a report pasted into an issue should not depend on that.
+      `draws ${fmt(r.drawCalls.mean, 0)} (${r.drawCalls.min}-${r.drawCalls.max})`
+        + ` - screen passes ${fmt(r.fullscreenPasses.mean, 0)} - fill ${fmt(r.shadedMpx.mean, 1)} Mpx`,
+      `triangles ${fmt(r.triangles.mean, 0)} (${r.triangles.min}-${r.triangles.max})`
+        + ` - culled ${fmt(r.culledObjects.mean, 0)} obj / ${fmt(r.culledInstances.mean, 0)} inst`,
       `physics ${fmt(d.physicsMs)}ms - scene ${fmt(d.sceneMs)}ms`,
       `quality ${quality} - renderScale ${renderScale} - ${d.backend}/${d.pipeline}`,
       '',
@@ -351,15 +403,22 @@ export default function PerformancePanel() {
 
       <Section
         title='Geometry'
-        hint={'What the scene submitted this frame. A low draw count next to a high Mpx figure below means '
-            + 'the frame is spent on fullscreen passes, not on meshes.'}
+        hint={'Mean over the last refresh, with the frame-to-frame range beside it. A wide range with a '
+            + 'still camera is usually shadow cascade staggering, which re-draws every caster on a '
+            + '4-frame cycle — not a bug. A low draw count next to a high Mpx figure below means the '
+            + 'frame is spent on fullscreen passes, not on meshes.'}
       >
-        <Row label='Draw calls' value={d.drawCalls.toLocaleString()} />
-        <Row label='Instanced' value={d.instancedDrawCalls.toLocaleString()} />
-        <Row label='Objects' value={d.objects.toLocaleString()} />
-        <Row label='Instances' value={d.instances.toLocaleString()} />
-        <Row label='Triangles' value={d.triangles.toLocaleString()} />
-        <Row label='Culled' value={d.culled.toLocaleString()} title='Rejected by the frustum test before any draw.' />
+        <RangeRow label='Draw calls' r={r.drawCalls} />
+        <RangeRow label='Instanced' r={r.instancedDrawCalls} />
+        <RangeRow label='Objects' r={r.objects} />
+        <RangeRow label='Instances' r={r.instances} />
+        <RangeRow label='Triangles' r={r.triangles} />
+        {/* Two counters, not one: models and foliage blades are different units and summing them made
+            a landscape's grass swamp the model count entirely. */}
+        <RangeRow label='Culled (objects)' r={r.culledObjects}
+                  title='Scene meshes rejected by the camera frustum test before any draw.' />
+        <RangeRow label='Culled (instances)' r={r.culledInstances}
+                  title='Foliage instances rejected by the distance or frustum test, counted per blade.' />
         <Row label='Nodes' value={d.nodes.toLocaleString()} />
       </Section>
 
@@ -369,13 +428,12 @@ export default function PerformancePanel() {
             + 'quarter as much as a full-res one. It is the number that explains a frame whose triangle '
             + 'count is trivial.'}
       >
-        <Row label='Screen passes' value={d.fullscreenPasses.toLocaleString()} />
-        <Row label='Shaded' value={`${fmt(d.shadedMpx, 1)} Mpx`} hl={d.shadedMpx > 40} />
-        <Row
-          label='State changes'
-          value={`${d.stateChanges.toLocaleString()} (${d.stateChangesSaved.toLocaleString()} saved)`}
-          title='Redundant GL state calls the state cache elided are counted as saved.'
-        />
+        <RangeRow label='Screen passes' r={r.fullscreenPasses} />
+        <RangeRow label='Shaded' r={r.shadedMpx} dp={1} unit=' Mpx' hl={r.shadedMpx.mean > 40} />
+        <RangeRow label='State changes' r={r.stateChanges}
+                  title='GL state calls the cache could not elide (a genuine difference).' />
+        <RangeRow label='· saved' r={r.stateChangesSaved}
+                  title='Redundant GL state calls the state cache absorbed.' />
       </Section>
 
       <Section

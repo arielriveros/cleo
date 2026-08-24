@@ -33,10 +33,13 @@ import type {
     Buffer, Texture, TextureView, Sampler, ShaderModule, BindGroup, BindGroupLayout,
     RenderPipeline, RenderTarget,
 } from '../resources';
+import type { ShaderProgram, ShaderProgramDescriptor } from '../shaderProgram';
+import type { UniformBlockLayout } from '../uniformSet';
+import { WebGPUShaderProgram } from './webgpuShaderProgram';
 import type {
     TextureFormat, TextureDimension, TextureUsageFlags, BufferUsageFlags, SamplerDescriptor,
     VertexBufferLayout, PrimitiveState, DepthStencilState, ColorTargetState, RenderPassDescriptor,
-    ShaderStageFlags, IndexFormat, BlendState, ShaderResource,
+    ShaderStageFlags, IndexFormat, BlendState, ShaderResource, TextureConfigureDescriptor,
 } from '../types';
 import { TEXTURE_FORMAT_INFO, textureByteSize, isDepthFormat, ShaderStage } from '../types';
 
@@ -103,6 +106,7 @@ class WebGPUTexture implements Texture {
     private _destroyed = false;
 
     constructor(descriptor: TextureDescriptor, handle: GPUTexture, owned: boolean,
+                private readonly _queue: GPUQueue,
                 private readonly _onDestroy: () => void) {
         this.label = descriptor.label ?? 'texture';
         this.format = descriptor.format;
@@ -114,6 +118,112 @@ class WebGPUTexture implements Texture {
         this.usage = descriptor.usage;
         this.handle = handle;
         this._owned = owned;
+    }
+
+    // --- uploads -----------------------------------------------------------------------------
+    //
+    // The half of the Texture interface that WebGL2 satisfies by allocating storage through the
+    // upload calls themselves. WebGPU cannot: a GPUTexture fixes its size, format and mip count at
+    // creation, so an "allocate" here has nothing left to allocate.
+    //
+    // That is a real difference in the ownership model, not a missing call, and it is the last thing
+    // standing between `graphics/texture.ts` and this backend. Where an operation maps, it is
+    // implemented; where it needs the storage created later, it throws saying exactly that rather
+    // than silently doing nothing to a texture the caller believes it just filled.
+
+    private _config: TextureConfigureDescriptor | null = null;
+
+    /** Remembered for the sampler this texture will be paired with; nothing to apply to the texture. */
+    public configure(descriptor: TextureConfigureDescriptor): void { this._config = descriptor; }
+
+    /** The state {@link configure} recorded, for the sampler the bind group pairs with this texture. */
+    public get samplingConfig(): TextureConfigureDescriptor | null { return this._config; }
+
+    public upload2D(image: TexImageSource | null, width: number, height: number, mipMap: boolean): void {
+        if (!image) return this._needsCreationTimeSize('upload2D(null)');
+        this._copyExternal(image, width, height, 0, 0);
+        if (mipMap && this.mipLevelCount > 1) this.generateMipmaps();
+    }
+
+    public uploadCube(images: readonly TexImageSource[] | null, width: number, height: number,
+                      mipMap: boolean): void {
+        if (!images) return this._needsCreationTimeSize('uploadCube(null)');
+        for (let face = 0; face < 6; face++) this._copyExternal(images[face], width, height, 0, face);
+        if (mipMap && this.mipLevelCount > 1) this.generateMipmaps();
+    }
+
+    public uploadFace(face: number, image: TexImageSource, mipMap: boolean): void {
+        this._copyExternal(image, this.width, this.height, 0, face);
+        if (mipMap && this.mipLevelCount > 1) this.generateMipmaps();
+    }
+
+    public uploadBytes(data: Uint8Array, width: number, height: number): void {
+        this.uploadRegion(0, 0, width, height, data);
+    }
+
+    public uploadRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
+        this._queue.writeTexture(
+            { texture: this.handle, mipLevel: 0, origin: { x, y, z: 0 } },
+            data as ArrayBufferView<ArrayBuffer>,
+            { offset: 0, bytesPerRow: width * 4, rowsPerImage: height },
+            { width, height, depthOrArrayLayers: 1 });
+    }
+
+    public allocateCube(): void { this._needsCreationTimeSize('allocateCube'); }
+    public allocateVolume(): void { this._needsCreationTimeSize('allocateVolume'); }
+    public allocateDepthArray(): void { this._needsCreationTimeSize('allocateDepthArray'); }
+
+    /**
+     * A comparison sampler is a SAMPLER on this backend, not texture state.
+     *
+     * Recorded rather than applied, for the bind group to pair with. WebGL2 sets
+     * `TEXTURE_COMPARE_MODE` on the texture object, which is the difference the RHI already documents
+     * at `WebGL2Sampler`.
+     */
+    public setCompareMode(enabled: boolean): void {
+        this._compare = enabled;
+    }
+    private _compare = false;
+    public get compareEnabled(): boolean { return this._compare; }
+
+    /**
+     * Not implemented, and not a one-liner.
+     *
+     * WebGPU has no `generateMipmap`: a mip chain is built by RENDERING each level from the one above,
+     * which needs a pipeline, a sampler and a pass per level. That belongs with the device, not here,
+     * and nothing on this backend has asked for it yet.
+     */
+    public generateMipmaps(): void {
+        throw new Error(`${this.label}: WebGPU has no generateMipmap — a mip chain is rendered level ` +
+                        'by level, which needs a device-owned pipeline that does not exist yet');
+    }
+
+    /** The size is fixed at creation here; this asserts agreement rather than setting anything. */
+    public setSize(width: number, height: number): void {
+        if (width !== this.width || height !== this.height)
+            throw new Error(`${this.label}: a GPUTexture cannot be resized (${this.width}x${this.height}` +
+                            ` -> ${width}x${height}); create a new one`);
+    }
+
+    private _copyExternal(source: TexImageSource, width: number, height: number,
+                          mipLevel: number, layer: number): void {
+        this._queue.copyExternalImageToTexture(
+            { source: source as GPUCopyExternalImageSource, flipY: !(this._config?.flipY ?? true) },
+            { texture: this.handle, mipLevel, origin: { x: 0, y: 0, z: layer } },
+            { width, height, depthOrArrayLayers: 1 });
+    }
+
+    /**
+     * The one shape that does not port, named at the point it is reached.
+     *
+     * Every one of these allocates storage on WebGL2 — `texImage2D` with null data, `texStorage3D`,
+     * an immutable array. A GPUTexture already has its storage and cannot grow one. Closing this means
+     * `graphics/texture.ts` creating its GPU texture once it knows its dimensions instead of
+     * discovering them through the upload, which is a change to the class, not to this method.
+     */
+    private _needsCreationTimeSize(operation: string): never {
+        throw new Error(`${this.label}: ${operation} allocates storage, and a GPUTexture fixes its ` +
+                        'size at creation. The texture has to be created at its final dimensions.');
     }
 
     public get byteSize(): number {
@@ -241,6 +351,17 @@ class WebGPURenderPipeline implements RenderPipeline {
     public readonly colorTargets: readonly ColorTargetState[];
     public readonly bindGroupLayouts: readonly WebGPUBindGroupLayout[];
     public readonly handle: GPURenderPipeline;
+    /**
+     * Group indices BELOW the highest one the shaders declare that they never declared themselves.
+     *
+     * WebGPU requires a bind group at every index up to the pipeline's highest, and an `'auto'`
+     * layout duly produces an empty one for each gap. The engine's shaders are full of gaps —
+     * `outline` uses groups 1 and 2, `overdraw` uses 0 and 1, the lit families reach group 5 —
+     * because the numbering is by ROLE (0 textures, 1 transform, 2 material, 3 shadows, ...) and no
+     * program plays every role. Leaving the gaps to the caller would mean every draw site knowing
+     * which roles its shader happens to skip, so the pass fills them instead.
+     */
+    public readonly emptyGroups: readonly number[];
 
     constructor(descriptor: RenderPipelineDescriptor, handle: GPURenderPipeline,
                 groups: readonly number[]) {
@@ -252,6 +373,10 @@ class WebGPURenderPipeline implements RenderPipeline {
         this.handle = handle;
         this.bindGroupLayouts = groups.map(
             g => new WebGPUBindGroupLayout(g, handle.getBindGroupLayout(g), `${this.label}:group${g}`));
+        const highest = groups.length ? Math.max(...groups) : -1;
+        const gaps: number[] = [];
+        for (let g = 0; g < highest; g++) if (!groups.includes(g)) gaps.push(g);
+        this.emptyGroups = gaps;
     }
 
     /** The layout for a group index, or undefined when the shaders never declared it. */
@@ -281,10 +406,25 @@ class WebGPURenderTarget implements RenderTarget {
 class WebGPURenderPassEncoder implements RenderPassEncoder {
     private _ended = false;
 
-    constructor(private readonly _pass: GPURenderPassEncoder) {}
+    constructor(private readonly _pass: GPURenderPassEncoder,
+                private readonly _device: GPUDevice) {}
 
+    /**
+     * Bind the pipeline, and an empty group at every index its shaders skipped.
+     *
+     * See {@link WebGPURenderPipeline.emptyGroups}: WebGPU rejects a draw with any index below the
+     * pipeline's highest left unset, and the engine numbers groups by role rather than densely. The
+     * empties are built here rather than by the caller because a draw site has no business knowing
+     * which roles its shader happens not to play — and because the failure is a validation error at
+     * DRAW time ("No bind group set at group index 0"), far from the pass that forgot.
+     */
     public setPipeline(pipeline: RenderPipeline): void {
-        this._pass.setPipeline((pipeline as WebGPURenderPipeline).handle);
+        const p = pipeline as WebGPURenderPipeline;
+        this._pass.setPipeline(p.handle);
+        for (const group of p.emptyGroups)
+            this._pass.setBindGroup(group, this._device.createBindGroup({
+                layout: p.handle.getBindGroupLayout(group), entries: [],
+            }));
     }
 
     public setBindGroup(group: number, bindGroup: BindGroup, dynamicOffsets?: readonly number[]): void {
@@ -371,7 +511,7 @@ class WebGPUCommandEncoder implements CommandEncoder {
             label: descriptor.label,
             colorAttachments,
             ...(depthStencilAttachment ? { depthStencilAttachment } : {}),
-        }));
+        }), this._device);
     }
 
     public copyTextureToTexture(source: TextureView, destination: TextureView,
@@ -467,7 +607,7 @@ export class WebGPUDevice implements Device {
             mipLevelCount: Math.max(1, descriptor.mipLevelCount ?? 1),
             usage: gpuTextureUsage(descriptor.usage),
         });
-        const texture = new WebGPUTexture(descriptor, handle, true, () => this._textures.delete(texture));
+        const texture = new WebGPUTexture(descriptor, handle, true, this._device.queue, () => this._textures.delete(texture));
         this._textures.add(texture);
         return texture;
     }
@@ -514,6 +654,23 @@ export class WebGPUDevice implements Device {
 
     public createSampler(descriptor: SamplerDescriptor): Sampler {
         return new WebGPUSampler(this._device, { ...descriptor }, 'sampler');
+    }
+
+    /**
+     * Build a program from the BUILD-TIME layout.
+     *
+     * Nothing is compiled here: the module is compiled by the pipeline that uses it. What this owns
+     * is the uniform storage and the attribute list, neither of which WebGPU can be asked for at
+     * runtime — which is why a descriptor without them is refused rather than guessed at. That is
+     * the case for a custom material assembled from a user's GLSL, and refusing is the honest
+     * outcome: it cannot run on this backend and should say so.
+     */
+    public createShaderProgram(descriptor: ShaderProgramDescriptor): ShaderProgram {
+        if (!descriptor.vertexInputs || !descriptor.uniformBlocks)
+            throw new Error(`${descriptor.label}: WebGPU needs the build-time vertex inputs and ` +
+                            'uniform-block layouts; this program has neither (a runtime-assembled GLSL shader?)');
+        return new WebGPUShaderProgram(this, descriptor.label, descriptor.vertexInputs,
+                                       descriptor.uniformBlocks as UniformBlockLayout[]);
     }
 
     public createShaderModule(descriptor: ShaderModuleDescriptor): ShaderModule {
@@ -640,7 +797,7 @@ export class WebGPUDevice implements Device {
             mipLevelCount: 1,
             usage: 0,
         };
-        const texture = new WebGPUTexture(descriptor, gpuTexture, false, () => { /* surface-owned */ });
+        const texture = new WebGPUTexture(descriptor, gpuTexture, false, this._device.queue, () => { /* surface-owned */ });
         const view = new WebGPUTextureView(texture, 0, 0, gpuTexture.createView({ label: 'surface' }), 'surface');
         return new WebGPURenderTarget([view], undefined, gpuTexture.width, gpuTexture.height, 'surface');
     }

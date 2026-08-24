@@ -22,6 +22,7 @@ import type {
     Buffer, Texture, TextureView, Sampler, ShaderModule, BindGroup, BindGroupLayout,
     RenderPipeline, RenderTarget,
 } from './resources';
+import type { ShaderProgram, ShaderProgramDescriptor } from './shaderProgram';
 
 /** Which graphics API a device is driving. */
 export type BackendKind = 'webgl2' | 'webgpu';
@@ -256,12 +257,39 @@ export interface Device {
     createTextureView(texture: Texture, baseMipLevel?: number, baseArrayLayer?: number): TextureView;
     createSampler(descriptor: SamplerDescriptor): Sampler;
     createShaderModule(descriptor: ShaderModuleDescriptor): ShaderModule;
+
+    /**
+     * Build a linked, uniform-writable program.
+     *
+     * Distinct from {@link createShaderModule}, which describes a program to a PIPELINE. This is the
+     * thing the engine writes uniforms into and reads attributes from, and the two backends implement
+     * it with no shared code: WebGL2 compiles and links GLSL then reflects it; WebGPU stores the
+     * build-time layout and writes bytes. Neither knows the other exists.
+     */
+    createShaderProgram(descriptor: ShaderProgramDescriptor): ShaderProgram;
     createRenderPipeline(descriptor: RenderPipelineDescriptor): RenderPipeline;
     createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget;
     createBindGroup(descriptor: BindGroupDescriptor): BindGroup;
 
     /** The swap chain's current target. Reacquired every frame: WebGPU hands back a new one each time. */
     getCurrentSurfaceTarget(): RenderTarget;
+
+    /**
+     * Re-establish the surface configuration. Called whenever the canvas changes.
+     *
+     * The other half of the surface contract, and the half with no WebGL2 equivalent — which is why it
+     * belongs here rather than behind a backend cast.
+     *
+     * **Not needed for a plain resize, measured.** `GPUCanvasContext.configure()` carries no size and
+     * `getCurrentTexture()` reads the canvas's current width and height, so the swap chain follows a
+     * resize on its own; `harness:webgpu` passes its resize check with this call commented out, and
+     * says so beside it. What it is for is re-establishing configuration after the canvas is
+     * RE-PARENTED — which the editor does on every mode switch — and after a device is replaced.
+     * `Renderer.resize` is simply the hook that runs after both, and `configure` is idempotent and
+     * cheap enough that calling it there is better than adding a second lifecycle event nobody
+     * remembers to fire.
+     */
+    reconfigureSurface(): void;
 
     writeBuffer(buffer: Buffer, offset: number, data: ArrayBufferView): void;
 
@@ -286,10 +314,14 @@ export interface Device {
     /**
      * Read a colour attachment back to the CPU.
      *
-     * Asynchronous on purpose. WebGL2 could satisfy this synchronously with `readPixels`, and does
-     * today — `Renderer.screenshotOffscreen` returns a data URL from a straight-line call. WebGPU
-     * cannot: `copyTextureToBuffer` followed by `mapAsync` is inherently deferred. Since the editor's
-     * thumbnail capture is the only caller, the async signature is the honest one for both.
+     * Asynchronous on purpose. WebGL2 satisfies it synchronously with `readPixels` and resolves in a
+     * microtask; WebGPU cannot, because `copyTextureToBuffer` followed by `mapAsync` is inherently
+     * deferred. The two engine callers — `Renderer.screenshotOffscreen` and
+     * `Renderer.renderProbePreview` — are `async` for this reason and for no other.
+     *
+     * Both do their rendering and restore their state BEFORE awaiting, which is what keeps the async
+     * signature from leaking into behaviour: the frame is drawn by the time the promise exists, so a
+     * game-loop frame arriving during the readback finds the live viewport, not a retargeted one.
      */
     readPixels(view: TextureView, x: number, y: number, width: number, height: number): Promise<Uint8Array>;
 

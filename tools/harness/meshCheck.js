@@ -177,7 +177,7 @@ app.whenReady().then(async () => {
           preview ? 'len=' + preview.length : String(preview));
   }
   if (stats) {
-    console.log(`      drawCalls=${stats.drawCalls} rhi=${stats.rhiDrawCalls} triangles=${stats.triangles} vertices=${stats.vertices} objects=${stats.objects} culled=${stats.culled} instanced=${stats.instancedDrawCalls} instances=${stats.instances}`);
+    console.log(`      drawCalls=${stats.drawCalls} rhi=${stats.rhiDrawCalls} triangles=${stats.triangles} vertices=${stats.vertices} objects=${stats.objects} culled=${stats.culledObjects}/${stats.culledInstances} instanced=${stats.instancedDrawCalls} instances=${stats.instances}`);
     console.log(`      shadedMpx=${(stats.shadedMpx ?? 0).toFixed?.(2) ?? stats.shadedMpx} stateChanges=${stats.stateChanges}`);
   }
 
@@ -198,22 +198,25 @@ app.whenReady().then(async () => {
   // `rhiDrawCalls` is tracked for the same reason the others are, and one more: a draw that falls back
   // from the RHI command model to `Mesh` produces identical pixels AND identical draw counts, so it is
   // the only number that can catch that regression.
-  const TRACKED = ['drawCalls', 'triangles', 'vertices', 'objects', 'culled', 'instancedDrawCalls',
-                   'instances', 'rhiDrawCalls'];
-  const current = {};
-  for (const k of TRACKED) current[k] = stats[k];
-
-  if (process.env.CLEO_MESH_BASELINE === 'write') {
-    fs.writeFileSync(statsBaselinePath, JSON.stringify(current, null, 2));
-    console.log('      frame-stat baseline written to ' + statsBaselinePath);
-  } else if (fs.existsSync(statsBaselinePath)) {
-    const want = JSON.parse(fs.readFileSync(statsBaselinePath, 'utf-8'));
-    const drift = TRACKED.filter(k => want[k] !== current[k])
-                         .map(k => `${k}: ${want[k]} -> ${current[k]}`);
-    check('frame stats match the baseline', drift.length === 0, drift.join(', '));
-  } else {
-    check('frame stats have a baseline', false, 'no ' + path.basename(statsBaselinePath) + ' — run with CLEO_MESH_BASELINE=write');
-  }
+  const TRACKED = ['drawCalls', 'triangles', 'vertices', 'objects', 'culledObjects', 'culledInstances',
+                   'instancedDrawCalls', 'instances', 'rhiDrawCalls'];
+  const compareStats = (label, file, sample) => {
+    const current = {};
+    for (const k of TRACKED) current[k] = sample[k];
+    if (process.env.CLEO_MESH_BASELINE === 'write') {
+      fs.writeFileSync(file, JSON.stringify(current, null, 2));
+      console.log(`      ${label} baseline written to ` + file);
+    } else if (fs.existsSync(file)) {
+      const want = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      const drift = TRACKED.filter(k => want[k] !== current[k])
+                           .map(k => `${k}: ${want[k]} -> ${current[k]}`);
+      check(`${label} match the baseline`, drift.length === 0, drift.join(', '));
+    } else {
+      check(`${label} have a baseline`, false,
+            'no ' + path.basename(file) + ' — run with CLEO_MESH_BASELINE=write');
+    }
+  };
+  compareStats('frame stats', statsBaselinePath, stats);
 
   // Instancing is a deferred-path feature here: the forward renderer draws these objects individually,
   // so demanding an instanced draw in forward mode would fail for a reason that is not a defect.
@@ -240,6 +243,64 @@ app.whenReady().then(async () => {
   console.log('      tilemap: ' + JSON.stringify(tm));
   check('tilemap chunks were built and drawn', stats && stats.tilemapDraws > 0,
         JSON.stringify(stats && { chunks: stats.tilemapChunks, draws: stats.tilemapDraws }));
+
+  // Frustum culling actually rejects work.
+  //
+  // Turn the camera 180 degrees away from everything and assert that every model is rejected. Worth its
+  // own framing because the default shot cannot tell a correct cull test from NO cull test: with the
+  // whole scene in view both produce the same picture and the same counts. The deferred pipeline's
+  // forward-overlay queues (opaque Blinn-Phong/custom, and transparent) were collected with no test at
+  // all for exactly as long as that was true, so those models drew wherever the camera pointed.
+  //
+  // Base profile only. The full scene adds gizmos, which deliberately bypass culling.
+  if (scene === 'base') {
+    const modelCount = await js('window.__modelCount ? window.__modelCount() : -1');
+    await js('window.__lookAway(true)');
+    // capturePage forces a frame: this window is never shown, so rAF alone is throttled and the stats
+    // can otherwise still describe the previous framing.
+    await win.webContents.capturePage();
+    await sleep(300);
+    await win.webContents.capturePage();
+    const away = await js('window.__stats()');   // frameStats: renderer.stats omits rhiDrawCalls
+    await js('window.__lookAway(false)');
+    await win.webContents.capturePage();
+    await sleep(300);
+    await win.webContents.capturePage();
+    console.log(`      facing away: objects=${away.objects} culledObjects=${away.culledObjects}`
+                + ` of ${modelCount} models, drawCalls=${away.drawCalls} triangles=${away.triangles}`
+                + ` tilemapDraws=${away.tilemapDraws}`);
+    check('every model is frustum-culled when the camera faces away',
+          modelCount > 0 && away.culledObjects === modelCount,
+          `culledObjects=${away.culledObjects} modelCount=${modelCount}`);
+    // The counter above only proves each model was TESTED. What proves it was not drawn anyway is the
+    // recorded away-facing frame stats: a queue that skips the cull test submits its triangles here and
+    // nowhere else, because every other framing in this harness has the whole scene in view.
+    compareStats('away-facing frame stats',
+                 path.join(__dirname, `meshBaseline.${pipeline}.away.json`), away);
+  }
+
+  // Draw the selection outline over a SKINNED BASIC mesh.
+  //
+  // No picture baseline, on purpose — the silhouette there is still wrong and recording it would pin a
+  // defect. What this DOES cover is the GL-error and shader-warning checks below, and that is not
+  // theoretical: on the legacy `Mesh.draw` path this exact selection raised GL_INVALID_OPERATION three
+  // times a frame and rendered the mesh itself as a torn fan, because the outline program re-initialised
+  // the mesh's VAO to its own attribute layout and the geometry pass then drew against it. The Basic
+  // family is the one where those layouts differ (no normal/tangent/bitangent), and the scene's own
+  // selection is a PBR cube, so nothing here ever exercised it.
+  //
+  // `CLEO_OUTLINE_TAG=<label>` additionally writes `shots/outline-<label>.png` for eyeballing.
+  {
+    console.log('      outline over: ' + await js("window.__select('basicSkinned')"));
+    await win.webContents.capturePage();
+    await sleep(300);
+    const img = await win.webContents.capturePage();
+    if (process.env.CLEO_OUTLINE_TAG)
+      fs.writeFileSync(path.join(shotDir, `outline-${process.env.CLEO_OUTLINE_TAG}.png`), img.toPNG());
+    await js("window.__select()");   // give the scene its own selection back
+    await win.webContents.capturePage();
+    await sleep(200);
+  }
 
   // The present pass is WGSL-authored, so its u_exposure is a std140 block member, not a loose
   // uniform. Changing it must change the picture — if the block were never uploaded it would read as
@@ -372,6 +433,19 @@ app.whenReady().then(async () => {
       check('clouds have a baseline', false, 'no ' + path.basename(cloudPath));
     }
   }
+
+  // Driver-level GL errors, which are neither exceptions nor `[Shader]` warnings and were therefore
+  // invisible to both checks below.
+  //
+  // Not hypothetical: the IBL fallback cube was built as a TEXTURE_2D and then allocated as a
+  // TEXTURE_CUBE_MAP, so every run logged "Zero is bound to target" plus five "no texture bound to
+  // target" at boot, allocated nothing, and left a 2D texture bound to cube samplers. Nothing threw,
+  // no pixel moved in this scene, and the harness passed. `allocateCube` throws on that mismatch now;
+  // this catches the next one of its kind.
+  const glMessages = [...errors, ...warnings].filter(
+    w => /GL_INVALID|WebGL: INVALID|GL_OUT_OF_MEMORY|glTexStorage|no texture bound/.test(w));
+  check('no driver GL errors', glMessages.length === 0,
+        glMessages.slice(0, 4).map(m => m.slice(0, 160)).join(' | '));
 
   // Shader warnings, of any kind.
   //

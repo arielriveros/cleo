@@ -17,8 +17,17 @@ export interface RenderStats {
     rhiDrawCalls: number;
     /** Scene meshes drawn in the color pass (post-`visible`; excludes shadow/IBL re-draws and foliage blades). */
     objects: number;
-    /** Scene meshes skipped this frame by camera frustum culling (color pass only). */
-    culled: number;
+    /**
+     * Scene meshes skipped this frame by camera frustum culling (color pass only).
+     *
+     * Objects and instances are counted separately because they are not the same unit and summing them
+     * produces a number that cannot be interpreted: a landscape with a few thousand grass blades behind
+     * the camera used to swamp the model count entirely, so "Culled: 4127" said nothing about whether
+     * any actual mesh had been rejected.
+     */
+    culledObjects: number;
+    /** Foliage instances skipped this frame by the distance or frustum test (per blade, not per cell). */
+    culledInstances: number;
     /** Total instances submitted across all instanced draws (PBR batches + foliage). */
     instances: number;
     /** Triangles submitted to the GPU this frame (× instanceCount for instanced draws). */
@@ -59,7 +68,8 @@ export const frameStats: RenderStats = {
     instancedDrawCalls: 0,
     rhiDrawCalls: 0,
     objects: 0,
-    culled: 0,
+    culledObjects: 0,
+    culledInstances: 0,
     instances: 0,
     triangles: 0,
     vertices: 0,
@@ -105,7 +115,8 @@ export function resetFrameStats(): void {
     frameStats.instancedDrawCalls = 0;
     frameStats.rhiDrawCalls = 0;
     frameStats.objects = 0;
-    frameStats.culled = 0;
+    frameStats.culledObjects = 0;
+    frameStats.culledInstances = 0;
     frameStats.instances = 0;
     frameStats.triangles = 0;
     frameStats.vertices = 0;

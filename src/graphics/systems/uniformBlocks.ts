@@ -1,6 +1,6 @@
 import { gl } from '../glContext';
 import { Logger } from '../../core/logger';
-import { device } from '../rhi/webgl2/webgl2Device';
+import { glDevice } from '../rhi/webgl2/webgl2Device';
 import type { WebGL2Buffer } from '../rhi/webgl2/webgl2Device';
 import { BufferUsage } from '../rhi/types';
 
@@ -92,7 +92,7 @@ export class UniformBlockSet {
         const bindingPoint = index;
         gl.uniformBlockBinding(program, index, bindingPoint);
 
-        const buffer = device.createBuffer({
+        const buffer = glDevice().createBuffer({
             label: `ubo.${name}`,
             size: dataSize,
             usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
@@ -265,7 +265,7 @@ export class UniformBlockSet {
     public flush(): void {
         for (const block of this._blocks) {
             if (!block.dirty) continue;
-            device.writeBuffer(block.buffer, 0, new Uint8Array(block.cpu));
+            glDevice().writeBuffer(block.buffer, 0, new Uint8Array(block.cpu));
             block.dirty = false;
         }
     }

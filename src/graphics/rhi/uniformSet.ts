@@ -13,6 +13,7 @@
 
 import type { Device } from './device';
 import type { Buffer } from './resources';
+import { BufferUsage } from './types';
 
 /** One writable leaf, as the `.wgsl` loader reflects it. */
 export interface UniformMember {
@@ -168,6 +169,77 @@ export class UniformSet {
         if (!this._dirty) return;
         this._dirty = false;
         device.writeBuffer(this.buffer, 0, new Uint8Array(this._cpu));
+    }
+}
+
+/**
+ * Every uniform block one PROGRAM declares, written by name and bound by group.
+ *
+ * This is the piece that makes `setUniform('u_exposure', 2.0)` work on WebGPU. A `UniformSet` knows one
+ * block; a program has several — `outline` has its transforms in group 1 and its colour in group 2, the
+ * lit families spread four across groups 1, 2, 4 and 5 — and the ~330 call sites in the renderer name
+ * a member without knowing or caring which. Routing by name is therefore not a convenience here, it is
+ * the entire compatibility story.
+ *
+ * **First match wins, and blocks are searched in declaration order.** A name that two blocks both
+ * declare would otherwise resolve differently depending on Map iteration order, which is the kind of
+ * thing that works until a shader gains a member. The engine has one real instance of this today:
+ * `u_material.emissive` exists in both the forward and deferred Blinn-Phong structs — at different
+ * offsets — which is why `uniformLayoutCheck` matches per MODULE rather than across all of them.
+ */
+export class ProgramUniforms {
+    private readonly _sets: UniformSet[] = [];
+    /** Resolved name -> set, memoised. A miss is cached as null so a stray name costs one search. */
+    private readonly _route = new Map<string, UniformSet | null>();
+
+    constructor(device: Device, blocks: readonly UniformBlockLayout[], label = 'program') {
+        for (const block of blocks) {
+            const buffer = device.createBuffer({
+                label: `${label}:${block.name}`,
+                size: block.size,
+                usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST,
+            });
+            this._sets.push(new UniformSet(block, buffer));
+        }
+    }
+
+    /** The blocks, in declaration order. */
+    public get blocks(): readonly UniformSet[] { return this._sets; }
+
+    /** The block bound at `group`, or undefined when the program declares none there. */
+    public forGroup(group: number): UniformSet | undefined {
+        return this._sets.find(s => s.layout.group === group);
+    }
+
+    /**
+     * Write a value by name into whichever block declares it.
+     *
+     * Returns false when no block does — which is NOT an error: the renderer sets uniforms that only
+     * some programs have (`u_uvScale` on the unlit family, the shadow members on the lit one), and
+     * every call site relies on the miss being silent. A throw here would turn one shader gaining a
+     * member into a crash in an unrelated pass.
+     */
+    public set(name: string, value: unknown): boolean {
+        const cached = this._route.get(name);
+        if (cached !== undefined) return cached === null ? false : cached.set(name, value);
+        for (const set of this._sets) {
+            if (!set.has(name)) continue;
+            this._route.set(name, set);
+            return set.set(name, value);
+        }
+        this._route.set(name, null);
+        return false;
+    }
+
+    /** Upload every block that changed. One call before a draw, not one per member. */
+    public flush(device: Device): void {
+        for (const set of this._sets) set.flush(device);
+    }
+
+    public destroy(): void {
+        for (const set of this._sets) set.buffer.destroy();
+        this._sets.length = 0;
+        this._route.clear();
     }
 }
 

@@ -488,7 +488,8 @@ window.__error = null;
     // The selection outline (`outline` writes the mask, `outlinePost` expands and composites it) draws
     // only when the renderer HAS a selected node. Nothing in a harness scene ever set one, so both
     // programs compiled and never drew a pixel in any capture. Pin a selection in the full profile.
-    if (fullScene) engine.renderer.setSelectedNode(cube.id);
+    // Remembered so `__select()` can put it back — see the hook below.
+    if (fullScene) { engine.renderer.setSelectedNode(cube.id); window.__defaultSelectedId = cube.id; }
 
     // `probePreview` renders a baked probe's cubemap to an equirect strip for the editor's inspector.
     // It is off-frame — it targets its own FBO — so it can never appear in a viewport signature and has
@@ -585,12 +586,29 @@ window.__error = null;
     // velocity is zero and the blur legitimately vanishes, which made the check fail about a third of the
     // time for a reason that had nothing to do with the shader.
     let motionHandle = null;
+    // Motion advances PER RENDERED FRAME, not on a wall-clock timer.
+    //
+    // Motion blur reprojects against the PREVIOUS frame's view matrix, so its velocity is the
+    // difference between two consecutive renders. A `setInterval` cannot guarantee one tick between
+    // them: this window is never shown, rAF is starved, and the frames the harness forces with
+    // `capturePage` can arrive closer together than the timer fires. The camera is then in the same
+    // place two frames running, velocity is zero, the gather early-outs — and the check fails saying
+    // "the pass did nothing", which is true and has nothing to do with the pass.
+    //
+    // rAF fires exactly when a frame is produced, forced ones included, so consecutive rendered
+    // frames differ by construction.
     window.__startMotion = (amp) => {
       let t = 0;
-      motionHandle = setInterval(() => { t += 0.006; camera.setPosition([4 + Math.sin(t) * amp, 4, 4]); }, 16);
+      const step = () => {
+        if (motionHandle === null) return;
+        t += 0.006;
+        camera.setPosition([4 + Math.sin(t) * amp, 4, 4]);
+        motionHandle = requestAnimationFrame(step);
+      };
+      motionHandle = requestAnimationFrame(step);
     };
     window.__stopMotion = () => {
-      if (motionHandle) clearInterval(motionHandle);
+      if (motionHandle) cancelAnimationFrame(motionHandle);
       motionHandle = null;
       camera.setPosition([4, 4, 4]);
     };
@@ -632,6 +650,39 @@ window.__error = null;
       camera.setRotation(on ? [-22, -135, 0] : [30, -135, 0]);
       return on ? 'up' : 'default';
     };
+
+    // Yaw the camera 180 degrees so NOTHING in the scene is in front of it.
+    //
+    // The one framing no other check uses, and the only one that can see a missing frustum test: every
+    // pass in the default shot has the whole scene in view, so a queue collected with no cull test at
+    // all draws exactly the same picture and the same counts as one that culls correctly. The deferred
+    // pipeline's forward-overlay queues (opaque Blinn-Phong/custom, and transparent) were collected
+    // with no test for exactly as long as that was true.
+    // Select a node by name (or clear), so the selection outline can be put over something other than
+    // the one PBR cube the full scene selects. The mask draws the SOURCE mesh through a position-only
+    // program, so which material the selected mesh was packed for is exactly what it exercises.
+    window.__select = (name) => {
+      // No argument restores whatever the scene selected at setup. A check that borrows the selection
+      // has to give it back: the full scene selects a cube on purpose, and leaving it cleared removes
+      // that outline from every capture afterwards — which showed up as a one-cell shading drift and
+      // read exactly like driver noise.
+      if (name === undefined) { engine.renderer.setSelectedNode(window.__defaultSelectedId || null); return 'restored'; }
+      if (!name) { engine.renderer.setSelectedNode(null); return 'cleared'; }
+      const node = engine.scene.root.children.find(n => n.name === name)
+                 || Array.from(engine.scene.models).find(n => n.name === name);
+      if (!node) return 'missing:' + name;
+      engine.renderer.setSelectedNode(node.id);
+      return node.name;
+    };
+
+    window.__lookAway = (on) => {
+      camera.setRotation(on ? [30, 45, 0] : [30, -135, 0]);
+      return on ? 'away' : 'default';
+    };
+
+    // Models in the scene, so the check above can assert that ALL of them were rejected rather than
+    // just "fewer than before" — which a partial fix would also satisfy.
+    window.__modelCount = () => (engine.scene ? engine.scene.models.size : -1);
 
     // Cloud parameters, for A/B-ing the pass. The clouds are scene-node state rather than renderer
     // state, so `__setRender` cannot reach them and neither could passCheck.

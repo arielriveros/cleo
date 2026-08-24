@@ -3,7 +3,8 @@
   "triangles": 29788,
   "vertices": 89364,
   "objects": 17,
-  "culled": 2,
+  "culledObjects": 2,
+  "culledInstances": 0,
   "instancedDrawCalls": 0,
   "instances": 0,
   "rhiDrawCalls": 101

@@ -160,6 +160,16 @@ app.whenReady().then(async () => {
     if (cfg.motion) { await js(`window.__startMotion(${cfg.motion})`); await sleep(400); }
     else await sleep(400);
     signatures[cfg.name] = await capture();
+    // A PNG of one configuration, on demand. Not part of the gate — the signature is — but the gate
+    // reports a delta and a delta cannot be looked at. `CLEO_PASS_SHOT=<name> CLEO_PASS_TAG=<label>`
+    // writes `shots/pass-<name>-<label>.png`, which is how the overdraw investigation got anywhere:
+    // two builds, two labels, and the corruption was obvious in a second.
+    if (process.env.CLEO_PASS_SHOT === cfg.name) {
+      const img = await win.webContents.capturePage();
+      const out = path.join(__dirname, 'shots', `pass-${cfg.name}-${process.env.CLEO_PASS_TAG || 'x'}.png`);
+      fs.writeFileSync(out, img.toPNG());
+      console.log('      shot: ' + out);
+    }
     stats[cfg.name] = await js('JSON.stringify(window.__renderStats())').then(JSON.parse);
     await js('window.__stopMotion()');
   }

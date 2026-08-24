@@ -29,19 +29,32 @@ export function webgpuAvailableInBrowser(): boolean {
  * layered attachments and readback — verified against a real driver by `tools/harness/webgpuCheck.js`,
  * including two of the engine's own `.wgsl` programs drawing pixel-exact output.
  *
- * The DRAW path above it is portable now too: every draw in the harness scene goes through the RHI
- * command model, and `renderer.ts` is down to a few dozen raw `gl.*` calls, none of them in a pass.
+ * The DRAW path above it is portable: every draw in the harness scene goes through the RHI command
+ * model, and `renderer.ts` is down to 29 raw `gl.*` calls, none of them inside a pass.
  *
- * What is still WebGL2-only is the SHADER and UNIFORM layer. `ShaderManager.bind(name)` selects a linked
- * GL program, and ~330 `setUniform(name, value)` call sites in the renderer reach uniforms the way
- * WebGL2 does: by name, into a std140 block whose member offsets the driver reports. WebGPU has no such
- * reflection and no `useProgram` — a pipeline carries its own module, and uniforms are bytes written at
- * offsets computed from the WGSL layout rules. Both halves of that already exist
- * (`tools/wgslLayout.mjs` computes the offsets, `rhi/uniformSet.ts` writes by name, and
- * `npm run harness:uniforms` checks all 1,697 members against a real driver); what does not exist is a
- * `Shader` that routes to them instead of to `gl.uniform*`.
+ * The SHADER and UNIFORM layer is no longer the blocker either — that note used to live here and is now
+ * out of date. `rhi/shaderProgram.ts` is the seam, `WebGPUShaderProgram` implements it, the renderer
+ * builds all 55 of its programs through `device.createShaderProgram`, and `harness:webgpu` drives
+ * `setUniform` by name into the right group on a real adapter. The swap chain is done too: the surface
+ * is on the interface and the harness reads back a pass that drew into it.
  *
- * Flipping this constant before that lands would trade an honest "not yet" for a black viewport.
+ * What is left is the RESOURCE layer, and it is a short, specific list — every remaining WebGL2-only
+ * call in the engine is a `glDevice()` site, 40 of them:
+ *
+ *   - `Mesh` (19) owns a `WebGLVertexArrayObject` and hands raw `WebGLBuffer` handles to
+ *     `vertexAttribPointer`. WebGPU has no VAO; the pipeline carries the layout. This one is on the
+ *     path of every draw, so it is the blocker that matters. `TileMesh` (7) is the same shape.
+ *   - `uniformBlocks` (2, the global UNIFORM_BUFFER binding points), `webgl2Commands` (2, inside the
+ *     backend), `texturePacker` (1), and the renderer's own 6 (vertex-layout buffers + the cloud-noise
+ *     bake framebuffer).
+ *   - The three framebuffer wrappers are down to ONE call each, all the same one: `unbind()`, which
+ *     restores the default framebuffer. That is the legacy bind model, and it is a symptom rather than
+ *     a cause — every remaining caller is a draw or clear issued OUTSIDE a pass, which is the same set
+ *     `Mesh` sits at the centre of. Port the draws and these go with them.
+ *   - `Renderer.initialize` acquires a WebGL2 context unconditionally and never calls
+ *     `acquireWebGPUDevice`.
+ *
+ * Flipping this constant before those land would trade an honest "not yet" for a black viewport.
  */
 export const WEBGPU_IMPLEMENTED = false;
 

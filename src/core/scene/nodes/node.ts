@@ -1836,13 +1836,31 @@ export class Node {
    * World-space bounding sphere used for fast frustum culling. The default matches the unit-cube
    * {@link getBoundingBox}: centered at the world position with a radius covering the scaled cube's
    * corner. {@link ModelNode} overrides this with the geometry's actual (cached) bounds.
+   *
+   * Returns a live cached reference — callers must not mutate it.
    */
   public getBoundingSphere(): { center: vec3; radius: number } {
+    if (!this._worldSphereDirty) return this._worldSphere;
     const scale = this.worldScale;
     const maxScale = Math.max(Math.abs(scale[0]), Math.abs(scale[1]), Math.abs(scale[2]));
     vec3.copy(this._worldSphere.center, this.worldPosition);
     // Half-diagonal of the scaled unit cube: 0.5 * sqrt(3) per axis, times the largest world scale.
     this._worldSphere.radius = 0.5 * Math.sqrt(3) * maxScale;
+    this._worldSphereDirty = false;
     return this._worldSphere;
+  }
+
+  /**
+   * Force the next {@link getBoundingSphere} / {@link getBoundingBox} to recompute.
+   *
+   * The world caches are normally invalidated by `updateTransforms`, which is the only thing that can
+   * move a node. Editing the underlying VERTICES moves the bounds without moving the node, so the
+   * transform never goes dirty and the stale sphere survives — call this after such an edit (terrain
+   * sculpting is the one in-tree case; see `Geometry.invalidateBounds`, which handles the object-space
+   * half).
+   */
+  public invalidateWorldBounds(): void {
+    this._worldSphereDirty = true;
+    this._worldBoxDirty = true;
   }
 }

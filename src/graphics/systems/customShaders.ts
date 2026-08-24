@@ -1,4 +1,5 @@
-import { Shader } from '../shader';
+import { device } from '../rhi/deviceHandle';
+import type { ShaderProgram } from '../rhi/shaderProgram';
 import { ShaderManager } from './shaderManager';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
 import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
@@ -534,7 +535,7 @@ function vertexSource(renderMode: CustomRenderMode): string {
 const registered = new Set<string>();           // ShaderManager keys we've compiled+registered
 const failed = new Set<string>();               // keys whose user source failed to compile (magenta fallback in use)
 const errors = new Map<string, string>();       // last compile error per key
-const fallbackByMode = new Map<CustomRenderMode, Shader>();
+const fallbackByMode = new Map<CustomRenderMode, ShaderProgram>();
 
 // --- key lifetime -------------------------------------------------------------------------------
 //
@@ -554,7 +555,7 @@ const lastKeyOf = new WeakMap<CustomMaterial, string>();
 
 /** True if `shader` is one of the shared magenta fallbacks — those are reused across every failing key
  *  of a render mode, so they must never be disposed on behalf of one of them. */
-function isFallback(shader: Shader): boolean {
+function isFallback(shader: ShaderProgram): boolean {
     for (const s of fallbackByMode.values()) if (s === shader) return true;
     return false;
 }
@@ -623,11 +624,12 @@ void main() {
 
 /** Lazily compiled magenta program per render mode; reused under any failing key. References all
  *  varyings so its VAO layout matches the standard material shaders (screen mode uses screen.vs). */
-function fallbackShader(mode: CustomRenderMode): Shader {
+function fallbackShader(mode: CustomRenderMode): ShaderProgram {
     let s = fallbackByMode.get(mode);
     if (!s) {
         const fs = mode === 'deferred' ? FALLBACK_DEFERRED_FS : mode === 'screen' ? FALLBACK_SCREEN_FS : FALLBACK_FORWARD_FS;
-        s = new Shader().create(vertexSource(mode), fs);
+        s = device.createShaderProgram({ label: `customFallback:${mode}`,
+                                        vertex: vertexSource(mode), fragment: fs });
         fallbackByMode.set(mode, s);
     }
     return s;
@@ -654,7 +656,11 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
     if (registered.has(key)) return !failed.has(key);
 
     try {
-        const shader = new Shader().create(vertexSource(mat.renderMode), assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms));
+        const shader = device.createShaderProgram({
+            label: key,
+            vertex: vertexSource(mat.renderMode),
+            fragment: assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms),
+        });
         ShaderManager.Instance.addShader(key, shader);
         registered.add(key);
         errors.delete(key);
@@ -719,15 +725,18 @@ export function tryCompileCustom(
     fragmentSource: string,
     uniforms: CustomUniform[],
 ): { ok: boolean; error?: string; wgsl?: string; wgslError?: string } {
-    const probe = new Shader();
+    // Built and thrown away: the question is only whether it compiles. The device owns cleanup on the
+    // failing path now (see `createShaderProgram`), so there is nothing to dispose when it throws.
     let result: { ok: boolean; error?: string };
     try {
-        probe.create(vertexSource(renderMode), assembleCustomFragment(renderMode, fragmentSource, uniforms));
+        device.createShaderProgram({
+            label: `customProbe:${renderMode}`,
+            vertex: vertexSource(renderMode),
+            fragment: assembleCustomFragment(renderMode, fragmentSource, uniforms),
+        }).dispose();
         result = { ok: true };
     } catch (e: any) {
         return { ok: false, error: String(e?.message ?? e) };
-    } finally {
-        probe.dispose();
     }
 
     // Only worth translating source that already compiles: naga's diagnostics for GLSL that is simply

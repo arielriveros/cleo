@@ -1,8 +1,10 @@
 import { gl } from "../glContext";
-import { device } from '../rhi/webgl2/webgl2Device';
+import { glDevice } from '../rhi/webgl2/webgl2Device';
+import { device } from '../rhi/deviceHandle';
 import type { WebGL2Framebuffer } from '../rhi/webgl2/webgl2Device';
 import { Texture } from "../texture";
 import { Shader } from "../shader";
+import type { ShaderProgram } from "../rhi/shaderProgram";
 import { Mesh } from "../mesh";
 import { GLState } from "./glState";
 import { ShaderManager } from "./shaderManager";
@@ -333,7 +335,7 @@ export class TexturePacker {
             break;
         }
 
-        if (!this._fbo) this._fbo = device.createFramebuffer('channelPack');
+        if (!this._fbo) this._fbo = glDevice().createFramebuffer('channelPack');
 
         const output = new Texture({ mipMap: true, precision: 'low', wrapping });
         output.create(null, width, height);
@@ -397,16 +399,16 @@ export class TexturePacker {
      * in `Renderer`, so a project with no packed materials pays nothing and the packer stays
      * self-contained.
      */
-    private _ensureShader(): Shader {
+    private _ensureShader(): ShaderProgram {
         const existing = ShaderManager.Instance.find('channelPack');
         if (existing) return existing;
-        const shader = new Shader().create(ChannelPackProgram.vertex!, ChannelPackProgram.fragment!);
+        const shader = device.createShaderProgram({ label: 'channelPack', ...ChannelPackProgram });
         ShaderManager.Instance.addShader('channelPack', shader);
         return shader;
     }
 
     /** A private screen quad — 4 vertices, ~80 bytes — rather than a public accessor on the Renderer. */
-    private _ensureQuad(shader: Shader): Mesh {
+    private _ensureQuad(shader: ShaderProgram): Mesh {
         if (this._quad) return this._quad;
         const quad = new Mesh();
         quad.initializeVAO(shader.attributes);

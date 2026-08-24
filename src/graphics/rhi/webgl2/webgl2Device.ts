@@ -2,7 +2,7 @@ import { gl } from '../../glContext';
 import { GLState } from '../../systems/glState';
 import { Logger } from '../../../core/logger';
 import { setViewportSize } from '../../renderStats';
-import { glBufferTarget, glBufferUsageHint, glTextureTarget } from './glEnums';
+import { glBufferTarget, glBufferUsageHint, glTextureTarget, glTextureFormat, glAddressMode, glMinFilter } from './glEnums';
 import { detectWebGL2Capabilities } from './capabilities';
 import { applyVertexLayout } from './vertexArray';
 import {
@@ -15,8 +15,11 @@ import type {
 } from '../device';
 import type { RenderPassDescriptor } from '../types';
 import type { Buffer, Texture } from '../resources';
-import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor } from '../types';
+import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor, AddressMode, TextureConfigureDescriptor } from '../types';
 import { textureByteSize, TEXTURE_FORMAT_INFO, isDepthFormat } from '../types';
+import type { ShaderProgram, ShaderProgramDescriptor } from '../shaderProgram';
+import { Shader } from '../../shader';
+import { device } from '../deviceHandle';
 
 /**
  * The WebGL2 implementation of the RHI device.
@@ -226,6 +229,13 @@ export class WebGL2Device implements Device {
      * one object is reused and only its size is refreshed, which is what the canvas can actually change
      * between calls. Callers written for the WebGPU rule work unchanged on both.
      */
+    /**
+     * Nothing to do: a WebGL2 drawing buffer is resized by assigning `canvas.width`/`height`, which the
+     * renderer has already done by the time it calls this. Present so the renderer can state the intent
+     * once for both backends rather than asking which one it is on.
+     */
+    public reconfigureSurface(): void { /* the drawing buffer follows the canvas */ }
+
     public getCurrentSurfaceTarget(): WebGL2RenderTarget {
         const width = this._canvas.width, height = this._canvas.height;
         if (!this._surfaceTarget || this._surfaceTarget.width !== width || this._surfaceTarget.height !== height)
@@ -299,6 +309,29 @@ export class WebGL2Device implements Device {
      * `ShaderManager` during initialization, and re-doing that inside the backend would duplicate the
      * uniform reflection and std140 handling that the migration depends on.
      */
+    /**
+     * Compile and link GLSL, then reflect it.
+     *
+     * The WGSL half of the descriptor is ignored here — WebGL2 cannot read it, and the GLSL it needs
+     * was generated from that same module at build time. A caller with only WGSL (there is none
+     * today) would be a mistake worth hearing about.
+     */
+    public createShaderProgram(descriptor: ShaderProgramDescriptor): ShaderProgram {
+        if (!descriptor.vertex || !descriptor.fragment)
+            throw new Error(`${descriptor.label}: WebGL2 needs GLSL vertex and fragment stages`);
+        // Dispose on failure, here rather than at the call site. `Shader`'s constructor creates the two
+        // GL shader objects and `create` throws without deleting them, so a failed compile leaked a
+        // pair unless the caller wrapped it — which the custom-material registration path, the one
+        // caller that compiles source a user can get wrong, did not.
+        const shader = new Shader();
+        try {
+            return shader.create(descriptor.vertex, descriptor.fragment);
+        } catch (error) {
+            shader.dispose();
+            throw error;
+        }
+    }
+
     public createShaderModule(descriptor: ShaderModuleDescriptor): WebGL2ShaderModule {
         return new WebGL2ShaderModule(descriptor);
     }
@@ -416,12 +449,14 @@ export class WebGL2Device implements Device {
     }
 
     /**
-     * The same readback, without the promise. WebGL2 only, and it exists because two engine callers
-     * genuinely are synchronous today: `Renderer.screenshotOffscreen` and `Renderer.renderProbePreview`
-     * both return a data URL from a straight-line call, and the editor's thumbnail capture is built on
-     * that. Threading `await` through those is a real API break (see the roadmap, M7.11) and belongs in
-     * its own change — but the GL work has no business staying in the renderer until then, so it lives
-     * here and {@link readPixels} is a thin wrapper over it. WebGPU has no counterpart and never will.
+     * The same readback without the promise — PRIVATE, and the only reason it still exists is that
+     * `readPixels` above is genuinely synchronous on this backend and there is no point pretending
+     * otherwise inside the class.
+     *
+     * It used to be public, for two engine callers that returned a data URL from a straight-line call:
+     * `Renderer.screenshotOffscreen` and `Renderer.renderProbePreview`. Both are `async` now, so no
+     * caller outside this file can reach a synchronous readback — which is the property that matters,
+     * since WebGPU has no counterpart and never will.
      */
     /**
      * Copy a rectangle from one texture view to another.
@@ -462,7 +497,7 @@ export class WebGL2Device implements Device {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    public readPixelsSync(view: WebGL2TextureView, x: number, y: number,
+    private readPixelsSync(view: WebGL2TextureView, x: number, y: number,
                           width: number, height: number): Uint8Array {
         const format = view.texture.format;
         if (isDepthFormat(format)) throw new Error(`readPixels cannot read the depth format ${format}`);
@@ -686,15 +721,26 @@ export class WebGL2Texture implements Texture {
     }
 
     /** The GL format triple and sampler state this texture uploads with. */
-    public configure(internalFormat: number, format: number, type: number,
-                     wrapping: number, minFilter: number, flipY: boolean, isDepth: boolean): void {
-        this._internalFormat = internalFormat;
-        this._glFormat = format;
-        this._type = type;
-        this._wrapping = wrapping;
-        this._minFilter = minFilter;
-        this._flipY = flipY;
-        this._isDepth = isDepth;
+    /**
+     * Settle the state every upload below applies.
+     *
+     * The GL triple is resolved HERE rather than by the caller, which is the point of the neutral
+     * descriptor: `graphics/texture.ts` used to compute `internalFormat`/`format`/`type` itself and
+     * hand three GL enums to a backend, which is exactly the coupling that made it un-portable.
+     */
+    public configure(descriptor: TextureConfigureDescriptor): void {
+        const triple = glTextureFormat(descriptor.format);
+        this._internalFormat = triple.internalFormat;
+        this._glFormat = triple.format;
+        this._type = triple.type;
+        this._wrapping = glAddressMode(descriptor.addressMode);
+        // `linear-mipmap-linear` is the pair, not a third filter: WebGL2 has one enum for both
+        // halves, so the neutral descriptor names the combination and the split happens here.
+        const mip = descriptor.minFilter === 'linear-mipmap-linear';
+        const base = descriptor.minFilter === 'nearest' ? 'nearest' : 'linear';
+        this._minFilter = glMinFilter(base, mip ? base : null);
+        this._flipY = descriptor.flipY;
+        this._isDepth = descriptor.isDepth;
     }
 
     /**
@@ -733,6 +779,7 @@ export class WebGL2Texture implements Texture {
 
     /** Upload a 2D image, or allocate an empty 2D render target when `image` is null. */
     public upload2D(image: TexImageSource | null, width: number, height: number, mipMap: boolean): void {
+        this.bindForUpload();
         this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
         if (image) gl.texImage2D(this.target, 0, this._internalFormat, this._glFormat, this._type, image);
@@ -753,6 +800,7 @@ export class WebGL2Texture implements Texture {
 
     /** Upload all six cube faces, or allocate six empty ones when `images` is null. */
     public uploadCube(images: readonly TexImageSource[] | null, width: number, height: number, mipMap: boolean): void {
+        this.bindForUpload();
         this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
         const faces = WebGL2Texture.cubeFaces();
@@ -765,11 +813,13 @@ export class WebGL2Texture implements Texture {
         this.checkForErrors();
     }
 
-    /** Upload one cube face. `face` is a GL face target from {@link cubeFaces}. */
+    /** Upload one cube face, by index into +X -X +Y -Y +Z -Z — not a GL face enum. */
     public uploadFace(face: number, image: TexImageSource, mipMap: boolean): void {
+        this.bindForUpload();
+        const target = WebGL2Texture.cubeFaces()[face];
         this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
-        gl.texImage2D(face, 0, this._internalFormat, this._glFormat, this._type, image);
+        gl.texImage2D(target, 0, this._internalFormat, this._glFormat, this._type, image);
         if (mipMap) gl.generateMipmap(this.target);
         this.checkForErrors();
     }
@@ -778,18 +828,20 @@ export class WebGL2Texture implements Texture {
      * Upload raw RGBA bytes. Always RGBA8/UNSIGNED_BYTE and never flipped or mipmapped, so the data
      * maps 1:1 to UVs — this is the editable-splat-map path, which `uploadRegion` then patches.
      */
-    public uploadBytes(data: Uint8Array, width: number, height: number, wrapping: number): void {
+    public uploadBytes(data: Uint8Array, width: number, height: number, wrapping: AddressMode): void {
+        this.bindForUpload();
         this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         gl.texImage2D(this.target, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
         gl.texParameteri(this.target, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(this.target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(this.target, gl.TEXTURE_WRAP_S, wrapping);
-        gl.texParameteri(this.target, gl.TEXTURE_WRAP_T, wrapping);
+        gl.texParameteri(this.target, gl.TEXTURE_WRAP_S, glAddressMode(wrapping));
+        gl.texParameteri(this.target, gl.TEXTURE_WRAP_T, glAddressMode(wrapping));
         this.checkForErrors();
     }
 
     public uploadRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
+        this.bindForUpload();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         gl.texSubImage2D(this.target, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
     }
@@ -824,8 +876,26 @@ export class WebGL2Texture implements Texture {
         }
     }
 
+    /**
+     * Fail loudly when an allocation is aimed at a target this texture was not created for.
+     *
+     * `bindForUpload` binds `this.target`; the allocators below name their target explicitly because
+     * WebGL2 has a different entry point per shape. When the two disagree the bind lands on one target
+     * and the allocation on another, so the driver sees NOTHING bound: it logs
+     * "Zero is bound to target" plus one "no texture bound to target" per parameter, does nothing, and
+     * execution continues with an unallocated texture. That is a console message rather than a failure,
+     * and it survived in the renderer's IBL fallback cube for as long as that cube existed.
+     */
+    private _requireDimension(expected: TextureDimension, method: string): void {
+        if (this.dimension !== expected)
+            throw new Error(`Texture "${this.label}": ${method} needs a '${expected}' texture, ` +
+                            `but this one was created as '${this.dimension}'`);
+    }
+
     /** Immutable storage for a renderable cubemap: `levels` mips per face. */
     public allocateCube(size: number, levels: number): void {
+        this._requireDimension('cube', 'allocateCube');
+        this.bindForUpload();
         gl.texStorage2D(gl.TEXTURE_CUBE_MAP, levels, this._internalFormat, size, size);
         const minFilter = levels > 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR;
         gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, minFilter);
@@ -841,14 +911,17 @@ export class WebGL2Texture implements Texture {
      * `texStorage3D` rather than `texImage3D` is what makes the layers valid attachment targets for
      * `framebufferTextureLayer`, which is how the volume gets filled — one fullscreen draw per slice.
      */
-    public allocateVolume(width: number, height: number, depth: number, wrapping: number): void {
+    public allocateVolume(width: number, height: number, depth: number, wrapping: AddressMode): void {
+        this._requireDimension('3d', 'allocateVolume');
+        this.bindForUpload();
         this._clearPendingErrors();
         gl.texStorage3D(gl.TEXTURE_3D, 1, this._internalFormat, width, height, depth);
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, wrapping);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, wrapping);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, wrapping);
+        const wrap = glAddressMode(wrapping);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, wrap);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, wrap);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, wrap);
         this.checkForErrors();
     }
 
@@ -862,6 +935,8 @@ export class WebGL2Texture implements Texture {
      * around and shadow the far side of the map with unrelated geometry.
      */
     public allocateDepthArray(size: number, layers: number, compare: boolean): void {
+        this._requireDimension('2d-array', 'allocateDepthArray');
+        this.bindForUpload();
         this._clearPendingErrors();
         gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, this._internalFormat, size, size, layers);
         const filter = compare ? gl.LINEAR : gl.NEAREST;
@@ -883,12 +958,16 @@ export class WebGL2Texture implements Texture {
      * so the editor's cascade debug blit has to switch it off around its draw.
      */
     public setCompareMode(enabled: boolean): void {
+        this.bindForUpload();
         gl.texParameteri(this.target, gl.TEXTURE_COMPARE_MODE, enabled ? gl.COMPARE_REF_TO_TEXTURE : gl.NONE);
         gl.texParameteri(this.target, gl.TEXTURE_MIN_FILTER, enabled ? gl.LINEAR : gl.NEAREST);
         gl.texParameteri(this.target, gl.TEXTURE_MAG_FILTER, enabled ? gl.LINEAR : gl.NEAREST);
     }
 
-    public generateMipmaps(): void { gl.generateMipmap(this.target); }
+    public generateMipmaps(): void {
+        this.bindForUpload();
+        gl.generateMipmap(this.target);
+    }
 
     /**
      * Drain any error already flagged, so a later `checkForErrors` cannot blame this texture for it.
@@ -1072,19 +1151,35 @@ export class WebGL2Framebuffer {
 }
 
 /**
- * The live device, in a module of its own — the same shape, and for the same reason, as `glContext.ts`.
+ * The live device, narrowed to THIS backend.
  *
- * Every low-level wrapper needs to reach the device, and routing that through the renderer would put
- * the renderer (and therefore the scene, and therefore every node class) back into the dependency
- * graph of the smallest leaves in the engine. Exported as a live binding so consumers read `device` as
- * a plain value and see the assignment the moment the renderer makes it.
+ * A named exception, and greppable on purpose. `rhi/deviceHandle.ts` hands out the INTERFACE, which is
+ * what every migrated consumer wants and what the compiler then holds it to. These callers are not
+ * migrated, and each one names a concept WebGPU does not have: `Mesh` and `TileMesh` own a
+ * `WebGLVertexArrayObject` and hand raw `WebGLBuffer` handles to `vertexAttribPointer`,
+ * `uniformBlocks` binds buffers to the global UNIFORM_BUFFER binding points, `texturePacker` builds its
+ * own framebuffer, and the renderer reads pixels back synchronously.
+ *
+ * Every call here is one of those. The list shrinks as each owner is migrated, which it would not if
+ * the same access were bought by widening `Device` with methods only one backend can implement.
+ *
+ * Throws rather than handing back a mis-typed object when another backend is live: a WebGL2-only path
+ * reached under WebGPU is a bug in the caller, and the throw is what says so at the call that did it.
  */
-export let device: WebGL2Device;
+export function glDevice(): WebGL2Device {
+    if (!(device instanceof WebGL2Device))
+        throw new Error('a WebGL2-only path was reached while a different backend is active');
+    return device;
+}
 
-/** Called once by the renderer, immediately after it acquires a context. */
-export function setDevice(next: WebGL2Device): void { device = next; }
-
-/** Release the current device's resources. Used when a context is lost or replaced. */
+/**
+ * Release the current device's resources. Used when a context is lost or replaced.
+ *
+ * The handle itself moved to `rhi/deviceHandle.ts` so its consumers are typed against the INTERFACE
+ * rather than against this class — see the note there. This function stays behind because what it does
+ * after `destroy()` is WebGL2's business: `GLState` caches the GL state machine, and a device that is
+ * going away leaves the cache describing a context that no longer exists.
+ */
 export function destroyDevice(): void {
     if (!device) return;
     device.destroy();

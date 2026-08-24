@@ -32,15 +32,23 @@ function syncPreviewCamera(scene: Scene): void {
 }
 
 // Capture a scene to a base64 PNG with the ground grid hidden (kept clean, then restored).
-function captureClean(engine: CleoEngine, scene: Scene): string {
+//
+// The restore is deliberately NOT in a `finally` around the await. `screenshotOffscreen` is async
+// because the readback is, but an async function body runs synchronously up to its first `await` — and
+// that await comes after the render. So the promise returned below has already drawn the frame, and the
+// grid can go back on immediately. Awaiting first would leave the live viewport without its grid for as
+// long as the readback takes, which on WebGPU is a real gap rather than a microtask.
+async function captureClean(engine: CleoEngine, scene: Scene): Promise<string> {
   const prevGrid = engine.renderer.gridVisible;
   engine.renderer.setGridVisible(false);
+  let pending: Promise<string>;
   try {
     syncPreviewCamera(scene);
-    return engine.renderer.screenshotOffscreen(scene, THUMB_SIZE);
+    pending = engine.renderer.screenshotOffscreen(scene, THUMB_SIZE);
   } finally {
     engine.renderer.setGridVisible(prevGrid);
   }
+  return pending;
 }
 
 /**
@@ -51,7 +59,7 @@ function captureClean(engine: CleoEngine, scene: Scene): string {
  * for the capture only (keeping the user's orbit orientation) and restored afterwards. The orbit controller
  * is muted while dollied so it can't snap the camera back to its zoom radius mid-capture.
  */
-export function captureMaterialSphere(engine: CleoEngine, scene: Scene): string {
+export function captureMaterialSphere(engine: CleoEngine, scene: Scene): Promise<string> {
   const cam = scene.activeCamera;
   if (!cam) return captureClean(engine, scene);
 
@@ -64,6 +72,8 @@ export function captureMaterialSphere(engine: CleoEngine, scene: Scene): string 
       cam.onUpdate = () => {};
       cam.setPosition([0, 0, -fit]); // the rig looks down its local -Z at the pivot (the sphere)
     }
+    // The promise, not its value — see the note in `captureClean`. The frame is already drawn by the
+    // time this returns, so the camera can be put back before the readback resolves rather than after.
     return captureClean(engine, scene);
   } finally {
     if (dollied) {

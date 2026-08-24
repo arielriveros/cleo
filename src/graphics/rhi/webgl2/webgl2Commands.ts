@@ -31,7 +31,7 @@ import {
     glTopology, glIndexType, indexByteSize, isTriangleTopology,
 } from './glEnums';
 import { frameStats, setViewportSize } from '../../renderStats';
-import { device } from './webgl2Device';
+import { glDevice } from './webgl2Device';
 import type { WebGL2Texture, WebGL2Buffer, WebGL2Framebuffer } from './webgl2Device';
 import type {
     RenderPipelineDescriptor, BindGroupDescriptor, ShaderModuleDescriptor,
@@ -78,7 +78,14 @@ export class WebGL2ShaderModule implements ShaderModule {
         this.program = descriptor.program;
     }
 
-    public get shader(): Shader { return ShaderManager.Instance.getShader(this.program); }
+    /**
+     * The linked program, as the CONCRETE WebGL2 class.
+     *
+     * The cast is honest rather than lazy: this is the WebGL2 backend, the registry hands out the
+     * backend-neutral `ShaderProgram` interface, and everything registered while THIS backend is live is
+     * a `Shader`. A WebGPU backend would reach for its own program type in the same place.
+     */
+    public get shader(): Shader { return ShaderManager.Instance.getShader(this.program) as Shader; }
 
     /** The GLSL sampler name for a (group, binding), or undefined when the program declares no such
      *  resource. A texture and its sampler share one name — see `findResources` in wgslTranslate. */
@@ -399,7 +406,7 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
      */
     private _beginDraw(): number {
         if (!this._pipeline) throw new Error('draw before setPipeline');
-        GLState.bindVAO(device.vertexArrayFor(this._pipeline, this._vertexBuffers, this._indexBuffer));
+        GLState.bindVAO(glDevice().vertexArrayFor(this._pipeline, this._vertexBuffers, this._indexBuffer));
         // Uniform writes go to a CPU buffer and upload once, immediately before the draw that reads
         // them — the same contract `Mesh.draw` has always honoured through `flushBound`.
         ShaderManager.Instance.flushBound();
@@ -439,7 +446,7 @@ export class WebGL2CommandEncoder implements CommandEncoder {
 
     public copyTextureToTexture(source: TextureView, destination: TextureView,
                                 width: number, height: number): void {
-        device.copyTexture(source as WebGL2TextureView, destination as WebGL2TextureView, width, height);
+        glDevice().copyTexture(source as WebGL2TextureView, destination as WebGL2TextureView, width, height);
     }
 
     public finish(): void { /* WebGL2 issued everything as it was recorded */ }

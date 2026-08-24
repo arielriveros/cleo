@@ -11,14 +11,18 @@
 
 import { acquireWebGPUDevice, type WebGPUDevice } from '../../../../src/graphics/rhi/webgpu/webgpuDevice';
 import { BufferUsage, TextureUsage, ShaderStage, type VertexBufferLayout } from '../../../../src/graphics/rhi/types';
-import { UniformSet } from '../../../../src/graphics/rhi/uniformSet';
+import { UniformSet, ProgramUniforms } from '../../../../src/graphics/rhi/uniformSet';
+import { WebGPUShaderProgram } from '../../../../src/graphics/rhi/webgpu/webgpuShaderProgram';
 import type { Texture, TextureView, ShaderModule } from '../../../../src/graphics/rhi/resources';
 import ScreenProgram from '../../../../src/graphics/shaders/wgsl/screen.wgsl';
 import PresentProgram from '../../../../src/graphics/shaders/wgsl/present.wgsl';
+import OutlineProgram from '../../../../src/graphics/shaders/wgsl/outline.wgsl';
 
 interface CheckResult { name: string; pass: boolean; detail: string; }
 
 const SIZE = 64;
+/** The swap-chain canvas starts here and is resized to prove the surface follows. */
+const SURFACE_W = 80, SURFACE_H = 48;
 
 /**
  * A screen-filling quad in clip space, with UVs oriented for WebGPU.
@@ -28,6 +32,16 @@ const SIZE = 64;
  * its input exactly. Getting this backwards still renders — it renders the image flipped, which an
  * eyeball check on a symmetric test pattern would happily accept. Hence an asymmetric pattern below.
  */
+/** The three attributes `outline` declares, packed: position, normal, uv — 32 bytes. */
+const OUTLINE_VERTEX_LAYOUT: VertexBufferLayout = {
+    arrayStride: 32, stepMode: 'vertex',
+    attributes: [
+        { name: 'a_position', shaderLocation: 0, offset: 0,  format: 'float32x3' },
+        { name: 'a_normal',   shaderLocation: 1, offset: 12, format: 'float32x3' },
+        { name: 'a_texCoord', shaderLocation: 2, offset: 24, format: 'float32x2' },
+    ],
+};
+
 const QUAD = new Float32Array([
     -1, +1, 0,   0, 0,
     -1, -1, 0,   0, 1,
@@ -105,7 +119,19 @@ async function run(): Promise<CheckResult[]> {
     const check = (name: string, pass: boolean, detail: string = '') =>
         results.push({ name, pass, detail });
 
-    const device = await acquireWebGPUDevice({ powerPreference: 'high-performance' });
+    // A real canvas, so the surface half of the interface is exercised rather than skipped.
+    //
+    // Every other check here draws into a texture it made itself, which never touches the swap chain —
+    // and the swap chain is the one resource the engine cannot substitute, since it is the only path to
+    // the screen. It is in the DOM because a detached canvas has no presentation path at all on some
+    // implementations, and the point is to test the one the editor will use.
+    const surfaceCanvas = document.createElement('canvas');
+    surfaceCanvas.width = SURFACE_W;
+    surfaceCanvas.height = SURFACE_H;
+    surfaceCanvas.style.cssText = 'position:fixed;left:-9999px;top:0';
+    document.body.appendChild(surfaceCanvas);
+
+    const device = await acquireWebGPUDevice({ powerPreference: 'high-performance', canvas: surfaceCanvas });
     if (!device) {
         check('device acquired', false, 'acquireWebGPUDevice returned null');
         return results;
@@ -423,6 +449,165 @@ struct Targets {
               'a depth-less pipeline against a depth target invalidates the command buffer');
     }
 
+    // --- 6. a program with TWO uniform blocks, written by name ------------------------------------
+    //
+    // `outline` is the cleanest case in the engine: matrices in group 1, a colour in group 2, and no
+    // textures at all. That separation is what makes the test sharp — group 1 decides WHERE the
+    // triangle lands and group 2 decides WHAT COLOUR it is, so a name routed to the wrong block does
+    // not merely shade differently, it moves the geometry or leaves it black.
+    //
+    // This is the piece the renderer needs and did not have: `UniformSet` knows one block, and a
+    // program has several.
+    {
+        const SIZE = 8;
+        const module = device.createShaderModule({
+            label: 'outline', stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
+            source: OutlineProgram.wgsl, resources: OutlineProgram.resources,
+            entryPoints: OutlineProgram.entryPoints,
+        });
+        const pipeline = device.createRenderPipeline({
+            label: 'outline', vertex: module, fragment: module,
+            vertexLayouts: [OUTLINE_VERTEX_LAYOUT],
+            primitive: { topology: 'triangle-list', cullMode: 'none', frontFace: 'ccw' },
+            colorTargets: [{ format: 'rgba8unorm' }],
+        });
+
+        const program = new ProgramUniforms(device, OutlineProgram.uniformBlocks, 'outline');
+        check('the outline program declares two uniform blocks',
+              program.blocks.length === 2 && !!program.forGroup(1) && !!program.forGroup(2),
+              program.blocks.map(b => 'g' + b.layout.group + ':' + b.layout.name).join(' '));
+
+        // A full-viewport triangle in clip space, with identity view/projection.
+        const IDENTITY = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+        const verts = new Float32Array([
+            -1, -1, 0,  0, 0, 1,  0, 0,
+             3, -1, 0,  0, 0, 1,  2, 0,
+            -1,  3, 0,  0, 0, 1,  0, 2,
+        ]);
+        const vbo = device.createBuffer({ label: 'outline-verts', size: verts.byteLength,
+                                          usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+        device.writeBuffer(vbo, 0, verts);
+
+        const drawOutline = async (color: number[], scale: number): Promise<Uint8Array> => {
+            // Every one of these is routed BY NAME across two blocks, exactly as the renderer writes
+            // them — no group numbers, no offsets, no knowledge of which struct holds what.
+            const model = [scale,0,0,0, 0,scale,0,0, 0,0,1,0, 0,0,0,1];
+            if (!program.set('u_model', model)) throw new Error('u_model did not resolve');
+            if (!program.set('u_view', IDENTITY)) throw new Error('u_view did not resolve');
+            if (!program.set('u_projection', IDENTITY)) throw new Error('u_projection did not resolve');
+            if (!program.set('u_outlineColor', color)) throw new Error('u_outlineColor did not resolve');
+            program.flush(device);
+
+            const target = makeTarget(device, SIZE, 'outline');
+            const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
+            const groups = [1, 2].map(g => device.createBindGroup({
+                layout: pipeline.bindGroupLayouts.find(l => l.group === g)!,
+                entries: [{ binding: 0, buffer: program.forGroup(g)!.buffer }],
+            }));
+            const encoder = device.createCommandEncoder('outline');
+            const pass = encoder.beginRenderPass(renderTarget, {
+                label: 'outline',
+                colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
+            });
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(1, groups[0]);
+            pass.setBindGroup(2, groups[1]);
+            pass.setVertexBuffer(0, vbo);
+            pass.draw(3);
+            pass.end();
+            encoder.finish();
+            const pixels = await device.readPixels(target.view, 0, 0, SIZE, SIZE);
+            target.texture.destroy();
+            return pixels;
+        };
+
+        // Group 2 decides the colour.
+        const red = await drawOutline([1, 0, 0], 1);
+        check('a name routed to group 2 colours the fragment',
+              red[0] === 255 && red[1] === 0 && red[2] === 0,
+              `rgb=(${red[0]},${red[1]},${red[2]})`);
+        const teal = await drawOutline([0, 0.5, 1], 1);
+        check('a second colour writes the same member again',
+              teal[0] === 0 && Math.abs(teal[2] - 255) <= 1,
+              `rgb=(${teal[0]},${teal[1]},${teal[2]})`);
+
+        // Group 1 decides the geometry. Scaling the model matrix to a quarter pulls the triangle off
+        // the top-right corner, so that texel goes back to the clear colour while the origin stays lit.
+        const shrunk = await drawOutline([0, 0.5, 1], 0.25);
+        const corner = ((SIZE - 1) * SIZE + (SIZE - 1)) * 4;
+        check('a name routed to group 1 moves the geometry',
+              shrunk[corner + 2] === 0 && teal[corner + 2] > 200,
+              `corner blue: full=${teal[corner + 2]} shrunk=${shrunk[corner + 2]}`);
+
+        // --- the same program, driven through the ShaderProgram INTERFACE ------------------------
+        //
+        // Everything above used `ProgramUniforms` directly. This is the shape the renderer actually
+        // talks to: `setUniform(name, value)` and `flushUniformBlocks()`, the same two calls it makes
+        // ~330 times against a WebGL2 `Shader`, reaching a WebGPU program that shares no code with it.
+        {
+            const gpuProgram = new WebGPUShaderProgram(device, 'outline',
+                                                       OutlineProgram.vertexInputs,
+                                                       OutlineProgram.uniformBlocks);
+
+            // Attributes are DECLARED on this backend, not reflected off a linked program.
+            check('the WebGPU program reports the shader vertex attributes',
+                  gpuProgram.attributes.length === 3
+                  && gpuProgram.attributes[0].name === 'a_position'
+                  && gpuProgram.attributes[0].byteSize === 12
+                  && gpuProgram.attributes[2].byteSize === 8,
+                  gpuProgram.attributes.map(a => a.location + ':' + a.name + ':' + a.byteSize).join(' '));
+            check('it reports no reflected vertexAttribPointer layout',
+                  gpuProgram.attributes.every(a => a.layout === undefined),
+                  'that shape is WebGL2-only and a WebGPU program must not invent one');
+
+            check('hasUniform answers across both blocks',
+                  gpuProgram.hasUniform('u_model') && gpuProgram.hasUniform('u_outlineColor')
+                  && !gpuProgram.hasUniform('u_notAThing'),
+                  'u_model (group 1), u_outlineColor (group 2), and a name neither declares');
+
+            gpuProgram.use();   // bookkeeping on this backend — proves it is callable, not that it acts
+            gpuProgram.setUniform('u_model', [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+            gpuProgram.setUniform('u_view', IDENTITY);
+            gpuProgram.setUniform('u_projection', IDENTITY);
+            gpuProgram.setUniform('u_outlineColor', [1, 1, 0]);
+            gpuProgram.flushUniformBlocks();
+
+            const target = makeTarget(device, SIZE, 'outline-iface');
+            const renderTarget = device.createRenderTarget({ colorViews: [target.view] });
+            const groups = [1, 2].map(g => device.createBindGroup({
+                layout: pipeline.bindGroupLayouts.find(l => l.group === g)!,
+                entries: [{ binding: 0, buffer: gpuProgram.uniforms.forGroup(g)!.buffer }],
+            }));
+            const encoder = device.createCommandEncoder('outline-iface');
+            const pass = encoder.beginRenderPass(renderTarget, {
+                label: 'outline-iface',
+                colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
+            });
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(1, groups[0]);
+            pass.setBindGroup(2, groups[1]);
+            pass.setVertexBuffer(0, vbo);
+            pass.draw(3);
+            pass.end();
+            encoder.finish();
+            const px = await device.readPixels(target.view, 0, 0, SIZE, SIZE);
+            target.texture.destroy();
+
+            check('a uniform set through the ShaderProgram interface reaches the shader',
+                  px[0] === 255 && px[1] === 255 && px[2] === 0,
+                  `rgb=(${px[0]},${px[1]},${px[2]}) — set via setUniform + flushUniformBlocks`);
+
+            check('describeBlockLayout reports both blocks with their members',
+                  (gpuProgram.describeBlockLayout() as any[]).length === 2,
+                  JSON.stringify((gpuProgram.describeBlockLayout() as any[]).map(b => b.name)));
+
+            gpuProgram.dispose();
+        }
+
+        program.destroy();
+        vbo.destroy();
+    }
+
     // --- reallocateBuffer ------------------------------------------------------------------------
     //
     // A GPUBuffer's size is fixed at creation, so growing one means destroying it and making another.
@@ -446,7 +631,58 @@ struct Targets {
         grown.destroy();
     }
 
+    // --- the swap chain --------------------------------------------------------------------------
+    //
+    // The only resource with no substitute: every other target in this file is a texture the harness
+    // allocated, and none of them is the screen. Two things have to hold for the renderer's present
+    // pass to work — the surface target must describe the canvas as it is NOW, and drawing into it must
+    // actually land in its pixels.
+    //
+    // The size half is checked across a resize because that is where it can silently go wrong: the
+    // renderer resizes its own internal buffers on every viewport change, and if the surface did not
+    // follow it would keep presenting at the old size into a target the compositor then rescales —
+    // a soft image with nothing anywhere reporting an error.
+    {
+        const before = device.getCurrentSurfaceTarget();
+        check('the surface target describes the canvas',
+              before.width === SURFACE_W && before.height === SURFACE_H,
+              `${before.width}x${before.height}, canvas ${SURFACE_W}x${SURFACE_H}`);
+
+        // Drawing into the swap chain, not merely acquiring it. The surface is configured COPY_SRC for
+        // exactly this — acquiring a target proves nothing about whether a pass can write to it.
+        const encoder = device.createCommandEncoder('surface-clear');
+        const pass = encoder.beginRenderPass(before, {
+            label: 'surface-clear',
+            colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 1, 0, 1] }],
+        });
+        pass.end();
+        encoder.finish();
+        const pixels = await device.readPixels(before.colorViews[0], 0, 0, 2, 2);
+        // The surface format is the platform's preferred one, which is bgra8unorm on most desktops —
+        // so this asserts on the GREEN channel and on opacity, the two that mean the same thing in
+        // either channel order, rather than pinning a byte order the platform gets to choose.
+        const green = pixels[1] > 240 && pixels[0] < 16 && pixels[3] > 240;
+        check('a render pass writes to the swap-chain texture', green,
+              `rgba(${pixels[0]},${pixels[1]},${pixels[2]},${pixels[3]}) from a green clear`);
+
+        // MEASURED (2026-08-23, this driver): the resize below passes with the `reconfigureSurface`
+        // call commented out. `getCurrentTexture()` reads the canvas's CURRENT width/height, and
+        // `configure()` carries no size, so a plain resize needs no reconfiguration — which is what the
+        // spec says and the opposite of what this check was first written to assert. Recorded here
+        // because the next person to read `Renderer.resize` will wonder, and re-measuring costs a
+        // rebuild and a driver run. What the call is actually for is re-establishing configuration
+        // after the canvas is re-parented, which the editor does on every mode switch.
+        surfaceCanvas.width = SURFACE_W * 2;
+        surfaceCanvas.height = SURFACE_H + 17;
+        device.reconfigureSurface();
+        const after = device.getCurrentSurfaceTarget();
+        check('the surface follows a canvas resize',
+              after.width === SURFACE_W * 2 && after.height === SURFACE_H + 17,
+              `${after.width}x${after.height}, canvas ${surfaceCanvas.width}x${surfaceCanvas.height}`);
+    }
+
     device.destroy();
+    surfaceCanvas.remove();
     return results;
 }
 

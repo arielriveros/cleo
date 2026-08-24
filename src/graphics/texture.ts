@@ -3,8 +3,9 @@ import { bytesToDataUrl } from "../core/base64";
 import { Logger } from "../core/logger";
 import { resolveTextureFormat } from "./rhi/textureFormat";
 import { glTextureFormat, glTextureTarget, glAddressMode, glMinFilter } from "./rhi/webgl2/glEnums";
-import { device } from "./rhi/webgl2/webgl2Device";
+import { device } from "./rhi/deviceHandle";
 import { WebGL2Texture } from "./rhi/webgl2/webgl2Device";
+import type { Texture as RhiTexture } from "./rhi/resources";
 import { WebGL2TextureView } from "./rhi/webgl2/webgl2Commands";
 import { TextureUsage } from "./rhi/types";
 import type { TextureFormat, TextureDimension, AddressMode } from "./rhi/types";
@@ -89,7 +90,15 @@ export class Texture {
      * paths — six of them, one per WebGL2 entry point — keep reading exactly as they did while the
      * allocation, the lifetime and the byte accounting move behind the RHI.
      */
-    private readonly _gpu: WebGL2Texture;
+    /**
+     * The device-owned texture, as the RHI describes one.
+     *
+     * Typed by the INTERFACE rather than the WebGL2 class, which is what makes this file portable:
+     * every upload below goes through methods both backends can implement, and the two that cannot
+     * (`bind` to a texture unit, `unbind`) are cast at their call sites so the coupling is one named
+     * exception instead of the whole class.
+     */
+    private readonly _gpu: RhiTexture;
     private _width: number = 0;
     private _height: number = 0;
     // Colour channels actually allocated (1 for an R8/R16F target, 4 otherwise). Only affects byteSize.
@@ -167,21 +176,34 @@ export class Texture {
         this._mipMapFilter = filter;
         this._minFilter = glMinFilter(filter, this._mipMap ? filter : null);
 
-        this._gpu.configure(triple.internalFormat, triple.format, triple.type,
-                            this._wrapping, this._minFilter, this._flipY, this._usage === 'depth');
+        this._gpu.configure({
+            format: resolved.format,
+            addressMode: this._addressMode,
+            minFilter: this._mipMap ? (filter === 'nearest' ? 'nearest' : 'linear-mipmap-linear')
+                                    : filter,
+            flipY: this._flipY,
+            isDepth: this._usage === 'depth',
+        });
     }
 
     /** The format actually allocated, which is not necessarily the one requested. */
     public get format(): TextureFormat { return this._resolvedFormat; }
 
     /** The device-owned handle. Everything below still binds and uploads through it directly. */
-    private get _texture(): WebGLTexture { return this._gpu.handle; }
+    private get _texture(): WebGLTexture { return (this._gpu as WebGL2Texture).handle; }
 
     /** Bind for sampling. See WebGL2Texture.bind — the state cache lives with the GPU resource now. */
-    public bind(slot: number = 0): void { this._gpu.bind(slot); }
+    /**
+     * Bind for sampling at a texture UNIT.
+     *
+     * Not on the RHI interface and never will be: a unit is a WebGL2 concept, and WebGPU binds
+     * through bind groups instead. The remaining callers are the legacy material-application paths;
+     * they go when those do.
+     */
+    public bind(slot: number = 0): void { (this._gpu as WebGL2Texture).bind(slot); }
 
     /** Release whichever unit this texture was last bound to. */
-    public unbind(): void { this._gpu.unbind(); }
+    public unbind(): void { (this._gpu as WebGL2Texture).unbind(); }
 
     /** Close an upload: record the dimensions it established, then release the upload unit. */
     private _finishUpload(): void {
@@ -190,7 +212,6 @@ export class Texture {
     }
 
     public create(data: HTMLImageElement | CubemapFaces | null, width: number = 0, height: number = 0): void {
-        this._gpu.bindForUpload();
         this._data = data;
         this._width = width;
         this._height = height;
@@ -233,17 +254,15 @@ export class Texture {
      * data maps 1:1 to UVs, and it can be partially updated later with `updateRegion`.
      */
     public createFromData(data: Uint8Array, width: number, height: number, wrapping: 'clamp' | 'repeat' | 'mirror' = 'clamp'): void {
-        this._gpu.bindForUpload();
         this._data = null;
         this._width = width;
         this._height = height;
-        this._gpu.uploadBytes(data, width, height, glAddressMode(ADDRESS_MODES[wrapping]));
+        this._gpu.uploadBytes(data, width, height, ADDRESS_MODES[wrapping]);
         this._finishUpload();
     }
 
     /** Upload a sub-rectangle of RGBA bytes (row-major, tightly packed) into an existing data texture. */
     public updateRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
-        this._gpu.bindForUpload();
         this._gpu.uploadRegion(x, y, width, height, data);
         this.unbind();
     }
@@ -253,7 +272,6 @@ export class Texture {
             Logger.error('Cannot update 2D texture with cubemap face', 'Texture');
             return;
         }
-        this._gpu.bindForUpload();
         this._data = data;
         if (data) {
             this._width = data.width;
@@ -268,14 +286,13 @@ export class Texture {
             Logger.error('Cannot set cubemap face on non-cubemap texture', 'Texture');
             return;
         }
-        this._gpu.bindForUpload();
         // Face order matches WebGL2Texture.cubeFaces(): +X, -X, +Y, -Y, +Z, -Z.
         const order: readonly ('posX' | 'negX' | 'posY' | 'negY' | 'posZ' | 'negZ')[] =
             ['posX', 'negX', 'posY', 'negY', 'posZ', 'negZ'];
         (this._data as CubemapFaces)[face] = data;
         this._width = data.width;
         this._height = data.height;
-        this._gpu.uploadFace(WebGL2Texture.cubeFaces()[order.indexOf(face)], data, this._mipMap);
+        this._gpu.uploadFace(order.indexOf(face), data, this._mipMap);
         this._finishUpload();
     }
 
@@ -285,7 +302,6 @@ export class Texture {
      * prefiltered specular) — render into a face/level with a framebuffer, then sample as a cubemap.
      */
     public createCubemapTarget(size: number, levels: number = 1): void {
-        this._gpu.bindForUpload();
         this._width = size;
         this._height = size;
         this._mipMap = levels > 1;
@@ -305,12 +321,11 @@ export class Texture {
             Logger.error('createVolume requires a texture created with target: "texture3D"', 'Texture');
             return;
         }
-        this._gpu.bindForUpload();
         this._width = width;
         this._height = height;
         this._depth = depth;
         this._mipMap = false; // a tiling noise field wants a single level; mips would blur the tile seams
-        this._gpu.allocateVolume(width, height, depth, glAddressMode(ADDRESS_MODES[wrapping]));
+        this._gpu.allocateVolume(width, height, depth, ADDRESS_MODES[wrapping]);
         this._finishUpload();
     }
 
@@ -329,7 +344,6 @@ export class Texture {
             Logger.error('createArrayTarget requires a texture created with target: "texture2DArray"', 'Texture');
             return;
         }
-        this._gpu.bindForUpload();
         this._width = size;
         this._height = size;
         this._depth = layers;
@@ -340,14 +354,12 @@ export class Texture {
 
     /** Toggle hardware depth comparison on a depth array/2D target. */
     public setDepthCompare(enabled: boolean): void {
-        this._gpu.bindForUpload();
         this._gpu.setCompareMode(enabled);
         this.unbind();
     }
 
     /** (Re)generate the mip chain for this texture — e.g. after rendering a captured cubemap. */
     public generateMipmaps(): void {
-        this._gpu.bindForUpload();
         this._gpu.generateMipmaps();
         this.unbind();
     }
@@ -406,7 +418,7 @@ export class Texture {
      * group entry. `texture` above hands out the raw WebGL handle and is the thing the RHI is meant
      * to retire; this one hands out a resource the device already owns.
      */
-    public get gpu(): WebGL2Texture { return this._gpu; }
+    public get gpu(): WebGL2Texture { return this._gpu as WebGL2Texture; }
 
     /**
      * This texture as an RHI view, created once and reused.
@@ -416,7 +428,7 @@ export class Texture {
      * resource on WebGL2, so one per texture is correct as well as cheap.
      */
     public get view(): WebGL2TextureView {
-        if (!this._view) this._view = new WebGL2TextureView(this._gpu);
+        if (!this._view) this._view = new WebGL2TextureView(this._gpu as WebGL2Texture);
         return this._view;
     }
     private _view: WebGL2TextureView | null = null;

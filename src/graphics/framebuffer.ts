@@ -1,4 +1,6 @@
-import { device } from './rhi/webgl2/webgl2Device';
+import { glDevice } from './rhi/webgl2/webgl2Device';
+import { device } from './rhi/deviceHandle';
+import type { RenderTarget } from './rhi/resources';
 import type { ColorAttachmentDescriptor } from './rhi/types';
 import type { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 import { Texture, TextureConfig } from './texture';
@@ -77,15 +79,26 @@ export class Framebuffer {
         return this;
     }
 
-    /** Make this the current draw target, viewport included. */
+    /**
+     * Make this the current draw target, viewport included.
+     *
+     * `bind`/`unbind` are the LEGACY model, and the last thing keeping this class off the RHI
+     * interface. Binding a framebuffer object is not a concept WebGPU has — there a target is named by
+     * the pass that opens it and stops being current when the pass ends — so `RenderTarget.bind()` is
+     * WebGL2-only and the cast below says so rather than widening the interface to accommodate it.
+     *
+     * They go away with the last draw that is not recorded against a pass encoder: every remaining
+     * caller is a site that draws (or clears) outside a pass and therefore depends on inherited target
+     * state. See the `glDevice()` worklist for the rest of that set.
+     */
     public bind(): Framebuffer {
-        this.renderTarget.bind();
+        (this.renderTarget as WebGL2RenderTarget).bind();
         return this;
     }
 
     /** Hand the canvas back the draw target — the default framebuffer, at its own resolution. */
     public unbind(): Framebuffer {
-        device.getCurrentSurfaceTarget().bind();
+        glDevice().getCurrentSurfaceTarget().bind();
         return this;
     }
 
@@ -100,32 +113,6 @@ export class Framebuffer {
         this.recreate();
     }
 
-    public get framebuffer(): WebGLFramebuffer { return this.renderTarget.framebuffer!.handle; }
-
-    /**
-     * Open a render pass on this target: bind it, set the viewport, and clear what was asked for.
-     *
-     * The pass boundary, in one call. `bind()` and `gl.clear()` were only ever adjacent by convention,
-     * and nothing stopped a pass binding and forgetting to clear — which produced a frame of the
-     * previous pass's contents rather than an error.
-     *
-     * The descriptor names every colour attachment this framebuffer actually has, not just slot 0:
-     * `gl.clear` clears them all, and a descriptor that claimed otherwise would be a lie the WebGPU
-     * backend would then faithfully implement as something different.
-     */
-    public beginPass(label: string, clear: { color?: boolean; depth?: boolean } = {}): void {
-        const colorAttachments: ColorAttachmentDescriptor[] = [];
-        for (let i = 0; i < this._colors.length; i++)
-            colorAttachments.push({ target: i, loadOp: clear.color ? 'clear' : 'load', storeOp: 'store' });
-        device.beginRenderPass(this.renderTarget, {
-            label,
-            colorAttachments,
-            depthAttachment: this._depth
-                ? { loadOp: clear.depth ? 'clear' : 'load', storeOp: 'store' }
-                : undefined,
-        });
-    }
-
     /**
      * This framebuffer as an RHI render target.
      *
@@ -134,7 +121,7 @@ export class Framebuffer {
      * attachment and therefore evicts the target — cannot leave a stale one behind. Holding one here
      * instead would mean two places that have to agree about when the attachments changed.
      */
-    public get renderTarget(): WebGL2RenderTarget {
+    public get renderTarget(): RenderTarget {
         return device.createRenderTarget({
             label: 'framebuffer',
             colorViews: this._colors.map(c => c.view),

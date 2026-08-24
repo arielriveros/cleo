@@ -63,12 +63,12 @@ function programToModule() {
     const imports = new Map();   // identifier -> wgsl stem
     for (const m of src.matchAll(/^import\s+(\w+)\s+from\s+'\.\/shaders\/wgsl\/([\w.]+)\.wgsl'/gm))
         imports.set(m[1], m[2]);
-    const creates = new Map();   // local shader variable -> wgsl stem
-    for (const m of src.matchAll(/(?:const|let)\s+(\w+)\s*=\s*new Shader\(\)\.create\(\s*(\w+)\./g))
-        if (imports.has(m[2])) creates.set(m[1], imports.get(m[2]));
+    // The renderer's `programs` table: one `['registeredName', XProgram],` row per program. It used to
+    // be 55 `new Shader().create(X...)` locals plus 56 `addShader('name', local)` calls, which took two
+    // regexes and a join through the local's name to read. One row is one mapping now.
     const programs = new Map();  // registered name -> wgsl stem
-    for (const m of src.matchAll(/addShader\(\s*'([^']+)'\s*,\s*(\w+)\s*\)/g))
-        if (creates.has(m[2])) programs.set(m[1], creates.get(m[2]));
+    for (const m of src.matchAll(/\[\s*'([^']+)'\s*,\s*(\w+)\s*\]/g))
+        if (imports.has(m[2])) programs.set(m[1], imports.get(m[2]));
     return programs;
 }
 

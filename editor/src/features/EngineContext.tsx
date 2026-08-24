@@ -3717,7 +3717,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Save a material tab to the library (capturing a sphere thumbnail) and propagate to references.
   // captureMaterialSphere renders the tab's own scene offscreen, so this works for a tab that is not on
   // screen — which is what lets Save All reach every dirty material.
-  const saveMaterialTab = (tabId: string) => {
+  // Async only because the thumbnail readback is (a WebGPU one is a buffer map). The capture's own
+  // camera and grid restores happen before it suspends — see `captureMaterialSphere`.
+  const saveMaterialTab = async (tabId: string) => {
     const instance = instanceRef.current;
     const tab = tabsRef.current.find(t => t.id === tabId);
     if (!instance || !tab || tab.kind !== 'material') return;
@@ -3726,7 +3728,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const sphere = runtime.scene.getNodeById(runtime.rootId) as ModelNode | null;
     if (!sphere || !sphere.model) return;
     try {
-      const thumbnail = captureMaterialSphere(instance, runtime.scene);
+      const thumbnail = await captureMaterialSphere(instance, runtime.scene);
       if (tab.materialId) {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail, tab.materialId);
         updateMaterial(tab.materialId, asset);
@@ -3841,7 +3843,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Save a terrain-material tab to the library (capturing a sphere thumbnail) + propagate to layers.
-  const saveTerrainMaterialTab = (tabId: string) => {
+  const saveTerrainMaterialTab = async (tabId: string) => {
     const instance = instanceRef.current;
     const tab = tabsRef.current.find(t => t.id === tabId);
     if (!instance || !tab || tab.kind !== 'terrainMaterial') return;
@@ -3850,7 +3852,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const material = runtime.tm; // the edited TerrainMaterial (the preview node carries the composite)
     if (!material) return;
     try {
-      const thumbnail = captureMaterialSphere(instance, runtime.scene);
+      const thumbnail = await captureMaterialSphere(instance, runtime.scene);
       if (tab.terrainMaterialId) {
         const asset = buildTerrainMaterialAsset(material, tab.title, thumbnail, tab.terrainMaterialId);
         updateTerrainMaterial(tab.terrainMaterialId, asset);
@@ -4086,8 +4088,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'scene': return await saveCurrentScene();
       case 'template': await saveTemplateTab(tabId); break;
       case 'model': await saveModelTab(tabId); break;
-      case 'material': saveMaterialTab(tabId); break;
-      case 'terrainMaterial': saveTerrainMaterialTab(tabId); break;
+      case 'material': await saveMaterialTab(tabId); break;
+      case 'terrainMaterial': await saveTerrainMaterialTab(tabId); break;
       case 'script': saveScriptTab(tabId); break;
       case 'tileset': {
         // Without this the tab fell through still dirty, so Ctrl+S / Save All / the close prompt all

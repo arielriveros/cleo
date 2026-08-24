@@ -29,9 +29,13 @@ module.exports = {
                 test: /\.ts$/,
                 exclude: /node_modules/,
                 loader: 'ts-loader',
-                // The harness lives outside the engine's tsconfig `include`, and its job is to exercise
-                // the device at runtime rather than to be a second type gate — `npm run typecheck`
-                // already covers everything it imports.
+                // The harness lives outside the engine's tsconfig, and its job is to exercise the
+                // device at runtime rather than to be a second type gate.
+                //
+                // This used to say `npm run typecheck` covers everything it imports. It did not:
+                // tsconfig starts from `src/cleo.ts` and nothing shipped imports the WebGPU backend,
+                // so that file was checked by nothing. It is named in tsconfig `files` now — keep it
+                // there, because transpileOnly will not catch a missing import for you.
                 options: { transpileOnly: true },
             },
             { test: /\.glsl|vs|fs$/, exclude: /node_modules/, loader: 'ts-shader-loader' },

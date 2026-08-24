@@ -111,6 +111,23 @@ export function textureByteSize(
 // ------------------------------------------------------------------------------------------------
 
 export type AddressMode = 'clamp-to-edge' | 'repeat' | 'mirror-repeat';
+
+/**
+ * The sampling and colour-space state a texture applies to every upload that follows.
+ *
+ * Settled once rather than passed to each upload because it is a property of the TEXTURE, not of any
+ * one write: the same cube gets six faces and a mip chain, and all seven operations have to agree
+ * about filtering and flip. Depth is called out explicitly because it overrides both — a depth
+ * texture is forced to NEAREST/CLAMP whatever was asked for, and filtering one is undefined.
+ */
+export interface TextureConfigureDescriptor {
+    readonly format: TextureFormat;
+    readonly addressMode: AddressMode;
+    readonly minFilter: 'nearest' | 'linear' | 'linear-mipmap-linear';
+    /** Images arrive top-left-origin and GL samples bottom-left; false flips on upload. */
+    readonly flipY: boolean;
+    readonly isDepth: boolean;
+}
 export type FilterMode = 'nearest' | 'linear';
 
 export interface SamplerDescriptor {

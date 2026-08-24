@@ -216,7 +216,9 @@ describe('cloud composite upsample', () => {
     });
 
     it('is the shader the renderer composites the low-res clouds with', () => {
-        expect(renderer).toContain("this._shaderManager.addShader('cloudUpsample'");
+        // Registration is a row in the renderer's `programs` table now, not an `addShader` call per
+        // program — see the note there. The row is still what says this shader is wired up at all.
+        expect(renderer).toMatch(/\['cloudUpsample',\s+CloudUpsampleProgram\]/);
         expect(renderer).toContain("this._shaderManager.bind('cloudUpsample')");
         // The slab test needs the layer bounds and the camera, or it silently always passes.
         expect(renderer).toContain("setUniform('u_slabBottom'");

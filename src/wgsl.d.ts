@@ -45,6 +45,21 @@ declare module '*.wgsl' {
          * WebGL2 ignores these and asks the driver instead; WebGPU has no reflection and needs them.
          * Verified against a real driver by `tools/harness/uniformLayoutCheck.js`.
          */
+        /**
+         * The vertex stage's `@location(N)` inputs, with the engine's `a_` prefix.
+         *
+         * WebGL2 reflects these off the linked program; WebGPU has no such call and is handed its
+         * vertex layout up front, so a WebGPU program reports this list instead. Read from the same
+         * declaration the translator renames, so the two cannot disagree about a name or a location.
+         */
+        readonly vertexInputs: readonly {
+            /** With the `a_` prefix — `a_position`, not `position`. */
+            readonly name: string;
+            readonly location: number;
+            /** The WGSL type, e.g. `vec3<f32>`. */
+            readonly type: string;
+        }[];
+
         readonly uniformBlocks: readonly {
             readonly group: number;
             readonly binding: number;

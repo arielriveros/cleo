@@ -1,12 +1,12 @@
-import { Shader } from "../shader";
+import type { ShaderProgram } from "../rhi/shaderProgram";
 
 export class ShaderManager {
     private static _instance: ShaderManager | null = null;
-    private _shaders: Map<string, Shader>;
-    private _boundShader: Shader | null = null;
+    private _shaders: Map<string, ShaderProgram>;
+    private _boundShader: ShaderProgram | null = null;
 
     private constructor() {
-        this._shaders = new Map<string, Shader>();
+        this._shaders = new Map<string, ShaderProgram>();
     }
 
     public static get Instance(): ShaderManager {
@@ -15,21 +15,21 @@ export class ShaderManager {
         return ShaderManager._instance;
     }
 
-    public addShader(name: string, shader: Shader): void {
+    public addShader(name: string, shader: ShaderProgram): void {
         this._shaders.set(name, shader);
     }
 
-    public getShader(name: string): Shader {
+    public getShader(name: string): ShaderProgram {
         const shader = this._shaders.get(name);
-        if (!shader) throw new Error(`Shader ${name} not found`);
+        if (!shader) throw new Error(`ShaderProgram ${name} not found`);
         return shader;
     }
 
     /** The shader registered under `name`, or undefined — unlike {@link getShader}, does not throw. */
-    public find(name: string): Shader | undefined { return this._shaders.get(name); }
+    public find(name: string): ShaderProgram | undefined { return this._shaders.get(name); }
 
     /**
-     * Unregisters `name`. Does NOT dispose the shader: one Shader instance can be registered under
+     * Unregisters `name`. Does NOT dispose the shader: one ShaderProgram instance can be registered under
      * several names (every failing custom-shader key shares one magenta fallback), so ownership is the
      * caller's to decide — see {@link isRegistered}.
      */
@@ -39,8 +39,8 @@ export class ShaderManager {
         this._shaders.delete(name);
     }
 
-    /** Whether this exact Shader instance is still registered under any name. */
-    public isRegistered(shader: Shader): boolean {
+    /** Whether this exact ShaderProgram instance is still registered under any name. */
+    public isRegistered(shader: ShaderProgram): boolean {
         for (const s of this._shaders.values()) if (s === shader) return true;
         return false;
     }

@@ -1,4 +1,6 @@
-import { device } from './rhi/webgl2/webgl2Device';
+import { glDevice } from './rhi/webgl2/webgl2Device';
+import { device } from './rhi/deviceHandle';
+import type { RenderTarget } from './rhi/resources';
 import { Texture } from './texture';
 import type { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 
@@ -38,7 +40,7 @@ export class LayeredDepthFramebuffer {
     }
 
     public unbind(): void {
-        device.getCurrentSurfaceTarget().bind();
+        glDevice().getCurrentSurfaceTarget().bind();
     }
 
     /**
@@ -54,13 +56,18 @@ export class LayeredDepthFramebuffer {
      */
     public clearAll(): void {
         const target = this.renderTarget;
+        // Through a command encoder, not the WebGL2 device's own `beginRenderPass`. Same calls on this
+        // backend — `createCommandEncoder` forwards to it and `finish()` is a no-op — but it is the
+        // spelling that exists on both, and a pass that is opened has to be ended.
+        const encoder = device.createCommandEncoder('shadow.clear');
         for (let layer = 0; layer < this._layers; layer++) {
-            device.beginRenderPass(target, {
+            encoder.beginRenderPass(target, {
                 label: 'shadow.clear',
                 colorAttachments: [],
                 depthAttachment: { loadOp: 'clear', storeOp: 'store', baseArrayLayer: layer },
-            });
+            }).end();
         }
+        encoder.finish();
         this.unbind();
     }
 
@@ -79,7 +86,7 @@ export class LayeredDepthFramebuffer {
     }
 
     /** This array as an RHI render target: no colour attachments at all, one layered depth attachment. */
-    public get renderTarget(): WebGL2RenderTarget {
+    public get renderTarget(): RenderTarget {
         return device.createRenderTarget({
             label: 'shadow-array',
             colorViews: [],

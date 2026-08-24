@@ -58,7 +58,13 @@ export class LandscapeNode extends Node {
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
             const node = this._chunkNodes[i];
-            if (chunk.dirty && node && node.initialized) {
+            if (!chunk.dirty || !node) continue;
+            // Sculpting moved the chunk's vertices without moving the node, so nothing marked the
+            // node's cached world sphere/box dirty — do it here. (The geometry's own object-space
+            // caches were dropped by Terrain._refreshChunkGeometry.) Done before the `initialized`
+            // gate: the bounds are wrong whether or not the GPU buffer exists yet.
+            node.invalidateWorldBounds();
+            if (node.initialized) {
                 chunk.model.mesh.updateVertexData(chunk.model.geometry.getData(TERRAIN_ATTRIBUTES));
                 chunk.dirty = false;
             }

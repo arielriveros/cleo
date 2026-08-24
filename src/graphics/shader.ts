@@ -5,21 +5,7 @@ import { GLState } from './systems/glState';
 import { UniformBlockSet } from './systems/uniformBlocks';
 
 
-type AttributeLayout = {
-    size: number,
-    type: number,
-    normalized: boolean,
-    stride: number,
-    offset: number
-}
-
-type AttributeInfo = {
-    name: string,       // name of the attribute
-    type: string,       // human readable type of the attribute
-    byteSize: number,   // size of the attribute in bytes
-    location: number    // location of the attribute in the shader program
-    layout: AttributeLayout
-}
+import type { ShaderProgram, AttributeInfo } from './rhi/shaderProgram';
 
 type UniformInfo = {
     type: string,   // human readable type of the uniform
@@ -28,7 +14,7 @@ type UniformInfo = {
     location: WebGLUniformLocation
 }
 
-export class Shader {
+export class Shader implements ShaderProgram {
     private _shaderProgram!: WebGLProgram;
     private _vertexShader!: WebGLShader;
     private _fragmentShader!: WebGLShader;

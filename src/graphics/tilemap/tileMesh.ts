@@ -22,7 +22,7 @@ import { frameStats } from '../../graphics/renderStats';
 import { ShaderManager } from '../../graphics/systems/shaderManager';
 import { TILE_VERTEX_LAYOUT } from '../rhi/vertexLayouts';
 import { applyVertexLayout } from '../rhi/webgl2/vertexArray';
-import { device } from '../rhi/webgl2/webgl2Device';
+import { glDevice } from '../rhi/webgl2/webgl2Device';
 import type { WebGL2Buffer } from '../rhi/webgl2/webgl2Device';
 import { BufferUsage } from '../rhi/types';
 import { GridSpec, cellSortY, cellToWorld } from './cellMath';
@@ -185,20 +185,20 @@ export class TileMesh {
 
     private _upload(verts: Float32Array, indices: Uint16Array): void {
         if (!this._vao) {
-            this._vao = device.createVertexArray();
+            this._vao = glDevice().createVertexArray();
             // COPY_DST on the vertex buffer: an animated chunk rewrites its UVs every frame through
             // `advanceAnimation`, which is what earns it a DYNAMIC_DRAW hint. Indices never change.
-            this._vbo = device.createBuffer({ label: 'tileChunk.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
-            this._ibo = device.createBuffer({ label: 'tileChunk.indices', size: 0, usage: BufferUsage.INDEX });
+            this._vbo = glDevice().createBuffer({ label: 'tileChunk.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+            this._ibo = glDevice().createBuffer({ label: 'tileChunk.indices', size: 0, usage: BufferUsage.INDEX });
         }
         GLState.bindVAO(this._vao);
-        this._vbo = device.reallocateBuffer(this._vbo as WebGL2Buffer, verts);
+        this._vbo = glDevice().reallocateBuffer(this._vbo as WebGL2Buffer, verts);
 
         // The layout is still this chunk's own — a tilemap vertex really is position/uv/colour, not the
         // model vertex — but the attribute binding is no longer a private copy of the same six calls.
         applyVertexLayout(TILE_VERTEX_LAYOUT, (this._vbo as WebGL2Buffer).handle);
 
-        this._ibo = device.reallocateBuffer(this._ibo as WebGL2Buffer, indices);
+        this._ibo = glDevice().reallocateBuffer(this._ibo as WebGL2Buffer, indices);
         GLState.bindVAO(null);
     }
 
@@ -228,7 +228,7 @@ export class TileMesh {
             }
         }
         GLState.bindVAO(this._vao);
-        device.writeBuffer(this._vbo as WebGL2Buffer, 0, this._verts);
+        glDevice().writeBuffer(this._vbo as WebGL2Buffer, 0, this._verts);
         GLState.bindVAO(null);
     }
 
@@ -279,7 +279,7 @@ export class TileMesh {
             // GLState dedupes bindVertexArray by identity, so a deleted VAO left in its cache would make
             // the next bind of that handle a silent no-op.
             if (GLState.currentVAO === this._vao) GLState.reset();
-            device.deleteVertexArray(this._vao);
+            glDevice().deleteVertexArray(this._vao);
             this._vao = null;
         }
         this._verts = null;

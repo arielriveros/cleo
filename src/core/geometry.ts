@@ -179,8 +179,9 @@ export class Geometry {
     /**
      * Object-space bounding sphere (center + radius), computed lazily and cached. Derived from the
      * BVH's root AABB when the geometry has triangles (reusing bounds already computed by the BVH
-     * build), otherwise from a single pass over the positions. Purely local-space, so it never
-     * invalidates — used for cheap per-object frustum culling (see `Node.getBoundingSphere`).
+     * build), otherwise from a single pass over the positions. Purely local-space, so the camera never
+     * invalidates it — only a vertex edit does, via {@link invalidateBounds}. Used for cheap per-object
+     * frustum culling (see `Node.getBoundingSphere`).
      */
     public get boundingSphere(): { center: vec3; radius: number } {
         if (this._boundingSphere) return this._boundingSphere;
@@ -212,7 +213,8 @@ export class Geometry {
     }
     /**
      * Object-space axis-aligned bounding box, computed lazily and cached. Local-space, so like
-     * {@link boundingSphere} it only invalidates when the vertices themselves change ({@link scale}).
+     * {@link boundingSphere} it only invalidates when the vertices themselves change
+     * ({@link invalidateBounds}).
      *
      * Deliberately computed from a direct pass over the positions rather than from `this.bvh.bounds`
      * (which is where {@link boundingSphere} gets its extents): touching `bvh` force-builds the whole
@@ -250,6 +252,23 @@ export class Geometry {
     public scale(factor: number): void {
         if (factor === 1) return;
         for (let i = 0; i < this._positions.length; i++) this._positions[i] *= factor;
+        this.invalidateBounds();
+    }
+
+    /**
+     * Drop the cached BVH and bounding sphere/box so the next reader recomputes them from the current
+     * positions.
+     *
+     * Anything that rewrites `positions` IN PLACE must call this. {@link scale} was for a long time the
+     * only such writer and invalidated inline, which left the caches looking like they never went stale —
+     * so terrain sculpting, which also writes positions in place, silently kept its pre-sculpt cull
+     * sphere and let a raised chunk be frustum-culled while it was plainly on screen.
+     *
+     * Note this only clears the geometry's OBJECT-space caches. A node holding it also caches a
+     * world-space sphere keyed on its transform, which no vertex edit touches — see
+     * `Node.invalidateWorldBounds`.
+     */
+    public invalidateBounds(): void {
         this._bvh = undefined;
         this._boundingSphere = undefined;
         this._boundingBox = undefined;

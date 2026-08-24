@@ -1,4 +1,6 @@
-import { device } from './rhi/webgl2/webgl2Device';
+import { glDevice } from './rhi/webgl2/webgl2Device';
+import { device } from './rhi/deviceHandle';
+import type { RenderTarget } from './rhi/resources';
 import type { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 import { Texture } from './texture';
 
@@ -32,20 +34,25 @@ export class CubeFramebuffer {
      * six-face bake from stranding six framebuffers per mip level.
      */
     public targetFor(cube: Texture, face: number, mip: number = 0,
-                     withDepth: boolean = false, size: number = 0): WebGL2RenderTarget {
+                     withDepth: boolean = false, size: number = 0): RenderTarget {
         return this._target(cube, face, mip, withDepth, size);
     }
 
+    /**
+     * The legacy bind model — see the note on `Framebuffer.bind`. `RenderTarget.bind()` is WebGL2-only
+     * because binding a framebuffer object is not something WebGPU has, so the cast is the coupling
+     * stated rather than the interface widened to hide it.
+     */
     public bindFace(cube: Texture, face: number, mip: number = 0, withDepth: boolean = false, size: number = 0): void {
-        this._target(cube, face, mip, withDepth, size).bind(false);
+        (this._target(cube, face, mip, withDepth, size) as WebGL2RenderTarget).bind(false);
     }
 
     /** Hand the draw target back to the canvas. The viewport is the caller's — see bindFace. */
     public unbind(): void {
-        device.getCurrentSurfaceTarget().bind(false);
+        glDevice().getCurrentSurfaceTarget().bind(false);
     }
 
-    private _target(cube: Texture, face: number, mip: number, withDepth: boolean, size: number): WebGL2RenderTarget {
+    private _target(cube: Texture, face: number, mip: number, withDepth: boolean, size: number): RenderTarget {
         return device.createRenderTarget({
             label: 'cubeFramebuffer',
             colorViews: [device.createTextureView(cube.gpu, mip, face)],

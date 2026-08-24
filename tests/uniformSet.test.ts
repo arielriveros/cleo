@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { UniformSet } from '../src/graphics/rhi/uniformSet';
+import { UniformSet, ProgramUniforms } from '../src/graphics/rhi/uniformSet';
 import type { UniformBlockLayout } from '../src/graphics/rhi/uniformSet';
 import type { Buffer } from '../src/graphics/rhi/resources';
 
@@ -169,5 +169,98 @@ describe('uploads', () => {
         set.flush(device);
         set.flush(device);
         expect(uploads).toHaveLength(1);   // two writes, one upload; the second flush is a no-op
+    });
+});
+
+/**
+ * Routing a name to the right BLOCK.
+ *
+ * A program has several uniform blocks and the renderer's call sites name a member without knowing
+ * which one holds it — `outline` keeps its matrices in group 1 and its colour in group 2, the lit
+ * families spread four across groups 1, 2, 4 and 5. These pin the routing rules rather than the
+ * offsets, which `harness:uniforms` checks against a real driver.
+ */
+describe('ProgramUniforms', () => {
+    const TRANSFORM: UniformBlockLayout = {
+        name: 'u_transform', group: 1, binding: 0, size: 64,
+        flat: [
+            { name: 'u_transform.u_scale', type: 'f32', offset: 0, size: 4 },
+            { name: 'u_transform.u_shared', type: 'f32', offset: 4, size: 4 },
+        ],
+    };
+    const MATERIAL: UniformBlockLayout = {
+        name: 'u_material', group: 2, binding: 0, size: 32,
+        flat: [
+            { name: 'u_material.u_color', type: 'vec3<f32>', offset: 0, size: 12 },
+            { name: 'u_material.u_shared', type: 'f32', offset: 16, size: 4 },
+        ],
+    };
+
+    /** A device that hands out distinguishable buffers and records uploads per buffer. */
+    function twoBlockProgram() {
+        const uploads = new Map<string, Uint8Array>();
+        const device = {
+            createBuffer: (d: any) => ({ label: d.label, size: d.size, usage: d.usage, destroy() {} }),
+            writeBuffer: (b: any, _o: number, data: ArrayBufferView) =>
+                uploads.set(b.label, new Uint8Array(data.buffer.slice(0))),
+        } as any;
+        return { device, uploads, program: new ProgramUniforms(device, [TRANSFORM, MATERIAL], 'outline') };
+    }
+
+    it('allocates one buffer per block, sized to the block', () => {
+        const { program } = twoBlockProgram();
+        expect(program.blocks.map(b => b.buffer.size)).toEqual([64, 32]);
+        expect(program.blocks.map(b => b.buffer.label)).toEqual(['outline:u_transform', 'outline:u_material']);
+    });
+
+    it('finds a block by the group it is bound at', () => {
+        const { program } = twoBlockProgram();
+        expect(program.forGroup(1)?.layout.name).toBe('u_transform');
+        expect(program.forGroup(2)?.layout.name).toBe('u_material');
+        expect(program.forGroup(3)).toBeUndefined();
+    });
+
+    it('routes a bare name to the block that declares it', () => {
+        const { program, device, uploads } = twoBlockProgram();
+        expect(program.set('u_color', [0.25, 0.5, 0.75])).toBe(true);
+        program.flush(device);
+        const material = new Float32Array(uploads.get('outline:u_material')!.buffer);
+        expect([material[0], material[1], material[2]]).toEqual([0.25, 0.5, 0.75]);
+    });
+
+    it('reports a name no block declares, without throwing', () => {
+        // Load-bearing: the renderer sets uniforms only some programs have, and every call site relies
+        // on the miss being silent.
+        const { program } = twoBlockProgram();
+        expect(program.set('u_notAThing', 1)).toBe(false);
+    });
+
+    it('gives an ambiguous name to the FIRST block in declaration order', () => {
+        const { program, device, uploads } = twoBlockProgram();
+        program.set('u_shared', 9);
+        program.flush(device);
+        const transform = new Float32Array(uploads.get('outline:u_transform')!.buffer);
+        const material = new Float32Array(uploads.get('outline:u_material')!.buffer);
+        expect(transform[1]).toBe(9);      // u_transform.u_shared, offset 4
+        expect(material[4]).toBe(0);       // u_material.u_shared, offset 16 — untouched
+    });
+
+    it('keeps routing to the same block once resolved', () => {
+        // The route is memoised; a second write must not re-search and land elsewhere.
+        const { program, device, uploads } = twoBlockProgram();
+        program.set('u_shared', 1);
+        program.set('u_shared', 2);
+        program.flush(device);
+        const transform = new Float32Array(uploads.get('outline:u_transform')!.buffer);
+        expect(transform[1]).toBe(2);
+    });
+
+    it('uploads only the blocks that changed', () => {
+        const { program, device, uploads } = twoBlockProgram();
+        program.flush(device);            // both dirty on construction
+        uploads.clear();
+        program.set('u_color', [1, 1, 1]);
+        program.flush(device);
+        expect([...uploads.keys()]).toEqual(['outline:u_material']);
     });
 });

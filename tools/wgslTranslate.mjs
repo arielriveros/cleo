@@ -111,6 +111,31 @@ export function findResources(wgsl) {
 }
 
 /**
+ * The vertex stage's `@location(N) name: type` inputs, as ATTRIBUTES the engine can name.
+ *
+ * WebGL2 gets this by reflecting the linked program (`getActiveAttrib`); WebGPU has no such call, and
+ * a pipeline is handed its vertex layout up front. The engine builds those layouts from a program's
+ * reported attributes (`_vertexLayoutsFor` -> `modelVertexLayout`), so a WebGPU program has to be able
+ * to report the same list — which means reading it out of the WGSL at build time.
+ *
+ * The `a_` prefix is added here for the same reason the translator adds it to the generated GLSL: the
+ * engine names attributes `a_position` and the WGSL parameter must NOT, or naga's local copy of the
+ * input collides with the attribute it was renamed from. Both halves read the same declaration, so
+ * they cannot disagree about the name or the location.
+ */
+export function findVertexInputs(wgsl) {
+    const entryPoints = findEntryPoints(wgsl);
+    if (!entryPoints.vertex) return [];
+    const signature = new RegExp('fn\\s+' + entryPoints.vertex + '\\s*\\(([\\s\\S]*?)\\)\\s*->');
+    const params = (wgsl.match(signature) || [])[1] || '';
+    const out = [];
+    for (const m of params.matchAll(/@location\((\d+)\)\s*([A-Za-z_]\w*)\s*:\s*([^,)]+)/g))
+        out.push({ name: 'a_' + m[2], location: Number(m[1]), type: m[3].trim() });
+    out.sort((a, b) => a.location - b.location);
+    return out;
+}
+
+/**
  * The uniform-buffer resources, with the full byte layout of the struct each one points at.
  *
  * WebGL2 does not need this — it asks the driver for `UNIFORM_OFFSET` and friends, which is
@@ -276,7 +301,8 @@ export async function translateWgsl(wgsl, label = 'shader') {
     const renames = buildRenames(wgsl, entryPoints, label);
     // Reflection rides along with the translation: both backends need to know what this program binds
     // where, and deriving it from the same source at the same moment is what keeps it from drifting.
-    const out = { wgsl, entryPoints, resources: findResources(wgsl), uniformBlocks: findUniformBlocks(wgsl) };
+    const out = { wgsl, entryPoints, resources: findResources(wgsl), uniformBlocks: findUniformBlocks(wgsl),
+                  vertexInputs: findVertexInputs(wgsl) };
     // A module marked `// @glsl-chunk` also exports a pasteable GLSL chunk. Opt-in via a
     // directive rather than always, because the extraction only makes sense for a module whose
     // entry point exists purely to keep its functions alive.

@@ -1,4 +1,4 @@
-import { mat4, quat, vec3 } from 'gl-matrix';
+import { mat4, vec3 } from 'gl-matrix';
 import { engineEventBus } from '../core/eventBus';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
@@ -18,7 +18,7 @@ import { CHUNK_SIZE, TileChunk } from '../graphics/tilemap/chunk';
 import { cellToWorld } from '../graphics/tilemap/cellMath';
 import { PointLight, Spotlight } from './lighting';
 import { Mesh } from './mesh';
-import { Shader } from './shader';
+import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
 import { LayeredDepthFramebuffer } from './layeredDepthFramebuffer';
 import {
@@ -119,7 +119,8 @@ import { gl, setGLContext } from './glContext';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities, Device } from './rhi/device';
 import { resolveBackendRequest } from './rhi/backendSelect';
-import { WebGL2Device, setDevice, device } from './rhi/webgl2/webgl2Device';
+import { WebGL2Device, glDevice } from './rhi/webgl2/webgl2Device';
+import { setDevice, device } from './rhi/deviceHandle';
 import type { WebGL2Buffer } from './rhi/webgl2/webgl2Device';
 import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND } from './rhi/types';
 import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout } from './rhi/types';
@@ -994,146 +995,115 @@ export class Renderer {
             throw new Error(msg);
         }
 
-        // Material shaders
-        const basicShader = new Shader().create(BasicProgram.vertex!, BasicProgram.fragment!);
-        // Forward unlit instanced shader for the editor skeleton overlay (many spheres/bones in one draw).
-        const basicInstancedShader = new Shader().create(BasicInstancedProgram.vertex!, BasicInstancedProgram.fragment!);
-        const defaultShader = new Shader().create(BlinnPhongProgram.vertex!, BlinnPhongProgram.fragment!);
-        const basicSkinnedShader = new Shader().create(BasicSkinnedProgram.vertex!, BasicSkinnedProgram.fragment!);
-        const defaultSkinnedShader = new Shader().create(BlinnPhongSkinnedProgram.vertex!, BlinnPhongSkinnedProgram.fragment!);
-        const pbrShader = new Shader().create(PBRProgram.vertex!, PBRProgram.fragment!);
-        const pbrSkinnedShader = new Shader().create(PBRSkinnedProgram.vertex!, PBRSkinnedProgram.fragment!);
-        // Deferred geometry-pass shaders (reuse the material vertex shaders + G-buffer fragment shaders)
-        const pbrGeometryShader = new Shader().create(GeometryPBRProgram.vertex!, GeometryPBRProgram.fragment!);
-        const pbrGeometrySkinnedShader = new Shader().create(GeometryPBRSkinnedProgram.vertex!, GeometryPBRSkinnedProgram.fragment!);
-        const defaultGeometryShader = new Shader().create(GeometryBlinnPhongProgram.vertex!, GeometryBlinnPhongProgram.fragment!);
-        const defaultGeometrySkinnedShader = new Shader().create(GeometryBlinnPhongSkinnedProgram.vertex!, GeometryBlinnPhongSkinnedProgram.fragment!);
-        const basicGeometryShader = new Shader().create(GeometryBasicProgram.vertex!, GeometryBasicProgram.fragment!);
-        const basicGeometrySkinnedShader = new Shader().create(GeometryBasicSkinnedProgram.vertex!, GeometryBasicSkinnedProgram.fragment!);
-        // Instanced geometry variants (pbr/default share the 14-float vertex layout)
-        const pbrGeometryInstancedShader = new Shader().create(GeometryPBRInstancedProgram.vertex!, GeometryPBRInstancedProgram.fragment!);
-        const defaultGeometryInstancedShader = new Shader().create(GeometryBlinnPhongInstancedProgram.vertex!, GeometryBlinnPhongInstancedProgram.fragment!);
-        // Terrain splat geometry shader (reuses the default 14-float vertex layout).
-        const terrainGeometryShader = new Shader().create(GeometryTerrainProgram.vertex!, GeometryTerrainProgram.fragment!);
-        // Forward-lit terrain: used only by the light-probe capture (a forward pass), where the deferred
-        // terrain G-buffer shader can't be lit. Same 14-float layout as the deferred terrain shader.
-        const terrainForwardShader = new Shader().create(TerrainForwardProgram.vertex!, TerrainForwardProgram.fragment!);
-        // Tilemap chunks: a 2D-only pos/uv/colour layout of their own, not the 14-float model layout.
-        const tilemapShader = new Shader().create(TilemapProgram.vertex!, TilemapProgram.fragment!);
-        // Instanced billboard foliage (grass) geometry shader.
-        const foliageBillboardShader = new Shader().create(GeometryFoliageBillboardProgram.vertex!, GeometryFoliageBillboardProgram.fragment!);
-        // Deferred lighting (fullscreen) shader
-        const deferredLightingShader = new Shader().create(DeferredLightingProgram.vertex!, DeferredLightingProgram.fragment!);
-        // SSAO (fullscreen) shaders
-        const ssaoShader = new Shader().create(SSAOProgram.vertex!, SSAOProgram.fragment!);
-        const ssaoBlurShader = new Shader().create(SSAOBlurProgram.vertex!, SSAOBlurProgram.fragment!);
-        // IBL precompute shaders
-        const irradianceShader = new Shader().create(IrradianceProgram.vertex!, IrradianceProgram.fragment!);
-        const prefilterShader = new Shader().create(PrefilterProgram.vertex!, PrefilterProgram.fragment!);
-        const brdfShader = new Shader().create(BRDFProgram.vertex!, BRDFProgram.fragment!);
-        // Environment shaders
-        const shadowMapShader = new Shader().create(ShadowMapProgram.vertex!, ShadowMapProgram.fragment!);
-        // Skinned depth shader so animated meshes cast their animated-pose shadow (not the bind pose).
-        const shadowMapSkinnedShader = new Shader().create(ShadowMapSkinnedProgram.vertex!, ShadowMapSkinnedProgram.fragment!);
-        const shadowMapInstancedShader = new Shader().create(ShadowMapInstancedProgram.vertex!, ShadowMapInstancedProgram.fragment!);
-        const shadowMapInstancedCutoutShader = new Shader().create(ShadowMapInstancedCutoutProgram.vertex!, ShadowMapInstancedCutoutProgram.fragment!);
-        const skybox = new Shader().create(SkyboxProgram.vertex!, SkyboxProgram.fragment!);
-        // Volumetric clouds (fullscreen raymarch, runs on the screen vertex shader)
-        const volumetricCloudsShader = new Shader().create(VolumetricCloudsProgram.vertex!, VolumetricCloudsProgram.fragment!);
-        const cloudNoiseBakeShader = new Shader().create(CloudNoiseBakeProgram.vertex!, CloudNoiseBakeProgram.fragment!);
-        const cloudTemporalResolveShader = new Shader().create(CloudTemporalResolveProgram.vertex!, CloudTemporalResolveProgram.fragment!);
-        const cloudUpsampleShader = new Shader().create(CloudUpsampleProgram.vertex!, CloudUpsampleProgram.fragment!);
-        // Sky atmosphere (per-direction Nishita scattering, baked into a cubemap via the IBL cube VS)
-        const skyAtmosphereShader = new Shader().create(SkyAtmosphereProgram.vertex!, SkyAtmosphereProgram.fragment!);
-        // Probe preview: equirectangular unwrap of a probe's captured cube for the editor thumbnail.
-        const probePreviewShader = new Shader().create(ProbePreviewProgram.vertex!, ProbePreviewProgram.fragment!);
-        // Sky fog (fullscreen distance fog whose colour is sampled from the atmosphere cubemap)
-        const skyFogShader = new Shader().create(SkyFogProgram.vertex!, SkyFogProgram.fragment!);
-        // Screen shaders
-        const screenShader = new Shader().create(ScreenProgram.vertex!, ScreenProgram.fragment!);
-        // Final present: exposure -> tonemap -> sRGB (the single display resolve).
-        const presentShader = new Shader().create(PresentProgram.vertex!, PresentProgram.fragment!);
-        const godRaysShader = new Shader().create(VolumetricGodRaysProgram.vertex!, VolumetricGodRaysProgram.fragment!);
-        const debugViewShader = new Shader().create(DebugViewProgram.vertex!, DebugViewProgram.fragment!);
-        const shadowDebugShader = new Shader().create(ShadowDebugProgram.vertex!, ShadowDebugProgram.fragment!);
-        const bloomShader = new Shader().create(BloomProgram.vertex!, BloomProgram.fragment!);
-        // Reuses the selection-mask vertex shader: it is the minimal MVP transform the mask pass
-        // already drives over these same meshes, so no new vertex path is introduced.
-        const overdrawShader = new Shader().create(OverdrawProgram.vertex!, OverdrawProgram.fragment!);
-        const bloomDownsampleShader = new Shader().create(BloomDownsampleProgram.vertex!, BloomDownsampleProgram.fragment!);
-        const bloomUpsampleShader = new Shader().create(BloomUpsampleProgram.vertex!, BloomUpsampleProgram.fragment!);
-        const chromaticAbShader = new Shader().create(ChromaticAberrationProgram.vertex!, ChromaticAberrationProgram.fragment!);
-        const composerShader = new Shader().create(ComposerProgram.vertex!, ComposerProgram.fragment!);
-        // Editor infinite grid (fullscreen world-plane pass)
-        const gridShader = new Shader().create(GridProgram.vertex!, GridProgram.fragment!);
-        // Outline: material shader stamps the selection silhouette into the mask; the screen shader
-        // turns that mask into a border in a post pass.
-        const outlineShader = new Shader().create(OutlineProgram.vertex!, OutlineProgram.fragment!);
-        const outlinePostShader = new Shader().create(OutlinePostProgram.vertex!, OutlinePostProgram.fragment!);
-        // Motion blur (camera reprojection): velocity -> tile max -> neighbor max -> gather.
-        const motionBlurVelocityShader = new Shader().create(MotionBlurVelocityProgram.vertex!, MotionBlurVelocityProgram.fragment!);
-        const motionBlurTileMaxShader = new Shader().create(MotionBlurTileMaxProgram.vertex!, MotionBlurTileMaxProgram.fragment!);
-        const motionBlurNeighborMaxShader = new Shader().create(MotionBlurNeighborMaxProgram.vertex!, MotionBlurNeighborMaxProgram.fragment!);
-        const motionBlurShader = new Shader().create(MotionBlurGatherProgram.vertex!, MotionBlurGatherProgram.fragment!);
+        // Every program the renderer registers, by the name `ShaderManager` knows it as.
+        //
+        // This was 55 `new Shader().create(...)` locals followed by 56 `addShader` calls naming each
+        // local again — two lists that had to be kept in step by hand, with nothing checking that they
+        // were. The table also moves construction onto the DEVICE: `createShaderProgram` picks the
+        // backend's implementation out of the same descriptor, so this is the list a WebGPU backend
+        // builds too, rather than a list of WebGL2 `Shader`s.
+        //
+        // Order is preserved exactly. Nothing depends on link order, but attribute LOCATIONS are
+        // assigned per program by the driver, and reordering the table is the kind of change that
+        // moves a recorded baseline for a reason nobody can name afterwards.
+        const programs: ReadonlyArray<readonly [string, Omit<ShaderProgramDescriptor, 'label'>]> = [
+            ['basic',                        BasicProgram],
+            // Forward unlit instanced shader for the editor skeleton overlay (many spheres/bones in one draw).
+            ['basicInstanced',               BasicInstancedProgram],
+            ['blinn_phong',                  BlinnPhongProgram],
+            ['basicSkinned',                 BasicSkinnedProgram],
+            ['blinn_phongSkinned',           BlinnPhongSkinnedProgram],
+            ['pbr',                          PBRProgram],
+            ['pbrSkinned',                   PBRSkinnedProgram],
+            // Deferred geometry-pass shaders (they reuse the material vertex shaders + G-buffer fragment shaders).
+            ['pbrGeometry',                  GeometryPBRProgram],
+            ['pbrGeometrySkinned',           GeometryPBRSkinnedProgram],
+            ['blinn_phongGeometry',          GeometryBlinnPhongProgram],
+            ['blinn_phongGeometrySkinned',   GeometryBlinnPhongSkinnedProgram],
+            ['basicGeometry',                GeometryBasicProgram],
+            ['basicGeometrySkinned',         GeometryBasicSkinnedProgram],
+            // Instanced geometry variants (pbr/default share the 14-float vertex layout).
+            ['pbrGeometryInstanced',         GeometryPBRInstancedProgram],
+            ['blinn_phongGeometryInstanced', GeometryBlinnPhongInstancedProgram],
+            // Terrain splat geometry shader (reuses the default 14-float vertex layout). Registered TWICE, and
+            // the two names must resolve to the same object — see the alias note below.
+            ['terrain',                      GeometryTerrainProgram],
+            ['terrainGeometry',              GeometryTerrainProgram],
+            // Forward-lit terrain: used only by the light-probe capture (a forward pass), where the deferred
+            // terrain G-buffer shader cannot be lit. Same 14-float layout as the deferred terrain shader.
+            ['terrainForward',               TerrainForwardProgram],
+            // Tilemap chunks: a 2D-only pos/uv/colour layout of their own, not the 14-float model layout.
+            ['tilemap',                      TilemapProgram],
+            // Instanced billboard foliage (grass).
+            ['foliageBillboardInstanced',    GeometryFoliageBillboardProgram],
+            // Deferred lighting (fullscreen).
+            ['deferredLighting',             DeferredLightingProgram],
+            // SSAO (fullscreen).
+            ['ssao',                         SSAOProgram],
+            ['ssaoBlur',                     SSAOBlurProgram],
+            // IBL precompute.
+            ['irradiance',                   IrradianceProgram],
+            ['prefilter',                    PrefilterProgram],
+            ['brdf',                         BRDFProgram],
+            // Environment.
+            ['shadowMap',                    ShadowMapProgram],
+            // Skinned depth, so animated meshes cast their animated-pose shadow rather than the bind pose.
+            ['shadowMapSkinned',             ShadowMapSkinnedProgram],
+            ['shadowMapInstanced',           ShadowMapInstancedProgram],
+            ['shadowMapInstancedCutout',     ShadowMapInstancedCutoutProgram],
+            ['skybox',                       SkyboxProgram],
+            // Volumetric clouds (fullscreen raymarch, on the screen vertex shader).
+            ['volumetricClouds',             VolumetricCloudsProgram],
+            ['cloudNoiseBake',               CloudNoiseBakeProgram],
+            ['cloudTemporalResolve',         CloudTemporalResolveProgram],
+            ['cloudUpsample',                CloudUpsampleProgram],
+            // Sky atmosphere (per-direction Nishita scattering, baked into a cubemap via the IBL cube VS).
+            ['skyAtmosphere',                SkyAtmosphereProgram],
+            // Probe preview: equirectangular unwrap of a probe's captured cube, for the editor thumbnail.
+            ['probePreview',                 ProbePreviewProgram],
+            // Sky fog (fullscreen distance fog whose colour is sampled from the atmosphere cubemap).
+            ['skyFog',                       SkyFogProgram],
+            // Screen.
+            ['screen',                       ScreenProgram],
+            // Final present: exposure -> tonemap -> sRGB (the single display resolve).
+            ['present',                      PresentProgram],
+            ['godRays',                      VolumetricGodRaysProgram],
+            ['debugView',                    DebugViewProgram],
+            ['shadowDebug',                  ShadowDebugProgram],
+            ['bloom',                        BloomProgram],
+            // Reuses the selection-mask vertex shader: the minimal MVP transform the mask pass already drives
+            // over these same meshes, so no new vertex path is introduced.
+            ['overdraw',                     OverdrawProgram],
+            ['bloomDownsample',              BloomDownsampleProgram],
+            ['bloomUpsample',                BloomUpsampleProgram],
+            ['chromaticAberration',          ChromaticAberrationProgram],
+            ['composer',                     ComposerProgram],
+            // Editor infinite grid (fullscreen world-plane pass).
+            ['grid',                         GridProgram],
+            // Outline: the material shader stamps the selection silhouette into the mask; the screen shader
+            // turns that mask into a border in a post pass.
+            ['outline',                      OutlineProgram],
+            ['outlinePost',                  OutlinePostProgram],
+            // Motion blur (camera reprojection): velocity -> tile max -> neighbor max -> gather.
+            ['motionBlurVelocity',           MotionBlurVelocityProgram],
+            ['motionBlurTileMax',            MotionBlurTileMaxProgram],
+            ['motionBlurNeighborMax',        MotionBlurNeighborMaxProgram],
+            ['motionBlur',                   MotionBlurGatherProgram],
+        ];
 
-        // Add shaders to the material system
-        this._shaderManager.addShader('basic', basicShader);
-        this._shaderManager.addShader('basicInstanced', basicInstancedShader);
-        this._shaderManager.addShader('blinn_phong', defaultShader);
-        this._shaderManager.addShader('basicSkinned', basicSkinnedShader);
-        this._shaderManager.addShader('blinn_phongSkinned', defaultSkinnedShader);
-        this._shaderManager.addShader('pbr', pbrShader);
-        this._shaderManager.addShader('pbrSkinned', pbrSkinnedShader);
-        this._shaderManager.addShader('pbrGeometry', pbrGeometryShader);
-        this._shaderManager.addShader('pbrGeometrySkinned', pbrGeometrySkinnedShader);
-        this._shaderManager.addShader('blinn_phongGeometry', defaultGeometryShader);
-        this._shaderManager.addShader('blinn_phongGeometrySkinned', defaultGeometrySkinnedShader);
-        this._shaderManager.addShader('basicGeometry', basicGeometryShader);
-        this._shaderManager.addShader('basicGeometrySkinned', basicGeometrySkinnedShader);
-        this._shaderManager.addShader('pbrGeometryInstanced', pbrGeometryInstancedShader);
-        this._shaderManager.addShader('blinn_phongGeometryInstanced', defaultGeometryInstancedShader);
-        // 'terrain' is used by ModelNode.initializeModel (attribute reflection); 'terrainGeometry' by the deferred pass.
-        this._shaderManager.addShader('terrain', terrainGeometryShader);
-        this._shaderManager.addShader('terrainGeometry', terrainGeometryShader);
-        this._shaderManager.addShader('terrainForward', terrainForwardShader);
-        this._shaderManager.addShader('tilemap', tilemapShader);
-        this._shaderManager.addShader('foliageBillboardInstanced', foliageBillboardShader);
-        this._shaderManager.addShader('deferredLighting', deferredLightingShader);
-        this._shaderManager.addShader('ssao', ssaoShader);
-        this._shaderManager.addShader('ssaoBlur', ssaoBlurShader);
-        this._shaderManager.addShader('irradiance', irradianceShader);
-        this._shaderManager.addShader('prefilter', prefilterShader);
-        this._shaderManager.addShader('brdf', brdfShader);
-        this._shaderManager.addShader('shadowMap', shadowMapShader);
-        this._shaderManager.addShader('shadowMapSkinned', shadowMapSkinnedShader);
-        this._shaderManager.addShader('shadowMapInstanced', shadowMapInstancedShader);
-        this._shaderManager.addShader('shadowMapInstancedCutout', shadowMapInstancedCutoutShader);
-        this._shaderManager.addShader('skybox', skybox);
-        this._shaderManager.addShader('volumetricClouds', volumetricCloudsShader);
-        this._shaderManager.addShader('cloudNoiseBake', cloudNoiseBakeShader);
-        this._shaderManager.addShader('cloudTemporalResolve', cloudTemporalResolveShader);
-        this._shaderManager.addShader('cloudUpsample', cloudUpsampleShader);
-        this._shaderManager.addShader('skyAtmosphere', skyAtmosphereShader);
-        this._shaderManager.addShader('probePreview', probePreviewShader);
-        this._shaderManager.addShader('skyFog', skyFogShader);
-        this._shaderManager.addShader('screen', screenShader);
-        this._shaderManager.addShader('present', presentShader);
-        this._shaderManager.addShader('godRays', godRaysShader);
-        this._shaderManager.addShader('debugView', debugViewShader);
-        this._shaderManager.addShader('shadowDebug', shadowDebugShader);
-        this._shaderManager.addShader('bloom', bloomShader);
-        this._shaderManager.addShader('overdraw', overdrawShader);
-        this._shaderManager.addShader('bloomDownsample', bloomDownsampleShader);
-        this._shaderManager.addShader('bloomUpsample', bloomUpsampleShader);
-        this._shaderManager.addShader('chromaticAberration', chromaticAbShader);
-        this._shaderManager.addShader('composer', composerShader);
-        this._shaderManager.addShader('grid', gridShader);
-        this._shaderManager.addShader('outline', outlineShader);
-        this._shaderManager.addShader('outlinePost', outlinePostShader);
-        this._shaderManager.addShader('motionBlurVelocity', motionBlurVelocityShader);
-        this._shaderManager.addShader('motionBlurTileMax', motionBlurTileMaxShader);
-        this._shaderManager.addShader('motionBlurNeighborMax', motionBlurNeighborMaxShader);
-        this._shaderManager.addShader('motionBlur', motionBlurShader);
+        // One program can carry two names, and when it does they must be the SAME object: uniform
+        // state lives on the program, so linking the source twice would give two programs that drift
+        // apart silently. 'terrain' is what `ModelNode.initializeModel` reflects attributes off;
+        // 'terrainGeometry' is what the deferred pass binds.
+        const built = new Map<Omit<ShaderProgramDescriptor, 'label'>, ShaderProgram>();
+        for (const [name, descriptor] of programs) {
+            let program = built.get(descriptor);
+            if (!program) {
+                program = this.device.createShaderProgram({ ...descriptor, label: name });
+                built.set(descriptor, program);
+            }
+            this._shaderManager.addShader(name, program);
+        }
 
         // Create framebuffers at the internal render size (canvas x renderScale), not the canvas size.
         const rw = this._renderWidth, rh = this._renderHeight;
@@ -1147,7 +1117,7 @@ export class Renderer {
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
         // VERTEX | COPY_DST: rewritten every frame with the batch's world matrices, which is what
         // earns it a DYNAMIC_DRAW hint.
-        this._instanceBuffer = device.createBuffer({ label: 'renderer.instanceMatrices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+        this._instanceBuffer = glDevice().createBuffer({ label: 'renderer.instanceMatrices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
 
         // Config wins if given; otherwise the quality tier's value (2048 at the 'high' default),
         // not the old hard-coded 4096 per cascade.
@@ -1289,8 +1259,29 @@ export class Renderer {
     }
 
     /** @deprecated Kept for compatibility — delegates to {@link screenshotOffscreen}. */
-    public screenshot(scene: Scene, size: number = 256): string {
+    public screenshot(scene: Scene, size: number = 256): Promise<string> {
         return this.screenshotOffscreen(scene, size);
+    }
+
+    /**
+     * Turn a readback into a base64 PNG data URL, flipping Y on the way.
+     *
+     * Both readback paths below need exactly this and had their own copy. The flip is not optional:
+     * `readPixels` reports rows bottom-up (GL's origin is bottom-left) and a canvas is top-down, so an
+     * unflipped thumbnail is upside down — which on a sphere or a symmetric prop is easy to miss.
+     * `putImageData` writes straight (non-premultiplied) alpha, which PNG preserves.
+     */
+    private static _encodePNG(pixels: Uint8Array, width: number, height: number): string {
+        const out = document.createElement('canvas');
+        out.width = width; out.height = height;
+        const ctx = out.getContext('2d')!;
+        const img = ctx.createImageData(width, height);
+        for (let y = 0; y < height; y++) {
+            const src = (height - 1 - y) * width * 4;
+            img.data.set(pixels.subarray(src, src + width * 4), y * width * 4);
+        }
+        ctx.putImageData(img, 0, 0);
+        return out.toDataURL('image/png');
     }
 
     /**
@@ -1302,9 +1293,18 @@ export class Renderer {
      * The pipeline is retargeted to a `size`x`size` square for the duration (camera aspect 1), so a caller
      * that framed the subject against a square is guaranteed the framing it asked for. Background draws
      * (skybox, sky, clouds, god rays, grid) are skipped and coverage alpha is taken from scene depth, so
-     * only actual geometry is opaque. Synchronous: it runs to completion between two game-loop frames.
+     * only actual geometry is opaque.
+     *
+     * Async because the readback is: WebGL2 can satisfy `readPixels` on the spot and does, but a WebGPU
+     * readback is a buffer map and cannot. The `await` therefore has to exist here whether or not
+     * today's backend needs it.
+     *
+     * **The pipeline is handed back BEFORE the await, not in a `finally` around it.** The retarget makes
+     * every screen-space buffer square and points the present pass at a private framebuffer; a game-loop
+     * frame that landed while this was suspended would render the live viewport through it. The image
+     * survives the restore because `_offscreenFBO` is private and `_resizeBuffers` never touches it.
      */
-    public screenshotOffscreen(scene: Scene, size: number = 256): string {
+    public async screenshotOffscreen(scene: Scene, size: number = 256): Promise<string> {
         if (size <= 0) return '';
         if (!this._offscreenFBO) this._offscreenFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
         if (this._offscreenFBO.width !== size || this._offscreenFBO.height !== size)
@@ -1315,24 +1315,13 @@ export class Renderer {
         this._resizeBuffers(size, size);
         try {
             this.render(scene); // resolves into _offscreenFBO (see _applyPostProcessing)
-
-            const pixels = device.readPixelsSync(this._offscreenFBO.colors[0].view, 0, 0, size, size);
-
-            // Flip Y (WebGL's origin is bottom-left) into the output canvas. Already square — no crop.
-            const out = document.createElement('canvas');
-            out.width = size; out.height = size;
-            const ctx = out.getContext('2d')!;
-            const img = ctx.createImageData(size, size);
-            for (let y = 0; y < size; y++) {
-                const src = (size - 1 - y) * size * 4;
-                img.data.set(pixels.subarray(src, src + size * 4), y * size * 4);
-            }
-            ctx.putImageData(img, 0, 0); // straight (non-premultiplied) alpha — PNG preserves it
-            return out.toDataURL('image/png');
         } finally {
             this._presentTarget = null;
             this._resizeBuffers(prevW, prevH); // hand the pipeline back to the live viewport
         }
+
+        const pixels = await device.readPixels(this._offscreenFBO.colors[0].view, 0, 0, size, size);
+        return Renderer._encodePNG(pixels, size, size); // already square — no crop
     }
 
     /**
@@ -1342,7 +1331,7 @@ export class Renderer {
      * never touched (unlike `screenshotOffscreen`, this doesn't run the whole pipeline, so it needs no
      * present-target/buffer swap). The probe's sharp linear-HDR `envMap` is tonemapped to display LDR.
      */
-    public renderProbePreview(probe: LightProbeNode, width: number = 256): string {
+    public async renderProbePreview(probe: LightProbeNode, width: number = 256): Promise<string> {
         if (width <= 0) return '';
         const cube = probe.envMap;
         if (!probe.hasBakedMaps || !cube) return '';
@@ -1362,22 +1351,13 @@ export class Renderer {
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
 
-        // Readback leaves the default framebuffer bound, which is what the viewport restore below
-        // assumes — the same state the explicit unbind used to leave.
-        const pixels = device.readPixelsSync(this._probePreviewFBO.colors[0].view, 0, 0, w, h);
+        // Viewport restored BEFORE the await, for the same reason the capture above restores its
+        // buffers first: a game-loop frame that lands while this is suspended must find the live
+        // viewport, not the preview's 2:1 one.
         this._setViewport(this._renderWidth, this._renderHeight);
 
-        // Flip Y (WebGL's origin is bottom-left) into the output canvas.
-        const out = document.createElement('canvas');
-        out.width = w; out.height = h;
-        const ctx = out.getContext('2d')!;
-        const img = ctx.createImageData(w, h);
-        for (let y = 0; y < h; y++) {
-            const src = (h - 1 - y) * w * 4;
-            img.data.set(pixels.subarray(src, src + w * 4), y * w * 4);
-        }
-        ctx.putImageData(img, 0, 0);
-        return out.toDataURL('image/png');
+        const pixels = await device.readPixels(this._probePreviewFBO.colors[0].view, 0, 0, w, h);
+        return Renderer._encodePNG(pixels, w, h);
     }
 
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
@@ -1502,14 +1482,24 @@ export class Renderer {
     /**
      * True when `node` is fully outside the camera frustum and can be skipped this frame. Tests the
      * node's cached world-space bounding sphere against the 6 frustum planes (~6 dot products).
-     * Increments the `culled` stat so the editor HUD can report savings.
+     *
+     * Pure — no stat side effect. Use it where a node has ALREADY been tested (and counted) earlier in
+     * the same frame; {@link _culled} is the counting variant for the first test of a node.
      */
-    private _culled(node: ModelNode): boolean {
+    private _outsideFrustum(node: ModelNode): boolean {
         if (!this._frustumCulling) return false;
         const s = node.getBoundingSphere();
-        const inside = this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius);
-        if (!inside) frameStats.culled++;
-        return !inside;
+        return !this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius);
+    }
+
+    /**
+     * {@link _outsideFrustum}, additionally incrementing the `culledObjects` stat so the editor HUD can
+     * report savings. Every node must reach this at most once per frame or the HUD double-counts.
+     */
+    private _culled(node: ModelNode): boolean {
+        const outside = this._outsideFrustum(node);
+        if (outside) frameStats.culledObjects++;
+        return outside;
     }
 
     private _geometryPass(scene: Scene): void {
@@ -1641,9 +1631,9 @@ export class Renderer {
                 // every sub-model of every level, in both the colour and the shadow pass.
                 for (const cell of layer.cells) {
                     if (!cell.glBuffer)
-                        cell.glBuffer = device.createBuffer({ label: 'foliage.cellMatrices', size: 0, usage: BufferUsage.VERTEX });
+                        cell.glBuffer = glDevice().createBuffer({ label: 'foliage.cellMatrices', size: 0, usage: BufferUsage.VERTEX });
                     if (cell.uploadedVersion !== layer.version) {
-                        cell.glBuffer = device.reallocateBuffer(cell.glBuffer, cell.matrices);
+                        cell.glBuffer = glDevice().reallocateBuffer(cell.glBuffer, cell.matrices);
                         cell.uploadedVersion = layer.version;
                     }
                 }
@@ -1742,12 +1732,12 @@ export class Renderer {
                     const d2 = this._aabbDistSq(camPos, cell.min, cell.max);
                     // Distance cull: nearest point of the cell's AABB to the camera.
                     if (d2 > maxD2) {
-                        frameStats.culled += cell.count;
+                        frameStats.culledInstances += cell.count;
                         continue;
                     }
                     // Frustum cull (honors the global toggle).
                     if (this._frustumCulling && !this._frustum.intersectsAABB(cell.min, cell.max)) {
-                        frameStats.culled += cell.count;
+                        frameStats.culledInstances += cell.count;
                         continue;
                     }
 
@@ -1954,8 +1944,13 @@ export class Renderer {
         // Offsets and stride come from the program the BUFFER was written for, locations from the one
         // about to draw it. `ModelNode.initializeModel` packs the vertex to exactly the attributes its
         // material's program declares, so a Basic model is 20 bytes and a PBR one 56 — assuming either
-        // is how a cube renders as a stretched bar. Skinned meshes are always the full 56 (see
-        // `createAnimated`), which is what `builtFor: null` says.
+        // is how a cube renders as a stretched bar.
+        //
+        // That is true of SKINNED meshes too. This used to claim they are always the full 56 because
+        // `createAnimated` packs all five attributes — but `initializeModel` then re-`create`s the mesh
+        // over the material program's set, animated or not, and the Basic family is where the two
+        // differ. `builtFor: null` therefore has no correct caller today; it is kept only because a mesh
+        // built outside `initializeModel` would need it.
         const model = modelVertexLayout(attributes,
             builtFor ? this._shaderManager.getShader(builtFor).attributes : null);
         if (shape === 'model+skin') {
@@ -2108,7 +2103,13 @@ export class Renderer {
                     targets: 3,
                     topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                     vertex: animated ? 'model+skin' : 'model',
-                    builtFor: animated ? null : shaderType,
+                    // `material.type` even when the mesh is SKINNED. This used to say `animated ? null`, meaning
+                    // "a skinned mesh is always the full 56-byte layout", citing `createAnimated`. That is
+                    // false: `ModelNode.initializeModel` re-`create`s EVERY mesh, animated included, packed
+                    // to its MATERIAL program's attributes — so a Basic skinned model is 20 bytes, and
+                    // reading it at 56 walks every third vertex. It rendered as a torn fan in the harness
+                    // screenshot for as long as the baseline has existed. See `shots/mesh.png` history.
+                    builtFor: node.model.material.type,
                 });
                 pass.setPipeline(customPipeline);
                 pass.setBindGroup(0, this._customBindGroup(customPipeline, mat));
@@ -2122,7 +2123,7 @@ export class Renderer {
                 targets: 3,   // the G-buffer
                 topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                 vertex: animated ? 'model+skin' : 'model',
-                builtFor: animated ? null : node.model.material.type,
+                builtFor: node.model.material.type,   // skinned too — see the note above
             });
             pass.setPipeline(pipeline);
             for (const [name, value] of mat.properties)
@@ -2169,15 +2170,17 @@ export class Renderer {
     /**
      * Record a mesh draw through the RHI, or report that this mesh still needs `Mesh` to do it.
      *
-     * The vertex layout on the pipeline covers the interleaved model vertex and nothing else, so a mesh
-     * whose attributes live in extra buffers or extra index buffers is not expressible yet and falls
-     * back: SKINNED meshes (dedicated bone-index and bone-weight buffers) and LOD meshes (alternate
-     * index buffers over the same vertices). Returning false rather than throwing keeps the fallback a
-     * routine branch instead of a cliff — those paths move when their layouts move onto pipelines.
+     * Returns false only when a SKINNED mesh is missing its bone buffers — a broken mesh, not a shape the
+     * command model cannot express. Everything else records: indexed and non-indexed, LOD levels (via
+     * `activeIndexBuffer`), submesh ranges, and skinned meshes whose bone data rides in two extra slots.
+     *
+     * The doc here used to claim skinned and LOD meshes fell back; both have recorded for a while and
+     * the comment simply went stale, which is worth knowing because it is the kind of note that stops
+     * people looking. Callers that still carry a `|| mesh.draw()` tail are keeping it for the one real
+     * case above, not for a class of geometry.
      */
     private _recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number): boolean {
         const indices = mesh.activeIndexBuffer;
-        if (!indices) return false;   // non-indexed meshes still draw arrays through Mesh
         pass.setVertexBuffer(0, mesh.vertexBuffer);
         if (mesh.isAnimated) {
             // Bone data rides in dedicated buffers rather than the interleaved vertex, so it is two
@@ -2186,6 +2189,17 @@ export class Renderer {
             if (!mesh.boneIndicesBuffer || !mesh.boneWeightsBuffer) return false;
             pass.setVertexBuffer(1, mesh.boneIndicesBuffer);
             pass.setVertexBuffer(2, mesh.boneWeightsBuffer);
+        }
+        // A mesh with no index buffer records an ARRAY draw rather than falling back.
+        //
+        // It used to return false here, which was fine while every caller had a `|| mesh.draw()` tail —
+        // and stopped being fine the moment a migrated pass dropped the tail, because the mesh then
+        // silently did not draw at all. `RenderPassEncoder.draw` has existed the whole time; nothing
+        // about a non-indexed mesh was ever unexpressible. `firstIndex`/`indexCount` become the vertex
+        // range, which is what a submesh over a non-indexed buffer would mean anyway.
+        if (!indices) {
+            pass.draw(indexCount > 0 ? indexCount : mesh.vertexCount, 1, firstIndex);
+            return true;
         }
         pass.setIndexBuffer(indices, mesh.activeIndexFormat);
         pass.drawIndexed(indexCount > 0 ? indexCount : mesh.activeIndexCount, 1, firstIndex);
@@ -2249,7 +2263,7 @@ export class Renderer {
         }
 
         const mesh = first.model.mesh;
-        this._instanceBuffer = device.reallocateBuffer(this._instanceBuffer as WebGL2Buffer,
+        this._instanceBuffer = glDevice().reallocateBuffer(this._instanceBuffer!,
                                                        this._instanceScratch.subarray(0, needed));
         const topology = first.model.material.config.wireframe ? 'line-list' : 'triangle-list';
 
@@ -2260,11 +2274,11 @@ export class Renderer {
         // draws of one mesh simply use different VAOs.
         if (reflection && !mesh.isAnimated && !mesh.hasLods && mesh.indexBuffer) {
             pass.setVertexBuffer(0, mesh.vertexBuffer);
-            pass.setVertexBuffer(1, this._instanceBuffer as WebGL2Buffer);
+            pass.setVertexBuffer(1, this._instanceBuffer!);
             pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
             pass.drawIndexed(mesh.indexCount, count);
         } else {
-            mesh.setupInstanceMatrixBuffer(this._instanceBuffer as WebGL2Buffer, 5);
+            mesh.setupInstanceMatrixBuffer(this._instanceBuffer!, 5);
             mesh.drawInstanced(count, topology);
             mesh.teardownInstanceMatrixBuffer(5);
         }
@@ -2645,7 +2659,14 @@ export class Renderer {
         // stays 0 and aliases the 2D G-buffer sampler on unit 0, which IS a draw-time sampler-type
         // collision. WebGPU is stricter still and rejects an unsatisfied binding outright. One tiny
         // texture removes the whole class of problem.
-        this._fallbackCube = new Texture({ mipMap: false });
+        // `target: 'cubemap'` is not optional here, and leaving it off did not fail where you could see
+        // it: the texture was created as a TEXTURE_2D, `createCubemapTarget` bound THAT and then called
+        // `texStorage2D(TEXTURE_CUBE_MAP, ...)` against nothing — two driver messages at boot
+        // ("Zero is bound to target", then five "no texture bound to target" from the parameters) and a
+        // fallback that was never a cubemap at all. Which meant this texture, whose entire job is to
+        // stop an IBL slot aliasing a 2D sampler, WAS a 2D sampler. `allocateCube` now throws on the
+        // mismatch rather than leaving it to the driver's console.
+        this._fallbackCube = new Texture({ target: 'cubemap', mipMap: false });
         this._fallbackCube.createCubemapTarget(1, 1);
 
         // White rather than black: a material with no base colour map multiplies by this, and black
@@ -2977,6 +2998,13 @@ export class Renderer {
         GLState.disable(gl.CULL_FACE);
 
         this._shaderManager.bind('skyAtmosphere');
+        // One pipeline for all six faces — same program, same state, only the target and `u_view`
+        // change. `builtFor: 'irradiance'` for the same reason `_convolveCubeFaces` says it: the unit
+        // cube is initialised from the irradiance program's attributes and carries position only, so
+        // its stride comes from THAT program rather than from whichever one is drawing it.
+        const skyPipeline = this._pipelineFor('skyAtmosphere', SkyAtmosphereProgram,
+                                              { cullMode: 'none', vertex: 'model',
+                                                builtFor: 'irradiance' });
         this._shaderManager.setUniform('u_projection', this._captureProj);
         this._shaderManager.setUniform('u_sunDir', sun);
         this._shaderManager.setUniform('u_sunColor', node.sunColor);
@@ -2998,10 +3026,14 @@ export class Renderer {
 
         this._setViewport(res, res);
         for (let face = 0; face < 6; face++) {
-            this._cubeFBO.bindFace(cube, face, 0, false);
+            // A pass per face, like `_convolveCubeFaces`: a face is a different render target, and the
+            // clear that used to be a bare `gl.clear` is the pass's own load op.
+            const pass = this._beginFullscreenPass(this._cubeFBO.targetFor(cube, face, 0, false),
+                                                   'skyAtmosphereBake', true, [0, 0, 0, 1], false);
+            pass.setPipeline(skyPipeline);
             this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
-            gl.clear(gl.COLOR_BUFFER_BIT);
-            this._iblCubeMesh.draw();
+            this._recordDraw(pass, this._iblCubeMesh, 0, 0);
+            this._endFullscreenPass(pass);
         }
         cube.generateMipmaps();
         this._cubeFBO.unbind();
@@ -3151,10 +3183,28 @@ export class Renderer {
         for (const node of scene.models) {
             if (!node.visible) continue;
             if ((node as any).isGizmo) { gizmoNodes.push(node); continue; }
-            if (this._selectedNodeId && node.id === this._selectedNodeId) selectedNodes.push(node);
+            // The selected node bypasses the frustum test below, exactly as the forward pipeline's
+            // collection loop does (see `_forwardPass`): the outline mask at the end of this method
+            // re-draws it, and a silhouette that vanishes the moment the node's sphere leaves the
+            // frustum is worse than one extra off-screen draw.
+            const selected = !!this._selectedNodeId && node.id === this._selectedNodeId;
+            if (selected) selectedNodes.push(node);
+
             const mat = node.model.material;
-            if (mat.config.transparent) transparentQueue.push(node);
-            else if (mat.type === 'blinn_phong' || mat.type === 'blinn_phongSkinned' || mat.type.startsWith('custom:')) opaqueForwardQueue.push(node);
+            if (mat.config.transparent) {
+                // These queues used to be collected with NO frustum test at all, so in the deferred
+                // pipeline (the default) every transparent and every opaque Blinn-Phong/custom model in
+                // the scene was drawn regardless of where the camera pointed. The geometry pass and the
+                // whole forward pipeline have always culled; this is the one collection loop that did not.
+                if (!selected && this._culled(node)) continue;
+                transparentQueue.push(node);
+            } else if (mat.type === 'blinn_phong' || mat.type === 'blinn_phongSkinned' || mat.type.startsWith('custom:')) {
+                // `_outsideFrustum`, not `_culled`: the geometry pass already tested and counted these
+                // (it culls before it skips forward-rendered material types), so counting again here
+                // would report every off-screen Blinn-Phong model twice.
+                if (!selected && this._outsideFrustum(node)) continue;
+                opaqueForwardQueue.push(node);
+            }
         }
 
         // Forward lighting is only needed if something is drawn through the material shaders.
@@ -3455,7 +3505,7 @@ export class Renderer {
         // backwards on WebGL2: targets are deduped and evicted with their texture, so 128 + 64 slices
         // would strand ~192 cached framebuffers for the session, where one re-pointed attachment and a
         // `destroy()` cost nothing.
-        const bakeFbo = device.createFramebuffer('cloudNoiseBake');
+        const bakeFbo = glDevice().createFramebuffer('cloudNoiseBake');
 
         // Volumes are RGBA8 (the default `precision: 'low'`): the fields are 0..1 scalars that then
         // get remapped and smoothstepped, so 8 bits per channel sits below the noise floor of the
@@ -4341,7 +4391,12 @@ export class Renderer {
         this._canvas.width = this._viewport.clientWidth;
         this._canvas.height = this._viewport.clientHeight;
 
-        if (!gl) return;
+        if (!this._deviceReady) return;
+        // Re-establish the surface configuration. A no-op on WebGL2, and NOT required for the resize
+        // itself on WebGPU (the swap chain tracks the canvas size — measured, see
+        // `Device.reconfigureSurface`). It is here because this method also runs after the editor
+        // re-parents the canvas on a mode switch, which is the case that does need it.
+        device.reconfigureSurface();
         // Internal buffers follow renderScale; the canvas stays native so the present pass upscales.
         this._resizeBuffers(this._renderWidth, this._renderHeight);
 
@@ -4696,7 +4751,7 @@ export class Renderer {
                     ...(materialConfig.transparent === true ? { blend: DEFAULT_BLEND } : {}),
                     topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                     vertex: isAnimatedModel ? 'model+skin' : 'model',
-                    builtFor: isAnimatedModel ? null : shaderType,
+                    builtFor: node.model.material.type,   // skinned too — see `_geometryPass`
                 });
                 pass!.setPipeline(customPipeline);
                 pass!.setBindGroup(0, this._customBindGroup(customPipeline, mat, envCube));
@@ -4720,7 +4775,7 @@ export class Renderer {
                     : {}),
                 topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                 vertex: isAnimatedModel ? 'model+skin' : 'model',
-                builtFor: isAnimatedModel ? null : node.model.material.type,
+                builtFor: node.model.material.type,   // skinned too — see `_geometryPass`
             });
             pass!.setPipeline(pipeline);
             for (const [name, value] of mat.properties)
@@ -4889,7 +4944,7 @@ export class Renderer {
                 vertex: skinned ? 'model+skin' : 'model',
                 // The shadow programs declare only position, but the buffer under them was written for
                 // whatever material the node wears — 20 bytes for an unlit caster, 56 for a lit one.
-                builtFor: skinned ? null : node.model.material.type,
+                builtFor: node.model.material.type,   // skinned too — see `_geometryPass`
             });
             pass.setPipeline(pipeline);
             if (shaderType !== bound) {
@@ -5382,6 +5437,21 @@ export class Renderer {
         if (this._overdrawFBO.width !== w || this._overdrawFBO.height !== h)
             this._overdrawFBO.create(w, h);
 
+        // NOT on the RHI command model, and the reason is measured rather than assumed.
+        //
+        // A bisect proved the pass, the pipeline state and the clear all port cleanly: keeping the new
+        // render pass and putting `mesh.draw()` back inside it was byte-identical to this. What does not
+        // reproduce is `_recordDraw` — routing these draws through it turns two of the extras-grid meshes
+        // into spiky triangle fans (10/128 signature cells, worst delta 40).
+        //
+        // Two things it is NOT, both eliminated by measurement: it is not the skinned-stride bug fixed
+        // elsewhere in this file (the corruption is identical before and after that fix, and the affected
+        // meshes are not animated), and it is not pipeline state. The two meshes come from the block that
+        // crosses every material type with every TOPOLOGY, which is the next thing to look at.
+        //
+        // Left on the legacy path deliberately: this is a debug channel, and shipping a visibly wrong
+        // picture to save one legacy draw is a bad trade. Evidence:
+        // `tools/harness/shots/pass-debugOverdraw-{old,fixed}.png`.
         this._overdrawFBO.bind();
         gl.clearColor(0, 0, 0, 1);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -5711,7 +5781,8 @@ export class Renderer {
             drawCalls: frameStats.drawCalls,
             instancedDrawCalls: frameStats.instancedDrawCalls,
             objects: frameStats.objects,
-            culled: frameStats.culled,
+            culledObjects: frameStats.culledObjects,
+            culledInstances: frameStats.culledInstances,
             instances: frameStats.instances,
             triangles: frameStats.triangles,
             vertices: frameStats.vertices,
@@ -5770,7 +5841,7 @@ export class Renderer {
         const clamped = Math.min(1, Math.max(0.25, scale));
         if (clamped === this._renderScale) return;
         this._renderScale = clamped;
-        if (gl) this._resizeBuffers(this._renderWidth, this._renderHeight);
+        if (this._deviceReady) this._resizeBuffers(this._renderWidth, this._renderHeight);
     }
 
     /** Rough GPU memory estimate: the renderer's own render-target framebuffers + registered asset
@@ -5909,7 +5980,7 @@ export class Renderer {
             this._ssaoSamples = t.ssaoSamples;
             // The kernel's ramp is sized to the sample count, so the samples must be rebuilt or the
             // new tier inherits the previous tier's radius.
-            if (gl) this._generateSSAOKernelAndNoise();
+            if (this._deviceReady) this._generateSSAOKernelAndNoise();
         }
         this._motionBlurEnabled = t.motionBlurEnabled;
         // Restore what the user authored rather than a hardcoded default: a tier without bloom has to
@@ -5918,7 +5989,7 @@ export class Renderer {
         if (this._ssaoResolutionScale !== t.ssaoResolutionScale || this._renderScale !== t.renderScale) {
             this._ssaoResolutionScale = t.ssaoResolutionScale;
             this._renderScale = t.renderScale;
-            if (gl) this._resizeBuffers(this._renderWidth, this._renderHeight);
+            if (this._deviceReady) this._resizeBuffers(this._renderWidth, this._renderHeight);
         }
         this._recreateShadowTargets(t.shadowMapResolution, t.shadowCascades);
         this._shadowFilterMode = t.shadowFilterMode;
@@ -6035,7 +6106,7 @@ export class Renderer {
         const clamped = Math.min(2048, Math.max(256, 1 << Math.round(Math.log2(size))));
         if (clamped === this._spotShadowResolution) return;
         this._spotShadowResolution = clamped;
-        if (!gl) return;
+        if (!this._deviceReady) return;
         this._spotShadowFBO.create(clamped, Renderer.MAX_SPOT_SHADOWS);
         this._spotShadowsDirty = true;
         this._spotShadowsActive = false;
@@ -6076,7 +6147,7 @@ export class Renderer {
         if (clampedSize === this._shadowMapResolution && clampedLayers === this._cascadeCount) return;
         this._shadowMapResolution = clampedSize;
         this._cascadeCount = clampedLayers;
-        if (!gl) return;
+        if (!this._deviceReady) return;
         this._shadowCascadeFBO.create(clampedSize, clampedLayers);
         // The fresh storage holds undefined depth until the next shadow pass writes or clears it.
         this._shadowMapsDirty = true;
@@ -6089,7 +6160,7 @@ export class Renderer {
         const clamped = Math.min(64, Math.max(4, Math.round(n)));
         if (clamped !== this._ssaoSamples) {
             this._ssaoSamples = clamped;
-            if (gl) this._generateSSAOKernelAndNoise(); // ramp is sized to the count — see the generator
+            if (this._deviceReady) this._generateSSAOKernelAndNoise(); // ramp is sized to the count — see the generator
         }
         this._quality = 'custom';
     }
@@ -6100,7 +6171,7 @@ export class Renderer {
         if (clamped === this._ssaoResolutionScale) return;
         this._ssaoResolutionScale = clamped;
         this._quality = 'custom';
-        if (gl) this._resizeBuffers(this._renderWidth, this._renderHeight);
+        if (this._deviceReady) this._resizeBuffers(this._renderWidth, this._renderHeight);
     }
 
     /** Snapshot every runtime-tunable render setting (for persisting a scene's look / publishing). */
@@ -6232,32 +6303,51 @@ export class Renderer {
      * when occluded). Sets `_outlineActive` so the outline pass runs only when something is selected.
      */
     private _renderSelectionMask(models: ModelNode[], sprites: SpriteNode[]): void {
-        this._outlineMaskFBO.bind();
-        // Clear the mask to transparent black without disturbing the configured scene clear color.
-        const cc = this._config.clearColor || [0.0, 0.0, 0.0, 1.0];
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.clearColor(cc[0], cc[1], cc[2], cc[3]);
-
         this._outlineActive = models.length > 0 || sprites.length > 0;
-        if (this._outlineActive) {
-            GLState.disable(gl.DEPTH_TEST);
-            GLState.depthMask(false);
-            GLState.disable(gl.BLEND);
-            gl.colorMask(true, true, true, true);
 
+        // The mask is opened and cleared even with nothing selected: the outline post pass samples it,
+        // and a silhouette left over from the previous selection would outline a node that is no longer
+        // chosen. `clearValue` rather than the standing clear colour — the mask wants transparent black
+        // while the scene's own clear colour is whatever the project configured, and the old code
+        // swapped `gl.clearColor` out and back by hand to get that.
+        const pass = this._beginFullscreenPass(this._outlineMaskFBO.renderTarget, 'outlineMask',
+                                               true, [0, 0, 0, 0], false);
+        if (this._outlineActive) {
+            // Always on top and never blended: the silhouette must be visible through geometry that
+            // occludes it, which is the whole point of an outline. Said as compare 'always' with writes
+            // off, because WebGPU has no separate "depth test disabled".
+            const depthAlways: DepthStencilState =
+                { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' };
             this._shaderManager.bind('outline');
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
             this._shaderManager.setUniform('u_projection', this._activeCamera.projectionMatrix);
             this._shaderManager.setUniform('u_outlineColor', [1.0, 1.0, 1.0]); // white silhouette
+
+            // One pipeline per SOURCE material, not one for the pass.
+            //
+            // `outline` reads position, normal and uv, but the buffer it reads was interleaved for
+            // whichever program the mesh was built for — a Basic model packs 20 bytes per vertex and a
+            // PBR one 56. Reading either at the other's stride walks every second or third vertex.
+            // `builtFor` is what makes the layout follow the buffer, and it is `material.type` for
+            // SKINNED meshes too: `ModelNode.initializeModel` re-`create`s every mesh, animated
+            // included, packed to its material program's attributes — so the `animated ? null`
+            // convention used elsewhere in this file (which claims a skinned mesh is always the full
+            // 56 bytes) is wrong for the Basic family, measured at real=20 against layout=56.
+            const drawWith = (mesh: Mesh, builtFor: string | null, model: mat4) => {
+                const pipeline = this._pipelineFor('outline', OutlineProgram, {
+                    depthStencil: depthAlways, vertex: 'model', builtFor,
+                });
+                pass.setPipeline(pipeline);
+                this._shaderManager.setUniform('u_model', model);
+                this._recordDraw(pass, mesh, 0, 0);
+            };
 
             // Selected models and their children.
             const modelNodes: any[] = [];
             for (const node of models) this._collectAllChildren(node, modelNodes);
             for (const node of modelNodes) {
                 if (!node.initialized || !node.model) continue;
-                this._shaderManager.setUniform('u_model', node.worldTransform);
-                node.model.mesh.draw('triangle-list');
+                drawWith(node.model.mesh, node.model.material.type, node.worldTransform);
             }
 
             // Selected sprites and their children (preserving billboard constraints).
@@ -6265,13 +6355,10 @@ export class Renderer {
             for (const node of sprites) this._collectAllChildren(node, spriteNodes);
             for (const node of spriteNodes) {
                 if (!node.initialized || !node.sprite) continue;
-                this._shaderManager.setUniform('u_model', this._spriteBillboardMatrix(node));
-                node.sprite.mesh.draw('triangle-list');
+                drawWith(node.sprite.mesh, node.sprite.material.type, this._spriteBillboardMatrix(node));
             }
-
-            GLState.depthMask(true);
-            GLState.enable(gl.DEPTH_TEST);
         }
+        this._endFullscreenPass(pass);
 
         // Restore the scene framebuffer for any subsequent draws.
         this._sceneFBO.bind();
@@ -6374,7 +6461,7 @@ export class Renderer {
         if (!this._overlaySphereMesh) this._overlaySphereMesh = build(Geometry.Sphere(8, 1));
         if (!this._overlayBoneMesh) this._overlayBoneMesh = build(Geometry.Cube(1, 1, 1));
         if (!this._overlayInstanceBuffer)
-            this._overlayInstanceBuffer = device.createBuffer({ label: 'renderer.overlayInstances', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+            this._overlayInstanceBuffer = glDevice().createBuffer({ label: 'renderer.overlayInstances', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
     }
 
     private _drawSkeletonOverlay(pass?: RenderPassEncoder, depthStencil?: DepthStencilState): void {

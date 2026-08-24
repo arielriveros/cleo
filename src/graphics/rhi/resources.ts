@@ -16,7 +16,7 @@
 import type {
     TextureFormat, TextureDimension, TextureUsageFlags, BufferUsageFlags,
     VertexBufferLayout, PrimitiveState, DepthStencilState, ColorTargetState,
-    ShaderStageFlags, SamplerDescriptor, ShaderResource,
+    ShaderStageFlags, SamplerDescriptor, ShaderResource, AddressMode, TextureConfigureDescriptor,
 } from './types';
 
 /** Common to every resource: a debug label and explicit disposal. */
@@ -42,6 +42,61 @@ export interface Texture extends GpuResource {
     readonly usage: TextureUsageFlags;
     /** Bytes this texture occupies on the GPU, including its mip chain. */
     readonly byteSize: number;
+
+    // --- uploads -------------------------------------------------------------------------------
+    //
+    // The engine has half a dozen ways to get pixels into a texture and they are genuinely different
+    // operations, not one with a flag: a decoded image, six cube faces, raw bytes, a sub-rectangle,
+    // and three kinds of empty storage to render into. Collapsing them into a single `writeTexture`
+    // was tried on paper and does not survive contact — an immutable array needs its layer count at
+    // allocation, a volume needs its depth, and a cube needs all six faces before it is complete.
+    //
+    // Every one is self-contained: no bind-then-upload pair. WebGL2 has to bind a texture before
+    // `texImage2D` and WebGPU has no such concept, so the bind belongs inside the backend, not in a
+    // call the caller has to remember to make first.
+
+    /** Settle the sampling and colour-space state the uploads below apply. Called once, before them. */
+    configure(descriptor: TextureConfigureDescriptor): void;
+
+    /** Upload a decoded image, or allocate empty 2D storage when `image` is null. */
+    upload2D(image: TexImageSource | null, width: number, height: number, mipMap: boolean): void;
+
+    /** Upload all six cube faces in +X -X +Y -Y +Z -Z order, or allocate six empty ones. */
+    uploadCube(images: readonly TexImageSource[] | null, width: number, height: number,
+               mipMap: boolean): void;
+
+    /** Upload one cube face, by INDEX into that same order — not a backend face enum. */
+    uploadFace(face: number, image: TexImageSource, mipMap: boolean): void;
+
+    /** Upload raw RGBA8 bytes, unflipped and unmipped, so the data maps 1:1 to UVs. */
+    uploadBytes(data: Uint8Array, width: number, height: number, wrapping: AddressMode): void;
+
+    /** Patch a sub-rectangle of RGBA8 bytes into existing 2D storage. */
+    uploadRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void;
+
+    /** Allocate an empty cubemap with `levels` mips, to render faces into. */
+    allocateCube(size: number, levels: number): void;
+
+    /** Allocate an empty 3D volume. */
+    allocateVolume(width: number, height: number, depth: number, wrapping: AddressMode): void;
+
+    /** Allocate an empty depth array — the shadow cascades. `compare` selects a comparison sampler. */
+    allocateDepthArray(size: number, layers: number, compare: boolean): void;
+
+    /** Turn the comparison sampler on or off. Reading a shadow texture without it is undefined. */
+    setCompareMode(enabled: boolean): void;
+
+    generateMipmaps(): void;
+
+    /**
+     * Report the dimensions back, once an upload knows them.
+     *
+     * WebGL2 allocates storage through the upload calls above, so the size is not known at creation
+     * — which is why `byteSize` once read 0 for a texture nobody had uploaded to yet, and every render
+     * target built from it came out 1x1. WebGPU knows its size up front and can treat this as an
+     * assertion rather than a setter.
+     */
+    setSize(width: number, height: number, depthOrArrayLayers?: number, mipLevelCount?: number): void;
 }
 
 /**
