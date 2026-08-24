@@ -2814,10 +2814,23 @@ export class Renderer {
         return this._textureBindGroup(pipeline, 3, textures);
     }
 
-    /** Repack the per-cascade arrays into the upload buffers. Called once, after the cascade pass. */
+    /**
+     * Repack the per-cascade arrays into the upload buffers. Called once, after the cascade pass.
+     *
+     * The matrix goes through `_uvProducing`, because the lighting shader uses it to turn a world
+     * position into a shadow-map TEXTURE COORDINATE - `chunks/shadows.wgsl` does
+     * `proj = (m * worldPos).xyz / w; proj = proj * 0.5 + 0.5;` and reads the map at `proj.xy`. That is
+     * the same clip-to-uv step every fullscreen reconstruction makes, and it is mirrored on WebGPU for
+     * the same reason. Left un-flipped, every lookup sampled the opposite row of the cascade and the
+     * scene came back with NO SHADOWS AT ALL while the shadow maps themselves stayed pixel-identical.
+     *
+     * The depth half is untouched by design. The map is rendered with `_clipProjection(lightSpace)`,
+     * whose stored depth is `(z_no + 1) / 2` - exactly what WebGL2 stores - and the lookup keeps the
+     * un-remapped matrix, so `proj.z * 0.5 + 0.5` reproduces it. `_uvProducing` negates only Y.
+     */
     private _packCascadeUniforms(): void {
         for (let i = 0; i < MAX_CASCADES; i++) {
-            this._cascadeMatPacked.set(this._cascadeMatrices[i], i * 16);
+            this._cascadeMatPacked.set(this._uvProducing(this._cascadeMatrices[i]), i * 16);
             this._cascadeSplitPacked[i] = this._cascadeSplits[i];
             this._cascadeDepthScalePacked[i] = this._cascadeDepthScales[i];
             this._cascadeTexelPacked[i] = this._cascadeTexelSizes[i];
@@ -5623,7 +5636,10 @@ export class Renderer {
             mat4.perspective(this._spotProj, halfFov * 2, 1, 0.1, far);
             mat4.multiply(this._spotShadowMatrices[layer], this._spotProj, this._spotView);
 
-            this._spotShadowMatPacked.set(this._spotShadowMatrices[layer], layer * 16);
+            // `_uvProducing` for the same reason the cascade matrices take it: the spot lookup in
+            // `chunks/shadows.wgsl` turns this into a texture coordinate, and that step is mirrored on
+            // WebGPU.
+            this._spotShadowMatPacked.set(this._uvProducing(this._spotShadowMatrices[layer]), layer * 16);
             // One texel's world size PER UNIT of distance — the shader multiplies by the actual
             // distance, because a perspective map's texel grows as it goes.
             this._spotShadowTexelScalePacked[layer] = (2 * Math.tan(halfFov)) / this._spotShadowResolution;
