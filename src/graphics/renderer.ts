@@ -2106,6 +2106,12 @@ export class Renderer {
      * deliberate — cloud coverage IS meant to reach the mask — and it is the one place in the engine
      * where the two halves agree.
      */
+    /** Additive accumulation: every fragment adds its increment, and nothing occludes anything. */
+    private static readonly _OVERDRAW_BLEND: BlendState = {
+        color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+        alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+    };
+
     private static readonly _CLOUD_BLEND: BlendState = {
         color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
         alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
@@ -5883,33 +5889,30 @@ export class Renderer {
         if (this._overdrawFBO.width !== w || this._overdrawFBO.height !== h)
             this._overdrawFBO.create(w, h);
 
-        // NOT on the RHI command model, and the reason is measured rather than assumed.
+        // On the RHI command model, and why the previous attempt at that failed is now known.
         //
-        // A bisect proved the pass, the pipeline state and the clear all port cleanly: keeping the new
-        // render pass and putting `mesh.draw()` back inside it was byte-identical to this. What does not
-        // reproduce is `_recordDraw` — routing these draws through it turns two of the extras-grid meshes
-        // into spiky triangle fans (10/128 signature cells, worst delta 40).
+        // This pass was left on the legacy path (`gl.clear`, `gl.blendFunc`, `mesh.draw()`) because
+        // routing it through `_recordDraw` turned two of the extras-grid meshes into spiky triangle
+        // fans. That was not a `_recordDraw` defect: the pass built ONE pipeline for every mesh, so
+        // every mesh was read at one stride. `overdraw` declares position only, but the buffer it reads
+        // was interleaved for whichever program the mesh was built for — a Basic model packs 20 bytes
+        // per vertex and a PBR one 56 — and reading either at the other's stride walks every second or
+        // third vertex. `builtFor: material.type` makes the layout follow the BUFFER, which is exactly
+        // the fix the selection mask already carries, for exactly the same reason.
         //
-        // Two things it is NOT, both eliminated by measurement: it is not the skinned-stride bug fixed
-        // elsewhere in this file (the corruption is identical before and after that fix, and the affected
-        // meshes are not animated), and it is not pipeline state. The two meshes come from the block that
-        // crosses every material type with every TOPOLOGY, which is the next thing to look at.
-        //
-        // Left on the legacy path deliberately: this is a debug channel, and shipping a visibly wrong
-        // picture to save one legacy draw is a bad trade. Evidence:
-        // `tools/harness/shots/pass-debugOverdraw-{old,fixed}.png`.
-        this._overdrawFBO.bind();
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        const cc = this.clearColor;
-        gl.clearColor(cc[0], cc[1], cc[2], cc[3] ?? 1);
+        // Leaving it legacy stopped being an option regardless: `gl` is undefined on WebGPU, so this
+        // threw, and the game loop logs a frame error without rescheduling — one visit to this channel
+        // killed the renderer for the rest of the session, and every frame after it showed a stale
+        // image. That is how the cross-backend diff found it: WebGPU froze at `debugOverdraw` and
+        // reported identical frame stats for every configuration that followed.
+        const pass = this._beginFullscreenPass(this._overdrawFBO.renderTarget, 'overdraw',
+                                               true, [0, 0, 0, 1], true);
 
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.cull(false);
-        GLState.blend(true);
-        gl.blendFunc(gl.ONE, gl.ONE);
-        gl.blendEquation(gl.FUNC_ADD);
+        // Nothing occludes anything: this counts how many times each pixel was shaded, so the depth
+        // test has to accept every fragment. Spelled as compare 'always' with writes off, because
+        // WebGPU has no separate "depth test disabled".
+        const depthAlways: DepthStencilState =
+            { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' };
 
         this._shaderManager.bind('overdraw');
         this._shaderManager.setUniform('u_increment', 1 / Renderer.OVERDRAW_MAX);
@@ -5919,17 +5922,16 @@ export class Renderer {
         for (const node of scene.models) {
             if (!node.visible || (node as any).isGizmo) continue;
             if (!node.initialized) node.initializeModel();
+            const pipeline = this._pipelineFor('overdraw', OverdrawProgram, {
+                blend: Renderer._OVERDRAW_BLEND, depthStencil: depthAlways,
+                cullMode: 'none', vertex: 'model', builtFor: node.model.material.type,
+            });
+            pass.setPipeline(pipeline);
             this._shaderManager.setUniform('u_model', node.worldTransform);
-            node.model.mesh.draw();
+            this._recordDraw(pass, node.model.mesh, 0, 0);
         }
 
-        GLState.blend(false);
-        this._restoreDefaultBlend();
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-        GLState.cull(true);
-
-        this._overdrawFBO.unbind();
+        this._endFullscreenPass(pass);
     }
 
     /**

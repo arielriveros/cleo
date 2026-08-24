@@ -35,10 +35,16 @@ async function loadNaga() {
  */
 export function findEntryPoints(wgsl) {
     const found = {};
+    // Comments stripped first. The window between the stage attribute and `fn` is deliberately narrow
+    // so an unrelated function cannot be matched, and a doc comment sitting between the two — legal
+    // WGSL, and the natural place to explain what a stage declares — was enough to overrun it. The
+    // symptom was a stage silently missing from the translation, surfacing much later as "WebGL2 needs
+    // GLSL vertex and fragment stages" from a program that plainly has both.
+    const source = stripLineComments(wgsl);
     const stages = [['vertex', '@vertex'], ['fragment', '@fragment'], ['compute', '@compute']];
     for (const [stage, attribute] of stages) {
         const re = new RegExp(attribute + '[\\s\\S]{0,120}?\\bfn\\s+([A-Za-z_]\\w*)');
-        const match = re.exec(wgsl);
+        const match = re.exec(source);
         if (match) found[stage] = match[1];
     }
     return found;

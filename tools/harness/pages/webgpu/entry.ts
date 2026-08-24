@@ -668,11 +668,14 @@ struct Targets {
                                                        OutlineProgram.uniformBlocks);
 
             // Attributes are DECLARED on this backend, not reflected off a linked program.
+            // `outline` declares POSITION ONLY, deliberately: every attribute a vertex stage declares is
+            // one the pipeline's vertex layout must supply, and this pass draws whatever the user
+            // selected — a Basic model's buffer has no normal at all. See outline.wgsl.
             check('the WebGPU program reports the shader vertex attributes',
-                  gpuProgram.attributes.length === 3
+                  gpuProgram.attributes.length === 1
                   && gpuProgram.attributes[0].name === 'a_position'
-                  && gpuProgram.attributes[0].byteSize === 12
-                  && gpuProgram.attributes[2].byteSize === 8,
+                  && gpuProgram.attributes[0].location === 0
+                  && gpuProgram.attributes[0].byteSize === 12,
                   gpuProgram.attributes.map(a => a.location + ':' + a.name + ':' + a.byteSize).join(' '));
             check('it reports no reflected vertexAttribPointer layout',
                   gpuProgram.attributes.every(a => a.layout === undefined),

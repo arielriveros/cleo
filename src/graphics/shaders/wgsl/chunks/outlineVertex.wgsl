@@ -1,15 +1,18 @@
 // Vertex stage for the selection-outline and overdraw passes. The GLSL twin is materials/outline.vs.
 //
-// It declares position, normal and texCoord only — three of the five model attributes — and the GLSL
-// original leaves their locations implicit, so the linker assigns 0/1/2. That happens to match the
-// canonical model order (see rhi/vertexLayouts.ts MODEL_ATTRIBUTES), which is why it can draw a mesh
-// whose VAO was built for the full five-attribute layout. Spelled out explicitly here so the match is
-// a stated contract rather than a coincidence of declaration order.
+// It declares POSITION ONLY, and that is a requirement rather than an economy. Neither fragment stage
+// reads a normal or a uv — both return a flat colour — and every attribute a vertex stage declares is
+// one the pipeline's vertex layout must supply. WebGPU enforces that ("Vertex attribute slot 1 used in
+// [EntryPoint \"vs_main\"] is not present in the VertexState") and refuses the pipeline outright;
+// WebGL2 quietly hands the shader a generic (0,0,0,1) instead, which is why declaring three worked
+// there for as long as it did.
+//
+// The mesh being drawn decides what is available: `ModelNode.initializeModel` packs the vertex to
+// exactly the attributes its MATERIAL's program declares, so a Basic model carries position and uv and
+// nothing else. A pass that draws every model in the scene therefore cannot ask for a normal.
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) normal: vec3<f32>,
-    @location(1) uv: vec2<f32>,
 };
 
 struct OutlineTransform {
@@ -20,17 +23,9 @@ struct OutlineTransform {
 @group(1) @binding(0) var<uniform> u_transform: OutlineTransform;
 
 @vertex
-fn vs_main(
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) texCoord: vec2<f32>,
-) -> VertexOutput {
+fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     var out: VertexOutput;
     out.position = u_transform.u_projection * u_transform.u_view * u_transform.u_model
                  * vec4<f32>(position, 1.0);
-    // WGSL has no mat3(mat4) narrowing constructor.
-    let rot = mat3x3<f32>(u_transform.u_model[0].xyz, u_transform.u_model[1].xyz, u_transform.u_model[2].xyz);
-    out.normal = rot * normal;
-    out.uv = texCoord;
     return out;
 }
