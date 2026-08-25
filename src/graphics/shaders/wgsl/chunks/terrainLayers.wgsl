@@ -120,7 +120,9 @@ fn band(range: vec2<f32>, v: f32, edge: f32) -> f32 {
  *
  * Returned rather than accumulated through `inout`, which WGSL does not have. Texture sampling is
  * guarded by the uniform `hasXxx` flags only, never by the per-fragment weight — a per-fragment branch
- * around a sample leaves the mip derivatives undefined.
+ * around a sample leaves the mip derivatives undefined, and WGSL rejects it outright. The flags reach
+ * here as PARAMETERS, which is fine: uniformity propagates from the call sites, and every call site
+ * passes a value straight out of the uniform buffer. See `resolveTerrainSurface` for what that costs.
  */
 fn addLayer(w: f32, uv: vec2<f32>,
             albedoTex: texture_2d<f32>, albedoSmp: sampler, hasAlbedo: i32, color: vec3<f32>,
@@ -210,15 +212,17 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
 
     let sum = w0 + w1 + w2 + w3;
 
-    var out: TerrainSurface;
-    if (sum < 1e-4) {
-        out.albedo = toLinear(u_terrain.u_baseColor);
-        out.metallic = 0.0;
-        out.roughness = 0.9;
-        out.normal = nGeom;
-        return out;
-    }
-
+    // The four layers are resolved BEFORE the unpainted-terrain branch below, not after it.
+    //
+    // `sum < 1e-4` is a PER-FRAGMENT condition, so an early return on it puts everything following in
+    // non-uniform control flow — and `addLayer` samples textures, which WGSL permits only in uniform
+    // control flow. It rejected the module outright ("'textureSample' must only be called from uniform
+    // control flow"), which invalidated the `terrainForward` pipeline and every bind group built from
+    // its layout, so the whole terrain drew nothing. GLSL merely leaves the derivatives undefined here,
+    // which is why this stood. Same rule and same shape as the early return in `motionBlur.wgsl`.
+    //
+    // Costs nothing that matters: on the fallback path every weight is ~0, so the work being done ahead
+    // of the branch is work whose result is multiplied by zero and then discarded.
     let l0 = addLayer(w0, uv0, u_albedo0_texture, u_albedo0_sampler, u_terrain.u_hasAlbedo0,
                       u_terrain.u_color0, u_normal0_texture, u_normal0_sampler,
                       u_terrain.u_hasNormal0, u_terrain.u_metallic0, u_terrain.u_roughness0, tbn);
@@ -231,6 +235,15 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     let l3 = addLayer(w3, uv3, u_albedo3_texture, u_albedo3_sampler, u_terrain.u_hasAlbedo3,
                       u_terrain.u_color3, u_normal3_texture, u_normal3_sampler,
                       u_terrain.u_hasNormal3, u_terrain.u_metallic3, u_terrain.u_roughness3, tbn);
+
+    var out: TerrainSurface;
+    if (sum < 1e-4) {
+        out.albedo = toLinear(u_terrain.u_baseColor);
+        out.metallic = 0.0;
+        out.roughness = 0.9;
+        out.normal = nGeom;
+        return out;
+    }
 
     out.albedo = (l0.albedo + l1.albedo + l2.albedo + l3.albedo) / sum;
     out.metallic = (l0.metallic + l1.metallic + l2.metallic + l3.metallic) / sum;

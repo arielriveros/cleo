@@ -30,7 +30,12 @@ struct OutlinePostUniforms {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let scene = tonemap(textureSample(u_screenTexture_texture, u_screenTexture_sampler, in.uv).rgb,
                         u_outline.u_exposure);
-    let center = textureSample(u_maskTexture_texture, u_maskTexture_sampler, in.uv).r;
+    // The mask is read with `textureSampleLevel` at level 0, both here and in the search loop below.
+    // The `center > 0.5` return is a per-fragment branch, so the loop after it is non-uniform control
+    // flow, where WGSL forbids `textureSample` and rejects the module — which invalidated `outlinePost`
+    // and left the selection outline undrawn. `_outlineMaskFBO` is `mipMap: false`, so level 0 is the
+    // only level, and a silhouette read at exact texel offsets never wanted a mip anyway.
+    let center = textureSampleLevel(u_maskTexture_texture, u_maskTexture_sampler, in.uv, 0.0).r;
     if (center > 0.5) { return vec4<f32>(scene, 1.0); }   // inside the object: leave untouched
 
     var best = 1e9;
@@ -39,7 +44,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let d2 = f32(x * x + y * y);
             if (d2 > f32(R * R) || d2 == 0.0) { continue; }
             let uv = in.uv + vec2<f32>(f32(x), f32(y)) * u_outline.u_texelSize;
-            if (textureSample(u_maskTexture_texture, u_maskTexture_sampler, uv).r > 0.5) {
+            if (textureSampleLevel(u_maskTexture_texture, u_maskTexture_sampler, uv, 0.0).r > 0.5) {
                 best = min(best, d2);
             }
         }

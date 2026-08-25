@@ -30,8 +30,13 @@
 
 #include "./chunks/fullscreen.wgsl"
 
+// Binding 1 is deliberately EMPTY. The cloud buffer is only ever read with `textureLoad`, which takes
+// no sampler, so a `sampler` declared beside it is never referenced — and an unreferenced binding is
+// dropped from the pipeline's auto-generated layout. The engine synthesises its sampler entries from
+// what the source DECLARES, so declaring one here made it hand WebGPU a fourth entry for a layout with
+// three, which invalidates the bind group and with it the whole command buffer: the pass then does not
+// even run its clear and the target reads back as zeros.
 @group(0) @binding(0) var u_clouds_texture: texture_2d<f32>;   // the reduced-resolution cloud image
-@group(0) @binding(1) var u_clouds_sampler: sampler;
 @group(0) @binding(2) var u_gDepth_texture: texture_depth_2d;   // the depth the raymarch bounded against
 @group(0) @binding(3) var u_gDepth_sampler: sampler;
 

@@ -111,13 +111,23 @@ fn heightGradient(h: f32, cloudType: f32) -> f32 {
  * `wind` is passed rather than read from a module global: the GLSL twin used a mutable global set once
  * in main, which WGSL would express as `var<private>` — a parameter says the same thing without the
  * hidden dependency.
+ *
+ * All three volume fetches are `textureSampleLevel` at level 0, never `textureSample`. This function is
+ * called from the raymarch loop and has its own per-fragment early-out below, so it is squarely in
+ * non-uniform control flow — where WGSL forbids the derivative-taking `textureSample` outright, and
+ * rejects the whole module ("'textureSample' must only be called from uniform control flow"), which
+ * invalidated the `volumetricClouds` pipeline and drew no clouds at all.
+ *
+ * Level 0 is not a compromise: both volumes are created with `mipMap: false` (see the `volume` helper
+ * in `Renderer._bakeCloudNoise`), so there is no other level to pick, and screen-space derivatives are
+ * meaningless along a ray anyway. It generates `textureLod` on WebGL2, which reads the same texels.
  */
 fn sampleDensity(pos: vec3<f32>, h: f32, cheap: bool, wind: vec3<f32>) -> f32 {
     let p = pos + wind;
 
     // Low-frequency base shape, from the baked volume.
-    let base = textureSample(u_baseNoise_texture, u_baseNoise_sampler,
-                             p * u_cloud.u_baseScale * u_cloud.u_baseNoiseInvPeriod).r;
+    let base = textureSampleLevel(u_baseNoise_texture, u_baseNoise_sampler,
+                                  p * u_cloud.u_baseScale * u_cloud.u_baseNoiseInvPeriod, 0.0).r;
 
     // Coverage remaps the base so higher coverage lets more of the field through; anvilBias widens the
     // effective coverage near the top for spreading cumulonimbus caps.
@@ -133,14 +143,14 @@ fn sampleDensity(pos: vec3<f32>, h: f32, cheap: bool, wind: vec3<f32>) -> f32 {
             // Curl-ish domain warp. The warp vector comes from the base volume's spare channels rather
             // than a hash: it is smooth (so the warp is coherent rather than per-cell noise) and it is
             // a fetch we can afford next to the ones already happening here.
-            let warpSample = textureSample(u_baseNoise_texture, u_baseNoise_sampler,
-                pos * u_cloud.u_baseScale * 4.0 * u_cloud.u_baseNoiseInvPeriod);
+            let warpSample = textureSampleLevel(u_baseNoise_texture, u_baseNoise_sampler,
+                pos * u_cloud.u_baseScale * 4.0 * u_cloud.u_baseNoiseInvPeriod, 0.0);
             let warp = warpSample.gba - 0.5;
             dp += warp * u_cloud.u_curlStrength * (1.0 / max(u_cloud.u_detailScale, 1e-5)) * 0.15
                   + vec3<f32>(warpSample.a) * u_cloud.u_curlStrength * 50.0;
         }
-        let detail = textureSample(u_detailNoise_texture, u_detailNoise_sampler,
-                                   dp * u_cloud.u_detailScale * u_cloud.u_detailNoiseInvPeriod).r;
+        let detail = textureSampleLevel(u_detailNoise_texture, u_detailNoise_sampler,
+                                        dp * u_cloud.u_detailScale * u_cloud.u_detailNoiseInvPeriod, 0.0).r;
         density = remap(density, detail * u_cloud.u_detailStrength, 1.0, 0.0, 1.0);
     }
 

@@ -138,7 +138,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // The trace buffer holds exactly one sample per block, at the sub-position traced this frame.
     let traceUV = (vec2<f32>(block) + 0.5) / u_resolve.u_traceResolution;
-    let traced = textureSample(u_trace_texture, u_trace_sampler, traceUV);
+    // Every fetch in this function is `textureSampleLevel` at level 0, never `textureSample`. The
+    // reprojection below is a chain of per-fragment early returns, so most of this function sits in
+    // non-uniform control flow, where WGSL forbids the derivative-taking `textureSample` and rejects
+    // the module outright. Both buffers are created `mipMap: false` (`_cloudTraceFBO`, the
+    // `_cloudHistoryFBOs` ping-pong), so level 0 is the only level there is.
+    let traced = textureSampleLevel(u_trace_texture, u_trace_sampler, traceUV, 0.0);
 
     // View ray, from the same reconstruction the raymarch uses.
     let ndc = in.uv * 2.0 - 1.0;
@@ -168,8 +173,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // but a smooth 4x upscale instead of hard 4x4 blocks. It is geometrically a little off (traced
     // samples sit at varying sub-positions), which is irrelevant for something that survives a frame
     // or two before history takes over, and very visible if you skip it.
-    let fallback = textureSample(u_trace_texture, u_trace_sampler,
-        (in.uv * u_resolve.u_resolution * 0.25) / u_resolve.u_traceResolution);
+    let fallback = textureSampleLevel(u_trace_texture, u_trace_sampler,
+        (in.uv * u_resolve.u_resolution * 0.25) / u_resolve.u_traceResolution, 0.0);
 
     // Neighbourhood bounds from the traced samples around this block. One sample per block means the
     // 3x3 block neighbourhood is the tightest honest bound available at this resolution — but only
@@ -203,8 +208,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let nbReaches = slabT < geometryDistance(
                 textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, nbUV, 0), nbUV);
             if (nbReaches != reachesSlab) { continue; }   // saw something else: not a valid bound
-            let sN = textureSample(u_trace_texture, u_trace_sampler,
-                                   traceUV + vec2<f32>(f32(x), f32(y)) * traceTexel);
+            let sN = textureSampleLevel(u_trace_texture, u_trace_sampler,
+                                        traceUV + vec2<f32>(f32(x), f32(y)) * traceTexel, 0.0);
             bounds.alphaLo = min(bounds.alphaLo, sN.a);
             bounds.alphaHi = max(bounds.alphaHi, sN.a);
             if (sN.a <= 1e-4) { continue; }
@@ -245,7 +250,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Clamp history into the freshly observed range, in unpremultiplied space so colour and coverage
     // come back out consistent with each other (see clampSample).
-    let history = clampSample(textureSample(u_history_texture, u_history_sampler, prevUV), bounds);
+    let history = clampSample(textureSampleLevel(u_history_texture, u_history_sampler, prevUV, 0.0), bounds);
 
     // A pixel traced this frame accumulates its new sample over the history rather than replacing it,
     // so the march dither averages across the 16-frame cycle. Every other pixel is history alone.
