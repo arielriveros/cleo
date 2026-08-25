@@ -34,7 +34,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let tangentSample = vec3<f32>(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
             let sampleVec = tangentSample.x * right + tangentSample.y * up + tangentSample.z * n;
             // cos(theta) is the Lambert term, sin(theta) the solid-angle weight of this ring.
-            irradiance += textureSample(u_envMap_texture, u_envMap_sampler, sampleVec).rgb
+            // Level 0 EXPLICITLY. `textureSample` picks its mip from screen-space derivatives, and
+            // there are no meaningful ones here: the "screen" is a cube face, and `sampleVec` sweeps
+            // the hemisphere between iterations rather than varying smoothly across the quad. The
+            // hardware still computes a level from that, and the two backends do not compute the same
+            // one — so the diffuse irradiance came out slightly different, which is invisible on any
+            // surface direct light reaches and is the WHOLE colour of one that faces away from it.
+            //
+            // Correct on its own terms as well as matching: a diffuse convolution integrates the
+            // source radiance, so the level it reads is a decision, not something to inherit from a
+            // derivative that does not mean anything. Deliberately choosing a blurrier level to cut
+            // fireflies would be a fine change; picking one by accident is not.
+            irradiance += textureSampleLevel(u_envMap_texture, u_envMap_sampler, sampleVec, 0.0).rgb
                           * cos(theta) * sin(theta);
             samples += 1.0;
             theta += SAMPLE_DELTA;
