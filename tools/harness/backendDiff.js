@@ -203,6 +203,20 @@ app.whenReady().then(async () => {
     console.log('');
   }
 
+  // A CHECK, not a footnote — and it is a check because it was a footnote when it mattered most.
+  //
+  // The game loop logs a frame error without rescheduling, so one bad frame ends the session and every
+  // configuration after it re-reads the same stale image. That shows up here as the subject submitting
+  // 1 draw where the reference submits 151, and until now it printed as an informational block under
+  // an "ALL PASS" line. A whole profile whose WebGPU session died on the first frame therefore passed.
+  //
+  // Both backends walk the same scene with the same seed, so equal work is not a tolerance question:
+  // there is no legitimate reason for the draw or fullscreen-pass counts to differ. If one ever earns
+  // a difference, it belongs in this condition with the reason, not in a number nobody reads.
+  check('both backends submit the same work on every configuration', workDiffers.length === 0,
+        workDiffers.map(c => `${c.name} ${statLine(reference, c.name)} vs ${statLine(subject, c.name)}`)
+          .slice(0, 4).join(' | ') + (workDiffers.length > 4 ? ` | +${workDiffers.length - 4} more` : ''));
+
   const matching = ranked.filter(([n, d]) => !MOTION_DEPENDENT.has(n) && d.material === 0).length;
   const gated = ranked.filter(([n]) => !MOTION_DEPENDENT.has(n)).length;
   console.log(`  ${matching}/${gated} gated configurations are pixel-identical across backends\n`);
