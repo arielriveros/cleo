@@ -511,7 +511,12 @@ window.__error = null;
         'vec4 fragment() {',
         '    vec3 src = texture(u_screenTexture, fragTexCoord).rgb;',
         '    float d = texture(u_depth, fragTexCoord).r;',
-        '    vec3 ramp = texture(u_rampTex, fragTexCoord * 4.0).rgb;',
+        // screenUV(), not fragTexCoord: a USER texture indexed by the render target's own V
+        // renders mirrored on one backend and not the other, because the two APIs number a
+        // target's rows from opposite ends. This tiles 4x either way, so the difference is
+        // four bands of checker in the wrong place rather than an obviously broken image —
+        // which is exactly why the scene carries it.
+        '    vec3 ramp = texture(u_rampTex, screenUV() * 4.0).rgb;',
         '    // Stepped on depth, not weighted by it: device depth is non-linear, so (1.0 - d) is',
         '    // about 0.01 over most of a scene and a weighted mix is invisible. A step makes the',
         '    // effect large where geometry is and exactly zero on the sky, which is what proves',

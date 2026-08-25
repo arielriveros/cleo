@@ -101,6 +101,45 @@ describe('assembleCustomFragment — ES 300 (WebGL2)', () => {
         }
     });
 
+    it('keeps the user BLOCK alive too, even when the source reads nothing from it', () => {
+        for (const dialect of ['es300', 'vulkan'] as const) {
+            // The ordinary case, not a contrived one: every declared uniform is a control in the
+            // editor, and a source edited down to a passthrough stops reading them while they stay
+            // declared. naga drops a block nothing reaches, the pipeline comes back without that
+            // GROUP, and `setBindGroup(2, ...)` then names an index the layout does not have — which
+            // invalidates the command buffer, so the pass is dropped and the material does not draw.
+            const built = assembleCustomFragment('screen', 'vec4 fragment() { return vec4(1.0); }',
+                                                 [{ name: 'amount', type: 'float', value: 0.5 },
+                                                  { name: 'shade', type: 'vec3', value: [0, 0, 0] },
+                                                  { name: 'steps', type: 'int', value: 2 },
+                                                  { name: 'invert', type: 'bool', value: false }] as any,
+                                                 dialect);
+            // The FIRST value uniform, and only it — one read is all a block needs.
+            expect(built, dialect).toContain('float _cleoInterface() { return 0.0 * (u_time');
+            expect(built, dialect).toMatch(/_cleoInterface\(\)[^]*\+ u_amount/);
+            expect(built, dialect).not.toMatch(/_cleoInterface\(\)[^]*u_shade\.x/);
+        }
+        // Converted rather than summed raw: `_cleoInterface` returns a float.
+        const ints = assembleCustomFragment('screen', 'vec4 fragment() { return vec4(1.0); }',
+                                            [{ name: 'steps', type: 'int', value: 2 }] as any, 'vulkan');
+        expect(ints).toMatch(/_cleoInterface\(\)[^]*\+ float\(u_steps\)/);
+    });
+
+    it('gives screen materials a screen UV that means the same thing on both backends', () => {
+        // `fragTexCoord` addresses the RENDER TARGET, and the two APIs number a target's rows from
+        // opposite ends. The engine settles that on the fullscreen quad so sampling u_screenTexture
+        // returns this pixel either way — but the VALUE is then upside down between backends, so a
+        // user texture indexed by it renders mirrored on one and not the other. screenUV() is the
+        // same position with one meaning, and it is the ONLY thing in the prelude that differs.
+        const es = assembleCustomFragment('screen', 'vec4 fragment() { return vec4(screenUV(), 0.0, 1.0); }',
+                                          [], 'es300');
+        const vk = assembleCustomFragment('screen', 'vec4 fragment() { return vec4(screenUV(), 0.0, 1.0); }',
+                                          [], 'vulkan');
+        expect(es).toContain('vec2 screenUV() { return vec2(fragTexCoord.x, fragTexCoord.y); }');
+        expect(vk).toContain('vec2 screenUV() { return vec2(fragTexCoord.x, 1.0 - fragTexCoord.y); }');
+        expect(() => glslToWgsl(vk, 'fragment')).not.toThrow();
+    });
+
     it('declares the user uniforms as loose uniforms, prefixed', () => {
         expect(source).toContain('uniform float u_intensity;');
         expect(source).toContain('uniform vec3 u_tint;');

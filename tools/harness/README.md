@@ -144,13 +144,25 @@ answer that image must not give by accident.
 
 Output lands under `shots/`, which is gitignored — about 20 MB for a full run.
 
-**What it showed first.** On both `every` profiles the composited configurations carry regular
-horizontal banding across the lower frame, worth ~185/255 at its peak while the signature only moves
-28/128 — a localised difference that block averages hide. It is NOT in the G-buffer (every channel is
-0/128) and NOT in the scene buffer (`debugScene` shows no banding at all), so it enters after the scene
-is lit, somewhere in the cloud composite or the post chain. It predates this gallery: `deferred.full`
-carried the same residual before either `every` scene existed. Unresolved, and the reason this page was
-worth building.
+**What it showed first, and what that was.** On both `every` profiles the composited configurations
+carried regular horizontal banding across the lower frame — ~185/255 at its peak while the signature
+only moved 28/128, which is exactly the kind of localised difference block averaging hides and a
+picture does not. That is what the page was built to catch, and it caught it on the first run.
+
+It was the screen-space custom material, and through it a convention the port had not settled.
+`fragTexCoord` addresses the RENDER TARGET, and the two APIs number a target's rows from opposite
+ends; the engine reconciles that on the fullscreen quad (`renderer.ts`, the `v0` constant), so
+`texture(u_screenTexture, fragTexCoord)` returns this pixel on both backends — but it reconciles it by
+giving the coordinate opposite MEANINGS. The scene's tint sampled a USER texture at
+`fragTexCoord * 4.0`, which therefore tiled from the bottom on one backend and from the top on the
+other. No single varying can do better: the pixel a fragment must read is fixed and the two APIs
+number it from opposite ends, so the prelude now also offers `screenUV()` — the same position with one
+meaning — and the scene uses it. `base` went 28/128 -> 3, `combined` 18 -> 0, forward's worst 32 -> 8.
+
+The hunt also turned up a second bug the gate could not have found, because it needs a material to be
+EDITED: a screen material that declares a value uniform its source does not read lost its whole bind
+group on WebGPU and silently did not draw. Both fixes are in `customShaders.ts`, both are covered in
+`tests/customShaderDialects.test.ts`.
 
 ### `webgpuBootCheck.js` — engine startup on a WebGPU device
 

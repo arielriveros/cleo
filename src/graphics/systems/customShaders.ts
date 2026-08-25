@@ -577,13 +577,34 @@ const ZERO_COORD: Record<SamplerType, string> = {
  *
  * The same device the magenta fallbacks below use to keep their varyings live.
  */
+/**
+ * One `float` expression that READS `decl` — the smallest touch that keeps its uniform block reachable.
+ *
+ * Arrays are read at index 0, and `int`/`bool` are converted because {@link keepInterfaceAlive} sums
+ * these into a float. Shared by the engine block and the user's so the two cannot drift apart.
+ */
+function scalarTouch(decl: ValueDecl): string {
+    const base = decl.array ? `${decl.name}[0]` : decl.name;
+    if (decl.type === 'float') return base;
+    if (decl.type === 'int' || decl.type === 'bool') return `float(${base})`;
+    if (decl.type.startsWith('mat')) return `${base}[0][0]`;
+    return `${base}.x`;
+}
+
 function keepInterfaceAlive(iface: PreludeInterface, userUniforms: CustomUniform[]): string {
     const terms: string[] = [];
 
     const first = iface.uniforms[0];
-    if (first) terms.push(first.type === 'float' ? first.name
-                        : first.type === 'mat4' ? `${first.name}[0][0]`
-                        : `${first.name}.x`);
+    if (first) terms.push(scalarTouch(first));
+
+    // The USER block, for exactly the reason the engine block is here and by the same rule. A material
+    // may declare a value uniform — the editor exposes every one of them as a control — whose source
+    // never reads it; `mixAmount` on a tint that has been edited down to a passthrough is the ordinary
+    // case, not a contrived one. naga drops a block nothing reaches, so the pipeline comes back without
+    // that GROUP, `setBindGroup(2, ...)` then names an index the layout does not have, and the whole
+    // command buffer is invalid: the pass is dropped and the material silently does not draw.
+    const firstUser = userValueDecls(userUniforms)[0];
+    if (firstUser) terms.push(scalarTouch(firstUser));
 
     for (const s of [...iface.samplers, ...userSamplerDecls(userUniforms)])
         terms.push(`texture(${s.name}, ${ZERO_COORD[s.type]}).r`);
@@ -641,7 +662,7 @@ const SCREEN_INTERFACE: PreludeInterface = {
         { name: 'u_sunVisible', type: 'float', comment: '0..1 edge fade; 0 = behind camera / far off-screen / no sun' },
         { name: 'u_exposure', type: 'float', comment: 'camera exposure the final present applies (present = toSrgb(aces(hdr * u_exposure)))' },
     ],
-    body: `
+    body: (dialect: ShaderDialect) => `
 const float PI = 3.14159265359;
 
 vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
@@ -652,6 +673,23 @@ vec3 reconstructWorldPos(vec2 uv, float depth) {
     vec4 world = u_invViewProj * clip;
     return world.xyz / world.w;
 }
+
+// Screen UV with (0,0) at the BOTTOM-LEFT on EVERY backend. Use it for anything that is not an index
+// into a screen-aligned engine texture.
+//
+// \`fragTexCoord\` addresses the RENDER TARGET, and the two APIs disagree about which row a target
+// starts at: a GL texture's v=0 is its bottom row, a WebGPU texture's v=0 is its top. The engine
+// settles that once, on the fullscreen quad, so \`texture(u_screenTexture, fragTexCoord)\` returns this
+// pixel on both backends — but it settles it by giving the coordinate opposite MEANINGS, and no single
+// varying can do better: the pixel a fragment must read is fixed, and the two APIs number it from
+// opposite ends. So the value is right for sampling the scene and upside down for everything else —
+// your own textures, a vertical gradient, a mask built from fragTexCoord.y — which then renders
+// mirrored on one backend and not the other.
+//
+// This is the same position with one meaning. Sample your textures and write your gradients through
+// it; keep \`fragTexCoord\` for u_screenTexture, u_depth and reconstructWorldPos(), which want the
+// render target's own indexing and are already correct.
+vec2 screenUV() { return vec2(fragTexCoord.x, ${dialect === 'vulkan' ? '1.0 - fragTexCoord.y' : 'fragTexCoord.y'}); }
 `,
 };
 
@@ -1363,6 +1401,8 @@ void surface(inout Surface s) {
 const SCREEN_SCRATCH = `// SCREEN custom material: a fullscreen post-process pass run from the camera's
 // Screen-Space Materials list (in linear HDR, before tonemapping).
 // Available: fragTexCoord, u_screenTexture (previous pass color), u_depth (opaque scene depth, 1.0 = sky),
+//   screenUV() — the same position with (0,0) at the bottom-left on EVERY backend; use it for your own
+//     textures and for anything asymmetric in y, and keep fragTexCoord for the three below,
 //   u_time, u_resolution, u_viewPos, u_invViewProj, reconstructWorldPos(uv, depth),
 //   u_sunDir / u_sunUV / u_sunVisible (sun world dir, screen UV, 0..1 visibility fade),
 //   u_exposure (the exposure the final present applies: present = toSrgb(aces(hdr * u_exposure))).
