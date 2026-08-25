@@ -132,7 +132,7 @@ class WebGPUBuffer implements Buffer {
  * engine mips `rgba8unorm` content textures and `rgba16float` capture cubes alike.
  */
 class WebGPUMipGenerator {
-    private readonly _pipelines = new Map<string, GPURenderPipeline>();
+    private readonly _pipelines = new Map<GPUTextureFormat, GPURenderPipeline>();
     private _module: GPUShaderModule | null = null;
     private _sampler: GPUSampler | null = null;
 
@@ -155,32 +155,21 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 };
 
-// Whether this blit mirrors V, set per pipeline by WebGPUMipGenerator.generate. True for a 2D chain
-// and FALSE for a cube face - a difference that was measured rather than derived: with the mirror
-// applied to cube faces the lit scene went from 10 differing signature cells to 26, and without it the
-// albedo channel went from 4 to 0.
-//
-// (Line comments only in here: this is a JS template literal, and a backtick in a doc comment closes
-// the string. That mistake cost a 72-error build whose output had been piped to /dev/null.)
-override FLIP_V: bool = true;
-
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> VertexOutput {
     var out: VertexOutput;
     let uv = vec2<f32>(f32((index << 1u) & 2u), f32(index & 2u));
-    // V INVERTED against the clip position for a 2D chain, and NOT for a cube face.
+    // V INVERTED against the clip position, because a mip blit is a COPY and this runs on WebGPU.
     //
-    // The triangle pairs clip y = -1 with uv.y = 0, which is the WebGL2 relationship. On WebGPU row 0
-    // of the destination is the TOP, at clip y = +1, so that fragment carries uv.y = 1 and samples the
-    // BOTTOM of the source — every generated level came out mirrored against its parent. Mip 0 is the
-    // rendered original and is always right, which is why nothing looked wrong until something sampled
-    // a level above it, at distance or at roughness.
+    // The triangle pairs clip y = -1 with uv.y = 0, which is the WebGL2 relationship. Here row 0 of
+    // the destination is the TOP, at clip y = +1, so that fragment carries uv.y = 1 and would sample
+    // the BOTTOM of the source: every generated level came out mirrored against its parent, and each
+    // level mirrored again. Mip 0 is the rendered original and is always right, which is why nothing
+    // looked wrong until something sampled a level ABOVE it - at distance, or at roughness.
     //
-    // Cube faces are the exception and keep the mirror, because Renderer._initializeIBL renders them
-    // through a Y-INVERTED capture projection so their storage matches the cubemap layout. That
-    // inversion is a property of content against storage, so a level generated from a face has to
-    // reproduce it rather than copy straight through.
-    out.uv = select(uv, vec2<f32>(uv.x, 1.0 - uv.y), FLIP_V);
+    // (Line comments only in here: this is a JS template literal, and a backtick in a doc comment
+    // would close the string.)
+    out.uv = vec2<f32>(uv.x, 1.0 - uv.y);
     out.position = vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
     return out;
 }
@@ -205,19 +194,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return this._sampler;
     }
 
-    private _pipelineFor(format: GPUTextureFormat, flipV: boolean): GPURenderPipeline {
-        const key = `${format}|${flipV}`;
-        let pipeline = this._pipelines.get(key);
+    private _pipelineFor(format: GPUTextureFormat): GPURenderPipeline {
+        let pipeline = this._pipelines.get(format);
         if (!pipeline) {
             const module = this._shader();
             pipeline = this._device.createRenderPipeline({
-                label: `mip-blit:${key}`,
+                label: `mip-blit:${format}`,
                 layout: 'auto',
-                vertex: { module, entryPoint: 'vs_main', constants: { FLIP_V: flipV ? 1 : 0 } },
+                vertex: { module, entryPoint: 'vs_main' },
                 fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
                 primitive: { topology: 'triangle-list' },
             });
-            this._pipelines.set(key, pipeline);
+            this._pipelines.set(format, pipeline);
         }
         return pipeline;
     }
@@ -237,7 +225,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                             `every level above the first is rendered into before it is sampled`);
 
         const format = gpuTextureFormat(texture.format);
-        const pipeline = this._pipelineFor(format, texture.dimension !== 'cube');
+        const pipeline = this._pipelineFor(format);
         const sampler = this._linearSampler();
         // Cube faces are array layers; a 2D texture is the same loop with one of them.
         const layers = texture.dimension === 'cube' ? 6 : texture.depthOrArrayLayers;
