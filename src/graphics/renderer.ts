@@ -837,7 +837,23 @@ export class Renderer {
     // `RenderPassEncoder.setVertexBuffer`, both of which take the interface now that `Mesh` holds
     // its buffers that way; only the legacy VAO path inside `Mesh` still needs a raw handle, and it
     // casts there.
-    private _instanceBuffer: RhiBuffer | null = null;
+    /**
+     * One instance buffer PER GROUP, keyed by the mesh+material key the groups are formed under.
+     *
+     * It was a single shared buffer, reallocated and rewritten immediately before each group's draw.
+     * That works on WebGL2, where the draw has already executed by the time the next write lands. It
+     * does not work on a recorded backend: every group in the pass reads whichever matrices were
+     * written LAST, and a growth reallocation destroys the buffer the earlier draws reference —
+     *
+     *     [Buffer "renderer.instanceMatrices"] used in submit while destroyed
+     *
+     * which invalidates the whole command buffer. It went unseen because no gated scene had a SECOND
+     * instanced group; `?scene=every` adds one and the error is immediate.
+     *
+     * Same rule, and the same fix, as the skeleton overlay's four draw sets: on a recorded backend,
+     * anything a pending draw reads has to still hold that draw's data at submit.
+     */
+    private readonly _instanceBuffers: Map<string, RhiBuffer> = new Map();
     private _instanceScratch: Float32Array = new Float32Array(16 * 64);
 
     // Editor skeleton overlay: drawn instanced + always-on-top in the gizmo pass (set by the editor).
@@ -1322,7 +1338,6 @@ export class Renderer {
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
         // VERTEX | COPY_DST: rewritten every frame with the batch's world matrices, which is what
         // earns it a DYNAMIC_DRAW hint.
-        this._instanceBuffer = device.createBuffer({ label: 'renderer.instanceMatrices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
 
         // Config wins if given; otherwise the quality tier's value (2048 at the 'high' default),
         // not the old hard-coded 4096 per cascade.
@@ -1820,8 +1835,8 @@ export class Renderer {
         for (const node of singles) this._drawGeometryNode(pass, node);
 
         // Instanced groups (>=2 identical mesh+material), else fall back to a single draw.
-        for (const group of instanceGroups.values()) {
-            if (group.length >= 2) this._drawInstancedGroup(pass, group);
+        for (const [key, group] of instanceGroups) {
+            if (group.length >= 2) this._drawInstancedGroup(pass, group, key);
             else this._drawGeometryNode(pass, group[0]);
         }
         this._endFullscreenPass(pass);
@@ -2603,7 +2618,7 @@ export class Renderer {
         return true;
     }
 
-    private _drawInstancedGroup(pass: RenderPassEncoder, group: ModelNode[]): void {
+    private _drawInstancedGroup(pass: RenderPassEncoder, group: ModelNode[], key: string): void {
         const first = group[0];
         const type = first.model.material.type;
         const shaderType = type === 'blinn_phong' ? 'blinn_phongGeometryInstanced' : 'pbrGeometryInstanced';
@@ -2642,8 +2657,11 @@ export class Renderer {
         }
 
         const mesh = first.model.mesh;
-        this._instanceBuffer = device.reallocateBuffer(this._instanceBuffer!,
-                                                       this._instanceScratch.subarray(0, needed));
+        let instances = this._instanceBuffers.get(key)
+            ?? device.createBuffer({ label: `renderer.instanceMatrices:${key}`, size: 0,
+                                     usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+        instances = device.reallocateBuffer(instances, this._instanceScratch.subarray(0, needed));
+        this._instanceBuffers.set(key, instances);
         const topology = first.model.material.config.wireframe ? 'line-list' : 'triangle-list';
 
         // Through the RHI when the mesh's whole layout fits on the pipeline. Note what this removes:
@@ -2654,11 +2672,11 @@ export class Renderer {
         // `active*` rather than the base index buffer, and no `hasLods` bail — see _recordFoliageDraw.
         if (reflection && !mesh.isAnimated && mesh.activeIndexBuffer) {
             pass.setVertexBuffer(0, mesh.vertexBuffer);
-            pass.setVertexBuffer(1, this._instanceBuffer!);
+            pass.setVertexBuffer(1, instances);
             pass.setIndexBuffer(mesh.activeIndexBuffer, mesh.activeIndexFormat);
             pass.drawIndexed(mesh.activeIndexCount, count);
         } else {
-            mesh.setupInstanceMatrixBuffer(this._instanceBuffer!, 5);
+            mesh.setupInstanceMatrixBuffer(instances, 5);
             mesh.drawInstanced(count, topology);
             mesh.teardownInstanceMatrixBuffer(5);
         }
@@ -5322,6 +5340,25 @@ export class Renderer {
             if (!this._warnedScreenMaterialMeshes.has(node.id)) {
                 this._warnedScreenMaterialMeshes.add(node.id);
                 Logger.warn(`Model '${node.name}' uses a screen-space custom material; assign it to a camera's Screen-Space Materials list instead. The mesh is skipped.`);
+            }
+            return;
+        }
+        // A DEFERRED custom material has no home here either, for a reason of the same kind: its
+        // prelude writes three G-buffer outputs, and this path draws into the scene buffer, which has
+        // one attachment. WebGL2 tolerated it by writing location 0 and dropping the rest; WebGPU
+        // cannot build the pipeline at all, so `viaRHI` — which only ever recognised the `custom:`
+        // prefix — sent it to the legacy `mesh.draw()`, and that now throws by name.
+        //
+        // Reached two ways: the forward PIPELINE, which has no geometry pass to put it in, and the
+        // light-probe capture, which walks every model through this function whatever the pipeline. In
+        // both the honest answer is to skip it and say so once, exactly as the screen case above does.
+        if (node.model.material.type.startsWith('customGeom:')) {
+            if (!this._warnedScreenMaterialMeshes.has(node.id)) {
+                this._warnedScreenMaterialMeshes.add(node.id);
+                Logger.warn(`Model '${node.name}' uses a DEFERRED custom material, which writes a ` +
+                            `G-buffer and cannot be drawn by a forward pass (forward pipeline, or a ` +
+                            `light-probe capture). The mesh is skipped; give it a forward custom ` +
+                            `material to draw it here.`);
             }
             return;
         }

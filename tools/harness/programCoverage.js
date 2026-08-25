@@ -9,6 +9,9 @@ const fs = require('fs');
 const os = require('os');
 const { pathToFileURL } = require('url');
 
+/** The opt-in scenes the page can build; anything else is `base`. See meshCheck.js. */
+const SCENES = ['full', 'every', 'every2d'];
+
 const root = path.resolve(process.env.CLEO_MESH_DIR || path.join(__dirname, 'pages', 'mesh'));
 // A FIXED profile directory, reused across runs.
 //
@@ -44,10 +47,18 @@ const DEFAULTS = {
 //                               programs instead, so nothing ever reaches the G-buffer variants. They
 //                               are kept because their reflected attributes are the canonical vertex
 //                               layout. Delete them only together with that dependency.
+//   customGeom:*                dead in the FORWARD pipeline, which has no geometry pass to put it
+//                               in. Its prelude writes three G-buffer outputs and a forward pass
+//                               has one attachment, so `_renderModel` skips it with a warning.
+//                               Reachable, and reached, in the deferred pipeline.
 const UNREACHABLE = new Set([
     'terrain',
     'blinn_phongGeometry', 'blinn_phongGeometrySkinned', 'blinn_phongGeometryInstanced',
 ]);
+
+/** Whether a program is unreachable in THIS run — some depend on the pipeline, not just the name. */
+const unreachable = (name) => UNREACHABLE.has(name)
+    || (process.env.CLEO_PIPELINE === 'forward' && name.startsWith('customGeom:'));
 
 // Mirrors captureGallery's shot list exactly, including the bits that are easy to leave out and that
 // silently cost coverage: motion blur early-outs at zero camera velocity, and the sky features are node
@@ -89,7 +100,7 @@ app.whenReady().then(async () => {
     // content for, so without it their programs compile and never bind and this report says so.
     const params = new URLSearchParams();
     if (process.env.CLEO_PIPELINE === 'forward') params.set('forward', '1');
-    if (process.env.CLEO_SCENE === 'full') params.set('scene', 'full');
+    if (SCENES.includes(process.env.CLEO_SCENE)) params.set('scene', process.env.CLEO_SCENE);
     // Every bit of the material/topology grid, by default. The gallery keeps its scene fixed so its
     // shots stay comparable; coverage has no such constraint and a larger scene can only bind MORE
     // programs, so leaving these off simply under-reported the Basic and Blinn-Phong variants.
@@ -145,12 +156,12 @@ app.whenReady().then(async () => {
         + atLoad.filter(n => !driven.includes(n)).length + ' at scene load only)');
     console.log('AT LOAD ONLY: ' + atLoad.filter(n => !driven.includes(n)).join(' '));
     const unused = (names || []).filter(n => !used.includes(n));
-    const unexpected = unused.filter(n => !UNREACHABLE.has(n));
-    console.log('UNUSED (unreachable by design): ' + unused.filter(n => UNREACHABLE.has(n)).join(' '));
+    const unexpected = unused.filter(n => !unreachable(n));
+    console.log('UNUSED (unreachable by design): ' + unused.filter(n => unreachable(n)).join(' '));
     console.log('UNUSED (unexpected): ' + (unexpected.join(' ') || 'none'));
     if (!names) { console.log('could not reach ShaderManager.Instance._shaders'); app.exit(1); return; }
     const out = path.join(__dirname, 'shots', 'coverage-' + (process.env.CLEO_PIPELINE || 'deferred')
-        + (process.env.CLEO_SCENE === 'full' ? '-full' : '') + '.json');
+        + (SCENES.includes(process.env.CLEO_SCENE) ? '-' + process.env.CLEO_SCENE : '') + '.json');
     fs.writeFileSync(out, JSON.stringify(names, null, 2));
     console.log(names.length + ' programs compiled -> ' + out);
     console.log(names.join(' '));
