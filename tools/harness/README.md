@@ -166,76 +166,31 @@ vertically mirrored on WebGPU — smooth, in the right channel, and upside down.
 
 The hunt also turned up a second bug the gate could not have found, because it needs a material to be
 EDITED: a screen material that declares a value uniform its source does not read lost its whole bind
-group on WebGPU and silently did not draw. Both of those are in `customShaders.ts` and covered in `tests/customShaderDialects.test.ts`; the
-packer's is in `texturePacker.ts`, where the ratchet is the regression test — an orientation bug
-needs two real devices to see.
+group on WebGPU and silently did not draw. Both of those are in `customShaders.ts` and covered in
+`tests/customShaderDialects.test.ts`; the packer's is in `texturePacker.ts`, where the ratchet is the
+regression test — an orientation bug needs two real devices to see.
 
-**What is left.** 1-4 signature cells at worst 8/128 on `deferred.every`, and `deferred.full`'s
-`debugSSAO` recorded at 2 rather than 0. Both are float divergence between two shader compilers
-doing the same arithmetic: about 5% of pixels differ by 4-8/255 whatever is switched on, and SSAO
-roughly doubles that because it compares reconstructed depths against a bias, so a rounding
-difference flips a sample in or out. It is NOT the rotation noise — holding that constant on both
-backends changes nothing, which is worth knowing because it is the obvious suspect. Outside SSAO,
-eleven pixels in the whole frame differ by more than 40/255, all of them one specular highlight.
+Two more came out of following the residual down instead of calling it noise. The diffuse-irradiance
+convolution sampled its source cube through `textureSample`, which picks a mip from screen-space
+derivatives — and there are none worth having when the "screen" is a cube face and the sample vector
+sweeps a hemisphere between loop iterations. The two backends computed different levels, so every
+probe's irradiance differed slightly: invisible on any surface direct light reaches, and the entire
+colour of one that faces away from it. The `every` scene has such a surface on purpose.
 
-`deferred.full`'s entries were re-recorded here — every one of them fell (30 to 6, 20 to 0) except
-`debugSSAO`, which rose from 0 to 2. That entry was recorded at `f492421`, before `0720c01` put two
-custom-material models into the same scene; two more objects in the depth buffer is two more
-objects for SSAO to occlude against. A stale baseline, not drift.
+And a uniform name was written to only the FIRST block declaring it. One program can declare the same
+member twice — `u_view` lives in the transform block for the vertex stage and in the forward lighting
+block for cascade selection — and for a custom forward material the transform block was the one that
+lost, so the mesh drew at the origin with w = 0 and rasterised nothing. Right draw count, no validation
+error, a shadow on the floor with nothing above it. `deferred.full` went 13/25 to 24/25 on that one
+change; `debugCascades` went with it, because the built-in programs lost the same name the other way
+round.
 
-### `webgpuBootCheck.js` — engine startup on a WebGPU device
+**Where it stands.** `base`, both `every2d` profiles and `forward.every` are 25/25 pixel-identical.
+`deferred.every` and `deferred.full` are 24/25, and the one configuration left is `debugSSAO` at
+1-2/128.
 
-`webgpuCheck.js` proves the RHI's `WebGPUDevice` works against a real driver. This one drives the
-ENGINE's own startup at it — `?backend=webgpu&cleoWebgpuProbe=1` on the mesh page — and reads
-`renderer.deviceProbe`, which records the stage startup reached and the stage it died at.
-
-It is a **ratchet**, not a pass/fail on the port being finished: startup is expected to fail on WebGPU
-today, and `webgpuBoot.json` records exactly where. Porting a resource owner moves the failure forward
-and that file is edited in the same commit, so the progress is a reviewable diff. It catches the two
-things a boolean cannot — a failure that moves BACKWARDS, and one that moves forward without anybody
-writing it down. It also catches the failure mode that motivated the whole check: acquisition silently
-falling back to WebGL2 while every WebGPU-shaped assertion still passes against a WebGL2 device.
-
-The second half of the run loads the same page with `?backend=webgl2` and asserts it still reaches
-`firstFrame`. That is the control — device acquisition is the only code path that ships.
-
-## Notes
-
-- `pages/*/cleo.js` and `pages/naga/naga/` are staged copies, rewritten on every run. They are ignored by
-  git; the sources are `dist/` and `src/graphics/rhi/webgpu/naga/`.
-- **Two committed WebGL2 baselines do not reproduce on every machine, and that is not a code
-  regression.** `passBaseline.json`'s `bloom` entry and `meshShading.deferred.json` both fail here in a
-  way that reproduces at `203bbaf` — before any of the WebGPU parity work — with a freshly deleted
-  Chromium profile, a fresh build, and the window shown rather than hidden. The deferred shading
-  signature is consistently ~6 of 128 values out, always the same cells, always in the direction of
-  less local contrast. The adapter is a single Intel Arc 140T; there is no second GPU to have switched
-  to.
-
-  So before reading a red `harness:mesh` or `harness:pass` as "my change moved WebGL2", **run the same
-  driver at HEAD as a control and compare the two failure lines to each other**, not to the committed
-  baseline. Identical cells and identical deltas mean the change moved nothing. Do NOT re-record either
-  baseline to make the run green: what they were recorded against is exactly the thing that needs
-  finding out.
-
-  `backendDiff.js` is immune to this and is the signal to trust meanwhile — it compares two windows
-  inside one session, so anything machine-dependent is shared by both and cancels.
-- `mesh:full` on the deferred pipeline has a known INTERMITTENT shading difference, and it is much
-  larger than it was first recorded as. Measured at the branch point `203bbaf`, with every WebGPU
-  change reverted, four consecutive runs of the same command reported **10, 16, 19 and 16** differing
-  cells — not the two (`cell21.sd`, `cell23.sd`) this note used to name. The base scene shows the same
-  thing at a smaller scale: 5 to 6 cells.
-
-  The signature is identical every time and is what identifies it: `sd` always DOWN and `mean` always
-  UP, never the reverse. The likely mechanism is the volumetric clouds' Bayer 1/16 temporal resolve,
-  which needs sixteen frames to converge and only gets as many as a hidden window's throttled
-  `requestAnimationFrame` delivers — a less-converged cloud has less local contrast and, where the
-  cloud is thin, more brightness, which is exactly those two directions.
-
-  So: before believing a red `mesh` or `mesh:full` run, re-run it, and check the DIRECTION. Cells
-  moving both ways, or a `mean` moving down, is not this. If it is still ambiguous, stash and measure
-  the same command at `203bbaf` — that is what established the band above.
-- `passBaseline.json` **is** committed — it is the reference the gate compares against. So is
-  `webgpuBoot.json`, which is a ratchet rather than a recording: never re-record it to make a red run
-  green, and never edit it without the port that moved it in the same commit.
-- The mesh harness pins `shadowStagger = false`. Staggered cascades make a single-frame stat snapshot
-  depend on the frame index, which would make the baseline meaningless.
+That last one is float divergence, not a bug: about 5% of pixels differ by 4-8/255 whatever is switched
+on, and SSAO roughly doubles that because it compares reconstructed depths against a bias, so a
+rounding difference flips a sample in or out. It is NOT the rotation noise — holding that constant on
+both backends changes nothing, which is worth writing down because it is the obvious suspect. Outside
+SSAO, eleven pixels in the whole frame differ by more than 40/255, all of them one specular highlight.
