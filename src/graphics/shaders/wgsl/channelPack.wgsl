@@ -6,8 +6,9 @@
 // they used to do two or three, and bind one texture unit where they used to bind two.
 //
 // A straight byte copy per channel: no colour-space conversion, no filtering beyond the resample when
-// sources differ in size. sRGB data stays sRGB, and the packer's UVs are the identity, so whatever
-// orientation the sources were uploaded with is preserved.
+// sources differ in size. sRGB data stays sRGB, and the pack preserves whatever orientation the
+// sources were uploaded with — which takes the quad pairing clip-space y with the V the BACKEND
+// puts there, not the identity UVs it looks like it should be. See `_ensureQuad`.
 
 #include "./chunks/fullscreen.wgsl"
 

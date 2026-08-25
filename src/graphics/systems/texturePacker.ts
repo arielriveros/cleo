@@ -461,12 +461,27 @@ export class TexturePacker {
         return shader;
     }
 
-    /** A private screen quad — 4 vertices, ~80 bytes — rather than a public accessor on the Renderer. */
+    /**
+     * A private screen quad — 4 vertices, ~80 bytes — rather than a public accessor on the Renderer.
+     *
+     * Its V pairing is the backend's, exactly as `Renderer`'s shared screen quad picks it and for the
+     * same reason. A GL texture's v=0 is its bottom row and a WebGPU texture's is its top, while clip
+     * space agrees on neither being special: y=-1 is the bottom of the viewport in both, which is
+     * destination row 0 on WebGL2 and row H-1 on WebGPU. Pairing y=-1 with v=0 on both therefore
+     * copies source row 0 to destination row 0 on one backend and to row H-1 on the other — the pack
+     * comes out VERTICALLY MIRRORED on WebGPU, so a material with an authored metallic or roughness
+     * map reads it upside down while the unpacked sources it was built from stay correct. That is
+     * subtle enough to survive a look at the frame: the map is still smooth, still in the right
+     * channel, just wrong.
+     */
     private _ensureQuad(shader: ShaderProgram): Mesh {
         if (this._quad) return this._quad;
         const quad = new Mesh();
         quad.initializeVAO(shader.attributes);
-        quad.create([-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1], 12, [0, 1, 2, 0, 2, 3]);
+        const v0 = device.backend === 'webgl2' ? 0 : 1;   // the V that belongs with clip-space y = -1
+        const v1 = 1 - v0;
+        quad.create([-1, -1, 0, 0, v0,  1, -1, 0, 1, v0,
+                      1,  1, 0, 1, v1, -1,  1, 0, 0, v1], 12, [0, 1, 2, 0, 2, 3]);
         this._quad = quad;
         return quad;
     }
