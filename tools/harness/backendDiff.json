@@ -54,6 +54,33 @@
       "debugBloom": 0,
       "debugBloomMask": 0,
       "debugSSAO": 0
+    },
+    "deferred.full": {
+      "halfScale": 31,
+      "base": 30,
+      "bloom": 30,
+      "ssao": 30,
+      "noShadows": 30,
+      "grid": 30,
+      "skyFog": 30,
+      "godRays": 30,
+      "chromatic": 26,
+      "combined": 20,
+      "debugScene": 5,
+      "debugCascades": 2,
+      "debugAlbedo": 0,
+      "debugNormal": 0,
+      "debugShadow": 0,
+      "debugOverdraw": 0,
+      "debugMetallic": 0,
+      "debugRoughness": 0,
+      "debugEmissive": 0,
+      "debugAO": 0,
+      "debugDepth": 0,
+      "debugMask": 0,
+      "debugBloom": 0,
+      "debugBloomMask": 0,
+      "debugSSAO": 0
     }
   }
 }

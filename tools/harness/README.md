@@ -148,12 +148,21 @@ The second half of the run loads the same page with `?backend=webgl2` and assert
 
   `backendDiff.js` is immune to this and is the signal to trust meanwhile — it compares two windows
   inside one session, so anything machine-dependent is shared by both and cancels.
-- `mesh:full` on the deferred pipeline has a known INTERMITTENT 2-cell difference (`cell21.sd`,
-  `cell23.sd`, each ~8 low). It predates the WebGPU work and reproduces with every WebGPU change
-  reverted. The likely mechanism is the volumetric clouds' Bayer 1/16 temporal resolve, which needs
-  sixteen frames to converge and only gets as many as a hidden window's throttled `requestAnimationFrame`
-  delivers — a less-converged cloud has less local contrast, which is exactly the direction the two
-  cells move. Re-run before believing it.
+- `mesh:full` on the deferred pipeline has a known INTERMITTENT shading difference, and it is much
+  larger than it was first recorded as. Measured at the branch point `203bbaf`, with every WebGPU
+  change reverted, four consecutive runs of the same command reported **10, 16, 19 and 16** differing
+  cells — not the two (`cell21.sd`, `cell23.sd`) this note used to name. The base scene shows the same
+  thing at a smaller scale: 5 to 6 cells.
+
+  The signature is identical every time and is what identifies it: `sd` always DOWN and `mean` always
+  UP, never the reverse. The likely mechanism is the volumetric clouds' Bayer 1/16 temporal resolve,
+  which needs sixteen frames to converge and only gets as many as a hidden window's throttled
+  `requestAnimationFrame` delivers — a less-converged cloud has less local contrast and, where the
+  cloud is thin, more brightness, which is exactly those two directions.
+
+  So: before believing a red `mesh` or `mesh:full` run, re-run it, and check the DIRECTION. Cells
+  moving both ways, or a `mean` moving down, is not this. If it is still ambiguous, stash and measure
+  the same command at `203bbaf` — that is what established the band above.
 - `passBaseline.json` **is** committed — it is the reference the gate compares against. So is
   `webgpuBoot.json`, which is a ratchet rather than a recording: never re-record it to make a red run
   green, and never edit it without the port that moved it in the same commit.
