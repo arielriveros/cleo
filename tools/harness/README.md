@@ -112,6 +112,46 @@ Two things make it trustworthy, and both were needed:
 Motion-dependent configurations are reported but not gated: they are phase-dependent, which no seed
 fixes.
 
+
+### `compareGallery.js` — the same comparison, as pictures
+
+`backendDiff.js` answers "are the two backends the same?" as 128 numbers per capture and a ranked
+table. That is the right shape for a gate and the wrong shape for a person: a delta cannot be looked
+at. `CLEO_DIFF_SHOT` exists because of that gap, and it writes two PNGs for one named configuration.
+
+This writes all of them. Four profiles — `every` and `every2d`, each deferred and forward — over the
+same 28 configurations, in three images each: WebGL2, WebGPU, and their difference. Plus an
+`index.html` to read them in.
+
+```sh
+npm run harness:compare
+CLEO_COMPARE_PROFILES=deferred.every    # restrict the run (default: all four)
+CLEO_COMPARE_DIR=<dir>                  # default: shots/compare
+CLEO_COMPARE_GAIN=8                     # difference amplification
+```
+
+It is a **viewer, not a gate** — nothing here fails a build. It shares `passConfigs.js` with
+`passCheck` and `backendDiff` so the frames it shows are the frames the gate measures, and it prints
+`compare()`'s own numbers beside each pair so the page and the gate cannot disagree about what they are
+looking at. It inherits the honoured-backend check too, for the same reason: a refused request would
+make every pair identical for the worst possible reason, and that is the one failure a page of pictures
+cannot show you.
+
+The difference image is the maximum absolute channel difference, amplified (×8 by default) and drawn as
+grey on black — read it as *where*, not as *how much*, and read `peak pixel` for the magnitude. The
+amplification is the point: an honest difference of 4/255 is invisible, and "invisible" is exactly the
+answer that image must not give by accident.
+
+Output lands under `shots/`, which is gitignored — about 20 MB for a full run.
+
+**What it showed first.** On both `every` profiles the composited configurations carry regular
+horizontal banding across the lower frame, worth ~185/255 at its peak while the signature only moves
+28/128 — a localised difference that block averages hide. It is NOT in the G-buffer (every channel is
+0/128) and NOT in the scene buffer (`debugScene` shows no banding at all), so it enters after the scene
+is lit, somewhere in the cloud composite or the post chain. It predates this gallery: `deferred.full`
+carried the same residual before either `every` scene existed. Unresolved, and the reason this page was
+worth building.
+
 ### `webgpuBootCheck.js` — engine startup on a WebGPU device
 
 `webgpuCheck.js` proves the RHI's `WebGPUDevice` works against a real driver. This one drives the
