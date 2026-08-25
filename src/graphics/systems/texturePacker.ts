@@ -1,12 +1,11 @@
-import { gl } from "../glContext";
-import { glDevice } from '../rhi/webgl2/webgl2Device';
 import { device } from '../rhi/deviceHandle';
-import type { WebGL2Framebuffer } from '../rhi/webgl2/webgl2Device';
 import { Texture } from "../texture";
-import { Shader } from "../shader";
 import type { ShaderProgram } from "../rhi/shaderProgram";
+import type { ShaderModule, RenderPipeline } from '../rhi/resources';
+import type { TextureFormat } from '../rhi/types';
+import { ShaderStage } from '../rhi/types';
+import { screenQuadLayout } from '../rhi/vertexLayouts';
 import { Mesh } from "../mesh";
-import { GLState } from "./glState";
 import { ShaderManager } from "./shaderManager";
 import { TextureManager } from "./textureManager";
 import { setViewportSize } from "../renderStats";
@@ -86,7 +85,8 @@ export class TexturePacker {
      */
     private _bindings: WeakMap<Material, Binding> = new WeakMap();
 
-    private _fbo: WebGL2Framebuffer | null = null;
+    private _module: ShaderModule | null = null;
+    private readonly _pipelines = new Map<TextureFormat, RenderPipeline>();
     private _quad: Mesh | null = null;
     private _placeholder: string | null = null;
     private _lastSweep: number = 0;
@@ -302,9 +302,15 @@ export class TexturePacker {
     /**
      * Render `spec` into a fresh RGBA8 texture and register it.
      *
-     * Uses a private framebuffer rather than the `Framebuffer` class for the same reason
-     * `Renderer._bakeCloudNoise` does: that class allocates and OWNS its colour attachments and
-     * reallocates them on resize, which is the opposite of attaching one externally-owned texture once.
+     * Runs on the RHI, with its own encoder and its own one-shot pass. `_ensurePackedTextures` calls
+     * this from a point in the frame where NO pass is open, which is what makes that possible — the
+     * same shape `Renderer._bakeCloudNoise` uses for its compute dispatch.
+     *
+     * It was the last WebGL2-only path reachable from ordinary authored content: a private framebuffer,
+     * `checkFramebufferStatus`, four `Texture.bind(unit)` calls and a `quad.draw()`. Nothing ever
+     * reached it in a gated scene because no harness material had two DIFFERENT channel maps —
+     * `resolve` takes an identity fast path when one source serves every channel — so on WebGPU it sat
+     * behind a trigger nobody pulled, and `Mesh.draw` now throws by name when somebody does.
      */
     private _bake(key: string, spec: PackSpec, sources: string[], frame: number): string | null {
         const shader = this._ensureShader();
@@ -335,52 +341,59 @@ export class TexturePacker {
             break;
         }
 
-        if (!this._fbo) this._fbo = glDevice().createFramebuffer('channelPack');
-
+        // A colour texture is already allocated RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_* (see
+        // `Texture.create`), so there is nothing extra to declare in order to draw into it.
         const output = new Texture({ mipMap: true, precision: 'low', wrapping });
         output.create(null, width, height);
-
-        this._fbo.bind();
-        this._fbo.attachColor2D(0, output.texture);
-        // Worth checking: an incomplete framebuffer drops the draw silently and the texture keeps
-        // whatever texImage2D left in it, which reads as a plausible-looking flat material.
-        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        if (status !== gl.FRAMEBUFFER_COMPLETE) {
-            Logger.print('error', ['Channel-pack framebuffer incomplete:', status], 'TexturePacker');
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-            output.delete();
-            return null;
-        }
 
         const channels = [spec.r, spec.g, spec.b, spec.a];
         const srcIndex = channels.map(source => 'constant' in source ? -1 : sources.indexOf(source.textureId));
         const srcChannel = channels.map(source => 'constant' in source ? 0 : source.channel);
         const constants = channels.map(source => 'constant' in source ? source.constant : 0);
 
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(false);
-        GLState.cull(false);
-        gl.viewport(0, 0, width, height);
+        // `checkFramebufferStatus` is gone: WebGPU validates the attachment itself, and an incomplete
+        // WebGL2 framebuffer now surfaces the way every other target does rather than through a check
+        // only this bake had.
+        const target = device.createRenderTarget({
+            label: 'channelPack', colorViews: [output.attachmentView],
+        });
+        const pipeline = this._packPipeline(shader, output.rhiTexture.format);
+
+        // The viewport is the OUTPUT's size, not the canvas's, and `setViewportSize` still has to be
+        // told: `renderStats` charges shaded area by it on both backends.
         setViewportSize(width, height);
 
+        const encoder = device.createCommandEncoder('channelPack');
+        const pass = encoder.beginRenderPass(target, {
+            label: 'channelPack',
+            colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store',
+                                 clearValue: [0, 0, 0, 1] }],
+        });
+        pass.setViewport(0, 0, width, height);
+        pass.setPipeline(pipeline);
+
         ShaderManager.Instance.bind('channelPack');
-        for (let unit = 0; unit < 4; unit++) {
-            ShaderManager.Instance.setUniform(`u_src${unit}`, unit);
-            // Unused samplers alias source 0 rather than being left unbound: an unbound sampler2D is
-            // incomplete, and reading one is undefined behaviour even on a branch that never executes.
-            (textures[unit] || textures[0]).bind(unit);
-        }
         ShaderManager.Instance.setUniform('u_srcIndex', srcIndex);
         ShaderManager.Instance.setUniform('u_srcChannel', srcChannel);
         ShaderManager.Instance.setUniform('u_const', constants);
-        quad.draw(); // not a counted fullscreen pass: a one-off bake is not part of the frame
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        GLState.depthMask(true);
-        GLState.depthTest(true);
-        // Every subsequent pass sets its own viewport when it binds a target; restoring the canvas size
-        // here would be wrong while an offscreen capture is in flight.
+        // One bind group for all four pairs, at binding 2N — the engine keeps filter and wrap state on
+        // the texture, so the backend synthesises the sampler half. Unused slots ALIAS source 0 rather
+        // than being left out: a bind group may not have a hole, and reading an incomplete sampler is
+        // undefined even on a branch that never executes.
+        pass.setBindGroup(0, device.createBindGroup({
+            label: 'channelPack:group0',
+            layout: (pipeline as any).layoutForGroup(0),
+            entries: [0, 1, 2, 3].map(i => ({
+                binding: i * 2, textureView: (textures[i] || textures[0]).sampledView,
+            })),
+        }));
+
+        pass.setVertexBuffer(0, quad.vertexBuffer);
+        pass.setIndexBuffer(quad.indexBuffer!, quad.indexFormat);
+        pass.drawIndexed(quad.indexCount, 1, 0);   // not a counted pass: a one-off bake is not a frame
+        pass.end();
+        encoder.finish();
 
         output.generateMipmaps();
 
@@ -388,6 +401,47 @@ export class TexturePacker {
         TextureManager.Instance.addTexture(output, id);
         this._cache.set(key, { id, texture: output, lastFrame: frame });
         return id;
+    }
+
+    /**
+     * The pack pipeline, built once per output format.
+     *
+     * Cached rather than built per bake: WebGPU pipelines are real objects and a bake happens once
+     * per unique spec, so a fresh one each time would accumulate for the life of the device. Keyed
+     * on the format rather than assumed constant — `precision: 'low'` gives rgba8unorm today and
+     * the key costs nothing if that ever stops being true.
+     *
+     * No depth, no blend, no cull: the state four `GLState` calls used to set by hand.
+     */
+    private _packPipeline(shader: ShaderProgram, format: TextureFormat): RenderPipeline {
+        const existing = this._pipelines.get(format);
+        if (existing) return existing;
+        const pipeline = device.createRenderPipeline({
+            label: 'channelPack',
+            vertex: this._packModule(), fragment: this._packModule(),
+            vertexLayouts: screenQuadLayout(shader.attributes),
+            primitive: { topology: 'triangle-list', cullMode: 'none', frontFace: 'ccw' },
+            colorTargets: [{ format }],
+        });
+        this._pipelines.set(format, pipeline);
+        return pipeline;
+    }
+
+    /**
+     * The pack program's shader module, built once.
+     *
+     * Both stages come from ONE module: `channelPack.wgsl` declares its vertex stage by including
+     * `chunks/fullscreen.wgsl`, and the WebGL2 backend reads only `program` off it.
+     */
+    private _packModule(): ShaderModule {
+        if (!this._module) this._module = device.createShaderModule({
+            label: 'channelPack', program: 'channelPack',
+            stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
+            source: ChannelPackProgram.wgsl,
+            entryPoints: ChannelPackProgram.entryPoints,
+            resources: ChannelPackProgram.resources,
+        });
+        return this._module;
     }
 
     // ---------------------------------------------------------------------------------------------
