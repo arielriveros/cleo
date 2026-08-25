@@ -290,16 +290,31 @@ export class UniformSet {
  * a member without knowing or caring which. Routing by name is therefore not a convenience here, it is
  * the entire compatibility story.
  *
- * **First match wins, and blocks are searched in declaration order.** A name that two blocks both
- * declare would otherwise resolve differently depending on Map iteration order, which is the kind of
- * thing that works until a shader gains a member. The engine has one real instance of this today:
- * `u_material.emissive` exists in both the forward and deferred Blinn-Phong structs — at different
- * offsets — which is why `uniformLayoutCheck` matches per MODULE rather than across all of them.
+ * **A name is written to EVERY block that declares it**, in declaration order. One program really can
+ * declare the same member twice, in two blocks with two jobs: `modelVertex.wgsl` puts `u_view` in the
+ * transform block because the vertex stage needs it, and `pbrForward.wgsl` puts it in the lighting
+ * block because cascade selection needs the view-space depth. GLSL has one global per name and both
+ * uses read it; splitting them into blocks turned that into two destinations, and writing only the
+ * first left the other holding zeros forever.
+ *
+ * Which is not a subtle wrongness. A custom forward material's blocks come out in the order
+ * `[engine, shadow, user, transform]` — the transform is appended last, since it is the one block the
+ * FRAGMENT does not declare — so `u_view` landed in the prelude's engine block and never reached the
+ * vertex stage. `projection * 0 * model * p` is the origin with w = 0, every triangle is clipped, and
+ * the draw records normally and rasterises nothing: right draw count, empty frame. The built-in
+ * programs escaped only because their transform block happens to come first.
+ *
+ * Blocks of the same PROGRAM, to be clear. `u_material.emissive` exists in both the forward and the
+ * deferred Blinn-Phong structs at different offsets, and those are different programs — which is why
+ * `uniformLayoutCheck` matches per MODULE rather than across all of them.
  */
 export class ProgramUniforms {
     private readonly _sets: UniformSet[] = [];
-    /** Resolved name -> set, memoised. A miss is cached as null so a stray name costs one search. */
-    private readonly _route = new Map<string, UniformSet | null>();
+    /**
+     * Resolved name -> every set that declares it, memoised. A miss is cached as null so a stray name
+     * costs one search; almost every hit is a one-element array.
+     */
+    private readonly _route = new Map<string, UniformSet[] | null>();
 
     constructor(device: Device, blocks: readonly UniformBlockLayout[], label = 'program',
                 alignment: number = DEFAULT_UNIFORM_OFFSET_ALIGNMENT) {
@@ -315,23 +330,25 @@ export class ProgramUniforms {
     }
 
     /**
-     * Write a value by name into whichever block declares it.
+     * Write a value by name into EVERY block that declares it.
      *
-     * Returns false when no block does — which is NOT an error: the renderer sets uniforms that only
-     * some programs have (`u_uvScale` on the unlit family, the shadow members on the lit one), and
-     * every call site relies on the miss being silent. A throw here would turn one shader gaining a
-     * member into a crash in an unrelated pass.
+     * Returns false when none does — which is NOT an error: the renderer sets uniforms that only some
+     * programs have (`u_uvScale` on the unlit family, the shadow members on the lit one), and every
+     * call site relies on the miss being silent. A throw here would turn one shader gaining a member
+     * into a crash in an unrelated pass.
      */
     public set(name: string, value: unknown): boolean {
         const cached = this._route.get(name);
-        if (cached !== undefined) return cached === null ? false : cached.set(name, value);
-        for (const set of this._sets) {
-            if (!set.has(name)) continue;
-            this._route.set(name, set);
-            return set.set(name, value);
-        }
-        this._route.set(name, null);
-        return false;
+        if (cached !== undefined) return cached !== null && this._writeAll(cached, name, value);
+        const matches = this._sets.filter(set => set.has(name));
+        this._route.set(name, matches.length ? matches : null);
+        return matches.length > 0 && this._writeAll(matches, name, value);
+    }
+
+    private _writeAll(sets: readonly UniformSet[], name: string, value: unknown): boolean {
+        let written = false;
+        for (const set of sets) written = set.set(name, value) || written;
+        return written;
     }
 
     /** Upload every block that changed, each into a fresh slot. One call, immediately before a draw. */

@@ -249,24 +249,32 @@ describe('ProgramUniforms', () => {
         expect(program.set('u_notAThing', 1)).toBe(false);
     });
 
-    it('gives an ambiguous name to the FIRST block in declaration order', () => {
+    it('writes an ambiguous name to EVERY block that declares it', () => {
+        // One program really does declare a member twice, in two blocks with two jobs: the transform
+        // block carries `u_view` for the vertex stage and the forward lighting block carries it for
+        // cascade selection. GLSL had one global per name and both uses read it; blocks turned that
+        // into two destinations. Writing only the first left the other holding zeros — which for a
+        // custom forward material was the TRANSFORM block, so every vertex landed at the origin with
+        // w = 0, every triangle clipped, and the mesh recorded its draw and rasterised nothing.
         const { program, device, uploads } = twoBlockProgram();
         program.set('u_shared', 9);
         program.flush(device);
         const transform = new Float32Array(uploads.get('outline:u_transform')!.buffer);
         const material = new Float32Array(uploads.get('outline:u_material')!.buffer);
         expect(transform[1]).toBe(9);      // u_transform.u_shared, offset 4
-        expect(material[4]).toBe(0);       // u_material.u_shared, offset 16 — untouched
+        expect(material[4]).toBe(9);       // u_material.u_shared, offset 16 — at its OWN offset
     });
 
-    it('keeps routing to the same block once resolved', () => {
-        // The route is memoised; a second write must not re-search and land elsewhere.
+    it('keeps writing every declaring block once the route is memoised', () => {
+        // The route is memoised as a LIST; a second write must not collapse to the first block.
         const { program, device, uploads } = twoBlockProgram();
         program.set('u_shared', 1);
         program.set('u_shared', 2);
         program.flush(device);
         const transform = new Float32Array(uploads.get('outline:u_transform')!.buffer);
+        const material = new Float32Array(uploads.get('outline:u_material')!.buffer);
         expect(transform[1]).toBe(2);
+        expect(material[4]).toBe(2);
     });
 
     it('uploads only the blocks that changed', () => {
