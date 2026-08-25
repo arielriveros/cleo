@@ -195,12 +195,34 @@ describe('assembleCustomFragment — Vulkan (naga)', () => {
         expect(() => glslToWgsl(only, 'fragment')).not.toThrow();
     });
 
-    it('refuses forward and deferred with a reason aimed at the engine, not the user', () => {
-        for (const mode of ['forward', 'deferred'] as const) {
-            expect(vulkanUnsupportedReason(mode)).toBeTruthy();
-            expect(() => assembleCustomFragment(mode, 'vec4 fragment() { return vec4(1.0); }', [], 'vulkan'))
-                .toThrow(/cannot be checked for WebGPU yet/);
+    it('refuses FORWARD with a reason aimed at the engine, not the user', () => {
+        expect(vulkanUnsupportedReason('forward')).toBeTruthy();
+        expect(() => assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', [], 'vulkan'))
+            .toThrow(/cannot be checked for WebGPU yet/);
+    });
+
+    // Deferred moved from "refused" to "translates" when its prelude became an interface description
+    // rather than a template string: nothing about its CONTENT was ever Vulkan-hostile, only its form —
+    // an ES version header, loose uniforms, and varyings with no explicit location.
+    it('translates screen and deferred', () => {
+        for (const mode of ['screen', 'deferred'] as const) {
+            expect(vulkanUnsupportedReason(mode), mode).toBeNull();
+            const body = mode === 'screen' ? 'vec4 fragment() { return vec4(1.0); }'
+                                           : 'void surface(inout Surface s) { s.albedo = vec3(1.0); }';
+            const built = assembleCustomFragment(mode, body, [], 'vulkan');
+            expect(built, mode).toContain('#version 450');
+            expect(built, mode).not.toContain('precision highp float');
+            expect(built, mode).toContain('layout(set = ');
         }
-        expect(vulkanUnsupportedReason('screen')).toBeNull();
+    });
+
+    // The deferred varyings must be numbered exactly as chunks/modelVarying.wgsl numbers them, because
+    // that is the vertex stage the WebGPU pipeline pairs this fragment stage with and the two are
+    // matched by LOCATION. ES 300 links by name, so nothing there would notice a reordering.
+    it('numbers the lit varyings as the model vertex stage does', () => {
+        const built = assembleCustomFragment('deferred', 'void surface(inout Surface s) {}', [], 'vulkan');
+        for (const [location, name] of [[0, 'fragPos'], [1, 'fragTexCoord'], [2, 'fragTangent'],
+                                        [3, 'fragBitangent'], [4, 'fragNormal']] as const)
+            expect(built, name).toContain(`layout(location = ${location}) in vec${name === 'fragTexCoord' ? 2 : 3} ${name};`);
     });
 });

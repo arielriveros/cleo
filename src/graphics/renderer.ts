@@ -2440,8 +2440,15 @@ export class Renderer {
             }
             if (mat instanceof CustomMaterial) {
                 this._applyCustomMaterial(mat, true);   // u_time, u_viewPos + user VALUE uniforms
-                const customPipeline = this._pipelineFor(shaderType,
-                    { resources: customShaderResources('deferred', mat.uniforms) }, {
+                // See `_screenMaterialsPass` for what the WGSL is and why the vertex stage is a
+                // separate module. Absent on WebGL2 and for a material that could not translate.
+                const customWgsl = customShaderModules(mat);
+                const customPipeline = this._pipelineFor(shaderType, {
+                    resources: customShaderResources('deferred', mat.uniforms),
+                    ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
+                                       vertexWgsl: { wgsl: customWgsl.vertex,
+                                                     entryPoint: customWgsl.vertexEntry } } : {}),
+                }, {
                     cullMode: Renderer._cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                     targets: 3,

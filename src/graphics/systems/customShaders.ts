@@ -6,6 +6,7 @@ import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
 import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
 import ShadowsChunk from '../shaders/wgsl/shadowsChunk.wgsl';
 import ScreenProgram from '../shaders/wgsl/screen.wgsl';
+import GeometryPBRProgram from '../shaders/wgsl/geometryPBR.wgsl';
 import { uniformBlocksOf } from '../rhi/webgpu/wgslReflect';
 
 // The shadow library, GENERATED from chunks/shadows.wgsl at build time rather than read from
@@ -67,22 +68,54 @@ const SAMPLER_PARTS: Record<SamplerType, { texture: string; combined: string }> 
 };
 
 
+/** Newline. Named so the assembly below reads as concatenation rather than as escape soup. */
+const NL = '\n';
+
 const trailingComment = (comment?: string) => (comment ? ` // ${comment}` : '');
 
-/** Shared header: version, precision, varyings (from pbr.vs), color-space + light-count constants. */
-const COMMON_HEADER = `#version 300 es
-precision highp float;
+/**
+ * The varyings a lit custom material receives, in the ORDER their Vulkan locations are assigned.
+ *
+ * Must match `chunks/modelVarying.wgsl` — fragPos, uv, tangent, bitangent, normal at locations 0-4 —
+ * because that is the vertex stage the pipeline pairs this fragment stage with, and WebGPU matches the
+ * two by location. ES 300 links by name, which is why the order could drift unnoticed before and why
+ * the NAMES still have to be the ones user materials were written against.
+ */
+const COMMON_VARYINGS: ValueDecl[] = [
+    { name: 'fragPos', type: 'vec3' },
+    { name: 'fragTexCoord', type: 'vec2' },
+    // The TBN basis arrives as three vectors, because a matrix is not a valid shader interface type
+    // outside GLSL ES. It is reassembled into TBN in the epilogue's main(), before the user's function
+    // runs — user source in existing projects reads TBN directly, and getNormal() is documented in
+    // terms of it, so the name has to survive even though the transport did not.
+    { name: 'fragTangent', type: 'vec3' },
+    { name: 'fragBitangent', type: 'vec3' },
+    { name: 'fragNormal', type: 'vec3' },
+];
 
-in vec3 fragPos;
-in vec2 fragTexCoord;
+/**
+ * Where a LIT custom material's uniform blocks land.
+ *
+ * Not the front of group 1: `chunks/modelVertex.wgsl` declares and uses `ModelTransform` at
+ * `@group(1) @binding(0)`, and the vertex module is part of the same pipeline. See {@link BlockSlot}.
+ */
+/** Group 1's transform role — the one block a model vertex stage reads. See chunks/modelVertex.wgsl. */
+const VERTEX_TRANSFORM_BINDING = 0;
 
-// The TBN basis arrives as three vectors, because a matrix is not a valid shader interface type
-// outside GLSL ES. It is reassembled into TBN in the epilogue's main(), before the user's
-// function runs — user source in existing projects reads TBN directly, and getNormal() is
-// documented in terms of it, so the name has to survive even though the transport did not.
-in vec3 fragTangent;
-in vec3 fragBitangent;
-in vec3 fragNormal;
+const LIT_ENGINE_BLOCK: BlockSlot = { group: 1, binding: 4 };
+const LIT_USER_BLOCK: BlockSlot = { group: 1, binding: 5 };
+
+/** Alias kept for the deferred interface's declaration site, where the list reads better named. */
+const DEFERRED_VARYINGS = COMMON_VARYINGS;
+
+/** The two built-ins every mode offers. Loose uniforms under ES, one bound block under Vulkan. */
+const COMMON_UNIFORMS: ValueDecl[] = [
+    { name: 'u_viewPos', type: 'vec3', comment: 'camera world position' },
+    { name: 'u_time', type: 'float', comment: 'seconds' },
+];
+
+/** Constants, the TBN global, the back-compat shim and the colour helpers. Valid in both dialects. */
+const COMMON_BODY = `
 mat3 TBN;
 
 // Back-compat shim. fragPosLightSpace was a varying carrying the position in the (single, world-
@@ -95,22 +128,33 @@ const int MAX_POINT_LIGHTS = ${MAX_POINT_LIGHTS};
 const int MAX_SPOTLIGHTS = ${MAX_SPOTLIGHTS};
 const float PI = 3.14159265359;
 
-uniform vec3 u_viewPos;
-uniform float u_time;
-
 vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
 vec3 toSrgb(vec3 c)   { return pow(c, vec3(1.0 / 2.2)); }
 
 vec3 getNormal() { return normalize(TBN[2]); }
 `;
 
+/** Shared header: version, precision, varyings (from pbr.vs), color-space + light-count constants. */
+/**
+ * Shared ES-300 header, GENERATED from the same three lists the deferred interface uses.
+ *
+ * It used to be a template string with its own copy of the varyings, the built-in uniforms and the
+ * helpers. Two copies of a prelude is the failure this file already warns about — one gains a built-in,
+ * the other does not, and a user's material fails for a reason they did not cause. Only the FORWARD
+ * prelude still reads this; screen and deferred go through `renderPrelude` in both dialects.
+ */
+const COMMON_HEADER = `${versionHeader('es300')}
+${declareVaryings(COMMON_VARYINGS, 'es300')}
+${declareUniforms(COMMON_UNIFORMS, 'es300', 'CleoEngineUniforms', LIT_ENGINE_BLOCK)}
+${COMMON_BODY}`;
+
 /**
  * The forward prelude's engine samplers, as data.
  *
  * One entry, and it still earns being a list: the GLSL line inside LIGHTING_BLOCK is GENERATED from
  * this, so the bind-group reflection below and the declaration the shader actually compiles cannot
- * disagree about the name or the order. The deferred prelude has none — it is COMMON_HEADER only, and
- * a G-buffer pass samples no environment.
+ * disagree about the name or the order. The deferred interface declares none — a G-buffer pass writes
+ * surface parameters and samples no environment.
  */
 const FORWARD_ENGINE_SAMPLERS: SamplerDecl[] = [
     { name: 'u_envMap', type: 'samplerCube' },
@@ -221,11 +265,33 @@ void main() {
 }
 `;
 
-/** Deferred prelude: user writes `void surface(inout Surface s)` writing G-buffer channels. */
-const DEFERRED_PRELUDE = `${COMMON_HEADER}
-layout(location = 0) out vec4 gAlbedoMetallic;   // rgb = albedo, a = metallic
-layout(location = 1) out vec4 gNormalRoughness;  // rgb = world normal, a = roughness
-layout(location = 2) out vec4 gEmissiveAO;       // rgb = emissive, a = ambient occlusion
+/**
+ * Deferred prelude: user writes `void surface(inout Surface s)` writing G-buffer channels.
+ *
+ * An interface description rather than a template string, which is what makes it expressible in Vulkan
+ * GLSL and therefore translatable to WGSL. Everything that used to make it untranslatable was in the
+ * FORM, not the content: `#version 300 es` and `precision`, loose uniforms, and varyings with no
+ * explicit location. `renderPrelude` renders all three correctly for whichever dialect is asked for.
+ *
+ * The varying ORDER is load-bearing and is not free to change. `declareVaryings` numbers them by
+ * position for the Vulkan dialect, and they must line up with the vertex stage this material is paired
+ * with — `chunks/modelVarying.wgsl`, which is fragPos, uv, tangent, bitangent, normal at locations 0-4.
+ * ES 300 links varyings by NAME, so the order was invisible there and the names still have to be the
+ * ones existing user materials were written against.
+ */
+const DEFERRED_INTERFACE: PreludeInterface = {
+    varyings: DEFERRED_VARYINGS,
+    outputs: [
+        { name: 'gAlbedoMetallic', type: 'vec4', comment: 'rgb = albedo, a = metallic' },
+        { name: 'gNormalRoughness', type: 'vec4', comment: 'rgb = world normal, a = roughness' },
+        { name: 'gEmissiveAO', type: 'vec4', comment: 'rgb = emissive, a = ambient occlusion' },
+    ],
+    // No engine samplers: a G-buffer pass writes surface parameters and samples no environment.
+    samplers: [],
+    uniforms: COMMON_UNIFORMS,
+    engineBlock: LIT_ENGINE_BLOCK,
+    userBlock: LIT_USER_BLOCK,
+    body: `${COMMON_BODY}
 
 struct Surface {
     vec3 albedo;
@@ -235,13 +301,14 @@ struct Surface {
     vec3 emissive;
     float ao;
 };
-`;
+`,
+};
 
 const DEFERRED_EPILOGUE = `
 void main() {
-    // No cleoFragCoord here: the deferred prelude is COMMON_HEADER only and does not paste the shadow
-    // library, because a G-buffer pass writes surface parameters and never samples a shadow map. The
-    // global therefore does not exist in this program, and assigning it is a compile error.
+    // No cleoFragCoord here: the deferred prelude does not paste the shadow library, because a
+    // G-buffer pass writes surface parameters and never samples a shadow map. The global therefore
+    // does not exist in this program, and assigning it is a compile error.
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
     Surface s;
     s.albedo = vec3(1.0);
@@ -251,7 +318,7 @@ void main() {
     s.emissive = vec3(0.0);
     s.ao = 1.0;
     surface(s);
-    gAlbedoMetallic  = vec4(s.albedo, s.metallic);
+    gAlbedoMetallic  = vec4(s.albedo, s.metallic) + _cleoInterface();   // see keepInterfaceAlive
     gNormalRoughness = vec4(normalize(s.normal), s.roughness);
     gEmissiveAO      = vec4(s.emissive, s.ao);
 }
@@ -287,11 +354,27 @@ export type ShaderDialect = 'es300' | 'vulkan';
 /** The Vulkan-GLSL texture type and combined-sampler constructor behind each ES sampler type. */
 interface ValueDecl { name: string; type: string; comment?: string }
 
+/**
+ * Where a uniform block lands, as (group, binding).
+ *
+ * Spelled per mode rather than fixed, because the VERTEX module a custom material is paired with is
+ * not the same in every mode and its bindings are not negotiable. A screen material pairs with
+ * `chunks/fullscreen.wgsl`, which declares nothing, so its blocks can sit at the front of groups 1 and
+ * 2. A forward or deferred one pairs with `chunks/modelVertex.wgsl`, which already owns
+ * `@group(1) @binding(0)` for `ModelTransform` and USES it — two different structs at one (group,
+ * binding) across the two stages of one pipeline is not a layout WebGPU will build.
+ */
+interface BlockSlot { group: number; binding: number }
+
 /** Everything a prelude declares, spelled once and rendered into either dialect. */
 interface PreludeInterface {
     varyings: ValueDecl[];
     samplers: SamplerDecl[];
     uniforms: ValueDecl[];
+    /** Where the engine's built-in block goes. See {@link BlockSlot}. */
+    engineBlock: BlockSlot;
+    /** Where the user's own scalar uniforms go. */
+    userBlock: BlockSlot;
     /** Fragment outputs, in location order. Identical in both dialects. */
     outputs: ValueDecl[];
     /** Constants and helper functions — plain GLSL, valid as-is under both dialects. */
@@ -330,7 +413,8 @@ function declareSamplers(samplers: SamplerDecl[], dialect: ShaderDialect, group:
 }
 
 /** Scalar/vector/matrix uniforms: loose under ES, one bound block under Vulkan. */
-function declareUniforms(uniforms: ValueDecl[], dialect: ShaderDialect, blockName: string, set: number): string {
+function declareUniforms(uniforms: ValueDecl[], dialect: ShaderDialect, blockName: string,
+                         slot: BlockSlot): string {
     if (!uniforms.length) return '';
     if (dialect === 'es300')
         return uniforms.map(u => `uniform ${u.type} ${u.name};${trailingComment(u.comment)}`).join('\n');
@@ -342,7 +426,7 @@ function declareUniforms(uniforms: ValueDecl[], dialect: ShaderDialect, blockNam
         : `    ${u.type} ${u.name};${trailingComment(u.comment)}`);
     const macros = uniforms.filter(u => u.type === 'bool').map(u => `#define ${u.name} (${u.name}_b != 0)`);
 
-    return `layout(set = ${set}, binding = 0) uniform ${blockName} {\n${members.join('\n')}\n};` +
+    return `layout(set = ${slot.group}, binding = ${slot.binding}) uniform ${blockName} {\n${members.join('\n')}\n};` +
         (macros.length ? '\n' + macros.join('\n') : '');
 }
 
@@ -392,10 +476,10 @@ function renderPrelude(iface: PreludeInterface, userUniforms: CustomUniform[], d
         declareVaryings(iface.varyings, dialect),
         declareOutputs(iface.outputs),
         engineSamplers.glsl,
-        declareUniforms(iface.uniforms, dialect, 'CleoEngineUniforms', 1),
+        declareUniforms(iface.uniforms, dialect, 'CleoEngineUniforms', iface.engineBlock),
         iface.body,
         userSamplers.glsl,
-        declareUniforms(userValueDecls(userUniforms), dialect, 'CleoUserUniforms', 2),
+        declareUniforms(userValueDecls(userUniforms), dialect, 'CleoUserUniforms', iface.userBlock),
         keepInterfaceAlive(iface),
     ].filter(Boolean).join('\n');
 }
@@ -409,6 +493,10 @@ function renderPrelude(iface: PreludeInterface, userUniforms: CustomUniform[], d
 const SCREEN_INTERFACE: PreludeInterface = {
     varyings: [{ name: 'fragTexCoord', type: 'vec2' }],
     outputs: [{ name: 'fragColor', type: 'vec4' }],
+    // The fullscreen vertex stage declares no bindings at all, so both blocks take the front slot of
+    // their group. See BlockSlot for why the lit modes cannot.
+    engineBlock: { group: 1, binding: 0 },
+    userBlock: { group: 2, binding: 0 },
     samplers: [
         { name: 'u_screenTexture', type: 'sampler2D', comment: 'previous pass color (LINEAR HDR — before exposure/ACES/sRGB)' },
         { name: 'u_depth', type: 'sampler2D', depth: true, comment: 'opaque scene depth (deferred + forward); 1.0 = sky' },
@@ -501,7 +589,7 @@ export function screenShaderResources(uniforms: CustomUniform[]): ShaderResource
 export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUniform[]): ShaderResource[] {
     const engine = mode === 'screen' ? SCREEN_INTERFACE.samplers
                  : mode === 'forward' ? FORWARD_ENGINE_SAMPLERS
-                 : [];                       // deferred: COMMON_HEADER only, no engine samplers
+                 : [];                       // deferred: no engine samplers, see DEFERRED_INTERFACE
     const out: ShaderResource[] = [];
     let binding = 0;
     for (const s of [...engine, ...userSamplerDecls(uniforms)]) {
@@ -539,12 +627,13 @@ function uniformDeclarations(uniforms: CustomUniform[]): string {
  * recorded in WEBGPU_ROADMAP.md M3.
  */
 export function vulkanUnsupportedReason(renderMode: CustomRenderMode): string | null {
-    if (renderMode === 'screen') return null;
-    return 'Forward and deferred custom materials cannot be checked for WebGPU yet: the lighting ' +
-        'prelude passes the TBN basis as a mat3 varying (not a valid interface type outside GLSL ES), ' +
-        'declares its lights through an inline `uniform struct`, and includes the shadow library, ' +
-        'which is written in GLSL ES with precision qualifiers. All three are ported when the engine\'s ' +
-        'own forward lighting moves to WGSL. The material still runs normally on WebGL2.';
+    if (renderMode !== 'forward') return null;
+    return 'Forward custom materials cannot be checked for WebGPU yet: the lighting prelude declares ' +
+        'its directional light through an inline `uniform struct` and its point and spot lights as ' +
+        'ARRAYS of structs, neither of which Vulkan GLSL accepts outside a bound block, and it pastes ' +
+        'the shadow library, which is generated as GLSL ES and carries precision qualifiers and ' +
+        'combined samplers. Screen and deferred materials already translate. The material still runs ' +
+        'normally on WebGL2.';
 }
 
 /** Assemble the full fragment shader source: prelude + user uniform decls + user function + epilogue. */
@@ -554,18 +643,23 @@ export function assembleCustomFragment(
     uniforms: CustomUniform[],
     dialect: ShaderDialect = 'es300',
 ): string {
+    // Screen and deferred both go through the interface generator, so one description produces both
+    // dialects and there is no second copy to drift. Forward is still a template string — its lighting
+    // block declares an inline `uniform struct` and an array of them, which is what
+    // `vulkanUnsupportedReason` still refuses.
+    const iface = renderMode === 'screen' ? SCREEN_INTERFACE
+                : renderMode === 'deferred' ? DEFERRED_INTERFACE : null;
+    const epilogue = renderMode === 'screen' ? SCREEN_EPILOGUE : DEFERRED_EPILOGUE;
+
     if (dialect === 'vulkan') {
         const reason = vulkanUnsupportedReason(renderMode);
-        if (reason) throw new Error(reason);
-        return `${renderPrelude(SCREEN_INTERFACE, uniforms, 'vulkan')}\n${fragmentSource}\n${SCREEN_EPILOGUE}`;
+        if (reason || !iface) throw new Error(reason ?? ('no interface for ' + renderMode));
+        return renderPrelude(iface, uniforms, 'vulkan') + NL + fragmentSource + NL + epilogue;
     }
 
-    const decls = uniformDeclarations(uniforms);
-    if (renderMode === 'deferred')
-        return `${DEFERRED_PRELUDE}\n${decls}\n${fragmentSource}\n${DEFERRED_EPILOGUE}`;
-    if (renderMode === 'screen')
-        return `${renderPrelude(SCREEN_INTERFACE, uniforms, 'es300')}\n${fragmentSource}\n${SCREEN_EPILOGUE}`;
-    return `${FORWARD_PRELUDE}\n${decls}\n${fragmentSource}\n${FORWARD_EPILOGUE}`;
+    if (iface) return renderPrelude(iface, uniforms, 'es300') + NL + fragmentSource + NL + epilogue;
+    return FORWARD_PRELUDE + NL + uniformDeclarations(uniforms) + NL + fragmentSource + NL
+         + FORWARD_EPILOGUE;
 }
 
 /** The vertex shader a custom material's program is linked against (screen passes use the fullscreen quad VS). */
@@ -862,20 +956,35 @@ function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
         uniformBlocks?: readonly unknown[] } {
     if (device.backend === 'webgl2' || !translator) return {};
 
-    // Screen only, for now, and stated rather than implied. `assembleCustomFragment` already refuses
-    // the other two modes in the vulkan dialect (`vulkanUnsupportedReason`), so this is unreachable
-    // today — but it is the line that would otherwise pair a forward material with the FULLSCREEN
-    // vertex stage the moment that refusal is lifted, and the symptom would be a mesh drawn as a
-    // screen quad rather than an error.
-    if (mat.renderMode !== 'screen') return {};
+    // The engine program whose VERTEX source this material is compiled against — screen.vs's WGSL twin
+    // for a screen material, pbr.vs's for a lit one. Named per mode rather than assumed: pairing a lit
+    // fragment stage with the fullscreen vertex stage would draw the mesh as a screen quad rather than
+    // fail, which is the kind of wrong that looks like a shading bug for a week.
+    const base = mat.renderMode === 'screen' ? ScreenProgram
+               : mat.renderMode === 'deferred' ? GeometryPBRProgram : null;
+    if (!base) return {};   // forward — see vulkanUnsupportedReason
 
+    const iface = mat.renderMode === 'screen' ? SCREEN_INTERFACE : DEFERRED_INTERFACE;
     const vulkan = assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms, 'vulkan');
     const wgsl = retypeDepthTextures(translator(vulkan),
-                                     SCREEN_INTERFACE.samplers.filter(s => s.depth).map(s => s.name));
-    const base = ScreenProgram;   // screen.vs's WGSL twin; see `customWgsl`
+                                     iface.samplers.filter(s => s.depth).map(s => s.name));
     customWgsl.set(key, { fragment: wgsl, vertex: base.wgsl,
                           vertexEntry: base.entryPoints.vertex ?? 'vs_main' });
-    return { wgsl, vertexInputs: base.vertexInputs, uniformBlocks: uniformBlocksOf(wgsl) };
+    // The fragment stage's blocks, plus the one the VERTEX stage uses.
+    //
+    // That block is where the renderer's `u_model` / `u_view` / `u_projection` writes land, and a
+    // program reporting only the fragment stage's would drop every one of them silently — the mesh
+    // would draw at the origin under an identity view. But it is ONE block, not all of the base
+    // program's: `chunks/modelVertex.wgsl` documents group 1 as one role per binding (0 transform,
+    // 1 material, 2 shadow, 3 lighting), and a vertex stage uses the transform. Handing over the
+    // base program's MATERIAL block too — which this fragment stage does not reference, so WebGPU
+    // drops it from the layout — makes the bind group one entry too long, which invalidates the whole
+    // command buffer:
+    //
+    //     Number of entries (4) did not match the expected number of entries (3)
+    const transform = base.uniformBlocks.filter(b => b.group === 1 && b.binding === VERTEX_TRANSFORM_BINDING);
+    return { wgsl, vertexInputs: base.vertexInputs,
+             uniformBlocks: [...uniformBlocksOf(wgsl), ...transform] };
 }
 
 /** The WGSL a custom material's pipeline compiles, once `ensureCustomShader` has built it. */
