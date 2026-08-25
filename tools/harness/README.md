@@ -159,10 +159,29 @@ other. No single varying can do better: the pixel a fragment must read is fixed 
 number it from opposite ends, so the prelude now also offers `screenUV()` — the same position with one
 meaning — and the scene uses it. `base` went 28/128 -> 3, `combined` 18 -> 0, forward's worst 32 -> 8.
 
+A packed texture came out of the same hunt. `TexturePacker._bake` builds a fullscreen quad of its
+own and paired clip-space y with V the WebGL2 way on both backends, so every channel pack was
+vertically mirrored on WebGPU — smooth, in the right channel, and upside down. `debugMetallic` on
+`deferred.every` went 6/128 to 0, and `forward.every` reached full parity at 25/25.
+
 The hunt also turned up a second bug the gate could not have found, because it needs a material to be
 EDITED: a screen material that declares a value uniform its source does not read lost its whole bind
-group on WebGPU and silently did not draw. Both fixes are in `customShaders.ts`, both are covered in
-`tests/customShaderDialects.test.ts`.
+group on WebGPU and silently did not draw. Both of those are in `customShaders.ts` and covered in `tests/customShaderDialects.test.ts`; the
+packer's is in `texturePacker.ts`, where the ratchet is the regression test — an orientation bug
+needs two real devices to see.
+
+**What is left.** 1-4 signature cells at worst 8/128 on `deferred.every`, and `deferred.full`'s
+`debugSSAO` recorded at 2 rather than 0. Both are float divergence between two shader compilers
+doing the same arithmetic: about 5% of pixels differ by 4-8/255 whatever is switched on, and SSAO
+roughly doubles that because it compares reconstructed depths against a bias, so a rounding
+difference flips a sample in or out. It is NOT the rotation noise — holding that constant on both
+backends changes nothing, which is worth knowing because it is the obvious suspect. Outside SSAO,
+eleven pixels in the whole frame differ by more than 40/255, all of them one specular highlight.
+
+`deferred.full`'s entries were re-recorded here — every one of them fell (30 to 6, 20 to 0) except
+`debugSSAO`, which rose from 0 to 2. That entry was recorded at `f492421`, before `0720c01` put two
+custom-material models into the same scene; two more objects in the depth buffer is two more
+objects for SSAO to occlude against. A stale baseline, not drift.
 
 ### `webgpuBootCheck.js` — engine startup on a WebGPU device
 
