@@ -1539,13 +1539,22 @@ export class Renderer {
      * is the whole reason the first rendered WebGPU frame came out upside down — the render was right
      * and the encoder was wrong, which is worth knowing because "the image is flipped" reads like a
      * projection or winding problem and sends you looking in entirely the wrong place.
+     *
+     * `bottomUp` is per CALLER rather than per backend, because the rule above holds only for a
+     * readback whose content came from the SCENE. The screen quad pairs clip-space y with the V the
+     * backend puts there, which makes target row `r` hold the same thing on both backends — so a pass
+     * that RESAMPLES a scene buffer inherits the scene's row order and wants the backend answer, while
+     * a pass that SYNTHESISES its image from `uv` (the probe preview turns it into a latitude) puts its
+     * own row 0 at the bottom on both and wants `true` either way. Both readbacks used the backend
+     * answer, and the probe inspector's preview was therefore upside down on WebGPU.
      */
-    private static _encodePNG(pixels: Uint8Array, width: number, height: number): string {
+    private static _encodePNG(pixels: Uint8Array, width: number, height: number,
+                              bottomUp: boolean): string {
         const out = document.createElement('canvas');
         out.width = width; out.height = height;
         const ctx = out.getContext('2d')!;
         const img = ctx.createImageData(width, height);
-        const bottomUp = device.backend === 'webgl2';
+
         for (let y = 0; y < height; y++) {
             const src = (bottomUp ? height - 1 - y : y) * width * 4;
             img.data.set(pixels.subarray(src, src + width * 4), y * width * 4);
@@ -1591,7 +1600,9 @@ export class Renderer {
         }
 
         const pixels = await device.readPixels(this._offscreenFBO.colors[0].attachmentView, 0, 0, size, size);
-        return Renderer._encodePNG(pixels, size, size); // already square — no crop
+        // A resampled scene buffer: `_presentThumbnail` blits the lit scene through the screen
+        // quad, so these rows are the scene's rows and the backend rule applies.
+        return Renderer._encodePNG(pixels, size, size, device.backend === 'webgl2'); // already square
     }
 
     /**
@@ -1627,7 +1638,9 @@ export class Renderer {
         this._setViewport(this._renderWidth, this._renderHeight);
 
         const pixels = await device.readPixels(this._probePreviewFBO.colors[0].attachmentView, 0, 0, w, h);
-        return Renderer._encodePNG(pixels, w, h);
+        // Synthesised, not resampled: probePreview.wgsl reads `uv.y` as a LATITUDE, and the screen
+        // quad hands row 0 the same uv.y on both backends — so row 0 is the south pole either way.
+        return Renderer._encodePNG(pixels, w, h, true);
     }
 
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
