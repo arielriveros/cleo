@@ -13,7 +13,7 @@
 //
 //   verify:  npm run harness:backenddiff          (compares against backendDiff.json)
 //   record:  CLEO_BACKEND_DIFF=write ...          (writes it — see the ratchet rules below)
-//   scene:   CLEO_SCENE=full, CLEO_PIPELINE=forward   as with the other drivers
+//   scene:   CLEO_SCENE=full|every|every2d, CLEO_PIPELINE=forward   as with the other drivers
 const { app, BrowserWindow, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -44,7 +44,18 @@ stage(root, [
   ['src/graphics/rhi/webgpu/naga/nagaGlsl_bg.wasm', 'naga/nagaGlsl_bg.wasm'],
 ]);
 
-const scene = process.env.CLEO_SCENE === 'full' ? 'full' : 'base';
+/**
+ * The scene the page is asked to build. `base` is the default; the rest are opt-in and each carries
+ * its OWN baselines, because a baseline that moves for two reasons at once can attribute neither.
+ *
+ *   full     terrain, foliage and volumetric clouds
+ *   every    full, plus the material and geometry gap — authored maps, a two-map channel pack,
+ *            transparent / wireframe / double-sided, submeshes, model LOD, instanced LOD
+ *   every2d  the orthographic profile: tilemap layers, sprites and unlit quads under an ortho camera
+ */
+const SCENES = ['full', 'every', 'every2d'];
+const sceneOf = () => SCENES.includes(process.env.CLEO_SCENE) ? process.env.CLEO_SCENE : 'base';
+const scene = sceneOf();
 const pipeline = process.env.CLEO_PIPELINE === 'forward' ? 'forward' : 'deferred';
 const profile = `${pipeline}.${scene}`;
 const baselinePath = path.join(__dirname, 'backendDiff.json');

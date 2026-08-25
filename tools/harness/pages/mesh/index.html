@@ -356,9 +356,16 @@ window.__error = null;
     // foliage instances from a fixed lattice rather than `scatterFoliage`, which draws from an unseeded
     // RNG — a signature gate cannot hold a scene that reshuffles itself between runs.
     // ---------------------------------------------------------------------------------------------
-    const fullScene = new URLSearchParams(location.search).get('scene') === 'full';
-    window.__sceneProfile = fullScene ? 'full' : 'base';
+    // `every` is `full` PLUS the material/geometry gap, so it runs the block below and then its
+    // own; `every2d` is the ortho profile and runs neither. See each block for what it adds.
+    const sceneParam = new URLSearchParams(location.search).get('scene');
+    const everyScene = sceneParam === 'every';
+    const twoDScene = sceneParam === 'every2d';
+    const fullScene = sceneParam === 'full' || everyScene;
+    window.__sceneProfile = twoDScene ? 'every2d' : everyScene ? 'every' : fullScene ? 'full' : 'base';
     window.__fullSceneError = null;
+    window.__everySceneError = null;
+    window.__twoDSceneError = null;
 
     if (fullScene) try {
       // A seeded Math.random for the duration of this block, restored in the finally.
@@ -521,6 +528,394 @@ window.__error = null;
       } finally { Math.random = _random; }
     } catch (e) {
       window.__fullSceneError = String((e && e.stack) || e);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // `?scene=every` — every STATIC feature the renderer can be asked for.
+    //
+    // `full` closed the shader-family gap (terrain, foliage, clouds). This closes the MATERIAL and
+    // GEOMETRY gap, which is a different axis and had never been walked at all: no gated scene had an
+    // authored normal/emissive/occlusion map, a transparent or wireframe or double-sided material, a
+    // multi-material submesh model, a model LOD group, an instanced mesh carrying LOD index buffers,
+    // or a material with two DIFFERENT channel maps.
+    //
+    // That last one is the sharp end. `TexturePacker.resolve` takes an identity fast path when one
+    // source serves every channel, so two maps have to genuinely differ to reach `_bake` — which was
+    // the last WebGL2-only path in the engine and is ported in the same commit as this scene.
+    //
+    // Additive over `full` rather than a scene of its own: everything `full` builds is a feature too,
+    // and rebuilding it here would be a second copy to keep in step. It carries its own baselines, for
+    // the reason the `full` block already gives — a baseline that moves for two reasons at once can no
+    // longer attribute either.
+    // ---------------------------------------------------------------------------------------------
+    if (everyScene) try {
+      // Three more textures, each a DIFFERENT image, because that is the whole point: a pack spec
+      // whose channels all resolve to one source never bakes. Drawn rather than embedded so the upload
+      // path is the real one, and small because the packer resamples to the largest source anyway.
+      const solid = (name, r, g, b, opts) => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 32;
+        const cg = c.getContext('2d');
+        // A gradient, not a flat fill: a constant map hides an orientation or a channel-swizzle bug,
+        // which is exactly the class of bug a packed texture can have.
+        for (let y = 0; y < 32; y++)
+          for (let x = 0; x < 32; x++) {
+            const t = (x + y) / 62;
+            cg.fillStyle = `rgb(${Math.round(r * t)}, ${Math.round(g * t)}, ${Math.round(b * t)})`;
+            cg.fillRect(x, y, 1, 1);
+          }
+        cleo.TextureManager.Instance.addTextureFromBase64(c.toDataURL('image/png'), opts || { mipMap: true }, name);
+        return name;
+      };
+      solid('metalGrad', 255, 40, 40);
+      solid('roughGrad', 40, 255, 40);
+      solid('aoGrad', 40, 40, 255);
+      // A normal map has to be a NORMAL map: a flat (128,128,255) would leave the TBN path
+      // mathematically idle and a wrong basis would look identical to a right one.
+      const nrm = document.createElement('canvas');
+      nrm.width = nrm.height = 32;
+      const ng = nrm.getContext('2d');
+      for (let y = 0; y < 32; y++)
+        for (let x = 0; x < 32; x++) {
+          const bump = Math.sin(x * 0.6) * Math.cos(y * 0.6);
+          ng.fillStyle = `rgb(${Math.round(128 + bump * 90)}, ${Math.round(128 - bump * 90)}, 255)`;
+          ng.fillRect(x, y, 1, 1);
+        }
+      cleo.TextureManager.Instance.addTextureFromBase64(nrm.toDataURL('image/png'), { mipMap: true }, 'normalGrad');
+
+      // 1. The channel-pack trigger, and every authored map slot at once.
+      //
+      // metallicMap and roughnessMap are DIFFERENT textures, which is what sends this through
+      // `TexturePacker._bake` instead of the identity fast path. occlusionMap makes it a three-source
+      // pack; normalMap and emissiveMap exercise the two remaining slots a PBR material can carry.
+      const packed = new cleo.ModelNode('packedMaps', new cleo.Model(
+        cleo.Geometry.Sphere(32, 0.7),
+        cleo.Material.PBR({
+          baseColor: [1, 1, 1], metallic: 1, roughness: 1,
+          textures: {
+            baseColorTexture: 'checker', normalMap: 'normalGrad', emissiveMap: 'aoGrad',
+            metallicMap: 'metalGrad', roughnessMap: 'roughGrad', occlusionMap: 'aoGrad',
+          },
+        }),
+      ));
+      packed.setPosition([-3.4, 0.9, 2.6]);
+      scene.addNode(packed);
+      window.__packedMaterial = () => {
+        const n = engine.scene && [...engine.scene.models].find(m => m.name === 'packedMaps');
+        if (!n) return 'missing';
+        // `ormTexture` is the DERIVED slot `_syncPBR` writes back, not one of the authored three.
+        // An id under the packed prefix is the proof `_bake` ran; the authored id would mean the
+        // identity fast path took it, and the whole point of this material is to miss that path.
+        return String(n.model.material.textures.get('ormTexture') ?? null);
+      };
+
+      // 2. Transparent, wireframe, and the two non-default cull modes.
+      //
+      // Four separate nodes rather than one with flags flipped: they take different queues and
+      // different pipeline state, and a scene that only ever holds one of them at a time cannot catch
+      // an ordering bug between them.
+      const glass = new cleo.ModelNode('transparent', new cleo.Model(
+        cleo.Geometry.Cube(1.1, 1.1, 1.1),
+        cleo.Material.PBR({ baseColor: [0.35, 0.8, 0.95], metallic: 0.0, roughness: 0.15, opacity: 0.45 },
+                          { transparent: true }),
+      ));
+      glass.setPosition([2.6, 0.95, 2.9]);
+      scene.addNode(glass);
+
+      const wire = new cleo.ModelNode('wireframe', new cleo.Model(
+        cleo.Geometry.Sphere(16, 0.6),
+        cleo.Material.Basic({ color: [0.95, 0.85, 0.2] }, { wireframe: true }),
+      ));
+      wire.setPosition([-1.2, 1.9, 3.2]);
+      scene.addNode(wire);
+
+      const doubleSided = new cleo.ModelNode('doubleSided', new cleo.Model(
+        cleo.Geometry.Plane(1.6, 1.6),
+        cleo.Material.PBR({ baseColor: [0.9, 0.45, 0.7], metallic: 0.0, roughness: 0.6 },
+                          { side: 'double' }),
+      ));
+      doubleSided.setPosition([0.4, 1.6, 3.4]);
+      doubleSided.setRotation([0, 35, 0]);
+      scene.addNode(doubleSided);
+
+      const backFace = new cleo.ModelNode('backFace', new cleo.Model(
+        cleo.Geometry.Cube(0.8, 0.8, 0.8),
+        cleo.Material.PBR({ baseColor: [0.2, 0.9, 0.4], metallic: 0.0, roughness: 0.7 },
+                          { side: 'back' }),
+      ));
+      backFace.setPosition([1.5, 1.9, 3.6]);
+      scene.addNode(backFace);
+
+      // A caster that does NOT cast: the shadow queue's exclusion, which nothing tested.
+      const noShadow = new cleo.ModelNode('noShadow', new cleo.Model(
+        cleo.Geometry.Cube(0.7, 1.4, 0.7),
+        cleo.Material.PBR({ baseColor: [0.95, 0.6, 0.1], metallic: 0.0, roughness: 0.5 },
+                          { castShadow: false }),
+      ));
+      noShadow.setPosition([-2.6, 1.2, -1.4]);
+      scene.addNode(noShadow);
+
+      // Emissive only: the bloom mask's own input. Bright enough to clear the 0.4 threshold the
+      // `bloom` configuration sets at exposure 2, which nothing in `base` does.
+      const glow = new cleo.ModelNode('emissive', new cleo.Model(
+        cleo.Geometry.Sphere(20, 0.35),
+        cleo.Material.PBR({ baseColor: [0.02, 0.02, 0.02], metallic: 0, roughness: 1,
+                            emissiveFactor: [2.4, 1.6, 0.4] }),
+      ));
+      glow.setPosition([3.1, 2.2, -1.2]);
+      scene.addNode(glow);
+
+      // 3. A merged, multi-material model — `_drawSubmeshes`' RANGE path.
+      //
+      // Every model in every other scene has one material, so the loop that applies a material per
+      // index range and draws a slice of the index buffer had never run. The two ranges split the
+      // cube's 36 indices down the middle, which is enough to make a wrong `firstIndex` visible.
+      const merged = cleo.Geometry.Cube(1.0, 1.0, 1.0);
+      const half = Math.floor(merged.indices.length / 2);
+      const submeshed = new cleo.ModelNode('submeshed', new cleo.Model(
+        merged,
+        [cleo.Material.PBR({ baseColor: [0.9, 0.3, 0.3], metallic: 0.1, roughness: 0.4 }),
+         cleo.Material.PBR({ baseColor: [0.3, 0.3, 0.9], metallic: 0.6, roughness: 0.2 })],
+        [{ start: 0, count: half }, { start: half, count: merged.indices.length - half }],
+      ));
+      submeshed.setPosition([-4.4, 1.0, -2.2]);
+      scene.addNode(submeshed);
+      window.__submeshCount = () => {
+        const n = engine.scene && [...engine.scene.models].find(m => m.name === 'submeshed');
+        return n ? n.model.submeshes.length : -1;
+      };
+
+      // 4. A model LOD group — distinct from the terrain LOD `full` already covers.
+      //
+      // `LodGroupNode` shows exactly one child subtree and hides the rest, so a bug that shows two (or
+      // none) is a draw-count difference the gate reads directly. Distances are set so level 0 is the
+      // one the fixed camera selects, which keeps the frame deterministic.
+      const lodGroup = new cleo.LodGroupNode('lodGroup');
+      lodGroup.distances = [0, 40, 80];
+      lodGroup.cullDistance = 0;
+      lodGroup.setPosition([4.2, 0.9, 0.4]);
+      scene.addNode(lodGroup);
+      for (let level = 0; level < 3; level++) {
+        const child = new cleo.ModelNode('lod' + level, new cleo.Model(
+          cleo.Geometry.Sphere(24 - level * 8, 0.65),
+          cleo.Material.PBR({ baseColor: [0.4 + level * 0.2, 0.7, 0.9 - level * 0.2],
+                              metallic: 0.2, roughness: 0.5 }),
+        ));
+        lodGroup.addChild(child);
+      }
+      window.__lodLevel = () => {
+        const g = engine.scene && [...engine.scene.nodes].find(n => n.name === 'lodGroup');
+        return g ? g.activeLod : -1;
+      };
+
+      // 5. An INSTANCED batch whose mesh carries LOD index buffers.
+      //
+      // `_recordFoliageDraw` and `_drawInstancedGroup` used to bail to `Mesh.drawInstanced` — a raw
+      // `gl` path — whenever `hasLods` was true, and were widened onto `activeIndexBuffer` without any
+      // scene ever having such a mesh. This is that scene.
+      const lodInstanced = new cleo.Model(
+        cleo.Geometry.Sphere(20, 0.3),
+        cleo.Material.PBR({ baseColor: [0.85, 0.55, 0.95], metallic: 0.3, roughness: 0.35 }),
+      );
+      for (let i = 0; i < 6; i++) {
+        const n = new cleo.ModelNode('lodInst' + i, lodInstanced);
+        n.setPosition([-5 + i * 1.1, 0.35, 4.2]);
+        scene.addNode(n);
+        if (!n.initialized) n.initializeModel();
+      }
+      // Coarser index sets over the SAME vertex buffer, which is what a terrain LOD level is. Built
+      // from the base indices by dropping every other triangle rather than from a decimator: the point
+      // is that a second index buffer exists and is selected, not that it is a good simplification.
+      const baseIndices = lodInstanced.geometry.indices;
+      const decimate = (step) => {
+        const out = [];
+        for (let t = 0; t < baseIndices.length; t += 3)
+          if ((t / 3) % step === 0) out.push(baseIndices[t], baseIndices[t + 1], baseIndices[t + 2]);
+        return out;
+      };
+      lodInstanced.mesh.setLodIndices([decimate(2), decimate(4)]);
+      window.__instancedHasLods = () => lodInstanced.mesh.hasLods;
+
+      // 6. Terrain layer textures.
+      //
+      // The landscape `full` builds is untextured, so `u_layerCount` is 0 and every branch in
+      // chunks/terrainLayers.wgsl that reads an albedo, a normal or a displacement map is skipped —
+      // including the parallax offset and the height-aware blend. Two layers with different maps make
+      // the splat blend do real work.
+      const land = [...scene.landscapes][0];
+      if (land) {
+        const rock = cleo.TerrainMaterial.Create('pbr', {
+          baseColor: [0.62, 0.6, 0.58], metallic: 0.0, roughness: 0.85,
+          textures: { baseColorTexture: 'checker', normalMap: 'normalGrad' },
+        });
+        rock.tiling = 8;
+        rock.displacementScale = 0.08;
+        rock.heightBlend = 1.5;
+        rock.textures.set('displacementMap', 'aoGrad');
+        land.terrain.setLayer(0, rock);
+
+        const moss = cleo.TerrainMaterial.Create('pbr', {
+          baseColor: [0.34, 0.5, 0.22], metallic: 0.0, roughness: 0.7,
+          textures: { baseColorTexture: 'metalGrad', normalMap: 'normalGrad' },
+        });
+        moss.tiling = 14;
+        moss.auto = true;
+        moss.hRange = [0, 3];
+        moss.sRange = [0, 0.5];
+        land.terrain.setLayer(1, moss);
+        window.__terrainLayers = () => land.terrain.layers.filter(l => l && l.albedoId).length;
+      } else {
+        window.__terrainLayers = () => -1;
+      }
+
+      // 7. An animated sprite, held STILL.
+      //
+      // `loop: false` over a one-frame list leaves it on frame 0 for the life of the scene, so the
+      // animated-sprite path is exercised without making the signature depend on when the capture
+      // happened — the discipline the whole `full` block keeps.
+      const animTiles = cleo.gridTileset('animcheck.ts', 'checker', 8, 8);
+      const animSprite = new cleo.AnimatedSpriteNode('animSprite',
+        new cleo.Sprite({ tileset: animTiles, tileIndex: 27, tint: [0.9, 0.9, 0.4] }),
+        { frames: [27], fps: 1, loop: false, constraints: 'cylindrical' });
+      animSprite.setPosition([1.2, 1.3, 2.2]);
+      scene.addNode(animSprite);
+    } catch (e) {
+      window.__everySceneError = String((e && e.stack) || e);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // `?scene=every2d` — the 2D half.
+    //
+    // "2D" in this engine is a CAMERA and its content, not a second renderer: an orthographic
+    // projection plus the xy grid plane. Two renderer branches exist solely for it — the grid's fade
+    // radius (`renderer.ts`, `_activeCamera.type === 'orthographic'`) and the sky's perspective
+    // override — and neither had ever been inside a gated frame. Not one measured pixel, on either
+    // backend, has ever come from an ortho projection.
+    //
+    // The 3D props are HIDDEN rather than never built. The page's instrumentation reaches for three
+    // base-scene nodes by name — `camera` for the motion configurations, `probe` for the probe
+    // preview, `cube` for the outline mask — so the base block has to run whatever profile is asked
+    // for. Hiding the rest keeps every other profile on a byte-identical code path (nothing about
+    // base/full/every changes) while making what this profile actually RENDERS 2D content.
+    // ---------------------------------------------------------------------------------------------
+    if (twoDScene) try {
+      // Orthographic, and framed on the tile grid below. `near` stays positive and `far` well past the
+      // content so nothing is clipped by the ortho box, which is a different failure from a wrong
+      // projection and would be easy to mistake for one.
+      camera.camera.type = 'orthographic';
+      camera.camera.left = -8; camera.camera.right = 8;
+      camera.camera.bottom = -4.5; camera.camera.top = 4.5;
+      camera.camera.near = 0.1; camera.camera.far = 100;
+      // In FRONT of the plane, yawed 180 to look back at it. Two facts decide this and both cost a
+      // run to find: `Node.worldForward` is (0,0,1) at identity rotation, so an unrotated camera
+      // faces AWAY from content in front of it and renders nothing but sky; and tilemap quads face
+      // +Z, so viewing them from -Z shows their back faces and culls every one. Standing at +Z and
+      // turning round satisfies both. Depth decreases away from the viewer: background at -z.
+      camera.setPosition([0, 0, 12]);
+      camera.setRotation([0, 180, 0]);
+      engine.renderer.setGridPlane('xy');
+      window.__cameraType = () => (engine.scene && engine.scene.activeCamera
+        ? engine.scene.activeCamera.type : 'none');
+
+      // Hide the 3D props. `cube` stays visible — the outline configuration selects it — and so do the
+      // lights, which is what proves the lighting path still runs under an ortho projection.
+      for (const n of scene.models) {
+        if (n.name === 'cube') continue;
+        n.visible = false;
+      }
+
+      // A cubemap sky, the one sky kind no gated scene has had. `full` uses SkyAtmosphereNode because
+      // the skyFog and godRays configurations need it; nothing claims the sky here, so the skybox goes
+      // where it can actually be seen. Six distinct faces, so a face-ordering or orientation bug is
+      // visible rather than symmetric.
+      const face = (r, g, b, label) => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 32;
+        const fg = c.getContext('2d');
+        fg.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        fg.fillRect(0, 0, 32, 32);
+        // A corner mark: a rotated face still fills the same way, and only an asymmetric mark says so.
+        fg.fillStyle = '#ffffff';
+        fg.fillRect(2, 2, 8, 4);
+        fg.fillStyle = '#000000';
+        fg.fillRect(2, 2, 4, 4);
+        return c.toDataURL('image/png');
+      };
+      // The base scene's SkyAtmosphereNode has to GO, not just be hidden: `_renderSky` prefers a
+      // baked atmosphere cube over a skybox whenever one exists, so leaving it in place would
+      // build the cubemap and never draw it.
+      scene.removeNodesByName('sky');
+      const skybox = await cleo.Skybox.fromBase64({
+        posX: face(200, 60, 60), negX: face(60, 200, 60),
+        posY: face(60, 60, 200), negY: face(200, 200, 60),
+        posZ: face(200, 60, 200), negZ: face(60, 200, 200),
+      });
+      scene.addNode(new cleo.SkyboxNode('skybox', skybox));
+
+      // A tilemap with more than one layer. `full` has a single-layer map; a second layer is what makes
+      // the per-layer draw and the chunk's layer ordering do work, and it is what a 2D game has.
+      const tiles = cleo.gridTileset('twodtiles.ts', 'checker', 8, 8);
+      const map = new cleo.Tilemap({ kind: 'orthogonal', cellWidth: 1, cellHeight: 1 });
+      map.registerTileset(tiles);
+      map.addLayer({ tilesetId: tiles.id });
+      map.addLayer({ tilesetId: tiles.id });
+      for (let row = 0; row < 9; row++)
+        for (let col = 0; col < 16; col++) {
+          // A closed-form pattern, not a random one: the whole scene has to be identical between the
+          // two backend windows the diff compares.
+          map.setTile(0, col, row, ((col * 3 + row * 5) & 7) + ((col + row) & 1) * 8);
+          // The second layer is SPARSE, which is what makes it a second layer rather than a second
+          // copy: a chunk that is empty in one layer and populated in another is where a per-layer
+          // draw can lose its ordering.
+          if (((col + row * 2) & 3) === 0) map.setTile(1, col, row, 40 + ((col * row) & 7));
+        }
+      const mapNode2d = new cleo.TilemapNode('tiles2d', map);
+      mapNode2d.setPosition([-8, -4.5, -1]);
+      scene.addNode(mapNode2d);
+      window.__tile2dLayers = () => map.layers.length;
+
+      // Sprites in `free` mode — a 2D game does not billboard toward the camera, it places quads on a
+      // plane. One tinted, one untinted, one animated and held on a single frame.
+      const spriteTiles2d = cleo.gridTileset('twodsprites.ts', 'checker', 8, 8);
+      const place = (name, tile, tint, x, y) => {
+        const s = new cleo.SpriteNode(name,
+          new cleo.Sprite({ tileset: spriteTiles2d, tileIndex: tile, tint }), 'free');
+        s.setPosition([x, y, 0.5]);
+        scene.addNode(s);
+        return s;
+      };
+      place('hero', 12, [1, 1, 1], -4.5, 1.2);
+      place('coin', 21, [1.0, 0.85, 0.2], 0.5, -1.4);
+      place('enemy', 33, [0.9, 0.3, 0.35], 4.6, 0.8);
+
+      const anim2d = new cleo.AnimatedSpriteNode('anim2d',
+        new cleo.Sprite({ tileset: spriteTiles2d, tileIndex: 44, tint: [0.4, 0.9, 1.0] }),
+        { frames: [44], fps: 1, loop: false, constraints: 'free' });
+      anim2d.setPosition([2.4, 2.1, 0.5]);
+      scene.addNode(anim2d);
+
+      // Unlit and transparent quads: the two material kinds a 2D scene is mostly made of, and the
+      // blend queue under an ortho projection, which is where a depth-range mistake would show.
+      const quad = (name, geom, material, x, y, z) => {
+        const n = new cleo.ModelNode(name, new cleo.Model(geom, material));
+        n.setPosition([x, y, z]);
+        scene.addNode(n);
+        return n;
+      };
+      quad('unlitQuad', cleo.Geometry.Plane(2.2, 1.4),
+           cleo.Material.Basic({ color: [0.25, 0.85, 0.55], textures: { base: 'checker' } }),
+           -3.0, -2.2, 0.2);
+      quad('fadeQuad', cleo.Geometry.Plane(2.6, 1.6),
+           cleo.Material.Basic({ color: [1.0, 0.4, 0.6], opacity: 0.5 }, { transparent: true }),
+           3.2, -2.0, 0.6);
+      // One LIT quad, so the ortho frame is not entirely unlit: the deferred G-buffer and the lighting
+      // pass both have to survive a projection with no perspective divide.
+      quad('litQuad', cleo.Geometry.Plane(2.0, 2.0),
+           cleo.Material.PBR({ baseColor: [0.8, 0.8, 0.85], metallic: 0.1, roughness: 0.5,
+                               textures: { baseColorTexture: 'checker' } }),
+           0.0, 2.4, 0.2);
+    } catch (e) {
+      window.__twoDSceneError = String((e && e.stack) || e);
     }
 
     engine.setScene(scene);

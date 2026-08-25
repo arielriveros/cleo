@@ -42,7 +42,18 @@ const shotDir = process.env.CLEO_SHOT_DIR || path.join(__dirname, 'shots');
 // CLEO_SCENE=full adds the terrain/foliage/cloud content the base scene lacks. It gets its OWN
 // baselines and its own screenshot rather than replacing the base ones: a scene that grows and a
 // shader that regressed would otherwise be the same failure, and neither could be attributed.
-const scene = process.env.CLEO_SCENE === 'full' ? 'full' : 'base';
+/**
+ * The scene the page is asked to build. `base` is the default; the rest are opt-in and each carries
+ * its OWN baselines, because a baseline that moves for two reasons at once can attribute neither.
+ *
+ *   full     terrain, foliage and volumetric clouds
+ *   every    full, plus the material and geometry gap — authored maps, a two-map channel pack,
+ *            transparent / wireframe / double-sided, submeshes, model LOD, instanced LOD
+ *   every2d  the orthographic profile: tilemap layers, sprites and unlit quads under an ortho camera
+ */
+const SCENES = ['full', 'every', 'every2d'];
+const sceneOf = () => SCENES.includes(process.env.CLEO_SCENE) ? process.env.CLEO_SCENE : 'base';
+const scene = sceneOf();
 const sceneTag = scene === 'base' ? '' : '.' + scene;
 const shotName = (process.env.CLEO_PIPELINE === 'forward' ? 'mesh.forward' : 'mesh') + sceneTag + '.png';
 fs.mkdirSync(shotDir, { recursive: true });
