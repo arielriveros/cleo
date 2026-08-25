@@ -2565,11 +2565,18 @@ export class Renderer {
         // about a non-indexed mesh was ever unexpressible. `firstIndex`/`indexCount` become the vertex
         // range, which is what a submesh over a non-indexed buffer would mean anyway.
         if (!indices) {
-            pass.draw(indexCount > 0 ? indexCount : mesh.vertexCount, 1, firstIndex);
+            // Nothing to rasterize is not a draw. An empty mesh reaches here from a node added THIS
+            // frame — the shadow pass runs before the geometry pass that builds it — and WebGPU's
+            // validation layer says so out loud ("Draw with a vertex count of 0 is unusual"), which
+            // WebGL2 never did. `true` rather than `false`: the draw was handled, and the caller's
+            // fallback is a raw `gl` call that would be strictly worse.
+            const count = indexCount > 0 ? indexCount : mesh.vertexCount;
+            if (count > 0) pass.draw(count, 1, firstIndex);
             return true;
         }
         pass.setIndexBuffer(indices, mesh.activeIndexFormat);
-        pass.drawIndexed(indexCount > 0 ? indexCount : mesh.activeIndexCount, 1, firstIndex);
+        const count = indexCount > 0 ? indexCount : mesh.activeIndexCount;
+        if (count > 0) pass.drawIndexed(count, 1, firstIndex);
         return true;
     }
 
@@ -5624,6 +5631,10 @@ export class Renderer {
             if (!node.model.materials.some(m => m.config.castShadow && !m.config.wireframe)) continue;
             // Skip gizmo/overlay nodes from shadow casting
             if ((node as any).isGizmo) continue;
+            // A node added this frame has no mesh yet: this pass runs BEFORE the geometry pass that
+            // calls `initializeModel`, so its `Mesh` is still the empty one the constructor made. It
+            // cannot cast a shadow, and recording the attempt costs a bind and a zero-count draw.
+            if (!node.initialized) continue;
             if (this._frustumCulling) {
                 const s = node.getBoundingSphere();
                 if (!this._shadowFrustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
