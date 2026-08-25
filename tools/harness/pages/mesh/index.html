@@ -91,6 +91,29 @@ window.__error = null;
     if (typeof engine.initialize === 'function') await engine.initialize();
     engine.setViewport(document.getElementById('vp'));
 
+    // Install the GLSL -> WGSL translator, exactly as the editor does.
+    //
+    // Without it a custom material has no WGSL, so it cannot build a WebGPU program and the renderer
+    // skips it — which is invisible in a WebGL2-only baseline and shows up in the cross-backend diff
+    // as WebGPU submitting three fewer draws and one fewer fullscreen pass than WebGL2, forever. The
+    // gate can only watch the custom-material path if this page supplies what the editor supplies.
+    //
+    // Non-fatal on purpose: a missing naga build should not take out the other twenty-odd checks on
+    // this page, and `window.__translator` says which of the two runs happened.
+    // Recorded BEFORE installing, because that is the invariant worth keeping: the engine bundle
+    // must ship no translator of its own, or every published game carries 1.3 MB of naga.
+    window.__translatorBefore = cleo.hasWgslTranslator();
+    window.__translator = false;
+    try {
+      const nagaUrl = (f) => new URL('naga/' + f, document.baseURI).href;
+      const naga = await import(/* webpackIgnore: true */ nagaUrl('nagaGlsl.js'));
+      await naga.default({ module_or_path: nagaUrl('nagaGlsl_bg.wasm') });
+      cleo.setWgslTranslator((glsl) => naga.glsl_to_wgsl(glsl, 'fragment'));
+      window.__translator = cleo.hasWgslTranslator();
+    } catch (e) {
+      console.warn('naga translator unavailable: ' + e);
+    }
+
 
     // A real texture, so the 2D upload path (texImage2D from an HTMLImageElement, sampler parameters,
     // mip generation) is actually exercised. Drawn here rather than embedded so the bytes are a valid

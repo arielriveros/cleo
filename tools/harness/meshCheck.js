@@ -31,7 +31,13 @@ function stage(pageDir, files) {
   }
 }
 
-stage(root, [['dist/cleo.js', 'cleo.js']]);
+stage(root, [
+  ['dist/cleo.js', 'cleo.js'],
+  // The translator the page installs. Staged like the bundle so a stale copy is impossible,
+  // and so the custom-material path this scene contains is actually reachable on WebGPU.
+  ['src/graphics/rhi/webgpu/naga/nagaGlsl.js', 'naga/nagaGlsl.js'],
+  ['src/graphics/rhi/webgpu/naga/nagaGlsl_bg.wasm', 'naga/nagaGlsl_bg.wasm'],
+]);
 const shotDir = process.env.CLEO_SHOT_DIR || path.join(__dirname, 'shots');
 // CLEO_SCENE=full adds the terrain/foliage/cloud content the base scene lacks. It gets its OWN
 // baselines and its own screenshot rather than replacing the base ones: a scene that grows and a
@@ -351,11 +357,19 @@ app.whenReady().then(async () => {
     }
     check('a broken custom shader still reports its error', !custom.broken.ok && !!custom.broken.error,
           'a failing compile was reported as ok');
-    // No translator is installed outside the editor, so nothing here may produce WGSL. If it did, naga
-    // would be reachable from the engine bundle and every published game would carry 1.3 MB of it.
-    check('no WGSL is produced without a translator installed',
-          !custom.screen.hasWgsl && !custom.screen.wgslError,
-          'the engine translated with no translator installed');
+    // The engine must ship NO translator of its own — if it did, naga would be reachable from the
+    // bundle and every published game would carry 1.3 MB of it. The page records that before it
+    // installs one, because it now does install one: without a translator a custom material has no
+    // WGSL, cannot build a WebGPU program, and is skipped, which is invisible in a WebGL2-only
+    // baseline and shows in the cross-backend diff as a permanent draw-count deficit.
+    const before = await evalJson('JSON.stringify(window.__translatorBefore)', 'translator state');
+    check('the engine bundle carries no translator of its own', before === false,
+          'hasWgslTranslator() was already true before the page installed one');
+    const installed = await evalJson('JSON.stringify(window.__translator)', 'translator installed');
+    check('the page installs a WGSL translator', installed === true,
+          'naga did not load — the custom-material path is unmeasured on WebGPU');
+    check('a screen material translates to WGSL', !!custom.screen.hasWgsl && !custom.screen.wgslError,
+          String(custom.screen.wgslError || 'no WGSL produced'));
   }
 
   // Did the probe actually bake? `probesForFrame` skips any probe without baked maps, so an unbaked

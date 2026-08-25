@@ -39,7 +39,12 @@ function stage(pageDir, files) {
   }
 }
 
-stage(root, [['dist/cleo.js', 'cleo.js']]);
+stage(root, [
+  ['dist/cleo.js', 'cleo.js'],
+  // See meshCheck.js — the page installs the WGSL translator and needs it staged beside it.
+  ['src/graphics/rhi/webgpu/naga/nagaGlsl.js', 'naga/nagaGlsl.js'],
+  ['src/graphics/rhi/webgpu/naga/nagaGlsl_bg.wasm', 'naga/nagaGlsl_bg.wasm'],
+]);
 const baselinePath = path.join(__dirname, 'passBaseline.json');
 const writing = process.env.CLEO_PASS_BASELINE === 'write';
 

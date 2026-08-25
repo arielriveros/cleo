@@ -19,4 +19,5 @@ tools/harness/pages/*/cleo.js
 # Built by `npm run harness:webgpu:build` from tools/harness/webpack.harness.js.
 tools/harness/pages/webgpu/bundle.js
 tools/harness/pages/naga/naga/
+tools/harness/pages/mesh/naga/
 tools/harness/shots/

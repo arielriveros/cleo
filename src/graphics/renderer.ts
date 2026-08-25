@@ -104,7 +104,7 @@ import { GLState } from './systems/glState';
 import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial } from './material';
-import { ensureCustomShader, customShaderReady, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
+import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
@@ -4835,7 +4835,22 @@ export class Renderer {
     private _pipelineFor(program: string,
                          reflection: { resources: readonly ShaderResource[]; wgsl?: string;
                                        entryPoints?: { vertex?: string; fragment?: string;
-                                                       compute?: string } },
+                                                       compute?: string };
+                                       /**
+                                        * A SEPARATE module for the vertex stage.
+                                        *
+                                        * Only custom materials use it. Their WGSL is a translated
+                                        * FRAGMENT stage and nothing else, because the vertex half was
+                                        * never the user's — it is a fixed engine source whose WGSL
+                                        * twin already ships. Pairing the two modules is what WebGPU
+                                        * wants anyway; merging two naga outputs would collide on
+                                        * every struct and private name they each invented.
+                                        *
+                                        * Both modules carry the same `program` name, so the WebGL2
+                                        * backend — which keys its pipeline off `vertex.program` and
+                                        * ignores WGSL entirely — cannot tell the difference.
+                                        */
+                                       vertexWgsl?: { wgsl: string; entryPoint: string } },
                          options: { blend?: BlendState; depthStencil?: DepthStencilState;
                                     cullMode?: CullMode; targets?: number;
                                     topology?: PrimitiveTopology;
@@ -4881,6 +4896,7 @@ export class Renderer {
         const cubeFace = this._cubeFaceCapture && device.backend === 'webgpu';
         const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
                             + '|' + (builtFor ?? '') + (cubeFace ? '|cw' : '')
+                            + (reflection.vertexWgsl ? '|vs' : '')
                             + '|' + colorFormats.join(',')
                             + (blend ? '|' + JSON.stringify(blend) : '')
                             + (resolvedDepth ? '|' + JSON.stringify(resolvedDepth) : '');
@@ -4898,9 +4914,17 @@ export class Renderer {
                 ...(reflection.entryPoints ? { entryPoints: reflection.entryPoints } : {}),
                 resources: reflection.resources,
             });
+            const vertexModule = reflection.vertexWgsl
+                ? device.createShaderModule({
+                    label: program, program, stage: ShaderStage.VERTEX,
+                    source: reflection.vertexWgsl.wgsl,
+                    entryPoints: { vertex: reflection.vertexWgsl.entryPoint },
+                    resources: reflection.resources,
+                  })
+                : module;
             pipeline = device.createRenderPipeline({
                 label: program,
-                vertex: module, fragment: module,
+                vertex: vertexModule, fragment: module,
                 // Slot 0 is the interleaved model vertex, over only the attributes this program
                 // declares. Slot 1 is the per-instance model matrix, spread across four attribute slots
                 // because neither API has a mat4 vertex format.
@@ -6013,8 +6037,15 @@ export class Renderer {
             const dst = 1 - src;
             const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'screenMaterial',
                                                    false, undefined, false);
-            const pipeline = this._pipelineFor(mat.type, { resources: screenShaderResources(mat.uniforms) },
-                                              { vertex: 'model', builtFor: mat.type });
+            // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
+            // is already linked and `_pipelineFor` reaches it by name. `entryPoints.fragment` is
+            // `main` because that is what naga calls the entry it generates, not `fs_main`.
+            const wgsl = customShaderModules(mat);
+            const pipeline = this._pipelineFor(mat.type, {
+                resources: screenShaderResources(mat.uniforms),
+                ...(wgsl ? { wgsl: wgsl.fragment, entryPoints: { fragment: 'main' },
+                             vertexWgsl: { wgsl: wgsl.vertex, entryPoint: wgsl.vertexEntry } } : {}),
+            }, { vertex: 'model', builtFor: mat.type });
             pass.setPipeline(pipeline);
             this._shaderManager.bind(mat.type);
             // Group 0 is the two engine samplers followed by the user's, in declaration order — the

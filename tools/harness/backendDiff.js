@@ -36,7 +36,13 @@ function stage(pageDir, files) {
     fs.copyFileSync(src, path.join(pageDir, to));
   }
 }
-stage(root, [['dist/cleo.js', 'cleo.js']]);
+stage(root, [
+  ['dist/cleo.js', 'cleo.js'],
+  // The translator the page installs. Staged like the bundle so a stale copy is impossible,
+  // and so the custom-material path this scene contains is actually reachable on WebGPU.
+  ['src/graphics/rhi/webgpu/naga/nagaGlsl.js', 'naga/nagaGlsl.js'],
+  ['src/graphics/rhi/webgpu/naga/nagaGlsl_bg.wasm', 'naga/nagaGlsl_bg.wasm'],
+]);
 
 const scene = process.env.CLEO_SCENE === 'full' ? 'full' : 'base';
 const pipeline = process.env.CLEO_PIPELINE === 'forward' ? 'forward' : 'deferred';

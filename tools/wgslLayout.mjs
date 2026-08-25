@@ -271,3 +271,88 @@ export function flattenLayout(typeName, structs, baseName = '', baseOffset = 0, 
     });
     return out;
 }
+
+/**
+ * Comments removed, both kinds.
+ *
+ * Resource declarations and struct bodies here are heavily commented, and a comment can hide a
+ * declaration — or, for a BLOCK comment inside a struct, be split on its own commas into phantom
+ * fields with names taken from the prose.
+ */
+export function stripLineComments(text) {
+    return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
+/**
+ * Every `@group(G) @binding(B) var ...` a module declares.
+ *
+ * One scan serving two consumers, which is why it is a function rather than a regex repeated twice:
+ * {@link buildRenames} needs it to map naga's mangled identifiers back, and the RHI needs it as
+ * REFLECTION — a `BindGroup` has to know that binding 0 of group 0 is the texture the GLSL calls
+ * `u_screenTexture`, because the WebGL2 backend satisfies a bind group by assigning a texture unit and
+ * setting that sampler uniform by name.
+ *
+ * `glslName` is the name after a texture/sampler pair collapses. WGSL keeps the two apart; GLSL ES has
+ * only combined samplers, so `u_screenTexture_texture` at (0,0) and `u_screenTexture_sampler` at (0,1)
+ * are one `uniform sampler2D u_screenTexture`. Both entries therefore report the same `glslName`, and a
+ * WebGL2 bind group acts on the texture entry and ignores the sampler one.
+ */
+export function findResources(wgsl) {
+    const source = stripLineComments(wgsl);
+    const resource = /@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<([^>]*)>)?\s+([A-Za-z_]\w*)\s*:\s*([^;]+);/g;
+    const found = [];
+    for (const m of source.matchAll(resource)) {
+        const [, group, binding, addressSpace, name, rawType] = m;
+        const type = rawType.trim().replace(/\s+/g, ' ');
+        const space = (addressSpace || '').trim();
+
+        let kind;
+        if (/\buniform\b/.test(space)) kind = 'uniform';
+        else if (/\bstorage\b/.test(space)) kind = 'storage';
+        else if (/^sampler(_comparison)?$/.test(type)) kind = 'sampler';
+        else if (/^texture_/.test(type)) kind = 'texture';
+        else kind = 'other';
+
+        found.push({
+            group: Number(group),
+            binding: Number(binding),
+            name,
+            kind,
+            type,
+            glslName: name.replace(/_(texture|sampler)$/, ''),
+        });
+    }
+    return found;
+}
+
+export function findUniformBlocks(wgsl) {
+    const structs = findStructs(wgsl);
+    return findResources(wgsl)
+        .filter(r => r.kind === 'uniform')
+        .map((r) => {
+            const members = structs.get(r.type);
+            if (!members) return { group: r.group, binding: r.binding, name: r.name, struct: r.type, members: [], size: 0 };
+            const laid = layoutStruct(members, structs);
+            return {
+                group: r.group,
+                binding: r.binding,
+                name: r.name,
+                struct: r.type,
+                /** Bytes the whole block occupies, which is the uniform buffer's size. */
+                size: laid.size,
+                members: laid.members,
+                /**
+                 * Every writable leaf by full path, with the offset from the start of the BLOCK.
+                 *
+                 * Rooted at the VAR's name, so a path reads `u_material.opacity` or
+                 * `u_lighting.u_pointLights[3].ambient` — which is exactly what GL reflects, and what
+                 * the renderer passes to `setUniform` for the dotted cases. The shorter aliases the
+                 * renderer also uses (`u_exposure` for `u_present.u_exposure`) are resolved by suffix
+                 * registration at runtime, the same way `UniformBlockSet` already does it.
+                 *
+                 * `members` above stays struct-relative and is the wrong thing to write with.
+                 */
+                flat: flattenLayout(r.type, structs, r.name),
+            };
+        });
+}

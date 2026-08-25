@@ -5,6 +5,8 @@ import { Logger } from '../../core/logger';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
 import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
 import ShadowsChunk from '../shaders/wgsl/shadowsChunk.wgsl';
+import ScreenProgram from '../shaders/wgsl/screen.wgsl';
+import { uniformBlocksOf } from '../rhi/webgpu/wgslReflect';
 
 // The shadow library, GENERATED from chunks/shadows.wgsl at build time rather than read from
 // environment/shadows.glsl. Custom materials are assembled here at runtime and need the library as
@@ -43,7 +45,19 @@ const MAX_SPOTLIGHTS = 8;
 // are not, and leaving them below produced a temporal-dead-zone ReferenceError that surfaced as the
 // whole `cleo` bundle failing to define itself.
 type SamplerType = 'sampler2D' | 'samplerCube' | 'sampler2DArray';
-interface SamplerDecl { name: string; type: SamplerType; comment?: string }
+interface SamplerDecl {
+    name: string;
+    type: SamplerType;
+    comment?: string;
+    /**
+     * The engine binds a DEPTH texture here.
+     *
+     * Invisible to GLSL, which has one `sampler2D` whatever the format; load-bearing on WebGPU, where
+     * a depth texture cannot satisfy a `texture_2d<f32>` binding and the bind group is rejected. naga
+     * cannot know — it is translating GLSL that does not say. See `retypeDepthTextures`.
+     */
+    depth?: true;
+}
 
 /** The Vulkan-GLSL texture type and combined-sampler constructor behind each ES sampler type. */
 const SAMPLER_PARTS: Record<SamplerType, { texture: string; combined: string }> = {
@@ -342,6 +356,32 @@ function declareOutputs(outputs: ValueDecl[]): string {
     return outputs.map((o, i) => `layout(location = ${i}) out ${o.type} ${o.name};${trailingComment(o.comment)}`).join('\n');
 }
 
+/**
+ * A no-op reference to the engine uniform block, so it stays part of the shader INTERFACE.
+ *
+ * A material whose body reads none of the built-ins — plenty do; a tint or a ramp needs no time, no
+ * camera and no sun — produces a module where the block is declared and never used. WebGPU builds its
+ * bind group layout from what the entry point actually REACHES, so the block is dropped, and the engine
+ * (which binds it unconditionally, because the interface is fixed) then hands over a group with one
+ * entry for a layout with none:
+ *
+ *     Number of entries (1) did not match the expected number of entries (0). Expected layout: []
+ *
+ * which invalidates the command buffer and drops the pass. Referencing ONE member is enough — the block
+ * is one binding — and the value is multiplied by zero, so nothing about the picture changes. It is the
+ * same device the magenta fallbacks below use to keep their varyings live.
+ *
+ * Generated from the interface rather than written out, so it cannot name a uniform that is not there.
+ */
+function keepInterfaceAlive(iface: PreludeInterface): string {
+    const first = iface.uniforms[0];
+    if (!first) return 'float _cleoInterface() { return 0.0; }';
+    const scalar = first.type === 'float' ? first.name
+                 : first.type === 'mat4' ? `${first.name}[0][0]`
+                 : `${first.name}.x`;
+    return `float _cleoInterface() { return 0.0 * ${scalar}; }`;
+}
+
 /** Render a whole interface, then the user's uniforms, in the requested dialect. */
 function renderPrelude(iface: PreludeInterface, userUniforms: CustomUniform[], dialect: ShaderDialect): string {
     const engineSamplers = declareSamplers(iface.samplers, dialect, 0, 0);
@@ -356,6 +396,7 @@ function renderPrelude(iface: PreludeInterface, userUniforms: CustomUniform[], d
         iface.body,
         userSamplers.glsl,
         declareUniforms(userValueDecls(userUniforms), dialect, 'CleoUserUniforms', 2),
+        keepInterfaceAlive(iface),
     ].filter(Boolean).join('\n');
 }
 
@@ -370,7 +411,7 @@ const SCREEN_INTERFACE: PreludeInterface = {
     outputs: [{ name: 'fragColor', type: 'vec4' }],
     samplers: [
         { name: 'u_screenTexture', type: 'sampler2D', comment: 'previous pass color (LINEAR HDR — before exposure/ACES/sRGB)' },
-        { name: 'u_depth', type: 'sampler2D', comment: 'opaque scene depth (deferred + forward); 1.0 = sky' },
+        { name: 'u_depth', type: 'sampler2D', depth: true, comment: 'opaque scene depth (deferred + forward); 1.0 = sky' },
     ],
     uniforms: [
         { name: 'u_time', type: 'float', comment: 'seconds' },
@@ -396,8 +437,9 @@ vec3 reconstructWorldPos(vec2 uv, float depth) {
 `,
 };
 
+// `+ _cleoInterface()` adds exactly 0.0 — see keepInterfaceAlive for why it is here at all.
 const SCREEN_EPILOGUE = `
-void main() { fragColor = fragment(); }
+void main() { fragColor = fragment() + _cleoInterface(); }
 `;
 
 const GLSL_TYPE: Record<string, string> = {
@@ -538,6 +580,21 @@ const failed = new Set<string>();               // keys whose user source failed
 const errors = new Map<string, string>();       // last compile error per key
 const fallbackByMode = new Map<CustomRenderMode, ShaderProgram>();
 /**
+ * The translated WGSL per key, and the vertex module its pipeline pairs it with.
+ *
+ * naga translates a FRAGMENT stage — `tryCompileCustom` asks for exactly that — so a custom material's
+ * WGSL is half a program. The other half is not translated at all: a custom material is compiled
+ * against a FIXED engine vertex source (`pbr.vs` / `screen.vs`), whose WGSL twin the engine already
+ * ships. Two modules in one pipeline is what WebGPU wants anyway, and it avoids merging two naga
+ * outputs that would collide on every struct and private-variable name they both invented.
+ *
+ * They line up because the locations do. `chunks/fullscreen.wgsl` emits
+ * `@location(0) uv: vec2<f32>`; naga emits `@fragment fn main(@location(0) fragTexCoord: vec2<f32>)`
+ * from the prelude's first varying. WebGPU matches stages by location and type, never by name.
+ */
+const customWgsl = new Map<string, { fragment: string; vertex: string; vertexEntry: string }>();
+
+/**
  * Keys this DEVICE cannot build a program for at all — neither the user's source nor the magenta
  * fallback. Distinct from `failed`, which means "the user's GLSL is broken, magenta is standing in":
  * there is no program under these keys, so nothing may try to bind one.
@@ -591,6 +648,7 @@ function releaseKey(key: string): void {
     registered.delete(key);
     failed.delete(key);
     unbuildable.delete(key);
+    customWgsl.delete(key);
     errors.delete(key);
 
     // Only free the program if this key was its last registration and it is not a shared fallback.
@@ -699,6 +757,10 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
             label: key,
             vertex: vertexSource(mat.renderMode),
             fragment: assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms),
+            // The WebGPU half. Absent on WebGL2, which reflects a linked program instead, and absent
+            // on WebGPU too when no translator is installed — in which case `createShaderProgram`
+            // refuses by name and the catch below reports a material that cannot run here.
+            ...webgpuHalf(mat, key),
         });
         ShaderManager.Instance.addShader(key, shader);
         registered.add(key);
@@ -730,6 +792,96 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
         failed.add(key);
         return false;
     }
+}
+
+/**
+ * Retype the depth textures in naga's output, and fix up the reads.
+ *
+ * The mirror image of `fixPlainDepthSamplers` in `tools/wgslTranslate.mjs`, which repairs the GENERATED
+ * GLSL for shaders authored in WGSL. This repairs generated WGSL for shaders authored in GLSL, and it
+ * exists for the same reason: GLSL has one `sampler2D` whatever the texture's format, and WGSL has two
+ * incompatible types. naga translates `uniform sampler2D u_depth` to `texture_2d<f32>` because that is
+ * all the GLSL said — and WebGPU then rejects the bind group, because the engine binds the scene depth
+ * buffer there:
+ *
+ *     None of the supported sample types (UnfilterableFloat|Depth) of [Texture] match the expected
+ *     sample types (Float). While validating entries[2] as a Sampled Texture.
+ *
+ * A rejected bind group invalidates the whole command buffer, so the pass does not even clear.
+ *
+ * Two edits, and the second is why this is a wrap rather than a rename. `textureSample` on a
+ * `texture_depth_2d` returns a bare `f32`, but naga generated code that swizzles the `vec4` a float
+ * texture would have given (`.x`, from the user's `texture(u_depth, uv).r`). Wrapping restores the
+ * vec4 — as `(d, 0, 0, 1)`, which is exactly what an ES 3.0 driver hands back for a depth texture, so
+ * a material reading `.g` or `.a` sees the same values it saw on WebGL2.
+ */
+function retypeDepthTextures(wgsl: string, names: readonly string[]): string {
+    let out = wgsl;
+    for (const name of names) {
+        out = out.replace(new RegExp(String.raw`(var\s+${name}_t\s*:\s*)texture_2d<f32>`, 'g'),
+                          '$1texture_depth_2d');
+
+        // Balanced-paren scan rather than a regex: the coordinate expression contains parentheses of
+        // its own, and a lazy `\)` match would close the call after the first of them.
+        for (const fn of ['textureSample', 'textureSampleLevel']) {
+            const open = `${fn}(${name}_t,`;
+            for (let at = out.indexOf(open); at !== -1; at = out.indexOf(open, at + 1)) {
+                let depth = 0, end = -1;
+                for (let i = at + fn.length; i < out.length; i++) {
+                    if (out[i] === '(') depth++;
+                    else if (out[i] === ')' && --depth === 0) { end = i; break; }
+                }
+                if (end === -1) break;   // unbalanced: leave it alone and let the compiler say so
+                const call = out.slice(at, end + 1);
+                const wrapped = `vec4<f32>(${call}, 0.0, 0.0, 1.0)`;
+                out = out.slice(0, at) + wrapped + out.slice(end + 1);
+                at += wrapped.length - call.length;
+            }
+        }
+    }
+    return out;
+}
+
+/**
+ * The build-time-shaped reflection WebGPU needs, derived at runtime.
+ *
+ * Three pieces, from three different places, and none of them guessed:
+ *
+ *   * **the WGSL** — naga, translating the material's VULKAN-dialect GLSL. Editor and harness install
+ *     the translator; a published game gets its WGSL baked at publish time instead.
+ *   * **`vertexInputs`** — copied verbatim off the built-in program whose vertex source this material
+ *     is literally compiled against, so it is the same list rather than a matching one.
+ *   * **`uniformBlocks`** — reflected out of the WGSL naga just produced, by the same
+ *     `tools/wgslLayout.mjs` that lays out every built-in program at build time. See `wgslReflect.ts`.
+ *
+ * Returns `{}` on WebGL2 (which needs none of it) and when there is no translator, which is the honest
+ * answer: without WGSL there is no WebGPU program, and saying so beats fabricating a layout.
+ */
+function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
+        vertexInputs?: readonly { name: string; location: number; type: string }[];
+        uniformBlocks?: readonly unknown[] } {
+    if (device.backend === 'webgl2' || !translator) return {};
+
+    // Screen only, for now, and stated rather than implied. `assembleCustomFragment` already refuses
+    // the other two modes in the vulkan dialect (`vulkanUnsupportedReason`), so this is unreachable
+    // today — but it is the line that would otherwise pair a forward material with the FULLSCREEN
+    // vertex stage the moment that refusal is lifted, and the symptom would be a mesh drawn as a
+    // screen quad rather than an error.
+    if (mat.renderMode !== 'screen') return {};
+
+    const vulkan = assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms, 'vulkan');
+    const wgsl = retypeDepthTextures(translator(vulkan),
+                                     SCREEN_INTERFACE.samplers.filter(s => s.depth).map(s => s.name));
+    const base = ScreenProgram;   // screen.vs's WGSL twin; see `customWgsl`
+    customWgsl.set(key, { fragment: wgsl, vertex: base.wgsl,
+                          vertexEntry: base.entryPoints.vertex ?? 'vs_main' });
+    return { wgsl, vertexInputs: base.vertexInputs, uniformBlocks: uniformBlocksOf(wgsl) };
+}
+
+/** The WGSL a custom material's pipeline compiles, once `ensureCustomShader` has built it. */
+export function customShaderModules(mat: CustomMaterial):
+        { fragment: string; vertex: string; vertexEntry: string } | undefined {
+    return customWgsl.get(mat.type as string);
 }
 
 /**

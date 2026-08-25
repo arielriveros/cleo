@@ -8,7 +8,13 @@
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { findStructs, layoutStruct, flattenLayout } from './wgslLayout.mjs';
+// `findResources` / `findUniformBlocks` live in wgslLayout.mjs so the ENGINE can import them too:
+// a custom material's WGSL arrives at runtime and has to be reflected with the same code that
+// reflects the engine's own at build time. Re-exported here because this module is where every
+// existing caller looks for them.
+import { findStructs, layoutStruct, flattenLayout, findResources, findUniformBlocks,
+         stripLineComments } from './wgslLayout.mjs';
+export { findResources, findUniformBlocks };
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -64,59 +70,6 @@ function structBody(wgsl, name) {
 }
 
 /**
- * Comments removed, both kinds.
- *
- * Resource declarations and struct bodies here are heavily commented, and a comment can hide a
- * declaration — or, for a BLOCK comment inside a struct, be split on its own commas into phantom
- * fields with names taken from the prose.
- */
-function stripLineComments(text) {
-    return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-}
-
-/**
- * Every `@group(G) @binding(B) var ...` a module declares.
- *
- * One scan serving two consumers, which is why it is a function rather than a regex repeated twice:
- * {@link buildRenames} needs it to map naga's mangled identifiers back, and the RHI needs it as
- * REFLECTION — a `BindGroup` has to know that binding 0 of group 0 is the texture the GLSL calls
- * `u_screenTexture`, because the WebGL2 backend satisfies a bind group by assigning a texture unit and
- * setting that sampler uniform by name.
- *
- * `glslName` is the name after a texture/sampler pair collapses. WGSL keeps the two apart; GLSL ES has
- * only combined samplers, so `u_screenTexture_texture` at (0,0) and `u_screenTexture_sampler` at (0,1)
- * are one `uniform sampler2D u_screenTexture`. Both entries therefore report the same `glslName`, and a
- * WebGL2 bind group acts on the texture entry and ignores the sampler one.
- */
-export function findResources(wgsl) {
-    const source = stripLineComments(wgsl);
-    const resource = /@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<([^>]*)>)?\s+([A-Za-z_]\w*)\s*:\s*([^;]+);/g;
-    const found = [];
-    for (const m of source.matchAll(resource)) {
-        const [, group, binding, addressSpace, name, rawType] = m;
-        const type = rawType.trim().replace(/\s+/g, ' ');
-        const space = (addressSpace || '').trim();
-
-        let kind;
-        if (/\buniform\b/.test(space)) kind = 'uniform';
-        else if (/\bstorage\b/.test(space)) kind = 'storage';
-        else if (/^sampler(_comparison)?$/.test(type)) kind = 'sampler';
-        else if (/^texture_/.test(type)) kind = 'texture';
-        else kind = 'other';
-
-        found.push({
-            group: Number(group),
-            binding: Number(binding),
-            name,
-            kind,
-            type,
-            glslName: name.replace(/_(texture|sampler)$/, ''),
-        });
-    }
-    return found;
-}
-
-/**
  * The vertex stage's `@location(N) name: type` inputs, as ATTRIBUTES the engine can name.
  *
  * WebGL2 gets this by reflecting the linked program (`getActiveAttrib`); WebGPU has no such call, and
@@ -153,38 +106,6 @@ export function findVertexInputs(wgsl) {
  * stride and matrix stride computed here against what a real driver reports for the same block, across
  * every program in the engine. Where they disagree, the driver is right.
  */
-export function findUniformBlocks(wgsl) {
-    const structs = findStructs(wgsl);
-    return findResources(wgsl)
-        .filter(r => r.kind === 'uniform')
-        .map((r) => {
-            const members = structs.get(r.type);
-            if (!members) return { group: r.group, binding: r.binding, name: r.name, struct: r.type, members: [], size: 0 };
-            const laid = layoutStruct(members, structs);
-            return {
-                group: r.group,
-                binding: r.binding,
-                name: r.name,
-                struct: r.type,
-                /** Bytes the whole block occupies, which is the uniform buffer's size. */
-                size: laid.size,
-                members: laid.members,
-                /**
-                 * Every writable leaf by full path, with the offset from the start of the BLOCK.
-                 *
-                 * Rooted at the VAR's name, so a path reads `u_material.opacity` or
-                 * `u_lighting.u_pointLights[3].ambient` — which is exactly what GL reflects, and what
-                 * the renderer passes to `setUniform` for the dotted cases. The shorter aliases the
-                 * renderer also uses (`u_exposure` for `u_present.u_exposure`) are resolved by suffix
-                 * registration at runtime, the same way `UniformBlockSet` already does it.
-                 *
-                 * `members` above stays struct-relative and is the wrong thing to write with.
-                 */
-                flat: flattenLayout(r.type, structs, r.name),
-            };
-        });
-}
-
 /**
  * naga's generated identifiers, mapped back to names this engine can use.
  *

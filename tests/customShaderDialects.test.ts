@@ -75,7 +75,19 @@ describe('assembleCustomFragment — ES 300 (WebGL2)', () => {
 
         expect(source).toContain('in vec2 fragTexCoord;');
         expect(source).toContain('layout(location = 0) out vec4 fragColor;');
-        expect(source).toContain('void main() { fragColor = fragment(); }');
+        expect(source).toContain('void main() { fragColor = fragment() + _cleoInterface(); }');
+    });
+
+    // The keep-alive is not decoration: a material whose body reads no built-in produces a WGSL module
+    // where the engine uniform block is declared and never reached, WebGPU drops it from the pipeline's
+    // bind group layout, and the engine's unconditional bind of that group then invalidates the whole
+    // command buffer. Both dialects carry it so the two preludes stay the same shape.
+    it('keeps the engine uniform block alive in the shader interface', () => {
+        for (const dialect of ['es300', 'vulkan'] as const) {
+            const built = assembleCustomFragment('screen', 'vec4 fragment() { return vec4(1.0); }', [],
+                                                 dialect);
+            expect(built, dialect).toContain('float _cleoInterface() { return 0.0 * u_time; }');
+        }
     });
 
     it('declares the user uniforms as loose uniforms, prefixed', () => {
