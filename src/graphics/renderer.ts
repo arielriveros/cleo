@@ -5435,8 +5435,15 @@ export class Renderer {
             if (mat instanceof CustomMaterial) {
                 if (!viaRHI) { this._applyCustomMaterial(mat); return false; }
                 this._applyCustomMaterial(mat, true);
-                const customPipeline = this._pipelineFor(shaderType,
-                    { resources: customShaderResources('forward', mat.uniforms) }, {
+                // See `_screenMaterialsPass`. Absent on WebGL2 and for a material that could not
+                // translate; group 3 (the shadow maps) is bound below as for any lit program.
+                const customWgsl = customShaderModules(mat);
+                const customPipeline = this._pipelineFor(shaderType, {
+                    resources: customShaderResources('forward', mat.uniforms),
+                    ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
+                                       vertexWgsl: { wgsl: customWgsl.vertex,
+                                                     entryPoint: customWgsl.vertexEntry } } : {}),
+                }, {
                     cullMode: Renderer._cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: this._forwardDepthWrite,
                                     depthCompare: 'less-equal' },
@@ -6020,13 +6027,10 @@ export class Renderer {
      * A material that failed to compile renders the magenta fallback (registered by ensureCustomShader).
      */
     /**
-     * These programs are compiled at RUNTIME from a user's GLSL, so there is no build-time reflection
-     * to hand `_pipelineFor`. Screen mode has the next best thing: its prelude is GENERATED from an
-     * interface description, so `screenShaderResources` can derive the identical group 0 from the same
-     * data — one source of truth, two renderings of it, no ordering to keep in step by hand.
-     *
-     * The forward and deferred custom preludes are still hand-written template strings with nothing to
-     * reflect, so `_applyCustomMaterial` keeps binding their samplers by unit.
+     * These programs are compiled at RUNTIME from a user's GLSL, so there is no build-time reflection to
+     * hand `_pipelineFor`. Every prelude is now GENERATED from an interface description instead, so
+     * `customShaderResources` derives the identical group 0 from the same data — one source of truth,
+     * two renderings of it, no ordering to keep in step by hand.
      */
     private _screenMaterialsPass(scene: Scene): void {
         const mats = scene.activeCamera?.screenMaterials;

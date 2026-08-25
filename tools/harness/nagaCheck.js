@@ -82,10 +82,15 @@ app.whenReady().then(async () => {
   check('its WGSL looks like WGSL', /(@fragment|struct|var<)/.test(r.screenGood.wgslHead || ''),
         (r.screenGood.wgslHead || '').slice(0, 120));
 
-  check('a forward material compiles but reports no WebGPU support', r.forward.ok && !r.forward.hasWgsl && !!r.forward.wgslError,
+  // The lit modes. Both used to be refused here with an engine-limitation message; both translate now,
+  // and these check the two things that made forward the last one — its lights arriving as struct
+  // members of a bound block, and the shadow library's comparison samplers surviving the split.
+  check('a lit forward material compiles and translates', r.forward.ok && r.forward.hasWgsl,
         JSON.stringify(r.forward).slice(0, 300));
-  check('and says why, in terms of the engine', /cannot be checked for WebGPU yet/.test(r.forward.wgslError || ''),
-        r.forward.wgslError);
+  check('its lights came through as WGSL structs', /struct DirectionalLight/.test(r.forward.wgslHead || ''),
+        (r.forward.wgslHead || '').slice(0, 160));
+  check('a deferred material compiles and translates', r.deferred.ok && r.deferred.hasWgsl,
+        JSON.stringify(r.deferred).slice(0, 300));
 
   // Whichever way this one lands it must not be reported as a compile failure — that is the distinction
   // the whole two-verdict return shape exists to preserve.

@@ -78,15 +78,26 @@ describe('assembleCustomFragment — ES 300 (WebGL2)', () => {
         expect(source).toContain('void main() { fragColor = fragment() + _cleoInterface(); }');
     });
 
-    // The keep-alive is not decoration: a material whose body reads no built-in produces a WGSL module
-    // where the engine uniform block is declared and never reached, WebGPU drops it from the pipeline's
-    // bind group layout, and the engine's unconditional bind of that group then invalidates the whole
-    // command buffer. Both dialects carry it so the two preludes stay the same shape.
-    it('keeps the engine uniform block alive in the shader interface', () => {
+    // The keep-alive is not decoration: WebGPU builds a pipeline's bind group layout from what the
+    // entry point REACHES, and the engine binds a fixed interface whether or not a material reads it.
+    // A material that touches none of it gets a layout the engine's bind group is too long for, which
+    // invalidates the whole command buffer. Both dialects carry it so the preludes stay the same shape.
+    it('keeps every bound resource alive in the shader interface', () => {
         for (const dialect of ['es300', 'vulkan'] as const) {
-            const built = assembleCustomFragment('screen', 'vec4 fragment() { return vec4(1.0); }', [],
-                                                 dialect);
-            expect(built, dialect).toContain('float _cleoInterface() { return 0.0 * u_time; }');
+            const screen = assembleCustomFragment('screen', 'vec4 fragment() { return vec4(1.0); }',
+                                                  [{ name: 'mask', type: 'sampler2D', value: '' }] as any,
+                                                  dialect);
+            expect(screen, dialect).toContain('float _cleoInterface() { return 0.0 * (u_time');
+            // Both engine samplers AND the user's, because the engine binds all three unconditionally.
+            for (const name of ['u_screenTexture', 'u_depth', 'u_mask'])
+                expect(screen, `${dialect} ${name}`).toContain(`texture(${name}, vec2(0.0)).r`);
+
+            // Forward adds the environment cube and the spot shadows — the shadow library binds four
+            // group-3 entries and `shadowCalculation()` reaches only the two cascade ones.
+            const forward = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }',
+                                                   [], dialect);
+            expect(forward, dialect).toContain('texture(u_envMap, vec3(0.0, 0.0, 1.0)).r');
+            expect(forward, dialect).toContain('spotShadowFor(0, fragPos, getNormal(), fragPos)');
         }
     });
 
@@ -107,7 +118,7 @@ describe('assembleCustomFragment — ES 300 (WebGL2)', () => {
         const forward = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', []);
         expect(forward).toContain('#version 300 es');
         expect(forward).toContain('shadowCalculation');
-        expect(forward).toContain('fragColor = fragment();');
+        expect(forward).toContain('fragColor = fragment() + _cleoInterface();');
 
         const deferred = assembleCustomFragment('deferred', 'void surface(inout Surface s) { s.ao = 1.0; }', []);
         expect(deferred).toContain('layout(location = 2) out vec4 gEmissiveAO;');
@@ -181,6 +192,60 @@ describe('assembleCustomFragment — Vulkan (naga)', () => {
         expect(wgsl).toContain('@fragment');
     });
 
+    // The assertion the whole forward port exists for: a realistic LIT material — one that reads the
+    // lights, calls the shadow helper and samples the environment cube — translates end to end. Every
+    // structural check above is a means to this one, and naga is the only judge that counts.
+    it('translates a realistic forward material all the way to WGSL', () => {
+        const body = `
+vec4 fragment() {
+    vec3 N = getNormal();
+    vec3 V = normalize(u_viewPos - fragPos);
+    vec3 Lo = vec3(0.0);
+    accumulateLight(N, V, u_tint, 0.0, u_rough, -u_dirLight.direction, u_dirLight.diffuse, Lo);
+    for (int i = 0; i < u_numPointLights; ++i) {
+        vec3 d = u_pointLights[i].position - fragPos;
+        accumulateLight(N, V, u_tint, 0.0, u_rough, normalize(d), u_pointLights[i].diffuse, Lo);
+    }
+    for (int i = 0; i < u_numSpotlights; ++i)
+        Lo += u_spotlights[i].ambient * u_spotlights[i].cutOff;
+    Lo *= 1.0 - shadowCalculation() * 0.5;
+    if (u_useEnvMap) Lo += texture(u_envMap, reflect(-V, N)).rgb * 0.1;
+    return vec4(Lo * texture(u_mask, fragTexCoord).r, 1.0);
+}
+`;
+        const uniforms = [
+            { name: 'tint', type: 'vec3', value: [1, 1, 1] },
+            { name: 'rough', type: 'float', value: 0.5 },
+            { name: 'mask', type: 'sampler2D', value: '' },
+        ] as any;
+        const wgsl = glslToWgsl(assembleCustomFragment('forward', body, uniforms, 'vulkan'), 'fragment');
+        expect(wgsl).toContain('@fragment');
+        expect(wgsl).toContain('struct CleoEngineUniforms');
+        expect(wgsl).toContain('struct DirectionalLight');
+        expect(wgsl).toContain('texture_depth_2d_array');   // the shadow cascades survived the split
+        expect(wgsl).toContain('sampler_comparison');
+    });
+
+    it('translates a realistic deferred material all the way to WGSL', () => {
+        const body = `
+void surface(inout Surface s) {
+    s.albedo = u_tint * texture(u_mask, fragTexCoord).rgb;
+    s.normal = getNormal();
+    s.roughness = u_rough;
+    s.emissive = vec3(0.0, 0.0, sin(u_time));
+}
+`;
+        const uniforms = [
+            { name: 'tint', type: 'vec3', value: [1, 1, 1] },
+            { name: 'rough', type: 'float', value: 0.5 },
+            { name: 'mask', type: 'sampler2D', value: '' },
+        ] as any;
+        const wgsl = glslToWgsl(assembleCustomFragment('deferred', body, uniforms, 'vulkan'), 'fragment');
+        expect(wgsl).toContain('@fragment');
+        expect(wgsl).toContain('struct CleoEngineUniforms');
+        expect(wgsl).toContain('@location(2)');   // three G-buffer outputs
+    });
+
     it('translates a material with no user uniforms at all', () => {
         // The empty-block case: `uniform CleoUserUniforms { };` is a syntax error, so it must be omitted.
         const bare = assembleCustomFragment('screen', 'vec4 fragment() { return vec4(u_time); }', [], 'vulkan');
@@ -195,20 +260,15 @@ describe('assembleCustomFragment — Vulkan (naga)', () => {
         expect(() => glslToWgsl(only, 'fragment')).not.toThrow();
     });
 
-    it('refuses FORWARD with a reason aimed at the engine, not the user', () => {
-        expect(vulkanUnsupportedReason('forward')).toBeTruthy();
-        expect(() => assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', [], 'vulkan'))
-            .toThrow(/cannot be checked for WebGPU yet/);
-    });
-
-    // Deferred moved from "refused" to "translates" when its prelude became an interface description
-    // rather than a template string: nothing about its CONTENT was ever Vulkan-hostile, only its form —
-    // an ES version header, loose uniforms, and varyings with no explicit location.
-    it('translates screen and deferred', () => {
-        for (const mode of ['screen', 'deferred'] as const) {
+    // Deferred and then forward moved from "refused" to "translates" as their preludes became interface
+    // descriptions rather than template strings. Nothing about their CONTENT was Vulkan-hostile; it was
+    // an ES version header, loose uniforms, varyings with no explicit location, an inline
+    // `uniform struct` and a shadow library generated as GLSL ES.
+    it('translates every render mode', () => {
+        for (const mode of ['screen', 'deferred', 'forward'] as const) {
             expect(vulkanUnsupportedReason(mode), mode).toBeNull();
-            const body = mode === 'screen' ? 'vec4 fragment() { return vec4(1.0); }'
-                                           : 'void surface(inout Surface s) { s.albedo = vec3(1.0); }';
+            const body = mode === 'deferred' ? 'void surface(inout Surface s) { s.albedo = vec3(1.0); }'
+                                             : 'vec4 fragment() { return vec4(1.0); }';
             const built = assembleCustomFragment(mode, body, [], 'vulkan');
             expect(built, mode).toContain('#version 450');
             expect(built, mode).not.toContain('precision highp float');
@@ -216,13 +276,46 @@ describe('assembleCustomFragment — Vulkan (naga)', () => {
         }
     });
 
-    // The deferred varyings must be numbered exactly as chunks/modelVarying.wgsl numbers them, because
-    // that is the vertex stage the WebGPU pipeline pairs this fragment stage with and the two are
-    // matched by LOCATION. ES 300 links by name, so nothing there would notice a reordering.
+    // The lit varyings must be numbered exactly as chunks/modelVarying.wgsl numbers them, because that
+    // is the vertex stage the WebGPU pipeline pairs this fragment stage with and the two are matched by
+    // LOCATION. ES 300 links by name, so nothing there would notice a reordering.
     it('numbers the lit varyings as the model vertex stage does', () => {
-        const built = assembleCustomFragment('deferred', 'void surface(inout Surface s) {}', [], 'vulkan');
-        for (const [location, name] of [[0, 'fragPos'], [1, 'fragTexCoord'], [2, 'fragTangent'],
-                                        [3, 'fragBitangent'], [4, 'fragNormal']] as const)
-            expect(built, name).toContain(`layout(location = ${location}) in vec${name === 'fragTexCoord' ? 2 : 3} ${name};`);
+        for (const mode of ['deferred', 'forward'] as const) {
+            const body = mode === 'deferred' ? 'void surface(inout Surface s) {}'
+                                             : 'vec4 fragment() { return vec4(1.0); }';
+            const built = assembleCustomFragment(mode, body, [], 'vulkan');
+            for (const [location, name, type] of [[0, 'fragPos', 'vec3'], [1, 'fragTexCoord', 'vec2'],
+                                                  [2, 'fragTangent', 'vec3'], [3, 'fragBitangent', 'vec3'],
+                                                  [4, 'fragNormal', 'vec3']] as const)
+                expect(built, `${mode} ${name}`)
+                    .toContain(`layout(location = ${location}) in ${type} ${name};`);
+        }
+    });
+
+    // The three things that used to make FORWARD untranslatable, each checked where it now lands.
+    it('carries the lights as block members, not as loose struct uniforms', () => {
+        const built = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', [],
+                                             'vulkan');
+        expect(built).not.toContain('uniform struct');
+        expect(built).toContain('struct DirectionalLight {');
+        expect(built).toContain('    DirectionalLight u_dirLight;');
+        // A literal length, not MAX_POINT_LIGHTS: a block member's array size has to be a constant
+        // expression already in scope, and the constants are rendered after the uniforms.
+        expect(built).toContain('    PointLight u_pointLights[16];');
+        expect(built).toContain('    SpotLight u_spotlights[8];');
+    });
+
+    it('gives the shadow library explicit bindings and splits its comparison samplers', () => {
+        const built = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', [],
+                                             'vulkan');
+        expect(built).not.toMatch(/uniform\s+highp\s+sampler2DArrayShadow/);
+        expect(built).toContain('uniform texture2DArray u_shadowCascades_t;');
+        expect(built).toContain('uniform samplerShadow u_shadowCascades_s;');
+        expect(built).toContain('#define u_shadowCascades sampler2DArrayShadow(u_shadowCascades_t, u_shadowCascades_s)');
+        expect(built).toMatch(/layout\(std140, set = \d+, binding = \d+\) uniform/);
+        // The ES form is untouched — it is what WebGL2 has always compiled.
+        const es = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', []);
+        expect(es).toMatch(/uniform\s+highp\s+sampler2DArrayShadow\s+u_shadowCascades;/);
+        expect(es).toContain('layout(std140) uniform');
     });
 });

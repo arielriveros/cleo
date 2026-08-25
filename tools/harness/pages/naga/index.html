@@ -59,8 +59,24 @@ vec4 fragment() {
     window.__results = () => ({
       // Compiles AND translates: the state a portable custom material should reach.
       screenGood: slim(cleo.tryCompileCustom('screen', good, screenUniforms)),
-      // Compiles on WebGL2, cannot be checked for WebGPU — the engine's own limitation, reported as such.
-      forward: slim(cleo.tryCompileCustom('forward', 'vec4 fragment() { return vec4(getNormal(), 1.0); }', [])),
+      // A LIT material, reading the lights, taking a shadow and sampling the environment cube — the
+      // three things the forward prelude carries that the screen one does not. It used to be here to
+      // prove the engine refused it politely; it is here now to prove it translates.
+      forward: slim(cleo.tryCompileCustom('forward', [
+        'vec4 fragment() {',
+        '    vec3 N = getNormal();',
+        '    vec3 V = normalize(u_viewPos - fragPos);',
+        '    vec3 Lo = u_dirLight.diffuse * max(dot(N, -u_dirLight.direction), 0.0);',
+        '    for (int i = 0; i < u_numPointLights; ++i)',
+        '        Lo += u_pointLights[i].diffuse / max(u_pointLights[i].constant, 1.0);',
+        '    Lo *= 1.0 - shadowCalculation() * 0.5;',
+        '    if (u_useEnvMap) Lo += texture(u_envMap, reflect(-V, N)).rgb * 0.1;',
+        '    return vec4(Lo, 1.0);',
+        '}',
+      ].join(String.fromCharCode(10)), [])),
+      // The G-buffer mode, whose prelude was the second of the three to become an interface.
+      deferred: slim(cleo.tryCompileCustom('deferred',
+        'void surface(inout Surface s) { s.albedo = vec3(0.5); s.normal = getNormal(); }', [])),
       // Compiles on WebGL2, fails naga: a `while` with a non-constant bound is fine in GLSL ES and is
       // what a real portability warning looks like.
       screenOdd: slim(cleo.tryCompileCustom('screen',

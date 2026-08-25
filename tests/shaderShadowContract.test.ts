@@ -102,7 +102,12 @@ describe('the generated GLSL chunk stays pasteable', () => {
         const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'systems', 'customShaders.ts'), 'utf-8');
         expect(src).toContain("from '../shaders/wgsl/shadowsChunk.wgsl'");
         expect(src).toContain('ShadowsChunk.glslChunk');
-        expect(src).toContain('${SHADOWS_SRC}');
+        // Pasted in BOTH dialects: verbatim for ES 300, and through `vulkanShadowLibrary` for Vulkan,
+        // which rewrites the three ES-only lines (two combined shadow samplers and an unbound block)
+        // using the chunk's OWN reflection rather than a second copy of its binding numbers.
+        expect(src).toContain('SHADOWS_SRC');
+        expect(src).toContain('vulkanShadowLibrary()');
+        expect(src).toContain('ShadowsChunk.resources');
     });
 });
 

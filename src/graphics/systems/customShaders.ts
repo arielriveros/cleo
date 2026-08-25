@@ -7,6 +7,7 @@ import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
 import ShadowsChunk from '../shaders/wgsl/shadowsChunk.wgsl';
 import ScreenProgram from '../shaders/wgsl/screen.wgsl';
 import GeometryPBRProgram from '../shaders/wgsl/geometryPBR.wgsl';
+import PBRProgram from '../shaders/wgsl/pbr.wgsl';
 import { uniformBlocksOf } from '../rhi/webgpu/wgslReflect';
 
 // The shadow library, GENERATED from chunks/shadows.wgsl at build time rather than read from
@@ -40,12 +41,12 @@ const MAX_SPOTLIGHTS = 8;
 
 // --- sampler declaration primitives -------------------------------------------------------------
 //
-// Above the preludes because the preludes CALL them: the forward prelude generates its one engine
-// sampler line from FORWARD_ENGINE_SAMPLERS through `declareSamplers`, and that happens while this
-// module is still evaluating. A hoisted function declaration is fine there; the consts it reaches for
-// are not, and leaving them below produced a temporal-dead-zone ReferenceError that surfaced as the
-// whole `cleo` bundle failing to define itself.
-type SamplerType = 'sampler2D' | 'samplerCube' | 'sampler2DArray';
+// Above the interfaces because the interfaces reach for them while this module is still evaluating —
+// `COMMON_BODY` interpolates the light-count constants, and `vulkanShadowLibrary` reads SAMPLER_PARTS.
+// A hoisted function declaration is fine there; the consts it reaches for are not, and leaving them
+// below produced a temporal-dead-zone ReferenceError that surfaced as the whole `cleo` bundle failing
+// to define itself.
+type SamplerType = 'sampler2D' | 'samplerCube' | 'sampler2DArray' | 'sampler2DArrayShadow';
 interface SamplerDecl {
     name: string;
     type: SamplerType;
@@ -60,11 +61,20 @@ interface SamplerDecl {
     depth?: true;
 }
 
-/** The Vulkan-GLSL texture type and combined-sampler constructor behind each ES sampler type. */
-const SAMPLER_PARTS: Record<SamplerType, { texture: string; combined: string }> = {
-    sampler2D: { texture: 'texture2D', combined: 'sampler2D' },
-    samplerCube: { texture: 'textureCube', combined: 'samplerCube' },
-    sampler2DArray: { texture: 'texture2DArray', combined: 'sampler2DArray' },
+/**
+ * The Vulkan-GLSL texture type, sampler type and combined-sampler constructor behind each ES type.
+ *
+ * `sampler` is `sampler` for everything but a SHADOW sampler, which takes `samplerShadow` — a
+ * comparison sampler is a different object, and pairing one with a plain `sampler` is not a program
+ * that links. The shadow entries are here rather than beside the library that uses them because this
+ * is the one table that says how an ES combined sampler splits.
+ */
+const SAMPLER_PARTS: Record<SamplerType, { texture: string; combined: string; sampler: string }> = {
+    sampler2D: { texture: 'texture2D', combined: 'sampler2D', sampler: 'sampler' },
+    samplerCube: { texture: 'textureCube', combined: 'samplerCube', sampler: 'sampler' },
+    sampler2DArray: { texture: 'texture2DArray', combined: 'sampler2DArray', sampler: 'sampler' },
+    sampler2DArrayShadow: { texture: 'texture2DArray', combined: 'sampler2DArrayShadow',
+                            sampler: 'samplerShadow' },
 };
 
 
@@ -134,20 +144,6 @@ vec3 toSrgb(vec3 c)   { return pow(c, vec3(1.0 / 2.2)); }
 vec3 getNormal() { return normalize(TBN[2]); }
 `;
 
-/** Shared header: version, precision, varyings (from pbr.vs), color-space + light-count constants. */
-/**
- * Shared ES-300 header, GENERATED from the same three lists the deferred interface uses.
- *
- * It used to be a template string with its own copy of the varyings, the built-in uniforms and the
- * helpers. Two copies of a prelude is the failure this file already warns about — one gains a built-in,
- * the other does not, and a user's material fails for a reason they did not cause. Only the FORWARD
- * prelude still reads this; screen and deferred go through `renderPrelude` in both dialects.
- */
-const COMMON_HEADER = `${versionHeader('es300')}
-${declareVaryings(COMMON_VARYINGS, 'es300')}
-${declareUniforms(COMMON_UNIFORMS, 'es300', 'CleoEngineUniforms', LIT_ENGINE_BLOCK)}
-${COMMON_BODY}`;
-
 /**
  * The forward prelude's engine samplers, as data.
  *
@@ -160,19 +156,69 @@ const FORWARD_ENGINE_SAMPLERS: SamplerDecl[] = [
     { name: 'u_envMap', type: 'samplerCube' },
 ];
 
-/** Lighting block (structs, uniforms, PBR/shadow helpers) — verbatim from pbr.fs, minus the u_material struct. */
-const LIGHTING_BLOCK = `
-uniform bool u_isTransparent;
-uniform int u_numPointLights;
-uniform int u_numSpotlights;
-uniform mat4 u_view;    // only to get the view-space depth that selects a cascade
+/**
+ * The shadow library, in Vulkan GLSL.
+ *
+ * `SHADOWS_SRC` is generated from `shadowsChunk.wgsl` as GLSL **ES**, which is the dialect the forward
+ * prelude has always pasted. Three lines of it are ES-only, and they are the only three — a dump of the
+ * generated chunk has no `#extension`, no `#version`, and no `precision` qualifier anywhere except on
+ * the two sampler declarations:
+ *
+ *     uniform highp sampler2DArrayShadow u_shadowCascades;
+ *     uniform highp sampler2DArrayShadow u_spotShadows;
+ *     layout(std140) uniform ShadowUniforms_block_0Fragment { ShadowUniforms u_shadow; };
+ *
+ * So this is a transform rather than a second generated chunk. That matters twice over: there is no
+ * Rust toolchain on this machine, so `npm run naga:build` cannot run and the vendored artifact emits
+ * ES 300 only; and a second copy of a 14 KB chunk would ship in every bundle to serve the editor.
+ *
+ * The bindings are NOT written here. They come from `shadowsChunk.wgsl`'s own reflection — the same
+ * list `customShaderResources` hands the RHI for group 3 — so the declaration the shader compiles and
+ * the bind group the engine builds cannot disagree about which texture is which.
+ */
+function vulkanShadowLibrary(): string {
+    let out = SHADOWS_SRC;
 
-uniform struct DirectionalLight {
+    // Each texture in group 3, with its comparison sampler at binding+1. `glslName` is the combined
+    // name the generated ES source uses, which is exactly the identifier being replaced.
+    for (const r of ShadowsChunk.resources) {
+        if (r.kind !== 'texture' || r.group !== 3) continue;
+        const parts = SAMPLER_PARTS['sampler2DArrayShadow'];
+        const combined = new RegExp(
+            String.raw`uniform\s+(?:highp|mediump|lowp)?\s*\w+\s+${r.glslName}\s*;`, 'g');
+        out = out.replace(combined,
+            `layout(set = ${r.group}, binding = ${r.binding}) uniform ${parts.texture} ${r.glslName}_t;` + NL +
+            `layout(set = ${r.group}, binding = ${r.binding + 1}) uniform ${parts.sampler} ${r.glslName}_s;` + NL +
+            `#define ${r.glslName} ${parts.combined}(${r.glslName}_t, ${r.glslName}_s)`);
+    }
+
+    // The library's own uniform block. naga emits it with `layout(std140)` and no set/binding, which
+    // Vulkan GLSL rejects ("uniform/buffer blocks require layout(binding=X)").
+    for (const r of ShadowsChunk.resources) {
+        if (r.kind !== 'uniform') continue;
+        out = out.replace(/layout\(std140\)\s+uniform\s+(\w+)/g,
+                          `layout(std140, set = ${r.group}, binding = ${r.binding}) uniform $1`);
+    }
+
+    return out;
+}
+
+/**
+ * The light structs, declared as TYPES so the uniform block below can have members of them.
+ *
+ * `DirectionalLight` used to be declared inline as `uniform struct DirectionalLight {…} u_dirLight;`.
+ * That is legal GLSL ES and is exactly what Vulkan GLSL refuses — a loose uniform of struct type — so
+ * the definition and the declaration are now separate, which is what lets `u_dirLight` become a member
+ * of `CleoEngineUniforms` alongside everything else. The struct BODIES are unchanged, so every material
+ * that reads `u_dirLight.diffuse` or `u_pointLights[i].constant` keeps working.
+ */
+const LIGHT_STRUCTS = `
+struct DirectionalLight {
     vec3 direction;
     vec3 ambient;
     vec3 diffuse;
     vec3 specular;
-} u_dirLight;
+};
 
 struct PointLight {
     vec3 position;
@@ -196,15 +242,24 @@ struct SpotLight {
     float cutOff;      // cosine of the inner half-angle
     float outerCutOff; // cosine of the outer half-angle (smaller than cutOff)
 };
+`;
 
-uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
-uniform SpotLight  u_spotlights[MAX_SPOTLIGHTS];
+/** The lighting inputs, as data. Loose uniforms under ES, members of one bound block under Vulkan. */
+const LIGHTING_UNIFORMS: ValueDecl[] = [
+    { name: 'u_isTransparent', type: 'bool' },
+    { name: 'u_numPointLights', type: 'int' },
+    { name: 'u_numSpotlights', type: 'int' },
+    { name: 'u_view', type: 'mat4', comment: 'only to get the view-space depth that selects a cascade' },
+    { name: 'u_dirLight', type: 'DirectionalLight' },
+    { name: 'u_pointLights', type: 'PointLight', array: MAX_POINT_LIGHTS },
+    { name: 'u_spotlights', type: 'SpotLight', array: MAX_SPOTLIGHTS },
+    { name: 'u_useEnvMap', type: 'bool' },
+    { name: 'u_envMapLinear', type: 'bool', comment: 'true when u_envMap is a linear HDR probe cube (skip the sRGB decode)' },
+];
 
-uniform bool u_useEnvMap;
-${declareSamplers(FORWARD_ENGINE_SAMPLERS, 'es300', 0, 0).glsl}
-uniform bool u_envMapLinear;   // true when u_envMap is a linear HDR probe cube (skip the sRGB decode)
-
-${SHADOWS_SRC}
+/** PBR helpers, the shadow library and the two shadow entry points custom materials call. */
+const LIGHTING_BODY = (dialect: ShaderDialect) => `
+${dialect === 'vulkan' ? vulkanShadowLibrary() : SHADOWS_SRC}
 
 /** View-space depth of this fragment — what picks a cascade. */
 float cleoViewDepth() { return -(u_view * vec4(fragPos, 1.0)).z; }
@@ -252,16 +307,33 @@ void accumulateLight(vec3 N, vec3 V, vec3 albedo, float metallic, float roughnes
 }
 `;
 
-/** Forward prelude: user writes `vec4 fragment()` returning final LINEAR-HDR color. */
-const FORWARD_PRELUDE = `${COMMON_HEADER}${LIGHTING_BLOCK}
-layout(location = 0) out vec4 fragColor;
-`;
+/**
+ * Forward prelude: user writes `vec4 fragment()` returning final LINEAR-HDR color.
+ *
+ * The last of the three to become an interface description, and the one that needed the machinery: an
+ * inline `uniform struct`, two ARRAYS of structs, and a pasted shadow library generated as GLSL ES.
+ * See LIGHT_STRUCTS, `ValueDecl.array` and `vulkanShadowLibrary` respectively.
+ */
+const FORWARD_INTERFACE: PreludeInterface = {
+    varyings: COMMON_VARYINGS,
+    outputs: [{ name: 'fragColor', type: 'vec4' }],
+    samplers: FORWARD_ENGINE_SAMPLERS,
+    uniforms: [...COMMON_UNIFORMS, ...LIGHTING_UNIFORMS],
+    engineBlock: LIT_ENGINE_BLOCK,
+    userBlock: LIT_USER_BLOCK,
+    structs: LIGHT_STRUCTS,
+    // The shadow library binds FOUR group-3 entries, and `shadowCalculation()` reaches only the two
+    // cascade ones. `spotShadowFor` is what touches the other pair; without this, any material that
+    // takes a shadow but no spot shadow gets a two-entry layout for the engine's four-entry group.
+    keepAlive: 'spotShadowFor(0, fragPos, getNormal(), fragPos)',
+    body: (dialect) => COMMON_BODY + LIGHTING_BODY(dialect),
+};
 
 const FORWARD_EPILOGUE = `
 void main() {
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
     cleoFragCoord = gl_FragCoord.xy;
-    fragColor = fragment();
+    fragColor = fragment() + _cleoInterface();   // see keepInterfaceAlive
 }
 `;
 
@@ -352,7 +424,20 @@ export type ShaderDialect = 'es300' | 'vulkan';
 
 
 /** The Vulkan-GLSL texture type and combined-sampler constructor behind each ES sampler type. */
-interface ValueDecl { name: string; type: string; comment?: string }
+interface ValueDecl {
+    name: string;
+    type: string;
+    /**
+     * Array length, for a uniform declared as `T name[N]`.
+     *
+     * A literal rather than the `MAX_POINT_LIGHTS` constant the ES prelude has always written, because
+     * a Vulkan block member's array size must be a constant expression already in scope, and the
+     * constants live in the interface's BODY, which `renderPrelude` emits after the uniforms. The
+     * constant is still declared, for the user's own source to reference.
+     */
+    array?: number;
+    comment?: string;
+}
 
 /**
  * Where a uniform block lands, as (group, binding).
@@ -377,8 +462,27 @@ interface PreludeInterface {
     userBlock: BlockSlot;
     /** Fragment outputs, in location order. Identical in both dialects. */
     outputs: ValueDecl[];
-    /** Constants and helper functions — plain GLSL, valid as-is under both dialects. */
-    body: string;
+    /**
+     * Struct TYPE definitions, emitted before the uniform block that uses them.
+     *
+     * Separate from `body` because ordering is not free: a Vulkan block member of type `PointLight`
+     * needs `PointLight` already declared, and `body` is rendered after the uniforms so that user
+     * helpers can reference them. Identical in both dialects — a plain `struct` is plain GLSL.
+     */
+    structs?: string;
+    /**
+     * A GLSL float expression naming anything the interface's pasted BODY binds that no list here
+     * describes. Folded into `_cleoInterface` — see {@link keepInterfaceAlive}.
+     */
+    keepAlive?: string;
+    /**
+     * Constants and helper functions.
+     *
+     * A function of the dialect rather than a string, because the forward prelude pastes the shadow
+     * library and that library is GENERATED as GLSL ES — its samplers are combined and its uniform
+     * block carries no set/binding. See `vulkanShadowLibrary`.
+     */
+    body: string | ((dialect: ShaderDialect) => string);
 }
 
 
@@ -405,25 +509,28 @@ function declareSamplers(samplers: SamplerDecl[], dialect: ShaderDialect, group:
     for (const s of samplers) {
         const parts = SAMPLER_PARTS[s.type];
         lines.push(`layout(set = ${group}, binding = ${binding}) uniform ${parts.texture} ${s.name}_t;${trailingComment(s.comment)}`);
-        lines.push(`layout(set = ${group}, binding = ${binding + 1}) uniform sampler ${s.name}_s;`);
+        lines.push(`layout(set = ${group}, binding = ${binding + 1}) uniform ${parts.sampler} ${s.name}_s;`);
         lines.push(`#define ${s.name} ${parts.combined}(${s.name}_t, ${s.name}_s)`);
         binding += 2;
     }
     return { glsl: lines.join('\n'), next: binding };
 }
 
-/** Scalar/vector/matrix uniforms: loose under ES, one bound block under Vulkan. */
+/** `type name` or `type name[N]` — the one place an array suffix is written. */
+const declarator = (u: ValueDecl) => `${u.type} ${u.name}${u.array === undefined ? '' : `[${u.array}]`}`;
+
+/** Scalar/vector/matrix/struct uniforms: loose under ES, one bound block under Vulkan. */
 function declareUniforms(uniforms: ValueDecl[], dialect: ShaderDialect, blockName: string,
                          slot: BlockSlot): string {
     if (!uniforms.length) return '';
     if (dialect === 'es300')
-        return uniforms.map(u => `uniform ${u.type} ${u.name};${trailingComment(u.comment)}`).join('\n');
+        return uniforms.map(u => `uniform ${declarator(u)};${trailingComment(u.comment)}`).join(NL);
 
     // A `bool` member fails naga's validator as NonHostShareable, so it is carried as an int and
     // restored by a macro. The user's source keeps saying `u_flag`.
     const members = uniforms.map(u => u.type === 'bool'
         ? `    int ${u.name}_b;${trailingComment(u.comment)}`
-        : `    ${u.type} ${u.name};${trailingComment(u.comment)}`);
+        : `    ${declarator(u)};${trailingComment(u.comment)}`);
     const macros = uniforms.filter(u => u.type === 'bool').map(u => `#define ${u.name} (${u.name}_b != 0)`);
 
     return `layout(set = ${slot.group}, binding = ${slot.binding}) uniform ${blockName} {\n${members.join('\n')}\n};` +
@@ -440,30 +547,52 @@ function declareOutputs(outputs: ValueDecl[]): string {
     return outputs.map((o, i) => `layout(location = ${i}) out ${o.type} ${o.name};${trailingComment(o.comment)}`).join('\n');
 }
 
+/** A coordinate of the right shape to sample each ES sampler type with. Never actually read. */
+const ZERO_COORD: Record<SamplerType, string> = {
+    sampler2D: 'vec2(0.0)',
+    samplerCube: 'vec3(0.0, 0.0, 1.0)',
+    sampler2DArray: 'vec3(0.0)',
+    sampler2DArrayShadow: 'vec4(0.0)',
+};
+
 /**
- * A no-op reference to the engine uniform block, so it stays part of the shader INTERFACE.
+ * A no-op reference to everything the engine binds, so none of it is dropped from the INTERFACE.
  *
- * A material whose body reads none of the built-ins — plenty do; a tint or a ramp needs no time, no
- * camera and no sun — produces a module where the block is declared and never used. WebGPU builds its
- * bind group layout from what the entry point actually REACHES, so the block is dropped, and the engine
- * (which binds it unconditionally, because the interface is fixed) then hands over a group with one
- * entry for a layout with none:
+ * WebGPU builds a pipeline's bind group layout from what the entry point actually REACHES. The engine
+ * binds a FIXED interface — every prelude sampler, the built-in uniform block, the user's samplers and
+ * the shadow maps — whether or not a particular material happens to read them. A material that reads
+ * only some of it therefore gets a layout with the rest missing, and the engine's bind group is then
+ * too long for it:
  *
- *     Number of entries (1) did not match the expected number of entries (0). Expected layout: []
+ *     Number of entries (4) did not match the expected number of entries (2)
  *
- * which invalidates the command buffer and drops the pass. Referencing ONE member is enough — the block
- * is one binding — and the value is multiplied by zero, so nothing about the picture changes. It is the
- * same device the magenta fallbacks below use to keep their varyings live.
+ * which invalidates the whole command buffer and drops the pass. It is not a rare case: a tint needs no
+ * time and no camera, a lit material that never reflects needs no environment cube, and a material that
+ * calls `shadowCalculation()` reaches the cascades but not the spot shadows.
  *
- * Generated from the interface rather than written out, so it cannot name a uniform that is not there.
+ * Everything here is multiplied by zero, so nothing about the picture changes, and it is GENERATED from
+ * the same lists that declare the bindings — it cannot name something that is not there, or miss
+ * something that is. `body` and the user's samplers are both already in scope: `renderPrelude` renders
+ * this last.
+ *
+ * The same device the magenta fallbacks below use to keep their varyings live.
  */
-function keepInterfaceAlive(iface: PreludeInterface): string {
+function keepInterfaceAlive(iface: PreludeInterface, userUniforms: CustomUniform[]): string {
+    const terms: string[] = [];
+
     const first = iface.uniforms[0];
-    if (!first) return 'float _cleoInterface() { return 0.0; }';
-    const scalar = first.type === 'float' ? first.name
-                 : first.type === 'mat4' ? `${first.name}[0][0]`
-                 : `${first.name}.x`;
-    return `float _cleoInterface() { return 0.0 * ${scalar}; }`;
+    if (first) terms.push(first.type === 'float' ? first.name
+                        : first.type === 'mat4' ? `${first.name}[0][0]`
+                        : `${first.name}.x`);
+
+    for (const s of [...iface.samplers, ...userSamplerDecls(userUniforms)])
+        terms.push(`texture(${s.name}, ${ZERO_COORD[s.type]}).r`);
+
+    // Whatever the interface's pasted library binds that no engine list describes — see FORWARD_INTERFACE.
+    if (iface.keepAlive) terms.push(iface.keepAlive);
+
+    if (!terms.length) return 'float _cleoInterface() { return 0.0; }';
+    return `float _cleoInterface() { return 0.0 * (${terms.join(NL + '        + ')}); }`;
 }
 
 /** Render a whole interface, then the user's uniforms, in the requested dialect. */
@@ -476,19 +605,20 @@ function renderPrelude(iface: PreludeInterface, userUniforms: CustomUniform[], d
         declareVaryings(iface.varyings, dialect),
         declareOutputs(iface.outputs),
         engineSamplers.glsl,
+        iface.structs ?? '',
         declareUniforms(iface.uniforms, dialect, 'CleoEngineUniforms', iface.engineBlock),
-        iface.body,
+        typeof iface.body === 'function' ? iface.body(dialect) : iface.body,
         userSamplers.glsl,
         declareUniforms(userValueDecls(userUniforms), dialect, 'CleoUserUniforms', iface.userBlock),
-        keepInterfaceAlive(iface),
+        keepInterfaceAlive(iface, userUniforms),
     ].filter(Boolean).join('\n');
 }
 
 // --- The screen-mode interface ------------------------------------------------------------------
 //
-// Screen is the mode with full WebGPU support today, and not by accident: it has no lighting, no
-// shadow library and no mat3 varying, which are exactly the three things the forward and deferred
-// preludes carry that Vulkan GLSL will not take (see `vulkanUnsupportedReason`).
+// The first of the three to be expressed this way, because it was the simplest: no lighting, no shadow
+// library, one varying. The other two followed once the generator could express what they needed — a
+// struct type, an array of them, dialect-dependent body text, and a block that is not at binding 0.
 
 const SCREEN_INTERFACE: PreludeInterface = {
     varyings: [{ name: 'fragTexCoord', type: 'vec2' }],
@@ -556,6 +686,9 @@ const WGSL_TEXTURE: Record<SamplerType, string> = {
     sampler2D: 'texture_2d<f32>',
     samplerCube: 'texture_cube<f32>',
     sampler2DArray: 'texture_2d_array<f32>',
+    // Only reached if a PRELUDE ever declares one. The shadow library declares its own, and its group 3
+    // reflection comes off `shadowsChunk.wgsl` rather than from this table.
+    sampler2DArrayShadow: 'texture_depth_2d_array',
 };
 
 /**
@@ -566,8 +699,8 @@ const WGSL_TEXTURE: Record<SamplerType, string> = {
  * disagreed, the bind group would point a sampler at the wrong texture and the material would render
  * a plausible wrong picture rather than fail. There is no second copy of the ordering to drift.
  *
- * Screen mode only. The forward and deferred preludes are still hand-written template strings with no
- * interface description to read, so they have nothing to reflect; they migrate when they gain one.
+ * A thin alias for `customShaderResources('screen', …)`, kept because the screen pass reads better for
+ * naming the mode once at the call site than for repeating it.
  */
 export function screenShaderResources(uniforms: CustomUniform[]): ShaderResource[] {
     return customShaderResources('screen', uniforms);
@@ -610,30 +743,21 @@ export function screenUserSamplerNames(uniforms: CustomUniform[]): string[] {
     return userSamplerDecls(uniforms).map(s => s.name);
 }
 
-/** Auto-generated declarations from the user's uniform list, in the ES dialect. */
-function uniformDeclarations(uniforms: CustomUniform[]): string {
-    return uniforms
-        .filter(u => u.name && GLSL_TYPE[u.type])
-        .map(u => `uniform ${GLSL_TYPE[u.type]} u_${u.name};`)
-        .join('\n');
-}
-
 /**
- * Why a render mode cannot be assembled as Vulkan GLSL yet, or null when it can.
+ * Why this render mode cannot be translated to WGSL — `null` when it can, which is now every mode.
  *
- * Returned as prose because it reaches the user: the material editor shows it in place of a naga
- * diagnostic, and `NotIOShareableType([0])` pointing into a prelude they never wrote would tell them
- * nothing about what to do. Each reason is a real, measured incompatibility — see the probe results
- * recorded in WEBGPU_ROADMAP.md M3.
+ * Kept as a function rather than deleted because it is exported API and the editor asks it: it fills
+ * the third verdict in `CustomMaterialEditor` ("compiles on WebGL2, and the ENGINE cannot offer WebGPU
+ * here"), distinct from "compiles, but naga rejected this particular source". That distinction is
+ * still worth having if a future mode arrives before its prelude does. Returning null for everything
+ * simply means the editor never shows that state today.
+ *
+ * It used to refuse forward and deferred, naming a mat3 varying, an inline `uniform struct` and the
+ * ES-generated shadow library. The mat3 was already gone when this was written; the other two are
+ * gone now — see LIGHT_STRUCTS, `ValueDecl.array` and `vulkanShadowLibrary`.
  */
-export function vulkanUnsupportedReason(renderMode: CustomRenderMode): string | null {
-    if (renderMode !== 'forward') return null;
-    return 'Forward custom materials cannot be checked for WebGPU yet: the lighting prelude declares ' +
-        'its directional light through an inline `uniform struct` and its point and spot lights as ' +
-        'ARRAYS of structs, neither of which Vulkan GLSL accepts outside a bound block, and it pastes ' +
-        'the shadow library, which is generated as GLSL ES and carries precision qualifiers and ' +
-        'combined samplers. Screen and deferred materials already translate. The material still runs ' +
-        'normally on WebGL2.';
+export function vulkanUnsupportedReason(_renderMode: CustomRenderMode): string | null {
+    return null;
 }
 
 /** Assemble the full fragment shader source: prelude + user uniform decls + user function + epilogue. */
@@ -643,23 +767,14 @@ export function assembleCustomFragment(
     uniforms: CustomUniform[],
     dialect: ShaderDialect = 'es300',
 ): string {
-    // Screen and deferred both go through the interface generator, so one description produces both
-    // dialects and there is no second copy to drift. Forward is still a template string — its lighting
-    // block declares an inline `uniform struct` and an array of them, which is what
-    // `vulkanUnsupportedReason` still refuses.
+    // All three modes go through the interface generator now, so one description produces both dialects
+    // and there is no second copy of any prelude to drift.
     const iface = renderMode === 'screen' ? SCREEN_INTERFACE
-                : renderMode === 'deferred' ? DEFERRED_INTERFACE : null;
-    const epilogue = renderMode === 'screen' ? SCREEN_EPILOGUE : DEFERRED_EPILOGUE;
+                : renderMode === 'deferred' ? DEFERRED_INTERFACE : FORWARD_INTERFACE;
+    const epilogue = renderMode === 'screen' ? SCREEN_EPILOGUE
+                   : renderMode === 'deferred' ? DEFERRED_EPILOGUE : FORWARD_EPILOGUE;
 
-    if (dialect === 'vulkan') {
-        const reason = vulkanUnsupportedReason(renderMode);
-        if (reason || !iface) throw new Error(reason ?? ('no interface for ' + renderMode));
-        return renderPrelude(iface, uniforms, 'vulkan') + NL + fragmentSource + NL + epilogue;
-    }
-
-    if (iface) return renderPrelude(iface, uniforms, 'es300') + NL + fragmentSource + NL + epilogue;
-    return FORWARD_PRELUDE + NL + uniformDeclarations(uniforms) + NL + fragmentSource + NL
-         + FORWARD_EPILOGUE;
+    return renderPrelude(iface, uniforms, dialect) + NL + fragmentSource + NL + epilogue;
 }
 
 /** The vertex shader a custom material's program is linked against (screen passes use the fullscreen quad VS). */
@@ -961,10 +1076,10 @@ function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
     // fragment stage with the fullscreen vertex stage would draw the mesh as a screen quad rather than
     // fail, which is the kind of wrong that looks like a shading bug for a week.
     const base = mat.renderMode === 'screen' ? ScreenProgram
-               : mat.renderMode === 'deferred' ? GeometryPBRProgram : null;
-    if (!base) return {};   // forward — see vulkanUnsupportedReason
+               : mat.renderMode === 'deferred' ? GeometryPBRProgram : PBRProgram;
 
-    const iface = mat.renderMode === 'screen' ? SCREEN_INTERFACE : DEFERRED_INTERFACE;
+    const iface = mat.renderMode === 'screen' ? SCREEN_INTERFACE
+                : mat.renderMode === 'deferred' ? DEFERRED_INTERFACE : FORWARD_INTERFACE;
     const vulkan = assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms, 'vulkan');
     const wgsl = retypeDepthTextures(translator(vulkan),
                                      iface.samplers.filter(s => s.depth).map(s => s.name));
