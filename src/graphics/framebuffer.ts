@@ -104,8 +104,6 @@ export class Framebuffer {
     /** Hand the canvas back the draw target — the default framebuffer, at its own resolution. */
     public unbind(): Framebuffer {
         if (device.backend !== 'webgl2') return this;   // see Framebuffer.bind
-
-        if (device.backend !== 'webgl2') return this instanceof Framebuffer ? this : undefined as never;
         glDevice().getCurrentSurfaceTarget().bind();
         return this;
     }

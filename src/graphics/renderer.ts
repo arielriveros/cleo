@@ -104,7 +104,7 @@ import { GLState } from './systems/glState';
 import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial } from './material';
-import { ensureCustomShader, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
+import { ensureCustomShader, customShaderReady, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
@@ -844,7 +844,21 @@ export class Renderer {
     private _skeletonOverlay: SkeletonOverlay | null = null;
     private _overlaySphereMesh: Mesh | null = null;
     private _overlayBoneMesh: Mesh | null = null;
-    private _overlayInstanceBuffer: RhiBuffer | null = null;
+    /**
+     * One instance buffer PER draw set, not one shared by all four.
+     *
+     * `_drawSkeletonOverlay` records bones, joints, markers and the highlight into the SAME render pass,
+     * and every set used to reallocate-and-write the one shared buffer just before recording its draw.
+     * On WebGL2 that works because each draw has already executed by the time the next write lands. On
+     * WebGPU nothing has executed yet — the draws are recorded and run at submit — so all four read
+     * whichever matrices were written last, and a growth reallocation destroys the buffer the earlier
+     * draws reference outright ("[Buffer "renderer.overlayInstances"] used in submit while destroyed"),
+     * which invalidates the whole command buffer and drops the gizmo pass.
+     *
+     * Same rule as the per-draw uniform arena: on a recorded backend, anything a pending draw reads has
+     * to still hold that draw's data at submit.
+     */
+    private _overlayInstanceBuffers: (RhiBuffer | null)[] = [];
 
     // Object -> stable id (for grouping identical mesh+material into instanced draws)
     private _objIds: WeakMap<object, number> = new WeakMap();
@@ -2465,6 +2479,20 @@ export class Renderer {
     }
 
     /**
+     * Whether this material has a program behind it at all.
+     *
+     * Only ever false for a custom material on a backend that could build neither the user's program
+     * nor the magenta fallback — WebGPU, until custom materials carry runtime reflection. It is checked
+     * HERE rather than in the per-pipeline bind callbacks because those signal "I set a pipeline" by
+     * returning true, so a `false` from one of them means "fall back to the legacy `mesh.draw()`" —
+     * which is a raw `gl` call, i.e. the exact opposite of skipping. On WebGL2 the magenta fallback
+     * always registers, so this is always true and nothing changes.
+     */
+    private static _drawable(mat: Material): boolean {
+        return !(mat instanceof CustomMaterial) || customShaderReady(mat);
+    }
+
+    /**
      * Draw a model's index buffer, applying `bindMaterial` before each range.
      *
      * The single-material case (every model that was not merged at import) takes the same path with one
@@ -2475,6 +2503,7 @@ export class Renderer {
         const model = node.model;
         if (!model.hasSubmeshes) {
             const mat = model.material;
+            if (!Renderer._drawable(mat)) return;
             // A callback that set a PIPELINE has already fixed the cull mode; calling _applyCull after
             // it would be harmless today and wrong the moment the two disagree.
             const viaPipeline = !!bindMaterial(mat);
@@ -2488,6 +2517,7 @@ export class Renderer {
             // `materials` is parallel to `submeshes` by construction, but indexing it unguarded turns any
             // future disagreement into a mid-frame TypeError rather than a wrong colour. Slot 0 always exists.
             const mat = model.materials[i] ?? model.materials[0];
+            if (!Renderer._drawable(mat)) continue;
             const viaPipeline = !!bindMaterial(mat);
             if (!viaPipeline) this._applyCull(mat.config.side);
             if (viaPipeline && pass
@@ -2546,11 +2576,16 @@ export class Renderer {
      */
     private _recordFoliageDraw(pass: RenderPassEncoder, mesh: Mesh,
                                instances: RhiBuffer, count: number): boolean {
-        if (mesh.isAnimated || mesh.hasLods || !mesh.indexBuffer) return false;
+        // LODs are NOT a reason to fall back. A level is a whole alternate index buffer over the same
+        // vertices, and `activeIndexBuffer` already names the selected one — the legacy path only ever
+        // handled them by re-binding VAO state, which is exactly what does not exist off WebGL2. Only
+        // `isAnimated` still needs it, and `Mesh.drawInstanced` now says so by name when it does.
+        const indices = mesh.activeIndexBuffer;
+        if (mesh.isAnimated || !indices) return false;
         pass.setVertexBuffer(0, mesh.vertexBuffer);
         pass.setVertexBuffer(1, instances);
-        pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
-        pass.drawIndexed(mesh.indexCount, count);
+        pass.setIndexBuffer(indices, mesh.activeIndexFormat);
+        pass.drawIndexed(mesh.activeIndexCount, count);
         return true;
     }
 
@@ -2602,11 +2637,12 @@ export class Renderer {
         // next NON-instanced draw of the same (shared) mesh kept reading the instance buffer. A VAO
         // keyed by pipeline AND buffers cannot have that problem — the instanced and non-instanced
         // draws of one mesh simply use different VAOs.
-        if (reflection && !mesh.isAnimated && !mesh.hasLods && mesh.indexBuffer) {
+        // `active*` rather than the base index buffer, and no `hasLods` bail — see _recordFoliageDraw.
+        if (reflection && !mesh.isAnimated && mesh.activeIndexBuffer) {
             pass.setVertexBuffer(0, mesh.vertexBuffer);
             pass.setVertexBuffer(1, this._instanceBuffer!);
-            pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
-            pass.drawIndexed(mesh.indexCount, count);
+            pass.setIndexBuffer(mesh.activeIndexBuffer, mesh.activeIndexFormat);
+            pass.drawIndexed(mesh.activeIndexCount, count);
         } else {
             mesh.setupInstanceMatrixBuffer(this._instanceBuffer!, 5);
             mesh.drawInstanced(count, topology);
@@ -3724,7 +3760,11 @@ export class Renderer {
         // default mask-preserving alpha blend. The shader outputs PREMULTIPLIED color, so both RGB and
         // the bloom-mask ALPHA use ONE, ONE_MINUS_SRC_ALPHA (premultiplied "over"); mathematically
         // identical to the old straight-alpha composite, and correct when bilinearly upsampled.
-        gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        //
+        // Guarded like `_restoreDefaultBlend`: this is standing context state, and the WebGPU pipeline
+        // built below already carries the same factors in `Renderer._CLOUD_BLEND`. Unguarded, any scene
+        // with an enabled clouds node killed the first WebGPU frame here.
+        if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
         // One pipeline and one texture group for the raymarch, reused by whichever target it lands in
         // — full-res straight into the scene buffer, or a reduced/Bayer-subset buffer that the resolve
@@ -5966,6 +6006,10 @@ export class Renderer {
         for (const mat of mats) {
             if (!(mat instanceof CustomMaterial) || mat.renderMode !== 'screen') continue;
             ensureCustomShader(mat); // idempotent; magenta fallback under the key on compile error
+            // ...unless the device could build neither the user's program nor the magenta one, which is
+            // every custom material on WebGPU until the runtime reflection lands. Skipping leaves the
+            // chain's source buffer as this stage's result, so the following passes still compose.
+            if (!customShaderReady(mat)) continue;
             const dst = 1 - src;
             const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'screenMaterial',
                                                    false, undefined, false);
@@ -7094,7 +7138,7 @@ export class Renderer {
     }
 
     private _ensureOverlayMeshes(): void {
-        if (this._overlaySphereMesh && this._overlayBoneMesh && this._overlayInstanceBuffer) return;
+        if (this._overlaySphereMesh && this._overlayBoneMesh) return;
         // Position-only base geometry: init the VAO with the single-attribute shadowMap shader (spheres/
         // cubes may lack tangents, so a 5-attr layout would mismatch). Instance matrices are wired
         // separately via setupInstanceMatrixBuffer (mirrors _foliagePass).
@@ -7107,17 +7151,14 @@ export class Renderer {
         };
         if (!this._overlaySphereMesh) this._overlaySphereMesh = build(Geometry.Sphere(8, 1));
         if (!this._overlayBoneMesh) this._overlayBoneMesh = build(Geometry.Cube(1, 1, 1));
-        if (!this._overlayInstanceBuffer)
-            this._overlayInstanceBuffer = device.createBuffer({ label: 'renderer.overlayInstances', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
     }
 
     private _drawSkeletonOverlay(pass?: RenderPassEncoder, depthStencil?: DepthStencilState): void {
         const o = this._skeletonOverlay;
         if (!o) return;
         this._ensureOverlayMeshes();
-        let buf = this._overlayInstanceBuffer;
         const sphere = this._overlaySphereMesh, bone = this._overlayBoneMesh;
-        if (!buf || !sphere || !bone) return;
+        if (!sphere || !bone) return;
 
         this._shaderManager.bind('basicInstanced');
         // The overlay meshes carry position ONLY (see _ensureOverlayMeshes), so the buffer they were
@@ -7133,23 +7174,28 @@ export class Renderer {
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
 
-        const drawSet = (mesh: Mesh, matrices: Float32Array, count: number, color: [number, number, number]) => {
+        // `set` indexes this call's own buffer — see _overlayInstanceBuffers.
+        const drawSet = (set: number, mesh: Mesh, matrices: Float32Array, count: number,
+                         color: [number, number, number]) => {
             if (count <= 0) return;
             this._shaderManager.setUniform('u_material.color', color);
             this._shaderManager.setUniform('u_material.hasTexture', false);
             this._shaderManager.setUniform('u_material.opacity', 1.0);
-            // Reassigned through the field, not the local: on WebGPU a grown buffer is a NEW one,
-            // and the local alias would leave the next frame writing into a destroyed handle.
-            buf = this._overlayInstanceBuffer =
-                device.reallocateBuffer(buf!, matrices.subarray(0, count * 16));
-            if (pipeline && mesh.indexBuffer) {
+            // Reassigned through the array, not a local: on WebGPU a grown buffer is a NEW one, and a
+            // local alias would leave the next frame writing into a destroyed handle.
+            let buf = this._overlayInstanceBuffers[set]
+                ?? device.createBuffer({ label: `renderer.overlayInstances${set}`, size: 0,
+                                         usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+            buf = this._overlayInstanceBuffers[set] =
+                device.reallocateBuffer(buf, matrices.subarray(0, count * 16));
+            if (pipeline && mesh.activeIndexBuffer) {
                 // No bind group: `basicInstanced` samples `u_material_texture` only when hasTexture is
                 // set, and the overlay never sets it — but the sampler still has to reference a
                 // complete texture, so the group is bound with the 1x1 fallback.
                 pass!.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._fallbackTexture]));
                 pass!.setVertexBuffer(0, mesh.vertexBuffer);
                 pass!.setVertexBuffer(1, buf!);
-                pass!.setIndexBuffer(mesh.indexBuffer, mesh.activeIndexFormat);
+                pass!.setIndexBuffer(mesh.activeIndexBuffer, mesh.activeIndexFormat);
                 pass!.drawIndexed(mesh.activeIndexCount, count);
             } else {
                 mesh.setupInstanceMatrixBuffer(buf!, 5);
@@ -7161,9 +7207,9 @@ export class Renderer {
         // Bones first, joints over them, role markers above those, and the selection highlight last of all —
         // depth test is off in the gizmo pass, so the later draw simply wins where they overlap, and the one
         // thing you are pointing at should never be hidden by a label.
-        drawSet(bone, o.boneMatrices, o.boneCount, o.boneColor);
-        drawSet(sphere, o.jointMatrices, o.jointCount, o.jointColor);
-        if (o.markerMatrices && o.markerColor) drawSet(sphere, o.markerMatrices, o.markerCount ?? 0, o.markerColor);
-        if (o.highlightMatrix && o.highlightColor) drawSet(sphere, o.highlightMatrix, 1, o.highlightColor);
+        drawSet(0, bone, o.boneMatrices, o.boneCount, o.boneColor);
+        drawSet(1, sphere, o.jointMatrices, o.jointCount, o.jointColor);
+        if (o.markerMatrices && o.markerColor) drawSet(2, sphere, o.markerMatrices, o.markerCount ?? 0, o.markerColor);
+        if (o.highlightMatrix && o.highlightColor) drawSet(3, sphere, o.highlightMatrix, 1, o.highlightColor);
     }
 }

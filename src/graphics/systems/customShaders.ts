@@ -1,6 +1,7 @@
 import { device } from '../rhi/deviceHandle';
 import type { ShaderProgram } from '../rhi/shaderProgram';
 import { ShaderManager } from './shaderManager';
+import { Logger } from '../../core/logger';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
 import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
 import ShadowsChunk from '../shaders/wgsl/shadowsChunk.wgsl';
@@ -536,6 +537,20 @@ const registered = new Set<string>();           // ShaderManager keys we've comp
 const failed = new Set<string>();               // keys whose user source failed to compile (magenta fallback in use)
 const errors = new Map<string, string>();       // last compile error per key
 const fallbackByMode = new Map<CustomRenderMode, ShaderProgram>();
+/**
+ * Keys this DEVICE cannot build a program for at all — neither the user's source nor the magenta
+ * fallback. Distinct from `failed`, which means "the user's GLSL is broken, magenta is standing in":
+ * there is no program under these keys, so nothing may try to bind one.
+ *
+ * WebGPU is the case. Both halves are assembled from GLSL at runtime and carry no build-time vertex
+ * inputs or uniform-block layouts, which is what `WebGPUDevice.createShaderProgram` requires — so the
+ * fallback threw from inside the catch that was meant to contain the first failure, and the exception
+ * escaped `_ensureCustomShaders`. The game loop logs a frame error WITHOUT rescheduling, so that one
+ * throw ended the session: every scene with any custom material rendered a single frame and stopped.
+ */
+const unbuildable = new Set<string>();
+/** One log line per (mode, reason), not one per material per frame. */
+const unbuildableReported = new Set<string>();
 
 // --- key lifetime -------------------------------------------------------------------------------
 //
@@ -575,6 +590,7 @@ function releaseKey(key: string): void {
     ShaderManager.Instance.removeShader(key);
     registered.delete(key);
     failed.delete(key);
+    unbuildable.delete(key);
     errors.delete(key);
 
     // Only free the program if this key was its last registration and it is not a shared fallback.
@@ -624,12 +640,25 @@ void main() {
 
 /** Lazily compiled magenta program per render mode; reused under any failing key. References all
  *  varyings so its VAO layout matches the standard material shaders (screen mode uses screen.vs). */
-function fallbackShader(mode: CustomRenderMode): ShaderProgram {
+function fallbackShader(mode: CustomRenderMode): ShaderProgram | null {
     let s = fallbackByMode.get(mode);
     if (!s) {
         const fs = mode === 'deferred' ? FALLBACK_DEFERRED_FS : mode === 'screen' ? FALLBACK_SCREEN_FS : FALLBACK_FORWARD_FS;
-        s = device.createShaderProgram({ label: `customFallback:${mode}`,
-                                        vertex: vertexSource(mode), fragment: fs });
+        try {
+            s = device.createShaderProgram({ label: `customFallback:${mode}`,
+                                            vertex: vertexSource(mode), fragment: fs });
+        } catch (e: any) {
+            // The fallback is itself runtime-assembled GLSL, so on a backend that cannot compile the
+            // user's source it cannot compile this either. Returning null rather than throwing is the
+            // whole point: this function is called from inside a catch, and throwing here rethrows past
+            // the handler that exists to keep a bad material from killing the frame.
+            if (!unbuildableReported.has(mode)) {
+                unbuildableReported.add(mode);
+                Logger.warn(`Custom ${mode} materials cannot render on the ${device.backend} backend: ` +
+                            String(e?.message ?? e), 'CustomShaders');
+            }
+            return null;
+        }
         fallbackByMode.set(mode, s);
     }
     return s;
@@ -654,6 +683,16 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
     }
 
     if (registered.has(key)) return !failed.has(key);
+    // Already known unbuildable on this device — do not recompile it once per material per frame.
+    // The stand-in is re-checked rather than assumed present: the first attempt can land before the
+    // engine's own programs are registered, and there is no later event that would come back for it.
+    if (unbuildable.has(key)) {
+        if (!ShaderManager.Instance.find(key)) {
+            const standIn = standInFor(mat.renderMode);
+            if (standIn) ShaderManager.Instance.addShader(key, standIn);
+        }
+        return false;
+    }
 
     try {
         const shader = device.createShaderProgram({
@@ -666,12 +705,57 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
         errors.delete(key);
         return true;
     } catch (e: any) {
-        ShaderManager.Instance.addShader(key, fallbackShader(mat.renderMode));
+        errors.set(key, String(e?.message ?? e));
+        const magenta = fallbackShader(mat.renderMode);
+        if (!magenta) {
+            unbuildable.add(key);
+            // The key stays OUT of `registered`, so `customForwardTypes` never hands the renderer a
+            // type with no program behind it and `customShaderReady` tells the draw paths to skip.
+            //
+            // But something must still answer `getShader(material.type)`: `ModelNode.initializeModel`
+            // reads that program's ATTRIBUTES to decide which vertex streams to pack into the mesh, and
+            // that is real backend-independent work — without it the model has no vertex buffer at all
+            // and stops casting shadows too, which is further from the WebGL2 picture, not closer.
+            //
+            // So alias a built-in program that has build-time reflection. Custom materials are compiled
+            // against `vertexSource(mode)`, which IS pbr.vs / screen.vs, so the attribute set is not an
+            // approximation — it is the same one. Only `.attributes` is ever read: nothing binds this,
+            // because every draw path checks `customShaderReady` first.
+            const standIn = standInFor(mat.renderMode);
+            if (standIn) ShaderManager.Instance.addShader(key, standIn);
+            return false;
+        }
+        ShaderManager.Instance.addShader(key, magenta);
         registered.add(key);
         failed.add(key);
-        errors.set(key, String(e?.message ?? e));
         return false;
     }
+}
+
+/**
+ * A built-in program compiled from the same vertex source a custom material of `mode` would use.
+ *
+ * Named in preference order because which of them exists depends on the render pipeline the renderer
+ * booted with. Returns null before the engine's own programs are registered, which is harmless — the
+ * material is re-checked next frame.
+ */
+function standInFor(mode: CustomRenderMode): ShaderProgram | null {
+    const names = mode === 'screen' ? ['screen'] : ['pbrGeometry', 'pbr'];
+    for (const name of names) {
+        const found = ShaderManager.Instance.find(name);
+        if (found) return found;
+    }
+    return null;
+}
+
+/**
+ * Whether a program is actually registered under this material's key, i.e. whether it can be drawn.
+ *
+ * True for a working material AND for one showing magenta — both have a program. False only where the
+ * device could build neither, which is the case the draw paths have to skip rather than bind.
+ */
+export function customShaderReady(mat: CustomMaterial): boolean {
+    return registered.has(mat.type as string);
 }
 
 /**

@@ -195,8 +195,16 @@ export class Mesh {
 
         // Leave this VAO pointing at a valid index buffer (the uploads left the last level bound); every
         // subsequent draw re-binds the selected level anyway, since `hasLods` is now true.
-        glDevice().bindIndexBuffer(this._lodBuffers[this._lod] as WebGL2Buffer);
-        GLState.bindVAO(null);
+        //
+        // Guarded like `_bindOwnVAO` above, and for the same reason: this is VAO state, and there is no
+        // VAO off WebGL2. The entry guard alone was not enough — `_bindOwnVAO` returns EARLY on WebGPU
+        // and then execution fell straight through to here, so every terrain with LOD enabled (the
+        // default) killed the frame on the first level change. `activeIndexBuffer` is what the WebGPU
+        // path reads instead, and it needs no binding.
+        if (device.backend === 'webgl2') {
+            glDevice().bindIndexBuffer(this._lodBuffers[this._lod] as WebGL2Buffer);
+            GLState.bindVAO(null);
+        }
     }
 
     /**
@@ -243,7 +251,25 @@ export class Mesh {
         this._lod = Math.max(0, Math.min(Math.round(level), Math.max(0, this._lodBuffers.length - 1)));
     }
 
+    /**
+     * The three methods below issue raw `gl` draw calls, so a caller that reaches them off WebGL2 is a
+     * caller the RHI path declined to record. That used to dereference an undefined `gl` several lines
+     * later, which reads as a null-property error in the middle of `mesh.ts` and names neither the mesh
+     * nor the path that gave up on it.
+     *
+     * The game loop logs a frame error WITHOUT rescheduling, so whichever shape it takes, one such draw
+     * ends the session and every later measurement reads a stale image. This makes it say so.
+     */
+    private _requireLegacyBackend(path: string): void {
+        if (device.backend === 'webgl2') return;
+        throw new Error(
+            `Mesh.${path} is a WebGL2-only draw path, reached on the ${device.backend} backend ` +
+            `(${this._vertexCount} vertices, animated: ${this._isAnimated}, LODs: ${this.hasLods}). ` +
+            `The caller should have recorded this draw through the render-pass encoder instead.`);
+    }
+
     public draw(topology: PrimitiveTopology = 'triangle-list'): void {
+        this._requireLegacyBackend('draw');
         GLState.bindVAO(this._vao());
         ShaderManager.Instance.flushBound();
         const mode = glTopology(topology);
@@ -280,6 +306,7 @@ export class Mesh {
      */
     public drawRange(indexOffset: number, indexCount: number, topology: PrimitiveTopology = 'triangle-list'): void {
         if (indexCount <= 0 || !this._indexBuffer || this._indexCount <= 0) return;
+        this._requireLegacyBackend('drawRange');
         GLState.bindVAO(this._vao());
         ShaderManager.Instance.flushBound();
         if (this.hasLods) glDevice().bindIndexBuffer(this._lodBuffers[0] as WebGL2Buffer);
@@ -291,6 +318,7 @@ export class Mesh {
     }
 
     public drawInstanced(instanceCount: number, topology: PrimitiveTopology = 'triangle-list'): void {
+        this._requireLegacyBackend('drawInstanced');
         GLState.bindVAO(this._vao());
         ShaderManager.Instance.flushBound();
         const mode = glTopology(topology);
