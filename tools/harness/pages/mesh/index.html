@@ -859,7 +859,7 @@ window.__error = null;
       map.registerTileset(tiles);
       map.addLayer({ tilesetId: tiles.id });
       map.addLayer({ tilesetId: tiles.id });
-      for (let row = 0; row < 9; row++)
+      for (let row = 0; row < 4; row++)
         for (let col = 0; col < 16; col++) {
           // A closed-form pattern, not a random one: the whole scene has to be identical between the
           // two backend windows the diff compares.
@@ -870,7 +870,11 @@ window.__error = null;
           if (((col + row * 2) & 3) === 0) map.setTile(1, col, row, 40 + ((col * row) & 7));
         }
       const mapNode2d = new cleo.TilemapNode('tiles2d', map);
-      mapNode2d.setPosition([-8, -4.5, -1]);
+      // A floor BAND across the lower third, which is what a 2D game's tilemap looks like and
+      // what leaves the sprites and quads somewhere to be seen. Hung from its TOP edge, because
+      // `cellMath.ts` places row 0 at `-(row + 0.5) * cellHeight` and rows run DOWNWARD — anchored
+      // at the bottom instead, the whole map sits below the ortho box with one row in frame.
+      mapNode2d.setPosition([-8, -1, -1]);
       scene.addNode(mapNode2d);
       window.__tile2dLayers = () => map.layers.length;
 
@@ -884,14 +888,14 @@ window.__error = null;
         scene.addNode(s);
         return s;
       };
-      place('hero', 12, [1, 1, 1], -4.5, 1.2);
-      place('coin', 21, [1.0, 0.85, 0.2], 0.5, -1.4);
-      place('enemy', 33, [0.9, 0.3, 0.35], 4.6, 0.8);
+      place('hero', 12, [1, 1, 1], -4.5, 0.7);
+      place('coin', 21, [1.0, 0.85, 0.2], 0.6, 2.3);
+      place('enemy', 33, [0.9, 0.3, 0.35], 4.8, 1.1);
 
       const anim2d = new cleo.AnimatedSpriteNode('anim2d',
         new cleo.Sprite({ tileset: spriteTiles2d, tileIndex: 44, tint: [0.4, 0.9, 1.0] }),
         { frames: [44], fps: 1, loop: false, constraints: 'free' });
-      anim2d.setPosition([2.4, 2.1, 0.5]);
+      anim2d.setPosition([2.6, 3.4, 0.5]);
       scene.addNode(anim2d);
 
       // Unlit and transparent quads: the two material kinds a 2D scene is mostly made of, and the
@@ -899,21 +903,28 @@ window.__error = null;
       const quad = (name, geom, material, x, y, z) => {
         const n = new cleo.ModelNode(name, new cleo.Model(geom, material));
         n.setPosition([x, y, z]);
+        // STOOD UP. `Geometry.Plane` lies in XZ with a +Y normal — it is a floor, not a sprite —
+        // so to a camera looking down -Z it is edge-on and renders as a sliver. Rotating here
+        // rather than at each call site is what keeps the three of them agreeing.
+        n.setRotation([90, 0, 0]);
         scene.addNode(n);
         return n;
       };
       quad('unlitQuad', cleo.Geometry.Plane(2.2, 1.4),
-           cleo.Material.Basic({ color: [0.25, 0.85, 0.55], textures: { base: 'checker' } }),
-           -3.0, -2.2, 0.2);
+           cleo.Material.Basic({ color: [0.25, 0.85, 0.55], textures: { base: 'checker' } },
+                               { side: 'double' }),
+           -3.2, -2.6, 0.2);
       quad('fadeQuad', cleo.Geometry.Plane(2.6, 1.6),
-           cleo.Material.Basic({ color: [1.0, 0.4, 0.6], opacity: 0.5 }, { transparent: true }),
-           3.2, -2.0, 0.6);
+           cleo.Material.Basic({ color: [1.0, 0.4, 0.6], opacity: 0.5 },
+                               { transparent: true, side: 'double' }),
+           3.4, -2.4, 0.6);
       // One LIT quad, so the ortho frame is not entirely unlit: the deferred G-buffer and the lighting
       // pass both have to survive a projection with no perspective divide.
       quad('litQuad', cleo.Geometry.Plane(2.0, 2.0),
            cleo.Material.PBR({ baseColor: [0.8, 0.8, 0.85], metallic: 0.1, roughness: 0.5,
-                               textures: { baseColorTexture: 'checker' } }),
-           0.0, 2.4, 0.2);
+                               textures: { baseColorTexture: 'checker' } },
+                             { side: 'double' }),
+           -6.2, 2.9, 0.2);
     } catch (e) {
       window.__twoDSceneError = String((e && e.stack) || e);
     }
