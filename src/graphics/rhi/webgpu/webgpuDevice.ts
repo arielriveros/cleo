@@ -893,8 +893,15 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
     }
 
     public setBindGroup(group: number, bindGroup: BindGroup, dynamicOffsets?: readonly number[]): void {
-        this._pass.setBindGroup(group, (bindGroup as WebGPUBindGroup).handle,
-                                dynamicOffsets ? Array.from(dynamicOffsets) : undefined);
+        const handle = (bindGroup as WebGPUBindGroup).handle;
+        // The third argument is OMITTED when there are no offsets, never passed as `undefined`.
+        //
+        // `setBindGroup` is an overloaded WebIDL operation and resolution looks at how many arguments
+        // were supplied, not at their values: an explicit `undefined` selects the sequence overload and
+        // is then converted, which throws "The provided value cannot be converted to a sequence". No
+        // caller in this engine passes offsets yet, so every call took that branch.
+        if (dynamicOffsets) this._pass.setBindGroup(group, handle, Array.from(dynamicOffsets));
+        else this._pass.setBindGroup(group, handle);
     }
 
     public setVertexBuffer(slot: number, buffer: Buffer, offset: number = 0): void {

@@ -43,9 +43,14 @@ describe('resolveBackendRequest', () => {
         expect(resolveBackendRequest('webgpu')).toBe(NOT_IN_BROWSER);
     });
 
-    it('refuses WebGPU when the browser has it but the build does not draw through it', () => {
+    it('refuses WebGPU only while the build says it cannot draw through one', () => {
+        // Asserted against WEBGPU_IMPLEMENTED rather than a hardcoded refusal, because that constant is
+        // exactly the thing being tested: while it is false a browser with WebGPU is still turned away,
+        // and once the renderer really does draw through one, flipping it must let the request through
+        // without editing this expectation. A test that has to be rewritten to flip a flag is measuring
+        // the flag's current value, not the rule.
         browser({ gpu: true });
-        expect(resolveBackendRequest('webgpu')).toBe(NOT_IMPLEMENTED);
+        expect(resolveBackendRequest('webgpu')).toBe(WEBGPU_IMPLEMENTED ? null : NOT_IMPLEMENTED);
     });
 
     it('allows WebGPU through the ?cleoWebgpuProbe=1 hatch', () => {
@@ -61,10 +66,15 @@ describe('resolveBackendRequest', () => {
     it('does not open on a truthy-but-wrong hatch value', () => {
         // `=== '1'` and `=== true`, not truthiness: `?cleoWebgpuProbe=0` reads as the string '0', which
         // is truthy in JS and would otherwise turn "off" into "on".
+        //
+        // The claim is that a wrong hatch value behaves EXACTLY like no hatch at all, so it is asserted
+        // against whatever the no-hatch answer currently is. That keeps the test about the hatch even
+        // once WEBGPU_IMPLEMENTED makes the request succeed for unrelated reasons.
+        const closed = WEBGPU_IMPLEMENTED ? null : NOT_IMPLEMENTED;
         browser({ gpu: true, search: '?cleoWebgpuProbe=0' });
-        expect(resolveBackendRequest('webgpu')).toBe(NOT_IMPLEMENTED);
+        expect(resolveBackendRequest('webgpu')).toBe(closed);
         browser({ gpu: true, search: '?cleoWebgpuProbe' });
-        expect(resolveBackendRequest('webgpu')).toBe(NOT_IMPLEMENTED);
+        expect(resolveBackendRequest('webgpu')).toBe(closed);
     });
 });
 

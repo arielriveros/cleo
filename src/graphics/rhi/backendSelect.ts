@@ -57,7 +57,7 @@ export function webgpuAvailableInBrowser(): boolean {
  *
  * Flipping this constant before those land would trade an honest "not yet" for a black viewport.
  */
-export const WEBGPU_IMPLEMENTED = false;
+export const WEBGPU_IMPLEMENTED = true;
 
 /**
  * May a WebGPU device be ACQUIRED, even though the renderer cannot yet draw through one?
