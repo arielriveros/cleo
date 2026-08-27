@@ -5,14 +5,8 @@ type EngineValue = ReturnType<typeof useCleoEngine>;
 
 /**
  * The asset libraries (templates, materials, terrain materials, models, script assets, animation fields)
- * plus their CRUD, split out of the large EngineContext.
- *
- * This is the biggest self-contained cluster in the old context, and the Assets explorer / VfsContext
- * consume exactly this slice — so they can subscribe here instead of re-rendering on every unrelated
- * EngineContext change. The state still lives in EngineProvider (each library is persisted to IndexedDB
- * by `usePersistedLibrary`); this context only re-exposes it as a narrow, memoized value.
- *
- * Derived via `Pick` so the signatures stay in lockstep with the context they are lifted from.
+ * plus their CRUD. The state lives in EngineProvider, persisted to IndexedDB by `usePersistedLibrary`;
+ * this context re-exposes it as a narrow, memoized value, derived via `Pick` to stay in lockstep with it.
  */
 export type AssetLibraryContextValue = Pick<EngineValue,
   | 'templates' | 'addTemplate' | 'removeTemplate' | 'updateTemplate'

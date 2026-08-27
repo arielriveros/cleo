@@ -1,10 +1,6 @@
-// On-screen debug toast stack for the editor viewport. Every `Logger.debug(...)` emit shows up here as
-// a line over the 3D view and self-expires after 10s — a heads-up channel for values you want to watch
-// while looking at the scene, without diverting your eyes to the Console panel.
-//
-// Editor-only by design: published games disable the Logger wholesale (player/index.tsx), so this never
-// renders there. It subscribes to the same CleoEngine.eventEmitter 'LOG' stream the console store uses,
-// but keeps only `debug` entries and drives its own expiry, independent of the console's ring buffer.
+// On-screen debug toast stack for the editor viewport: every `Logger.debug(...)` emit shows as a line
+// over the 3D view and self-expires. Subscribes to the same 'LOG' stream as the console store but keeps
+// only `debug` entries and drives its own expiry. Editor-only; published games disable the Logger.
 import { useEffect, useRef, useState } from 'react';
 import { CleoEngine } from 'cleo';
 import type { LogEntry } from 'cleo';
@@ -18,8 +14,8 @@ const MAX_LINES = 8;
 
 interface Toast { id: string; text: string; born: number }
 
-// Engine objects are large and often circular, so the on-screen text stays a shallow one-liner — the
-// Console panel's inspector is where you expand anything structured. Mirrors logStore's preview().
+// Engine objects are large and often circular, so the on-screen text stays a shallow one-liner.
+// Mirrors logStore's preview().
 function format(data: any[]): string {
   return data.map((value) => {
     if (typeof value === 'string') return value;
@@ -36,8 +32,7 @@ function format(data: any[]): string {
 
 export default function DebugOverlay() {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  // A monotonic tick that forces a re-render as lines approach expiry, so the CSS fade reflects real
-  // elapsed time rather than only firing when a new toast arrives.
+  // Forces a re-render as lines approach expiry, so the CSS fade tracks real elapsed time.
   const [, setTick] = useState(0);
   const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
@@ -54,7 +49,6 @@ export default function DebugOverlay() {
     };
 
     CleoEngine.eventEmitter.on('LOG', onLog);
-    // Repaint a few times a second so the fade tracks wall-clock time; cheap next to the render loop.
     const interval = setInterval(() => setTick((t) => t + 1), 200);
 
     return () => {

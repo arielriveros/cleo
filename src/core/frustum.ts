@@ -1,11 +1,9 @@
 import { mat4 } from "gl-matrix";
 
 /**
- * View frustum represented as 6 world-space planes, used for fast per-object culling. Planes are
- * extracted from a combined view-projection matrix with the Gribb–Hartmann method and normalized so
- * that a point is inside the frustum when its signed distance to every plane is >= 0. Works for both
- * perspective and orthographic projections. A single instance is meant to be reused per frame
- * (`setFromViewProjection` overwrites in place, no allocation).
+ * View frustum as 6 world-space planes (Gribb–Hartmann), for per-object culling under either
+ * projection. Planes are normalized, so a point is inside when its signed distance to every plane is
+ * >= 0. `setFromViewProjection` overwrites in place: reuse one instance per frame.
  */
 export class Frustum {
     // 6 planes × (a, b, c, d), normalized so (a, b, c) is unit length. Order: L, R, B, T, N, F.
@@ -20,12 +18,12 @@ export class Frustum {
         const m14 = m[12], m24 = m[13], m34 = m[14], m44 = m[15];
 
         // Left = row4 + row1, Right = row4 - row1, etc. (row-vector convention).
-        this._set(0, m41 + m11, m42 + m12, m43 + m13, m44 + m14); // left
-        this._set(1, m41 - m11, m42 - m12, m43 - m13, m44 - m14); // right
-        this._set(2, m41 + m21, m42 + m22, m43 + m23, m44 + m24); // bottom
-        this._set(3, m41 - m21, m42 - m22, m43 - m23, m44 - m24); // top
-        this._set(4, m41 + m31, m42 + m32, m43 + m33, m44 + m34); // near
-        this._set(5, m41 - m31, m42 - m32, m43 - m33, m44 - m34); // far
+        this._set(0, m41 + m11, m42 + m12, m43 + m13, m44 + m14);
+        this._set(1, m41 - m11, m42 - m12, m43 - m13, m44 - m14);
+        this._set(2, m41 + m21, m42 + m22, m43 + m23, m44 + m24);
+        this._set(3, m41 - m21, m42 - m22, m43 - m23, m44 - m24);
+        this._set(4, m41 + m31, m42 + m32, m43 + m33, m44 + m34);
+        this._set(5, m41 - m31, m42 - m32, m43 - m33, m44 - m34);
     }
 
     private _set(i: number, a: number, b: number, c: number, d: number): void {
@@ -37,13 +35,13 @@ export class Frustum {
         this._planes[o + 3] = d * inv;
     }
 
-    /** True if the world-space sphere is at least partially inside the frustum. The hot cull path. */
+    /** True if the world-space sphere is at least partially inside the frustum. */
     public intersectsSphere(cx: number, cy: number, cz: number, radius: number): boolean {
         const p = this._planes;
         for (let i = 0; i < 6; i++) {
             const o = i * 4;
             const dist = p[o] * cx + p[o + 1] * cy + p[o + 2] * cz + p[o + 3];
-            if (dist < -radius) return false; // fully outside this plane
+            if (dist < -radius) return false;
         }
         return true;
     }
@@ -54,7 +52,7 @@ export class Frustum {
         for (let i = 0; i < 6; i++) {
             const o = i * 4;
             const a = p[o], b = p[o + 1], c = p[o + 2];
-            // Corner of the box furthest along the plane normal; if it is behind the plane, so is the box.
+            // p-vertex: the corner furthest along the plane normal. Behind the plane => the box is too.
             const px = a >= 0 ? max[0] : min[0];
             const py = b >= 0 ? max[1] : min[1];
             const pz = c >= 0 ? max[2] : min[2];

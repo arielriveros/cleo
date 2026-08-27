@@ -51,7 +51,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
     eventEmitter.emit('SCENE_CHANGED')
   }
 
-  // Plain render helpers (invoked as functions so inputs keep identity across re-renders).
+  // Invoked as functions, not components, so the inputs keep identity across re-renders.
   const slider = (label: string, k: keyof AtmoState, min: number, max: number, step: number, fixed = 2) => (
     <Slider label={label} min={min} max={max} step={step} value={state[k] as number}
       labelClassName='w-[104px]' readout={(v) => v.toFixed(fixed)}

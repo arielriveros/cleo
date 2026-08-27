@@ -1,32 +1,15 @@
-/**
- * Backend-neutral vocabulary for the render hardware interface (RHI).
- *
- * Every name here is WebGPU's, deliberately. The mapping only runs one way: expressing WebGPU's
- * immutable pipelines, bind groups and explicit render passes on top of WebGL2 is routine, while
- * expressing WebGL2's mutable global state on top of WebGPU is not possible at all. So the abstraction
- * is shaped like the stricter of the two APIs, and the WebGL2 backend translates *down* into the
- * deduped `GLState` calls it already makes.
- *
- * String unions rather than numeric enums, for three reasons: they survive `JSON.stringify` into a
- * pipeline-cache key without a lookup table, they read in a debugger, and — the one that actually
- * forced it — a numeric enum would have to pick one backend's constants and would silently become a
- * lie on the other. `TextureConfig` in texture.ts already made this choice for its own options; this
- * is that convention carried across the whole interface.
- *
- * This module is pure data and types. It imports nothing, touches no context, and is safe to load in
- * the DOM-free test suite.
- */
+// Backend-neutral vocabulary for the render hardware interface. Every name is WebGPU's, because the
+// mapping only runs one way: WebGPU's stricter model expresses on WebGL2, not the reverse.
+// String unions, never numeric enums — an enum would have to pick one backend's constants.
+// Pure data and types: imports nothing, touches no context.
 
 // ------------------------------------------------------------------------------------------------
 // Textures
 // ------------------------------------------------------------------------------------------------
 
 /**
- * Texture formats the engine can allocate.
- *
- * Only the formats reachable from `TextureConfig` today, plus the two canvas formats a WebGPU swap
- * chain can hand back. Adding one means adding a row to {@link TEXTURE_FORMAT_INFO} — that table is
- * exhaustive over this union, so the compiler names the omission instead of failing at runtime.
+ * Texture formats the engine can allocate. Adding one requires a row in {@link TEXTURE_FORMAT_INFO},
+ * which is exhaustive over this union.
  */
 export type TextureFormat =
     | 'r8unorm'
@@ -46,13 +29,8 @@ export type TextureAspect = 'color' | 'depth';
 export type TextureDimension = '2d' | '2d-array' | '3d' | 'cube';
 
 /**
- * Static properties of a format, kept as one exhaustive table so no backend has to re-derive them.
- *
- * `filterable` is the field that matters most in practice: WebGL2 needs `OES_texture_float_linear`
- * before a 16F/32F texture can be sampled with LINEAR, and WebGPU gates 32F filtering behind the
- * `float32-filterable` feature. Both are optional on real hardware, which is why texture.ts already
- * silently downgrades `precision: 'high'` to RGBA8 when the extension is missing. Naming the property
- * here is what will let a capability check report that downgrade rather than hide it.
+ * Static properties of a format, as one exhaustive table so no backend re-derives them. `filterable`
+ * is optional on real hardware on both backends, which is what drives the RGBA8 downgrade.
  */
 export interface TextureFormatInfo {
     readonly aspect: TextureAspect;
@@ -83,11 +61,8 @@ export function isDepthFormat(format: TextureFormat): boolean {
 }
 
 /**
- * Bytes a mip chain of `format` occupies at these dimensions.
- *
- * Mips converge on 4/3 of the base level, but the renderer reports GPU memory per resource in the
- * stats panel and a closed-form 4/3 would drift from what `Texture.byteSize` already reports. So this
- * sums the real levels, each dimension halved and floored at 1 — which is what both APIs allocate.
+ * Bytes a mip chain of `format` occupies at these dimensions. Sums the real levels rather than using
+ * the closed-form 4/3, so it matches what both APIs actually allocate.
  */
 export function textureByteSize(
     format: TextureFormat, width: number, height: number, depthOrLayers: number = 1, mipCount: number = 1,
@@ -113,12 +88,8 @@ export function textureByteSize(
 export type AddressMode = 'clamp-to-edge' | 'repeat' | 'mirror-repeat';
 
 /**
- * The sampling and colour-space state a texture applies to every upload that follows.
- *
- * Settled once rather than passed to each upload because it is a property of the TEXTURE, not of any
- * one write: the same cube gets six faces and a mip chain, and all seven operations have to agree
- * about filtering and flip. Depth is called out explicitly because it overrides both — a depth
- * texture is forced to NEAREST/CLAMP whatever was asked for, and filtering one is undefined.
+ * The sampling and colour-space state a texture applies to every upload that follows — a property of
+ * the texture, not of a write. Depth overrides it: forced to NEAREST/CLAMP whatever was asked for.
  */
 export interface TextureConfigureDescriptor {
     readonly format: TextureFormat;
@@ -139,8 +110,7 @@ export interface SamplerDescriptor {
     mipmapFilter?: FilterMode;
     /**
      * Makes this a comparison sampler — `sampler2DArrayShadow` in GLSL, `sampler_comparison` in WGSL.
-     * Set for the shadow cascades and the spot atlas, which sample with hardware depth compare rather
-     * than reading depth back and comparing by hand. See shaders/environment/shadows.glsl.
+     * Set for the shadow cascades and the spot atlas.
      */
     compare?: CompareFunction;
     maxAnisotropy?: number;
@@ -151,13 +121,8 @@ export interface SamplerDescriptor {
 // ------------------------------------------------------------------------------------------------
 
 /**
- * Buffer usage flags, combined with a bitwise OR.
- *
- * Bit flags rather than a string union because usages genuinely compose — a vertex buffer rewritten
- * every frame is `VERTEX | COPY_DST` — and both APIs model them as a mask. `STORAGE` and `INDIRECT`
- * have no WebGL2 equivalent at all; they are declared here because compute skinning and GPU-driven
- * culling are the point of the port, and a backend that cannot honour them should say so through
- * {@link DeviceCapabilities} rather than by lacking the vocabulary.
+ * Buffer usage flags, combined with a bitwise OR. `STORAGE` and `INDIRECT` have no WebGL2 equivalent;
+ * a backend that cannot honour them reports so through {@link DeviceCapabilities}.
  */
 export const BufferUsage = {
     VERTEX:   0x0001,
@@ -189,16 +154,8 @@ export const ShaderStage = {
 export type ShaderStageFlags = number;
 
 /**
- * One `@group(G) @binding(B)` a program declares, as reflected from its WGSL at build time.
- *
- * This is what makes a {@link BindGroup} satisfiable on both backends. WebGPU binds by group and
- * binding directly. WebGL2 has neither concept, so its backend assigns a texture unit and sets the
- * combined sampler uniform named by `glslName` — which is why the GLSL name travels alongside the WGSL
- * one rather than being recomputed.
- *
- * A texture and its sampler share a `glslName`: WGSL keeps them apart, GLSL ES has only combined
- * samplers, so `u_x_texture` and `u_x_sampler` are one `uniform sampler2D u_x`. The WebGL2 backend acts
- * on the texture entry and skips the sampler one; WebGPU honours both.
+ * One `@group(G) @binding(B)` a program declares, reflected from its WGSL at build time. A texture and
+ * its sampler SHARE a `glslName`, which is what WebGL2 binds through, so it skips the sampler entry.
  */
 export interface ShaderResource {
     readonly group: number;
@@ -212,15 +169,7 @@ export interface ShaderResource {
     readonly glslName: string;
 }
 
-/**
- * Vertex attribute formats.
- *
- * The engine's own layouts are entirely float32 today — including bone indices, which ride as floats
- * inside the 14-float interleaved skinned vertex rather than as integers. The integer formats are
- * declared anyway because a WebGPU pipeline must name a format for every attribute, and packing bone
- * indices as `uint8x4` is the obvious first win once the layout is explicit rather than inferred from
- * attribute names.
- */
+/** Vertex attribute formats. The engine's own layouts are float32 throughout, bone indices included. */
 export type VertexFormat =
     | 'float32' | 'float32x2' | 'float32x3' | 'float32x4'
     | 'uint8x4' | 'unorm8x4'
@@ -241,9 +190,8 @@ export function vertexFormatSize(format: VertexFormat): number { return VERTEX_F
 
 export interface VertexAttribute {
     /**
-     * Attribute name as the shader declares it. Carried alongside `shaderLocation` because the WebGL2
-     * backend still resolves attributes by name through `getActiveAttrib` — exactly what `Mesh` does
-     * today via its `_CANON_ATTR` table — while a WebGPU pipeline binds purely by location.
+     * Attribute name as the shader declares it. Carried alongside `shaderLocation` because WebGL2
+     * resolves attributes by name; a WebGPU pipeline binds purely by location.
      */
     name: string;
     shaderLocation: number;
@@ -299,17 +247,8 @@ export interface BlendState {
 }
 
 /**
- * The engine's default: straight alpha-over for colour, and the destination alpha left ALONE.
- *
- * Exactly what `Renderer._restoreDefaultBlend` sets — `blendFuncSeparate(SRC_ALPHA,
- * ONE_MINUS_SRC_ALPHA, ZERO, ONE)` — and it has to be, because the alpha channel of the scene buffer
- * is the bloom mask, not coverage. `zero`/`one` on the alpha half IS what "surviving the colour blend
- * intact" means: a bare `gl.blendFunc` restore that forgot the alpha half is precisely the bug that
- * once made bloom emit nothing at all.
- *
- * This constant previously said `one`/`one-minus-src-alpha` for alpha under that same comment, which
- * would accumulate coverage into the mask and dim every bloom source behind a transparent object.
- * Nothing used it yet, so the error was inert; the forward pass was the first thing to reach for it.
+ * The engine's default: alpha-over for colour, destination alpha left ALONE. The alpha half must stay
+ * `zero`/`one` — the scene buffer's alpha channel is the bloom mask, not coverage.
  */
 export const DEFAULT_BLEND: BlendState = {
     color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
@@ -317,17 +256,7 @@ export const DEFAULT_BLEND: BlendState = {
 };
 
 /** Additive, for the god-ray composite and the bloom upsample chain. */
-/**
- * Whether a topology rasterises triangles.
- *
- * Lives here rather than in a backend because it is a question about the RHI's own topology union,
- * and BOTH backends count triangles now — it used to sit in `webgl2/glEnums.ts`, which meant the
- * WebGPU encoder would have had to import from the WebGL2 backend to keep the same counter.
- *
- * `Mesh.draw` needs this for its triangle counter, which previously read `mode === gl.TRIANGLES` —
- * a comparison that silently under-counted every strip. Asking the question by name rather than by
- * enum equality is what fixes it.
- */
+/** Whether a topology rasterises triangles. Strips and fans count, which a `=== TRIANGLES` test misses. */
 export function isTriangleTopology(topology: PrimitiveTopology): boolean {
     return topology === 'triangle-list' || topology === 'triangle-strip';
 }
@@ -367,12 +296,8 @@ export interface PrimitiveState {
 // ------------------------------------------------------------------------------------------------
 
 /**
- * What happens to an attachment at the start of a pass.
- *
- * The distinction is nearly free on desktop WebGL2 but load-bearing on tile-based mobile GPUs, where
- * `'clear'` spares the driver reading the previous contents back into tile memory. The engine issues
- * `gl.clear` by hand at the top of most passes today; making it part of the descriptor is what turns
- * that into a real optimisation rather than a redundant write.
+ * What happens to an attachment at the start of a pass. Nearly free on desktop, load-bearing on
+ * tile-based GPUs where `'clear'` spares reading the previous contents into tile memory.
  */
 export type LoadOp = 'load' | 'clear';
 
@@ -393,27 +318,14 @@ export interface DepthAttachmentDescriptor {
     storeOp: StoreOp;
     /** Only read when `loadOp` is `'clear'`. */
     clearValue?: number;
-    /**
-     * Render into one layer of a `2d-array` depth target, or one face of a cube.
-     *
-     * This is the shadow cascades and the spot atlas. WebGL2 reaches a layer through
-     * `framebufferTextureLayer`; WebGPU through `createView({ baseArrayLayer })`. Both are expressible,
-     * which is why the cascade array survives the port unchanged — see LayeredDepthFramebuffer.
-     */
+    /** Render into one layer of a `2d-array` depth target, or one cube face: the shadow cascades and spot atlas. */
     baseArrayLayer?: number;
 }
 
 export interface RenderPassDescriptor {
     /**
-     * What this pass is called. Debug marker, GPU-timing row, and the key the profiler attributes cost
-     * under on WebGPU.
-     *
-     * NOT the same name space as `RenderPass` in gpuProfiler.ts, which is what this used to claim. The
-     * renderer passes ~40 distinct labels and there are 29 profiler scopes, overlapping in roughly 20
-     * names: several passes share one scope (the three motion-blur passes), several scopes contain no
-     * pass at all (`frameEnd`), and several passes sit in no scope (`brdf`, `outline`, `shadow.clear`).
-     * `PASS_LABEL_TO_SCOPE` is the actual correspondence, and it is a partial map on purpose —
-     * anything not in it is reported as `pass:<label>` rather than filed under a scope it is not in.
+     * What this pass is called: debug marker, GPU-timing row, and the WebGPU profiler's attribution key.
+     * NOT the same name space as `RenderPass` in gpuProfiler.ts — `PASS_LABEL_TO_SCOPE` is the mapping.
      */
     label: string;
     colorAttachments: ColorAttachmentDescriptor[];

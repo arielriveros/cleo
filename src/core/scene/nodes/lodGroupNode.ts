@@ -22,17 +22,15 @@ export class LodGroupNode extends Node {
     public get activeLod(): number { return this._activeLod; }
     public get distanceCulled(): boolean { return this._distanceCulled; }
 
-    // Show exactly the active level (or nothing while distance-culled). Called on parse and on
-    // transitions only — subtree flag writes are not per-frame work.
+    // Show exactly the active level, or nothing while distance-culled.
     private _applyActiveLod(): void {
         for (let i = 0; i < this._children.length; i++)
             this._children[i].setLodVisible(!this._distanceCulled && i === this._activeLod);
     }
 
     /**
-     * Distance from the camera to the *surface* of the group's bounding sphere picks the level, with
-     * the same ×0.9 hysteresis as Terrain.lodFor: coarsen (and cull) immediately, refine/un-cull only
-     * once comfortably inside the threshold, so a camera sitting on a boundary doesn't flip per frame.
+     * Pick the level from the camera's distance to the *surface* of the group's bounding sphere.
+     * Thresholds carry ×0.9 hysteresis: coarsen and cull immediately, refine only once inside it.
      */
     public updateLod(camPos: vec3): void {
         if (this._children.length === 0) return;
@@ -60,9 +58,8 @@ export class LodGroupNode extends Node {
     }
 
     /**
-     * Union of the level-0 subtree's ModelNode spheres — level 0 is the authored mesh, the other
-     * levels are stand-ins for the same object, so its bound serves the whole group (for LOD distance
-     * and frustum culling alike). Uses the shared per-frame _worldSphere cache.
+     * Union of the level-0 subtree's ModelNode spheres. Level 0 is the authored mesh, so its bound
+     * serves the whole group. Uses the shared per-frame _worldSphere cache.
      */
     public getBoundingSphere(): { center: vec3; radius: number } {
         if (!this._worldSphereDirty) return this._worldSphere;
@@ -112,5 +109,3 @@ export class LodGroupNode extends Node {
         this._applyActiveLod(); // children exist only after finishParse: start showing level 0
     }
 }
-
-/** How `followOffset` is oriented relative to the follow target. */

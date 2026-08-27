@@ -30,8 +30,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
 
   useEffect(() => {
     const refresh = () => setTexturesIds(
-      // '__packed__' ids are engine-derived channel packs (metallic+roughness+occlusion combined into
-      // one texture); they are not assignable — the source maps in the slots above them are.
+      // '__packed__' ids are engine-derived channel packs and are never assignable.
       Array.from(TextureManager.Instance.textures.keys())
         .filter(key => !(key.includes('__editor__') || key.includes('__debug__') || isDerivedTextureId(key)))
     );
@@ -99,7 +98,6 @@ export default function TextureInspector(props: { tex: string, material: Materia
         img.src = data as string;
         img.onload = () => {
           let texName = file.name;
-          // if texture exists, change the name
           let i = 1;
           while (TextureManager.Instance.getTexture(texName)) {
             texName = `${file.name.split('.')[0]}_${i}.${file.name.split('.')[1]}`;
@@ -123,7 +121,6 @@ export default function TextureInspector(props: { tex: string, material: Materia
     props.material.properties.set(`has${props.tex.charAt(0).toUpperCase() + props.tex.slice(1)}`, true)
     setTexture(textureId);
     setOpen(false);
-    // notify others
     eventEmitter.emit("TEXTURES_CHANGED");
     eventEmitter.emit('SCENE_CHANGED', { kind: 'texture' });
   }

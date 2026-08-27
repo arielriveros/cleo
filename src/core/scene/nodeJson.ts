@@ -1,25 +1,15 @@
 // Operations on SERIALIZED node subtrees — the `{ id, name, type, children, ... }` shape Node.serialize
-// produces and Node.parse consumes. Pure JSON in, pure JSON out (parseNodeJson excepted), no GL and no
-// live scene, so the editor's asset tooling and the engine's runtime instantiation share one implementation
-// rather than each carrying its own copy that can drift.
-
-// The type dispatch that materializes a subtree lives in nodes/parseNodeJson.ts, the one module that
-// imports every node class. The base class reaches it through the one-slot hook in nodes/childParser.ts
-// rather than importing it, because every subclass extends `Node` at module-evaluation time and a direct
-// import would close a cycle through a class that has to exist first.
+// produces and Node.parse consumes. Pure JSON in, pure JSON out, no GL and no live scene, so the editor's
+// asset tooling and the engine's runtime instantiation share one implementation.
 
 import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Deep-copy a serialized subtree, preserving typed arrays.
  *
- * `JSON.parse(JSON.stringify(x))` cannot be used: a published build's geometry arrives as Float32Array/
- * Uint16Array views over game.bin, and JSON turns those into `{"0":1,"1":2,…}` objects — a mesh that
- * silently comes back empty. `structuredClone` is no good either, since cloning a view copies the ENTIRE
- * backing buffer (the whole game.bin) per instance.
- *
- * Typed arrays are `slice()`d rather than shared, which is required and not merely tidy: `Geometry.scale`
- * writes into its positions IN PLACE, so two instances over one buffer would deform each other.
+ * Neither `JSON.parse(JSON.stringify(x))` (turns geometry views into plain objects) nor `structuredClone`
+ * (copies each view's entire backing buffer) is usable here. Typed arrays are `slice()`d, never shared:
+ * `Geometry.scale` writes its positions IN PLACE, so two instances over one buffer would deform each other.
  */
 export function cloneNodeJson<T>(value: T): T {
     if (value === null || typeof value !== 'object') return value;
@@ -42,9 +32,8 @@ const NODE_REF_KEYS = ['followId', 'lookAtId', 'cameraNodeId', 'uiTargetId'];
 
 /**
  * Rewrite node-reference fields (CameraRigNode's follow/lookAt/camera pins) through an id map.
- *
- * References to nodes OUTSIDE the copied subtree are deliberately left alone: those mean "follow the player
- * that already exists in the scene", which is exactly what should survive an instantiation.
+ * References to nodes OUTSIDE the copied subtree are left alone: those mean "follow the player already
+ * in the scene", which must survive an instantiation.
  */
 export function remapNodeRefs(json: any, map: Map<string, string>): void {
     for (const key of NODE_REF_KEYS) {
@@ -61,9 +50,8 @@ function assignIds(json: any, map: Map<string, string>, newId: () => string): vo
     if (json?.id) {
         const id = newId();
         map.set(json.id, id);
-        // The id this node was COPIED from. Anything keyed by the original id can still find its way home
-        // after renumbering — which is how a published game attaches the right precompiled script to an
-        // instantiated node (see setScriptProvider / Node._commonParse).
+        // The id this node was COPIED from, so anything keyed by the original id still resolves after
+        // renumbering (a published game attaches precompiled scripts this way).
         json.__sourceId = json.__sourceId ?? json.id;
         json.id = id;
     }
@@ -71,16 +59,11 @@ function assignIds(json: any, map: Map<string, string>, newId: () => string): vo
 }
 
 /**
- * Recursively assign fresh ids to a serialized subtree, filling `map` with oldId -> newId.
+ * Recursively assign fresh ids to a serialized subtree, filling `map` with oldId -> newId, then remap
+ * node references. The remap must be a second pass: a node may reference a sibling that has not been
+ * renumbered yet, so references can only be fixed once the whole map exists.
  *
- * Two passes, and the second is not optional: a node may reference a sibling that has not been renumbered
- * yet, so the references can only be fixed once the whole map exists. Doing the remap in here rather than
- * leaving it to callers means a copied subtree can never silently keep pointing at the original — a template
- * holding a camera rig and its follow target would otherwise have every instance follow the FIRST
- * instance's target.
- *
- * @param newId Id factory, so a caller with its own id scheme (the editor's `cryptoRandomId`) stays
- *              consistent with the ids it generates everywhere else.
+ * @param newId Id factory, for a caller with its own id scheme (the editor's `cryptoRandomId`).
  */
 export function regenerateNodeIds(json: any, map: Map<string, string>, newId: () => string = uuidv4): void {
     assignIds(json, map, newId);

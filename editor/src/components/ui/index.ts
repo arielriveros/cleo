@@ -54,6 +54,6 @@ export type { ModalProps } from './Modal';
 export { OverlayPanel } from './OverlayPanel';
 export type { OverlayPanelProps } from './OverlayPanel';
 
-// Refactored (token-based) legacy primitives, re-exported for a single import surface.
+// Primitives that live outside ui/, re-exported for a single import surface.
 export { default as Collapsable } from '../Collapsable';
 export { default as AxisInput } from '../AxisInput';

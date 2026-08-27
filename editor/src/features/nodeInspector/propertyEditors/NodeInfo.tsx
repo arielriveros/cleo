@@ -16,8 +16,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
     setSpawnOnStart(props.node.spawnOnStart);
   }, [props.node]);
 
-  // The name can also be changed from the scene tree's inline rename, which leaves this field showing the
-  // old text: the selected node is the same object, so the effect above never re-runs for it.
+  // The scene tree's inline rename mutates the same node object, so the effect above never re-runs for it.
   useEffect(() => {
     const onSceneChanged = (e?: { kind?: string; node?: Node }) => {
       if (e?.kind === 'name' && e.node === props.node) setNodeName(props.node.name);
@@ -26,8 +25,8 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
     return () => { eventEmitter.off('SCENE_CHANGED', onSceneChanged) };
   }, [eventEmitter, props.node]);
 
-  // The flag is a RUNTIME rule — editing scenes set scene.spawnRulesEnabled = false, so the node stays
-  // visible here whatever this says. Nothing to re-derive in the viewport, just the dirty mark.
+  // spawnOnStart is a RUNTIME rule: editing scenes set scene.spawnRulesEnabled = false, so the node stays
+  // visible here whatever this says.
   const handleSpawnOnStartChange = (value: boolean) => {
     setSpawnOnStart(value);
     props.node.spawnOnStart = value;
@@ -36,7 +35,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
 
   const handleNodeNameChange = () => {
     if (nodeName === props.node.name) return;
-    // Same rules as the scene tree's inline rename — they live in one place so the two can't drift.
+    // Same rules as the scene tree's inline rename, kept in one place so the two cannot drift.
     const problem = validateNodeName(nodeName);
     if (problem) {
       Logger.warn(problem, 'Editor');

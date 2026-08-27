@@ -4,11 +4,9 @@ import type { BoneMapping, BoneMatchKind } from 'cleo'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 
-// Review modal for importing animation clips. Two sections: a SKELETON mapping (which source bone drives
-// which target joint, auto-matched with a manual override per row) and the CLIP list (per-clip
-// compatibility against that mapping, pick which to add). Editing a mapping row updates the clip counts
-// immediately — the counts are recomputed from the live mapping, so the user sees the effect of a fix
-// before committing to the (expensive) retarget, which happens on Accept back in EngineContext.
+// Review modal for importing animation clips: a SKELETON mapping (which source bone drives which target
+// joint) and the CLIP list. Clip counts are recomputed from the live mapping, so a mapping fix shows its
+// effect before Accept, which is where EngineContext runs the retarget.
 
 const KIND_LABEL: Record<BoneMatchKind, string> = {
   exact: 'exact', normalized: 'name', humanoid: 'auto', spine: 'spine', index: 'index', manual: 'manual', none: '—',
@@ -24,11 +22,8 @@ const KIND_STYLE: Record<BoneMatchKind, string> = {
 }
 
 /**
- * The name to seed the rename box with.
- *
- * Every Mixamo clip is literally called `mixamo.com`, and a nameless glTF animation parses as
- * `Animation` — neither identifies anything, and a second import of either collides into "… (2)". For
- * those two the FILE name is what the user actually recognises.
+ * The name to seed the rename box with. Mixamo clips are all called `mixamo.com` and nameless glTF
+ * animations parse as `Animation`; for those two the file name is used instead.
  */
 function defaultClipName(clipName: string, fileName: string): string {
   const generic = clipName === 'mixamo.com' || clipName === 'Animation' || !clipName.trim()
@@ -41,10 +36,10 @@ function defaultClipName(clipName: string, fileName: string): string {
 export default function AnimationImportModal() {
   const { pendingAnimationImport, resolveAnimationImport } = useEditorSessions()
   const [include, setInclude] = useState<boolean[]>([])
-  // Per-clip name, editable before commit. Renaming here rather than afterwards keeps Animation Field
-  // samples (which reference clips by name and are NOT rewritten by a later rename) from being orphaned.
+  // Per-clip name, editable before commit. Animation Field samples reference clips by name and are NOT
+  // rewritten by a later rename, so renaming must happen here.
   const [names, setNames] = useState<string[]>([])
-  // Working copy of the mapping so edits are instant; committed back on Accept.
+  // Working copy of the mapping; committed back on Accept.
   const [mapping, setMapping] = useState<BoneMapping | null>(null)
   const [showMap, setShowMap] = useState(false)
 
@@ -79,14 +74,14 @@ export default function AnimationImportModal() {
     nodes.filter(n => (targetOf.get(n) ?? null) === null)
       .map(n => info.sourceBones.find(b => b.node === n)?.name ?? `node ${n}`)
 
-  // target for each source bone, from the live mapping — clip counts read through this.
+  // Source bone → target joint from the LIVE mapping; clip counts read through this.
   const targetOf = new Map(mapping.entries.map(e => [e.sourceNode, e.targetNode] as const))
   const mappedCount = mapping.entries.filter(e => e.targetNode !== null).length
   const autoCount = mapping.entries.filter(e => e.kind === 'humanoid' || e.kind === 'normalized' || e.kind === 'spine').length
   const exactCount = mapping.entries.filter(e => e.kind === 'exact').length
   const unmappedCount = mapping.entries.length - mappedCount
 
-  // Unmapped rows first — those are the ones that need attention.
+  // Unmapped rows first: those are the ones needing attention.
   const rows = [...mapping.entries].sort((a, b) => (a.targetNode === null ? 0 : 1) - (b.targetNode === null ? 0 : 1))
 
   return (

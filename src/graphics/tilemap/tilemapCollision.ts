@@ -1,11 +1,6 @@
-// Turning a chunk's solid cells into as few collider boxes as possible.
-//
-// One box per solid tile is correct but ruinous: a 32x32 chunk of solid ground would put 1024 static
-// bodies in the world, and a modest map hundreds of thousands. Greedy meshing collapses solid regions
-// into maximal rectangles instead — an open field becomes a single box, and only genuinely ragged
-// geometry (a checkerboard is the worst case) approaches one box per cell.
-//
-// Pure integer work with no physics types in scope, so it is directly unit-testable.
+// Turning a chunk's solid cells into as few collider boxes as possible: greedy meshing collapses solid
+// regions into maximal rectangles, where one box per tile would put 1024 bodies in a full chunk.
+// Pure integer work with no physics types in scope.
 
 /** An axis-aligned run of solid cells, inclusive on both ends. */
 export interface SolidBox {
@@ -13,11 +8,8 @@ export interface SolidBox {
 }
 
 /**
- * Cover every solid cell of a `w` x `h` bitmap with non-overlapping rectangles.
- *
- * Greedy in two passes per rectangle: take the longest horizontal run starting at the first unclaimed
- * solid cell, then extend it downward for as long as the row below matches it exactly. Every cell is
- * visited a constant number of times, so this is O(w*h) despite the nested loops.
+ * Cover every solid cell of a `w` x `h` bitmap with non-overlapping rectangles: the longest horizontal
+ * run from each unclaimed cell, extended downward while the row below matches. O(w*h).
  */
 export function greedyMerge(solid: Uint8Array, w: number, h: number): SolidBox[] {
     const boxes: SolidBox[] = [];

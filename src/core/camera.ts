@@ -27,7 +27,6 @@ export class Camera {
     private _bottom: number;
     private _top: number;
 
-    // Cached matrices, recomputed only when their inputs change (see _viewDirty / _projDirty).
     private _view: mat4 = mat4.create();
     private _projection: mat4 = mat4.create();
     private _viewDirty: boolean = true;
@@ -55,14 +54,12 @@ export class Camera {
 
     public get type(): 'perspective' | 'orthographic' { return this._type; }
     public set type(value: 'perspective' | 'orthographic') { if (value !== this._type) { this._type = value; this._projDirty = true; } }
-    // Setters copy into the internal vectors so the camera never aliases (and gets desynced by)
-    // externally-owned/cached vectors such as a node's world position.
+    // Setters copy into the internal vectors; the camera never aliases a caller's vector.
     public get position(): vec3 { return this._position; }
     public set position(value: vec3) { vec3.copy(this._position, value); this._viewDirty = true; }
     public get eye(): vec3 { return this._eye; }
     public set eye(value: vec3) { vec3.copy(this._eye, value); this._viewDirty = true; }
-    // Up vector for the view matrix. Defaults to world up; set explicitly for cube-map capture,
-    // where the +Y / -Y faces need a non-default up.
+    // Defaults to world up; cube-map capture must set it explicitly for the +Y / -Y faces.
     public get up(): vec3 { return this._up; }
     public set up(value: vec3) { vec3.copy(this._up, value); this._viewDirty = true; }
     public get fov(): number { return this._fov; }
@@ -72,12 +69,9 @@ export class Camera {
     public get far(): number { return this._far; }
     public set far(value: number) { if (value !== this._far) { this._far = value; this._projDirty = true; } }
     /**
-     * Viewport aspect (width / height), set by {@link resize}.
-     *
-     * Read-only on purpose: it is derived from the viewport, and a setter would let a caller desync it
-     * from the value the projection matrix actually uses. Exposed because anything that UNPROJECTS has
-     * to apply the same scaling `projectionMatrix` does — for an orthographic camera that means
-     * `left`/`right` scaled by this, and `top`/`bottom` not (see {@link Raycaster.screenToRay}).
+     * Viewport aspect (width / height), set by {@link resize}. Anything that UNPROJECTS must apply the
+     * same scaling `projectionMatrix` does: an orthographic camera scales `left`/`right` by this and
+     * leaves `top`/`bottom` alone (see {@link Raycaster.screenToRay}).
      */
     public get ratio(): number { return this._ratio; }
     public get left(): number { return this._left; }

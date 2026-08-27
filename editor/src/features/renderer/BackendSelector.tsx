@@ -7,16 +7,9 @@ import { readBackendPreference, writeBackendPreference } from './backendPreferen
 import webglLogo from '../../images/logos/WebGL-logo.svg';
 import webgpuLogo from '../../images/logos/WebGPU-logo.svg';
 
-// Graphics API selector.
-//
-// The choice is a REQUEST resolved when the engine constructs its device, not a live switch: a WebGL
-// context cannot change API underneath the buffers, textures and programs already built on it. So the
-// control persists a preference and tells the user it applies on reload, rather than appearing to do
-// something instant and silently doing nothing.
-//
-// It also distinguishes the two reasons WebGPU might be unavailable, because they are not the user's
-// problem in the same way: a browser without `navigator.gpu` is theirs to change, a build without a
-// WebGPU device is ours.
+// Graphics API selector. The choice is a request resolved when the engine constructs its device, not a
+// live switch: a context cannot change API underneath the buffers, textures and programs built on it.
+// The control persists a preference and says it applies on reload.
 
 const OPTIONS: { value: BackendKind; label: string; logo: string }[] = [
   { value: 'webgl2', label: 'WebGL 2', logo: webglLogo },
@@ -37,8 +30,6 @@ export default function BackendSelector() {
   const unavailable = (value: BackendKind): string | null => {
     if (value !== 'webgpu') return null;
     if (!browserHasWebGPU) return 'This browser does not expose navigator.gpu.';
-    // Deliberately specific about which half is missing. The device is built and verified against a
-    // real driver; what is not wired up is the renderer, which still talks to WebGL directly.
     if (!WEBGPU_IMPLEMENTED) return 'The WebGPU device works, but the renderer does not draw through it yet.';
     return null;
   };
@@ -49,8 +40,8 @@ export default function BackendSelector() {
     setPreference(value);
   };
 
-  // The preference is stored but the running renderer is on something else — either a pending reload
-  // or a request that could not be met. Those read very differently, so they are not one message.
+  // The preference is stored but the running renderer is on something else: a pending reload, or a
+  // request that could not be met. Those are separate messages.
   const pendingReload = preference !== active && !fallbackReason;
 
   return (

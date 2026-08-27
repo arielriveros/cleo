@@ -1,12 +1,9 @@
 import { vec3 } from "gl-matrix";
 
 /**
- * Bounding Volume Hierarchy for exact ray/triangle picking against a mesh.
- *
- * The tree is built once in the mesh's local (object) space and can be shared across every
- * instance of that geometry. To query, transform the ray into object space (via the inverse
- * world transform) and call {@link BVH.raycast}. This is an engine feature — usable both by the
- * editor's click-selection and by gameplay code at runtime (see `Raycaster`).
+ * Bounding Volume Hierarchy for exact ray/triangle picking against a mesh. The tree is built in the
+ * mesh's local (object) space and shared across every instance of that geometry, so a query must
+ * transform the ray into object space (inverse world transform) before calling {@link BVH.raycast}.
  */
 
 export interface BVHHit {
@@ -29,11 +26,8 @@ interface BVHNode {
 
 /**
  * A built BVH flattened into transferable buffers, so it can be constructed in a worker and adopted on
- * the main thread instead of being rebuilt there (the build is O(n log n) with a sort per node — one of
- * the most expensive steps of importing a dense mesh).
- *
- * `nodes` packs 9 floats per node: [minX,minY,minZ, maxX,maxY,maxZ, left, right, start] — `count` is
- * derivable but stored too, so 10 floats. Kept as a single Float32Array to transfer in one go.
+ * the main thread. `nodes` packs 10 floats per node —
+ * [minX,minY,minZ, maxX,maxY,maxZ, left, right, start, count] — as one Float32Array, to transfer in one go.
  */
 export interface SerializedBVH {
     positions: Float32Array;
@@ -105,19 +99,14 @@ export class BVH {
     }
 
     /**
-     * Builds a BVH from a geometry's local-space positions and triangle indices.
-     * `positions` is an array of [x, y, z]; `indices` is a flat triangle index list. If `indices`
-     * is empty the positions are treated as a non-indexed triangle soup.
+     * Builds a BVH from a geometry's flat local-space buffers: `positions` as xyz triples, `indices`
+     * as a flat triangle index list. Empty `indices` means the positions are a non-indexed soup.
      */
-    /** Build directly from flat buffers — the shape `Geometry` now stores natively. */
     public static fromBuffers(positions: Float32Array, indices: Uint32Array): BVH {
         return new BVH(positions, indices);
     }
 
-    /**
-     * Flatten this tree into transferable buffers. Pair with {@link BVH.fromSerialized} to build in a
-     * worker and adopt on the main thread without repeating the build.
-     */
+    /** Flatten this tree into transferable buffers. Pair with {@link BVH.fromSerialized}. */
     public serialize(): SerializedBVH {
         const nodes = new Float32Array(this._nodes.length * NODE_STRIDE);
         for (let i = 0; i < this._nodes.length; i++) {
@@ -160,9 +149,8 @@ export class BVH {
     public get triangleCount(): number { return this._triCount; }
 
     /**
-     * Object-space AABB of the whole geometry — the root node's bounds, computed for free during the
-     * build. A cheap, cached tight box that avoids re-scanning every vertex (used to derive a geometry
-     * bounding sphere for frustum culling). Empty geometry → a zero box at the origin.
+     * Object-space AABB of the whole geometry — the root node's bounds, cached from the build, so no
+     * vertex rescan. Empty geometry → a zero box at the origin.
      */
     public get bounds(): { min: [number, number, number]; max: [number, number, number] } {
         if (this._nodes.length === 0)
@@ -172,7 +160,6 @@ export class BVH {
     }
 
     private _build(): void {
-        // Precompute triangle centroids used for the median split.
         for (let t = 0; t < this._triCount; t++) {
             this._order[t] = t;
             const i0 = this._indices[t * 3] * 3;

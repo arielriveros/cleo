@@ -13,14 +13,10 @@ import type { BodyDescription, ShapeDescription } from '../EngineContext'
 import { migrateLegacyUI } from '../../utils/uiMigration'
 import type { ScriptAsset } from '../../utils/scripts'
 
-// game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts can call
+// game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts call
 // Game.loadScene(name|id) to switch at runtime. Textures are serialized ONCE at the top level (they are
-// global), and every scene's tree is built through the same buildGameData path as a single-scene publish
-// so nothing about the runtime shape changes per scene.
-//
-// Closed scenes are re-resolved against the current asset libraries first (resyncScene), so an asset
-// edited while a scene was closed still ships up to date — the cross-scene propagation requirement, at
-// publish time.
+// global) and every scene's tree goes through the same buildGameData path as a single-scene publish.
+// Closed scenes are re-resolved against the current asset libraries first (resyncScene).
 
 export interface MultiSceneSources {
   mainSceneId: string
@@ -56,13 +52,13 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
       continue
     }
 
-    // A closed scene: load its blob, pull scripts/bodies/triggers into temp maps, parse a throwaway
-    // Scene, re-resolve its assets against the current libraries, then serialize it the normal way.
+    // A closed scene: load its blob, parse a throwaway Scene, re-resolve its assets against the current
+    // libraries, then serialize it the normal way.
     const data = await loadSceneData(meta.id)
     if (!data) continue
     const clone = JSON.parse(JSON.stringify({ scene: data.scene, ui: data.ui }))
-    // A scene that was never opened in this build still carries its UI as the legacy blob. Missing this
-    // is the silent failure mode: the game publishes and runs, and that scene simply has no HUD.
+    // A scene never opened in this build still carries its UI as the legacy blob; without this it
+    // publishes and runs with no HUD.
     migrateLegacyUI(clone.scene, clone.ui)
     const maps = { scripts: new Map<string, string>(), bodies: new Map<string, any>(), triggers: new Map<string, any>() }
     extractNodeState(clone.scene, maps)
@@ -80,61 +76,49 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     scenes[meta.id] = { name: meta.name, scene: gd.scene }
   }
 
-  // Discard the authoring each scene's dimension does not use — a landscape in a 2D scene, a tilemap in
-  // a 3D one. The ordering here is load-bearing and there are two reasons for it: compressing a heightfield
-  // we are about to delete is pure waste, and the texture filter below is driven off the SERIALIZED scenes,
-  // so a landscape stripped after it would still drag its layer textures into the build.
+  // Discard the authoring each scene's dimension does not use. The ordering is load-bearing: the texture
+  // filter below is driven off the SERIALIZED scenes, so a landscape stripped after it would still drag
+  // its layer textures into the build.
   for (const meta of src.scenes) {
     const entry = scenes[meta.id]
     if (!entry) continue
-    // An UNKNOWN dimension strips nothing. A scene saved before dimension became per-scene has none
-    // recorded, and guessing wrong here would silently delete the authoring the game is built around —
-    // the same asymmetry the texture walker reasons about, so it errs the same way. One save per scene
-    // records the resolved value and the strip starts applying.
+    // An UNKNOWN dimension strips nothing: a scene saved before dimension became per-scene has none
+    // recorded, and guessing wrong would delete the authoring the game is built around.
     const dimension = meta.id === src.openSceneId ? (src.liveDimension ?? meta.dimension) : meta.dimension
     if (dimension) stripDimensionData(entry.scene, dimension)
   }
 
   // Bulk terrain and tilemap data (height field, splat map, tile grids) out of the JSON manifest and into
-  // deflated byte arrays the packer moves into game.bin. Main thread: CompressionStream lives here,
-  // alongside the rest of the DOM-dependent publish prep.
+  // deflated byte arrays the packer moves into game.bin. Main thread: CompressionStream lives here.
   for (const entry of Object.values(scenes)) {
     await compressTerrainData(entry.scene)
     await compressTilemapData(entry.scene)
   }
 
-  // Templates once too, for the same reason as textures: the runtime registry is global, the player loads it
-  // at boot, and a Game.loadScene switch must not invalidate what a script can still instantiate. Every
-  // template in the library ships — a script may name any of them, and there is no way to tell statically.
+  // Templates once, like textures: the runtime registry is global and a Game.loadScene switch must not
+  // invalidate what a script can still instantiate. Every template ships — a script may name any of them.
   const templates = bakeTemplates(src.libs.templates ?? [], src.libs.materials, src.scriptAssets)
 
-  // Textures once, for the whole game (they are global, not per scene). As raw compressed bytes, not
-  // base64: the packer writes them verbatim into game.bin, so publishing neither encodes nor inflates
-  // them. Must run on the main thread — the canvas fallback inside needs a DOM.
-  //
-  // Narrowed to what the SERIALIZED scenes and templates actually reference. Unfiltered, this shipped
-  // the entire TextureManager — every texture the project had ever imported, used or not. Note the
-  // filter must run AFTER bakeTemplates, since a template can be the only referrer of a texture.
+  // Textures once, for the whole game, as raw compressed bytes the packer writes verbatim into game.bin.
+  // Must run on the main thread — the canvas fallback inside needs a DOM. Narrowed to what the SERIALIZED
+  // scenes and templates reference, so it must run AFTER bakeTemplates: a template can be a texture's
+  // only referrer.
   const wanted = new Set<string>()
   for (const entry of Object.values(scenes)) collectPublishedTextureIds(entry.scene, wanted)
   for (const t of templates) collectPublishedTextureIds((t as any).node, wanted)
 
   let textureBytes: any[] = []
   try {
-    // Empty means the walker found nothing to keep — far more likely a walker bug than a genuinely
-    // textureless game, so fall back to shipping everything rather than a build with no textures.
+    // Empty means the walker found nothing to keep — more likely a walker bug than a textureless game,
+    // so fall back to shipping everything.
     textureBytes = wanted.size > 0
       ? TextureManager.Instance.serializeTextureBytes(wanted)
       : TextureManager.Instance.serializeTextureBytes()
   } catch { textureBytes = [] }
 
-  // Shared animation clips, ONCE for the whole game, in their source rig's space — and a map of which
-  // model asset uses which. `AnimatedModel.serialize` drops an asset-backed clip, so the scenes above
-  // carry none of them; the player resolves and retargets at load instead. That is what keeps one walk
-  // shared by two characters from shipping twice (and from shipping once per PLACEMENT, which is what
-  // embedding would have cost).
-  //
-  // Narrowed to what a shipped model actually references, the same discipline as textures.
+  // Shared animation clips ONCE for the whole game, in their source rig's space, plus a map of which model
+  // asset uses which. `AnimatedModel.serialize` drops an asset-backed clip, so the scenes above carry
+  // none; the player resolves and retargets at load. Narrowed to what a shipped model references.
   const modelAnimations: Record<string, string[]> = {}
   const wantedAnims = new Set<string>()
   for (const m of src.libs.models ?? []) {

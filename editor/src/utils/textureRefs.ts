@@ -1,12 +1,9 @@
 // Detects texture image files a model references but that were NOT included in the upload, by reading the
 // source files directly: GLTF `images[].uri` and MTL `map_*` lines.
 //
-// This covers only the text formats, and deliberately so — it exists to name images that never reach the
-// loader at all. Everything else (FBX and GLB, whose references are binary, and any slot that resolved to
-// nothing) is reported by the loaders themselves through `TextureLoadReport`, which importModelFiles
-// unions with this. A previous version of this comment claimed GLB/FBX always embed their textures and
-// therefore needed no detection; they frequently do not, and the result was an untextured import that
-// cheerfully announced "All referenced textures are present".
+// Text formats only, since this names images that never reach the loader at all. FBX and GLB carry their
+// references in binary and are covered instead by the loaders' own `TextureLoadReport`, which
+// importModelFiles unions with this.
 
 // Last path segment, splitting on both separators (MTL paths are often Windows-style, e.g. `tex\a.png`).
 function baseName(path: string): string { const parts = path.split(/[\\/]/); return parts[parts.length - 1] }
@@ -15,9 +12,8 @@ function extOf(name: string): string { const b = baseName(name).toLowerCase(); c
 // MTL texture-map directives; the filename is the LAST whitespace token (options like `-bm 0.5` precede it).
 const MTL_MAP_RE = /^\s*(map_\w+|bump|disp|decal|norm|refl)\b\s+(.+?)\s*$/i
 
-// The gltf material texture slots the engine's GLTFLoader.createMaterial actually loads. Detection must
-// mirror this exactly so the modal lists precisely the images that will be applied (not every image in
-// the file, which over-reports unused / shared-source images and leaves uploads that never get used).
+// The gltf material texture slots GLTFLoader.createMaterial actually loads. This must mirror that exactly,
+// or the modal lists images that will never be applied.
 function gltfMaterialImageIndices(mat: any): (number | undefined)[] {
   const pbr = mat?.pbrMetallicRoughness
   return [

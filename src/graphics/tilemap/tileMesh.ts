@@ -1,17 +1,9 @@
-// GPU geometry for one tilemap chunk.
+// GPU geometry for one tilemap chunk: its own interleaved buffer, 8 floats per vertex —
+// position.xy | uv.xy | colour.rgba — because per-cell tint needs a colour attribute Geometry has no
+// slot for.
 //
-// Deliberately NOT built on Geometry/Mesh/Model: per-cell tint and opacity need a colour attribute, and
-// Geometry's vertex layout is a fixed position/normal/uv/tangent/bitangent set that Mesh's canonical
-// attribute table bakes in. Smuggling colour through the normal slot would work today and be a trap
-// forever, so a tilemap chunk owns a small interleaved buffer of its own instead.
-//
-// Layout, 8 floats per vertex:  position.xy | uv.xy | colour.rgba
-//
-// On a Y-sorted layer the cells are emitted in depth order and the index buffer is split into BANDS —
-// contiguous ranges sharing one sort depth. The renderer then interleaves those bands with sprites
-// using one drawElements per band at a byte offset, rather than a draw call per cell. Banding by the
-// tile's resolved sort depth (row + anchorRow, plus zBias) rather than by its grid row is what makes a
-// two-cell-tall tree sort as one object at its trunk.
+// On a Y-sorted layer the index buffer is split into BANDS of contiguous ranges sharing one sort
+// depth, so the renderer interleaves tiles with sprites at one draw per band rather than per cell.
 
 // The last raw GL here is the two draw calls. They stay for the same reason Mesh's do: a draw belongs
 // on a render-pass encoder, and moving the 2D pass onto one is its own migration.
@@ -32,9 +24,8 @@ import { CELL_EMPTY, CHUNK_SIZE, TileChunk, cellFlipX, cellFlipY, cellRot90, cel
 import type { TilemapLayer } from './tilemapLayer';
 import type { Tileset } from './tileset';
 
-// Derived from the layout rather than restated, so the scratch-buffer arithmetic below cannot drift
-// from the attribute offsets the VAO is actually built with. Attribute locations and the stride now
-// live in one place: TILE_VERTEX_LAYOUT in rhi/vertexLayouts.ts.
+// Derived from TILE_VERTEX_LAYOUT, so the scratch-buffer arithmetic cannot drift from the offsets
+// the VAO is built with.
 const FLOATS_PER_VERTEX = TILE_VERTEX_LAYOUT.arrayStride / 4;
 const MAX_CELLS = CHUNK_SIZE * CHUNK_SIZE;
 
@@ -79,10 +70,7 @@ export class TileMesh {
     public get indexCount(): number { return this._indexCount; }
     public get bands(): readonly DepthBand[] { return this._bands; }
 
-    /**
-     * Rebuild from the chunk's current cells. Also recomputes `chunk.animated`, which is why the data
-     * layer never has to know which tiles animate — it only ever flags `meshDirty`.
-     */
+    /** Rebuild from the chunk's current cells, recomputing `chunk.animated` along the way. */
     public build(chunk: TileChunk, layer: TilemapLayer, tileset: Tileset, grid: GridSpec, time: number): void {
         this._animated = [];
         this._bands = [];
@@ -186,9 +174,7 @@ export class TileMesh {
     }
 
     private _upload(verts: Float32Array, indices: Uint16Array): void {
-        // The VAO is WebGL2-only decoration on this class too: the RHI draw path builds its own from
-        // the pipeline's layout (`vertexArrayFor`), and only `draw`/`drawRange` below read this one.
-        // Same split as `Mesh` — the buffers are portable, the vertex-array object is not.
+        // The VAO is WebGL2-only, read by `draw`/`drawRange` alone; the RHI path builds its own.
         const webgl2 = device.backend === 'webgl2';
         if (webgl2 && !this._vao) {
             this._vao = glDevice().createVertexArray();
@@ -213,11 +199,8 @@ export class TileMesh {
     }
 
     /**
-     * Rewrite the UVs of this chunk's animated cells for `time`.
-     *
-     * Early-outs unless the resolved frame set actually changed. Without that guard every animated
-     * tilemap would issue a bufferSubData per chunk per frame regardless of the animation's fps, which
-     * is the difference between a few uploads a second and one per chunk at 60 Hz.
+     * Rewrite the UVs of this chunk's animated cells for `time`. Early-outs unless the resolved frame
+     * set changed, so the upload rate follows the animation's fps rather than the frame rate.
      */
     public patchAnimatedUVs(tileset: Tileset, time: number): void {
         if (!this._verts || this._animated.length === 0) return;
@@ -242,26 +225,15 @@ export class TileMesh {
         if (device.backend === 'webgl2') GLState.bindVAO(null);
     }
 
-    /**
-     * The chunk buffers, for a caller recording the draw through the RHI instead of calling `draw`.
-     *
-     * Exposed rather than adding a `drawViaPass` here because the pass encoder, the pipeline and the
-     * vertex layout all belong to the renderer; this class owns the buffers and nothing else about
-     * how a frame is recorded. Null until `build` has run.
-     */
+    /** The chunk buffers, for a caller recording the draw through the RHI. Null until `build` has run. */
     public get vertexBuffer(): RhiBuffer | null { return this._vbo; }
     public get indexBuffer(): RhiBuffer | null { return this._ibo; }
 
     public draw(): void {
         if (this._indexCount === 0 || !this._vao) return;
         GLState.bindVAO(this._vao);
-        // Upload any pending uniform-block writes before drawing.
-        //
-        // A WGSL-authored program has no loose uniforms — naga puts them all in a std140 block that is
-        // written to a CPU buffer and uploaded on flush. `Mesh.draw` does this; this class has its own
-        // draw path and did not, so once tilemap.fs became tilemap.wgsl the transform block was never
-        // uploaded and the chunks drew against whatever the buffer was allocated with. It did not throw
-        // and it did not change a draw count — the tiles simply stopped appearing.
+        // Upload pending uniform-block writes: a WGSL-authored program has no loose uniforms, so
+        // without this the chunks draw against whatever the buffer was allocated with.
         ShaderManager.Instance.flushBound();
         gl.drawElements(glTopology('triangle-list'), this._indexCount, glIndexType('uint16'), 0);
         frameStats.drawCalls++;
@@ -300,12 +272,8 @@ export class TileMesh {
     }
 }
 
-/**
- * Map a unit-square corner to the tile's texture space under the cell's orientation bits.
- *
- * Diagonal (transpose) first, then the two mirrors — Tiled's order, and the same one `orientShape` in
- * tilemap.ts applies to collider outlines, so art and collision stay in agreement.
- */
+// Map a unit-square corner to the tile's texture space under the cell's orientation bits. Diagonal
+// first, then the two mirrors — the same order `orientShape` uses, so art and collision agree.
 function orientUVFlags(ux: number, uy: number, rot90: boolean, flipX: boolean, flipY: boolean): [number, number] {
     let s = ux, t = uy;
     if (rot90) { const tmp = s; s = t; t = tmp; }

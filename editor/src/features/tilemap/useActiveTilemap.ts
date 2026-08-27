@@ -3,10 +3,8 @@ import { TilemapNode } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 
 // Which tilemap the tilemap-mode panels act on, and a re-render trigger for its (non-React) contents.
-//
-// A Tilemap is plain engine state, so nothing about editing it re-renders React on its own. Every panel
-// here polls the map's `version` counter on the scene bus instead of trying to mirror the grid into state,
-// which would mean copying thousands of cells on every stroke.
+// A Tilemap is plain engine state, so every panel here polls the map's `version` counter rather than
+// mirroring the grid into React state, which would copy thousands of cells on every stroke.
 
 export function useActiveTilemap(): {
   node: TilemapNode | null
@@ -29,9 +27,8 @@ export function useActiveTilemap(): {
     }
   }, [eventEmitter, refresh])
 
-  // A paint stroke mutates the map without touching the scene graph, so nothing on the bus fires. Poll the
-  // map's version instead — cheap (one integer compare) and it keeps the palette/layer counts honest while
-  // the user drags.
+  // A paint stroke mutates the map without touching the scene graph, so nothing on the bus fires; poll the
+  // map's version instead.
   const tilemaps = Array.from(editorScene.tilemaps) as TilemapNode[]
   const active = tilemaps.find(t => t.id === tilemapBrush.current.activeTilemapId) ?? tilemaps[0] ?? null
   useEffect(() => {

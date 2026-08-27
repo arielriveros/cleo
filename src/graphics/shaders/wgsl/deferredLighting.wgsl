@@ -58,6 +58,7 @@ struct Lighting {
     u_probeInvVolume1: mat4x4<f32>,
 
     u_dirLight: DirectionalLight,
+    u_skyLight: SkyLight,
     u_pointLights: array<PointLight, 16>,
     u_spotlights: array<SpotLight, 8>,
 
@@ -216,7 +217,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Fallback indirect term used where no probe volume applies: the directional light's ambient as a
     // simple fill floor (matches the forward Blinn-Phong path; zeroed when the light is removed so
     // deleting every light still goes to black), plus a crude env reflection when a map is present.
-    var fallbackAmbient = u_lighting.u_dirLight.ambient * albedo;
+    // The sky light is scene-wide indirect: it belongs in the FALLBACK term, so a light probe still
+    // wins wherever its volume covers the pixel and the two blend by the same weights as before. That
+    // is why it is added here rather than after the probe blend.
+    var fallbackAmbient = (u_lighting.u_dirLight.ambient
+                           + skyIrradiance(u_lighting.u_skyLight, N)) * albedo;
     if (u_lighting.u_useEnvMap != 0) {
         let kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
         let R = reflect(-V, N);

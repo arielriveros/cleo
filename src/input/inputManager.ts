@@ -41,7 +41,7 @@ export class InputManager {
     };
     private static _prevetDefault: boolean = false;
     private static _keysInfo: KeysInfo = {};
-    // Gate to allow requesting pointer lock on user clicks
+    // Gate for requesting pointer lock on user clicks.
     private static _mouseCaptureEnabled: boolean = false;
     private constructor() {}
 
@@ -52,19 +52,16 @@ export class InputManager {
         InputManager._canvas.onmousemove = InputManager.instance._onMouseMove;
         InputManager._canvas.onmousedown = InputManager.instance._onMouseDown;
         InputManager._canvas.onmouseup = InputManager.instance._onMouseUp;
-        // Only capture wheel events when mouse is over the canvas
         InputManager._canvas.onwheel = InputManager.instance._onWheel as any;
         window.onkeydown = InputManager.instance._onKeyDown;
         window.onkeyup = InputManager.instance._onKeyUp;
 
-        // Pointer lock state listeners
         const onPointerLockChange = () => {
             const locked = (document as any).pointerLockElement === InputManager._canvas;
             InputManager._mouseInfo.captured = locked;
         };
         document.addEventListener('pointerlockchange', onPointerLockChange);
         document.addEventListener('pointerlockerror', () => {
-            // Simply mark as not captured on error
             InputManager._mouseInfo.captured = false;
         });
     }
@@ -73,14 +70,13 @@ export class InputManager {
         if (InputManager._prevetDefault) event.preventDefault();
         const mouseInfo = InputManager._mouseInfo;
 
-        // When pointer is locked, use relative movement deltas
         if (mouseInfo.captured) {
             const dx = (event as any).movementX || 0;
             const dy = (event as any).movementY || 0;
-            // Accumulate movement to capture multiple events in a frame
+            // Accumulated, so several events in one frame all count.
             mouseInfo.velocity[0] += dx;
             mouseInfo.velocity[1] += dy;
-            // Maintain a virtual position while locked
+            // Under pointer lock there is no real cursor, so `position` is a virtual one.
             mouseInfo.position[0] += dx;
             mouseInfo.position[1] += dy;
             return;
@@ -91,7 +87,6 @@ export class InputManager {
         mouseInfo.position[0] = event.clientX;
         mouseInfo.position[1] = event.clientY;
     
-        // Check if the mouse has moved
         if (vec2.distance(mouseInfo.position, lastPosition) > Number.EPSILON ) {
             mouseInfo.velocity[0] = (mouseInfo.position[0] - lastPosition[0]);
             mouseInfo.velocity[1] = (mouseInfo.position[1] - lastPosition[1]);
@@ -104,7 +99,6 @@ export class InputManager {
         switch (event.button) {
             case 0:
                 mouseInfo.buttons.Left = true;
-                // If enabled (e.g., in play mode), capture the pointer on left click
                 if (InputManager._mouseCaptureEnabled && InputManager._canvas) {
                     try { (InputManager._canvas as any).requestPointerLock?.(); } catch {}
                 }
@@ -147,7 +141,7 @@ export class InputManager {
     private _onWheel(event: WheelEvent) {
         if (InputManager._prevetDefault) event.preventDefault();
         const mouseInfo = InputManager._mouseInfo;
-        // Accumulate deltas so multiple wheel events in a frame are captured
+        // Accumulated, so several wheel events in one frame all count.
         mouseInfo.wheel.deltaX += event.deltaX || 0;
         mouseInfo.wheel.deltaY += event.deltaY || 0;
     }
@@ -157,9 +151,8 @@ export class InputManager {
         const keysInfo = InputManager._keysInfo;
         if (!keysInfo[event.code]) return;
         keysInfo[event.code].pressed = true;
-        // dont call onPress if the key is not released
         // A script's onPress runs off the browser's keydown dispatch, outside every guard the engine
-        // wraps its own lifecycle handlers in — a throw here would otherwise escape to the page.
+        // wraps its own lifecycle handlers in, so a throw here would escape to the page.
         if (keysInfo[event.code].released) {
             try { keysInfo[event.code].onPress(); }
             catch (e) { Logger.error(`Error in registerKeyPress('${event.code}') callback: ${e}`, 'Script'); }
@@ -190,7 +183,6 @@ export class InputManager {
     public resetMouseVelocity() {
         InputManager._mouseInfo.velocity[0] = 0;
         InputManager._mouseInfo.velocity[1] = 0;
-        // Also reset wheel deltas each frame
         InputManager._mouseInfo.wheel.deltaX = 0;
         InputManager._mouseInfo.wheel.deltaY = 0;
     }
@@ -212,8 +204,7 @@ export class InputManager {
 
     public isMouseOverCanvas(): boolean {
         if (!InputManager._canvas) return false;
-        // Under pointer lock the cursor has no screen position (`position` becomes a free-running
-        // virtual one), but every event is delivered to the canvas by definition.
+        // Under pointer lock the cursor has no screen position, but every event goes to the canvas.
         if (InputManager._mouseInfo.captured) return true;
 
         const rect = InputManager._canvas.getBoundingClientRect();
@@ -253,7 +244,6 @@ export class InputManager {
         InputManager._keysInfo[key].onPress = () => {};
     }
 
-    // Public API to control pointer lock
     /** Allows `captureMouse`/a left click on the canvas to request pointer lock. Off by default. */
     public enableMouseCapture() {
         InputManager._mouseCaptureEnabled = true;

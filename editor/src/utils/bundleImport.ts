@@ -8,9 +8,9 @@ import { planMerge, LocalState } from './bundleMerge'
 import { createProject, openProject } from './projects'
 import type { BundleData } from './bundle'
 
-// Applies an imported bundle to local storage, then reloads. Both modes write straight to IndexedDB and
-// let the boot path rebuild all React/engine state — far safer than reconciling live state, and it
-// sidesteps the debounced library-persistence that could otherwise resurrect pre-import data.
+// Applies an imported bundle to local storage, then reloads. Both modes must write straight to IndexedDB
+// and let the boot path rebuild React/engine state: reconciling live state instead lets the debounced
+// library-persistence resurrect pre-import data.
 
 function texturesToRecords(textures: BundleData['textures']): StoredTexture[] {
   return textures.map(t => ({
@@ -28,9 +28,8 @@ function texturesToRecords(textures: BundleData['textures']): StoredTexture[] {
  */
 export async function applyBundleReplace(bundle: BundleData, targetProjectId?: string): Promise<void> {
   const isProject = bundle.manifest.kind === 'project'
-  // `targetProjectId` writes into a project that is NOT open — the "import as a new project" flow. Threading
-  // the id through the key helpers is deliberate; briefly repointing the active project instead would send
-  // any in-flight debounced write from the open project into the new one.
+  // `targetProjectId` writes into a project that is NOT open. The id must be threaded through the key
+  // helpers; repointing the active project would send in-flight debounced writes into the new project.
   const pid = targetProjectId
 
   // Libraries + VFS.
@@ -44,8 +43,8 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await idbSet(libKey('tilesets', pid), bundle.libraries.tilesets ?? [])
 
   if (isProject) {
-    // Drop every existing scene blob, then write the bundle's. Scoped: an unscoped scan here would wipe
-    // every OTHER project's scenes too.
+    // Drop every existing scene blob, then write the bundle's. Must stay scoped: an unscoped scan wipes
+    // every other project's scenes too.
     const stale = await idbKeysByPrefix(scenePrefix(pid))
     for (const key of stale) await idbDelete(key)
     for (const [id, data] of Object.entries(bundle.scenes)) await idbSet(sceneKey(id, pid), data)
@@ -59,8 +58,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
       prefs: bundle.manifest.prefs,
     }
     await idbSet(metaKey(pid), meta)
-    // Even a bundle we exported ourselves is untrusted input by the time it comes back: repairVfs is what
-    // guarantees the index the editor boots into satisfies its structural invariants.
+    // A bundle is untrusted input; repairVfs guarantees the index the editor boots into is well-formed.
     await idbSet(vfsKey(pid), repairVfs(bundle.vfs).next)
   } else {
     // Asset pack: keep local scenes/meta; swap the asset entries of the VFS, keep local scene entries.
@@ -83,12 +81,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   window.location.reload()
 }
 
-/**
- * Import a bundle into a brand-new project, leaving the open one untouched, and switch to it.
- *
- * The natural default now that projects exist: "Replace" destroys a whole project's worth of work, which is
- * rarely what someone dragging in a .zip wants.
- */
+/** Import a bundle into a brand-new project, leaving the open one untouched, and switch to it. */
 export async function applyBundleAsNewProject(bundle: BundleData, name?: string): Promise<void> {
   const record = await createProject(name || bundle.manifest.projectName || 'Imported Project')
   await applyBundleReplace(bundle, record.id)

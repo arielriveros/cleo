@@ -10,23 +10,17 @@ import { getScriptIdOf, seedScriptFields, unlinkScript } from './scripts'
 import { hashAsset, assetHashKey, AssetLibs, hashesComparable } from './assetHash'
 import { captureAnimationState, restoreAnimationState, applyIkRig } from './placedAnimation'
 
-// Pull-based cross-scene propagation. When a scene is opened, its stored node tree still carries the
-// asset links (__materialId / __modelId / __templateId, terrain layer.materialId, foliage rule.modelId)
-// but the linked assets in the global libraries may have been edited, added to, or deleted while this
-// scene was closed. resyncScene re-resolves every link against the *current* libraries so a scene the
-// user never had open still reflects the latest assets — the requirement that asset edits propagate to
-// all scenes, including terrain foliage.
+// Pull-based cross-scene propagation: re-resolves every asset link a stored scene carries (__materialId /
+// __modelId / __templateId, terrain layer.materialId, foliage rule.modelId) against the CURRENT libraries,
+// so a scene the user never had open still reflects the latest assets. The same pass runs at publish time
+// on each non-open scene.
 //
-// It is gated by the per-asset content hashes captured when the scene was last saved: an asset whose
-// hash is unchanged is left alone, so models/templates (which are re-instantiated, not patched) don't
-// needlessly churn node ids on every open. A missing saved-hash map (legacy scene blob) means "resync
-// everything".
+// Gated by the per-asset content hashes captured at the last save: an unchanged hash is left alone so
+// models and templates, which are re-instantiated rather than patched, do not churn node ids on every
+// open. A missing saved-hash map means "resync everything".
 //
-// The same pass runs at publish time on each non-open scene (M4), so published closed scenes get the
-// propagation too.
-//
-// Pass ORDER matters: template/mesh instances are rebuilt wholesale from their stored subtree, so they run
-// first — anything rebuilt after the material/script passes would never be visited by them.
+// Pass ORDER matters: template/mesh instances are rebuilt wholesale from their stored subtree, so they
+// must run first — anything rebuilt after the material/script passes would never be visited by them.
 
 export type ResyncMaps = {
   scripts: Map<string, string>
@@ -50,7 +44,7 @@ function reinstantiate(
   maps: ResyncMaps,
   make: (parent: Node) => string,
   /** Runs once the rebuilt node has its transform, spawn flag and variables back. `prev` is the detached
-   *  original, still readable — that is where a per-instance baseline like MODEL_BASE_TRS_VAR lives. */
+   *  original, still readable — where a per-instance baseline like MODEL_BASE_TRS_VAR lives. */
   onRebuilt?: (rebuilt: Node, prev: Node) => void,
 ): Node | null {
   const parent = inst.parent
@@ -59,15 +53,13 @@ function reinstantiate(
   const rot = Array.from(inst.rotation) as [number, number, number]
   const scl = Array.from(inst.scale) as [number, number, number]
   // Per-instance node state the rebuild would otherwise drop: the subtree comes back from the ASSET, which
-  // knows nothing about how this particular placement was configured. Without this, a mesh instance flagged
-  // dormant silently comes back spawning on start the next time its asset changes.
+  // knows nothing about how this placement was configured.
   const spawnOnStart = inst.spawnOnStart
   const animation = captureAnimationState(inst)
-  // Same class again: `instantiateModelAsset` overwrites the clone's `variables` wholesale, so without this
-  // the rebuild takes the placement's script link (`__scriptId`), its template link (`__templateId`) and
-  // every variable the user authored on it with it.
+  // `instantiateModelAsset` overwrites the clone's `variables` wholesale, taking the placement's
+  // `__scriptId`, `__templateId` and every authored variable with it.
   const variables = new Map(inst.variables)
-  // Drop the old subtree's out-of-band data so map entries don't leak (mirrors syncModelInstances).
+  // Drop the old subtree's out-of-band data so map entries do not leak.
   for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id) }
   // removeChild detaches synchronously; Node.remove() only marks and its deferred sweep mis-splices.
   parent.removeChild(inst)
@@ -76,8 +68,7 @@ function reinstantiate(
   if (newNode) {
     newNode.setPosition(pos).setRotation(rot).setScale(scl)
     newNode.spawnOnStart = spawnOnStart
-    // Only what the rebuild did NOT already set — the freshly stamped `__modelId`/`__templateId` point at the
-    // asset this node was just built from and must win over the old copy.
+    // Only what the rebuild did NOT already set: the freshly stamped `__modelId`/`__templateId` must win.
     for (const [name, v] of variables) {
       if (newNode.variables.has(name)) continue
       newNode.setVariable(name, v.value, v.type, v.access)
@@ -102,10 +93,9 @@ export function resyncScene(
 ): boolean {
   let changed = false
 
-  // Hashes written by a DIFFERENT version of hashAsset cannot be compared against ours — every one of them
-  // would read as "changed" and the whole scene would be rebuilt from its assets, losing per-placement
-  // configuration wholesale. "I cannot tell" is not "everything changed": leave the scene alone and let the
-  // next save re-record hashes in the current format. (See hashesComparable for the legacy-blob case.)
+  // Hashes from a DIFFERENT version of hashAsset must not be compared: every one would read as "changed"
+  // and rebuild the whole scene, losing per-placement configuration. "I cannot tell" is not "everything
+  // changed" — leave the scene alone and let the next save re-record hashes in the current format.
   const comparable = hashesComparable(savedHashes, savedHashVersion)
 
   const changedSince = (kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script' | 'tileset', id: string, current: string): boolean =>
@@ -119,10 +109,7 @@ export function resyncScene(
   const tilesetById = new Map((libs.tilesets ?? []).map(t => [t.id, t]))
 
   // Template/mesh instances are rebuilt from their stored subtree, so they must run BEFORE the material and
-  // script passes: a subtree re-instantiated afterwards would never be visited by them and would keep
-  // whatever those passes were meant to replace. (instantiate* also resolves __materialId against the
-  // library as it builds, so a rebuilt subtree is already current — the ordering is what keeps the
-  // script/body/trigger passes honest for the nodes inside it.)
+  // script passes: a subtree re-instantiated afterwards would never be visited by them.
 
   // --- Template instances ---
   for (const node of Array.from(scene.nodes)) {
@@ -143,42 +130,30 @@ export function resyncScene(
     const asset = modelById.get(modelId)
     if (!asset) continue // a placed mesh with no source asset stays as-is (matches delete consequence)
 
-    // A TEMPLATE instance belongs to the pass above, which has already rebuilt it from the template's own
-    // stored subtree. Rebuilding it again from the model asset would replace that subtree with a bare model —
-    // losing whatever the template arranged around the character — and `instantiateModelAsset` stamps a fresh
-    // `variables` object, so the node would also stop carrying `__templateId` and quietly cease to be a
-    // template instance at all. A node can legitimately carry both links, because a template made from a
-    // placed model keeps the model's.
+    // A node can carry BOTH links (a template made from a placed model keeps the model's), but a template
+    // instance belongs to the pass above: rebuilding it from the model asset would replace the template's
+    // subtree with a bare model and drop `__templateId` along with it.
     let live = node
     if (!node.getVariable(TEMPLATE_ID_VAR) && changedSince('model', modelId, hashAsset(asset))) {
       live = reinstantiate(scene, node, maps,
         parent => instantiateModelAsset(asset, parent, libs.materials, libs.models, libs.animations),
-        // The rebuild has just put this copy's own transform back, which is right for where the user placed
-        // it and wrong for a change the MODEL made to its root transform. Re-apply that change on top. A
-        // LOD-wrapped asset carries its root transform on the wrapper's child, so it needs no delta.
+        // The rebuild restores this copy's own transform, so a change the MODEL made to its root transform
+        // has to go back on top. A LOD-wrapped asset carries that on the wrapper's child and needs no delta.
         (rebuilt, prev) => {
           if (!modelAssetHasLodBehavior(asset)) applyModelTransformDelta(rebuilt, readModelBaseTrs(prev), asset.nodeJson)
         }) ?? node
       changed = true
     }
-    // The IK rig is skeleton data and the ASSET owns it, so it is re-applied here whatever the hash says.
-    //
-    // Ungated deliberately, unlike the rebuild above. A TEMPLATE stores its own serialized copy of the whole
-    // subtree — skin included — so a rig authored while a character was a template instance gets baked into
-    // the template and rebuilt from there forever. `commitIkRig` reaches the asset and live model instances
-    // but has no way to reach inside a template blob, which left a rig that could not be cleared from the
-    // panel that wrote it. Re-applying from the asset every time makes the asset the only source that
-    // matters — including when it says there is no rig at all, which is why `undefined` must be assigned
-    // rather than skipped.
-    //
+    // The ASSET owns the IK rig, so re-apply it whatever the hash says — a template bakes its own copy of
+    // the skin and `commitIkRig` cannot reach inside a template blob. `undefined` must be ASSIGNED, not
+    // skipped, or a rig the asset no longer has can never be cleared.
     // Applied to `live`, not `node`: after a rebuild `node` is a detached subtree that nothing renders.
     applyIkRig(live, assetIkRig(asset))
   }
 
   // --- Class scripts on placed nodes ---
-  // Re-cache the (possibly edited) source into the per-node scripts map and reconcile native fields to the
-  // current schema. A deleted script unlinks the node. Not gated by reinstantiate — scripts are patched in
-  // place, so node ids never churn.
+  // Re-cache the source into the per-node scripts map and reconcile native fields to the current schema.
+  // A deleted script unlinks the node. Patched in place, so node ids never churn.
   for (const node of Array.from(scene.nodes)) {
     const scriptId = getScriptIdOf(node)
     if (!scriptId) continue
@@ -189,17 +164,16 @@ export function resyncScene(
       seedScriptFields(node, asset, false)
       changed = true
     } else if (!maps.scripts.has(node.id)) {
-      // Even when unchanged, the per-node source cache is empty on a fresh open — populate it so the scene
-      // serializes/plays with the correct source.
+      // The per-node source cache is empty on a fresh open even when nothing changed; populate it so the
+      // scene serializes and plays with the correct source.
       maps.scripts.set(node.id, asset.source)
     }
   }
 
   // --- Materials on placed nodes + camera screen-material passes ---
   for (const node of Array.from(scene.nodes)) {
-    // One pass per SUBMESH: a merged model links one asset per index range, and reading only the scalar
-    // `__materialId` (which mirrors slot 0) skipped every material but the first — so an asset edited
-    // while this scene was closed never reached the other submeshes.
+    // One pass per SUBMESH: a merged model links one asset per index range, and the scalar `__materialId`
+    // mirrors slot 0 only.
     const matIds = getMaterialIdsOf(node)
     for (let slot = 0; slot < matIds.length; slot++) {
       const matId = matIds[slot]
@@ -243,9 +217,8 @@ export function resyncScene(
   }
 
   // --- Tilemap layers: refresh the embedded tileset copy each layer draws from ---
-  // The cells are the user's work and are never touched; only the tileset the layer resolves against is
-  // re-read. A layer whose tileset was deleted while the scene was closed is unlinked rather than left
-  // pointing at nothing, so it reads as broken (draws nothing) instead of drawing stale art.
+  // The cells are the user's work and must never be touched. A layer whose tileset was deleted is unlinked
+  // so it draws nothing rather than stale art.
   for (const tn of Array.from(scene.tilemaps) as any[]) {
     const tilemap = tn.tilemap
     for (const layer of tilemap.layers) {
@@ -261,8 +234,8 @@ export function resyncScene(
   }
 
   // --- Sprites: the same refresh, one embedded tileset each ---
-  // Inline tilesets are skipped: they are synthesized (a helper icon's 1x1 wrapper, a migrated sheet)
-  // and have no library asset, so the "asset is gone -> unlink" branch would wrongly blank them.
+  // Inline tilesets are synthesized and have no library asset, so the "asset is gone -> unlink" branch
+  // must skip them.
   for (const sprite of Array.from(scene.sprites) as any[]) {
     const id = sprite.tileset?.id
     if (!id || isInlineTilesetId(id)) continue

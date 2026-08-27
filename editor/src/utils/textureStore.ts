@@ -1,22 +1,9 @@
-// The single home for texture payloads.
+// The single home for texture payloads: stored exactly once, keyed by TextureManager id, as **Blobs**
+// (IndexedDB's structured clone handles a Blob natively and keeps it out-of-line). Asset records carry
+// only `textureIds`, never the bytes.
 //
-// WHY THIS EXISTS
-//
-// Textures used to be embedded as base64 in every asset that referenced them: a MaterialAsset carried a
-// copy of each of its maps, and the ModelAsset for the same model carried a copy of ALL of them again. A
-// model with 8 materials sharing 3 textures therefore stored those textures many times over — in memory,
-// in IndexedDB, and in every save. On top of that, base64 inflates bytes by 33% and costs an encode on
-// save and a decode on load.
-//
-// So payloads now live here exactly once, keyed by TextureManager id, stored as **Blobs**. IndexedDB's
-// structured clone handles a Blob natively (Chrome keeps it out-of-line, so writing one is closer to
-// passing a reference than copying bytes). Asset records keep only `textureIds`.
-//
-// LIFECYCLE
-//
-// Everything is preloaded into the TextureManager at boot (`preloadTextures`), so by the time any asset is
-// applied or instantiated its textures are already registered. That is what keeps the restore paths
-// synchronous — they simply find the texture already there.
+// Everything is preloaded into the TextureManager at boot (`preloadTextures`) before any asset is applied
+// or instantiated, which is what lets the restore paths stay synchronous.
 
 import { TextureManager, parseBase64DataUri } from 'cleo'
 import { openDB, TEXTURE_STORE } from './idb'
@@ -28,26 +15,21 @@ export type StoredTexture = {
   mime: string
   config: any
   /**
-   * Which project owns this payload. Redundant with the record's key, deliberately: it makes a record
-   * self-describing (so a repair pass can rebuild the keys) and it is what a bundle import stamps.
+   * Which project owns this payload. Redundant with the record's key on purpose: it makes a record
+   * self-describing so a repair pass can rebuild the keys, and it is what a bundle import stamps.
    */
   projectId?: string
 }
 
 // PROJECT SCOPING
 //
-// The store key is `p:<project>:<textureId>`. It has to be, because the bare ids are not globally unique —
-// they are minted per project and are baked into every serialized material, scene, template and foliage
-// rule, so they cannot be re-minted to disambiguate. Prefixing the KEY leaves every id in every asset
-// untouched while making two projects' "Rock" two different rows.
+// The store key is `p:<project>:<textureId>`: bare texture ids are minted per project and baked into every
+// serialized material, scene, template and foliage rule, so they cannot be re-minted to disambiguate.
+// It must stay a string prefix, not a compound `[projectId, id]` key — an array key needs an IndexedDB
+// version bump and breaks the string-prefix reasoning the rest of the storage layer is built on.
 //
-// A string prefix rather than a compound `[projectId, id]` key on purpose: an array key would need an
-// IndexedDB version bump (whose onblocked path is already a hard error across tabs) and would break the
-// string-prefix reasoning the rest of the storage layer is built on.
-//
-// Reads are always range queries, never getAll()-then-filter: storedTextureIds runs inside persistTextures,
-// which fires from a debounced effect on EVERY library change, and a full getAll there would deserialize
-// every project's image blobs on every material edit.
+// Reads must be range queries, never getAll()-then-filter: storedTextureIds runs from a debounced effect
+// on EVERY library change, and a full getAll would deserialize every project's image blobs each time.
 
 /** Bound a cursor/getAll to one project's rows. '￿' sorts after any character a key can contain. */
 function projectRange(projectId?: string): IDBKeyRange {
@@ -75,12 +57,9 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
   })
 }
 
-// Run write ops in a readwrite transaction and resolve only when the transaction has COMMITTED
-// (tx.oncomplete) — not merely when each put/delete fired its own onsuccess. This matters because the
-// bundle-import path calls window.location.reload() immediately after writing textures: a reload aborts a
-// still-open transaction, so resolving on per-request success (as this store used to) let the reload drop
-// every texture while the libraries/scenes — written via idbSet, which already awaits oncomplete —
-// survived. Mirrors idbSet's durability guarantee.
+// Run write ops in a readwrite transaction and resolve only on tx.oncomplete, never on per-request
+// onsuccess: the bundle-import path reloads the page straight after writing, and a reload aborts a
+// still-open transaction. Mirrors idbSet's durability guarantee.
 async function writeTx(run: (store: IDBObjectStore) => void): Promise<void> {
   const db = await openDB()
   return new Promise<void>((resolve, reject) => {
@@ -138,11 +117,9 @@ export async function deleteProjectTextures(projectId: string): Promise<void> {
 }
 
 /**
- * Re-key every pre-multi-project record under a project prefix. Part of the one-time workspace migration.
- *
- * A cursor rather than getAll + putTextures: the store holds every image in the workspace, and materializing
- * all of those blobs at once to move them would be gratuitous. One readwrite transaction, awaited on
- * `oncomplete` (see writeTx) because the boot path may reload immediately after.
+ * Re-key every pre-multi-project record under a project prefix; part of the one-time workspace migration.
+ * A cursor rather than getAll + putTextures, so the workspace's images are never all materialized at once.
+ * One readwrite transaction, awaited on `oncomplete` because the boot path may reload immediately after.
  */
 export async function migrateUnscopedTextures(prefix: string): Promise<number> {
   const db = await openDB()
@@ -172,16 +149,12 @@ export async function migrateUnscopedTextures(prefix: string): Promise<number> {
 
 /**
  * Write any of `ids` whose payload the store doesn't have yet, taking the bytes straight off the live
- * Texture (TextureManager.getSource). Idempotent, so it can be run whenever anything changes.
+ * Texture (TextureManager.getSource). Idempotent.
  *
- * Omit `ids` to persist EVERY live texture. That is the right default: a texture can be referenced by the
- * scene without belonging to any asset library (a map dropped straight onto a node's material), and the
- * project blob no longer embeds textures — so anything only the scene knows about would otherwise be lost.
- * It stays correct under project scoping because the TextureManager only ever holds the OPEN project's
- * textures: preloadTextures fills it from one project's rows, and switching projects reloads the page.
- *
- * Textures with no retained source — the built-in 'Null', editor icons, anything loaded from a path — are
- * skipped on purpose: they are recreated at boot and were never the thing bloating storage.
+ * Omit `ids` to persist EVERY live texture — the right default, since a texture can be referenced by the
+ * scene without belonging to any library. Safe under project scoping because the TextureManager only ever
+ * holds the OPEN project's textures. Textures with no retained source (built-ins, editor icons, anything
+ * loaded from a path) are skipped: they are recreated at boot.
  */
 export async function persistTextures(ids?: Iterable<string>): Promise<number> {
   const tm = TextureManager.Instance
@@ -218,7 +191,7 @@ export async function adoptLegacyTextures(textures: LegacyTexture[]): Promise<vo
 
   for (const t of textures) {
     if (!t?.id || !t.data) continue
-    // Register it so it's usable this session (and so getSource works for anything downstream).
+    // Register it so it is usable this session and getSource works downstream.
     if (!TextureManager.Instance.getTexture(t.id))
       TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id)
 
@@ -269,10 +242,9 @@ export function legacyTexturesOf(...libraries: AnyAsset[][]): LegacyTexture[] {
 }
 
 /**
- * Register every stored texture into the TextureManager. Run once at boot, before the libraries are used,
- * so asset restore paths find their textures already present and stay synchronous.
- *
- * Returns the number registered. Textures already live (e.g. built-ins) are left alone.
+ * Register every stored texture into the TextureManager. Must run at boot before the libraries are used,
+ * so asset restore paths find their textures present and stay synchronous.
+ * Returns the number registered; textures already live (e.g. built-ins) are left alone.
  */
 export async function preloadTextures(): Promise<number> {
   const records = await getAllTextures()

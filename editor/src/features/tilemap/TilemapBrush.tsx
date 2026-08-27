@@ -12,11 +12,9 @@ interface Props {
 
 /**
  * Viewport-mounted tile painting tool. Active only in tilemap mode.
- *
- * Modelled on LandscapeBrush: it owns pointer listeners on the viewport in the CAPTURE phase and suppresses
- * camera movement + click-selection through the existing GIZMO_DRAG_* events. The one structural difference
- * is picking — a tilemap is flat, so instead of marching a heightfield this intersects the ray with the
- * map's own Z plane, which under the 2D orthographic camera is exact.
+ * Owns pointer listeners on the viewport in the CAPTURE phase and suppresses camera movement and
+ * click-selection through the GIZMO_DRAG_* events. Picking intersects the ray with the map's own Z plane,
+ * which is exact under the 2D orthographic camera.
  */
 export default function TilemapBrush({ viewportRef }: Props) {
   const { instance, editorScene, eventEmitter, editorMode, tilemapBrush } = useCleoEngine()
@@ -75,16 +73,14 @@ export default function TilemapBrush({ viewportRef }: Props) {
       if (!cam) return null
       const node = activeTilemap()
       if (!node) return null
-      // The map's origin is normally refreshed by its per-frame update, which the editor never runs
-      // (Scene.update only ticks nodes once the scene has started) — so sync it here, or every cell this
-      // picks would be offset by however far the node has been moved.
+      // Scene.update only ticks nodes once the scene has started, so the map's origin is never refreshed
+      // in the editor; sync it here or every picked cell is offset by however far the node was moved.
       node.tilemap.setOrigin(node.worldPosition)
       const rect = viewport.getBoundingClientRect()
       const ray = Raycaster.screenToRay(clientX - rect.left, clientY - rect.top, rect.width, rect.height, cam)
       const planeZ = node.worldPosition[2]
       const dz = ray.direction[2]
-      // A ray parallel to the tile plane never meets it. Only reachable if the user has rotated the editor
-      // camera to look along the plane, which 2D mode does not do — but a 3D scene holding a tilemap can.
+      // A ray parallel to the tile plane never meets it. Reachable only from a 3D scene holding a tilemap.
       if (Math.abs(dz) < 1e-6) return null
       const t = (planeZ - ray.origin[2]) / dz
       if (t < 0) return null
@@ -96,16 +92,15 @@ export default function TilemapBrush({ viewportRef }: Props) {
 
     const showCursor = (node: TilemapNode, col: number, row: number, w = 1, h = 1) => {
       const grid = node.tilemap.grid
-      // A hex/diamond cell traces its real outline; a rectangular selection traces the block instead, which
-      // is what makes a stamp or a rect drag legible.
+      // A hex/diamond cell traces its real outline; a rectangular selection traces the block instead.
       const block = w > 1 || h > 1 || grid.kind === 'orthogonal'
       const corners = block ? null : cellCorners(grid, col, row)
       const points = corners ? corners.length / 2 : 4
       const cursor = ensureCursor(points)
       if (!cursor) return
       // Written in place: `positions` is the geometry's live buffer, and the cursor node is rebuilt
-      // whenever the point count changes, so the length always matches. (Mutating positions leaves the
-      // geometry's memoized BVH stale, which is harmless here — the raycaster skips __editor__ nodes.)
+      // whenever the point count changes, so the length always matches. The memoized BVH is left stale,
+      // which is harmless — the raycaster skips __editor__ nodes.
       const geometry = cursor.model.geometry
       const positions = geometry.positions
       positions.fill(0)
@@ -177,8 +172,8 @@ export default function TilemapBrush({ viewportRef }: Props) {
       node.tilemap.fillRect(b.activeLayer, a.col, a.row, b2.col, b2.row, b.stamp.tiles[0] ?? 0, b.orient)
     }
 
-    // The brush listens in the capture phase on the viewport, which is an ancestor of the floating tool
-    // card — without this a click on a control there would start a stroke and never reach the control.
+    // The brush listens in the capture phase on the viewport, an ancestor of the floating tool card;
+    // without this a click on a control there starts a stroke and never reaches the control.
     const inOverlay = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-cleo-overlay]')
 
     const beginStroke = (label: string) => {

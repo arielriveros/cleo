@@ -13,11 +13,8 @@ const TOOLS: { id: TerrainTool; label: string }[] = [
 
 /**
  * Floating tool card shown while landscape mode is active: sculpt, paint terrain materials onto the 4
- * layers, and scatter each painted material's foliage.
- *
- * Editing only — a landscape is CREATED from the scene tree's Add menu, its size/resolution and heightmap
- * live on its node inspector, and it is positioned with the ordinary transform gizmo in scene mode. Same
- * split as the tilemap: the mode holds the brushes, the node holds what the thing is.
+ * layers, and scatter each painted material's foliage. Editing only — creation, size/resolution and
+ * placement belong to the node inspector and the scene-mode gizmo.
  */
 export default function LandscapeInspector() {
     const { eventEmitter, terrainBrush } = useCleoEngine();
@@ -33,7 +30,6 @@ export default function LandscapeInspector() {
     /** Outcome of the last whole-terrain generation, shown under the button. */
     const [foliageStatus, setFoliageStatus] = useState('');
 
-    // Keep the shared brush ref in sync with the UI.
     useEffect(() => {
         const b = terrainBrush.current;
         b.mode = mode; b.tool = tool; b.radius = radius; b.strength = strength; b.falloff = falloff;
@@ -41,9 +37,7 @@ export default function LandscapeInspector() {
         eventEmitter.emit('TERRAIN_BRUSH_CHANGED');
     }, [mode, tool, radius, strength, falloff, paintLayer, foliageErase, terrainBrush, eventEmitter]);
 
-    // Regenerating replaces every scattered instance, so confirm before discarding work — and report what
-    // happened either way. The old version returned a boolean nobody read, which made a mis-set-up terrain
-    // (no foliage-bearing material on any layer) look identical to a working one that placed nothing.
+    // Regenerating replaces every scattered instance, so confirm before discarding the author's work.
     const generateFoliage = () => {
         if (!node) return;
         const existing = node.terrain.foliage.reduce((n, f) => n + f.count, 0);

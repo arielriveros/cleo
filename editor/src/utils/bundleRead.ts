@@ -1,23 +1,17 @@
 import { BundleAssetIndex, BundleData, BundleManifest, BundleTexture, BundleTextureIndexRow, BUNDLE_PATHS } from './bundle';
 import { inflateBundleAssets, packBundleAssets } from './bundleAssets';
 
-// The one place that knows the on-disk bundle layout — both halves of it.
+// The one place that knows the on-disk bundle layout — which filenames exist, which are optional, how
+// scenes are enumerated, which legacy spellings still resolve. A bundle arrives either as a .zip or as a
+// folder of the same files over HTTP (an example project), so each caller supplies only a way to fetch one
+// entry. Duplicating this contract across two readers makes them drift, and the symptom is a bundle that
+// imports with pieces quietly missing.
 //
-// A bundle reaches the editor two ways: as a .zip the user picked (unzipped by JSZip inside the project
-// worker) and as a folder of the same files served over HTTP (a bundled example project). Both need the
-// identical knowledge — which filenames exist, which are optional, how scenes are enumerated, which legacy
-// spellings still have to be honoured — so that knowledge lives here once and each caller supplies only a
-// way to fetch one entry. The same argument as storageKeys.ts: a contract duplicated across two readers
-// drifts silently, and the symptom is a bundle that imports with pieces quietly missing.
+// Both on-disk FORMATS are read here: format 2 puts every payload in one `assets.bin`, format 1 left them
+// in the JSON with one file per texture.
 //
-// It is also where the two on-disk FORMATS are reconciled. Format 2 puts every payload in one
-// `assets.bin`; format 1 left them in the JSON and wrote one file per texture. Both are read here — that
-// is what keeps every already-exported .cleoproj.zip importable, and lets the example projects shipped
-// under editor/public/examples stay exactly as they were built.
-//
-// Deliberately free of DOM, JSZip and engine imports: this module is pulled into projectWorker.ts. The
-// writer below returns a list of entries rather than an archive for the same reason — zipping is the
-// caller's business, and keeping JSZip out of here is what lets the layout be unit-tested.
+// Must stay free of DOM, JSZip and engine imports — this module is pulled into projectWorker.ts. The
+// writer below returns a list of entries rather than an archive for the same reason.
 
 export interface BundleSource {
   /** Parsed JSON at `path`, or null when the entry does not exist. Must not throw on a missing entry. */
@@ -25,10 +19,8 @@ export interface BundleSource {
   /** Raw bytes at `path`, or null when the entry does not exist. */
   bytes(path: string): Promise<ArrayBuffer | null>;
   /**
-   * Every scene entry in the bundle.
-   *
-   * A zip can glob its own entries; a remote folder cannot be listed, so it derives the paths from the
-   * manifest instead. Which is why this is the source's job and not this module's.
+   * Every scene entry in the bundle. The source's job, not this module's: a zip globs its own entries,
+   * while a remote folder cannot be listed and must derive the paths from the manifest.
    */
   scenePaths(manifest: BundleManifest): Promise<string[]>;
   /** Progress hook, called after each entry is read. `total` may grow as more of the bundle is discovered. */
@@ -50,8 +42,7 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     materials: (await src.json(`${BUNDLE_PATHS.librariesDir}materials.json`)) ?? [],
     terrainMaterials: (await src.json(`${BUNDLE_PATHS.librariesDir}terrainMaterials.json`)) ?? [],
     templates: (await src.json(`${BUNDLE_PATHS.librariesDir}templates.json`)) ?? [],
-    // Bundles exported before the mesh->model rename wrote this library as 'meshes.json'. The records
-    // themselves are unchanged, so falling back to the old filename is all that is needed to import them.
+    // 'meshes.json' is the legacy filename for this library; the records themselves are unchanged.
     models:
       (await src.json(`${BUNDLE_PATHS.librariesDir}models.json`)) ??
       (await src.json(`${BUNDLE_PATHS.librariesDir}meshes.json`)) ??
@@ -70,8 +61,8 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     ? (((await src.json(BUNDLE_PATHS.texturesIndex)) ?? []) as BundleTextureIndexRow[])
     : [];
 
-  // 9 fixed JSON entries are already read by the time the total is known; report against the full set so
-  // the bar does not jump backwards once scenes and textures are discovered.
+  // 9 fixed JSON entries are already read by the time the total is known; report against the full set or
+  // the progress bar jumps backwards.
   const total = 9 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
   let done = 9;
   src.onEntry?.(done, total);
@@ -90,19 +81,15 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     src.onEntry?.(++done, total);
     const blob = await src.bytes(BUNDLE_PATHS.assets);
     src.onEntry?.(++done, total);
-    // A v2 bundle without its blob is not a bundle with no assets — it is a truncated file, and importing
-    // it would silently produce a project of empty meshes. Say so instead.
+    // A v2 bundle without its blob is truncated, not empty; importing it yields a project of empty meshes.
     if (!index || !blob) throw new Error('Bundle is missing assets.bin');
     await inflateBundleAssets(bundle, blob, index);
     return { bundle, transfer: bundle.textures.map(t => t.bytes) };
   }
 
   // --- Format 1: one payload file per texture -----------------------------------------------------
-  //
-  // Texture payloads are the bulk of such a bundle and are independent of each other, so they are read a
-  // few at a time rather than one by one — over HTTP that is the difference between one round trip per
-  // texture and a saturated connection. Results are written back by index so the order stays the
-  // manifest's, not the order they happened to finish in.
+  // Read a few at a time; over HTTP that is the difference between one round trip per texture and a
+  // saturated connection. Results are written back BY INDEX so the order stays the manifest's.
   const slots: (BundleTexture | null)[] = new Array(texIndex.length).fill(null);
   let next = 0;
   const worker = async () => {
@@ -128,13 +115,8 @@ export interface BundleEntry {
 
 /**
  * Lay a gathered bundle out as archive entries (format 2).
- *
  * MUTATES `bundle` — packBundleAssets replaces every payload with a marker. Safe in the worker, which
- * holds its own structured-clone copy.
- *
- * This lives next to readBundle deliberately. The layout used to be written in projectJobs.ts and read
- * here, which is precisely the duplicated contract this module's header warns about: two lists of
- * filenames that have to agree, and a bundle that imports with pieces quietly missing when they stop.
+ * holds its own structured-clone copy. Must stay beside readBundle: they are one filename contract.
  */
 export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> {
   const { blob, index } = await packBundleAssets(bundle);
@@ -157,9 +139,8 @@ export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> 
   for (const [id, data] of Object.entries(scenes)) entries.push(json(`${BUNDLE_PATHS.scenesDir}${id}.json`, data));
 
   entries.push(json(BUNDLE_PATHS.assetsIndex, index));
-  // Not text: the blob is mostly already-compressed image bytes and float data, where deflating hundreds
-  // of megabytes buys a few percent for a lot of wall-clock. What is left in the JSON is structure, which
-  // is exactly what compresses well — the reverse of how this bundle used to be written (all STORE).
+  // Not text: the blob is already-compressed image bytes and float data, where deflating hundreds of
+  // megabytes buys a few percent. The JSON left behind is structure, which does compress well.
   entries.push({ path: BUNDLE_PATHS.assets, data: blob, text: false });
 
   return entries;

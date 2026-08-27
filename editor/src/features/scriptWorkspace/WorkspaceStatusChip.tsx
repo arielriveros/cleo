@@ -3,9 +3,8 @@ import { Button } from '../../components/ui/Button'
 import { Modal, ModalFooter, ModalHeader } from '../../components/ui/Modal'
 import { useScriptWorkspace } from './ScriptWorkspaceContext'
 
-// Status of the external script workspace, shown in the menu bar whenever it is connected. It is only
-// ever loud when it needs the user: a paused sync and an edit conflict are both states where the editor
-// is deliberately NOT applying something, and staying silent about that would look like data loss.
+// Status of the external script workspace, shown in the menu bar whenever it is connected. Loud only
+// for a paused sync or an edit conflict — the states where something is deliberately not applied.
 
 const DOT: Record<string, string> = {
   live: 'bg-success',

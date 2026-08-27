@@ -1,10 +1,6 @@
-// A module store (same shape as sceneInspector/hoveredScriptStore) that lets an edit made in an external
-// IDE reach an ALREADY-OPEN Monaco script tab.
-//
-// It cannot go through props: MonacoScriptEditor is deliberately uncontrolled -- it builds its model once
-// from `initialSource` and reports edits outward -- so a changed prop would not move the text, and making
-// it controlled would fight the editor on every keystroke. Instead the editor subscribes to a revision
-// counter here and replaces its model's contents when its own script is bumped.
+// A module store that lets an edit made in an external IDE reach an already-open Monaco script tab.
+// It cannot go through props: MonacoScriptEditor is uncontrolled and builds its model once from
+// `initialSource`, so it subscribes to the revision counter here and replaces its model when bumped.
 
 type Listener = () => void
 

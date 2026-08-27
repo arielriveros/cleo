@@ -17,12 +17,9 @@ import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
 
-// The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries (textures,
-// materials, terrain materials, templates, models), with real folders.
-//
-// The folder layout lives in VfsContext; SVAR's own store owns what's on screen; useFileManagerBridge
-// stitches the two together. Creation and import stay in our own toolbar because SVAR's context menu can't
-// dispatch custom actions (its performAction is a closed switch over the built-in ids).
+// The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries, with real
+// folders. Folder layout lives in VfsContext, SVAR's store owns what is on screen, useFileManagerBridge
+// stitches them together. Creation and import stay in our toolbar: SVAR's performAction is a closed switch.
 
 export default function AssetsExplorer() {
   const { ready } = useVfs()
@@ -33,8 +30,7 @@ export default function AssetsExplorer() {
       </div>
     )
   }
-  // Mounted only once the index and every library have loaded, so its `data` is complete and can then stay
-  // frozen — see the useMemo in the host.
+  // Mounted only once the index and every library have loaded, so its `data` is complete and stays frozen.
   return <AssetsExplorerHost />
 }
 
@@ -55,10 +51,8 @@ function AssetsExplorerHost() {
   const [importing, setImporting] = useState(false)
   const importingRef = useRef(false)
 
-  // Audit: assets that are in a library but that the explorer isn't showing (a material the node inspector
-  // offers but the Assets tab doesn't have). Recomputed when the panel is opened, against BOTH the index
-  // and the file manager's live store — the two can disagree, and which one dropped the asset is the
-  // useful part. Cheap, so it also runs whenever the index/libraries change, just to drive the badge.
+  // Audit: assets a library holds but the explorer is not showing. Checked against BOTH the index and the
+  // file manager's live store — the two can disagree, and which one dropped the asset is the useful part.
   const [missingOpen, setMissingOpen] = useState(false)
   const missingMenuRef = useRef<HTMLDivElement>(null)
   const missing = useMemo(() => {
@@ -66,8 +60,8 @@ function AssetsExplorerHost() {
     return findMissingFromExplorer(vfs, libs, treeIds.size ? treeIds : undefined)
   }, [vfs, libs, apiRef, missingOpen])
 
-  // The opposite direction: entries pointing at an asset that no longer exists. They draw nothing, but
-  // they hold their path reserved, so re-importing the same file quietly comes back as "Rock (2)".
+  // The opposite direction: entries pointing at an asset that does not exist. They keep their path
+  // reserved, so re-importing the same file comes back as "Rock (2)".
   const orphans = useMemo(() => findOrphanEntries(vfs, libs), [vfs, libs])
   const audited = missing.length + orphans.length
 
@@ -96,15 +90,14 @@ function AssetsExplorerHost() {
     return () => { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey) }
   }, [addOpen])
 
-  // Built once, on mount. Re-passing `data` would make SVAR call store.init() and rebuild its whole tree,
-  // collapsing every open folder on every change; from here on the tree is kept in sync event by event.
+  // Built once, on mount: re-passing `data` makes SVAR call store.init() and collapse every open folder.
   const initialData = useMemo(() => buildFileManagerData(vfs, libs), [])
   const initialMode = useMemo<TMode>(() => {
     try { return (localStorage.getItem(FM_MODE_KEY) as TMode) || 'cards' } catch { return 'cards' }
   }, [])
 
-  // SVAR's own toolbar is hidden (filemanager.css) so search, the preview toggle and the view-mode switch
-  // can share ONE row with the Add menu; these mirror its state and drive it through the store's actions.
+  // SVAR's own toolbar is hidden (filemanager.css); these mirror its state and drive it through the
+  // store's actions.
   const [previewOpen, setPreviewOpen] = useState(false)
   const [viewMode, setViewMode] = useState<TMode>(initialMode)
   const [search, setSearch] = useState('')
@@ -150,10 +143,9 @@ function AssetsExplorerHost() {
   }
 
   // --- drops onto the explorer ------------------------------------------------------------------------
-  // Capture phase, on purpose. SVAR's <Uploader> registers its own capture-phase drop listener on the
-  // inner .wx-upload-area; ours sits on an ancestor, so it runs first and stopPropagation() keeps the file
-  // away from it. That matters: SVAR's directory walker drops the folder structure, which would break
-  // multi-file model bundles (a .gltf next to its .bin and textures/).
+  // Capture phase: SVAR's <Uploader> has its own capture-phase drop listener on the inner .wx-upload-area,
+  // so an ancestor listener runs first and stopPropagation() keeps the file away from it. SVAR's directory
+  // walker drops the folder structure, which breaks multi-file model bundles.
   useEffect(() => {
     const el = wrapperRef.current
     if (!el) return
@@ -170,9 +162,8 @@ function AssetsExplorerHost() {
       const types = e.dataTransfer?.types ?? []
       if (types.includes('text/cleo-fm-path')) return null // an internal move; useDragOutPatch owns it
       if (types.includes('Files')) return 'file'
-      // Only the scene tree's dedicated MIME counts as a node. A bare text/plain check used to work
-      // here, but dock-panel tab drags and doc-tab drags also carry text/plain-ish payloads and must
-      // not light up "save as template".
+      // Only the scene tree's dedicated MIME counts as a node: dock-panel and doc-tab drags also carry
+      // text/plain-ish payloads and must not light up "save as template".
       if (types.includes('text/cleo-node')) return 'node'
       return null
     }
@@ -204,8 +195,7 @@ function AssetsExplorerHost() {
         return
       }
 
-      // A node from the scene tree becomes a template — what the old Templates tab's drop zone did, except
-      // the whole explorer is now the drop zone.
+      // A node from the scene tree becomes a template; the whole explorer is the drop zone.
       const nodeId = e.dataTransfer.getData('text/cleo-node')
       if (!nodeId || !editorScene) return
       const node = editorScene.getNodeById(nodeId)
@@ -231,9 +221,9 @@ function AssetsExplorerHost() {
     }
   }, [runImport, editorScene, scripts, bodies, triggers, addTemplate])
 
-  // Hovering a script card highlights every node icon in the scene tree that references that script (the
-  // same light-blue tint the tree's own script-icon hover uses). Delegated over the SVAR DOM — its cards are
-  // `.wx-item[data-id]` / `.wx-row[data-id]`, the data-id is the VFS path (setID prefixes ':').
+  // Hovering a script card highlights every node icon in the scene tree that references it. Delegated over
+  // the SVAR DOM: cards are `.wx-item[data-id]` / `.wx-row[data-id]` and data-id is the VFS path
+  // (setID prefixes ':').
   useEffect(() => {
     const el = wrapperRef.current
     if (!el) return
@@ -251,9 +241,8 @@ function AssetsExplorerHost() {
     return () => { el.removeEventListener('mouseover', onOver); el.removeEventListener('mouseout', onOut); hoveredScriptStore.set(null) }
   }, [pathIndexRef])
 
-  // A card label is ellipsized at 80px, so hovering has to be able to say what the name actually is.
-  // SVAR renders no title of its own; the attribute is written on hover rather than up front because the
-  // card elements are React-reused across renames, which would leave a cached title stale.
+  // A card label is ellipsized at 80px and SVAR renders no title of its own. Written on hover, not up
+  // front: card elements are React-reused across renames and would keep a stale title.
   useEffect(() => {
     const el = wrapperRef.current
     if (!el) return
@@ -271,8 +260,8 @@ function AssetsExplorerHost() {
   }, [])
 
   // --- file-manager rendering hooks -------------------------------------------------------------------
-  // Stable identities: SVAR memoizes its `templates` (preview/icon) object, and a changing `data`/config
-  // prop re-inits the store. Everything these need is read through refs.
+  // Stable identities: SVAR memoizes its `templates` object and a changing `data`/config prop re-inits
+  // the store, so everything these need is read through refs.
   const previews = useCallback((file: Partial<IParsedEntity>): string | null => {
     if (!file?.id || file.type === 'folder') return null
     const entry = pathIndexRef.current.get(file.id)
@@ -292,14 +281,14 @@ function AssetsExplorerHost() {
 
   const menuOptions = useCallback((mode: TContextMenuType): IFileMenuOption[] => {
     const options = getMenuOptions(mode).filter(o => o.id !== 'download') as IFileMenuOption[]
-    // Right-clicking empty space offers folder creation (SVAR's default body menu is Paste only). The id
-    // is custom, so SVAR's own performAction ignores it — the capture-phase click listener below runs it.
+    // Right-clicking empty space offers folder creation. The id is custom, so SVAR's performAction ignores
+    // it — the capture-phase click listener below runs it.
     if (mode === 'body') return [{ id: 'cleo-new-folder', icon: 'wxi-folder', text: 'New folder' }, ...options]
     return options
   }, [])
 
-  // SVAR's context menu portals to <body> and its performAction is a closed switch over the built-in
-  // action ids — a custom option renders fine but its click goes nowhere. Catch it at the document level.
+  // SVAR's context menu portals to <body> and its performAction is a closed switch over built-in action
+  // ids, so a custom option's click goes nowhere. Catch it at the document level.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest?.('[data-id=":cleo-new-folder"]')) newFolder()
@@ -308,9 +297,8 @@ function AssetsExplorerHost() {
     return () => document.removeEventListener('click', onClick, true)
   }, [newFolder])
 
-  // The explorer's entire chrome is ONE 28px row: Add menu, search, then the preview toggle and view-mode
-  // switch on the right. Every saved pixel goes to the card area below, which at a 30vh bottom bar has
-  // only ~130px to show a full card row including its name.
+  // The explorer's entire chrome is ONE 28px row; every saved pixel goes to the card area below, which at
+  // a 30vh bottom bar has only ~130px for a full card row.
   const addItems: { label: string; icon: React.ReactNode; run: () => void; title: string }[] = [
     { label: 'Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterMaterialEditor(), title: 'Create a new material asset' },
     { label: 'Terrain Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new terrain material asset' },

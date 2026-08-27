@@ -1,16 +1,5 @@
-/**
- * Reflecting a WGSL module the engine did not build.
- *
- * `tools/wgslTranslate.mjs` reflects every one of the engine's own shaders at BUILD time and ships the
- * answer on each `.wgsl` import. A custom material has no build step: it is a user's GLSL, stored in a
- * project, translated to WGSL by naga while the app runs. So the same questions have to be answered
- * again, later, about a string that did not exist when the bundle was made.
- *
- * They are answered by the SAME code. `tools/wgslLayout.mjs` is plain ESM with no Node dependencies for
- * exactly this reason — it bundles — and `tools/harness/uniformLayoutCheck.js` compares every offset it
- * computes against what a real driver reports. A second implementation of the WGSL memory-layout rules
- * would be a second implementation the harness does not check.
- */
+// Reflecting a WGSL module the engine did not build — a custom material, translated by naga at runtime.
+// Shares `tools/wgslLayout.mjs` with the build-time path, so the layout rules have one implementation.
 import { findResources, findUniformBlocks } from '../../../../tools/wgslLayout.mjs';
 import type { UniformBlockLayout } from '../uniformSet';
 import type { ShaderResource } from '../types';
@@ -24,12 +13,8 @@ export function resourcesOf(wgsl: string): ShaderResource[] {
 }
 
 /**
- * The uniform blocks a module declares, laid out.
- *
- * `flat` is what `ProgramUniforms` writes through, rooted at the VAR's name. naga names its uniform
- * vars `global`, `global_1`, ... rather than anything meaningful, so those paths read `global.u_time` —
- * which is fine and is why the engine resolves `setUniform` names by SUFFIX as well as in full. The
- * struct name (`CleoEngineUniforms`) is the part a reader recognises, and it is carried through.
+ * The uniform blocks a module declares, laid out. `flat` paths are rooted at naga's var name
+ * (`global.u_time`), which is why `setUniform` resolves names by suffix as well as in full.
  */
 export function uniformBlocksOf(wgsl: string): UniformBlockLayout[] {
     return findUniformBlocks(wgsl).map(b => ({

@@ -10,64 +10,42 @@ import GeometryPBRProgram from '../shaders/wgsl/geometryPBR.wgsl';
 import PBRProgram from '../shaders/wgsl/pbr.wgsl';
 import { uniformBlocksOf } from '../rhi/webgpu/wgslReflect';
 
-// The shadow library, GENERATED from chunks/shadows.wgsl at build time rather than read from
-// environment/shadows.glsl. Custom materials are assembled here at runtime and need the library as
-// text, while the engine's own shaders want it as WGSL; generating this half means the cascade and
-// bias arithmetic is authored once. See tools/wgslTranslate.mjs `extractGlslChunk`.
+// The shadow library, GENERATED from chunks/shadows.wgsl at build time, so the cascade and bias
+// arithmetic is authored once. See tools/wgslTranslate.mjs `extractGlslChunk`.
 const SHADOWS_SRC = ShadowsChunk.glslChunk!;
 import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } from '../material';
 import type { ShaderResource } from '../rhi/types';
 
 // -----------------------------------------------------------------------------------------------
-// Runtime compilation of user-authored custom-material fragment shaders.
+// Runtime compilation of user-authored custom-material fragment shaders: a user's `fragment()` or
+// `surface()` plus a fixed PRELUDE, compiled and registered under the material's `type` key.
 //
-// A custom material stores a user-written GLSL function (`fragment()` for forward, `surface()` for
-// deferred) plus a list of user uniforms. This module assembles that into a complete program by
-// prepending a fixed PRELUDE (varyings + engine uniforms + helper library, matching the standard
-// vertex shader `pbr.vs`), compiles it with `Shader.create` (which throws with the GL info log on
-// failure), and registers it in the ShaderManager under the material's `type` key.
-//
-// IMPORTANT — keep in sync with the build-time shaders (runtime GLSL can't `#include`):
-//   - MAX_POINT_LIGHTS / MAX_SPOTLIGHTS  -> shaders/constants.glsl
-//   - light structs, PBR helpers -> shaders/materials/pbr.fs
-//   (shadow sampling is NOT on this list any more: shaders/environment/shadows.glsl is imported
-//    verbatim below, so it cannot drift.)
-//   - G-buffer output layout -> shaders/deferred/geometryPBR.fs
-//   - toLinear/toSrgb -> shaders/screen/tonemap.glsl
+// MUST be kept in sync by hand with the build-time shaders — runtime GLSL cannot `#include`:
+// light counts (constants.glsl), light structs and PBR helpers (pbr.fs), the G-buffer layout
+// (geometryPBR.fs), and toLinear/toSrgb (tonemap.glsl). The shadow library is imported, not copied.
 // -----------------------------------------------------------------------------------------------
 
 const MAX_POINT_LIGHTS = 16;
 const MAX_SPOTLIGHTS = 8;
 
 // --- sampler declaration primitives -------------------------------------------------------------
-//
-// Above the interfaces because the interfaces reach for them while this module is still evaluating —
-// `COMMON_BODY` interpolates the light-count constants, and `vulkanShadowLibrary` reads SAMPLER_PARTS.
-// A hoisted function declaration is fine there; the consts it reaches for are not, and leaving them
-// below produced a temporal-dead-zone ReferenceError that surfaced as the whole `cleo` bundle failing
-// to define itself.
+// Must stay ABOVE the interfaces, which reach for these while the module is still evaluating; moving
+// them below is a temporal-dead-zone ReferenceError that kills the whole bundle.
 type SamplerType = 'sampler2D' | 'samplerCube' | 'sampler2DArray' | 'sampler2DArrayShadow';
 interface SamplerDecl {
     name: string;
     type: SamplerType;
     comment?: string;
     /**
-     * The engine binds a DEPTH texture here.
-     *
-     * Invisible to GLSL, which has one `sampler2D` whatever the format; load-bearing on WebGPU, where
-     * a depth texture cannot satisfy a `texture_2d<f32>` binding and the bind group is rejected. naga
-     * cannot know — it is translating GLSL that does not say. See `retypeDepthTextures`.
+     * The engine binds a DEPTH texture here. Invisible to GLSL, load-bearing on WebGPU — a depth
+     * texture cannot satisfy a `texture_2d<f32>` binding. See `retypeDepthTextures`.
      */
     depth?: true;
 }
 
 /**
- * The Vulkan-GLSL texture type, sampler type and combined-sampler constructor behind each ES type.
- *
- * `sampler` is `sampler` for everything but a SHADOW sampler, which takes `samplerShadow` — a
- * comparison sampler is a different object, and pairing one with a plain `sampler` is not a program
- * that links. The shadow entries are here rather than beside the library that uses them because this
- * is the one table that says how an ES combined sampler splits.
+ * The Vulkan-GLSL texture type, sampler type and combined-sampler constructor behind each ES type. A
+ * SHADOW sampler takes `samplerShadow` — pairing a comparison sampler with a plain one will not link.
  */
 const SAMPLER_PARTS: Record<SamplerType, { texture: string; combined: string; sampler: string }> = {
     sampler2D: { texture: 'texture2D', combined: 'sampler2D', sampler: 'sampler' },
@@ -84,31 +62,19 @@ const NL = '\n';
 const trailingComment = (comment?: string) => (comment ? ` // ${comment}` : '');
 
 /**
- * The varyings a lit custom material receives, in the ORDER their Vulkan locations are assigned.
- *
- * Must match `chunks/modelVarying.wgsl` — fragPos, uv, tangent, bitangent, normal at locations 0-4 —
- * because that is the vertex stage the pipeline pairs this fragment stage with, and WebGPU matches the
- * two by location. ES 300 links by name, which is why the order could drift unnoticed before and why
- * the NAMES still have to be the ones user materials were written against.
+ * The varyings a lit custom material receives, in the ORDER their Vulkan locations are assigned. Must
+ * match `chunks/modelVarying.wgsl`: WebGPU pairs the stages by location, ES 300 by name.
  */
 const COMMON_VARYINGS: ValueDecl[] = [
     { name: 'fragPos', type: 'vec3' },
     { name: 'fragTexCoord', type: 'vec2' },
-    // The TBN basis arrives as three vectors, because a matrix is not a valid shader interface type
-    // outside GLSL ES. It is reassembled into TBN in the epilogue's main(), before the user's function
-    // runs — user source in existing projects reads TBN directly, and getNormal() is documented in
-    // terms of it, so the name has to survive even though the transport did not.
+    // The TBN basis arrives as three vectors — a matrix is not a valid shader interface type outside
+    // GLSL ES — and is reassembled into `TBN` in the epilogue before the user's function runs.
     { name: 'fragTangent', type: 'vec3' },
     { name: 'fragBitangent', type: 'vec3' },
     { name: 'fragNormal', type: 'vec3' },
 ];
 
-/**
- * Where a LIT custom material's uniform blocks land.
- *
- * Not the front of group 1: `chunks/modelVertex.wgsl` declares and uses `ModelTransform` at
- * `@group(1) @binding(0)`, and the vertex module is part of the same pipeline. See {@link BlockSlot}.
- */
 /** Group 1's transform role — the one block a model vertex stage reads. See chunks/modelVertex.wgsl. */
 const VERTEX_TRANSFORM_BINDING = 0;
 
@@ -144,37 +110,15 @@ vec3 toSrgb(vec3 c)   { return pow(c, vec3(1.0 / 2.2)); }
 vec3 getNormal() { return normalize(TBN[2]); }
 `;
 
-/**
- * The forward prelude's engine samplers, as data.
- *
- * One entry, and it still earns being a list: the GLSL line inside LIGHTING_BLOCK is GENERATED from
- * this, so the bind-group reflection below and the declaration the shader actually compiles cannot
- * disagree about the name or the order. The deferred interface declares none — a G-buffer pass writes
- * surface parameters and samples no environment.
- */
+// The forward prelude's engine samplers as DATA: the GLSL declaration and the bind-group reflection
+// are both generated from this, so they cannot disagree. The deferred interface declares none.
 const FORWARD_ENGINE_SAMPLERS: SamplerDecl[] = [
     { name: 'u_envMap', type: 'samplerCube' },
 ];
 
 /**
- * The shadow library, in Vulkan GLSL.
- *
- * `SHADOWS_SRC` is generated from `shadowsChunk.wgsl` as GLSL **ES**, which is the dialect the forward
- * prelude has always pasted. Three lines of it are ES-only, and they are the only three — a dump of the
- * generated chunk has no `#extension`, no `#version`, and no `precision` qualifier anywhere except on
- * the two sampler declarations:
- *
- *     uniform highp sampler2DArrayShadow u_shadowCascades;
- *     uniform highp sampler2DArrayShadow u_spotShadows;
- *     layout(std140) uniform ShadowUniforms_block_0Fragment { ShadowUniforms u_shadow; };
- *
- * So this is a transform rather than a second generated chunk. That matters twice over: there is no
- * Rust toolchain on this machine, so `npm run naga:build` cannot run and the vendored artifact emits
- * ES 300 only; and a second copy of a 14 KB chunk would ship in every bundle to serve the editor.
- *
- * The bindings are NOT written here. They come from `shadowsChunk.wgsl`'s own reflection — the same
- * list `customShaderResources` hands the RHI for group 3 — so the declaration the shader compiles and
- * the bind group the engine builds cannot disagree about which texture is which.
+ * The shadow library in Vulkan GLSL, transformed from the ES chunk rather than generated separately —
+ * only three lines differ. Bindings come from `shadowsChunk.wgsl`'s own reflection, never written here.
  */
 function vulkanShadowLibrary(): string {
     let out = SHADOWS_SRC;
@@ -203,15 +147,8 @@ function vulkanShadowLibrary(): string {
     return out;
 }
 
-/**
- * The light structs, declared as TYPES so the uniform block below can have members of them.
- *
- * `DirectionalLight` used to be declared inline as `uniform struct DirectionalLight {…} u_dirLight;`.
- * That is legal GLSL ES and is exactly what Vulkan GLSL refuses — a loose uniform of struct type — so
- * the definition and the declaration are now separate, which is what lets `u_dirLight` become a member
- * of `CleoEngineUniforms` alongside everything else. The struct BODIES are unchanged, so every material
- * that reads `u_dirLight.diffuse` or `u_pointLights[i].constant` keeps working.
- */
+// The light structs, declared as TYPES so the uniform block can have members of them — Vulkan GLSL
+// refuses a loose uniform of struct type.
 const LIGHT_STRUCTS = `
 struct DirectionalLight {
     vec3 direction;
@@ -307,13 +244,7 @@ void accumulateLight(vec3 N, vec3 V, vec3 albedo, float metallic, float roughnes
 }
 `;
 
-/**
- * Forward prelude: user writes `vec4 fragment()` returning final LINEAR-HDR color.
- *
- * The last of the three to become an interface description, and the one that needed the machinery: an
- * inline `uniform struct`, two ARRAYS of structs, and a pasted shadow library generated as GLSL ES.
- * See LIGHT_STRUCTS, `ValueDecl.array` and `vulkanShadowLibrary` respectively.
- */
+/** Forward prelude: the user writes `vec4 fragment()` returning a final linear-HDR colour. */
 const FORWARD_INTERFACE: PreludeInterface = {
     varyings: COMMON_VARYINGS,
     outputs: [{ name: 'fragColor', type: 'vec4' }],
@@ -322,9 +253,8 @@ const FORWARD_INTERFACE: PreludeInterface = {
     engineBlock: LIT_ENGINE_BLOCK,
     userBlock: LIT_USER_BLOCK,
     structs: LIGHT_STRUCTS,
-    // The shadow library binds FOUR group-3 entries, and `shadowCalculation()` reaches only the two
-    // cascade ones. `spotShadowFor` is what touches the other pair; without this, any material that
-    // takes a shadow but no spot shadow gets a two-entry layout for the engine's four-entry group.
+    // The shadow library binds FOUR group-3 entries but `shadowCalculation()` reaches only two;
+    // without this a material gets a two-entry layout for the engine's four-entry group.
     keepAlive: 'spotShadowFor(0, fragPos, getNormal(), fragPos)',
     body: (dialect) => COMMON_BODY + LIGHTING_BODY(dialect),
 };
@@ -338,18 +268,8 @@ void main() {
 `;
 
 /**
- * Deferred prelude: user writes `void surface(inout Surface s)` writing G-buffer channels.
- *
- * An interface description rather than a template string, which is what makes it expressible in Vulkan
- * GLSL and therefore translatable to WGSL. Everything that used to make it untranslatable was in the
- * FORM, not the content: `#version 300 es` and `precision`, loose uniforms, and varyings with no
- * explicit location. `renderPrelude` renders all three correctly for whichever dialect is asked for.
- *
- * The varying ORDER is load-bearing and is not free to change. `declareVaryings` numbers them by
- * position for the Vulkan dialect, and they must line up with the vertex stage this material is paired
- * with — `chunks/modelVarying.wgsl`, which is fragPos, uv, tangent, bitangent, normal at locations 0-4.
- * ES 300 links varyings by NAME, so the order was invisible there and the names still have to be the
- * ones existing user materials were written against.
+ * Deferred prelude: the user writes `void surface(inout Surface s)` writing G-buffer channels. The
+ * varying ORDER is load-bearing — `declareVaryings` numbers them by position for the Vulkan dialect.
  */
 const DEFERRED_INTERFACE: PreludeInterface = {
     varyings: DEFERRED_VARYINGS,
@@ -397,57 +317,32 @@ void main() {
 `;
 
 // --- Dialects -----------------------------------------------------------------------------------
+// The same user snippet compiles twice: GLSL ES 300 for WebGL2, and Vulkan GLSL for naga to translate
+// to WGSL. The dialects disagree only about how the ENGINE's declarations are spelled.
 //
-// The same user snippet has to compile twice: once as GLSL ES 300 for WebGL2, and once as Vulkan GLSL
-// so naga can translate it to WGSL for WebGPU. The two dialects disagree about how the *engine's*
-// declarations are spelled, never about the body the user writes — which is the property that makes a
-// single stored source viable at all.
-//
-// What differs, all of it verified against naga 29.0.4 rather than assumed:
-//
-//   - `#version 300 es` + `precision` are rejected outright; Vulkan GLSL is `#version 450`, no precision.
-//   - Combined samplers do not exist. A `sampler2D` becomes a `texture2D` + `sampler` pair, rebuilt into
-//     a combined handle by a `#define` — naga runs a real preprocessor, so `texture(u_tex, uv)` in the
-//     user's body needs no change.
-//   - Loose uniforms are rejected: "uniform/buffer blocks require layout(binding=X)". Everything scalar
-//     has to live in an explicitly bound block.
-//   - `bool` is not host-shareable, so it cannot be a block member. It round-trips as an `int` plus a
-//     `#define`, which again leaves the user's `if (u_flag)` untouched.
-//   - Varyings need an explicit `layout(location=N)`.
-//
-// Both forms are generated from ONE interface description below. That is the whole point: a
-// hand-written second copy of each prelude would drift the moment somebody added a built-in to one and
-// not the other, and the symptom would be a user's material failing naga for a reason they did not
-// cause and cannot see.
+// Vulkan GLSL rejects `#version 300 es` and `precision`, has no combined samplers, refuses loose
+// uniforms and `bool` block members, and requires explicit varying locations. Both forms are
+// generated from ONE interface description, so a hand-written second copy cannot drift.
+// Everything above is verified against naga 29.0.4, not assumed.
 
 export type ShaderDialect = 'es300' | 'vulkan';
 
 
-/** The Vulkan-GLSL texture type and combined-sampler constructor behind each ES sampler type. */
+/** One scalar, vector or matrix declaration in a prelude interface. */
 interface ValueDecl {
     name: string;
     type: string;
     /**
-     * Array length, for a uniform declared as `T name[N]`.
-     *
-     * A literal rather than the `MAX_POINT_LIGHTS` constant the ES prelude has always written, because
-     * a Vulkan block member's array size must be a constant expression already in scope, and the
-     * constants live in the interface's BODY, which `renderPrelude` emits after the uniforms. The
-     * constant is still declared, for the user's own source to reference.
+     * Array length for a uniform declared `T name[N]`. A LITERAL, not a named constant: a Vulkan block
+     * member's array size must already be in scope, and the constants are emitted after the uniforms.
      */
     array?: number;
     comment?: string;
 }
 
 /**
- * Where a uniform block lands, as (group, binding).
- *
- * Spelled per mode rather than fixed, because the VERTEX module a custom material is paired with is
- * not the same in every mode and its bindings are not negotiable. A screen material pairs with
- * `chunks/fullscreen.wgsl`, which declares nothing, so its blocks can sit at the front of groups 1 and
- * 2. A forward or deferred one pairs with `chunks/modelVertex.wgsl`, which already owns
- * `@group(1) @binding(0)` for `ModelTransform` and USES it — two different structs at one (group,
- * binding) across the two stages of one pipeline is not a layout WebGPU will build.
+ * Where a uniform block lands, as (group, binding). Per mode, because the VERTEX module a material
+ * pairs with owns bindings of its own — `chunks/modelVertex.wgsl` already holds `@group(1) @binding(0)`.
  */
 interface BlockSlot { group: number; binding: number }
 
@@ -463,11 +358,8 @@ interface PreludeInterface {
     /** Fragment outputs, in location order. Identical in both dialects. */
     outputs: ValueDecl[];
     /**
-     * Struct TYPE definitions, emitted before the uniform block that uses them.
-     *
-     * Separate from `body` because ordering is not free: a Vulkan block member of type `PointLight`
-     * needs `PointLight` already declared, and `body` is rendered after the uniforms so that user
-     * helpers can reference them. Identical in both dialects — a plain `struct` is plain GLSL.
+     * Struct TYPE definitions, emitted before the uniform block that uses them. Separate from `body`,
+     * which renders after the uniforms — a Vulkan block member needs its type already declared.
      */
     structs?: string;
     /**
@@ -476,11 +368,8 @@ interface PreludeInterface {
      */
     keepAlive?: string;
     /**
-     * Constants and helper functions.
-     *
-     * A function of the dialect rather than a string, because the forward prelude pastes the shadow
-     * library and that library is GENERATED as GLSL ES — its samplers are combined and its uniform
-     * block carries no set/binding. See `vulkanShadowLibrary`.
+     * Constants and helper functions. May be a function of the dialect — the forward prelude pastes a
+     * shadow library generated as GLSL ES. See `vulkanShadowLibrary`.
      */
     body: string | ((dialect: ShaderDialect) => string);
 }
@@ -493,10 +382,8 @@ function versionHeader(dialect: ShaderDialect): string {
 }
 
 /**
- * Sampler declarations, consuming two binding slots each in the Vulkan form.
- *
- * `binding` is threaded through rather than derived per call so engine samplers and user samplers land
- * in one continuous range within the group.
+ * Sampler declarations, two binding slots each in the Vulkan form. `binding` is threaded through so
+ * engine and user samplers land in one continuous range within the group.
  */
 function declareSamplers(samplers: SamplerDecl[], dialect: ShaderDialect, group: number, binding: number): { glsl: string; next: number } {
     if (dialect === 'es300')
@@ -555,34 +442,13 @@ const ZERO_COORD: Record<SamplerType, string> = {
     sampler2DArrayShadow: 'vec4(0.0)',
 };
 
-/**
- * A no-op reference to everything the engine binds, so none of it is dropped from the INTERFACE.
- *
- * WebGPU builds a pipeline's bind group layout from what the entry point actually REACHES. The engine
- * binds a FIXED interface — every prelude sampler, the built-in uniform block, the user's samplers and
- * the shadow maps — whether or not a particular material happens to read them. A material that reads
- * only some of it therefore gets a layout with the rest missing, and the engine's bind group is then
- * too long for it:
- *
- *     Number of entries (4) did not match the expected number of entries (2)
- *
- * which invalidates the whole command buffer and drops the pass. It is not a rare case: a tint needs no
- * time and no camera, a lit material that never reflects needs no environment cube, and a material that
- * calls `shadowCalculation()` reaches the cascades but not the spot shadows.
- *
- * Everything here is multiplied by zero, so nothing about the picture changes, and it is GENERATED from
- * the same lists that declare the bindings — it cannot name something that is not there, or miss
- * something that is. `body` and the user's samplers are both already in scope: `renderPrelude` renders
- * this last.
- *
- * The same device the magenta fallbacks below use to keep their varyings live.
- */
-/**
- * One `float` expression that READS `decl` — the smallest touch that keeps its uniform block reachable.
- *
- * Arrays are read at index 0, and `int`/`bool` are converted because {@link keepInterfaceAlive} sums
- * these into a float. Shared by the engine block and the user's so the two cannot drift apart.
- */
+// A no-op reference to everything the engine binds, so nothing is dropped from the INTERFACE: WebGPU
+// builds a layout from what the entry point REACHES, and the engine's bind group is a fixed set. A
+// material reading only part of it otherwise gets a short layout, which invalidates the command buffer.
+// Generated from the same lists that declare the bindings, and multiplied by zero.
+
+// One `float` expression that READS `decl`. Arrays read at index 0; `int`/`bool` convert, since
+// `keepInterfaceAlive` sums these into a float.
 function scalarTouch(decl: ValueDecl): string {
     const base = decl.array ? `${decl.name}[0]` : decl.name;
     if (decl.type === 'float') return base;
@@ -597,12 +463,8 @@ function keepInterfaceAlive(iface: PreludeInterface, userUniforms: CustomUniform
     const first = iface.uniforms[0];
     if (first) terms.push(scalarTouch(first));
 
-    // The USER block, for exactly the reason the engine block is here and by the same rule. A material
-    // may declare a value uniform — the editor exposes every one of them as a control — whose source
-    // never reads it; `mixAmount` on a tint that has been edited down to a passthrough is the ordinary
-    // case, not a contrived one. naga drops a block nothing reaches, so the pipeline comes back without
-    // that GROUP, `setBindGroup(2, ...)` then names an index the layout does not have, and the whole
-    // command buffer is invalid: the pass is dropped and the material silently does not draw.
+    // The USER block, for the same reason: a material may declare a uniform its source never reads,
+    // and naga drops a block nothing reaches, leaving `setBindGroup` naming a group that is not there.
     const firstUser = userValueDecls(userUniforms)[0];
     if (firstUser) terms.push(scalarTouch(firstUser));
 
@@ -636,10 +498,7 @@ function renderPrelude(iface: PreludeInterface, userUniforms: CustomUniform[], d
 }
 
 // --- The screen-mode interface ------------------------------------------------------------------
-//
-// The first of the three to be expressed this way, because it was the simplest: no lighting, no shadow
-// library, one varying. The other two followed once the generator could express what they needed — a
-// struct type, an array of them, dialect-dependent body text, and a block that is not at binding 0.
+// No lighting, no shadow library, one varying.
 
 const SCREEN_INTERFACE: PreludeInterface = {
     varyings: [{ name: 'fragTexCoord', type: 'vec2' }],
@@ -729,33 +588,15 @@ const WGSL_TEXTURE: Record<SamplerType, string> = {
     sampler2DArrayShadow: 'texture_depth_2d_array',
 };
 
-/**
- * A screen-mode custom program's group 0, as the RHI describes a bind group layout.
- *
- * Derived from the SAME interface description and the SAME `userSamplerDecls` that render the
- * prelude, and walking bindings by twos exactly as `declareSamplers` does — because if the two ever
- * disagreed, the bind group would point a sampler at the wrong texture and the material would render
- * a plausible wrong picture rather than fail. There is no second copy of the ordering to drift.
- *
- * A thin alias for `customShaderResources('screen', …)`, kept because the screen pass reads better for
- * naming the mode once at the call site than for repeating it.
- */
+/** A screen-mode custom program's group 0. An alias for `customShaderResources('screen', …)`. */
 export function screenShaderResources(uniforms: CustomUniform[]): ShaderResource[] {
     return customShaderResources('screen', uniforms);
 }
 
 /**
- * A custom program's bind-group layout, for any of the three render modes.
- *
- * Group 0 is the engine samplers the mode's prelude declares, then the user's, in declaration order
- * and walking bindings by twos — exactly what `declareSamplers` does when it renders the same lists to
- * GLSL. Deriving both from one list is the point: if they disagreed, the bind group would point a
- * sampler at the wrong texture and the material would render a plausible wrong picture rather than
- * fail.
- *
- * Group 3 is the shadow textures, and ONLY for the forward mode — it is the one prelude that pastes
- * the shadow library. Those bindings are not re-declared here either: they come from the reflection
- * of `shadowsChunk.wgsl` itself, the module whose GLSL the prelude pastes.
+ * A custom program's bind-group layout. Group 0 is the engine samplers then the user's, walking
+ * bindings by twos exactly as `declareSamplers` does — the two are derived from one list on purpose.
+ * Group 3 is the shadow textures, forward mode only, taken from `shadowsChunk.wgsl`'s own reflection.
  */
 export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUniform[]): ShaderResource[] {
     const engine = mode === 'screen' ? SCREEN_INTERFACE.samplers
@@ -782,17 +623,8 @@ export function screenUserSamplerNames(uniforms: CustomUniform[]): string[] {
 }
 
 /**
- * Why this render mode cannot be translated to WGSL — `null` when it can, which is now every mode.
- *
- * Kept as a function rather than deleted because it is exported API and the editor asks it: it fills
- * the third verdict in `CustomMaterialEditor` ("compiles on WebGL2, and the ENGINE cannot offer WebGPU
- * here"), distinct from "compiles, but naga rejected this particular source". That distinction is
- * still worth having if a future mode arrives before its prelude does. Returning null for everything
- * simply means the editor never shows that state today.
- *
- * It used to refuse forward and deferred, naming a mat3 varying, an inline `uniform struct` and the
- * ES-generated shadow library. The mat3 was already gone when this was written; the other two are
- * gone now — see LIGHT_STRUCTS, `ValueDecl.array` and `vulkanShadowLibrary`.
+ * Why this render mode cannot be translated to WGSL, or null when it can — which is currently every
+ * mode. The editor shows this as a distinct verdict from "naga rejected this particular source".
  */
 export function vulkanUnsupportedReason(_renderMode: CustomRenderMode): string | null {
     return null;
@@ -826,46 +658,21 @@ const registered = new Set<string>();           // ShaderManager keys we've comp
 const failed = new Set<string>();               // keys whose user source failed to compile (magenta fallback in use)
 const errors = new Map<string, string>();       // last compile error per key
 const fallbackByMode = new Map<CustomRenderMode, ShaderProgram>();
-/**
- * The translated WGSL per key, and the vertex module its pipeline pairs it with.
- *
- * naga translates a FRAGMENT stage — `tryCompileCustom` asks for exactly that — so a custom material's
- * WGSL is half a program. The other half is not translated at all: a custom material is compiled
- * against a FIXED engine vertex source (`pbr.vs` / `screen.vs`), whose WGSL twin the engine already
- * ships. Two modules in one pipeline is what WebGPU wants anyway, and it avoids merging two naga
- * outputs that would collide on every struct and private-variable name they both invented.
- *
- * They line up because the locations do. `chunks/fullscreen.wgsl` emits
- * `@location(0) uv: vec2<f32>`; naga emits `@fragment fn main(@location(0) fragTexCoord: vec2<f32>)`
- * from the prelude's first varying. WebGPU matches stages by location and type, never by name.
- */
+// The translated WGSL per key, plus the vertex module its pipeline pairs it with. naga translates only
+// the FRAGMENT stage; the vertex half is the engine's own shipped WGSL, and the two line up because
+// WebGPU matches stages by LOCATION, never by name.
 const customWgsl = new Map<string, { fragment: string; vertex: string; vertexEntry: string }>();
 
-/**
- * Keys this DEVICE cannot build a program for at all — neither the user's source nor the magenta
- * fallback. Distinct from `failed`, which means "the user's GLSL is broken, magenta is standing in":
- * there is no program under these keys, so nothing may try to bind one.
- *
- * WebGPU is the case. Both halves are assembled from GLSL at runtime and carry no build-time vertex
- * inputs or uniform-block layouts, which is what `WebGPUDevice.createShaderProgram` requires — so the
- * fallback threw from inside the catch that was meant to contain the first failure, and the exception
- * escaped `_ensureCustomShaders`. The game loop logs a frame error WITHOUT rescheduling, so that one
- * throw ended the session: every scene with any custom material rendered a single frame and stopped.
- */
+// Keys this DEVICE cannot build a program for at all, not even the magenta fallback — so nothing may
+// try to bind one. Distinct from `failed`, where magenta IS standing in.
 const unbuildable = new Set<string>();
 /** One log line per (mode, reason), not one per material per frame. */
 const unbuildableReported = new Set<string>();
 
 // --- key lifetime -------------------------------------------------------------------------------
-//
-// A custom shader's key is derived from its CONTENT, so every edit to a material's source mints a new
-// key and registers a new program. Without the two structures below the superseded key stayed in the
-// ShaderManager forever — referenced by nothing, freed by nothing — so tuning one shader in the editor
-// leaked a program per keystroke-pause, permanently.
-//
-// Refcounted by key rather than swept, because `ensureCustomShader` already runs every frame for every
-// live material (the renderer's _ensureCustomShaders), which is exactly the signal needed: when a
-// material shows up under a different key than last time, its old key has lost a user.
+// A key is derived from CONTENT, so every source edit mints a new one and leaks the old program
+// without this. Refcounted rather than swept: `ensureCustomShader` runs per material per frame, so a
+// material appearing under a new key is exactly the signal that its old one lost a user.
 
 /** How many live materials currently use each key. */
 const keyRefs = new Map<string, number>();
@@ -880,10 +687,8 @@ function isFallback(shader: ShaderProgram): boolean {
 }
 
 /**
- * Drop one material's claim on `key`, disposing the program once nobody is left using it.
- *
- * Safe to be wrong in the conservative direction: if a key is released and later needed again,
- * `ensureCustomShader` simply recompiles it. The failure mode is a recompile, not a broken material.
+ * Drop one material's claim on `key`, disposing the program once nobody holds it. Releasing too
+ * eagerly only costs a recompile — `ensureCustomShader` rebuilds it on demand.
  */
 function releaseKey(key: string): void {
     const remaining = (keyRefs.get(key) ?? 1) - 1;
@@ -953,10 +758,8 @@ function fallbackShader(mode: CustomRenderMode): ShaderProgram | null {
             s = device.createShaderProgram({ label: `customFallback:${mode}`,
                                             vertex: vertexSource(mode), fragment: fs });
         } catch (e: any) {
-            // The fallback is itself runtime-assembled GLSL, so on a backend that cannot compile the
-            // user's source it cannot compile this either. Returning null rather than throwing is the
-            // whole point: this function is called from inside a catch, and throwing here rethrows past
-            // the handler that exists to keep a bad material from killing the frame.
+            // Return null, never throw: this runs inside a catch, and throwing here escapes the
+            // handler that exists to keep a bad material from killing the frame.
             if (!unbuildableReported.has(mode)) {
                 unbuildableReported.add(mode);
                 Logger.warn(`Custom ${mode} materials cannot render on the ${device.backend} backend: ` +
@@ -970,10 +773,8 @@ function fallbackShader(mode: CustomRenderMode): ShaderProgram | null {
 }
 
 /**
- * Idempotently compile + register the program for `mat.type` (its content-derived key). On success the
- * user program is registered; on failure a magenta fallback is registered under the same key so the
- * render/VAO paths never throw. Safe to call every frame — a `Set` lookup after the first compile.
- * Returns whether the user shader compiled.
+ * Idempotently compile and register the program for `mat.type`, falling back to magenta under the same
+ * key so the draw paths never throw. Safe to call every frame; returns whether the user shader compiled.
  */
 export function ensureCustomShader(mat: CustomMaterial): boolean {
     const key = mat.type as string;
@@ -988,9 +789,8 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
     }
 
     if (registered.has(key)) return !failed.has(key);
-    // Already known unbuildable on this device — do not recompile it once per material per frame.
-    // The stand-in is re-checked rather than assumed present: the first attempt can land before the
-    // engine's own programs are registered, and there is no later event that would come back for it.
+    // Already known unbuildable here. The stand-in is re-checked rather than assumed present: the
+    // first attempt can land before the engine's own programs are registered.
     if (unbuildable.has(key)) {
         if (!ShaderManager.Instance.find(key)) {
             const standIn = standInFor(mat.renderMode);
@@ -1004,9 +804,7 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
             label: key,
             vertex: vertexSource(mat.renderMode),
             fragment: assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms),
-            // The WebGPU half. Absent on WebGL2, which reflects a linked program instead, and absent
-            // on WebGPU too when no translator is installed — in which case `createShaderProgram`
-            // refuses by name and the catch below reports a material that cannot run here.
+            // The WebGPU half. Absent on WebGL2, and on WebGPU with no translator installed.
             ...webgpuHalf(mat, key),
         });
         ShaderManager.Instance.addShader(key, shader);
@@ -1018,18 +816,9 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
         const magenta = fallbackShader(mat.renderMode);
         if (!magenta) {
             unbuildable.add(key);
-            // The key stays OUT of `registered`, so `customForwardTypes` never hands the renderer a
-            // type with no program behind it and `customShaderReady` tells the draw paths to skip.
-            //
-            // But something must still answer `getShader(material.type)`: `ModelNode.initializeModel`
-            // reads that program's ATTRIBUTES to decide which vertex streams to pack into the mesh, and
-            // that is real backend-independent work — without it the model has no vertex buffer at all
-            // and stops casting shadows too, which is further from the WebGL2 picture, not closer.
-            //
-            // So alias a built-in program that has build-time reflection. Custom materials are compiled
-            // against `vertexSource(mode)`, which IS pbr.vs / screen.vs, so the attribute set is not an
-            // approximation — it is the same one. Only `.attributes` is ever read: nothing binds this,
-            // because every draw path checks `customShaderReady` first.
+            // The key stays OUT of `registered`, so the draw paths skip it — but `getShader` must still
+            // answer, because `ModelNode.initializeModel` reads its ATTRIBUTES to pack the mesh.
+            // The stand-in's vertex source IS this material's, so the attribute set is exact.
             const standIn = standInFor(mat.renderMode);
             if (standIn) ShaderManager.Instance.addShader(key, standIn);
             return false;
@@ -1042,25 +831,9 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
 }
 
 /**
- * Retype the depth textures in naga's output, and fix up the reads.
- *
- * The mirror image of `fixPlainDepthSamplers` in `tools/wgslTranslate.mjs`, which repairs the GENERATED
- * GLSL for shaders authored in WGSL. This repairs generated WGSL for shaders authored in GLSL, and it
- * exists for the same reason: GLSL has one `sampler2D` whatever the texture's format, and WGSL has two
- * incompatible types. naga translates `uniform sampler2D u_depth` to `texture_2d<f32>` because that is
- * all the GLSL said — and WebGPU then rejects the bind group, because the engine binds the scene depth
- * buffer there:
- *
- *     None of the supported sample types (UnfilterableFloat|Depth) of [Texture] match the expected
- *     sample types (Float). While validating entries[2] as a Sampled Texture.
- *
- * A rejected bind group invalidates the whole command buffer, so the pass does not even clear.
- *
- * Two edits, and the second is why this is a wrap rather than a rename. `textureSample` on a
- * `texture_depth_2d` returns a bare `f32`, but naga generated code that swizzles the `vec4` a float
- * texture would have given (`.x`, from the user's `texture(u_depth, uv).r`). Wrapping restores the
- * vec4 — as `(d, 0, 0, 1)`, which is exactly what an ES 3.0 driver hands back for a depth texture, so
- * a material reading `.g` or `.a` sees the same values it saw on WebGL2.
+ * Retype naga's depth textures and fix up the reads: GLSL has one `sampler2D` whatever the format, so
+ * naga emits `texture_2d<f32>` and WebGPU rejects the bind group. A WRAP, not a rename — `textureSample`
+ * on a depth texture returns a bare `f32`, restored to `(d, 0, 0, 1)` as an ES driver would give it.
  */
 function retypeDepthTextures(wgsl: string, names: readonly string[]): string {
     let out = wgsl;
@@ -1089,30 +862,16 @@ function retypeDepthTextures(wgsl: string, names: readonly string[]): string {
     return out;
 }
 
-/**
- * The build-time-shaped reflection WebGPU needs, derived at runtime.
- *
- * Three pieces, from three different places, and none of them guessed:
- *
- *   * **the WGSL** — naga, translating the material's VULKAN-dialect GLSL. Editor and harness install
- *     the translator; a published game gets its WGSL baked at publish time instead.
- *   * **`vertexInputs`** — copied verbatim off the built-in program whose vertex source this material
- *     is literally compiled against, so it is the same list rather than a matching one.
- *   * **`uniformBlocks`** — reflected out of the WGSL naga just produced, by the same
- *     `tools/wgslLayout.mjs` that lays out every built-in program at build time. See `wgslReflect.ts`.
- *
- * Returns `{}` on WebGL2 (which needs none of it) and when there is no translator, which is the honest
- * answer: without WGSL there is no WebGPU program, and saying so beats fabricating a layout.
- */
+// The build-time-shaped reflection WebGPU needs, derived at runtime: WGSL from naga, `vertexInputs`
+// copied off the built-in program this material's vertex source IS, and `uniformBlocks` reflected out
+// of that WGSL. Returns `{}` on WebGL2 and wherever no translator is installed.
 function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
         vertexInputs?: readonly { name: string; location: number; type: string }[];
         uniformBlocks?: readonly unknown[] } {
     if (device.backend === 'webgl2' || !translator) return {};
 
-    // The engine program whose VERTEX source this material is compiled against — screen.vs's WGSL twin
-    // for a screen material, pbr.vs's for a lit one. Named per mode rather than assumed: pairing a lit
-    // fragment stage with the fullscreen vertex stage would draw the mesh as a screen quad rather than
-    // fail, which is the kind of wrong that looks like a shading bug for a week.
+    // The engine program whose VERTEX source this material is compiled against. Named per mode:
+    // pairing a lit fragment stage with the fullscreen vertex stage draws the mesh as a screen quad.
     const base = mat.renderMode === 'screen' ? ScreenProgram
                : mat.renderMode === 'deferred' ? GeometryPBRProgram : PBRProgram;
 
@@ -1147,11 +906,8 @@ export function customShaderModules(mat: CustomMaterial):
 }
 
 /**
- * A built-in program compiled from the same vertex source a custom material of `mode` would use.
- *
- * Named in preference order because which of them exists depends on the render pipeline the renderer
- * booted with. Returns null before the engine's own programs are registered, which is harmless — the
- * material is re-checked next frame.
+ * A built-in program sharing `mode`'s vertex source, named in preference order since which exist
+ * depends on the pipeline. Null before the engine's own programs register; the caller retries.
  */
 function standInFor(mode: CustomRenderMode): ShaderProgram | null {
     const names = mode === 'screen' ? ['screen'] : ['pbrGeometry', 'pbr'];
@@ -1163,34 +919,17 @@ function standInFor(mode: CustomRenderMode): ShaderProgram | null {
 }
 
 /**
- * Whether a program is actually registered under this material's key, i.e. whether it can be drawn.
- *
- * True for a working material AND for one showing magenta — both have a program. False only where the
- * device could build neither, which is the case the draw paths have to skip rather than bind.
+ * Whether a program is registered under this material's key, so it can be drawn. True for a working
+ * material and for one showing magenta; false only where the device could build neither.
  */
 export function customShaderReady(mat: CustomMaterial): boolean {
     return registered.has(mat.type as string);
 }
 
-/**
- * Compile-check user source WITHOUT registering — used by the editor to surface inline compile errors.
- *
- * The program exists only to answer "does this compile?" and is dead the moment it has, so it is disposed
- * either way. It used to be dropped on the floor instead: the editor debounces this on every pause in
- * typing, so tuning one shader leaked a GL program (plus its two shader objects) every few keystrokes,
- * for the life of the tab. The `finally` matters as much as the dispose — a failing compile is the COMMON
- * case while typing, and the constructor has already allocated both shader objects by the time it throws.
- */
 // --- WGSL translation, injected -----------------------------------------------------------------
-//
-// Custom materials are GLSL stored inside saved projects, so checking one against WebGPU means running
-// naga *in the app*, not at build time like the engine's own shaders. The translator is therefore
-// injected rather than imported: the engine holds a slot, the editor fills it with the vendored naga
-// wasm, and a published game fills nothing.
-//
-// That indirection is the entire reason players do not download 1.3 MB of shader compiler. If this
-// module imported naga directly, webpack would follow the import into `cleo.js` and every player would
-// carry it to run code that only ever executes behind an editor button.
+// Custom materials are GLSL inside saved projects, so a WebGPU check means running naga IN THE APP.
+// The translator is injected, never imported: importing it would pull 1.3 MB of shader compiler into
+// `cleo.js` for every player, to run code that only executes behind an editor button.
 
 /** Translates one GLSL fragment stage to WGSL, or throws with a diagnostic. */
 export type WgslTranslator = (glsl: string) => string;
@@ -1204,19 +943,9 @@ export function setWgslTranslator(next: WgslTranslator | null): void { translato
 export function hasWgslTranslator(): boolean { return translator !== null; }
 
 /**
- * Compile a custom material's source, and translate it to WGSL when a translator is installed.
- *
- * The two halves are reported separately and deliberately so:
- *
- *   - `ok`/`error` is the GL compile. It is authoritative — it decides whether the material renders at
- *     all today, and its diagnostics come from the real driver with real line numbers.
- *   - `wgsl`/`wgslError` is the WebGPU verdict. A failure here means the material works now and will
- *     not work on a WebGPU backend, which is a warning, not an error. Collapsing the two would either
- *     block a working material or hide a real portability problem.
- *
- * `wgslError` is also set, without any translation being attempted, for the render modes whose prelude
- * is not yet expressible in Vulkan GLSL — the message then explains the engine's limitation rather than
- * implying the user's source is at fault.
+ * Compile a custom material's source, and translate it to WGSL when a translator is installed. The two
+ * verdicts stay separate: `ok`/`error` is the authoritative GL compile, while `wgslError` is a
+ * portability WARNING about a material that renders correctly today.
  */
 export function tryCompileCustom(
     renderMode: CustomRenderMode,

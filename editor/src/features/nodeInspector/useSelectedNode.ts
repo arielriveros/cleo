@@ -3,8 +3,7 @@ import { Node } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { isWithinTemplateInstance } from '../../utils/templates'
 
-// Shared by the Properties, Scripts and Physics panels: each is its own dock panel now, so each
-// resolves the selection independently instead of being handed a node by a common parent.
+// Resolves the current selection independently for each of the Properties, Scripts and Physics panels.
 export function useSelectedNode(): { node: Node | null, readOnly: boolean } {
   const { editorScene, selectedNode, editorMode } = useCleoEngine()
   const [node, setNode] = useState<Node | null>(null)
@@ -13,8 +12,7 @@ export function useSelectedNode(): { node: Node | null, readOnly: boolean } {
     setNode(editorScene && selectedNode ? editorScene.getNodeById(selectedNode) ?? null : null)
   }, [editorScene, selectedNode])
 
-  // A placed template instance (and its children) is read-only in Scene mode, except its Transform.
-  // Template mode itself stays fully editable (that's where the template is authored).
+  // A placed template instance and its children are read-only in Scene mode, except their Transform.
   const readOnly = editorMode === 'scene' && !!node && isWithinTemplateInstance(node)
 
   return { node, readOnly }

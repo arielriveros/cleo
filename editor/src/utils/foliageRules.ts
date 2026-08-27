@@ -84,19 +84,17 @@ function bakeModel(node: ModelNode): any {
 }
 
 /**
- * Build (or refresh) a terrain-material foliage rule from a model library asset: LOD0 + every extra LOD
- * level flattened, the asset's cull distance, and `modelId` as the sync key so saving the model asset
- * updates the rule. Scatter params and the billboard impostor are authored on the RULE, so an existing
- * rule's values are preserved on refresh.
- *
- * `kind: 'mesh'` below is NOT the old asset-type name — it is the rule's rendering mode (real geometry,
- * as opposed to a camera-facing 'billboard' impostor) and is deliberately left alone.
+ * Build (or refresh) a terrain-material foliage rule from a model library asset: LOD0 plus every extra LOD
+ * level flattened, the asset's cull distance, and `modelId` as the sync key. Scatter params and the
+ * billboard impostor are authored on the RULE, so an existing rule's values are preserved on refresh.
+ * `kind: 'mesh'` below is the rule's RENDERING MODE (real geometry vs a camera-facing 'billboard'), not an
+ * asset type.
  */
 export function buildFoliageRuleFromModelAsset(asset: ModelAsset, existing?: TerrainFoliageRule, library?: ModelAsset[]): TerrainFoliageRule {
   const models = flattenLevel(asset.nodeJson)
   if (models.length === 0) throw new Error(`Model "${asset.name}" has no static geometry`)
   // LOD levels are references into the model library, so the rule flattens the referenced asset's subtree.
-  // Levels whose model is gone resolve to null and are dropped by resolvedLods before we get here.
+  // A level whose model is gone is dropped by resolvedLods before this point.
   const lods = resolvedLods(asset, library)
     .map(l => ({ models: flattenLevel(l.nodeJson), distance: l.distance }))
     .filter(l => l.models.length > 0)
@@ -109,8 +107,8 @@ export function buildFoliageRuleFromModelAsset(asset: ModelAsset, existing?: Ter
     lods: lods.length ? lods : undefined,
     cullDistance: asset.cullDistance ?? 0,
     billboard: existing?.billboard ?? null,
-    // `existing` is a live (already-migrated) rule, so its density passes through untouched — but the
-    // unit marker must be stamped or the rule this returns would be re-divided on its next load.
+    // `existing` is already migrated, so its density passes through untouched, but the unit marker must
+    // still be stamped or the returned rule is re-divided on its next load.
     density: existing?.density ?? DEFAULT_FOLIAGE_DENSITY.mesh,
     densityUnit: FOLIAGE_DENSITY_UNIT,
     minScale: existing?.minScale ?? 0.8,

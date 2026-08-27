@@ -12,6 +12,14 @@
 
 struct PresentUniforms {
     u_exposure: f32,
+    /**
+     * 1 = untouched. Below 1 drains colour toward luma.
+     *
+     * The artist trim, multiplied by the sky light's cloud response — an overcast sky really does
+     * desaturate a scene, and most of that comes from the lighting itself (a white key and a flat fill),
+     * but not all of it. This covers the rest without turning the whole feature into a filter.
+     */
+    u_saturation: f32,
     // Offscreen thumbnail capture: make the background transparent so asset previews composite over
     // the editor's UI. Coverage comes from the scene DEPTH (1.0 == nothing was drawn) rather than the
     // scene colour's alpha, which carries the bloom mask and would erase dark, non-blooming assets.
@@ -35,5 +43,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         alpha = select(0.0, 1.0, coverage < 1.0);
     }
 
-    return vec4<f32>(tonemap(hdr, u_present.u_exposure), alpha);
+    return vec4<f32>(tonemapGraded(hdr, u_present.u_exposure, u_present.u_saturation), alpha);
 }

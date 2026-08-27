@@ -57,8 +57,7 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
 
   useEffect(() => { setState(readNode(props.node)) }, [props.node])
 
-  // Most keys map straight onto the node; the few that do not (the yaw-limit checkbox, which stands
-  // in for a pair of +/-Infinity bounds) are translated here.
+  // Keys map straight onto the node except the yaw-limit checkbox, which stands in for +/-Infinity bounds.
   const apply = (patch: Partial<RigState>) => {
     const next = { ...state, ...patch }
     for (const key in patch) {
@@ -73,7 +72,7 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
     eventEmitter.emit('SCENE_CHANGED')
   }
 
-  // Plain render helpers (invoked as functions so inputs keep identity across re-renders).
+  // Invoked as functions, not components, so the inputs keep identity across re-renders.
   const slider = (label: string, k: keyof RigState, min: number, max: number, step: number, fixed = 2) => (
     <Slider label={label} min={min} max={max} step={step} value={state[k] as number}
       labelClassName='w-[104px]' readout={(v) => v.toFixed(fixed)}

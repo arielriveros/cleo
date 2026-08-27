@@ -1,9 +1,8 @@
 import type { HullQuality } from 'cleo';
 
 /**
- * Convex-hull definition presets; the face budgets come from `HULL_BUDGETS` in the engine. Low is
- * exactly the mesh's bounding box; each level up carves volume off it but always still encloses
- * every mesh vertex — a lower definition is a looser wrapper, never a tighter one.
+ * Convex-hull definition presets; the face budgets come from `HULL_BUDGETS` in the engine. Low is exactly
+ * the mesh's bounding box; every level still encloses each mesh vertex, so lower is looser, never tighter.
  */
 export const HULL_QUALITIES: { value: HullQuality; label: string; title: string }[] = [
   { value: 'low', label: 'Low', title: 'Bounding box (6 faces) — cheapest to simulate' },

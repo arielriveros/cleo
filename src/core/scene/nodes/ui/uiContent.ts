@@ -72,9 +72,8 @@ export class UITextNode extends UINode {
 /**
  * A textured quad.
  *
- * `textureId` references the engine's texture store, deliberately NOT a raw URL or data URI the way the
- * legacy overlay's `src` did — that is what makes a UI image participate in asset hashing, resync and
- * (critically) the publish pass that packs referenced textures into the shipped bundle.
+ * `textureId` references the engine's texture store, never a raw URL or data URI: that is what makes a
+ * UI image participate in asset hashing, resync and the publish pass that packs referenced textures.
  */
 export class UIImageNode extends UINode {
     private _textureId: string | null = null;
@@ -107,11 +106,3 @@ export class UIImageNode extends UINode {
         UINode._parseUI(new UIImageNode(json.name, json.id), parent, json);
     }
 }
-
-/**
- * A clickable button.
- *
- * `onPress` is a real script handler (it is in `SCRIPT_HANDLERS`), so a class script overriding it gets
- * the same throw-guard and async-rejection handling every other handler does. The DOM layer calls
- * {@link press} rather than the handler directly, which is what keeps `disabled` enforced in one place.
- */

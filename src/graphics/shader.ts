@@ -22,11 +22,8 @@ export class Shader implements ShaderProgram {
     private _uniforms: {
         [name: string]: {info: UniformInfo, value: any}
     } = {};
-    /**
-     * std140 blocks, for programs generated from WGSL. Null for every hand-written GLSL program, which
-     * is all of them but two — WGSL has no loose uniforms, so naga wraps them in a block. See
-     * systems/uniformBlocks.ts.
-     */
+    // std140 blocks, for programs generated from WGSL. Null for hand-written GLSL, which has loose
+    // uniforms instead. See systems/uniformBlocks.ts.
     private _blocks: UniformBlockSet | null = null;
 
     constructor() {
@@ -58,10 +55,7 @@ export class Shader implements ShaderProgram {
         if (!gl.getProgramParameter(this._shaderProgram, gl.LINK_STATUS))
             throw new Error(gl.getProgramInfoLog(this._shaderProgram) || 'Unknown error creating program');
 
-        // The linked program keeps its own reference to both shader objects, so dropping ours here frees
-        // them as soon as the program is deleted (or immediately, for a program that never links). Nothing
-        // reads these fields after this point — they exist only to carry source between the constructor
-        // and the link above.
+        // The linked program holds its own reference, so dropping ours frees these with the program.
         gl.deleteShader(this._vertexShader);
         gl.deleteShader(this._fragmentShader);
         this._vertexShader = null!;
@@ -69,26 +63,21 @@ export class Shader implements ShaderProgram {
 
         this.storeAttributes();
         this.storeUniforms();
-        // After storeUniforms, which skips block members: getUniformLocation returns null for them, so
-        // they are invisible to the loose-uniform path and have to be reflected separately.
+        // Must follow storeUniforms: `getUniformLocation` returns null for block members, so they are
+        // invisible to the loose-uniform path and need reflecting separately.
         this._blocks = UniformBlockSet.reflect(this._shaderProgram);
 
         return this;
     }
 
     /**
-     * Releases this shader's GL objects. Idempotent, and safe on a shader whose `create()` threw — the
-     * constructor allocates the two shader objects before any source is compiled, so a shader that failed
-     * to compile still owns GL memory.
-     *
-     * There is no finalizer for GL objects: dropping the last JS reference to a Shader frees nothing, the
-     * program simply leaks for the lifetime of the context. Anything that compiles a program it does not
-     * intend to keep must call this.
+     * Release this shader's GL objects. Idempotent, and safe on a shader whose `create()` threw. Required:
+     * dropping the last JS reference frees nothing, and the program leaks for the context's lifetime.
      */
     public dispose(): void {
         if (this._shaderProgram) {
-            // GLState dedupes useProgram by identity, so if this program is the cached one the next
-            // useProgram() for it would be SKIPPED and a deleted program left bound. Invalidate first.
+            // GLState dedupes useProgram by identity, so a deleted program left cached would make the
+            // next useProgram a no-op. Invalidate first.
             if (GLState.currentProgram === this._shaderProgram) GLState.reset();
             gl.deleteProgram(this._shaderProgram);
             this._shaderProgram = null!;
@@ -107,17 +96,16 @@ export class Shader implements ShaderProgram {
         const switching = GLState.currentProgram !== this._shaderProgram;
         GLState.useProgram(this._shaderProgram);
 
-        // Indexed UNIFORM_BUFFER binding points are global, so another program's blocks are sitting in
-        // ours while it is current. Rebind on the switch — and only on the switch, since nothing can
-        // have disturbed them while this program stayed bound.
+        // Indexed UNIFORM_BUFFER binding points are global, so another program's blocks displace ours.
+        // Only on the switch: nothing can disturb them while this program stays bound.
         if (switching && this._blocks) this._blocks.bind();
     }
 
     public setUniform(name: string, value: any) {
         const uniform = this._uniforms[name];
         if (!uniform) {
-            // Not a loose uniform. It may still be a std140 block member, which has no location and so
-            // never reached `_uniforms`. Writing goes to a CPU buffer and is uploaded by `flush()`.
+            // Not a loose uniform, but possibly a block member: those have no location, and their
+            // writes go to a CPU buffer uploaded by `flush()`.
             this._blocks?.set(name, value);
             return;
         }
@@ -125,12 +113,7 @@ export class Shader implements ShaderProgram {
         this._setUniform(uniform.info.location, uniform.info.type, value, uniform.info.size);
     }
 
-    /**
-     * Upload any block writes made since the last flush.
-     *
-     * Called immediately before a draw rather than on every `setUniform`, so a pass that sets a dozen
-     * members costs one buffer upload instead of a dozen. A no-op for the loose-uniform programs.
-     */
+    /** Upload any block writes made since the last flush. Call immediately before a draw. */
     public flushUniformBlocks(): void { this._blocks?.flush(); }
 
     /** The driver's reported block layout, for verification. Empty for a loose-uniform program. */
@@ -139,14 +122,8 @@ export class Shader implements ShaderProgram {
     /** Whether this program carries std140 blocks — i.e. whether it was generated from WGSL. */
     public get hasUniformBlocks(): boolean { return this._blocks !== null; }
 
-    /**
-     * `size` is the ARRAY length GL reported for this uniform, 1 for a scalar.
-     *
-     * It matters only for the types whose single-element form is not already a `*v` call: `uniform1f`
-     * sets one float, so a `float[4]` set through it would silently write only the first element and
-     * leave the rest at whatever they were. The vector and matrix cases below already take a typed
-     * array of any length, so an array of those needs no special handling.
-     */
+    // `size` is the ARRAY length GL reported, 1 for a scalar. It matters only for types whose
+    // single-element form is not already a `*v` call — a `float[4]` through `uniform1f` writes one.
     private _setUniform(location: WebGLUniformLocation, type: string, value: any, size: number = 1) {
         switch (type) {
             case 'float':
@@ -335,9 +312,6 @@ export class Shader implements ShaderProgram {
                 case 'usampler2DArray':
                     defaultValue = 0; // texture unit 0
                     break;
-                // These are all already handled by _setUniform and named by getTypeName; only this
-                // switch was missing them, so declaring e.g. an ivec2 uniform threw at link time
-                // even though setting one would have worked fine.
                 case 'ivec2':
                     defaultValue = [0, 0];
                     break;
@@ -377,17 +351,9 @@ export class Shader implements ShaderProgram {
             };
             this._uniforms[name] = entry;
 
-            // GL reports an array uniform as `u_cascadeMatrices[0]`, and that is the only name
-            // `getUniformLocation` accepts — so filing it under just that name meant
-            // `setUniform('u_cascadeMatrices', …)` found nothing and silently did nothing. Callers
-            // worked around it by caching raw locations themselves, which then broke the moment a
-            // shader moved its arrays into a std140 block: `getUniformLocation` returns null for a
-            // block member, indistinguishable from an unused uniform. That is how SSAO came out
-            // uniformly unoccluded after ssao.fs became ssao.wgsl.
-            //
-            // Aliasing the stripped name onto the SAME entry makes the bare name work under either
-            // layout — loose array here, block member via UniformBlockSet, which registers the
-            // stripped name too.
+            // GL reports an array uniform as `u_name[0]`, and that is the only name
+            // `getUniformLocation` accepts. Alias the stripped name onto the same entry so the bare
+            // name works under either layout — loose array here, block member via UniformBlockSet.
             const stripped = name.endsWith('[0]') ? name.slice(0, -3) : null;
             if (stripped && !(stripped in this._uniforms)) this._uniforms[stripped] = entry;
         }
@@ -413,8 +379,7 @@ export class Shader implements ShaderProgram {
             case gl.SAMPLER_2D: return 'sampler2D';
             case gl.SAMPLER_CUBE: return 'samplerCube';
             case gl.SAMPLER_3D: return 'sampler3D';
-            // WebGL2 sampler types. All are set the same way (a texture unit index via uniform1i);
-            // they are listed individually because reflection matches on the exact GL enum.
+            // WebGL2 sampler types, listed individually because reflection matches the exact GL enum.
             case gl.SAMPLER_2D_ARRAY: return 'sampler2DArray';
             case gl.SAMPLER_2D_ARRAY_SHADOW: return 'sampler2DArrayShadow';
             case gl.SAMPLER_2D_SHADOW: return 'sampler2DShadow';

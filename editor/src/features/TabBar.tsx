@@ -21,9 +21,8 @@ function tabAssetKind(kind: TabKind): AssetKind {
 }
 
 // Browser-style tab strip below the top bar: the scene tab (titled with the open scene asset) plus one tab
-// per open asset. Tabs are reorderable by drag (HTML5 DnD, same idiom as the scene tree) and asset tabs are
-// closable; the scene tab is unclosable but movable — closing it would leave nothing to show, since the
-// engine always has a scene loaded. Every tab shows a dot when it has unsaved edits.
+// per open asset. Tabs are reorderable by drag (HTML5 DnD) and asset tabs are closable; the scene tab is
+// unclosable but movable. Every tab shows a dot when it has unsaved edits.
 export default function TabBar() {
   const { tabs, activeTabId, dirtyTabs, setActiveTab, closeTab, reorderTabs } = useDocument();
   const { isPlayMode } = usePlayback();

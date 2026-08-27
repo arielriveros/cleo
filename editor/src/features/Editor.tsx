@@ -33,10 +33,8 @@ function useSaveShortcuts() {
 }
 
 /**
- * Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z (or Ctrl+Y) redoes.
- *
- * The exact INVERSE of useSaveShortcuts' binding: that one is capture-phase precisely to steal Ctrl+S from
- * Monaco, whereas undo must leave text fields and the code editor alone so typing keeps its own history.
+ * Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z (or Ctrl+Y) redoes. NOT capture-phase, unlike useSaveShortcuts:
+ * undo must leave text fields and the code editor alone so typing keeps its own history.
  */
 function useUndoShortcuts() {
   const { undo, redo } = useHistory();
@@ -59,9 +57,8 @@ function useUndoShortcuts() {
 }
 
 /**
- * The shell's contents. Split out from `Editor` because it sits INSIDE HistoryProvider — the menu bar's
- * Undo/Redo buttons and the shortcuts below both read that session, and a component cannot consume a
- * context it provides itself.
+ * The shell's contents. Split out from `Editor` because it sits INSIDE HistoryProvider, and a component
+ * cannot consume a context it provides itself.
  */
 function Shell() {
   useSaveShortcuts();

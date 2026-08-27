@@ -9,8 +9,7 @@ import { useEventBus } from '../../EventBusContext';
 import { Field, Select, Hint } from '../../../components/ui';
 import { SpriteIcon } from '../sectionIcons';
 
-// A static sprite is a tileset plus one tile. Picking that tile is the whole job, so the atlas is shown
-// here rather than behind a material tab — TileGrid is the same picker the tilemap palette uses, with
+// A static sprite is a tileset plus one tile. TileGrid is the same picker the tilemap palette uses, with
 // rectangle selection turned off.
 
 export default function SpriteEditor(props: {node: SpriteNode}) {

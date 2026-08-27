@@ -14,8 +14,8 @@ const BASE_COLOR_TEXTURE = 12;
 // Base colour: legacy exporters write DIFFUSE, PBR ones (Stingray / Maya Standard Surface / 3ds Max
 // Physical, and glTF via assimp) write BASE_COLOR — often only BASE_COLOR.
 const BASE_SLOT = [DIFFUSE_TEXTURE, BASE_COLOR_TEXTURE];
-// Image formats a browser can turn into a texture. DDS/TGA/PSD/EXR do appear in FBX files and have to be
-// reported rather than handed to an <img>, which would just fail silently later.
+// Image formats a browser can decode. DDS/TGA/PSD/EXR appear in FBX files and must be REPORTED, not
+// handed to an `<img>` that fails silently later.
 const DECODABLE_HINTS = ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp'];
 // Normals: NORMALS is the correct type and what FBX/glTF use. HEIGHT stays as a fallback because assimp
 // maps OBJ's `bump` directive onto it, and that is the case this code was originally written against.
@@ -23,13 +23,8 @@ const NORMAL_SLOT = [NORMALS_TEXTURE, HEIGHT_TEXTURE];
 
 const assimpjs = require('./assimpjs');
 
-/**
- * The emscripten module, instantiated once and reused.
- *
- * Each `assimpjs()` call builds a fresh WASM instance, and the three entry points below used to do
- * that independently — so importing a non-glTF file *with* animations paid full WASM startup twice
- * (once to load the meshes, once for the FBX→glTF2 conversion that reads the animations).
- */
+// The emscripten module, instantiated once and reused: each `assimpjs()` call builds a fresh WASM
+// instance, and an import can need it twice.
 let assimpModule: Promise<any> | null = null;
 function getAssimp(): Promise<any> {
     if (!assimpModule) assimpModule = assimpjs() as Promise<any>;
@@ -123,13 +118,9 @@ async function loadAssimpModelFromFiles(files: File[]): Promise<{ meshes: any[],
     }
 }
 
-/**
- * Convert any assimp-readable model file (fbx/glb/obj/…) to glTF 2.0 in-memory and return the output
- * files (the .gltf JSON + its .bin buffer [+ any textures]) as `File`s, so they can be fed straight to
- * the engine's GLTFLoader. Used by the animation-import path to extract skeletal animation (which the
- * assjson mesh path drops). The result files reference each other by relative name, which the
- * GLTFLoader resolves — so we preserve the assimp output paths as the File names.
- */
+// Convert any assimp-readable model file to glTF 2.0 in memory, for the animation-import path — the
+// assjson mesh path drops skeletal animation. Output File NAMES keep assimp's paths, which the
+// GLTFLoader resolves the inter-file references against.
 async function convertToGltf2FromFiles(files: File[]): Promise<File[]> {
     const ajs = await getAssimp();
     let fileList = new ajs.FileList();
@@ -241,16 +232,9 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
             return undefined;
         }
 
-        /**
-         * The image bytes behind a `*N` reference — the form assimp gives a texture embedded in the model
-         * file itself (the default for a self-contained FBX or a GLB).
-         *
-         * The field names matter and are easy to get wrong: this reads the **assjson exporter's** output
-         * (`formathint` / `data` / `width` / `height`), NOT the C++ `aiTexture` struct's members
-         * (`achFormatHint` / `pcData`). Reading the struct names silently yields `undefined` for every
-         * texture ever, so an embedded-texture FBX imports with correct geometry and no maps at all —
-         * and nothing downstream can tell that apart from a model that genuinely has no textures.
-         */
+        // The image bytes behind a `*N` reference. Reads the assjson EXPORTER's field names
+        // (`formathint`/`data`/`width`/`height`), never the C++ `aiTexture` struct's — those silently
+        // yield undefined, and the model imports with no maps at all.
         const getEmbeddedTextureData = (texturePath: string | undefined) => {
             if (!texturePath || !texturePath.startsWith('*') || !textures) return undefined;
 
@@ -258,9 +242,8 @@ async function parseMaterial(mat: any, textures: any[] = []): Promise<{name: str
             const record = index >= 0 && index < textures.length ? textures[index] : undefined;
             if (!record) return undefined;
 
-            // `height > 0` means raw uncompressed ARGB pixels rather than an encoded image, so there is no
-            // mime type that would make a data: URL out of it. Rare (assimp keeps the original bytes when
-            // it can) and not worth an encoder here.
+            // `height > 0` means raw ARGB pixels rather than an encoded image, so there is no mime
+            // type to build a data: URL from.
             if (record.height > 0) {
                 Logger.print('warn', [`Embedded texture ${texturePath} is raw pixel data, which is not supported`], 'Import');
                 return undefined;
@@ -338,23 +321,16 @@ export interface ParsedMesh {
 }
 
 /**
- * Everything a model file yields that does NOT require a GL context: geometry as typed arrays plus
- * material descriptors ({@link OutputMaterial} — colours, plus texture *paths* and base64 strings,
- * never decoded pixels).
+ * Everything a model file yields that needs no GL context: geometry as typed arrays, plus material
+ * descriptors carrying texture paths and base64 strings, never decoded pixels.
  */
 export interface AssimpParseResult {
     meshes: ParsedMesh[];
     materials: { name: string; material: OutputMaterial }[];
 }
 
-/**
- * Parse model files into plain data. **Pure: no DOM, no WebGL, no engine imports** — this module only
- * pulls in assimpjs, which is a SINGLE_FILE emscripten build that already supports worker
- * environments. That is what lets the editor run this inside a Web Worker (and fall back to running
- * it inline, unchanged, when a worker is unavailable).
- *
- * Pair with `Loader.assembleAssimpModels`, which does the GL half on the main thread.
- */
+// Parse model files into plain data. PURE — no DOM, no WebGL, no engine imports — which is what lets
+// the editor run this in a Web Worker. Pair with `Loader.assembleAssimpModels` for the GL half.
 async function parseAssimpFiles(files: File[]): Promise<AssimpParseResult> {
     const res = await loadAssimpModelFromFiles(files);
 
@@ -368,9 +344,7 @@ async function parseAssimpFiles(files: File[]): Promise<AssimpParseResult> {
         const uvs: number[] = m.texturecoords?.[0];
         if (!uvs) throw new Error(`Mesh ${name} has no UVs`);
 
-        // assimp hands these over already flat, so this is a straight typed-array wrap. The loader
-        // used to explode each into an array of 3-element arrays here, only for Geometry to flatten
-        // it again on upload.
+        // assimp hands these over already flat, so this is a straight typed-array wrap.
         meshes.push({
             name,
             positions: new Float32Array(m.vertices),
@@ -386,12 +360,8 @@ async function parseAssimpFiles(files: File[]): Promise<AssimpParseResult> {
     return { meshes, materials };
 }
 
-/**
- * The buffers in `result` that can be transferred rather than copied across a worker boundary.
- *
- * Transferring detaches them in the sender, so only pass these when the sending side is done with the
- * result — which is the case for a worker replying with its final answer.
- */
+// The buffers in `result` that can be transferred rather than copied across a worker boundary.
+// Transferring DETACHES them in the sender, so only use these when it is done with the result.
 function parseResultTransferables(result: AssimpParseResult): ArrayBuffer[] {
     const out: ArrayBuffer[] = [];
     for (const m of result.meshes)

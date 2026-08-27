@@ -2,26 +2,24 @@ import { type VfsIndex, dirOf, stemOf } from './vfs'
 import { BASE_CLASS, type ScriptAsset, type ScriptBaseType } from './scripts'
 
 // Pure mapping between the editor's script library (VfsIndex + ScriptAsset[]) and a real folder on disk
-// that an external IDE can open — the "script workspace". Deliberately DOM-free, engine-free and
-// Electron-free so the whole sync contract is unit-testable from the root vitest suite.
+// that an external IDE can open — the "script workspace". Must stay DOM-free, engine-free and
+// Electron-free so the sync contract is unit-testable from the root vitest suite.
 //
 // Two directions, two plans:
 //   planPush(prev, desired)      editor -> disk   (what to write/rename/delete)
 //   planPull(prev, change)       disk -> editor   (what the watcher's changeset means)
 //
-// `prev` in both is the MirrorState: the last state BOTH sides agreed on. It is what makes a rename
+// `prev` in both is the MirrorState: the last state BOTH sides agreed on, which is what makes a rename
 // recoverable — see planPull.
 
 /** Script assets are always TypeScript; a mirrored file is always `.ts`. */
 export const MIRROR_EXT = '.ts'
 
 /**
- * How many files may vanish from disk in one changeset before sync refuses to apply it.
- *
- * A script asset is shared: deleting it drops `__scriptId` (and the native field values) from every node
- * that referenced it. A `git checkout` of a branch without the scripts folder, or a folder moved in
- * Explorer, arrives as exactly that — a pile of deletions — so past this many the sync pauses and asks
- * instead of gutting the library. Renames are paired off BEFORE this is counted.
+ * How many files may vanish from disk in one changeset before sync refuses to apply it and asks instead.
+ * Deleting a script asset drops `__scriptId` and its field values from every node that referenced it,
+ * and a `git checkout` or a moved folder arrives as a pile of deletions.
+ * Renames must be paired off BEFORE this is counted.
  */
 export const BULK_DELETE_LIMIT = 3
 
@@ -43,10 +41,9 @@ export type PushPlan = {
   writes: { rel: string; source: string }[]
   next: MirrorState
   /**
-   * Whether any FILE work is needed. `next` can move without this being true -- a script created or
-   * edited on disk is already where it belongs, so only the id -> path mapping changed. Callers must
-   * still persist `next` (the manifest) in that case: it is the identity record, and losing it makes the
-   * next session read those files as brand new, mint fresh asset ids and break every `__scriptId` link.
+   * Whether any FILE work is needed. `next` can move without this being true, and the caller must still
+   * persist `next`: it is the identity record, and losing it makes the next session read those files as
+   * brand new, mint fresh asset ids and break every `__scriptId` link.
    */
   filesChanged: boolean
 }
@@ -75,11 +72,8 @@ export type PullPlan = {
 /* -------------------------------------------------------------------------- */
 
 /**
- * FNV-1a (32-bit) of the source, plus its length.
- *
- * Only ever compared against another value from this same function, so the algorithm is an internal
- * detail — the watcher hashes independently for its own snapshot and never sends hashes across.
- * Length is appended because FNV-1a alone is a 32-bit space and a script library is long-lived.
+ * FNV-1a (32-bit) of the source, plus its length. Only ever compared against another value from this same
+ * function; the watcher hashes independently and never sends hashes across.
  */
 export function hashSource(source: string): string {
   let h = 0x811c9dc5
@@ -94,17 +88,15 @@ export function hashSource(source: string): string {
 /* Path mapping                                                                */
 /* -------------------------------------------------------------------------- */
 
-// Windows refuses these outright, and the VFS accepts them: an asset renamed to `Aux` or `a:b` in the
-// explorer must still land somewhere on disk. Sanitising is one-way — the manifest, not the filename,
-// is what maps a file back to its script id, so a mangled name never loses the link.
+// Windows refuses these outright while the VFS accepts them. Sanitising is one-way; the manifest, not the
+// filename, maps a file back to its script id, so a mangled name never loses the link.
 const ILLEGAL_CHARS = /[<>:"|?*\\/\x00-\x1f]/g
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
 
 /** Make one path segment safe to write on every platform. Never returns ''. */
 export function sanitizeSegment(name: string): string {
   let out = name.replace(ILLEGAL_CHARS, '_')
-  // Windows silently strips trailing dots and spaces, which would desync the name we recorded from the
-  // name on disk and make every rescan look like a rename.
+  // Windows silently strips trailing dots and spaces, which would make every rescan look like a rename.
   out = out.replace(/[. ]+$/, '')
   if (RESERVED.test(out)) out = `_${out}`
   return out || '_'
@@ -125,7 +117,7 @@ function mirrorStemPath(vfsPath: string): string {
 export function mirrorRelOf(vfsPath: string, taken: Set<string>): string {
   const base = mirrorStemPath(vfsPath)
   let rel = `${base}${MIRROR_EXT}`
-  // Same ' (2)' convention the explorer's uniquePath uses, so a collision reads the same in both places.
+  // Same ' (2)' convention as the explorer's uniquePath.
   let n = 2
   while (taken.has(rel.toLowerCase())) rel = `${base} (${n++})${MIRROR_EXT}`
   taken.add(rel.toLowerCase())
@@ -149,8 +141,7 @@ const CLASS_TO_BASE_TYPE: Record<string, ScriptBaseType> = Object.fromEntries(
 
 /**
  * Which node type a source file's class extends, for a file that appeared on disk with no asset behind it.
- * Falls back to 'node', which attaches to anything (`baseTypeMatchesNode`), so an unrecognised base is
- * never a hard failure.
+ * Falls back to 'node', which attaches to anything, so an unrecognised base is never a hard failure.
  */
 export function inferBaseType(source: string): ScriptBaseType {
   const m = /\bclass\s+[A-Za-z_$][\w$]*\s+extends\s+([A-Za-z_$][\w$]*)/.exec(source)
@@ -163,8 +154,7 @@ export function inferBaseType(source: string): ScriptBaseType {
 
 /**
  * Where every script in the library should live on disk, derived from the VFS folder layout.
- * Entries whose asset is gone are skipped (the reconciler prunes them separately); sorted by VFS path so
- * collision disambiguation is deterministic across runs.
+ * Entries whose asset is gone are skipped; sorted by VFS path so collision disambiguation is deterministic.
  */
 export function buildDesiredMirror(vfs: VfsIndex, scripts: ScriptAsset[]): DesiredFile[] {
   const byId = new Map(scripts.map(s => [s.id, s]))
@@ -184,9 +174,7 @@ export function buildDesiredMirror(vfs: VfsIndex, scripts: ScriptAsset[]): Desir
 
 /**
  * What the disk needs so it matches `desired`, given the last agreed state.
- *
- * A rename whose target is still occupied by a file this batch does not delete first (a swap, or a
- * collision with an unrelated file) degrades to delete+write rather than an fs.rename that would clobber.
+ * A rename onto a target this batch does not delete first degrades to delete+write, never an fs.rename.
  */
 export function planPush(prev: MirrorState, desired: DesiredFile[]): PushPlan {
   const plan: PushPlan = { deletes: [], renames: [], writes: [], next: new Map(), filesChanged: false }
@@ -236,13 +224,11 @@ export function planPush(prev: MirrorState, desired: DesiredFile[]): PushPlan {
 /**
  * What a watcher changeset means for the library.
  *
- * The hard part is renames: an IDE renaming a file produces a removal and a creation, and treating that
- * pair as delete+create would mint a new asset id and break `__scriptId` on every node using the script.
- * Two rules recover it, strongest first:
+ * An IDE rename arrives as a removal plus a creation; treating that pair as delete+create would mint a new
+ * asset id and break `__scriptId`. Two rules recover it, strongest first:
  *   1. a removal whose last-known content hash equals a creation's content — a pure rename;
  *   2. exactly one unmatched removal and one unmatched creation — a rename that was also edited.
- * Whatever is still unmatched afterwards is a genuine delete or a genuine new script, and only THEN is
- * the bulk-delete guard counted, so renaming a whole folder never trips it.
+ * The bulk-delete guard is counted only on what is still unmatched afterwards.
  */
 export function planPull(prev: MirrorState, change: ExternalChange): PullPlan {
   const plan: PullPlan = { renames: [], updates: [], creates: [], deletes: [], paused: false }

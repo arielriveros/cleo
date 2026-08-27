@@ -1,5 +1,4 @@
-// Small inline SVG glyphs (stroke = currentColor, 15px) used as Collapsable section icons across the
-// node inspector. No binary assets; they inherit the header's text color.
+// Inline SVG glyphs used as Collapsable section icons; stroke is currentColor at 15px.
 import React from 'react';
 
 const S = (props: React.SVGProps<SVGSVGElement>) => (
@@ -25,5 +24,4 @@ export const ProbeIcon = () => (<S><circle cx='12' cy='12' r='4' /><circle cx='1
 export const SkyboxIcon = () => (<S><rect x='4' y='4' width='16' height='16' rx='1.5' /><path d='M4 9h16M9 4v16' /></S>);
 export const AnimationIcon = () => (<S><path d='M5 12a7 7 0 1 1 2 5' /><path d='M5 21v-4h4' /></S>);
 export const ScriptIcon = () => (<S><path d='M8 6 3 12l5 6' /><path d='M16 6l5 6-5 6' /></S>);
-// A camera on the end of a boom, pivoting about a target — the rig's whole idea in one glyph.
 export const RigIcon = () => (<S><circle cx='5.5' cy='18.5' r='2' /><path d='M7 17.2 13.5 9' /><path d='M11 6.2h3l1-1.7h3l1 1.7h1.5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H11a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1Z' /></S>);

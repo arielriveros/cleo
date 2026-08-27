@@ -2,12 +2,8 @@ import { gl } from '../glContext';
 import { frameStats } from '../renderStats';
 
 /**
- * Central cache of WebGL global state. Every redundant `useProgram`, `bindVertexArray`,
- * `enable/disable`, `cullFace`, `depthMask` and `bindTexture` in a frame is a driver
- * call (and sometimes a sync point) we can skip when the requested state already matches.
- *
- * All state changes in the renderer should go through this singleton so the cache stays
- * authoritative. If external code touches GL state directly, call `reset()` to invalidate.
+ * Central cache of WebGL global state, skipping every redundant driver call. Every state change must
+ * go through it to stay authoritative; anything touching GL directly must call `reset()`.
  */
 class GLStateCache {
     private _program: WebGLProgram | null = null;
@@ -28,8 +24,7 @@ class GLStateCache {
     }
 
     public get currentProgram(): WebGLProgram | null { return this._program; }
-    /** The VAO this cache believes is bound. Needed so an owner deleting one can invalidate the cache —
-     *  a deleted VAO left here would make the next bind of that same handle a silent no-op. */
+    /** The VAO this cache believes is bound, so an owner deleting one can invalidate the entry. */
     public get currentVAO(): WebGLVertexArrayObject | null { return this._vao; }
 
     public bindVAO(vao: WebGLVertexArrayObject | null): void {
@@ -65,12 +60,8 @@ class GLStateCache {
     }
 
     /**
-     * Which face to cull, named rather than an enum.
-     *
-     * `GLState.cullFace(gl.BACK)` evaluated `gl.BACK` at the CALL SITE, so it threw on a backend with no
-     * context before the guard below could run - the same reason `enable`/`disable` became
-     * `depthTest`/`blend`/`cull`. The GL constants are inlined here because this file is the one place
-     * that is allowed to know them.
+     * Which face to cull, named rather than taking an enum: an argument like `gl.BACK` evaluates at the
+     * CALL SITE and throws on a backend with no context, before any guard here can run.
      */
     public cullFace(side: 'front' | 'back'): void {
         const mode = side === 'front' ? 0x0404 /* FRONT */ : 0x0405 /* BACK */;
@@ -92,13 +83,8 @@ class GLStateCache {
     }
 
     /**
-     * Bind `texture` to `unit`. The cache key is the unit alone, not (unit, target): a texture object
-     * has exactly one target for its lifetime, so two different targets on one unit necessarily mean
-     * two different texture objects and the identity compare already catches it.
-     *
-     * This is the hottest deduplication in the frame — the deferred lighting pass rebinds ~12
-     * textures and `_applyMaterial` rebinds every material map on every draw, most of them already
-     * bound to the same unit as the previous draw.
+     * Bind `texture` to `unit`. The cache key is the unit alone, not (unit, target) — a texture object
+     * has one target for its lifetime, so the identity compare already separates them.
      */
     public bindTexture(unit: number, target: number, texture: WebGLTexture | null): void {
         if (!gl) return;
@@ -114,11 +100,8 @@ class GLStateCache {
     }
 
     /**
-     * Bind unconditionally, refreshing the cache. For *mutation* paths (`texImage2D`, `texParameteri`,
-     * `generateMipmap`), which act on whatever is bound to the **active** unit — so they need both the
-     * active unit and the binding to be exactly what they asked for, not merely equivalent. The
-     * deduped `bindTexture` above can legitimately skip the `activeTexture` call when the binding
-     * already matches, which would send the upload to a different unit's texture.
+     * Bind unconditionally, for MUTATION paths, which act on the ACTIVE unit. The deduped
+     * {@link bindTexture} may skip `activeTexture`, sending an upload to another unit's texture.
      */
     public bindTextureForced(unit: number, target: number, texture: WebGLTexture | null): void {
         if (!gl) return;
@@ -129,15 +112,7 @@ class GLStateCache {
         frameStats.stateChanges++;
     }
 
-    /** Invalidate the whole cache (e.g. after code paths that change GL state directly). */
-    /**
-     * Depth testing on or off.
-     *
-     * Named rather than enum-taking, and that is the whole point: `GLState.enable(gl.DEPTH_TEST)`
-     * evaluates `gl.DEPTH_TEST` at the CALL SITE, so on a backend where `gl` is undefined it throws
-     * before this class is entered and the guards above never run. A named method is the only shape
-     * that lets a guard do its job.
-     */
+    /** Depth testing on or off. Named rather than enum-taking — see {@link cullFace}. */
     public depthTest(on: boolean): void { this.setEnabled(0x0B71 /* DEPTH_TEST */, on); }
 
     /** Blending on or off. See {@link depthTest} for why this is not an enum. */

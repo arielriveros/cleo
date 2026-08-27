@@ -28,10 +28,9 @@ function AtlasSlot() {
   if (!asset) return null
 
   const assign = async (id: string) => {
-    // The dimensions are STORED, not re-derived at load, so they have to be read from a DECODED image —
-    // TextureManager registers an id immediately and decodes afterwards, and reading `naturalWidth` during
-    // that window returns 0 and would bake a 1x1 grid into the asset permanently. This used to bail
-    // silently, which made dropping a just-imported texture look like nothing had happened.
+    // The dimensions are STORED, not re-derived at load, so they must come from a DECODED image:
+    // TextureManager registers an id immediately and decodes afterwards, and `naturalWidth` during that
+    // window is 0, which would bake a 1x1 grid into the asset permanently.
     const image = await awaitTextureImage(id)
     if (!image) {
       Logger.warn(`"${id}" is not a usable image — it may still be loading, or may have failed to decode`, 'Editor')
@@ -111,8 +110,7 @@ function TileMetaEditor() {
     return <Hint>Select one or more tiles in the atlas to edit what they mean.</Hint>
   }
 
-  // With several tiles selected the fields show the FIRST one's values and writing applies to all — the
-  // usual multi-edit compromise, and the alternative (blanking mixed fields) makes bulk marking painful.
+  // With several tiles selected the fields show the FIRST one's values and writing applies to all.
   const primary = asset.tiles[selection[0]] ?? {}
   const apply = (p: Partial<TileMeta>) => {
     for (const index of selection) {
@@ -265,8 +263,7 @@ function TerrainSetsEditor() {
             title='Assign the selected tiles to this set and record which mask each one fills'
             onClick={() => {
               // Membership lives on the tile (so the painter can tell what is "the same terrain"); the rule
-              // table maps a neighbour mask to candidates. Assigning in index order is the convention every
-              // Wang sheet on the internet follows, so it is what makes an imported sheet just work.
+              // table maps a neighbour mask to candidates. Index order is the Wang-sheet convention.
               const tiles = { ...asset.tiles }
               const rules: Record<number, number[]> = { ...set.tiles }
               selection.forEach((index, k) => {

@@ -99,13 +99,11 @@ export class UIRootNode extends UINode {
     public get planeMatrix(): number[] | null { return this._planeMatrix; }
 
     /**
-     * Resolve this root and its whole subtree.
+     * Resolve this root and its whole subtree. Called by the scene's UI pass, not by {@link solveUI}: a
+     * root's rect comes from the viewport or a projection, never from a parent rect.
      *
-     * Called by the scene's UI pass, not by {@link solveUI} — a root's rect comes from the viewport or a
-     * projection rather than from a parent rect, so it does not participate in the ordinary anchor solve.
-     *
-     * @param viewProj `projection * view` for the active camera, or null when there is no camera (an
-     *                 empty editor scene) — world roots then simply do not resolve.
+     * @param viewProj `projection * view` for the active camera, or null when there is no camera — world
+     *                 roots then do not resolve.
      */
     public solveRoot(
         viewportWidth: number,
@@ -131,10 +129,8 @@ export class UIRootNode extends UINode {
         this._resolvedOpacity = this._opacity;
         this._resolvedVisible = this._visible;
 
-        // Origin and scale, not just the rect. A WORLD-space root's rect is constant — it is always its
-        // reference resolution — and only the origin and scale move as the camera does. Comparing the rect
-        // alone meant a world-space HUD resolved correctly and then never moved on screen again, because
-        // the DOM layer skips any node whose layoutVersion has not changed.
+        // Origin and scale, not just the rect: a WORLD-space root's rect is constant (it is always its
+        // reference resolution) and only the origin and scale move as the camera does.
         if (!rectsEqual(this._prevRootRect, this._rect)
             || this._origin.x !== this._prevOriginX
             || this._origin.y !== this._prevOriginY
@@ -155,8 +151,7 @@ export class UIRootNode extends UINode {
             this._matchWidthOrHeight, dpr, this._referenceDpr);
 
         // The root's rect is the viewport expressed in reference units, so every descendant lays out in
-        // those units and the DOM applies one scale at the top. That is what makes a HUD authored at
-        // 1920x1080 land identically on a 1280x720 display.
+        // those units and the DOM applies one scale at the top.
         const s = this._scaleFactor > 0 ? this._scaleFactor : 1;
         setRect(this._rect, 0, 0, viewportWidth / s, viewportHeight / s);
         this._origin.x = 0;
@@ -177,8 +172,8 @@ export class UIRootNode extends UINode {
         this._offscreen = false;
 
         if (!viewProj) {
-            // No active camera: nothing to project against. Resolve to a hidden zero-scale rect rather
-            // than leaving last frame's values, which would freeze the label mid-air.
+            // No active camera: resolve to a hidden zero-scale rect rather than leaving last frame's
+            // values, which would freeze the label mid-air.
             this._scaleFactor = 0;
             this._origin.x = this._origin.y = 0;
             this._onScreen = false;
@@ -200,9 +195,8 @@ export class UIRootNode extends UINode {
         let oy = p.y - this._pivot[1] * h;
 
         if (this._clampToScreen) {
-            // edgeClamp also reports which way the anchor lies, and mirrors a behind-camera projection
-            // through the centre — a projection from behind lands on the opposite side of the screen from
-            // the object, so an unmirrored marker points exactly backwards.
+            // edgeClamp mirrors a behind-camera projection through the centre: such a projection lands on
+            // the opposite side of the screen from the object.
             const pinned = edgeClamp(ox, oy, w, h, viewportWidth, viewportHeight, 0, !p.inFront);
             ox = pinned.x;
             oy = pinned.y;
@@ -212,8 +206,8 @@ export class UIRootNode extends UINode {
 
         this._origin.x = ox;
         this._origin.y = oy;
-        // A clamped label is deliberately kept ON screen even when the anchor is behind the camera: that
-        // is the entire point of an offscreen marker, so hideBehindCamera does not apply to one.
+        // A clamped label stays ON screen even when the anchor is behind the camera, so hideBehindCamera
+        // does not apply to one.
         this._onScreen = p.inFront || this._clampToScreen || !this._hideBehindCamera;
 
         if (!this._billboard) this._solvePlaneMatrix(viewProj, viewportWidth, viewportHeight);
@@ -223,13 +217,9 @@ export class UIRootNode extends UINode {
      * Project the reference rect's four world corners and solve the transform that lays this root flat in
      * the world — a poster on a wall rather than a label facing the camera.
      *
-     * The rect is planar, so its image under a perspective camera is exactly a homography; solving for
-     * that from four projected corners avoids reconstructing the camera as a CSS `perspective` chain, and
-     * keeps the DOM layer free of any camera knowledge at all.
-     *
-     * The corners are laid out on the node's own XY plane, scaled so the reference resolution spans one
-     * world unit per {@link referenceDistance} — i.e. the node's scale controls its physical size — with
-     * the pivot deciding where the node's origin sits within the quad.
+     * The rect is planar, so its image under a perspective camera is exactly a homography. The corners sit
+     * on the node's own XY plane, scaled so the reference resolution spans one world unit per
+     * {@link referenceDistance}, with the pivot deciding where the node's origin sits in the quad.
      */
     private _solvePlaneMatrix(viewProj: mat4, viewportWidth: number, viewportHeight: number): void {
         const world = this.worldTransform;
@@ -250,8 +240,7 @@ export class UIRootNode extends UINode {
         }
 
         this._planeMatrix = quadHomography(corners, w, h);
-        // A quad with a corner behind the camera has no valid 2D image, so there is nothing sensible to
-        // draw; treat it as offscreen rather than showing a wildly sheared panel.
+        // A quad with a corner behind the camera has no valid 2D image; treat it as offscreen.
         if (!this._planeMatrix) this._onScreen = false;
     }
 
@@ -292,5 +281,3 @@ export class UIRootNode extends UINode {
         UINode._parseUI(new UIRootNode(json.name, 'screen', json.id), parent, json);
     }
 }
-
-/** A styled box. The plainest element there is, and the one containers are usually built from. */

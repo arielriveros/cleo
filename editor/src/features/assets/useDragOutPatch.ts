@@ -3,21 +3,10 @@ import type { IApi } from '@svar-ui/react-filemanager'
 import { dragPayload } from './assetKinds'
 import { movablePaths, VfsEntry, VfsIndex } from '../../utils/vfs'
 
-// SVAR's file manager has no drag-and-drop of any kind — its cards are plain divs and "move" is cut/paste
-// only. The editor's whole asset workflow is drag-based (a mesh onto the viewport, a material onto a
-// material slot), so we add HTML5 dragging on top of its DOM.
-//
-// Three things fall out of it:
-//   1. drag OUT — each card/row carries the same DataTransfer payloads the old explorers set, so every
-//      existing drop target (EngineViewport, MaterialSlot, TerrainLayerSlot, TextureInspector) keeps
-//      working untouched.
-//   2. drag INTO a folder — the move SVAR itself doesn't have. It ends in the normal `move-files` action,
-//      so the event bridge handles it like any cut/paste.
-//   3. the selection comes along — grabbing a card that is part of the current multi-selection drags the
-//      whole selection, the way cut/paste and delete already treat it.
-//
-// The coupling to SVAR's DOM is deliberate and narrow: the class names below, plus `data-id`, plus
-// lib-dom's setID() prefixing ids with ':'.
+// HTML5 dragging layered onto SVAR's file-manager DOM, which has none of its own: drag OUT carrying the
+// DataTransfer payloads every existing drop target already consumes, drag INTO a folder (ending in a
+// normal `move-files` action), and the multi-selection coming along with the grabbed card.
+// The coupling to SVAR's DOM is the class names below, `data-id`, and lib-dom's setID() prefixing ':'.
 
 const CARD = '.wx-cards .wx-item[data-id]' // cards view, and each pane of the split view
 const ROW = '.wx-row[data-id]'             // table view (rendered by @svar-ui/react-grid)
@@ -64,14 +53,13 @@ export function useDragOutPatch(
       wrapper.querySelectorAll<HTMLElement>(DRAGGABLE).forEach(el => {
         const ok = !!resolve(el)
         if (ok && el.getAttribute('draggable') !== 'true') el.draggable = true
-        // A card's <img> preview is natively draggable and would otherwise hijack the drag, handing the
-        // drop target an image URL instead of our payload.
+        // A card's <img> preview is natively draggable and would hijack the drag, handing the drop target
+        // an image URL instead of the asset payload.
         el.querySelectorAll('img').forEach(img => { img.draggable = false })
       })
     }
     mark()
-    // childList only: setting el.draggable reflects to the attribute, so observing attributes would make
-    // the marker retrigger itself forever.
+    // childList only: el.draggable reflects to the attribute, so observing attributes retriggers forever.
     const observer = new MutationObserver(mark)
     observer.observe(wrapper, { childList: true, subtree: true })
 
@@ -111,19 +99,16 @@ export function useDragOutPatch(
       const path = resolve(el)
       if (!path) { e.preventDefault(); return }
 
-      // Only the grabbed item gets an asset payload: every external drop target (viewport, material slot)
-      // consumes exactly one asset, and the item under the cursor is the unambiguous choice.
+      // Only the grabbed item gets an asset payload: every external drop target consumes exactly one.
       const entry = pathIndexRef.current.get(path)
       if (entry) for (const [mime, value] of dragPayload(entry.kind, entry.assetId)) e.dataTransfer.setData(mime, value)
 
       sources = selectionHolding(path) ?? [path]
 
-      // The path is what makes the drop-into-a-folder below possible. Folders get only this — they have
-      // no asset payload.
+      // The path drives the drop-into-a-folder below. Folders get only this — no asset payload.
       e.dataTransfer.setData(PATH_MIME, path)
       if (sources.length > 1) {
         e.dataTransfer.setData(MULTI_MIME, JSON.stringify(sources))
-        // The default drag image is the one card under the cursor, which reads as a single-item move.
         // Purge first: 'dragend' never fires when the store re-renders the card out from under the drag.
         document.querySelectorAll('.cleo-drag-ghost').forEach(n => n.remove())
         ghost = document.createElement('div')
@@ -176,8 +161,7 @@ export function useDragOutPatch(
     const onDragOver = (e: DragEvent) => {
       if (!e.dataTransfer?.types.includes(PATH_MIME)) return
       const hit = folderTargetOf(e.target as HTMLElement)
-      // Nothing in the drag can land there: no highlight and no preventDefault, so the drop is refused
-      // instead of quietly doing nothing.
+      // Nothing in the drag can land there: no highlight and no preventDefault, so the drop is refused.
       if (!hit || (sources.length && !movableInto(sources, hit.path).length)) { clearHighlight(); return }
 
       e.preventDefault()
@@ -213,9 +197,8 @@ export function useDragOutPatch(
       const hit = folderTargetOf(e.target as HTMLElement)
       if (!hit) return
 
-      // Dropping a folder onto itself or its own descendant is rejected by the store, and an item already
-      // in the target is a no-op — filter both out so a gesture the user obviously didn't mean doesn't
-      // log an error.
+      // Dropping a folder onto itself or a descendant is rejected by the store, and an item already in
+      // the target is a no-op; both are filtered out.
       const ids = movableInto(dragged, hit.path)
       if (!ids.length) return
 

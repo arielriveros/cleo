@@ -10,7 +10,6 @@ import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle,
 import { MaterialIcon } from '../sectionIcons';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
-  // Safety check to ensure the node has a model
   if (!props.node.model) {
     return <div>No model available for this node.</div>;
   }
@@ -18,30 +17,29 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const model = props.node.model;
   const material = model.material;
 
-  // Shader selection (basic | blinn_phong | pbr | custom)
   type ShaderType = 'basic' | 'blinn_phong' | 'pbr' | 'custom';
   const detectShaderType = (t: string): ShaderType =>
     t.startsWith('custom') ? 'custom'
     : (t.includes('blinn_phong') || t.includes('default')) ? 'blinn_phong' : t.includes('pbr') ? 'pbr' : 'basic';
   const [shaderType, setShaderType] = useState<ShaderType>(detectShaderType(material.type as string));
 
-  // Default shader state
   const [diffuse, setDiffuse] = useState(vec3ToHex(material.properties.get('diffuse')));
   const [specular, setSpecular] = useState(vec3ToHex(material.properties.get('specular')));
   const [ambient, setAmbient] = useState(vec3ToHex(material.properties.get('ambient')));
   const [shininess, setShininess] = useState(material.properties.get('shininess') || 32);
   const [emission, setEmission] = useState(vec3ToHex(material.properties.get('emissive')));
 
-  // PBR shader state
   const [baseColor, setBaseColor] = useState<string>(vec3ToHex(material.properties.get('baseColor') || [1,1,1]));
   const [metallic, setMetallic] = useState<number>(material.properties.get('metallic') ?? 0);
   const [roughness, setRoughness] = useState<number>(material.properties.get('roughness') ?? 1);
   const [emissiveFactor, setEmissiveFactor] = useState<string>(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
   const [pbrOpacity, setPbrOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
-  // Add default shader opacity state
+  // Parallax occlusion depth; inert without a Height map.
+  const [dispScale, setDispScale] = useState<number>(material.properties.get('dispScale') ?? 0.05);
+  // Cutout threshold, shared by all three shader types. 0 means no cutout.
+  const [alphaCutoff, setAlphaCutoff] = useState<number>(material.properties.get('alphaCutoff') ?? 0);
   const [defaultOpacity, setDefaultOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
 
-  // Basic shader state
   const [basicColor, setBasicColor] = useState(
     vec3ToHex(material.properties.get('color') ?? [1,1,1])
   );
@@ -49,7 +47,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     material.properties.get('opacity') ?? 1
   );
 
-  // Options state
   const [options, setOptions] = useState<{ wireframe: boolean; transparent: boolean; side: 'front' | 'back' | 'double'; castShadow: boolean; probeable: boolean;}>(
   {
     wireframe: material.config.wireframe ?? false,
@@ -60,7 +57,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   });
 
   useEffect(() => {
-    // Sync shader type and values from material when node changes
     setShaderType(detectShaderType(material.type as string));
 
     setDiffuse(vec3ToHex(material.properties.get('diffuse')));
@@ -74,7 +70,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     setRoughness(material.properties.get('roughness') ?? 1);
     setEmissiveFactor(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
     setPbrOpacity(material.properties.get('opacity') ?? 1);
-    // Sync default opacity
     setDefaultOpacity(material.properties.get('opacity') ?? 1);
 
     setBasicColor(vec3ToHex(material.properties.get('color') ?? [1,1,1]));
@@ -90,25 +85,20 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   }, [props.node])
 
-  // Apply shader type change to material
   useEffect(() => {
-    // Custom materials own their own type key (a content hash) + properties — the CustomMaterialEditor
-    // manages them, and the instance swap to/from CustomMaterial happens in handleShaderTypeChange.
+    // Custom materials own their type key (a content hash) and properties; the instance swap to and from
+    // CustomMaterial happens in handleShaderTypeChange.
     if (shaderType === 'custom') return;
 
-    // Update material.type to selected shader
     material.type = shaderType as any;
 
-    // Ensure required properties exist for selected shader
     if (shaderType === 'basic') {
       const carried = material.properties.get('color') || material.properties.get('baseColor') || material.properties.get('diffuse') || [1,1,1];
       material.properties.set('color', carried);
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
-      // Flag for single texture in basic
       if (material.properties.get('hasTexture') === undefined) material.properties.set('hasTexture', false);
     } else if (shaderType === 'blinn_phong') {
-      // Blinn-Phong shader required props — carry the main color/emissive over from PBR/basic so the
-      // object keeps its look after a type switch instead of resetting to white.
+      // Carry the main color/emissive over from PBR/basic so the object keeps its look.
       const carried = material.properties.get('diffuse') || material.properties.get('baseColor') || material.properties.get('color') || [1,1,1];
       material.properties.set('diffuse', carried);
       if (!material.properties.get('specular')) material.properties.set('specular', [1,1,1]);
@@ -134,7 +124,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     }
   }, [shaderType, material]);
 
-  // Apply options changes back to the material config
   useEffect(() => {
     material.config.wireframe = options.wireframe;
     material.config.transparent = options.transparent;
@@ -147,9 +136,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   useEffect(() => { eventEmitter.emit('TEXTURES_CHANGED') }, [])
 
-  // Switching the shader type to/from 'custom' swaps the material INSTANCE (a CustomMaterial subclass),
-  // carrying the config across. Built-in <-> built-in stays on the same instance (the effect above seeds
-  // the required properties). Read model.material fresh each render so the swap is picked up.
+  // Switching to or from 'custom' swaps the material INSTANCE, carrying the config across; built-in to
+  // built-in stays on the same instance. Read model.material fresh each render so the swap is picked up.
   const handleShaderTypeChange = (next: ShaderType) => {
     const cur = detectShaderType(model.material.type as string);
     if (next === cur) return;
@@ -178,8 +166,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   };
   const updateOption = (patch: Partial<typeof options>) => { setOptions((prev) => ({ ...prev, ...patch })); markMaterialDirty(); };
 
-  // Rendered as a function call (not a component) so the TextureInspector at each position stays
-  // mounted across re-renders instead of remounting.
+  // Called as a function, not a component, so each TextureInspector stays mounted across re-renders.
   const texSlot = (label: string, tex: string) => (
     <div className='flex flex-col items-center gap-1'>
       <span className='text-[10px] text-muted'>{label}</span>
@@ -223,6 +210,15 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {texSlot('Reflectivity', 'reflectivityMap')}
               </div>
             </Section>
+            <Section title='Cutout'>
+              <PropertyTable columns={['40%', '60%']}>
+                {/* The Mask slot lives with the other textures above; this is just its threshold. It
+                    replaces a hardcoded 0.5, and defaults to 0.5 for any material that predates it. */}
+                <PropertyRow label='Alpha cutoff' divider={false}>
+                  <Slider min={0} max={1} step={0.01} value={alphaCutoff} onChange={setNum('alphaCutoff', setAlphaCutoff)} />
+                </PropertyRow>
+              </PropertyTable>
+            </Section>
           </>
         )}
 
@@ -236,6 +232,18 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             </Section>
             <Section title='Texture'>
               <div className='flex flex-wrap gap-3'>{texSlot('Texture', 'texture')}</div>
+            </Section>
+            <Section title='Cutout'>
+              <PropertyTable columns={['40%', '60%']}>
+                {/* The mask is read from RED, so a grayscale map is what belongs here. 0 disables the
+                    cutout entirely; anything above it discards where the mask falls below. */}
+                <PropertyRow label='Alpha cutoff'>
+                  <Slider min={0} max={1} step={0.01} value={alphaCutoff} onChange={setNum('alphaCutoff', setAlphaCutoff)} />
+                </PropertyRow>
+                <PropertyRow label='Mask' divider={false}>
+                  <TextureInspector tex='maskMap' material={model.material} />
+                </PropertyRow>
+              </PropertyTable>
             </Section>
           </>
         )}
@@ -263,7 +271,30 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {texSlot('Normal', 'normalMap')}
                 {texSlot('Occlusion', 'occlusionMap')}
                 {texSlot('Emissive', 'emissiveMap')}
+                {texSlot('Height', 'displacementMap')}
               </div>
+            </Section>
+            <Section title='Parallax'>
+              <PropertyTable columns={['40%', '60%']}>
+                {/* Depth of the height field in UV units. Only the Height map above switches parallax
+                    on; with no map this is inert, and the same number means the same thing on a
+                    terrain paint layer. Past ~0.15 a surface starts to smear at grazing angles. */}
+                <PropertyRow label='Depth' divider={false}>
+                  <Slider min={0} max={0.2} step={0.005} value={dispScale} onChange={setNum('dispScale', setDispScale)} />
+                </PropertyRow>
+              </PropertyTable>
+            </Section>
+            <Section title='Cutout'>
+              <PropertyTable columns={['40%', '60%']}>
+                {/* The mask is read from RED, so a grayscale map is what belongs here. 0 disables the
+                    cutout entirely; anything above it discards where the mask falls below. */}
+                <PropertyRow label='Alpha cutoff'>
+                  <Slider min={0} max={1} step={0.01} value={alphaCutoff} onChange={setNum('alphaCutoff', setAlphaCutoff)} />
+                </PropertyRow>
+                <PropertyRow label='Mask' divider={false}>
+                  <TextureInspector tex='maskMap' material={model.material} />
+                </PropertyRow>
+              </PropertyTable>
             </Section>
           </>
         )}

@@ -15,30 +15,18 @@ import ChannelPackProgram from '../shaders/wgsl/channelPack.wgsl';
 import type { Material } from "../material";
 
 // -------------------------------------------------------------------------------------------------
-// Channel packing.
-//
-// Artists author metallic, roughness and occlusion as SEPARATE grayscale maps, because that is what
-// texturing tools export. Shaders want the opposite: one texture, one fetch, one bound unit, three
-// channels. This module is the seam between the two — it bakes the authored source maps into a single
-// packed texture on the GPU and hands the material a derived slot to bind.
-//
-// The packed layout is glTF's ORM (r = occlusion, g = roughness, b = metallic), which is what
-// geometryPBR.fs/pbr.fs already read and what every glTF import already delivers. That is not a
-// cosmetic choice: it means an imported pre-packed map hits the identity fast path below and is reused
-// byte-for-byte, with no bake, no cache entry and no extra VRAM.
-//
-// What this buys: fewer texture fetches, fewer binds, and freed texture units (standard materials give
-// back unit 5, terrain goes from 13 units to 9). What it does NOT buy is memory — the packed texture is
-// allocated IN ADDITION to its sources, which stay resident because the editor previews them.
+// Channel packing: bake separately authored metallic/roughness/occlusion maps into one GPU texture and
+// hand the material a derived slot. The layout is glTF's ORM, so an imported pre-packed map takes the
+// identity fast path. Costs VRAM — the pack is allocated IN ADDITION to its sources, which stay
+// resident for the editor's previews.
 // -------------------------------------------------------------------------------------------------
 
 /** One destination channel: a channel of a source texture, or a constant. */
 export type ChannelSource =
     | { textureId: string; channel: 0 | 1 | 2 | 3 }
     /**
-     * `ignored` marks a constant the consuming shader will never read (its `has*` flag is false). Such
-     * a channel does not have to be reproduced faithfully, which is exactly what lets a spec that is
-     * otherwise a straight copy of one texture take the identity path.
+     * `ignored` marks a constant the shader will never read, so the channel need not be reproduced —
+     * which is what lets an otherwise-identity spec skip the bake.
      */
     | { constant: number; ignored?: boolean };
 
@@ -78,11 +66,8 @@ export class TexturePacker {
     private static readonly MAX_SIZE = 4096;
 
     private _cache: Map<string, CacheEntry> = new Map();
-    /**
-     * The spec each material is currently bound to, so a per-frame `sync` is a string compare rather
-     * than a re-resolve. Weak because materials are replaced wholesale (the inspector's shader-type
-     * switch, setNodeMaterial) and never disposed — there is no hook to unregister from.
-     */
+    // The spec each material is bound to, so a per-frame `sync` is a string compare. WEAK: materials are
+    // replaced wholesale and never disposed, so there is no hook to unregister from.
     private _bindings: WeakMap<Material, Binding> = new WeakMap();
 
     private _module: ShaderModule | null = null;
@@ -103,13 +88,8 @@ export class TexturePacker {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Bring `material`'s derived texture slots in line with its authored source slots. Idempotent and
-     * cheap enough to call every frame for every material: the common path is three map reads and a
-     * string compare.
-     *
-     * Called per frame rather than on assignment because source textures decode asynchronously — a map
-     * assigned this frame may not have uploaded yet. A pack that cannot resolve simply is not recorded,
-     * so the next frame retries. That is the whole retry mechanism; there is no queue.
+     * Bring `material`'s derived texture slots in line with its authored sources. Idempotent, and meant
+     * to be called every frame: an unresolvable pack is simply not recorded, which IS the retry.
      */
     public sync(material: Material, frame: number): void {
         if (!material) return;
@@ -121,8 +101,7 @@ export class TexturePacker {
             case 'blinn_phongSkinned':
                 this._syncBlinnPhong(material, frame);
                 break;
-            // 'basic' has a single texture slot and nothing to combine; terrain composites are synced by
-            // the Terrain subsystem, which owns its layer slots.
+            // 'basic' has nothing to combine; terrain layer slots are synced by the Terrain subsystem.
         }
     }
 
@@ -148,13 +127,8 @@ export class TexturePacker {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * PBR: metallicMap + roughnessMap + occlusionMap -> one ORM texture in the `ormTexture` slot.
-     *
-     * A source's channel is inferred, not authored. A texture assigned to MORE than one of the three
-     * slots is a pre-packed ORM map, so each slot takes its ORM channel; a texture in exactly one slot
-     * is a standalone grayscale map and is read from red. That single rule covers both a hand-assigned
-     * grayscale metallic map and a glTF import (which fans one image out to metallic+roughness, and
-     * often occlusion too) with no channel picker in the UI.
+     * PBR: metallicMap + roughnessMap + occlusionMap -> one ORM texture. A source's channel is INFERRED:
+     * a texture in several slots is pre-packed and takes its ORM channel, one in a single slot reads red.
      */
     private _syncPBR(material: Material, frame: number): void {
         const occlusion = material.textures.get('occlusionMap');
@@ -188,10 +162,7 @@ export class TexturePacker {
 
     /**
      * Blinn-Phong: specularMap (rgb) + reflectivityMap -> one `specularReflectivityMap`, reflectivity in
-     * alpha. Note this only pays off in the forward `default.fs` — the deferred `geometryDefault.fs`
-     * samples neither map (it derives metallic from the scalar `reflectivity`), so a deferred
-     * blinn-phong material bakes and binds this for nothing. Materials don't know their pipeline, and
-     * gating on it would be a hidden coupling for one bind.
+     * alpha. Only the forward path samples it; a deferred material bakes and binds this for nothing.
      */
     private _syncBlinnPhong(material: Material, frame: number): void {
         const specular = material.textures.get('specularMap');
@@ -204,8 +175,7 @@ export class TexturePacker {
             return;
         }
 
-        // Reflectivity was historically read from blue (the metallic channel of a packed metal/rough
-        // map); a standalone map is grayscale, so red is the same value either way.
+        // A standalone reflectivity map is grayscale, so red carries the value.
         this._bind(material, 'specularReflectivityMap', {
             r: specular ? { textureId: specular, channel: 0 } : { constant: 1, ignored: true },
             g: specular ? { textureId: specular, channel: 1 } : { constant: 1, ignored: true },
@@ -214,14 +184,9 @@ export class TexturePacker {
         }, flags, frame);
     }
 
-    /**
-     * Pack `spec` into `slot` on `material` and set the `has*` flags the shader guards its reads with.
-     *
-     * While the pack is unresolved (a source still decoding) the slot gets a 1x1 white placeholder and
-     * every flag goes false, so the shader falls through to its scalar factors — the same path a
-     * material with no maps takes. The placeholder is not cosmetic: an unset sampler uniform defaults to
-     * texture unit 0, which would sample the BASE COLOUR map as ORM for those frames.
-     */
+    // Pack `spec` into `slot` and set the `has*` flags the shader guards its reads with. While
+    // unresolved the slot takes a 1x1 white PLACEHOLDER — an unset sampler defaults to unit 0, which
+    // would sample the base colour map as ORM.
     private _bind(material: Material, slot: string, spec: PackSpec, flags: Record<string, boolean>, frame: number): void {
         const key = this._specKey(spec);
         const bound = this._bindings.get(material);
@@ -260,8 +225,8 @@ export class TexturePacker {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * The texture id `spec` resolves to, or null if a source has not finished decoding yet (callers
-     * retry next frame). Order matters: cache, then the identity fast path, then a bake.
+     * The texture id `spec` resolves to, or null while a source is still decoding. Order matters:
+     * cache, then the identity fast path, then a bake.
      */
     public resolve(spec: PackSpec, frame: number): string | null {
         const key = this._specKey(spec);
@@ -279,9 +244,8 @@ export class TexturePacker {
         }
         if (sources.length === 0) return null; // an all-constant spec has nothing worth a texture
 
-        // Identity: every channel either comes from the one source at its own index, or is a constant
-        // the shader won't read. Reuse the source verbatim — no bake, no cache entry, no VRAM. This is
-        // the glTF path, and it is why importing a packed ORM map costs exactly nothing.
+        // Identity: every channel comes from one source at its own index, or is an ignored constant.
+        // Reuse it verbatim — no bake, no cache entry, no VRAM.
         if (sources.length === 1 && channels.every((source, i) =>
             'constant' in source ? source.ignored === true : source.channel === i)) return sources[0];
 
@@ -359,8 +323,8 @@ export class TexturePacker {
         });
         const pipeline = this._packPipeline(shader, output.rhiTexture.format);
 
-        // The viewport is the OUTPUT's size, not the canvas's, and `setViewportSize` still has to be
-        // told: `renderStats` charges shaded area by it on both backends.
+        // The viewport is the OUTPUT's size, and `setViewportSize` must be told — `renderStats`
+        // charges shaded area by it.
         setViewportSize(width, height);
 
         const encoder = device.createCommandEncoder('channelPack');
@@ -377,13 +341,11 @@ export class TexturePacker {
         ShaderManager.Instance.setUniform('u_srcChannel', srcChannel);
         ShaderManager.Instance.setUniform('u_const', constants);
 
-        // One bind group for all four pairs, at binding 2N — the engine keeps filter and wrap state on
-        // the texture, so the backend synthesises the sampler half. Unused slots ALIAS source 0 rather
-        // than being left out: a bind group may not have a hole, and reading an incomplete sampler is
-        // undefined even on a branch that never executes.
+        // One bind group for all four pairs at binding 2N; the backend synthesises the sampler half.
+        // Unused slots must ALIAS source 0 — a bind group may not have a hole.
         pass.setBindGroup(0, device.createBindGroup({
             label: 'channelPack:group0',
-            layout: (pipeline as any).layoutForGroup(0),
+            layout: pipeline.layoutForGroup(0)!,
             entries: [0, 1, 2, 3].map(i => ({
                 binding: i * 2, textureView: (textures[i] || textures[0]).sampledView,
             })),
@@ -403,16 +365,8 @@ export class TexturePacker {
         return id;
     }
 
-    /**
-     * The pack pipeline, built once per output format.
-     *
-     * Cached rather than built per bake: WebGPU pipelines are real objects and a bake happens once
-     * per unique spec, so a fresh one each time would accumulate for the life of the device. Keyed
-     * on the format rather than assumed constant — `precision: 'low'` gives rgba8unorm today and
-     * the key costs nothing if that ever stops being true.
-     *
-     * No depth, no blend, no cull: the state four `GLState` calls used to set by hand.
-     */
+    // The pack pipeline, cached per output format: a WebGPU pipeline is a real object and would
+    // otherwise accumulate for the life of the device. No depth, no blend, no cull.
     private _packPipeline(shader: ShaderProgram, format: TextureFormat): RenderPipeline {
         const existing = this._pipelines.get(format);
         if (existing) return existing;
@@ -427,12 +381,7 @@ export class TexturePacker {
         return pipeline;
     }
 
-    /**
-     * The pack program's shader module, built once.
-     *
-     * Both stages come from ONE module: `channelPack.wgsl` declares its vertex stage by including
-     * `chunks/fullscreen.wgsl`, and the WebGL2 backend reads only `program` off it.
-     */
+    // The pack program's shader module, built once. Both stages come from one `channelPack.wgsl`.
     private _packModule(): ShaderModule {
         if (!this._module) this._module = device.createShaderModule({
             label: 'channelPack', program: 'channelPack',
@@ -448,11 +397,7 @@ export class TexturePacker {
     // Lazily-built GL resources
     // ---------------------------------------------------------------------------------------------
 
-    /**
-     * Self-registers the pack program on first use instead of being built with the rest of the shaders
-     * in `Renderer`, so a project with no packed materials pays nothing and the packer stays
-     * self-contained.
-     */
+    // Self-registers the pack program on first use, so a project with no packed materials pays nothing.
     private _ensureShader(): ShaderProgram {
         const existing = ShaderManager.Instance.find('channelPack');
         if (existing) return existing;
@@ -461,19 +406,9 @@ export class TexturePacker {
         return shader;
     }
 
-    /**
-     * A private screen quad — 4 vertices, ~80 bytes — rather than a public accessor on the Renderer.
-     *
-     * Its V pairing is the backend's, exactly as `Renderer`'s shared screen quad picks it and for the
-     * same reason. A GL texture's v=0 is its bottom row and a WebGPU texture's is its top, while clip
-     * space agrees on neither being special: y=-1 is the bottom of the viewport in both, which is
-     * destination row 0 on WebGL2 and row H-1 on WebGPU. Pairing y=-1 with v=0 on both therefore
-     * copies source row 0 to destination row 0 on one backend and to row H-1 on the other — the pack
-     * comes out VERTICALLY MIRRORED on WebGPU, so a material with an authored metallic or roughness
-     * map reads it upside down while the unpacked sources it was built from stay correct. That is
-     * subtle enough to survive a look at the frame: the map is still smooth, still in the right
-     * channel, just wrong.
-     */
+    // A private screen quad. Its V pairing is the BACKEND's, as `Renderer`'s shared quad picks it: a
+    // GL texture's v=0 is its bottom row and a WebGPU texture's its top, so one pairing for both
+    // mirrors the pack vertically on one of them.
     private _ensureQuad(shader: ShaderProgram): Mesh {
         if (this._quad) return this._quad;
         const quad = new Mesh();

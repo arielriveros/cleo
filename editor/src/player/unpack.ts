@@ -1,12 +1,5 @@
-// Reader for the `game.bin` container written by features/publish/pack.ts. See that file for the
-// byte layout and for why offsets are blob-relative.
-//
-// This is the whole point of the binary format: every numeric array comes back as a typed-array VIEW
-// onto the downloaded ArrayBuffer, so a geometry costs zero parsing and zero copying — Geometry's
-// toFlat() passes a Float32Array straight through, and its constructor takes a Uint32Array directly,
-// so Model.parse needs no engine change to consume this. Texture bytes go to
-// TextureManager.addTextureFromBytes, the same path an import uses.
-//
+// Reader for the `game.bin` container written by features/publish/pack.ts; see that file for the byte
+// layout. Every numeric array comes back as a typed-array VIEW onto the downloaded ArrayBuffer.
 // Kept free of DOM and engine imports so it can be unit-tested against the packer under vitest.
 
 import { PACK_MAGIC, PACK_HEADER_BYTES, ATTRS } from '../features/publish/pack';
@@ -70,14 +63,9 @@ export function unpackGameBin(buffer: ArrayBuffer): UnpackedGame {
     config: t.config,
   }));
 
-  // A geometry referenced by N nodes is read N times. The FIRST reader gets the zero-copy view;
-  // every later one gets its own copy.
-  //
-  // This is not paranoia. Geometry.scale() writes into _positions IN PLACE, and toFlat() passes a
-  // Float32Array through without copying — so handing the same view to every instance would make one
-  // scaled crate deform all the others. The JSON path never had this problem because
-  // `new Float32Array(number[])` copied for each Model.parse; matching that keeps the change to the
-  // publish format observationally invisible to the runtime.
+  // A geometry referenced by N nodes is read N times. The FIRST reader gets the zero-copy view; every
+  // later one MUST get its own copy: Geometry.scale() writes into _positions in place, so a shared
+  // view would make one scaled instance deform all the others.
   const claimed = new Set<string>();
 
   const geometryFor = (ref: string): GeometryArrays | undefined => {
@@ -114,8 +102,8 @@ function inflateModelJson(model: any, game: UnpackedGame): void {
   }
 }
 
-/** Put back the prototype meshes of one foliage rule / serialized foliage layer. Mirrors pack's
- *  internFoliageSource — the two must always walk the same fields. */
+/** Put back the prototype meshes of one foliage rule / serialized foliage layer.
+ *  Mirrors pack's internFoliageSource — the two must always walk the same fields. */
 function inflateFoliageSource(src: any, game: UnpackedGame): void {
   if (!src || typeof src !== 'object') return;
   inflateModelJson(src.model, game);
@@ -141,13 +129,9 @@ export function inflateSceneGeometry(node: any, game: UnpackedGame): void {
 /**
  * Decompress every landscape's splat map and height field out of the blob, in place.
  *
- * Separate from inflateSceneGeometry because it is ASYNC: DecompressionStream has no synchronous form.
- * DEFLATE rather than PNG on purpose — the splat's alpha channel is layer 3's blend weight, and a
- * canvas round-trip premultiplies, which destroys the RGB of every texel where layer 3 is unused (the
- * common case). Deflate is the same algorithm PNG uses internally, minus the lossy image semantics.
- *
- * Falls back silently when the fields are absent: a game.bin published before this existed still
- * carries `heights`/`splat` as base64, which Terrain.deserialize reads directly.
+ * Async: DecompressionStream has no synchronous form. DEFLATE, not PNG: the splat's alpha channel is
+ * layer 3's blend weight and a canvas round-trip premultiplies it away. Fields absent from the blob
+ * are left alone — base64 `heights`/`splat` is read directly by Terrain.deserialize.
  */
 export async function inflateTerrainData(node: any, game: UnpackedGame): Promise<void> {
   if (!node || typeof node !== 'object') return;
@@ -173,8 +157,7 @@ export async function inflateTerrainData(node: any, game: UnpackedGame): Promise
 /**
  * Decompress every tilemap's cell grids out of the blob, in place.
  *
- * Async for the same reason as the terrain path, and with the same fallback: a game.bin published before
- * this existed carries `data` as base64, which TilemapLayer.parse reads directly.
+ * Async for the same reason as {@link inflateTerrainData}; `data` stored as base64 is left alone.
  */
 export async function inflateTilemapData(node: any, game: UnpackedGame): Promise<void> {
   if (!node || typeof node !== 'object') return;

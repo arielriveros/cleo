@@ -1,0 +1,11 @@
+{
+  "drawCalls": 236,
+  "triangles": 98596,
+  "vertices": 297324,
+  "objects": 42,
+  "culledObjects": 2,
+  "culledInstances": 2,
+  "instancedDrawCalls": 43,
+  "instances": 1013,
+  "rhiDrawCalls": 236
+}

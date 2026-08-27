@@ -4,28 +4,12 @@ import { glDevice } from '../rhi/webgl2/webgl2Device';
 import type { WebGL2Buffer } from '../rhi/webgl2/webgl2Device';
 import { BufferUsage } from '../rhi/types';
 
-/**
- * std140 uniform blocks, for programs generated from WGSL.
- *
- * Every uniform in this engine has always been a loose default-block uniform set by name through GL
- * reflection. WGSL has no such thing: naga puts every non-sampler uniform into a std140 block, so a
- * WGSL-authored program emits
- *
- *     layout(std140) uniform PresentUniforms_block_0Fragment { PresentUniforms u_present; };
- *
- * and `getUniformLocation` returns null for each member — which is why `Shader.storeUniforms` skipped
- * them and `setUniform('u_exposure', …)` would have silently done nothing. Not thrown: nothing. The
- * frame would simply render with whatever the buffer happened to contain.
- *
- * This is the smallest honest version of the roadmap's `UniformSet`: a CPU-side buffer per block,
- * written at the offsets GL reports, uploaded once per frame when dirty. Values still arrive through
- * `setUniform(name, value)`, so the ~374 existing call sites are untouched.
- *
- * Layout is read back from the driver (`UNIFORM_OFFSET`, `UNIFORM_ARRAY_STRIDE`,
- * `UNIFORM_MATRIX_STRIDE`) rather than computed from the std140 rules. Both would usually agree; when
- * they disagree the driver is right, and a hand-rolled packer would be wrong in a way that shows up as
- * one shader misbehaving on one vendor.
- */
+// std140 uniform blocks, for programs generated from WGSL: naga puts every non-sampler uniform into a
+// block, and `getUniformLocation` returns null for a block member. A CPU buffer per block, written at
+// the offsets GL reports and uploaded once per frame, so `setUniform(name, value)` still works.
+//
+// Layout is READ BACK from the driver, never computed from the std140 rules: where the two disagree
+// the driver is right, and a hand-rolled packer fails on one vendor only.
 
 interface BlockMember {
     /** The name GL reflected, before any suffix aliasing. Kept for layout verification. */
@@ -56,23 +40,13 @@ interface Block {
 
 export class UniformBlockSet {
     private readonly _blocks: Block[] = [];
-    /**
-     * Name -> every block member it refers to. A LIST, not a single entry.
-     *
-     * A name can legitimately land in more than one block: naga emits one block per shader stage, so
-     * a program whose vertex stage needs `u_view` for its MVP and whose fragment stage needs it to
-     * pick a shadow cascade has the same matrix in both. The renderer sets `u_view` once and means
-     * both — so a write broadcasts. Keeping one entry per name silently left the other block holding
-     * whatever it was initialised with, which for a view matrix is zeroes.
-     */
+    // Name -> every block member it refers to. A LIST: naga emits one block per stage, so a name can
+    // legitimately land in two, and a write must reach both.
     private readonly _members = new Map<string, { block: Block; member: BlockMember }[]>();
 
     private constructor() {}
 
-    /**
-     * Reflect a linked program's uniform blocks, or return null when it has none — which is every
-     * hand-written GLSL program in the engine, so the common path costs one `getProgramParameter`.
-     */
+    /** Reflect a linked program's uniform blocks, or null when it has none. */
     public static reflect(program: WebGLProgram): UniformBlockSet | null {
         const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORM_BLOCKS) as number;
         if (!count) return null;
@@ -86,9 +60,8 @@ export class UniformBlockSet {
         const name = gl.getActiveUniformBlockName(program, index) ?? `block${index}`;
         const dataSize = gl.getActiveUniformBlockParameter(program, index, gl.UNIFORM_BLOCK_DATA_SIZE) as number;
 
-        // One binding point per block, per program. They are re-bound on every program switch rather
-        // than allocated globally: the indexed UNIFORM_BUFFER binding points are a small shared array
-        // (24 guaranteed), and 56 programs would exhaust them.
+        // One binding point per block, re-bound on every program switch: the indexed UNIFORM_BUFFER
+        // points are a small shared array that allocating globally would exhaust.
         const bindingPoint = index;
         gl.uniformBlockBinding(program, index, bindingPoint);
 
@@ -131,36 +104,16 @@ export class UniformBlockSet {
         }
     }
 
-    /**
-     * Register a member under its full reflected name and under every dotted suffix of it.
-     *
-     * naga wraps a program's uniforms in a struct, so GL reports members as
-     * `PresentUniforms_block_0Fragment.u_present.u_exposure` while call sites ask for `u_exposure`.
-     *
-     * Every suffix is registered, not just the last segment, because the renderer names material
-     * uniforms compositionally: `setUniform(\`u_material.${name}\`, …)` over a material's property map.
-     * That asks for `u_material.baseColor`, which is neither the full reflected name nor the last
-     * segment — so registering only those two would leave every material uniform silently unset, which
-     * looks exactly like a material rendering with default values.
-     *
-     * A name landing in more than one block is normal rather than an error — see `_members` — so every
-     * match is recorded and a write reaches all of them.
-     */
+    // Register a member under its full reflected name and EVERY dotted suffix — the renderer names
+    // material uniforms compositionally, so `u_material.baseColor` must resolve as well as the ends.
     private _register(reflectedName: string, block: Block, member: BlockMember): void {
         // GL appends "[0]" to the name of an array member.
         const full = reflectedName.replace(/\[0\]$/, '');
         this._add(full, block, member);
         this._registerSuffixes(full, block, member);
 
-        // naga ESCAPES a member name that ends in a digit by appending an underscore, so `u_iblIntensity0`
-        // is emitted as `u_iblIntensity0_` and GL reports it that way. (It is a normalisation, not a
-        // quirk: a name already ending in `_` has it stripped, so the two forms can never collide.)
-        //
-        // The engine asks for the name it authored. Without the alias below, every uniform whose name
-        // ends in a digit silently resolves to nothing — which is not a compile error and not a warning,
-        // it is a value that stays whatever the buffer was allocated with. That is exactly how the light
-        // probes stopped contributing: `u_iblIntensity0` read as 0, and because an unbounded probe drives
-        // the fallback-ambient weight to zero, the ambient term vanished entirely instead of degrading.
+        // naga escapes a member name ending in a digit with a trailing underscore, so alias it back or
+        // every such uniform silently resolves to nothing.
         const unmangled = full.replace(/(\d)_$/, '$1');
         if (unmangled !== full) {
             this._add(unmangled, block, member);
@@ -174,14 +127,8 @@ export class UniformBlockSet {
         for (let i = 1; i < parts.length; i++) {
             const suffix = parts.slice(i).join('.');
 
-            // Only suffixes that begin at a `u_` name are worth registering. Every uniform this engine
-            // sets is `u_`-prefixed; the remaining segments are STRUCT FIELDS, which are never set by
-            // their bare name — the renderer says `u_dirLight.diffuse`, never `diffuse`.
-            //
-            // Registering them anyway was not merely useless, it was noisy in a way that hid real
-            // problems: `u_pointLights` is 16 elements and `u_spotlights` 8, all with a `position` and a
-            // `diffuse`, so every light shader logged a few hundred ambiguity warnings at startup for
-            // aliases nothing would ever ask for.
+            // Only `u_`-prefixed suffixes: the remaining segments are STRUCT FIELDS, never set by their
+            // bare name, and registering them buries the real ambiguity warnings.
             if (!suffix.startsWith('u_')) continue;
 
             this._add(suffix, block, member);
@@ -196,14 +143,9 @@ export class UniformBlockSet {
         list.push({ block, member });
     }
 
-    /** @internal Diagnostic: the GL buffer backing each block, with the size GL reports for its store. */
     /**
-     * Every reflected member, with the byte layout the DRIVER reports.
-     *
-     * Exists to be checked against the layout `tools/wgslLayout.mjs` computes from the WGSL type rules.
-     * WebGPU has no reflection, so those computed offsets are what a WebGPU uniform write will use —
-     * and the only way to know they are right is to compare them with a real driver's answer for the
-     * same struct. See `tools/harness/uniformLayoutCheck.js`.
+     * Every reflected member with the byte layout the DRIVER reports, so `tools/wgslLayout.mjs`'s
+     * computed offsets can be checked against a real driver. See `tools/harness/uniformLayoutCheck.js`.
      */
     public describeLayout(): { block: string; blockSize: number; name: string; offset: number;
                                arrayStride: number; matrixStride: number }[] {
@@ -253,8 +195,8 @@ export class UniformBlockSet {
     }
 
     /**
-     * Bind every block to its indexed binding point. Called when the owning program becomes current —
-     * the binding points are shared across programs, so the previous program's buffers are still there.
+     * Bind every block to its indexed binding point. Required on every program switch — the points are
+     * shared, so the previous program's buffers are still sitting in them.
      */
     public bind(): void {
         for (const block of this._blocks)
@@ -295,12 +237,8 @@ function describe(type: number): { components: number; columns: number; integer:
     }
 }
 
-/**
- * Write one member into its block's CPU buffer, honouring the strides the driver reported.
- *
- * Matrices are the reason `matrixStride` exists: std140 pads every column out to a vec4, so a mat3
- * occupies 48 bytes rather than 36 and a naive contiguous copy would shear it.
- */
+// Write one member into its block's CPU buffer, honouring the reported strides. std140 pads every
+// matrix column to a vec4, so a contiguous copy would shear a mat3.
 function writeMember(block: Block, member: BlockMember, value: any, name: string): void {
     const shape = describe(member.type);
     if (!shape) {

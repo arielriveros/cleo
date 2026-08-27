@@ -108,9 +108,8 @@ export class LightNode extends Node {
                 Logger.error(errMsg);
                 throw new Error(errMsg);
         }
-        // Back-compat: `castShadows` was never serialized, so every directional light was forced to
-        // cast on load and any authored value was silently discarded. Payloads written before it was
-        // added have no key at all, and for those the old behaviour IS the saved intent.
+        // Saves predating the serialized flag carry no key; for those, directional lights cast and
+        // nothing else does.
         const castShadows = json.castShadows ?? (json.lightType === 'directional');
         const node = new LightNode(json.name, light, castShadows, json.id);
         Node.finishParse(node, parent, json);
@@ -121,26 +120,17 @@ export class LightNode extends Node {
     public get index(): number { return this._index; }
     public set index(value: number) { this._index = value; }
     /**
-     * Whether this light casts shadows. Only DIRECTIONAL lights are honoured today: the renderer fits
-     * its cascades around the camera frustum for the first flagged directional light in the scene.
-     *
-     * There is deliberately no `lightSpace` on the node any more. It used to build a fixed 40x40x100
-     * orthographic box centred on the WORLD ORIGIN, ignoring the light's own position, with a
-     * hardcoded up vector that went NaN when the light pointed straight down — and an identity matrix
-     * for spot/point lights. Every light-space matrix now comes from the renderer's cascade fit.
+     * Whether this light casts shadows. Only DIRECTIONAL lights are honoured: the renderer fits its
+     * cascades around the camera frustum for the first flagged directional light in the scene.
      */
     public get castShadows(): boolean { return this._castShadows; }
     public set castShadows(value: boolean) { this._castShadows = value; }
 
-    /**
-     * Get bounding box for LightNode - returns a sphere bounding box
-     */
+    /** Selection bounds: a small box around the light's origin. */
     public getBoundingBox(): { min: vec3, max: vec3 } {
         const position = this.worldPosition;
         const scale = this.worldScale;
         
-        // For lights, use a sphere bounding box
-        // Use the largest scale component as the radius
         const radius = Math.max(scale[0], scale[1], scale[2]) * 0.5;
         
         const min = vec3.fromValues(
@@ -157,12 +147,3 @@ export class LightNode extends Node {
         return { min, max };
     }
 }
-
-/**
- * A light probe captures the surrounding scene into a cubemap and provides image-based lighting
- * (diffuse irradiance + prefiltered specular) for PBR. The actual capture/convolution is done by the
- * renderer (`Renderer.captureProbe`), which fills this node's baked maps. Two modes:
- *  - 'baked'    : captured once (on add, on load, or via the editor "Bake" button).
- *  - 'realtime' : re-captured every `updateFrequency` seconds for dynamic reflections.
- * The baked GPU cubemaps are not serialized (they'd lose HDR); instead the probe re-bakes on load.
- */

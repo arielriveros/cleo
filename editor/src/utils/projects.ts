@@ -1,10 +1,8 @@
 // The project registry: what projects exist, which one is open, and how to create, switch to and delete one.
 //
-// A project owns EVERYTHING — its scenes, all six asset libraries, its folder layout and its texture
-// payloads — under the key prefix `p:<id>:`. Nothing is shared between projects, which is why deleting one
-// is a prefix sweep rather than a graph walk, and why switching is a page reload rather than a state swap.
-//
-// The registry itself is the only kv record that is NOT scoped: it is the thing that says which scopes exist.
+// A project owns EVERYTHING — scenes, all six asset libraries, folder layout, texture payloads — under the
+// key prefix `p:<id>:`, and nothing is shared between projects. Deleting is a prefix sweep; switching is a
+// page reload. The registry itself is the only kv record that is NOT scoped.
 
 import { Logger } from 'cleo';
 import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb';
@@ -24,18 +22,15 @@ export type ProjectRecord = {
   /** Data URL of the project's main scene thumbnail, shown on its card in the browser. */
   thumbnail?: string;
   /**
-   * This project has already had its shot at the pre-multi-scene `cleo_project` blob (or was created after
-   * that format died). Without it, migrateLegacyProject — which runs inside setupInitialScene, i.e. once per
-   * project — would import the same legacy scene into every project the user creates.
+   * This project has already had its shot at the legacy single-scene `cleo_project` blob. Without it,
+   * migrateLegacyProject runs once per project and imports that scene into every project the user creates.
    */
   legacyMigrated?: boolean;
   /** Set while the one-time migration of an existing install is in flight; cleared when it completes. */
   migrating?: boolean;
   /**
    * Absolute path of the folder this project's scripts are mirrored into for editing in an external IDE.
-   *
-   * On the project record rather than in scoped storage because it is machine-local: a project exported
-   * and imported elsewhere must not inherit a path that only existed on the author's machine.
+   * Machine-local, so it lives on the project record and never in exportable scoped storage.
    */
   scriptWorkspacePath?: string;
   /** Command used to open that folder ('code', 'cursor', 'codium', …). Defaults to 'code'. */
@@ -45,11 +40,9 @@ export type ProjectRecord = {
 /** Registry of all projects. Unscoped — this is what defines the scopes. */
 const REGISTRY_KEY = 'cleo_projects';
 /**
- * The open project's id.
- *
- * localStorage because it must be readable SYNCHRONOUSLY: every scoped key is produced during render or from
- * sync module code. Mirrored into IndexedDB as well, so a browser that clears localStorage recovers the last
- * project instead of silently minting a second "Default Project" beside the user's real data.
+ * The open project's id. localStorage because it must be readable SYNCHRONOUSLY — every scoped key is
+ * produced during render or from sync module code. Mirrored into IndexedDB so a cleared localStorage
+ * recovers the last project instead of minting a second "Default Project".
  */
 const ACTIVE_KEY = 'cleo_active_project';
 /** A project whose wipe was deferred to the next boot — see deleteProject. */
@@ -87,7 +80,7 @@ async function copyProjectKeys(from: string | null, toPrefix: string): Promise<v
     if (value !== null && value !== undefined) await idbSet(toPrefix + name, value);
   }
   for (const key of await idbKeysByPrefix(fromPrefix + KEYS.scenePrefix)) {
-    // Only same-level keys: an unscoped scan would also match every project's already-scoped scene blobs.
+    // Only same-level keys; an unscoped scan also matches every project's already-scoped scene blobs.
     if (fromPrefix === '' && key.startsWith('p:')) continue;
     const value = await idbGet<any>(key);
     if (value !== null && value !== undefined) await idbSet(toPrefix + key.slice(fromPrefix.length), value);
@@ -108,11 +101,8 @@ async function hasLegacyWorkspace(): Promise<boolean> {
 
 /**
  * Fold an existing single-project install into the registry as "Default Project".
- *
- * Ordering is chosen so a crash is survivable: the record is written FIRST (with `migrating`), the data is
- * COPIED rather than moved, and the originals are deleted LAST. An interrupted run therefore leaves harmless
- * duplicates at the old keys, and the next boot sees `migrating` and finishes into the same project — rather
- * than leaving data that belongs to a project nothing points at.
+ * Ordering must survive a crash: write the record FIRST with `migrating`, COPY the data rather than move
+ * it, delete the originals LAST. An interrupted run leaves duplicates the next boot finishes cleaning up.
  */
 async function migrateWorkspace(existing?: ProjectRecord): Promise<ProjectRecord> {
   const now = Date.now();
@@ -131,7 +121,7 @@ async function migrateWorkspace(existing?: ProjectRecord): Promise<ProjectRecord
     } catch { /* ignore */ }
   }
 
-  // Point the editor at the new home before removing the old one, so a crash between the two still boots.
+  // Point the editor at the new home BEFORE removing the old one, so a crash between the two still boots.
   await writeActiveId(record.id);
 
   for (const name of MIGRATABLE_KEYS) await idbDelete(name);
@@ -160,14 +150,11 @@ async function wipeProject(id: string): Promise<void> {
 
 /**
  * Resolve which project to open, migrating an existing install if this is the first multi-project boot.
- *
- * Must complete before anything else touches storage — see the boot gate in app.tsx. Returns the registry
- * and the open project's id, or null when there is nothing to open (a fresh install, which lands on the
- * project launcher instead of silently creating something).
+ * Must complete before anything else touches storage — see the boot gate in app.tsx.
+ * Returns the registry and the open project's id, or null when there is nothing to open.
  */
 export async function initProjects(): Promise<{ projects: ProjectRecord[]; activeId: string | null }> {
-  // A delete that was deferred to avoid racing the editor's own debounced writers. Do it before anything can
-  // read — or re-create — the keys involved.
+  // A deferred delete must run before anything can read — or re-create — the keys involved.
   let pendingDelete: string | null = null;
   try { pendingDelete = localStorage.getItem(PENDING_DELETE_KEY); } catch { /* ignore */ }
   if (pendingDelete) {
@@ -214,12 +201,11 @@ export async function createProject(name: string): Promise<ProjectRecord> {
     legacyMigrated: true,
   };
   const id = record.id;
-  // No scene blob: setupInitialScene already handles "meta exists, blob absent" by creating an empty scene,
-  // which keeps the "a project always has at least one scene" invariant without writing megabytes here.
+  // No scene blob: setupInitialScene handles "meta exists, blob absent" by creating an empty scene.
   await idbSet(metaKey(id), createFreshProjectMeta());
   await idbSet(vfsKey(id), EMPTY_VFS);
-  // The libraries tolerate a missing key, but writing them makes the project visible to a prefix scan —
-  // which is what deletion and duplication walk.
+  // The libraries tolerate a missing key, but writing them makes the project visible to the prefix scan
+  // that deletion and duplication walk.
   await idbSet(libKey('materials', id), []);
   await idbSet(libKey('terrainMaterials', id), []);
   await idbSet(libKey('templates', id), []);
@@ -233,7 +219,7 @@ export async function createProject(name: string): Promise<ProjectRecord> {
 export async function renameProject(id: string, name: string): Promise<void> {
   const trimmed = name.trim();
   if (!trimmed) return;
-  // Metadata only. Nothing in storage is keyed by name — that is the whole point of id-based namespacing.
+  // Metadata only; nothing in storage is keyed by name.
   await saveProjects((await loadProjects()).map(p => (p.id === id ? { ...p, name: trimmed } : p)));
 }
 
@@ -267,12 +253,9 @@ export async function openProject(id: string): Promise<void> {
 }
 
 /**
- * Delete a project.
- *
- * A project that is not open can be wiped immediately. The OPEN one cannot: the editor's debounced writers
- * (400 ms per asset library, 500 ms for textures) would fire after the wipe and re-create the very keys just
- * removed. So the id is parked in localStorage, the pointer is moved to another project, and the page
- * reloads — initProjects performs the wipe before anything can write again.
+ * Delete a project. A project that is not open is wiped immediately; the OPEN one cannot be, because the
+ * editor's debounced writers (400 ms per library, 500 ms for textures) would re-create the keys just
+ * removed. Its id is parked in localStorage and the page reloads, so initProjects wipes it before any write.
  */
 export async function deleteProject(id: string, isActive: boolean): Promise<void> {
   if (!isActive) {

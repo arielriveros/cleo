@@ -27,8 +27,7 @@ import { loadProjects } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
 
 // One playback control. Same shape as ModeSelector's Segment / the viewport's gizmo toggle — a 25px
-// segment in a bordered, rounded group — so the transport reads as part of the same toolbar family
-// instead of the three floating PNG circles it used to be.
+// segment in a bordered, rounded group.
 interface TransportProps {
   title: string;
   disabled: boolean;
@@ -141,10 +140,8 @@ export default function MenuBar() {
   }, [showPublish]);
 
   // Publish targets embed all assets: buildGameData with useCache=false so textures serialize to base64.
-  //
-  // Split into two reported phases because they fail for different reasons and take very different times:
-  // serializing the scene (embedding every texture) and then the build itself (script obfuscation, asset
-  // packing, zipping) — the latter runs in the project worker and is by far the longest thing the editor does.
+  // Split into two reported phases: serializing the scene (embedding every texture), then the build itself
+  // (script obfuscation, asset packing, zipping), which runs in the project worker.
   const runPublish = async (
     title: string,
     ship: (data: any) => Promise<string>,

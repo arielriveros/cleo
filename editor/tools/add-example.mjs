@@ -153,22 +153,27 @@ function printCatalogue(entries) {
 /**
  * The cover image, taken from the main scene's saved thumbnail. Absent is fine — the gallery has a glyph.
  *
- * In a format-2 export that thumbnail is a `{o,l}` chunk in assets.bin rather than a data URL, so this
- * reads the bytes straight out of the blob. Slicing it here is deliberate: the alternative is exempting
- * the manifest from packing, and then "no payload is left in the JSON" stops being true of the format.
+ * In a format-2 export that thumbnail is not a data URL any more: `packBundleAssets` walks the manifest
+ * too and replaces it with a `{ $url: { o, l }, mime }` marker into assets.bin. So this reads the bytes
+ * straight out of the blob. Slicing it here is deliberate — the alternative is exempting the manifest
+ * from packing, and then "no payload is left in the JSON" stops being true of the format.
+ *
+ * `thumbnailChunk` is accepted as well. It never appears in anything the packer writes; it is kept
+ * because a reader that only knew that spelling was what this function shipped with, and dropping the
+ * branch buys nothing.
  */
 async function writeThumbnail(dir, manifest) {
   const metas = manifest.sceneMetas ?? [];
   const main = metas.find(m => m.id === manifest.mainSceneId) ?? metas[0];
+  const chunk = main?.thumbnail?.$url ?? main?.thumbnailChunk;
 
   let bytes = null;
   const match = typeof main?.thumbnail === 'string' && main.thumbnail.match(/^data:image\/\w+;base64,(.+)$/s);
   if (match) {
     bytes = Buffer.from(match[1], 'base64');
-  } else if (main?.thumbnailChunk) {
-    const { o, l } = main.thumbnailChunk;
+  } else if (chunk && typeof chunk.o === 'number' && typeof chunk.l === 'number') {
     const blob = await fs.readFile(path.join(dir, 'assets.bin')).catch(() => null);
-    if (blob && o + l <= blob.length) bytes = blob.subarray(o, o + l);
+    if (blob && chunk.o + chunk.l <= blob.length) bytes = blob.subarray(chunk.o, chunk.o + chunk.l);
   }
 
   if (!bytes) return false;

@@ -2,10 +2,9 @@ import React from 'react'
 import { useProject } from '../ProjectContext'
 import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 
-// Shown when unsaved edits are about to be lost: `openScene` parks a promise (confirmUnsavedScene) when
-// switching away from a dirty scene, and `closeTab` parks the same one when closing a dirty asset tab.
-// This modal resolves it: Save writes the asset then proceeds, Discard drops the edits and proceeds,
-// Cancel aborts. Mounted globally in Editor.
+// Shown when unsaved edits are about to be lost. `openScene` and `closeTab` park a promise
+// (confirmUnsavedScene) that this modal resolves: Save writes then proceeds, Discard drops the edits and
+// proceeds, Cancel aborts. Mounted globally in Editor.
 export default function UnsavedSceneModal() {
   const { pendingSceneConfirm, resolveSceneConfirm } = useProject()
 

@@ -1,13 +1,6 @@
 // Attaching a published game's SHARED animation clips to the characters that use them.
-//
-// A clip resolved from a shared `.anim` asset is not written into any serialized node — see
-// `AnimatedModel.serialize`, which drops any clip carrying an `assetId`. Without that, a walk shared by
-// two characters would ship once per character AND once per placement of each. So the game data instead
-// carries the clips ONCE, in their source rig's space (`data.animations`), plus which model asset uses
-// which (`data.modelAnimations`), and they are retargeted onto each character here, at scene load.
-//
-// The retarget is the same engine code the editor uses; the cost is one pass per (model, animation) pair
-// for the whole session, memoised below, not one per placement.
+// Clips ship once in their source rig's space (`data.animations`) plus which model asset uses which
+// (`data.modelAnimations`), and are retargeted onto each character at scene load, memoised per model.
 
 import {
   AnimatedModel, ModelNode, buildBoneMapping, retargetAnimation, Logger,
@@ -61,8 +54,7 @@ function modelIdOf(node: Node | null | undefined): string | undefined {
 /**
  * Resolve a game's shared animations onto every placed character in `scene`.
  *
- * Safe to call for a game with no shared animations (every published build before this existed): it
- * returns immediately when the data carries none.
+ * Returns immediately when the data carries no shared animations.
  */
 export function attachSharedAnimations(scene: Scene, data: PublishedAnimations): void {
   const assets = data.animations;
@@ -70,7 +62,7 @@ export function attachSharedAnimations(scene: Scene, data: PublishedAnimations):
   if (!assets?.length || !byModel) return;
 
   const assetById = new Map(assets.map(a => [a.id, a]));
-  // (model asset id -> clips), computed once per model however many placements it has.
+  // model asset id -> clips, computed once per model however many placements it has.
   const perModel = new Map<string, Animation[]>();
   let attached = 0;
 

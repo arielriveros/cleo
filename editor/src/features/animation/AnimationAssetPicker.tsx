@@ -3,15 +3,8 @@ import { useAssetLibrary } from '../AssetLibraryContext'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { cn, TextInput, Hint } from '../../components/ui'
 
-// Linking shared `.anim` assets to a model — the animation half of what TextureInspector does for maps.
-//
-// The whole shared-clip stack already existed (a `.anim` stores its clips in the SOURCE rig's space and is
-// retargeted per model at use), and the asset explorer already emits `text/cleo-animation` when one is
-// dragged out — but nothing consumed it, and nothing displayed a model's `animationIds`. The only way to
-// attach a clip was to import a file, which meant re-importing the same walk for every character.
-//
-// The link lives on the MODEL asset, deliberately: that is what makes one stored walk play on every
-// placement of a character rather than on the one node that happened to be selected.
+// Links shared `.anim` assets to a model. The link lives on the MODEL asset, not the node, so one stored
+// clip plays on every placement of a character.
 
 export default function AnimationAssetPicker(props: {
   /** The model asset to link to, or null when the node has no asset yet. */
@@ -32,8 +25,7 @@ export default function AnimationAssetPicker(props: {
   const link = async (animationId: string) => {
     setOpen(false)
     setQuery('')
-    // A node that never came from the library has nothing to hang the link on; adopt it first rather than
-    // making the user go and create a model asset by hand.
+    // A node that never came from the library has nothing to hang the link on, so adopt it first.
     const modelId = props.modelId ?? (await props.onNeedModel?.()) ?? null
     if (modelId) linkAnimationToModel(modelId, animationId)
   }

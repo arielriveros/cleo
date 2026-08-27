@@ -2,13 +2,10 @@ import { TextureManager } from 'cleo'
 
 // Waiting for a texture to finish decoding.
 //
-// `TextureManager.addTextureFromBase64`/`addTextureFromBytes` register an id SYNCHRONOUSLY and decode the
-// image asynchronously — `Texture.data` stays null for the whole decode window, and the engine exposes no
-// promise, callback or event for when that ends. So anything that needs the decoded pixels (a thumbnail
-// capture, or reading an atlas's dimensions) has to poll.
-//
-// The one exception is `addTextureFromData`, which takes an already-decoded HTMLImageElement and is
-// therefore ready the moment it returns. Prefer it when you control the load — see importAtlasImage.
+// `TextureManager.addTextureFromBase64`/`addTextureFromBytes` register an id SYNCHRONOUSLY and decode
+// asynchronously, with no promise, callback or event for when that ends — so anything needing the decoded
+// pixels has to poll. `addTextureFromData` is the exception: it takes an already-decoded
+// HTMLImageElement and is ready the moment it returns.
 
 /** The decoded image behind a texture id, or null while it is still decoding (or if it is not an image). */
 export function textureImage(id: string): HTMLImageElement | null {
@@ -29,9 +26,8 @@ function isReady(id: string): boolean {
 
 /**
  * Wait until every referenced texture has finished decoding, then yield one frame so the GPU upload lands.
- *
- * Used before a thumbnail capture — screenshotting too early captures an untextured mesh. Gives up after
- * `timeoutMs` rather than hanging on a texture that will never decode.
+ * Must precede a thumbnail capture; screenshotting early captures an untextured mesh.
+ * Gives up after `timeoutMs` rather than hanging on a texture that will never decode.
  */
 export async function awaitTexturesReady(ids: string[], timeoutMs = 10000): Promise<void> {
   const start = performance.now()
@@ -43,9 +39,7 @@ export async function awaitTexturesReady(ids: string[], timeoutMs = 10000): Prom
 /**
  * The decoded image for one texture id, waiting for it if it is still loading. Null on timeout, or when the
  * id names something that is not an image.
- *
- * This is what any consumer reading an image's PIXEL DIMENSIONS needs: `naturalWidth` is 0 until decode
- * lands, and a caller that reads it too early silently records a 0x0 image.
+ * Anything reading PIXEL DIMENSIONS must go through this: `naturalWidth` is 0 until the decode lands.
  */
 export async function awaitTextureImage(id: string, timeoutMs = 10000): Promise<HTMLImageElement | null> {
   if (!id) return null

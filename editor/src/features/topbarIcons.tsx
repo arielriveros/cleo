@@ -23,8 +23,7 @@ export const CheckIcon = () => (<S><path d='M5 13l4 4L19 7' /></S>);
 export const AlertIcon = () => (<S><path d='M12 3l9 16H3Z' /><path d='M12 10v4' /><path d='M12 17h.01' /></S>);
 // Panel grid — restore the default dock layout.
 export const LayoutIcon = () => (<S><rect x='3' y='4' width='18' height='16' rx='1.5' /><path d='M9 4v16M9 12h12' /></S>);
-// Stacked folders — the project browser. Deliberately a folder rather than a document: a project is the
-// container everything else lives in.
+// Stacked folders — the project browser.
 export const ProjectsIcon = () => (<S><path d='M3 8V6a1 1 0 0 1 1-1h4l2 2h6a1 1 0 0 1 1 1v1' /><path d='M2.5 10h17l-1.6 8.2a1 1 0 0 1-1 .8H5.1a1 1 0 0 1-1-.8Z' /></S>);
 
 // Playback: filled marks (fill = currentColor) so they read as solid controls at 25px, unlike the

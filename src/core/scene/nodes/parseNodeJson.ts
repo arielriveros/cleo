@@ -10,6 +10,7 @@ import { LightProbeNode } from "./lightProbeNode";
 import { SkyboxNode } from "./skyboxNode";
 import { VolumetricCloudsNode } from "./volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./skyAtmosphereNode";
+import { SkyLightNode } from "./skyLightNode";
 import { CameraNode } from "./cameraNode";
 import { SpriteNode } from "./spriteNode";
 import { AnimatedSpriteNode } from "./animatedSpriteNode";
@@ -21,20 +22,9 @@ import { UIButtonNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInpu
 /**
  * Reconstruct a serialized subtree under `parent`, dispatching on its `type`.
  *
- * `Node.parse` alone always builds a plain Node, so anything routed through it loses its subclass — a model
- * comes back as an empty transform. Every path that materializes a subtree (scene parse, runtime
- * `Scene.instantiate`, the editor's template/model instantiation) goes through here, so a new node type is
- * registered in exactly one place. `ModelNode.parse` detects animated vs static models itself, so skinned
- * meshes round-trip through the single `'model'` case.
- *
- * Kept as an exhaustive `switch` rather than a lookup table on purpose: one visible list of every type the
- * engine can rebuild is worth more than the indirection would save, and a missing case is obvious here in a
- * way a missing registration call would not be.
- *
- * This module is the top of the node graph — it imports every subclass and nothing imports it back. The
- * `setChildParser` call below is what lets the base class recurse into children without knowing any of
- * them; it rides along with the import rather than needing a side-effect-only import somewhere, because
- * both `scene.ts` and the `cleo` barrel already import `parseNodeJson` by name.
+ * Every path that materializes a subtree must route through here: `Node.parse` alone builds a plain Node
+ * and drops the subclass. This module is the top of the node graph — it imports every subclass and nothing
+ * imports it back, which is why the `setChildParser` wiring below lives here.
  */
 export function parseNodeJson(parent: Node, json: any): void {
   switch (json?.type) {
@@ -49,6 +39,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'tilemap': TilemapNode.parse(parent, json); break;
     case 'volumetricClouds': VolumetricCloudsNode.parse(parent, json); break;
     case 'skyAtmosphere': SkyAtmosphereNode.parse(parent, json); break;
+    case 'skyLight': SkyLightNode.parse(parent, json); break;
     case 'lodGroup': LodGroupNode.parse(parent, json); break;
     case 'cameraRig': CameraRigNode.parse(parent, json); break;
     case 'uiRoot': UIRootNode.parse(parent, json); break;

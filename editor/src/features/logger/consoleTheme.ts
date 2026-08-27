@@ -1,7 +1,6 @@
-// console-feed's <Console> is themed through a flat `styles` object. Rather than hardcoding hexes,
-// the values are read from the design tokens in index.css so the console can't drift from the rest of
-// the editor. Read lazily (not at module init) because index.css is injected by style-loader after
-// this module's import is evaluated.
+// console-feed's <Console> is themed through a flat `styles` object, filled from the index.css design
+// tokens. Must be read lazily, not at module init: style-loader injects index.css after this module's
+// import is evaluated.
 import { token as color } from '../../utils/cssTokens';
 
 type ConsoleStyles = Record<string, any>;

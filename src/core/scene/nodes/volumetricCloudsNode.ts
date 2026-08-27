@@ -52,9 +52,8 @@ export interface VolumetricCloudsOptions {
 }
 
 /**
- * Scene-wide volumetric cloud layer. Holds only configuration (no GPU resources) — the Renderer
- * discovers it as a singleton off the Scene (like the skybox) and runs a single fullscreen
- * raymarch pass, so all of these values are plain serializable getters/setters driven by the editor.
+ * Scene-wide volumetric cloud layer. Holds only configuration, no GPU resources — the renderer
+ * discovers it as a scene singleton and runs a single fullscreen raymarch pass.
  */
 export class VolumetricCloudsNode extends Node {
     // Shape
@@ -132,14 +131,11 @@ export class VolumetricCloudsNode extends Node {
         this._lightSteps = options.lightSteps ?? 5;
         this._maxDistance = options.maxDistance ?? 60000;
         this._jitter = options.jitter ?? true;
-        // Half resolution by default. The raymarch is the single most expensive pass in a cloudy
-        // frame and it produces a low-frequency image, so the full-res default was paying 4x the ray
-        // count for detail the upsample filter cannot even show. Raise it to 1.0 for a still capture.
+        // Half resolution by default: the raymarch is the most expensive pass in a cloudy frame and
+        // produces a low-frequency image. Raise to 1.0 for a still capture.
         this._resolutionScale = options.resolutionScale ?? 0.5;
         // Bayer-subset temporal reprojection: trace 1/16 of the pixels per frame and reconstruct the
-        // rest from reprojected history. On by default because the raymarch dominates a cloudy frame;
-        // the cost is some ghosting under fast camera or wind motion, which is why it can be turned
-        // off (and is, at the Ultra tier and during thumbnail capture).
+        // rest from reprojected history. Costs ghosting under fast camera or wind motion.
         this._temporalUpscale = options.temporalUpscale ?? true;
 
         this._enabled = options.enabled ?? true;
@@ -278,6 +274,3 @@ export class VolumetricCloudsNode extends Node {
         Node.finishParse(node, parent, json);
     }
 }
-
-/** Config for a SkyAtmosphereNode. Every field is optional so freshly-created nodes and old saves
- *  both fall back to Earth-like defaults (a clear midday blue sky). */

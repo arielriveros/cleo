@@ -6,16 +6,14 @@ import { loadProject, ProjectPrefs } from './projectStorage';
 import { cryptoRandomId } from './ids';
 import { metaKey, sceneKey, scenePrefix } from './storageKeys';
 
-// Multi-scene project storage. The project is a small meta record (scene list + which scene is main
-// and which was last open) plus one kv blob per scene. Scenes are stored one-per-key rather than as
-// a single array because a scene blob embeds full vertex data — one array key would rewrite every
-// scene's megabytes on each save.
+// Multi-scene project storage: a small meta record (scene list, which scene is main, which was last open)
+// plus one kv blob per scene. One key per scene, never a single array — a scene blob embeds full vertex
+// data, so an array key rewrites every scene's megabytes on each save.
 //
-// The legacy single-scene format (one blob under 'cleo_project') is migrated on first boot; the
-// legacy key is intentionally left in place for one release as a rollback backstop.
+// The legacy single-scene blob under 'cleo_project' is migrated on first boot and left in place as a
+// rollback backstop.
 
-// Key names live in storageKeys.ts (the single registry) and are produced by functions, never constants —
-// see that file for why. Re-exported here so existing importers keep their import path.
+// Key names live in storageKeys.ts and are produced by functions, never constants. Re-exported here.
 export { sceneKey, scenePrefix };
 
 /** Asset ids a scene references, captured at save time so delete warnings can see closed scenes. */
@@ -38,12 +36,8 @@ export interface SceneMeta {
   refs?: SceneRefs;
   /**
    * The camera rig this scene is authored with: '2D' is an orthographic pan/zoom, '3D' is free-fly.
-   *
-   * Optional on purpose, and NOT a ProjectMeta.version bump: this used to be one project-wide preference
-   * (ProjectPrefs.dimension), so old metas simply don't have it. An optional field is compatible in both
-   * directions — old readers ignore it, new readers fall back to the project pref then '3D' — whereas
-   * bumping ProjectMeta.version would be a needless breaking change for a purely additive field.
-   * Migration is therefore a read-time fallback, persisted on the next scene save.
+   * Optional rather than a ProjectMeta.version bump, so it stays compatible both ways: a reader falls back
+   * to ProjectPrefs.dimension and then '3D', and the next scene save persists it.
    */
   dimension?: '2D' | '3D';
 }
@@ -56,8 +50,8 @@ export interface ProjectMeta {
   prefs?: ProjectPrefs;
 }
 
-// The per-scene blob: exactly the buildGameData output (scripts/bodies/triggers embedded per node,
-// textures NOT embedded — they live in the texture store) plus save-time metadata.
+// The per-scene blob: the buildGameData output (scripts/bodies/triggers embedded per node, textures NOT —
+// they live in the texture store) plus save-time metadata.
 export interface SceneAssetData {
   scene: any;
   ui?: { version: number; elements: any[] };
@@ -100,9 +94,8 @@ export async function deleteSceneData(id: string): Promise<void> {
 }
 
 /**
- * One-time migration of the legacy single-scene project ('cleo_project') into the multi-scene
- * layout: the blob becomes the "Main" scene, set as both main and open. Returns the new meta, or
- * null when there is no legacy project either (fresh install).
+ * One-time migration of the legacy single-scene project ('cleo_project') into the multi-scene layout: the
+ * blob becomes the "Main" scene, set as both main and open. Null when there is no legacy project.
  */
 export async function migrateLegacyProject(): Promise<ProjectMeta | null> {
   const legacy = await loadProject();
@@ -114,9 +107,8 @@ export async function migrateLegacyProject(): Promise<ProjectMeta | null> {
     config: legacy.config,
     savedAt: legacy.savedAt ?? Date.now(),
   };
-  // Legacy exported blobs may embed textures; the texture store owns them now, but keeping the
-  // embedded copies would balloon the per-scene blob forever. They were already registered into the
-  // TextureManager by the original load path, so dropping them here is safe.
+  // A legacy blob may embed textures. Dropping them is safe — the original load path already registered
+  // them in the TextureManager, and the texture store owns them from here on.
   await idbSet(sceneKey(id), data);
   const meta: ProjectMeta = {
     version: 2,

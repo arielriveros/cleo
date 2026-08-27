@@ -19,11 +19,9 @@ import type { BodyDescription, ShapeDescription } from '../features/EngineContex
 import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/DebugVisibilityContext';
 
 /**
- * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes)
- * are derived from the objects themselves rather than authored by hand. `reconcileEditorHelpers`
- * is idempotent: it adds any missing helper and removes any stale one, so it can be run on every
- * scene/physics change. All helper nodes are named with an `__editor__`/`__debug__` prefix, so they
- * are already excluded from selection, serialization, play and published builds.
+ * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes),
+ * derived from the objects themselves. Every helper node's name must carry the `__editor__`/`__debug__`
+ * prefix — that is what excludes it from selection, serialization, play and published builds.
  */
 
 const LIGHT_ICON = '__editor__LightSprite';
@@ -35,8 +33,7 @@ const SHAPE_PREFIX = '__debug__shape_';
 const AABB_PREFIX = '__debug__aabb_';
 const TERRAIN_PREFIX = '__debug__terrain_';
 
-// Per-scene cache of the last-built shapes signature for each body/trigger id, so unchanged debug
-// subtrees aren't torn down and rebuilt on every SCENE_CHANGED.
+// Per-scene cache of the last-built shapes signature for each body/trigger id.
 const shapeSignatures = new WeakMap<Scene, Map<string, string>>();
 const sigMapFor = (scene: Scene): Map<string, string> => {
   let m = shapeSignatures.get(scene);
@@ -47,14 +44,9 @@ const sigMapFor = (scene: Scene): Map<string, string> => {
 const isHelperName = (name: string) => name.startsWith('__editor__') || name.startsWith('__debug__');
 
 /**
- * Every mesh vertex of `root` *and its descendants*, expressed in root-local space — the space
- * collider shapes are authored in. A prop imported as several child meshes must contribute all of
- * them, or the hull only wraps the parent's own geometry and visibly cuts through the rest.
- * Editor helpers and gizmos are always skipped.
- *
- * `includeSkinned` is the only thing that varies between callers: a hull must exclude skinned meshes
- * (their bind pose doesn't follow the animation, so the hull would be wrong the moment the character
- * moves), while fitting a primitive's starting size to the bind pose is perfectly reasonable.
+ * Every mesh vertex of `root` *and its descendants*, in root-local space — the space collider shapes
+ * are authored in. Editor helpers and gizmos are skipped.
+ * `includeSkinned` must be false for a hull: a skinned bind pose does not follow the animation.
  */
 function collectMeshPositions(root: Node, includeSkinned: boolean): number[][] {
   const out: number[][] = [];
@@ -94,22 +86,14 @@ export function collectHullPositions(root: Node): number[][] | null {
   return out.length >= 4 ? out : null;
 }
 
-/**
- * Fraction of vertices a fitted capsule's radius must cover. See `boundsFromPoints`.
- */
+/** Fraction of vertices a fitted capsule's radius must cover. See `boundsFromPoints`. */
 const RADIUS_PERCENTILE = 0.8;
 
 /**
  * AABB of a point cloud, plus the radius a capsule around its Y axis should use.
- *
- * `radius` is deliberately NOT `max(halfX, halfZ)`. Characters are authored in a T- or A-pose, so the
- * X extent is the ARM SPAN (~0.9) rather than the torso (~0.2); a capsule fitted that way would have
- * `height <= 2 * radius` and collapse into a sphere — exactly the case this is meant to serve. So it
- * is the RADIUS_PERCENTILEth percentile of each vertex's distance from the vertical axis, which the
- * torso dominates and outstretched limbs cannot inflate.
- *
- * Split out from `meshBounds` so it can be exercised without a GL context (Model allocates buffers on
- * construction, so a real ModelNode can't be built headless).
+ * `radius` must NOT be `max(halfX, halfZ)`: a T-posed character's X extent is the arm span, which would
+ * collapse the capsule into a sphere. It is the RADIUS_PERCENTILEth percentile of the distance from the
+ * vertical axis. GL-free so it can be exercised headless.
  */
 export function boundsFromPoints(points: number[][]): { center: Vec.vec3; half: Vec.vec3; radius: number } | null {
   if (!points.length) return null;
@@ -129,23 +113,19 @@ export function boundsFromPoints(points: number[][]): { center: Vec.vec3; half: 
 }
 
 /**
- * The size a new collider should start at, fitted to `root` and its descendants. All values are in
- * root-local (pre-scale) units, which is what shape descriptors are authored in — `setShapes` applies
- * the owner's world scale on top. Null when the subtree has no mesh, so the caller keeps its default.
+ * The size a new collider should start at, fitted to `root` and its descendants. Values are in
+ * root-local (pre-scale) units; `setShapes` applies the owner's world scale on top.
+ * Null when the subtree has no mesh, so the caller keeps its default.
  */
 export function meshBounds(root: Node): { center: Vec.vec3; half: Vec.vec3; radius: number } | null {
   return boundsFromPoints(collectMeshPositions(root, true));
 }
 
 /**
- * Build a single wireframe mesh visualizing one physics shape, at unit size (planes get no
- * wireframe). `color` is red for bodies, green for triggers. The transform is applied separately by
- * `applyShapeTransform`, which has to run every frame to track the owner's scale.
- *
- * A capsule is the exception and is baked at FINAL size from `scale`: its caps stay spherical under a
- * non-uniform owner scale while only the straight section stretches, which a scaled unit mesh cannot
- * express — it would shear the caps into ellipsoids. `shapesSignature` therefore folds the owner's
- * scale into a capsule's entry, so the mesh is rebuilt whenever that scale changes.
+ * Build a single wireframe mesh visualizing one physics shape, at unit size (planes get no wireframe).
+ * `color` is red for bodies, green for triggers; `applyShapeTransform` supplies the transform per frame.
+ * A capsule is the exception, baked at FINAL size from `scale` — its caps must stay spherical under a
+ * non-uniform scale, so `shapesSignature` folds that scale into its entry.
  */
 export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, number, number], scale: Vec.vec3): ModelNode | null {
   let model: Model | null;
@@ -165,9 +145,8 @@ export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, num
       break;
     }
     case 'convex':
-      // Geometry.ConvexHull emits each hull edge once as a gl.LINES pair AND fills normals/uvs —
-      // both are required: wireframe materials consume the index buffer as line pairs, and the VAO
-      // is strided by the shader's attribute list, so a positions-only geometry scrambles.
+      // Geometry.ConvexHull must fill normals/uvs as well as the gl.LINES index pairs: the VAO is
+      // strided by the shader's attribute list, so a positions-only geometry scrambles.
       model = new Model(
         Geometry.ConvexHull(shape.vertices, shape.faces),
         Material.Basic({ color }, { wireframe: true })
@@ -181,9 +160,8 @@ export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, num
 }
 
 /**
- * A capsule's final scaled dimensions, mirroring `Shape.Capsule` exactly: the radius grows radially
- * by max(X, Z) while the total height follows Y, and the straight section is whatever is left over
- * once the two caps are accounted for — which a lopsided scale can drive to zero, leaving a sphere.
+ * A capsule's final scaled dimensions, mirroring `Shape.Capsule`: the radius grows by max(X, Z), the
+ * total height follows Y, and the straight section is the remainder — possibly zero, leaving a sphere.
  */
 function capsuleDims(shape: { radius: number, height: number }, scale: Vec.vec3): { radius: number, cylinder: number } {
   const sx = Math.abs(scale[0]), sy = Math.abs(scale[1]), sz = Math.abs(scale[2]);
@@ -192,13 +170,9 @@ function capsuleDims(shape: { radius: number, height: number }, scale: Vec.vec3)
 }
 
 /**
- * Place one wireframe exactly where the physics engine puts the collider it stands for. A node's TRS
- * applies scale before rotation, which is the same order `setShapes` (node.ts) and cannon use: the
- * shape's dimensions and offset are scaled by the owner's world scale, then rotated. Getting this
- * wrong is invisible on an unrotated, unscaled node and badly wrong on any other.
- *
- * Scale is resolved per shape type to mirror `Shape.*` in the engine — a sphere has no ellipsoid
- * form in cannon, so it takes the dominant axis, and a cylinder takes max(X, Z) radially.
+ * Place one wireframe exactly where the physics engine puts the collider it stands for. Dimensions and
+ * offset are scaled by the owner's world scale and THEN rotated — the order `setShapes` and cannon use.
+ * Scale resolves per shape type: a sphere takes the dominant axis, a cylinder max(X, Z) radially.
  */
 function applyShapeTransform(node: ModelNode, shape: ShapeDescription, scale: Vec.vec3) {
   const sx = Math.abs(scale[0]), sy = Math.abs(scale[1]), sz = Math.abs(scale[2]);
@@ -219,7 +193,7 @@ function applyShapeTransform(node: ModelNode, shape: ShapeDescription, scale: Ve
       break;
     }
     case 'capsule':
-      // Already baked at final size by buildShapeDebugMesh — scaling it again would double-apply.
+      // Already baked at final size by buildShapeDebugMesh; scaling again would double-apply.
       node.setUniformScale(1);
       break;
     case 'convex':
@@ -229,13 +203,9 @@ function applyShapeTransform(node: ModelNode, shape: ShapeDescription, scale: Ve
 }
 
 /**
- * Cheap identity of a shape list. A baked convex hull carries hundreds of numbers, so hashing the
- * whole descriptor on every scene change would be wasteful — its vertex count and transform are
- * enough to notice a regenerate.
- *
- * Only a capsule folds in the owner's `scale`, because it is the only mesh baked at final size; every
- * other type is a unit mesh that `applyShapeTransform` rescales per frame, and including scale for
- * those would rebuild their geometry on every drag of the scale gizmo for no gain.
+ * Cheap identity of a shape list. A convex hull contributes only its vertex count and transform.
+ * Only a capsule folds in the owner's `scale` — it is the one mesh baked at final size; folding scale
+ * into the others would rebuild their geometry on every drag of the scale gizmo.
  */
 function shapesSignature(shapes: ShapeDescription[], scale: Vec.vec3): string {
   return shapes.map((s) => {
@@ -254,12 +224,11 @@ function shapesSignature(shapes: ShapeDescription[], scale: Vec.vec3): string {
   }).join(';');
 }
 
-// Attach a billboard light icon under a light, tinted to the light's current diffuse color.
+// Attach a billboard light icon under a light, tinted to its current diffuse color.
 function ensureLightIcon(light: LightNode) {
   if (light.getChildByName(LIGHT_ICON).length) return;
   const d = light.light.diffuse;
-  // Icons are whole-image sprites, so they go through the synthetic 1x1 tileset rather than the
-  // tileset library — there is no asset for them and none should show up in the explorer.
+  // Icons use the synthetic 1x1 tileset, never the tileset library — no asset may appear in the explorer.
   const icon = new SpriteNode(LIGHT_ICON, Sprite.fromTexture('__editor__light_icon', {
     tint: [d[0], d[1], d[2]],
   }));
@@ -267,8 +236,8 @@ function ensureLightIcon(light: LightNode) {
   light.addChild(icon);
 }
 
-// Attach a camera frustum wireframe under a camera. The onUpdate cancels the parent's scale so the
-// gizmo keeps a constant size regardless of the camera node's scale.
+// Attach a camera frustum wireframe under a camera; the onUpdate cancels the parent's scale so the
+// gizmo keeps a constant size.
 function ensureCameraGizmo(camera: CameraNode) {
   if (camera.getChildByName(CAMERA_GIZMO).length) return;
   const model = new Model(
@@ -285,8 +254,7 @@ function ensureCameraGizmo(camera: CameraNode) {
   camera.addChild(gizmo);
 }
 
-// Attach a billboard icon under a light probe so it is visible in the viewport (tinted cyan). Mirrors
-// the light icon: a camera-facing sprite rather than a wireframe sphere.
+// Attach a billboard icon under a light probe so it is visible in the viewport (tinted cyan).
 function ensureProbeHelper(probe: LightProbeNode) {
   if (probe.getChildByName(PROBE_HELPER).length) return;
   const icon = new SpriteNode(PROBE_HELPER, Sprite.fromTexture('__editor__probe_icon', {
@@ -297,10 +265,9 @@ function ensureProbeHelper(probe: LightProbeNode) {
 }
 
 /**
- * Ensure a top-level debug node that follows `target` and carries one wireframe per shape. The
- * meshes are rebuilt only when the shapes signature changes, but the per-frame `onUpdate` is
- * re-bound on every reconcile so it closes over the *current* shape list — the group outlives any
- * given edit, and a stale closure would keep drawing the previous offsets.
+ * Ensure a top-level debug node that follows `target` and carries one wireframe per shape. The meshes
+ * rebuild only when the shapes signature changes, but the per-frame `onUpdate` must be re-bound on every
+ * reconcile: the group outlives an edit and a stale closure keeps drawing the previous offsets.
  */
 function ensureShapeGroup(
   scene: Scene,
@@ -320,8 +287,7 @@ function ensureShapeGroup(
     scene.addNode(group);
   }
 
-  // Track the owner's transform, and place each wireframe exactly where its collider will be. Both
-  // have to run every frame: dragging the transform gizmo changes neither the shapes nor their
+  // Both must run every frame: dragging the transform gizmo changes neither the shapes nor their
   // signature, but it does move and rescale every collider.
   const debug = group;
   debug.onUpdate = () => {
@@ -335,7 +301,7 @@ function ensureShapeGroup(
 
   if (!isNew && cache.get(debugName) === sig) return; // shapes unchanged — keep existing children
 
-  // (Re)build shape children from scratch so type/size/count changes and shrinks are all handled.
+  // Rebuild from scratch so type/size/count changes and shrinks are all handled.
   for (const child of Array.from(debug.children)) debug.removeChild(child);
   shapes.forEach((shape, i) => {
     const mesh = buildShapeDebugMesh(shape, color, target.worldScale);
@@ -344,19 +310,11 @@ function ensureShapeGroup(
   cache.set(debugName, sig);
 }
 
+const HULL_VERSION = 5;
 /**
- * Reconcile all editor helper nodes on `scene` against its current contents and the physics
- * `bodies`/`triggers` maps. Adds missing helpers, rebuilds changed physics wireframes, and removes
- * stale ones. Idempotent — safe to call on every scene/physics change (in edit mode only).
+ * Rebuild any convex shape not stamped with HULL_VERSION from its node's current geometry. When the
+ * geometry is gone the shape is still stamped, so the rebuild is not retried on every reconcile.
  */
-/**
- * Upgrade legacy convex hulls in place. v1 hulled a sampled vertex subset (can cut inside the
- * mesh); v2's half-space clipper had numerical failures on vertices lying exactly on a cutting
- * plane. v3 is the AABB-anchored carve with an absolute containment audit. Rebuild any convex
- * shape without the v3 marker from the node's current geometry; if the geometry is gone, just
- * stamp it so the rebuild isn't retried every reconcile.
- */
-const HULL_VERSION = 5; // 5 = greedy deepest-cut plane selection (angular FPS could fill the budget with box-parallel planes)
 function migrateConvexShapes(scene: Scene, shapeLists: Map<string, { shapes: ShapeDescription[] }>) {
   for (const [id, entry] of shapeLists) {
     if (!entry.shapes.some((s) => s.type === 'convex' && s.v !== HULL_VERSION)) continue;
@@ -377,9 +335,8 @@ function migrateConvexShapes(scene: Scene, shapeLists: Map<string, { shapes: Sha
 }
 
 // A per-node world-AABB wireframe (a unit cube stretched to the node's bounds each frame). Top-level so
-// it inherits no transform: `getBoundingBox()` already returns a world-space box, so the group carries
-// the box directly. `min`/`max` collapse to a zero extent for an empty geometry — clamped so the cube
-// stays a thin visible sliver rather than vanishing to a degenerate scale.
+// it inherits no transform: `getBoundingBox()` is already world-space. An empty geometry's zero extent
+// is clamped so the cube stays a thin sliver rather than a degenerate scale.
 function ensureAabbBox(scene: Scene, target: Node) {
   const name = `${AABB_PREFIX}${target.id}`;
   let group = scene.getNodesByName(name)[0] as ModelNode | undefined;
@@ -400,11 +357,10 @@ function ensureAabbBox(scene: Scene, target: Node) {
 }
 
 /**
- * Wireframe of a terrain's collision heightfield, in terrain-local space (the debug group is placed at
- * the landscape's world origin, exactly where `Terrain.setOrigin` puts the physics body). Vertices use
- * the same mapping as `Terrain._buildChunkGeometry` (x = -half + c*e, z = -half + r*e, y = height), so
- * the wireframe sits on the collided surface. Downsampled to ~64 quads per side — the collider is the
- * full grid, but a debug view only needs the shape.
+ * Wireframe of a terrain's collision heightfield, in terrain-local space (the debug group sits at the
+ * landscape's world origin, where `Terrain.setOrigin` puts the physics body). Vertices must use
+ * `Terrain._buildChunkGeometry`'s mapping: x = -half + c*e, z = -half + r*e, y = height.
+ * Downsampled to ~64 quads per side.
  */
 function buildTerrainDebugMesh(terrain: any): ModelNode | null {
   const R: number = terrain.resolution, size: number = terrain.size, e: number = terrain.elementSize;
@@ -439,8 +395,7 @@ function buildTerrainDebugMesh(terrain: any): ModelNode | null {
   return new ModelNode(TERRAIN_PREFIX, new Model(geometry, Material.Basic({ color: [1, 0, 0] }, { wireframe: true, castShadow: false })));
 }
 
-// Cheap identity of a terrain's heights so the (moderately expensive) wireframe is rebuilt only when the
-// surface is actually sculpted, not on every reconcile.
+// Cheap identity of a terrain's heights, so the wireframe rebuilds only when the surface is sculpted.
 function terrainSignature(terrain: any): string {
   const R: number = terrain.resolution, H: Float32Array = terrain.heights;
   let sum = 0;
@@ -449,8 +404,8 @@ function terrainSignature(terrain: any): string {
   return `${R}|${terrain.size}|${terrain.elementSize}|${H?.length ?? 0}|${sum.toFixed(3)}`;
 }
 
-// Ensure a terrain heightfield wireframe that follows the landscape's world origin, rebuilt when the
-// surface changes. `landscape` is a LandscapeNode (accessed structurally to avoid a hard type import).
+// Ensure a terrain heightfield wireframe following the landscape's world origin.
+// `landscape` is a LandscapeNode, accessed structurally to avoid a hard type import.
 function ensureTerrainDebug(scene: Scene, landscape: any) {
   const name = `${TERRAIN_PREFIX}${landscape.id}`;
   const sig = terrainSignature(landscape.terrain);
@@ -480,8 +435,7 @@ export function reconcileEditorHelpers(
   visibility?: DebugVisibility,
   channel: DebugChannel = 'editor',
 ) {
-  // With no settings supplied (or a category missing), fall back to the pre-menu behaviour: everything
-  // on in the editor channel, everything off at runtime.
+  // With no settings supplied (or a category missing): everything on in the editor, off at runtime.
   const show = (cat: DebugCategory): boolean =>
     visibility ? visibility[cat][channel] : channel === 'editor';
 
@@ -489,12 +443,10 @@ export function reconcileEditorHelpers(
   migrateConvexShapes(scene, triggers);
 
   const nodes = Array.from(scene.nodes);
-  // The camera the editor views through (its own __editor__Camera, or whatever is active) must not
-  // draw its own frustum model — it would appear stuck to the viewport.
+  // The camera the editor views through must not draw its own frustum; it would stick to the viewport.
   const viewCamera = scene.activeCamera;
 
-  // 1-3 + spawn markers. Type-driven child icons/gizmos, added or removed to match the toggle (skip
-  // editor/debug helper nodes themselves).
+  // 1-3 + spawn markers. Type-driven child icons/gizmos, added or removed to match the toggle.
   for (const node of nodes) {
     if (isHelperName(node.name)) continue;
 
@@ -507,8 +459,7 @@ export function reconcileEditorHelpers(
       if (show('probes') && !existing) ensureProbeHelper(node);
       else if (!show('probes') && existing) node.removeChild(existing);
     } else if (node instanceof CameraNode) {
-      // Every camera except the one being viewed through gets a frustum gizmo — reconcile both ways
-      // so a hijacked/active camera's stale gizmo is also cleaned up.
+      // Reconcile both ways so a hijacked/active camera's stale gizmo is cleaned up too.
       const existing = node.getChildByName(CAMERA_GIZMO)[0];
       const shouldHave = show('cameras') && node !== viewCamera;
       if (shouldHave && !existing) ensureCameraGizmo(node);
@@ -521,8 +472,7 @@ export function reconcileEditorHelpers(
     for (const [id, body] of bodies) {
       const target = scene.getNodeById(id);
       if (!target) continue;
-      // The group carries only the body's transform; the owner's scale is folded into each shape by
-      // `applyShapeTransform`, exactly as `setShapes` folds it into the collider.
+      // The group carries only the body's transform; `applyShapeTransform` folds the owner's scale in.
       ensureShapeGroup(scene, target, `${BODY_PREFIX}${id}`, body.shapes, [1, 0, 0], (debug) => {
         debug.setPosition(target.position);
         debug.setRotation(target.rotation);
@@ -555,8 +505,7 @@ export function reconcileEditorHelpers(
     }
   }
 
-  // 7. Remove stale (or now-hidden) top-level debug groups. A group goes when its category is off, its
-  // backing body/trigger/landscape/node is gone, or (for AABBs) its owner is no longer eligible.
+  // 7. Remove stale or now-hidden top-level debug groups.
   const cache = sigMapFor(scene);
   const landscapeIds = new Set<string>();
   for (const landscape of scene.landscapes) landscapeIds.add((landscape as any).id);

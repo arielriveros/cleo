@@ -41,6 +41,73 @@ struct SpotLight {
     outerCutOff: f32,   // cosine of the outer half-angle (smaller than cutOff)
 };
 
+/**
+ * Scene-wide sky light: the sky's own radiance, projected onto L2 spherical harmonics.
+ *
+ * NINE COEFFICIENTS IN A UNIFORM BLOCK, not a cubemap, and that is forced rather than chosen. The
+ * deferred lighting pass already binds 13 texture+sampler pairs against a hard 16 (measured on
+ * ANGLE/D3D11 as exactly the ES 3.00 minimum — see rhi/webgl2/capabilities.ts), and terrainForward
+ * cannot take a cube at all: its layer samplers occupy units 0-8. A cube-based sky light would light
+ * every surface in the scene EXCEPT the ground, which is most of a landscape.
+ *
+ * Irradiance is a low-frequency signal, so L2 is not a compromise here — nine coefficients reproduce
+ * a diffuse sky to within a percent or so of a convolved 32x32 cube, for zero samplers and no bake.
+ *
+ * `sh` holds the projection of RADIANCE (rgb in xyz, w unused); the cosine-lobe convolution that turns
+ * it into irradiance is folded into the constants in `skyIrradiance`.
+ *
+ * The array is vec4 rather than vec3 because WGSL forbids a uniform-address-space array whose element
+ * stride is under 16 bytes, exactly as chunks/shadows.wgsl documents for its per-cascade scalars.
+ */
+struct SkyLight {
+    sh: array<vec4<f32>, 9>,
+    intensity: f32,
+    /** i32, not bool: WGSL forbids bool in a uniform buffer. 0 = no sky light in the scene. */
+    enabled: i32,
+    _pad0: f32,
+    _pad1: f32,
+};
+
+/**
+ * Diffuse indirect light arriving at a surface facing `n`, in the SAME UNITS the probe irradiance cube
+ * carries — multiply by albedo directly, exactly as `probeIBL` does with its cube fetch. Keeping the
+ * two in one unit is what lets a sky light and a light probe be mixed in a scene without one of them
+ * being silently several times the other.
+ *
+ * Ramamoorthi & Hanrahan 2001. The c constants ARE the cosine-lobe convolution — they are what makes
+ * this an irradiance evaluation rather than a radiance reconstruction.
+ *
+ * THE 1/PI IS NOT A FUDGE, and it is the whole reason this comment is long. Ramamoorthi's form returns
+ * irradiance E; Lambertian outgoing radiance is albedo/PI * E. `irradiance.wgsl` already folds that
+ * division in — for a uniform sky of radiance L its loop yields `PI * L * mean(cos*sin) = PI * L * 1/PI
+ * = L`, not PI*L — so the cube is E/PI and its consumers multiply by albedo alone. Returning E here
+ * instead would make a sky light PI times brighter than the identical scene lit by a probe, which is
+ * exactly what the first measurement of this function showed: a fully blown-out white scene.
+ */
+fn skyIrradiance(sky: SkyLight, n: vec3<f32>) -> vec3<f32> {
+    if (sky.enabled == 0) { return vec3<f32>(0.0); }
+
+    let c1 = 0.429043; let c2 = 0.511664; let c3 = 0.743125;
+    let c4 = 0.886227; let c5 = 0.247708;
+    let x = n.x; let y = n.y; let z = n.z;
+
+    let L00  = sky.sh[0].rgb;
+    let L1m1 = sky.sh[1].rgb; let L10 = sky.sh[2].rgb; let L11 = sky.sh[3].rgb;
+    let L2m2 = sky.sh[4].rgb; let L2m1 = sky.sh[5].rgb; let L20 = sky.sh[6].rgb;
+    let L21  = sky.sh[7].rgb; let L22 = sky.sh[8].rgb;
+
+    var e = c4 * L00
+          + 2.0 * c2 * (L11 * x + L1m1 * y + L10 * z)
+          + c3 * L20 * (z * z) - c5 * L20
+          + c1 * L22 * (x * x - y * y)
+          + 2.0 * c1 * (L2m2 * (x * y) + L21 * (x * z) + L2m1 * (y * z));
+
+    // A strongly directional sky drives the reconstruction negative in the unlit hemisphere. Clamping
+    // is not cosmetic: a negative irradiance subtracts from the direct term and punches black holes in
+    // whatever faces away from the sun.
+    return max(e, vec3<f32>(0.0)) * (sky.intensity / PI);
+}
+
 fn DistributionGGX(N: vec3<f32>, H: vec3<f32>, roughness: f32) -> f32 {
     let a = roughness * roughness;
     let a2 = a * a;

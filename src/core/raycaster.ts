@@ -16,9 +16,7 @@ export interface RaycastHit {
 }
 
 export class Raycaster {
-    /**
-     * Creates a ray from screen coordinates
-     */
+    /** Creates a ray from screen coordinates. */
     public static screenToRay(
         screenX: number, 
         screenY: number, 
@@ -26,21 +24,17 @@ export class Raycaster {
         screenHeight: number, 
         camera: Camera
     ): Ray {
-        // Convert screen coordinates to normalized device coordinates
         const x = (2.0 * screenX) / screenWidth - 1.0;
         const y = 1.0 - (2.0 * screenY) / screenHeight;
         
-        // Create ray in camera space
         const rayOrigin = vec3.create();
         const rayDirection = vec3.create();
         
         if (camera.type === 'perspective') {
-            // For perspective camera - ray starts at camera position
             rayOrigin[0] = 0;
             rayOrigin[1] = 0;
             rayOrigin[2] = 0;
             
-            // Calculate ray direction using the camera's field of view
             const fovRad = (camera.fov * Math.PI) / 180;
             const aspect = screenWidth / screenHeight;
             const tanHalfFov = Math.tan(fovRad / 2);
@@ -50,13 +44,9 @@ export class Raycaster {
             rayDirection[2] = -1.0;
             vec3.normalize(rayDirection, rayDirection);
         } else {
-            // Orthographic: parallel rays offset across the view plane, not fanned out from a point.
-            //
-            // The horizontal extents MUST go through the same aspect scaling the projection applies —
-            // Camera.projectionMatrix multiplies left/right by `ratio` and leaves top/bottom alone. Without
-            // it the picked X came out short by exactly the aspect factor: correct on the vertical
-            // centre-line and drifting further out toward each edge, which is what made tile painting in a
-            // 2D scene land away from the cursor.
+            // Orthographic: parallel rays offset across the view plane, not fanned out from a point. The
+            // horizontal extents MUST take the same aspect scaling Camera.projectionMatrix applies —
+            // left/right multiplied by `ratio`, top/bottom untouched.
             const left = camera.left * camera.ratio;
             const right = camera.right * camera.ratio;
             // Interpolated across the frustum rather than centred on 0, so an asymmetric one picks right too.
@@ -69,7 +59,6 @@ export class Raycaster {
             rayDirection[2] = -1.0;
         }
         
-        // Transform ray to world space
         const viewMatrix = camera.viewMatrix;
         const invViewMatrix = mat4.create();
         mat4.invert(invViewMatrix, viewMatrix);
@@ -77,14 +66,11 @@ export class Raycaster {
         const worldOrigin = vec3.create();
         const worldDirection = vec3.create();
         
-        // Transform ray origin to world space
         vec3.transformMat4(worldOrigin, rayOrigin, invViewMatrix);
         
-        // Transform ray direction to world space
-        // For direction vectors, we only apply rotation (no translation)
+        // A direction transforms by rotation only, so the translation column is stripped.
         const rotationMatrix = mat4.create();
         mat4.copy(rotationMatrix, invViewMatrix);
-        // Remove translation part
         rotationMatrix[12] = 0;
         rotationMatrix[13] = 0;
         rotationMatrix[14] = 0;
@@ -98,9 +84,7 @@ export class Raycaster {
         };
     }
     
-    /**
-     * Performs ray-sphere intersection test
-     */
+    /** Ray-sphere intersection test. */
     private static raySphereIntersection(
         ray: Ray, 
         center: vec3, 
@@ -127,9 +111,7 @@ export class Raycaster {
         return null;
     }
     
-    /**
-     * Performs ray-box intersection test (AABB)
-     */
+    /** Ray-box (AABB) intersection test. */
     private static rayBoxIntersection(
         ray: Ray, 
         min: vec3, 
@@ -140,7 +122,6 @@ export class Raycaster {
         
         for (let i = 0; i < 3; i++) {
             if (Math.abs(ray.direction[i]) < 1e-8) {
-                // Ray is parallel to the plane
                 if (ray.origin[i] < min[i] || ray.origin[i] > max[i]) {
                     return null;
                 }
@@ -167,20 +148,15 @@ export class Raycaster {
         return tMin > 0 ? tMin : tMax;
     }
     
-    /**
-     * Calculates bounding box for any node using the node's getBoundingBox method
-     */
+    /** Bounding box for any node, via the node's own getBoundingBox. */
     private static getBoundingBox(node: Node): { min: vec3, max: vec3 } {
         return node.getBoundingBox();
     }
     
     /**
-     * Performs a raycast against a set of nodes.
-     *
-     * Broad phase: ray-vs-AABB per node (`node.getBoundingBox()`). Narrow phase: when a node exposes
-     * a Bounding Volume Hierarchy (`node.getBVH()`, e.g. static meshes) the ray is refined against
-     * the actual triangles, so clicks inside a loose bounding box but off the geometry miss. Nodes
-     * without a BVH (sprites, lights, skinned meshes) keep AABB-granularity hits.
+     * Performs a raycast against a set of nodes. Broad phase is ray-vs-AABB per node; where a node
+     * exposes a BVH (`node.getBVH()`) the hit is refined against the actual triangles. Nodes without
+     * one (sprites, lights, skinned meshes) keep AABB-granularity hits.
      *
      * @param precise set to false to force AABB-only picking (skip the BVH narrow phase).
      */
@@ -195,16 +171,9 @@ export class Raycaster {
         for (const node of nodes) {
             if (!node.visible) continue;
 
-            // Skip editor/debug helper nodes (but keep gizmos raycastable), terrain, tilemaps and UI.
-            // Terrain and tilemaps are picked analytically by their own subsystems rather than by
-            // ray/AABB — and a tilemap's box spans everything it has ever painted, so without this skip
-            // it would swallow every click in a 2D scene.
-            //
-            // UI nodes are skipped because they are picked in SCREEN space, against their resolved rect,
-            // by the UI layer. They are not merely irrelevant to a world ray: `Node.getBoundingBox`
-            // falls back to a unit cube at the node's world position, so an entire HUD would otherwise
-            // be a stack of 1x1x1 boxes sitting at the origin — exactly where new nodes are created,
-            // swallowing clicks meant for whatever is actually there.
+            // Editor helpers (gizmos excepted), terrain, tilemaps and UI are never world-ray picked:
+            // terrain and tilemaps are picked analytically by their own subsystems, UI in SCREEN space
+            // against its resolved rect. Their AABBs here would swallow unrelated clicks.
             if ((node.name.startsWith('__editor__') && !node.name.includes('gizmo')) ||
                 node.name.startsWith('__debug__') ||
                 node.name.startsWith('__terrain_chunk__') ||
@@ -218,11 +187,9 @@ export class Raycaster {
             const distance = this.rayBoxIntersection(ray, boundingBox.min, boundingBox.max);
             if (distance === null || distance <= 0 || distance >= maxDistance) continue;
 
-            // Narrow phase against the node's BVH, if it has one.
             const bvh = precise ? node.getBVH() : null;
             if (bvh) {
                 const preciseDistance = this.raycastBVH(ray, node, bvh);
-                // BVH miss → the AABB hit was a false positive; reject the node.
                 if (preciseDistance === null || preciseDistance >= maxDistance) continue;
                 const hitPoint = vec3.create();
                 vec3.scaleAndAdd(hitPoint, ray.origin, ray.direction, preciseDistance);
@@ -234,15 +201,13 @@ export class Raycaster {
             }
         }
 
-        // Sort by distance (closest first)
         hits.sort((a, b) => a.distance - b.distance);
         return hits;
     }
 
     /**
-     * Refines a hit against a node's object-space BVH. Transforms the world-space ray into the
-     * node's local space via the inverse world transform and returns the world-space distance of
-     * the nearest triangle hit, or null when the ray misses the geometry.
+     * Refines a hit against a node's object-space BVH. Returns the world-space distance of the nearest
+     * triangle hit, or null when the ray misses the geometry.
      */
     private static raycastBVH(ray: Ray, node: Node, bvh: BVH): number | null {
         const inv = mat4.create();
@@ -252,8 +217,8 @@ export class Raycaster {
             return this.rayBoxIntersection(ray, box.min, box.max);
         }
 
-        // Origin transforms as a point; direction as a vector (strip translation, keep scale so the
-        // returned t stays consistent with the normalized world ray — see note below).
+        // Origin transforms as a point, direction as a vector with translation stripped but scale KEPT
+        // and never renormalized: that is what makes `hit.t` already a world-space distance.
         const localOrigin = vec3.transformMat4(vec3.create(), ray.origin, inv);
         const rotOnly = mat4.clone(inv);
         rotOnly[12] = 0; rotOnly[13] = 0; rotOnly[14] = 0;
@@ -262,9 +227,6 @@ export class Raycaster {
         const hit = bvh.raycast(localOrigin, localDir);
         if (!hit) return null;
 
-        // localDir was NOT renormalized, so `hit.t` is already the distance along the normalized
-        // world-space ray direction (worldRot * localDir == ray.direction). It maps directly to a
-        // world-space distance.
         return hit.t;
     }
 }

@@ -28,6 +28,8 @@ struct BlinnPhongGeometryMaterial {
     hasNormalMap: i32,
     hasEmissiveMap: i32,
     hasMaskMap: i32,
+    /** Cutout threshold for the mask above; 0 disables it. See chunks/basicGBuffer.wgsl. */
+    alphaCutoff: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: BlinnPhongGeometryMaterial;
 
@@ -41,9 +43,13 @@ struct GBuffer {
 fn fs_main(in: VertexOutput) -> GBuffer {
     let tbn = tbnOf(in);
 
-    if (u_material.hasMaskMap != 0) {
+    // `alphaCutoff`, not the literal 0.5 this used to hardcode. The threshold is now a per-material
+    // property shared with Basic and PBR. Existing content is unaffected: Material.Default defaults it
+    // to 0.5 whenever a mask is present, and `parse` applies the same default to anything saved before
+    // the property existed — so a project authored against the old constant reloads unchanged.
+    if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
         let mask = textureSample(u_material_maskMap_texture, u_material_maskMap_sampler, in.uv).r;
-        if (mask < 0.5) { discard; }
+        if (mask < u_material.alphaCutoff) { discard; }
     }
 
     var albedo = u_material.diffuse;

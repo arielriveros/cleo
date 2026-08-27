@@ -1,5 +1,5 @@
-// DevTools-style console panel. Rendering is console-feed's (rich object inspection, format
-// specifiers, error panels); the row chrome, filtering and scrolling are ours.
+// DevTools-style console panel. console-feed renders the message content; the row chrome, filtering and
+// scrolling are ours.
 import React, { useDeferredValue, useMemo, useRef, useState, useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
 import { Console } from 'console-feed';
 import type { ComponentOverrides } from 'console-feed';
@@ -40,10 +40,9 @@ function scopeHue(scope: string) {
   return hash;
 }
 
-// console-feed's own <Message> wrapper is replaced wholesale: we render the parsed content (`node`)
-// inside our own row so the timestamp and scope chip sit in a gutter, and so row colours come from
-// the editor's tokens. `content-visibility` lets the browser skip offscreen rows entirely — that,
-// the 500-entry cap and the store's per-frame batching are what keep per-frame logging cheap.
+// Replaces console-feed's <Message> wrapper: the parsed content (`node`) is rendered inside our own row
+// so the timestamp and scope chip get a gutter and colours come from the editor's tokens.
+// `content-visibility` lets the browser skip offscreen rows entirely.
 const Row: NonNullable<ComponentOverrides['Message']> = ({ log, node, children: _content, ...rest }) => {
   const entry = log as unknown as ConsoleEntry; // console-feed's Message type doesn't know about scope/search
   const hue = scopeHue(entry.scope);
@@ -69,7 +68,7 @@ const Row: NonNullable<ComponentOverrides['Message']> = ({ log, node, children: 
   );
 };
 
-// Stable identity: <Console> is a PureComponent, so a fresh object here would re-render every row.
+// Must be a stable identity: <Console> is a PureComponent, so a fresh object re-renders every row.
 const COMPONENTS: ComponentOverrides = { Message: Row };
 
 export default function ConsolePanel() {

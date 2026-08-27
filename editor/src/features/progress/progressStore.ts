@@ -1,18 +1,13 @@
-// The editor's shared progress store: one place every long operation reports to, and one window that
-// renders them all (ProgressWindow).
+// The editor's shared progress store: one place every long operation reports to, rendered by
+// ProgressWindow. Lives outside React because producers are not all components.
 //
-// It lives OUTSIDE React, like features/logger/logStore.ts, for two reasons: producers are not all
-// components (projectStorage, textureStore, the publish helpers are plain modules), and a store avoids
-// any provider-nesting constraint on who is allowed to report progress.
-//
-// The snapshot is immutable and only replaced when something actually changes — `useSyncExternalStore`
-// compares by reference, so handing back a fresh array every call would spin forever.
+// The snapshot must stay immutable and be replaced only on a real change: `useSyncExternalStore`
+// compares by reference, so a fresh array per call spins forever.
 
 export type StepStatus =
   | 'pending'   // not started
   | 'running'   // being worked on
-  | 'paused'    // waiting on a HUMAN, not on work (the import's review modal). Rendered as paused, and
-                // the bar deliberately stalls: pretending to make progress here would be a lie.
+  | 'paused'    // waiting on a human, not on work (the import's review modal); the bar stalls
   | 'done'
   | 'failed'
   | 'skipped'   // cancelled, or never reached
@@ -162,8 +157,7 @@ export function startTask(options: StartTaskOptions): TaskHandle {
       })
       cancelHandlers.delete(id)
 
-      // Nothing to report ⇒ nothing to dismiss. If anything failed or was skipped the card stays up
-      // until the user closes it, because that is the case where there IS something to read.
+      // If anything failed or was skipped the card stays up until the user closes it.
       if (clean) {
         setTimeout(() => {
           const t = tasks.find(x => x.id === id)
@@ -177,8 +171,8 @@ export function startTask(options: StartTaskOptions): TaskHandle {
 }
 
 export function cancelTask(id: string): void {
-  // Only on the transition into cancelled: onCancel has side effects (the import settles its review modal
-  // with it), and firing it twice because someone clicked Cancel twice would be a real bug.
+  // Fire only on the transition into cancelled: onCancel has side effects (the import settles its review
+  // modal with it) and must not run twice.
   const task = tasks.find(t => t.id === id)
   if (!task || task.cancelled) return
 

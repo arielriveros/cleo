@@ -1,23 +1,11 @@
 // ---------------------------------------------------------------------------
-// Bone-name matching for animation retargeting.
-//
-// Two rigs almost never agree on bone names. A Mixamo export calls the left forearm `mixamorig:LeftForeArm`;
-// a Rigify rig calls it `DEF-forearm.L`; a hand-authored rig might say `arm_lower_l`. Matching by exact name
-// fails all three against each other, so a clip from one rig would drive none of another's bones.
-//
-// The answer is two functions, both pure and both unit-tested: a NORMALIZER that strips the tool-specific
-// decoration so identical rigs exported from different tools line up, and a HUMANOID DICTIONARY that maps a
-// normalized name to a canonical slot (`foreArm.L`, `hips`, …) so two genuinely different naming conventions
-// meet in the middle. Neither imports anything — the retargeter and the editor both consume them.
+// Bone-name matching for animation retargeting: a normalizer for exporter decoration, and a humanoid
+// dictionary mapping normalized names to canonical slots. Both pure, with no imports.
 // ---------------------------------------------------------------------------
 
 /**
- * Strip the tool-specific decoration off a bone name so the same joint from different exporters compares
- * equal: `mixamorig:LeftForeArm` and `LeftForeArm` both become `leftforearm`.
- *
- * Drops a namespace prefix (`mixamorig:`, `Armature|`), then well-known rig prefixes (`DEF-`/`ORG-` Rigify,
- * `Bip01`/`Bip001` 3ds Max, `b_`/`bone_`), lowercases, and removes separators. Deliberately does NOT drop
- * side markers — `l`/`r` distinguish left from right and must survive; {@link humanoidSlotOf} reads them.
+ * Strip exporter decoration off a bone name so the same joint compares equal across tools:
+ * `mixamorig:LeftForeArm` and `LeftForeArm` both become `leftforearm`. Side markers are preserved.
  */
 export function normalizeBoneName(name: string): string {
     let s = name;
@@ -25,7 +13,6 @@ export function normalizeBoneName(name: string): string {
     const ns = Math.max(s.lastIndexOf(':'), s.lastIndexOf('|'));
     if (ns >= 0) s = s.slice(ns + 1);
     s = s.trim();
-    // Rig-specific leading tags. Order matters only in that each is anchored at the start.
     s = s.replace(/^(def[-_]|org[-_]|mch[-_])/i, '');       // Rigify deform / original / mechanism
     s = s.replace(/^bip0*1[\s_-]*/i, '');                    // 3ds Max Biped: "Bip01 ", "Bip001_"
     s = s.replace(/^(b[_-]|bone[_-])/i, '');                 // generic "b_" / "bone_"
@@ -45,11 +32,8 @@ type SidedSlot =
     | 'upLeg' | 'leg' | 'foot' | 'toe';
 type CenterSlot = 'hips' | 'spine' | 'chest' | 'neck' | 'head';
 
-/**
- * Synonyms per slot, matched against a normalized name with the side markers already removed. Ordered most-
- * to least specific within a family, but lookup is exact-token against this table, not substring, so
- * `forearm` cannot be captured by `arm`.
- */
+// Synonyms per slot, matched against a normalized name with the side marker removed. Lookup is
+// exact-token, not substring, so `forearm` cannot be captured by `arm`.
 const SIDED_SYNONYMS: Record<SidedSlot, string[]> = {
     shoulder: ['shoulder', 'clavicle', 'collar'],
     upperArm: ['upperarm', 'arm', 'uparm', 'armupper'],
@@ -90,23 +74,13 @@ const SIDE_TOKENS: { token: string; side: 'L' | 'R' }[] = [
     { token: 'l', side: 'L' }, { token: 'r', side: 'R' },
 ];
 
-/**
- * Every way `norm` could be read as a sided name, in order of preference.
- *
- * ALL of them, rather than the first — which is the whole point. A single-letter side marker is ambiguous
- * with the first letter of the bone's own name, and committing to the first reading loses real bones: `legl`
- * ("leg" + trailing L) starts with `l`, so a prefix-first split eats it and asks the table for `egl`. That
- * silently dropped `leg.L`, `leg.R`, `lowerleg.*`, `leglower.*`, `legupper.*`, `ring1.R` and `little1.L` —
- * the standard Blender and Unreal leg naming, in a function whose entire job is recognizing legs.
- *
- * The caller resolves the ambiguity by asking which reading names a bone it knows.
- */
+// Every way `norm` could be read as a sided name, in order of preference. A single-letter marker is
+// ambiguous with the bone's own first letter, so all readings are returned and the caller picks.
 function sideCandidates(norm: string): { core: string; side: 'L' | 'R' }[] {
     const out: { core: string; side: 'L' | 'R' }[] = [];
     for (const { token, side } of SIDE_TOKENS) {
         if (norm.length <= token.length) continue;
-        // Trailing first: `LeftLeg` is unambiguous either way, but `legl` is only correct read as a suffix,
-        // and a suffix marker is much the more common convention.
+        // Trailing first: a suffix marker is the more common convention, and `legl` only reads correctly that way.
         if (norm.endsWith(token)) out.push({ core: norm.slice(0, -token.length), side });
         if (norm.startsWith(token)) out.push({ core: norm.slice(token.length), side });
     }
@@ -122,23 +96,17 @@ for (const slot of Object.keys(CENTER_SYNONYMS) as CenterSlot[])
     for (const syn of CENTER_SYNONYMS[slot]) CENTER_LOOKUP.set(syn, slot);
 
 /**
- * The canonical humanoid slot a bone belongs to (`'foreArm.L'`, `'hips'`, `'spine'`), or null when the name
- * is not a recognizable humanoid bone.
- *
- * Returning null for an unknown bone is deliberate — a wrong slot is worse than no slot, because it would
- * drive the wrong joint. The spine is handled positionally by the caller (see the retargeter), so the
- * distinction between `spine`/`chest` here is a best-effort hint, not something the match relies on.
+ * The canonical humanoid slot a bone belongs to (`'foreArm.L'`, `'hips'`, `'spine'`), or null when the
+ * name is not a recognizable humanoid bone. The `spine`/`chest` split is a hint; the caller decides.
  */
 export function humanoidSlotOf(name: string): string | null {
     const norm = normalizeBoneName(name);
 
-    // Centre bones first — they carry no side, and 'l'/'r' stripping could corrupt e.g. a name like 'girl'.
+    // Centre bones first — they carry no side, and 'l'/'r' stripping would corrupt a name like 'girl'.
     const center = CENTER_LOOKUP.get(norm);
     if (center) return center;
 
-    // A sided bone needs a side; without one it is not one of the paired limb bones. Each candidate reading
-    // is tried against the table and the first one that names a bone wins — so an `l` that is really part of
-    // the bone's name simply fails to resolve and the next reading gets its turn.
+    // First candidate reading that names a known bone wins.
     for (const { core, side } of sideCandidates(norm)) {
         const slot = SIDED_LOOKUP.get(core);
         if (slot) return `${slot}.${side}`;

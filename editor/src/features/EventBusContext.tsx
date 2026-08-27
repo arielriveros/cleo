@@ -4,13 +4,9 @@ import type { useCleoEngine } from './EngineContext';
 type EditorEventEmitter = ReturnType<typeof useCleoEngine>['eventEmitter'];
 
 /**
- * The editor's UI event bus, on a context of its own.
- *
- * A large share of consumers want nothing from EngineContext except the emitter — they subscribe to
- * SCENE_CHANGED / TEXTURES_CHANGED / SELECT_NODE and drive their own re-render from it. The emitter is a
- * ref created once and never replaced, so this context's value never changes identity: a consumer that
- * reads only the bus re-renders *never* from context, instead of on every unrelated EngineContext state
- * change. That makes it the cheapest and highest-leverage of the split-out slices.
+ * The editor's UI event bus, on a context of its own. The emitter is a ref created once and never
+ * replaced, so this context's value never changes identity: a consumer that reads only the bus never
+ * re-renders from context.
  */
 export const EventBusContext = createContext<EditorEventEmitter | null>(null);
 

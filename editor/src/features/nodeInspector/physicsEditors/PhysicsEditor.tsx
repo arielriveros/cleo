@@ -13,8 +13,8 @@ import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 const LABEL = 'w-[130px]';
 
 // 3 axis toggles (used for linear/angular constraints; value is a [x,y,z] of 0|1).
-// Declared at module scope: a component defined inside a render body is a *new type* on every render,
-// which remounts its subtree and would wipe the drag state of the vector inputs below it.
+// Must stay at module scope: a component declared inside a render body is a new type every render, which
+// remounts its subtree and wipes the drag state of the vector inputs.
 const AxisToggles = ({ label, value, onChange }: { label: string; value: number[]; onChange: (v: number[]) => void }) => (
   <Field label={label} labelClassName={LABEL}>
     <div className='flex items-center gap-3'>
@@ -29,9 +29,8 @@ const AxisToggles = ({ label, value, onChange }: { label: string; value: number[
 );
 
 /**
- * Shape list plus the add-shape row. `canHull` is true when the node subtree has static mesh
- * geometry to fit a convex hull to — skinned meshes don't qualify, because a hull of the bind pose
- * would not follow the animated silhouette.
+ * Shape list plus the add-shape row. `canHull` is true when the node subtree has static mesh geometry
+ * to fit a convex hull to; skinned meshes do not qualify.
  */
 const ShapeTools = ({ shapes, canHull, addShape, addHull, regenerateHull, setShape, removeShape }: {
   shapes: ShapeDescription[];
@@ -100,30 +99,27 @@ export default function PhysicsEditor(props: {node: Node}) {
     if(sceneChanged) setSceneChanged(false)
   }, [sceneChanged]);
 
-  // Set while loading body/trigger props from the shared map on node-select, so the persist-effects below
-  // can tell a load apart from a user edit and dirty the tab only on the latter.
+  // Set while loading from the shared map, so the persist-effects below can tell a load from a user edit.
   const bodyLoadRef = useRef(false);
   const triggerLoadRef = useRef(false);
 
   useEffect(() => {
     const body = bodies.get(props.node.id);
     if (body) {
-      bodyLoadRef.current = true; // a load from the map, not a user edit — the persist-effect must not dirty
+      bodyLoadRef.current = true;
       setBodyProperties({
         mass: body.mass,
         linearDamping: body.linearDamping,
         angularDamping: body.angularDamping,
         linearConstraints: body.linearConstraints,
         angularConstraints: body.angularConstraints,
-        // Scenes saved before surfaces existed have neither; these are the values they behaved as.
         friction: body.friction ?? 0.3,
         restitution: body.restitution ?? 0,
-        // Likewise: absent means on, so an older scene behaves identically.
         simulatePhysics: body.simulatePhysics ?? true,
         cameraCollision: body.cameraCollision ?? true,
-        // Absent in scenes saved before the ground probe existed; 0 = off, which is how they behaved.
+        // 0 = ground probe off.
         groundProbeDistance: body.groundProbeDistance ?? 0,
-        // Likewise: absent means 0, which the engine reads as "use the default (~0.09s)".
+        // 0 means "use the engine default (~0.09s)".
         motionSmoothing: body.motionSmoothing ?? 0,
         shapes: body.shapes
       })
@@ -131,7 +127,6 @@ export default function PhysicsEditor(props: {node: Node}) {
     else setBodyProperties(null)
   }, [props.node, bodies])
 
-  // Persist body edits to the shared map; the editor-helper reconciler rebuilds the debug wireframe.
   useEffect(() => {
     if (bodyProperties) {
       bodies.set(props.node.id, {
@@ -163,7 +158,6 @@ export default function PhysicsEditor(props: {node: Node}) {
     else setTriggerProperties(null)
   }, [props.node, triggers])
 
-  // Persist trigger edits to the shared map; the editor-helper reconciler rebuilds the debug wireframe.
   useEffect(() => {
     if (triggerProperties) {
       triggers.set(props.node.id, { shapes: triggerProperties.shapes });
@@ -173,7 +167,6 @@ export default function PhysicsEditor(props: {node: Node}) {
     }
   }, [triggerProperties])
 
-  // Load ragdoll config from the node (merged over shared defaults) when a skinned mesh is selected.
   useEffect(() => {
     const m = props.node as ModelNode;
     const skinned = props.node.nodeType === 'model' && m.model instanceof AnimatedModel && m.model.hasSkin && !!m.animator;
@@ -181,13 +174,12 @@ export default function PhysicsEditor(props: {node: Node}) {
     else setRagdoll(null);
   }, [props.node]);
 
-  // Persist ragdoll edits straight onto the node (serializes with the scene → survives Play/save/load).
+  // Ragdoll config lives on the node itself, so it serializes with the scene.
   useEffect(() => {
     if (ragdoll && isSkinned) (props.node as ModelNode).ragdollConfig = ragdoll;
   }, [ragdoll]);
 
-  // Whether this node (or any of its descendants) has static mesh geometry to fit a hull to. The
-  // actual vertex gathering happens fresh on click, so child edits made after selection still count.
+  // The vertex gathering itself happens fresh on click, so child edits made after selection still count.
   const canHull = useMemo(() => collectHullPositions(props.node) !== null, [props.node, sceneChanged]);
 
   const writeShapes = (target: 'body' | 'trigger', shapes: ShapeDescription[]) => {
@@ -198,13 +190,9 @@ export default function PhysicsEditor(props: {node: Node}) {
     (target === 'body' ? bodyProperties!.shapes : triggerProperties!.shapes);
 
   /**
-   * A new shape is fitted to the node's mesh (and its descendants') rather than dropped in at size 1,
-   * which was never the right answer for anything and is useless on a character. `meshBounds` works in
-   * node-local units — the space descriptors are authored in — and includes skinned meshes, so a
-   * character gets a fit here even though it can't have a hull. A mesh-less node has nothing to fit to
-   * and keeps the unit defaults.
-   *
-   * Note `plane` is an explicit branch: as the trailing `else` it silently swallowed every unknown type.
+   * Adds a shape fitted to the node's mesh and its descendants'. `meshBounds` works in node-local units —
+   * the space shape descriptors are authored in — and includes skinned meshes. A mesh-less node keeps the
+   * unit defaults.
    */
   const addShape = (type: string, target: 'body' | 'trigger') => {
     const b = meshBounds(props.node);
@@ -227,9 +215,8 @@ export default function PhysicsEditor(props: {node: Node}) {
           : { type: 'cylinder', radius: 1, height: 1, numSegments: 16, offset, rotation };
         break;
       case 'capsule':
-        // Torso-percentile radius, not the X/Z extent — a T-pose's arm span would otherwise swallow the
-        // height and leave a sphere as wide as the character. See boundsFromPoints. The floor guards a
-        // mesh thin enough to fit a zero radius, which would reach cannon as a zero-size sphere.
+        // Torso-percentile radius, not the X/Z extent: a T-pose's arm span would give a sphere as wide as
+        // the character. The floor keeps a zero radius from reaching cannon.
         shape = b
           ? { type: 'capsule', radius: Math.max(b.radius, 0.01), height: b.half[1] * 2, numSegments: 16, offset, rotation }
           : { type: 'capsule', radius: 0.5, height: 2, numSegments: 16, offset, rotation };

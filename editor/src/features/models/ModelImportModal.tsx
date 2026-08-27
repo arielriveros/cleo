@@ -2,10 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 
-// Centered review modal shown once per imported model, between parsing and committing to the library.
-// Surfaces import state, lets the user upload textures the model references but that were missing from
-// the upload, and offers scale normalization. Accept commits (thumbnail + material assets + add); Cancel
-// discards. Mounted globally in Editor so it overlays the whole editor.
+// Review modal shown once per imported model, between parsing and committing to the library: import
+// state, replacements for referenced-but-missing textures, and scale normalization.
 export default function ModelImportModal() {
   const { pendingModelImport, resolveModelImport } = useEditorSessions()
 
@@ -17,7 +15,6 @@ export default function ModelImportModal() {
   const [separate, setSeparate] = useState(false)
   const [merge, setMerge] = useState(false)
 
-  // Reset per-import state whenever a new review opens.
   useEffect(() => {
     setExtraFiles([])
     setResolved(new Set())
@@ -36,10 +33,9 @@ export default function ModelImportModal() {
 
   const baseName = (p: string) => p.split(/[\\/]/).pop() || p
 
-  // Select all the missing texture files at once; each is matched to a missing entry by filename and linked.
   const onSelectMissing = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
-    // Lookup of still-unresolved missing names, keyed by lowercased basename.
+    // Still-unresolved missing names, keyed by lowercased basename — that is the match key.
     const wanted = new Map<string, string>()
     for (const { name } of info.missing) if (!resolved.has(name)) wanted.set(name.toLowerCase(), name)
 
@@ -47,8 +43,8 @@ export default function ModelImportModal() {
     for (const file of Array.from(fileList)) {
       const target = wanted.get(baseName(file.name).toLowerCase())
       if (!target) { ignored++; continue }
-      // Eagerly copy bytes before re-wrapping: an <input> File is disk-backed and can lose that backing
-      // (blob URL 404s with ERR_FILE_NOT_FOUND) by the time the deferred re-parse reads it.
+      // Copy the bytes before re-wrapping: an <input> File is disk-backed and can lose that backing
+      // (blob URL 404s) by the time the deferred re-parse reads it.
       const buf = await file.arrayBuffer()
       const aliased = new File([buf], target, { type: file.type || 'image/png' }) // alias to expected name
       setExtraFiles(prev => [...prev, aliased])

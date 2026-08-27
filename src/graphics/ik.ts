@@ -2,24 +2,13 @@ import { quat, vec3 } from 'gl-matrix';
 import { clamp } from '../core/math';
 
 // ---------------------------------------------------------------------------
-// Inverse kinematics.
-//
-// Pure vec3/quat maths — no GL, no scene, no engine imports — for the same reason animationField.ts is:
-// the interesting part is the geometry, and geometry is worth unit-testing on its own.
-//
-// The solver is ANALYTIC rather than iterative (no FABRIK, no CCD). A two-bone chain has a closed-form
-// answer: two lengths and a target distance determine the interior angles by the law of cosines, and the
-// only remaining freedom is which way the joint bends. Iterating would be slower, frame-rate dependent in
-// its convergence, and no more accurate.
+// Inverse kinematics. Pure vec3/quat maths — no GL, no scene, no engine imports.
+// The two-bone solver is analytic (law of cosines), not iterative.
 // ---------------------------------------------------------------------------
 
 /**
- * How far a limb may extend towards a target, as a fraction of its own length.
- *
- * Not 1: a perfectly straight limb is a singularity — the bend plane collapses and the joint's direction
- * becomes undefined. Held a hair short, the joint keeps a well-defined side all the way to the limit (at
- * 0.999 the knee is still bent ~2.5 degrees, which is plenty to define a plane) while the shortfall is
- * ~2mm on a metre-long leg, an order of magnitude below anything visible.
+ * How far a limb may extend towards a target, as a fraction of its own length. Never 1 — a perfectly
+ * straight limb is a singularity with no bend plane.
  */
 export const DEFAULT_MAX_REACH = 0.999;
 
@@ -31,18 +20,11 @@ export interface TwoBoneSolve {
     /** Where the tip should end up. */
     target: vec3;
     /**
-     * A point the mid joint should bend towards — a knee's "forward". Omit (or null) to preserve the bend
-     * plane the animated pose is already in, which is what foot placement wants: the animator decided which
-     * way the knee points, and IK should move the leg without arguing about it.
+     * A point the mid joint should bend towards — a knee's "forward". Omit or null to preserve the bend
+     * plane the animated pose is already in, which is what foot placement wants.
      */
     pole?: vec3 | null;
-    /**
-     * Fraction of full extension the limb may reach before it stops trying. Default 0.99.
-     *
-     * Never 1: a perfectly straight limb is a singularity — the bend plane collapses and the knee's
-     * direction becomes undefined — and real legs do not lock straight either. Holding a hair short of full
-     * extension keeps the joint's direction meaningful all the way to the limit.
-     */
+    /** Fraction of full extension the limb may reach. Default 0.99; never 1 — see {@link DEFAULT_MAX_REACH}. */
     maxReach?: number;
 }
 
@@ -57,31 +39,15 @@ export interface TwoBoneResult {
 
 /** Shared defaults for the foot-placement pass. Single source of truth for the engine and the editor UI. */
 export interface IkRigTuning {
-    /**
-     * Distance from the ankle joint down to the sole, in model units. The ankle is placed this far above the
-     * surface the ray hit — without it the ankle itself lands on the ground and the foot sinks.
-     */
+    /** Distance from the ankle joint down to the sole, in model units. The ankle is placed this far up. */
     footHeight: number;
     /** How far above the animated foot the ground ray starts. Covers a foot posed below the real surface. */
     traceUp: number;
     /** How far below the animated foot the ray reaches. Beyond this the foot is treated as airborne. */
     traceDown: number;
     /**
-     * How far a foot must rise ABOVE the most-planted foot before IK lets go of it entirely, in model units.
-     *
-     * This is the swing/stance split, and the reason a stride is not fought. Without it, a foot the animation
-     * lifted mid-step still finds ground under it — `traceDown` reaches further than a stride lifts — and is
-     * pulled straight back down to it. That destroys the animated lift for the whole swing phase and, because
-     * the swing foot is then the one demanding the most reach, drags the pelvis down by the same amount once
-     * per step. On screen it reads as the animation fighting the IK.
-     *
-     * Measured RELATIVE to the lowest foot, because absolutely it is not knowable: a foot 0.3 above its ground
-     * is mid-stride if the other foot is down, and is a character standing on ground 0.3 lower than the
-     * animation assumed if the other foot is up there too. The first wants releasing, the second wants the
-     * whole pelvis lowered — and only the other foot says which.
-     *
-     * A foot at or below its ground keeps the FULL correction whatever this is set to; that is the
-     * ground-penetration case the feature exists for. 0 disables the release entirely.
+     * How far a foot must rise above the most-planted foot before IK releases it, in model units — the
+     * swing/stance split. A foot at or below its ground keeps full correction; 0 disables the release.
      */
     swingRelease: number;
     /** Most the pelvis may be lowered, in model units. Stops a hole in the ground folding the character up. */
@@ -112,10 +78,7 @@ export interface IkFootChain {
     toe?: number;
 }
 
-/**
- * A character's IK setup. Lives on the {@link Skin} because it is joint indices INTO that skeleton — it
- * cannot be meaningful for any other rig, so it belongs with the skeleton rather than with a placed node.
- */
+/** A character's IK setup. Lives on the {@link Skin}: the fields are joint indices into that skeleton. */
 export interface IkRig extends Partial<IkRigTuning> {
     /** The pelvis. Lowered when a foot cannot reach its target. Omit to disable hip lowering. */
     hips?: number;
@@ -153,15 +116,8 @@ export interface IkRigValidation {
 }
 
 /**
- * Check that a rig describes chains the solver can actually use, and say what is wrong with the rest.
- *
- * Bone NAMES cannot answer this. Three bones can carry exactly the right names, land in exactly the right
- * slots, and still belong to three unrelated parts of the rig — a control bone, a twist helper, a pole target
- * — at which point the solver produces a mathematically valid pose with no relation to the character. Only
- * the hierarchy knows, so this asks the hierarchy.
- *
- * Pure, and separate from the solver, so the editor can warn while authoring and the runtime can skip while
- * playing without the two disagreeing about what "valid" means.
+ * Check that a rig describes chains the solver can use, reporting what is wrong with the rest. Tests the
+ * skeleton hierarchy, not bone names — the right names can still sit on unrelated parts of a rig.
  */
 export function validateIkRig(
     rig: IkRig | null | undefined,
@@ -247,18 +203,8 @@ export function validateIkRig(
 }
 
 /**
- * How much of a foot's ground correction survives, given how far it has lifted above the most-planted foot.
- *
- * 1 while the foot is down, falling to 0 once it has lifted `swingRelease`. `lift <= 0` — a foot at or through
- * the surface — always returns 1: pushing a foot out of the ground is the whole point of the feature and must
- * not be faded by anything.
- *
- * Smoothstep rather than a linear ramp, for two reasons that both matter on screen. It is flat at `t = 0`, so
- * a foot a centimetre off the ground still gets ~97% correction and uneven ground is still planted rather than
- * half-abandoned. And it is flat at `t = 1`, so there is no crease at the moment the foot is let go.
- *
- * `swingRelease <= 0` (or NaN) means the release is off and IK owns the foot throughout, which is how this
- * behaved before the value existed.
+ * How much of a foot's ground correction survives, given `lift` above the most-planted foot: a smoothstep
+ * from 1 down to 0 over `swingRelease`. `lift <= 0` and `swingRelease <= 0` both return 1.
  */
 export function swingReleaseWeight(lift: number, swingRelease: number): number {
     if (!(swingRelease > 0)) return 1;
@@ -276,17 +222,8 @@ function anyPerpendicular(out: vec3, v: vec3): vec3 {
 }
 
 /**
- * Bend a two-bone chain so its tip reaches `target`.
- *
- * Returns DELTAS, not absolute orientations. Bones carry a bind orientation and an animated pose that the
- * solver has no business reconstructing; the caller has both and applies these on top. That also makes the
- * result independent of whatever axis convention the rig was authored with — which varies by exporter and
- * is the usual reason a hand-rolled IK solver produces a corkscrewed limb.
- *
- * The maths: with limb lengths `a` and `b` and a target distance `d`, the angle at the root between the limb
- * axis and the upper bone is `acos((a² + d² - b²) / 2ad)`, and the interior angle at the mid joint follows
- * the same way. Both are clamped before `acos` — floating point routinely produces 1.0000000001 for a
- * straight limb, and `acos` of that is NaN, which propagates into the quaternions and collapses the skeleton.
+ * Bend a two-bone chain so its tip reaches `target`. Returns rotation DELTAS, not absolute orientations,
+ * so the caller composes them onto the bind and animated pose it already holds.
  */
 export function solveTwoBone(s: TwoBoneSolve): TwoBoneResult {
     const rootDelta = quat.create();
@@ -310,26 +247,12 @@ export function solveTwoBone(s: TwoBoneSolve): TwoBoneResult {
     const reached = d <= maxReach;
     if (!reached) d = maxReach;
 
-    // SOLVE THE POSITIONS FIRST, then read the rotations off them.
-    //
-    // The tempting alternative — compute the two interior-angle changes and compose them as deltas — is a
-    // sign-and-ordering minefield: the swing that aims the limb at the target has to be measured against the
-    // tip position AFTER the joint has bent, not before, and getting that backwards produces a limb that
-    // reaches past its target and folds the wrong way. Placing the joints and then asking "what rotation
-    // takes each bone from where it was to where it now is" has no such ordering to get wrong, and is
-    // verifiable by inspection: the answer is the positions.
+    // Solve the joint POSITIONS first, then read the rotations off them. Composing interior-angle
+    // deltas directly is a sign-and-ordering trap.
 
-    // The bend axis: normal to the plane the joint bends in.
-    //
-    // Taken from the limb's OWN current pose — `cross(upper, lower)` — and deliberately not from anything
-    // involving the target. A target-relative reference looks equivalent and is not: it collapses whenever
-    // the knee happens to point along the direction of the target, and on the far side of that it comes back
-    // with the opposite sign, snapping the knee through the character. That configuration is ordinary (a
-    // raised foot with a forward-pointing knee reaches it), so the flip would be too.
-    //
-    // The pose-only axis degenerates in exactly one place — a perfectly straight limb, which has no bend
-    // plane at all — and that is the pose a standing character is in, so the fallbacks below are the common
-    // path rather than a rarity.
+    // Bend axis: normal to the plane the joint bends in, taken from the limb's own pose
+    // (`cross(upper, lower)`) and never from the target — a target-relative axis flips sign mid-motion.
+    // It degenerates on a perfectly straight limb, so the fallbacks below are the common path.
     const dirTarget = vec3.normalize(vec3.create(), toTarget);
     const bendAxis = vec3.create();
     if (s.pole) {
@@ -340,11 +263,7 @@ export function solveTwoBone(s: TwoBoneSolve): TwoBoneResult {
     }
     if (vec3.length(bendAxis) < 1e-6) vec3.cross(bendAxis, upper, lower);
 
-    // The axis has to be PERPENDICULAR to the limb axis, so remove any component along it. Rotating about a
-    // tilted axis sweeps a cone: the angle it opens between the target direction and the upper bone is then
-    // smaller than the one the law of cosines asked for, the triangle does not close, and the tip lands short
-    // of the target. Only shows up once a target leaves the plane the limb is currently bent in, which is to
-    // say the moment IK does anything interesting.
+    // The axis must be perpendicular to the limb axis; a tilted one sweeps a cone and the tip lands short.
     vec3.scaleAndAdd(bendAxis, bendAxis, dirTarget, -vec3.dot(bendAxis, dirTarget));
 
     // Straight limb, no pole, or a pole sitting on the limb axis: nothing prefers one side, so any
@@ -352,9 +271,7 @@ export function solveTwoBone(s: TwoBoneSolve): TwoBoneResult {
     if (vec3.length(bendAxis) < 1e-6) anyPerpendicular(bendAxis, dirTarget);
     vec3.normalize(bendAxis, bendAxis);
 
-    // Interior angle at the root between the upper bone and the limb axis, by the law of cosines. Clamped
-    // before acos: floating point routinely yields 1.0000000001 for a straight limb, and acos of that is
-    // NaN, which spreads into the quaternions and collapses the whole skeleton.
+    // Law of cosines. Clamp before acos: a straight limb yields 1.0000000001 and acos of that is NaN.
     const rootAngle = Math.acos(clamp((a * a + d * d - b * b) / (2 * a * d), -1, 1));
 
     // NEGATIVE, so the joint swings towards the side `bendRef` is on rather than away from it. This is the
@@ -381,19 +298,14 @@ export function solveTwoBone(s: TwoBoneSolve): TwoBoneResult {
     return { rootDelta, midDelta, reached };
 }
 
-/**
- * Where the three joints end up after {@link solveTwoBone}'s deltas are applied. Positions only — the caller
- * needs orientations, but a test (and a debug overlay) wants to know where the joints actually landed.
- */
+/** Where the three joints end up after {@link solveTwoBone}'s deltas are applied. Positions only. */
 export function applyTwoBone(s: TwoBoneSolve, r: TwoBoneResult): { root: vec3; mid: vec3; tip: vec3 } {
     const upper = vec3.sub(vec3.create(), s.mid, s.root);
     const lower = vec3.sub(vec3.create(), s.tip, s.mid);
 
     const newUpper = vec3.transformQuat(vec3.create(), upper, r.rootDelta);
-    // The lower bone is carried by the root's rotation FIRST and takes its own on top — which is
-    // `midDelta * rootDelta`, not the other way round: gl-matrix applies the right-hand factor first, and
-    // `midDelta` was measured from where the root had already left the bone. This mirrors what the skeleton
-    // does, where the shin's global has the thigh's rotation baked in before any IK touches it.
+    // `midDelta * rootDelta`, not the reverse: gl-matrix applies the right-hand factor first, and the
+    // lower bone is carried by the root's rotation before it takes its own.
     const combined = quat.multiply(quat.create(), r.midDelta, r.rootDelta);
     const newLower = vec3.transformQuat(vec3.create(), lower, combined);
 

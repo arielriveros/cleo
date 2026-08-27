@@ -3,8 +3,8 @@ import { Button, TextInput } from '../../components/ui'
 import { useTileset } from './TilesetContext'
 import TileGrid from './TileGrid'
 
-// The tileset tab's main area: the atlas with its slicing grid. Fills the viewport slot the way the script
-// editor does — a tileset has no 3D preview, so nothing here touches the renderer.
+// The tileset tab's main area: the atlas with its slicing grid. A tileset has no 3D preview, so nothing
+// here touches the renderer.
 
 export default function TilesetTabView() {
   const { asset, patch, importAtlas, selection, setSelection, save, dirty } = useTileset()

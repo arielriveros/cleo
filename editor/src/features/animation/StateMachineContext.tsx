@@ -10,18 +10,13 @@ import { getAnimationTarget, accessibleNodeVariables, AccessibleVariable, Animat
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { AnimationFieldAsset, reembedFields } from '../../utils/animationFields'
 
-// Shared editing session for the Animation State Machine. Both the center node-graph (StateGraph) and
-// the right-sidebar inspector (StateMachineEditor) edit the SAME machine, so the working copy `sm`,
-// the current selection, the 3D/graph view toggle, and every mutator live here and are provided to
-// both. Mutators preserve the invariants that used to live in StateMachineEditor (single entry, rename
-// propagation into transitions/conditions, transition pruning on state removal).
+// Shared editing session for the Animation State Machine: the node-graph and the sidebar inspector edit the
+// SAME machine, so the working copy `sm`, the selection, the view toggle and every mutator live here.
+// Mutators hold the invariants: single entry, rename propagation, transition pruning on state removal.
 
 /**
- * A LINK is the pair of states, holding up to two transitions — one each way. The graph draws it as a single
- * edge (two arrowheads when both directions exist) and the inspector edits both at once.
- *
- * Selection identifies a link by its two state NAMES, not by an index into `sm.transitions`. Indices shift
- * whenever a transition is removed, which used to leave the selection silently pointing at its neighbour.
+ * A LINK is the pair of states, holding up to two transitions — one each way. Selection identifies a link
+ * by its two state NAMES, never by an index into `sm.transitions`: indices shift on removal.
  */
 export type SMSelection =
   | { kind: 'state'; name: string }
@@ -56,10 +51,7 @@ interface StateMachineContextValue {
   setSelection: (s: SMSelection) => void
   graphView: boolean
   setGraphView: (v: boolean) => void
-  /**
-   * Run the applied machine (evaluate transitions each frame) instead of the transport's raw clip. Lives here
-   * because the toggle is in the sidebar while the frame loop that honors it is in AnimationPlayer.
-   */
+  /** Run the applied machine (evaluating transitions each frame) instead of the transport's raw clip. */
   simulate: boolean
   setSimulate: (v: boolean) => void
 
@@ -133,9 +125,8 @@ export const emptyGroup = (): AnimationConditionGroup => ({ op: 'and', children:
 export const treeOf = (t: AnimationTransition): AnimationConditionGroup => t.condition ?? emptyGroup()
 
 /**
- * Fold a machine's legacy flat `conditions` into the `condition` tree, once, on load. The engine still reads
- * `conditions` when `condition` is absent, so untouched scenes keep working — but everything the editor writes
- * from here on is a tree, and keeping both populated would be two sources of truth.
+ * Fold a machine's legacy flat `conditions` into the `condition` tree, once, on load. The engine reads
+ * `conditions` only when `condition` is absent; never keep both populated.
  */
 function migrateConditions(sm: AnimationStateMachine): AnimationStateMachine {
   if (!sm.transitions.some(t => !t.condition && t.conditions?.length)) return sm
@@ -150,9 +141,8 @@ function migrateConditions(sm: AnimationStateMachine): AnimationStateMachine {
 }
 
 /**
- * Return a copy of `root` with the node at `path` replaced by `fn`'s result — or removed when it returns null.
- * Structural sharing is irrelevant here (trees are tiny); what matters is never mutating the working copy in
- * place, since React compares by reference.
+ * Return a copy of `root` with the node at `path` replaced by `fn`'s result, or removed when it returns
+ * null. Must copy: React compares the working copy by reference.
  */
 function editTree(
   root: AnimationConditionGroup,
@@ -216,9 +206,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const [graphView, setGraphView] = useState(true)
   const [simulate, setSimulate] = useState(false)
   const [, force] = useState(0)
-  // Bumped when physics changes, purely to invalidate accessVars below. `bodies` is a ref-backed Map, so its
-  // identity never changes and it is worthless as a memo dependency — adding a rigid body while this tab is
-  // open would otherwise leave the built-in list stale until the tab was reopened.
+  // Bumped when physics changes, to invalidate accessVars below: `bodies` is a ref-backed Map whose identity
+  // never changes, so it is worthless as a memo dependency.
   const [bodiesRev, setBodiesRev] = useState(0)
   useEffect(() => {
     const onPhysics = () => setBodiesRev(x => x + 1)
@@ -227,23 +216,19 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }, [eventEmitter])
 
   const clips = target ? target.model.animations.map(a => a.name) : []
-  // `bodies` is the authored physics side map. It is passed because no node in the EDITOR scene has a live
-  // rigid body — the editor never calls setBody, so the only record that a character is the thing that moves
-  // is this map. Without it the "(body)" group of built-ins can never appear while authoring.
+  // `bodies` is the authored physics side map, and must be passed: no node in the EDITOR scene has a live
+  // rigid body, so it is the only record of which node is the thing that moves.
   const accessVars = useMemo<AccessibleVariable[]>(
     () => accessibleNodeVariables(
       animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null, animationSourceScene, scriptAssets,
       new Set(bodies.keys())),
     [animationSourceScene, animationSourceId, animationTargetId, scriptAssets, bodies, bodiesRev])
 
-  // Un-applied working copies, per animation tab. There is only ever ONE live session (this provider keys
-  // off the active tab), so without a cache, switching away from an animation tab and back would reload the
-  // machine from the model and silently drop whatever had not been applied — while the tab's unsaved dot
-  // went on claiming those edits still existed.
+  // Un-applied working copies, per animation tab. Only ONE session is live at a time, so this cache is what
+  // keeps un-applied edits alive across a tab switch.
   const smCacheRef = useRef(new Map<string, AnimationStateMachine>())
 
-  // Load the machine on entry — the tab's un-applied working copy if it has one, else the model's; then
-  // select the entry state.
+  // Load the tab's un-applied working copy if it has one, else the model's.
   useEffect(() => {
     if (!target) { setSm(EMPTY); setSelection(null); return }
     const existing: AnimationStateMachine | null =
@@ -261,13 +246,9 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     return () => { eventEmitter.off('ANIM_CLIPS_CHANGED', onClips) }
   }, [eventEmitter])
 
-  // Functional: two mutators firing in one tick (e.g. a graph cascade) must not each derive from the same
-  // stale render-scoped `sm` and clobber one another.
-  //
-  // Every mutation also marks the animation tab dirty. It has to happen here rather than through the usual
-  // SCENE_CHANGED listener: the working copy is React state in this provider, so editing it touches no Scene
-  // and emits nothing the listener could see. `silent` is for machine changes the user did not make — see
-  // commitLayout.
+  // Must stay functional: two mutators firing in one tick must not both derive from the same stale `sm`.
+  // Marking the tab dirty also has to happen here — the working copy is React state, so editing it touches
+  // no Scene and emits no SCENE_CHANGED. `silent` is for machine changes the user did not make.
   const update = (fn: (prev: AnimationStateMachine) => AnimationStateMachine, opts?: { silent?: boolean }) => {
     setSm(prev => {
       const next = { ...fn(prev) }
@@ -278,11 +259,9 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
   const apply = () => {
     if (!target) return
-    // Resolve every field-playing state's `fieldId` into an EMBEDDED copy of the field. This is the one
-    // place that happens: from here the machine is self-contained, so it travels through scene saves,
-    // templates, bundles and the published game without any of them knowing what a field is. A state whose
-    // field asset has been deleted has its copy cleared, degrading it to "no clip" rather than to a pose
-    // nothing in the project can explain.
+    // The one place a field-playing state's `fieldId` is resolved into an EMBEDDED copy, which is what makes
+    // the machine self-contained through scene saves, templates, bundles and publish. A state whose field
+    // asset is gone has its copy cleared, degrading to "no clip".
     const applied = reembedFields(clone(sm), animationFields)
     target.animator.setStateMachine(clone(applied))
     commitAnimationStateMachine(clone(applied)) // marks the SOURCE model's tab dirty — that's where the edit landed
@@ -292,8 +271,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     force(x => x + 1)
   }
 
-  // Publish Apply so Save All / Ctrl+S can reach it: an animation tab has no asset, so "saving" it is
-  // applying the machine onto the source model, and the working copy only exists here.
+  // An animation tab has no asset, so "saving" it means applying the machine onto the source model.
+  // Publishing Apply here is what lets Save All / Ctrl+S reach the working copy.
   useEffect(() => {
     if (!target) return
     registerAnimationApply({ tabId: activeTabId, apply })
@@ -376,9 +355,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     if (selection?.kind === 'state' && selection.name === name) setSelection(null)
     if (selection?.kind === 'transition' && (selection.a === name || selection.b === name)) setSelection(null)
   }
-  // Silent: this is the graph's one-time auto-layout for legacy machines with no coordinates, which runs
-  // from an effect on open. Marking dirty here would make merely LOOKING at such a machine claim unsaved
-  // edits. The coordinates ride along on the next real edit's save.
+  // Silent: the graph's one-time auto-layout runs from an effect on open, so marking dirty here would make
+  // merely LOOKING at a coordinate-less machine claim unsaved edits.
   const commitLayout = (coords: Record<string, { x: number; y: number }>) =>
     update(prev => ({ ...prev, states: prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s) }), { silent: true })
   const deleteElements = (stateNames: string[], removedLinks: [string, string][]) => {
@@ -484,10 +462,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const renameClip = (oldName: string, typed: string) => {
     const next = typed.trim()
     if (!next || next === oldName) return
-    // A shared clip's name belongs to the `.anim` ASSET. Writing it there is what survives a reload (and
-    // what every other model linking the same asset sees); the re-resolve inside editSharedClip replaces
-    // the live clips, so the embedded-clip rename below must not also run — it would be renaming a clip
-    // that no longer exists under that name.
+    // A shared clip's name belongs to the `.anim` ASSET; only writing it there survives a reload.
+    // editSharedClip re-resolves the live clips, so the embedded-clip rename below must NOT also run.
     const sharedId = clipAssetId(oldName)
     const finalName = sharedId
       ? (editSharedClip(sharedId, oldName, { name: next }), next)
@@ -507,16 +483,14 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  // Root motion is read straight off the live model; the ANIM_CLIPS_CHANGED force-render above reflects a
-  // toggle without a working-copy edit, since the flag lives on the clip, not in the state machine.
+  // The root-motion flag lives on the clip, not in the state machine, so it is read straight off the live
+  // model and a toggle is reflected by the ANIM_CLIPS_CHANGED force-render above.
   const rootMotionOf = (name: string) => !!target?.model.animations.find(a => a.name === name)?.rootMotion
 
   /**
-   * Which shared `.anim` asset a clip came from, or undefined for a clip embedded in the model.
-   *
-   * It decides where an edit to that clip has to land. A resolved clip carries `assetId` and
-   * AnimatedModel.serialize drops it, so the embedded-clip helpers patch a list the clip is not in — the
-   * rename/delete/root-motion looked applied and was gone on reload. See editSharedClip.
+   * Which shared `.anim` asset a clip came from, or undefined for a clip embedded in the model. Decides
+   * where an edit lands: AnimatedModel.serialize drops `assetId`, so the embedded-clip helpers would patch
+   * a list the clip is not in. See editSharedClip.
    */
   const clipAssetId = (name: string) => target?.model.animations.find(a => a.name === name)?.assetId
 
@@ -528,8 +502,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
 
   const fieldOf = (id: string | undefined) => (id ? animationFields.find(f => f.id === id) : undefined)
 
-  // The link is read off the SOURCE node, not the preview clone: enterAnimationEditor clones the character
-  // into a throwaway scene, and adopting from the clone would put the throwaway copy in the library.
+  // Must read the SOURCE node, not the preview clone: enterAnimationEditor clones the character into a
+  // throwaway scene, and adopting from the clone would put that copy in the library.
   const sourceNode = animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null
   const modelId = resolveModelAssetId(sourceNode) ?? resolveModelAssetId(target?.node) ?? null
   const adoptModel = () => adoptModelAsset(sourceNode ?? target?.node ?? null)

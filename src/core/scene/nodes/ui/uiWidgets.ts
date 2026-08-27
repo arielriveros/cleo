@@ -35,18 +35,14 @@ export class UIButtonNode extends UINode {
     public set disabledTint(v: UIColor) { const p = this._disabledTint; this._disabledTint = numTuple(v, rgba(0.5, 0.5, 0.5, 0.4)); this._touch(); this._notifyChange('component', 'disabledTint', p, this._disabledTint); }
 
     /**
-     * Called when this button is activated.
-     *
-     * A real script handler (it is in `SCRIPT_HANDLERS`), so a class script overriding it gets the same
-     * throw-guard and async-rejection handling every other handler does.
+     * Called when this button is activated. A real script handler (it is in `SCRIPT_HANDLERS`), so a
+     * class script overriding it gets the same throw-guard and async-rejection handling.
      */
     public onPress(): void {}
 
     /**
-     * Fire this button, honouring `disabled`.
-     *
-     * The DOM layer's click handler goes through here rather than calling {@link onPress} directly, so the
-     * disabled rule lives in the engine and applies equally to a script that presses a button itself.
+     * Fire this button, honouring `disabled`. The DOM layer's click handler goes through here rather
+     * than calling {@link onPress} directly, so the disabled rule also covers a script pressing it.
      */
     public press(): void {
         if (this._disabled) return;
@@ -74,12 +70,7 @@ export class UIButtonNode extends UINode {
     }
 }
 
-/**
- * A row or column that positions its children in flow instead of by anchors.
- *
- * Children keep their cross-axis anchors, so a column of full-width rows is `stretch` on X plus a height
- * on Y — the stack only owns the main axis. A child with a {@link UISpacerNode}'s `flex` absorbs slack.
- */
+/** A filled bar showing `value` between `min` and `max`. */
 
 export class UIProgressBarNode extends UINode {
     private _min: number = 0;
@@ -127,17 +118,14 @@ export class UIProgressBarNode extends UINode {
     }
 
     /**
-     * Advance the smoothed fill.
-     *
-     * Runs from the ordinary node update (not the UI layout pass) because it is simulation, not layout:
-     * it must be frozen while the game is paused, which the layout pass deliberately is not.
+     * Advance the smoothed fill. Runs from the ordinary node update, not the UI layout pass: this is
+     * simulation and must freeze while the game is paused, which the layout pass does not.
      */
     public update(delta: number, time: number): void {
         super.update(delta, time);
         if (this._smoothing > 0 && this._displayed !== this._value) {
             const next = dampTime(this._displayed, this._value, this._smoothing, delta);
-            // Snap once inside a hair of the target, or the fill creeps forever and the DOM layer
-            // re-writes a style every frame for a difference nobody can see.
+            // Snap once within a hair of the target, or the fill creeps forever.
             this._displayed = Math.abs(next - this._value) < 1e-4 ? this._value : next;
             this._touch();
         }
@@ -221,10 +209,8 @@ export class UISliderNode extends UINode {
     public onValueChanged(_value: number): void {}
 
     /**
-     * Apply a drag from the DOM layer, in 0..1 along the slider's track.
-     *
-     * Separate from the `value` setter so the handler only fires for USER input — a script setting
-     * `value` should not re-enter its own `onValueChanged` and loop.
+     * Apply a drag from the DOM layer, in 0..1 along the slider's track. Separate from the `value`
+     * setter so the handler fires only for USER input and a script assignment cannot loop.
      */
     public setValueFromFraction(fraction: number): void {
         const before = this._value;

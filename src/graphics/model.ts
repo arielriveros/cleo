@@ -21,28 +21,17 @@ export type Submesh = { start: number; count: number };
 export class Model {
     private readonly  _geometry: Geometry;
     private readonly  _mesh: Mesh;
-    /**
-     * One material per submesh. Almost every model has exactly one, and `material` stays the
-     * get/set alias for `materials[0]` so the ~60 call sites that assume a single material — the
-     * renderer's pass bucketing, the editor's material slot, foliage baking — keep working unchanged.
-     */
+    // One material per submesh; `material` is the get/set alias for `materials[0]`.
     private _materials: Material[];
-    /**
-     * Index ranges parallel to `_materials`, or empty when the model draws its whole index buffer.
-     *
-     * Submeshes exist so a character split across several materials can still be ONE mesh, one node and
-     * one skeleton. The parts must agree on material `type` and `config.transparent`: the renderer
-     * chooses its pass, shader and sort key per NODE, from `materials[0]`, and a model whose parts
-     * disagreed on those would have to straddle two passes.
-     */
+    // Index ranges parallel to `_materials`, empty when the model is one whole-buffer draw. All parts
+    // must share `type` and `config.transparent` — the renderer picks its pass from `materials[0]`.
     private _submeshes: Submesh[];
 
     constructor(geometry: Geometry, material: Material | Material[], submeshes: Submesh[] = []) {
         this._geometry = geometry;
         this._materials = Array.isArray(material) ? (material.length ? material : [Material.Default({})]) : [material];
-        // A submesh list that does not line up with the materials is dropped, which turns the model back
-        // into one whole-buffer draw with materials[0]. Say so: silently, it presents as "the second
-        // material vanished on reload", because serialize() then writes only the singular `material`.
+        // A submesh list that does not line up with the materials is dropped, and the model falls back
+        // to one whole-buffer draw with materials[0].
         this._submeshes = submeshes.length === this._materials.length ? submeshes : [];
         if (submeshes.length && submeshes.length !== this._materials.length)
             Logger.warn(`Model: ${submeshes.length} submeshes vs ${this._materials.length} materials — submeshes dropped`, 'Model');
@@ -94,10 +83,7 @@ export class Model {
             data.geometry.indices
         );
 
-        // Material (de)serialization lives on the Material class so standalone material assets and
-        // Model share one code path. Legacy 'default'/'defaultSkinned' (and missing type) resolve to Blinn-Phong.
-        // `materials`/`submeshes` are the multi-material form; `material` is the original single one and
-        // is still what almost every saved model carries, so both shapes have to read.
+        // Both shapes must read: `materials`/`submeshes` is the multi-material form, `material` the single one.
         const materials = Array.isArray(data.materials) && data.materials.length
             ? data.materials.map((m: any) => Material.parse(m))
             : [Material.parse(data.material)];
@@ -106,10 +92,7 @@ export class Model {
     }
 
     public serialize(): any {
-        // Array.from is not optional: Geometry stores typed arrays, and JSON.stringify turns a
-        // Float32Array into an OBJECT ({"0":x,"1":y,...}) rather than an array — which would silently
-        // corrupt every saved model. Emitted flat; Geometry's constructor reads both the flat and the
-        // legacy nested shape, so older projects keep loading.
+        // Array.from is mandatory: JSON.stringify turns a Float32Array into an object, not an array.
         const geometry = {
             positions: Array.from(this._geometry.positions),
             normals: Array.from(this._geometry.normals),
@@ -119,9 +102,8 @@ export class Model {
             indices: Array.from(this._geometry.indices)
         };
 
-        // Material flattening lives on the Material class (shared with standalone material assets).
-        // `material` is still written for every model so anything reading the old shape (and older
-        // builds of the player) keeps working; `materials`/`submeshes` only appear when there are several.
+        // `material` is written for every model so readers of the single-material shape keep working;
+        // `materials`/`submeshes` appear only when there are several.
         const out: any = { geometry, material: this._materials[0].serialize() };
         if (this._submeshes.length > 1) {
             out.materials = this._materials.map(m => m.serialize());

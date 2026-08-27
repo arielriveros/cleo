@@ -1,10 +1,5 @@
-// Drop the authoring a scene's dimension makes dead weight before a build ships.
-//
-// A scene keeps both a landscape and a tilemap while it is being authored — the 2D/3D switch is meant to be
-// reversible, and the editor says so when you flip it. A published game has no such need: whichever of the
-// two the scene's dimension does not use will never render and never collide, and a heightfield or a painted
-// map is not a small thing to carry.
-//
+// Drop the authoring a scene's dimension makes dead weight before a build ships: a scene keeps both a
+// landscape and a tilemap while it is authored, but a published game needs only the one it uses.
 // Runs BEFORE the terrain compression and the referenced-only texture filter, so a discarded landscape's
 // layer textures are never deflated and never shipped. See buildMultiSceneGameData for that ordering.
 
@@ -15,10 +10,8 @@ function deadType(dimension: '2D' | '3D'): 'landscape' | 'tilemap' {
 
 /**
  * Remove every dead subtree from a serialized scene tree, in place. Returns how many were removed.
- *
- * The whole subtree goes, not just the node: children of a landscape are positioned relative to terrain
- * that is about to stop existing, and keeping them would leave props floating in a scene that cannot show
- * the ground they were placed on.
+ * The whole subtree goes, not just the node: a landscape's children are positioned relative to terrain
+ * that is about to stop existing.
  */
 export function stripDimensionData(sceneJson: any, dimension: '2D' | '3D'): number {
   const dead = deadType(dimension)

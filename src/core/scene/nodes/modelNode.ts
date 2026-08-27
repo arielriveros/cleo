@@ -13,11 +13,8 @@ import { Node } from "./node";
 
 /**
  * How far a skinned model's bind-pose bounds are inflated, as a CULLING margin: the mesh deforms on the
- * GPU, so its bind-pose extent understates where it can actually reach and a tight bound pops.
- *
- * Named and exported because it is a culling allowance, not a measurement — anything asking "how big is
- * this model" (import size normalization, the import review's reported size) has to divide it back out,
- * and a bare 1.75 buried in a getter is impossible to notice from those call sites.
+ * GPU, so its bind-pose extent understates where it can reach. It is an allowance, not a measurement —
+ * anything asking how big a model actually is must divide it back out.
  */
 export const SKINNED_BOUNDS_MARGIN = 1.75;
 
@@ -28,9 +25,8 @@ export const SKINNED_BOUNDS_MARGIN = 1.75;
 export class ModelNode extends Node {
     private _model: Model | AnimatedModel;
     private _initialized: boolean;
-    // Material type the mesh VAO/vertex-data were last built for. If the material type changes
-    // (e.g. the editor switches basic <-> default/pbr, which use different vertex attribute
-    // layouts), the mesh must be rebuilt — see the `initialized` getter.
+    // Material type the mesh VAO/vertex data were last built for. basic and default/pbr use different
+    // vertex attribute layouts, so a type change forces a rebuild — see the `initialized` getter.
     private _initializedType: string | null = null;
     private _animator: Animator | null;
     private _movementDirection: vec3;
@@ -43,7 +39,6 @@ export class ModelNode extends Node {
         this._initialized = false;
         this._movementDirection = vec3.create();
         
-        // Create animator for animated models
         if (model instanceof AnimatedModel && model.hasSkin) {
             this._animator = new Animator(model, this);
         } else {
@@ -94,7 +89,6 @@ export class ModelNode extends Node {
 
     protected _serializePayload(): any {
             const model = this._model.serialize()
-            // Serialize animation mappings + state machine if animator exists
             let animationMappings: AnimationMapping[] | null = null;
             let stateMachine: AnimationStateMachine | null = null;
             if (this._animator) {
@@ -110,31 +104,27 @@ export class ModelNode extends Node {
     }
 
     public static parse(parent: Node, json: any) {
-        // Check if this is an AnimatedModel by looking for animation/skin data
         const isAnimated = json.model.skin || json.model.animations || json.model.jointIndices;
         const model = isAnimated ? AnimatedModel.parse(json.model) : Model.parse(json.model);
         const node = new ModelNode(json.name, model, json.id);
         
-        // Restore animation mappings if they exist
         if (json.animationMappings && node.animator) {
             node.animator.setAnimationMappings(json.animationMappings);
         }
 
-        // Restore the animation state machine if present (takes precedence over mappings).
+        // A serialized state machine takes precedence over plain animation mappings.
         if (json.stateMachine && node.animator) {
             node.animator.setStateMachine(json.stateMachine);
         }
 
-        // Restore ragdoll config if present
         if (json.ragdoll) node.ragdollConfig = json.ragdoll;
 
         Node.finishParse(node, parent, json);
     }
 
     public get model(): Model | AnimatedModel { return this._model; }
-    // Reports uninitialized when the material type changed since the mesh was built, so the
-    // renderer's `if (!node.initialized) node.initializeModel()` guards rebuild the VAO/vertex
-    // data for the new material's attribute layout (basic uses a different layout than default/pbr).
+    // Reports uninitialized when the material type changed since the mesh was built, so the renderer
+    // rebuilds the VAO for the new material's attribute layout.
     public get initialized(): boolean {
         return this._initialized && this._initializedType === this._model.material.type;
     }
@@ -148,26 +138,16 @@ export class ModelNode extends Node {
     public get visible(): boolean { return super.visible; }
     public set visible(value: boolean) {
       super.visible = value;
-      // Every submesh, not just slot 0: hiding a merged model used to leave its other index ranges still
-      // casting shadows, so the character vanished but part of its silhouette did not.
+      // Every submesh, not just slot 0, or a merged model's other index ranges keep casting shadows.
       for (const material of this._model.materials) material.config.castShadow = value;
       for (const child of this._children)
         child.visible = value;
-      // The base setter (super.visible) already emitted the visibility SCENE_CHANGED for this node.
     }
 
     /**
-     * World-space AABB of the model's geometry: the geometry's cached object-space box transformed by
-     * the world matrix. Cached against `_worldBoxDirty`, so it costs 8 corner transforms at most once
-     * per frame, and the returned object is a live reference (see {@link Node.getBoundingBox}).
-     *
-     * This used to transform *every vertex of the mesh on every call*, allocating two vec3s each, with
-     * no cache — and the raycaster calls it once per node per ray. A 5-ray camera-collision probe over
-     * 40 mid-poly meshes meant ~1M transforms and ~2M allocations per frame (~18ms, most of it GC).
-     *
-     * Transforming the local box's corners gives a bound that is correct but looser than the exact
-     * vertex hull for a rotated mesh — the standard trade (Unity/Unreal both do this). Precise picking
-     * is unaffected: the raycaster refines AABB hits against the triangle BVH.
+     * World-space AABB of the model's geometry: the cached object-space box transformed by the world
+     * matrix, so it is looser than the exact vertex hull for a rotated mesh. Cached against
+     * `_worldBoxDirty`; the returned object is a live reference (see {@link Node.getBoundingBox}).
      */
     public getBoundingBox(): { min: vec3, max: vec3 } {
         if (!this._worldBoxDirty) return this._worldBox;
@@ -198,9 +178,8 @@ export class ModelNode extends Node {
             }
         }
 
-        // Skinned meshes deform on the GPU, so the bind-pose bound understates the animated extent.
-        // Inflate about the centre by the same factor getBoundingSphere uses, to avoid a limb sticking
-        // out of the box (which would make it unpickable and invisible to camera collision).
+        // Skinned meshes deform on the GPU, so inflate the bind-pose box about its centre by the same
+        // factor getBoundingSphere uses, or a limb reaches outside it.
         if (this._model instanceof AnimatedModel) {
             for (let a = 0; a < 3; a++) {
                 const centre = (min[a] + max[a]) * 0.5;
@@ -218,9 +197,8 @@ export class ModelNode extends Node {
     private static readonly _boxScratch: vec3 = vec3.create();
 
     /**
-     * Static meshes expose their geometry's cached BVH for exact picking. Skinned/animated meshes
-     * deform on the GPU, so an object-space BVH would not match the current pose — those return
-     * `null` and fall back to AABB picking.
+     * Static meshes expose their geometry's cached BVH for exact picking. Skinned meshes deform on the
+     * GPU, so an object-space BVH would not match the pose — those return `null` and pick by AABB.
      */
     public getBVH(): BVH | null {
         if (this._model instanceof AnimatedModel) return null;
@@ -229,13 +207,7 @@ export class ModelNode extends Node {
         return bvh.triangleCount > 0 ? bvh : null;
     }
 
-    /**
-     * World-space bounding sphere for frustum culling: the geometry's cached local sphere transformed
-     * by the world matrix, radius scaled by the largest world-axis scale. Cached and invalidated with
-     * the transform (`_worldSphereDirty`). Skinned/animated meshes deform on the GPU, so their bind-pose
-     * bound understates the animated extent — inflate the radius to avoid popping.
-     */
-    /** The bind-pose radius the sphere above is inflated by; see {@link SKINNED_BOUNDS_MARGIN}. */
+    /** The factor the culling sphere's radius is inflated by; see {@link SKINNED_BOUNDS_MARGIN}. */
     public get boundsMargin(): number { return this._model instanceof AnimatedModel ? SKINNED_BOUNDS_MARGIN : 1; }
 
     public getBoundingSphere(): { center: vec3; radius: number } {
@@ -256,9 +228,8 @@ export class ModelNode extends Node {
 
     public update(delta: number, time: number): void {
         super.update(delta, time);
-        // Skip animator playback when the scene has animations disabled (editor scenes) so skinned
-        // meshes hold their bind pose; Play scenes leave it enabled, and the Animation Editor drives
-        // its preview clone's animator directly (not via scene.update), so both still animate.
+        // Skip animator playback when the scene has animations disabled (editor scenes), so skinned
+        // meshes hold their bind pose.
         if (this._animator && this._scene?.animationsEnabled !== false) {
             const start = sceneStatsDetail.enabled ? performance.now() : 0;
             this._animator.checkTriggers();
@@ -267,12 +238,3 @@ export class ModelNode extends Node {
         }
     }
 }
-
-/**
- * Groups alternate LOD subtrees of one mesh asset: child i holds the whole level-i subtree and only
- * one level shows at a time, selected each frame by camera distance (Renderer._updateModelLOD →
- * updateLod). `distances[i]` is the distance at which child i becomes active (ascending,
- * distances[0] = 0). When `cullDistance > 0` the whole group hides past it; 0 = never cull.
- * Level switches use the event-less `setLodVisible` flag, never the `visible` setter (which emits
- * SCENE_CHANGED and, on ModelNode, clobbers material.config.castShadow).
- */

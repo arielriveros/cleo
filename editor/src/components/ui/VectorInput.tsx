@@ -27,8 +27,7 @@ export interface VectorInputProps {
 
 /**
  * Generalized numeric vector field (vec2/vec3/vec4/scalar). Each component has a colored, draggable
- * axis label (pointer-lock, clamped to min/max) and a click-to-type input. Replaces the 3-axis-only
- * AxisInput and the hand-rolled multi-input vectors in the Custom editors.
+ * axis label (pointer-lock, clamped to min/max) and a click-to-type input.
  */
 export function VectorInput({
   value,
@@ -57,7 +56,7 @@ export function VectorInput({
     return v;
   };
 
-  // Apply a new value at index i, honoring uniform (ratio) lock.
+  // Honors the uniform (ratio) lock.
   const applyAt = (i: number, next: number) => {
     const { value: cur, uniform: u, onChange: cb } = latest.current;
     if (u) {

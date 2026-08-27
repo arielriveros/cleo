@@ -174,6 +174,8 @@ export interface GltfMaterialDescriptor {
     emissiveFactor: [number, number, number];
     doubleSided: boolean;
     transparent: boolean;
+    /** glTF `alphaMode: MASK` as a cutoff; 0 when the material is not masked. */
+    alphaCutoff?: number;
     textures: {
         baseColorTexture?: number;
         metallicRoughnessTexture?: number;
@@ -218,9 +220,8 @@ export class GLTFLoader {
     private buffers: ArrayBuffer[] = [];
     private basePath: string = '';
     private files: File[] = [];
-    // Shared glTF resources are referenced once PER PRIMITIVE by the parse loops; without these caches a
-    // file with N primitives realizes N copies of each material and texture (fresh TextureManager ids,
-    // re-decoded images) instead of sharing the handful the file actually defines.
+    // Shared glTF resources are referenced once PER PRIMITIVE, so without these caches a file with N
+    // primitives realizes N copies of each material and texture.
     private materialCache = new Map<number, Material>();
     private textureIdCache = new Map<string, string | undefined>();
     // Descriptor-mode state: images described once each, keyed the same way textureIdCache is.
@@ -263,9 +264,7 @@ export class GLTFLoader {
         return this.parseMeshes();
     }
 
-    /**
-     * Load animated models with skinning and animation data from a file path
-     */
+    /** Load skinned, animated models from a file path. */
     async loadAnimatedFromPath(filePath: string): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
         // Extract base path for relative URI resolution
         this.basePath = filePath.substring(0, filePath.lastIndexOf('/') + 1);
@@ -282,9 +281,7 @@ export class GLTFLoader {
         return this.parseAnimatedMeshes();
     }
 
-    /**
-     * Load animated models with skinning and animation data from uploaded files
-     */
+    /** Load skinned, animated models from uploaded files. */
     async loadAnimatedFromFiles(files: File[]): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
         const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
         if (!gltfFile) {
@@ -306,10 +303,8 @@ export class GLTFLoader {
     }
 
     /**
-     * Parse ONLY animation clips + the source skeleton (bone names/parents) from uploaded files,
-     * for animation IMPORT/retargeting. Unlike loadAnimatedFromFiles this does NOT require a mesh or
-     * skin — animation-only files (e.g. a Mixamo export with "skin" unchecked) are supported: the
-     * skeleton is reconstructed from the glTF node hierarchy + the nodes the animation targets.
+     * Parse only animation clips and their source skeleton, for retargeting. Needs no mesh or skin —
+     * an animation-only file's skeleton is reconstructed from the node hierarchy and animation targets.
      */
     async loadAnimationsFromFiles(files: File[]): Promise<{ animations: Animation[]; skin: Skin }> {
         const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
@@ -348,10 +343,7 @@ export class GLTFLoader {
             }
         }
 
-        // Fold assimp's FBX pivot nodes away before anything reads the hierarchy. Their shape differs
-        // between two files exported from the SAME rig (assimp emits each pivot only when its FBX property
-        // is non-default), and a retarget matching them by name then drops or doubles a pre-rotation — a
-        // constant per-bone twist on exactly the pre-rotated bones. A file with no pivots is untouched.
+        // Fold assimp's FBX pivots away BEFORE anything reads the hierarchy — see fbxPivots.ts.
         const fromFile = this.gltf.skins && this.gltf.skins.length > 0 ? this.parseSkin(this.gltf.skins[0]) : null;
         const collapsed = collapseFbxPivots({ nodeParents, nodeTransforms, nodeNames }, animations, fromFile?.joints);
         const graph = {
@@ -363,9 +355,7 @@ export class GLTFLoader {
         // Prefer a real skin (has inverse-bind matrices); else synthesize joints from animated nodes.
         if (fromFile) return { animations: collapsed.animations, skin: { ...fromFile, ...graph } };
 
-        // Synthesized AFTER the collapse, so the joints are the real bones rather than the pivots that
-        // happened to carry the curves. That is what lets bone names, humanoid slots and the spine chain
-        // resolve on an animation-only file at all.
+        // AFTER the collapse, so the joints are the real bones rather than the pivots carrying curves.
         const animatedNodes = new Set<number>();
         for (const a of collapsed.animations) for (const ch of a.channels) animatedNodes.add(ch.targetNodeIndex);
         const joints = [...animatedNodes].sort((x, y) => x - y).map(ni => ({
@@ -374,11 +364,7 @@ export class GLTFLoader {
         return { animations: collapsed.animations, skin: { joints, ...graph } };
     }
 
-    /**
-     * Decode an embedded `data:` buffer URI. `fetch` handles data URIs and decodes base64 natively — the
-     * previous atob + per-character `charCodeAt` copy ran ~125 million iterations on a 125 MB embedded
-     * model and was one of the main reasons importing froze the editor.
-     */
+    // Decode an embedded `data:` buffer URI through `fetch`, which decodes base64 natively.
     private static async decodeDataUri(uri: string): Promise<ArrayBuffer> {
         return (await fetch(uri)).arrayBuffer();
     }
@@ -468,10 +454,7 @@ export class GLTFLoader {
         }
     }
 
-    /**
-     * Match a GLTF-relative URI (e.g. "textures/foo.png") against the provided files.
-     * Robust to folder imports (webkitRelativePath) and plain multi-select (basename only).
-     */
+    // Match a glTF-relative URI against the provided files, handling folder imports and multi-select.
     private findFile(uri: string): File | undefined {
         const target = decodeURIComponent(uri).replace(/\\/g, '/').replace(/^\.?\//, '').toLowerCase();
         const base = target.split('/').pop()!;
@@ -484,12 +467,8 @@ export class GLTFLoader {
         return file ?? this.files.find(f => f.name.toLowerCase() === base);
     }
 
-    /**
-     * The raw compressed bytes of an image stored in a bufferView (embedded / .glb).
-     *
-     * Copied out rather than returned as a view: the Texture retains these bytes for serialization, and a
-     * view would pin the model's whole (often enormous) glTF buffer alive for as long as the texture exists.
-     */
+    // The compressed bytes of an image stored in a bufferView. COPIED, not viewed: the Texture retains
+    // them, and a view would pin the model's whole glTF buffer alive.
     private bufferViewImageBytes(image: GLTFImage): Uint8Array {
         const bufferView = this.gltf.bufferViews![image.bufferView!];
         const buffer = this.buffers[bufferView.buffer];
@@ -498,21 +477,11 @@ export class GLTFLoader {
     }
 
     // ---- descriptor mode -------------------------------------------------------------------------
-    //
-    // Everything below produces PLAIN DATA: no Texture, no Material, no Geometry, no GL. It is what
-    // lets glTF parsing run in a Web Worker, with `Loader.assembleGltfModels` turning the result into
-    // engine objects on the main thread (where a GL context exists). The eager paths further down
-    // (`parseMeshes`/`parseAnimatedMeshes`) are thin wrappers over the same functions, so the worker
-    // and inline routes cannot drift apart.
+    // Everything below produces PLAIN DATA — no Texture, Material, Geometry or GL — so glTF parsing can
+    // run in a Web Worker. The eager paths below wrap these same functions, so the two cannot drift.
 
-    /**
-     * Describe an image without decoding or uploading it — the exact point where the old code called
-     * into `TextureManager` and therefore needed a GL context.
-     *
-     * `file` resolution happens here because only the parser knows how a glTF URI maps onto the
-     * uploaded file list; the descriptor carries the resolved *name* so the main thread can look the
-     * File back up without repeating the matching rules.
-     */
+    // Describe an image without decoding or uploading it. File resolution happens here — only the
+    // parser knows how a glTF URI maps onto the upload list — and the descriptor carries the name.
     private describeImage(image: GLTFImage): GltfImageSource {
         if (image.bufferView !== undefined)
             return { kind: 'bytes', bytes: this.bufferViewImageBytes(image), mime: image.mimeType || 'image/jpeg' };
@@ -532,11 +501,8 @@ export class GLTFLoader {
         return { kind: 'missing' };
     }
 
-    /**
-     * Index into {@link GltfParseResult.images} for a texture reference, deduped exactly as the eager
-     * path deduped TextureManager ids: many texture/material entries alias few images, and several
-     * image entries can share a URI (Blender does this), so each underlying image is described once.
-     */
+    // Index into `GltfParseResult.images` for a texture reference, deduped by SOURCE: many texture
+    // entries alias few images, and several image entries can share one URI.
     private imageIndexFor(textureIndex: number): number | undefined {
         if (!this.gltf.textures || !this.gltf.images) return undefined;
         const texture = this.gltf.textures[textureIndex];
@@ -580,6 +546,8 @@ export class GLTFLoader {
                 : [0, 0, 0],
             doubleSided: !!gltfMaterial.doubleSided,
             transparent: gltfMaterial.alphaMode === 'BLEND',
+            // 0.5 is the glTF default for MASK; 0 disables the cutout for every other alpha mode.
+            alphaCutoff: gltfMaterial.alphaMode === 'MASK' ? (gltfMaterial.alphaCutoff ?? 0.5) : 0,
             textures,
         };
     }
@@ -629,11 +597,8 @@ export class GLTFLoader {
     }
 
     /**
-     * Parse uploaded glTF files into plain data. **Pure: no DOM, no WebGL** — safe to run in a worker.
-     * Pair with `Loader.assembleGltfModels`.
-     *
-     * `animated` additionally extracts skins, animations and per-vertex joint bindings; skipping it for
-     * a static import avoids paying for skeleton parsing that would be discarded.
+     * Parse uploaded glTF files into plain data. Pure — no DOM, no WebGL — so it is safe in a worker;
+     * pair with `Loader.assembleGltfModels`. `animated` adds skins, clips and joint bindings.
      */
     public async parseDescriptorsFromFiles(files: File[], animated: boolean): Promise<GltfParseResult> {
         this.files = files;
@@ -707,14 +672,8 @@ export class GLTFLoader {
         return { meshes, materials, images: this.imageSources, skins: skins.map(s => s ?? undefined), animations };
     }
 
-    /**
-     * Fold assimp's FBX pivot nodes away across every skin and clip this file produced.
-     *
-     * Done here rather than per skin because the node graph is the whole glTF node list — one shared
-     * hierarchy — so the fold is computed once and written back to each skin. A character and an animation
-     * file must BOTH be collapsed or their pivot chains can still disagree, which is the whole failure
-     * this removes. `parseAnimationsAndSkeleton` does the same for the animation-only path.
-     */
+    // Fold assimp's FBX pivots away across every skin and clip at once — the node graph is one shared
+    // hierarchy. A character and an animation file must BOTH be collapsed or their chains disagree.
     private collapsePivots(skins: (Skin | null)[], animations: Animation[]): Animation[] {
         const first = skins.find(s => s) as Skin | undefined;
         if (!first?.nodeNames || !first.nodeParents || !first.nodeTransforms) return animations;
@@ -749,11 +708,8 @@ export class GLTFLoader {
         return out;
     }
 
-    /**
-     * Resolve a GLTF texture reference into a TextureManager texture id.
-     * Handles embedded bufferView images, data URIs, uploaded external files
-     * (file-import flow), and external paths (path-load flow).
-     */
+    // Resolve a glTF texture reference to a TextureManager id: bufferView images, data URIs, uploaded
+    // files and external paths.
     private loadTexture(textureIndex: number): string | undefined {
         if (!this.gltf.textures || !this.gltf.images) return undefined;
 
@@ -761,9 +717,7 @@ export class GLTFLoader {
         if (!texture || texture.source === undefined) return undefined;
 
         const image = this.gltf.images[texture.source];
-        // Many texture/material entries typically alias few images — and several image entries can even
-        // share one URI (Blender exports do this) — so key the cache on the image's actual source to
-        // decode/upload each underlying image exactly once.
+        // Key on the image's SOURCE, so each underlying image is decoded and uploaded exactly once.
         const cacheKey = image.uri !== undefined ? `uri:${image.uri}` : `bv:${image.bufferView}`;
         if (this.textureIdCache.has(cacheKey)) return this.textureIdCache.get(cacheKey);
         const id = this.resolveTexture(image);
@@ -775,9 +729,7 @@ export class GLTFLoader {
         const cfg = { wrapping: 'repeat' as const };
 
         try {
-            // 1. Embedded image (bufferView): hand the compressed bytes straight to the TextureManager. It
-            //    decodes them from a Blob — no base64 in either direction (this used to hand-roll a data
-            //    URL one character at a time, then make the browser decode it right back).
+            // 1. Embedded image: hand the compressed bytes straight over, decoded from a Blob.
             if (image.bufferView !== undefined) {
                 const bytes = this.bufferViewImageBytes(image);
                 const mime = image.mimeType || 'image/jpeg';
@@ -791,9 +743,8 @@ export class GLTFLoader {
 
             // 3. External URI
             if (image.uri) {
-                // 3a. File-import flow: resolve against the provided files (folder or multi-select).
-                // If the referenced file wasn't uploaded, return undefined (missing) rather than falling
-                // through to a doomed relative fetch — the latter rejects with an image error Event.
+                // 3a. File-import flow. An unresolved reference returns undefined rather than falling
+                // through to a relative fetch, which rejects with an image error Event.
                 if (this.files.length) {
                     const file = this.findFile(image.uri);
                     return file ? TextureManager.Instance.addTextureFromFile(file, cfg) : undefined;
@@ -808,12 +759,8 @@ export class GLTFLoader {
         return undefined;
     }
 
-    /**
-     * One entry per scene-node → mesh reference, carrying the node's name and world TRS so importers
-     * can place multi-part files (e.g. several variants laid out side by side) as authored, instead of
-     * flattening everything to the origin. Falls back to one identity-transform instance per mesh when
-     * no node references any mesh.
-     */
+    // One entry per scene-node -> mesh reference with the node's world TRS, so a multi-part file places
+    // as authored. Falls back to one identity instance per mesh when no node references any.
     private getMeshInstances(): { meshIndex: number; name?: string; transform?: ImportTransform; skinIndex?: number }[] {
         const instances: { meshIndex: number; name?: string; transform?: ImportTransform; skinIndex?: number }[] = [];
         const nodes = this.gltf.nodes;
@@ -889,11 +836,7 @@ export class GLTFLoader {
         return result;
     }
 
-    /**
-     * Eager-path geometry. Delegates to {@link describeGeometry} so there is a single implementation
-     * of glTF attribute decoding shared with the worker route — and so the flat typed arrays are
-     * adopted straight into `Geometry` rather than being exploded into per-vertex arrays first.
-     */
+    // Eager-path geometry, delegating to `describeGeometry` so attribute decoding has one implementation.
     private async createGeometry(primitive: GLTFMesh['primitives'][0]): Promise<Geometry> {
         const g = this.describeGeometry(primitive);
         return new Geometry(g.positions, g.normals, g.uvs, g.tangents, [], g.indices);
@@ -918,9 +861,7 @@ export class GLTFLoader {
             [gltfMaterial.emissiveFactor[0], gltfMaterial.emissiveFactor[1], gltfMaterial.emissiveFactor[2]] :
             [0, 0, 0];
 
-        // GLTF is a PBR format: build a PBR material and load its full metallic-roughness texture set
-        // (baseColor, metallic-roughness, normal, occlusion, emissive) rather than a Blinn-Phong subset,
-        // so imported/uploaded textures are all actually used.
+        // glTF is a PBR format, so load the whole metallic-roughness set rather than a Blinn-Phong subset.
         const textures: any = {};
         if (pbr?.baseColorTexture) textures.baseColorTexture = this.loadTexture(pbr.baseColorTexture.index);
         if (pbr?.metallicRoughnessTexture) textures.metallicRoughnessTexture = this.loadTexture(pbr.metallicRoughnessTexture.index);
@@ -933,6 +874,8 @@ export class GLTFLoader {
             metallic: pbr?.metallicFactor === undefined ? 1.0 : pbr.metallicFactor,
             roughness: pbr?.roughnessFactor === undefined ? 1.0 : pbr.roughnessFactor,
             opacity: pbr?.baseColorFactor ? pbr.baseColorFactor[3] : 1.0,
+            // See describeMaterial: MASK is a cutout, not transparency.
+            alphaCutoff: gltfMaterial.alphaMode === 'MASK' ? (gltfMaterial.alphaCutoff ?? 0.5) : 0,
             emissiveFactor,
             textures
         }, {
@@ -943,9 +886,7 @@ export class GLTFLoader {
         return material;
     }
 
-    /**
-     * Parse meshes with animation and skinning data
-     */
+    // Parse meshes with their animation and skinning data.
     private async parseAnimatedMeshes(): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
         const result: {name: string, model: AnimatedModel, transform?: ImportTransform}[] = [];
 
@@ -1037,9 +978,7 @@ export class GLTFLoader {
         return result;
     }
 
-    /**
-     * Parse a GLTF skin into our Skin format
-     */
+    // Convert a glTF skin into the engine's Skin.
     private parseSkin(gltfSkin: GLTFSkin): Skin {
         const joints: Skin['joints'] = [];
         
@@ -1131,9 +1070,7 @@ export class GLTFLoader {
         };
     }
 
-    /**
-     * Parse a GLTF animation into our Animation format
-     */
+    // Convert a glTF animation into the engine's Animation.
     private parseAnimation(gltfAnim: GLTFAnimation): Animation {
         const samplers: AnimationSampler[] = [];
         

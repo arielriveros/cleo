@@ -5,9 +5,8 @@ import { SegmentedControl, Toggle } from '../../components/ui'
 import { toRuntimeField } from '../../utils/animationFields'
 import type { AnimationFieldAxis } from '../../utils/animationFields'
 
-// Sidebar inspector for the Animation Field editor. The plot owns placement (that IS the data); this panel
-// owns everything the plot cannot express: the field's name, its mode, the axis ranges, and per-sample
-// details like which clip a point plays and its rate scale.
+// Sidebar inspector for the Animation Field editor: the field's name, mode and axis ranges, plus per-sample
+// clip and rate scale. Sample placement belongs to the plot.
 
 const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
 const btn = 'px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
@@ -28,21 +27,15 @@ export default function AnimationFieldPanel() {
   const is2D = field.mode === '2d'
   const weightOf = (clipName: string) => weights.find(w => w.clipName === clipName)?.weight ?? 0
 
-  // A blend paces itself against each clip's OWN authored length, so a clip several times shorter than the
-  // rest of the field plays that corner at several times the speed — which reads as "only the run animation
-  // is broken" and is invisible without the numbers. Compared against the MEDIAN so one bad clip cannot
-  // define what normal looks like.
-  //
-  // Only SHORT outliers are flagged. A long clip plays slowly, which is both far less jarring and usually
-  // deliberate — an idle is routinely several times the length of a walk, and warning about that every time
-  // would be noise. The 2.5x band also leaves a genuine run/walk cadence difference (~1.7x) alone.
+  // A blend paces itself against each clip's OWN authored length, so a much shorter clip plays its corner
+  // much faster. Compared against the MEDIAN, and only SHORT outliers are flagged; the 2.5x band clears a
+  // genuine run/walk cadence difference (~1.7x).
   const lengths = field.samples.map(s => clipDurations[s.clipName]).filter(d => d > 0).sort((a, b) => a - b)
   const median = lengths.length ? lengths[Math.floor(lengths.length / 2)] : 0
   const isOutlier = (d: number) => median > 0 && d > 0 && d < median / 2.5
 
-  // Samples sitting on the same coordinate split one sample's worth of weight. That is the right behaviour,
-  // but it is worth SAYING, because a wrapping axis makes its two ends the same point while the plot draws
-  // them at opposite edges — so the user cannot see why one clip is quieter than they drew it.
+  // Samples on the same coordinate split one sample's worth of weight. A wrapping axis makes its two ends
+  // the same point while the plot draws them at opposite edges, so this has to be said out loud.
   const coincidentWith: Record<number, string> = {}
   for (const group of coincidentSamples(toRuntimeField(field))) {
     for (const i of group) {
@@ -51,12 +44,9 @@ export default function AnimationFieldPanel() {
     }
   }
 
-  // A sample outside its axis range is the quietest failure this editor has. The plot draws it beyond the
-  // bordered box where it is easy to miss, every drag clamps back into the range so touching it destroys the
-  // value, and the probe cannot be dragged out to meet it — so the preview can never show the clip. At
-  // runtime the range is only a normalization basis and nothing clamps, so whether the clip ever plays comes
-  // down to whether the bound parameter reaches that far. For a negative coordinate it usually cannot: every
-  // speed built-in except forwardSpeed/lateralSpeed is a vector magnitude.
+  // A sample outside its axis range cannot be previewed: every drag clamps back into the range and the probe
+  // cannot be dragged out to meet it. At runtime the range is only a normalization basis and nothing clamps,
+  // so the clip plays only if the bound parameter reaches that far.
   const outside = (v: number, axis: AnimationFieldAxis) =>
     v < Math.min(axis.min, axis.max) || v > Math.max(axis.min, axis.max)
 
@@ -65,8 +55,7 @@ export default function AnimationFieldPanel() {
     const axis = which === 'x' ? field.xAxis : field.yAxis
     const lo = Math.min(axis.min, axis.max)
     const hi = Math.max(axis.min, axis.max)
-    // Headroom, so the sample lands inside the plot rather than exactly on its border where it cannot be
-    // grabbed without also being clamped.
+    // Headroom, so the sample lands inside the plot rather than on its border where a grab also clamps it.
     const pad = Math.max((hi - lo) * 0.1, Math.abs(v) * 0.1, 0.1)
     const round = (n: number) => Number(n.toFixed(3))
     if (v < lo) setAxis(which, { min: round(v - pad) })
@@ -317,16 +306,14 @@ function AxisRow({ label, axis, onChange }: {
 }
 
 /**
- * An axis's range spans a full turn, so it is almost certainly a heading.
- *
- * Only a nudge, never automatic: a -180..180 axis could legitimately be a clamped lean where the two ends
- * really are opposites, and silently wrapping it would change a field the user already tuned.
+ * Whether an axis's range spans a full turn, making it almost certainly a heading. Drives a suggestion
+ * only — never wrap an axis automatically, since -180..180 may be a clamped lean.
  */
 function looksAngular(axis: AnimationFieldAxis): boolean {
   return Math.abs((axis.max - axis.min) - 360) < 1e-6
 }
 
-/** Per-axis probe filtering. Split from AxisRow so the range stays one scannable line. */
+/** Per-axis probe filtering. */
 function AxisSmoothingRow({ label, axis, onChange }: {
   label: string
   axis: AnimationFieldAxis

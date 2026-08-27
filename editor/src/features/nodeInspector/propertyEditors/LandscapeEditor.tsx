@@ -5,11 +5,8 @@ import { Button, Hint, NumberInput } from '../../../components/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { rebuildTerrain } from '../../landscape/rebuildTerrain'
 
-// Node inspector for a LandscapeNode: the terrain's STRUCTURE — how big it is, how finely it is sampled,
-// how it is chunked — plus the heightmap import/export that replaces its shape wholesale.
-//
-// The split against landscape mode mirrors the tilemap's: this holds what the terrain IS, the mode holds
-// the brushes that edit it. Position is the node's own transform, edited with the ordinary gizmo.
+// Node inspector for a LandscapeNode: the terrain's STRUCTURE — size, sampling, chunking — plus the
+// heightmap import/export that replaces its shape wholesale. Landscape mode holds the brushes that edit it.
 
 const label = 'text-xs text-gray-300'
 
@@ -17,12 +14,8 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
   const { eventEmitter } = useCleoEngine()
   const terrain = props.node.terrain
 
-  // Staged, not live. A rebuild reallocates every chunk and resamples the splat and the foliage — far too
-  // expensive to run on each keystroke the way the tilemap's grid settings can afford to.
-  //
-  // Read from `config` rather than the `size`/`resolution` getters: those report the DERIVED values
-  // (resolution is the vertices-per-side after clamping), and this control has to round-trip what the
-  // terrain was actually built with.
+  // Staged, not live: a rebuild reallocates every chunk and resamples the splat and the foliage.
+  // Read from `config`, not the `size`/`resolution` getters, which report the derived (clamped) values.
   const cfg = terrain.config
   const [size, setSize] = useState(cfg.size)
   const [resolution, setResolution] = useState(cfg.resolution)

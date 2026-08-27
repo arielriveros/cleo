@@ -7,15 +7,9 @@ import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import { jointLabel } from './skeleton'
 
-// Foot-IK rig authoring, under the skeleton tree.
-//
-// Bones are assigned BY HAND: select a joint (in the tree or the viewport — both drive the same SELECT_JOINT
-// event) and click the role it fills. That is deliberate rather than a limitation. A skeleton is not
-// obliged to be humanoid, and a rig whose bones the engine guessed is a rig nobody has checked; the ⤓ button
-// offers the guess for the rigs where it works, and nothing depends on it.
-//
-// Everything here writes through commitIkRig, which lands on the MODEL ASSET — so a character's legs are
-// assigned once and every placement of it inherits them.
+// Foot-IK rig authoring, under the skeleton tree. Bones are assigned by hand: select a joint (SELECT_JOINT,
+// from the tree or the viewport) and click the role it fills; the ⤓ button offers a name-matched guess.
+// Everything writes through commitIkRig, which lands on the MODEL ASSET, so every placement inherits it.
 
 const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
 const ghost = 'px-1.5 py-0.5 rounded border border-control-hover hover:bg-control text-xs'
@@ -43,12 +37,11 @@ const emptyRig = (): IkRig => ({ feet: [] })
 export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; selectedJoint: number | null }) {
   const { commitIkRig, currentIkRig, eventEmitter } = useCleoEngine()
   const [rig, setRig] = useState<IkRig | null>(null)
-  /** What the last guess matched and skipped. Cleared on any manual edit, so it never describes a stale rig. */
+  /** What the last guess matched and skipped. Cleared on any manual edit. */
   const [report, setReport] = useState<string | null>(null)
   const [, force] = useState(0)
 
-  // Read the live rig once per model, then own it locally — every edit round-trips through commitIkRig, so
-  // there is no second source of truth to drift.
+  // Read the live rig once per model, then own it locally; every edit round-trips through commitIkRig.
   useEffect(() => { setRig(currentIkRig()) }, [skin])
   useEffect(() => {
     const refresh = () => force(x => x + 1)
@@ -92,15 +85,12 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
   const removeLeg = (i: number) => write({ ...current, feet: current.feet.filter((_, idx) => idx !== i) })
 
   /**
-   * Fill both legs from the bone names, where the rig uses recognizable ones.
-   *
-   * A convenience over the manual assignment, never a replacement for it. It reports what it did and refuses
-   * to write a rig the skeleton cannot support — writing one silently is what once left a character thrashing
-   * with a rig that looked perfectly reasonable in this panel.
+   * Fill both legs from the bone names, where the rig uses recognizable ones. Reports what it matched and
+   * skipped, and refuses to write a rig the skeleton cannot support.
    */
   const autoFill = () => {
-    // The engine's own matcher, not a second copy of it: `humanoidRigOf` is public precisely so a private
-    // re-implementation cannot drift away from what retargeting believes about the same skeleton.
+    // Must be the engine's own matcher: a private copy drifts from what retargeting believes about the
+    // same skeleton.
     const bySlot = humanoidRigOf(skin)
     const topo = skeletonTopology(skin)
 
@@ -122,10 +112,8 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
       return
     }
 
-    // The pelvis is the nearest common ancestor of the two thighs — by construction, on every rig. Asking
-    // the hierarchy rather than the name matters: `root` and `cog` are both synonyms for `hips`, and a
-    // root-motion bone is usually joint 0, so a name lookup hands back the bone at the character's FEET.
-    // Lowering that sinks the whole character instead of dropping its pelvis.
+    // The pelvis is the nearest common ancestor of the two thighs, by construction. Ask the hierarchy, never
+    // the name: `root`/`cog` are synonyms for `hips` and a root-motion bone is usually joint 0.
     const thighJoints = feet.map(f => topo.jointOfNode.get(f.thigh) ?? -1).filter(j => j >= 0)
     const ncaJoint = thighJoints.length > 1 ? nearestCommonAncestor(topo, thighJoints) : -1
     const hips = ncaJoint >= 0 ? skin.joints[ncaJoint].nodeIndex : bySlot.get('hips') ?? current.hips
@@ -145,11 +133,8 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
   }
 
   /**
-   * A tuning number, committed on BLUR or Enter rather than on every keystroke.
-   *
-   * Not a nicety: `write` goes through `commitIkRig` → `updateModel`, and the model library persists itself
-   * wholesale — vertex data and base64 textures for every model in the project. Typing "0.125" into an
-   * uncontrolled `onChange` would queue five full-library writes to IndexedDB.
+   * A tuning number. Must commit on BLUR or Enter, never per keystroke: `write` reaches `updateModel`, and
+   * the model library persists itself wholesale (vertex data and base64 textures for every model).
    */
   const num = (label: string, key: keyof IkRig, hint: string, step = 0.05) => {
     const commit = (raw: string) => {
@@ -160,8 +145,8 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
       <label className='flex items-center gap-1 text-[10px]' title={hint}>
         <span className='w-[74px] shrink-0 text-gray-400'>{label}</span>
         <input
-          // Uncontrolled + keyed on the committed value: `key` remounts the input when the rig is replaced
-          // from elsewhere (Clear, auto-fill), which a defaultValue alone would not pick up.
+          // Uncontrolled, so `key` on the committed value is what remounts the input when the rig is
+          // replaced from elsewhere (Clear, auto-fill).
           key={`${key}:${(current[key] as number | undefined) ?? ''}`}
           className={input + ' w-[56px]'} type='number' step={step} min='0'
           defaultValue={(current[key] as number | undefined) ?? ''}

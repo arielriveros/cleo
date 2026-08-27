@@ -4,6 +4,12 @@
 // fragment chunks, which simply use what the one included vertex chunk brought in. A program includes
 // exactly one vertex chunk, so this lands exactly once — the include resolver has no include-once
 // guard, and a second definition of a struct is a compile error.
+//
+// chunks/parallax.wgsl rides in here for that same "exactly once" property. Its consumers are
+// FRAGMENT chunks (terrainLayers, pbrGBuffer, pbrForward), and a program can include more than one
+// of those, so including it from each would define its functions twice. Here it cannot.
+
+#include "./parallax.wgsl"
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,

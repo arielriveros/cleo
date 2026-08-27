@@ -23,15 +23,16 @@ export { VolumetricCloudsNode } from "./core/scene/nodes/volumetricCloudsNode";
 export type { VolumetricCloudsOptions } from "./core/scene/nodes/volumetricCloudsNode";
 export { SkyAtmosphereNode } from "./core/scene/nodes/skyAtmosphereNode";
 export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
+export { SkyLightNode } from "./core/scene/nodes/skyLightNode";
+export type { SkyLightOptions } from "./core/scene/nodes/skyLightNode";
 export { CameraNode } from "./core/scene/nodes/cameraNode";
 export { SpriteNode } from "./core/scene/nodes/spriteNode";
 export { AnimatedSpriteNode } from "./core/scene/nodes/animatedSpriteNode";
 export type { SpriteFrameSource } from "./core/scene/nodes/animatedSpriteNode";
 export { getData, setData, bindDataAccessors, canAccessVariable } from "./core/scene/nodes/nodeVariables";
 export { attachScriptFactory, unwrapScriptNode } from "./core/scene/nodes/nodeScripting";
-// UI nodes. Every class is exported individually (rather than the base alone) because a script's base
-// type is resolved by CLASS NAME -- `class HealthBar extends UIProgressBarNode` is what gives the script
-// a typed `this.value`, and the editor's script library matches the same names.
+// UI nodes. Every class must be exported individually: a script's base type is resolved by CLASS NAME,
+// and the editor's script library matches the same names.
 export { UINode } from "./core/scene/nodes/ui/uiNode";
 export { UIRootNode } from "./core/scene/nodes/ui/uiRoot";
 export { UIPanelNode, UIStackNode, UISpacerNode } from "./core/scene/nodes/ui/uiContainers";
@@ -78,9 +79,9 @@ export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
 export { InputManager } from "./input/inputManager";
 export { TextureManager } from "./graphics/systems/textureManager";
-// Channel packing: separate metallic/roughness/occlusion (and specular/reflectivity) source maps are
-// combined into one texture before the shaders sample them. `isDerivedTextureId` identifies the
-// results, which are engine-owned — never assignable, listable or serializable.
+// Channel packing: metallic/roughness/occlusion (and specular/reflectivity) source maps combined into
+// one texture before the shaders sample them. `isDerivedTextureId` identifies the results, which are
+// engine-owned — never assignable, listable or serializable.
 export { TexturePacker, isDerivedTextureId, PACKED_ID_PREFIX } from "./graphics/systems/texturePacker";
 export type { PackSpec, ChannelSource } from "./graphics/systems/texturePacker";
 export { RigidBody as Body, Trigger } from "./physics/body";
@@ -135,8 +136,6 @@ export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTile
 export type { SpriteOptions, SpriteSide } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
-// Scene.physics is a public field of this type and scripts already reach through it (startRagdoll,
-// isGrounded), so the class belongs in the public surface too.
 export { PhysicsSystem } from "./physics/physicsSystem";
 export type { PhysicsRaycastHit, PhysicsRaycastOptions } from "./physics/physicsSystem";
 export { physicsStats } from "./physics/physicsStats";
@@ -183,15 +182,12 @@ export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime
 export { Game, setGameHost } from "./core/game";
 export type { GameHost } from "./core/game";
 export * as Vec from "gl-matrix";
-// The namespace keeps the surface tidy; clamp/lerp/damp/dampTime are also named because they are
-// what gameplay scripts reach for constantly and `MathUtils.clamp` is pure friction.
 export * as MathUtils from "./core/math";
 export { clamp, lerp, damp, dampTime } from "./core/math";
 export { aimFromDirection } from "./core/cameraRigMath";
 
-// This is what a user script's `import { ... } from 'cleo'` resolves to: the barrel's own namespace,
-// so everything exported above is importable from a script with no injection list to maintain. The
-// self-import is safe — every re-export above has been evaluated by the time this last statement runs.
+// What a user script's `import { ... } from 'cleo'` resolves to: the barrel's own namespace. Must stay
+// the LAST statement — the self-import only works once every re-export above has been evaluated.
 import * as CleoAPI from "./cleo";
 import { registerScriptModule as register } from "./core/scripting/scriptRuntime";
 register('cleo', CleoAPI);

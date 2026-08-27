@@ -1,14 +1,9 @@
 import { TextureManager, Logger } from 'cleo'
 
 // Bringing an atlas image in from disk.
-//
-// Deliberately NOT the fire-and-forget path the Assets explorer's drop handler uses
-// (`addTextureFromBase64`, which registers an id immediately and decodes later). A tileset STORES the
-// image's pixel dimensions — they are never re-derived, because the published player has no decoded image
-// when it parses a scene — so registering before decode would bake a 0x0 atlas into the asset permanently.
-//
-// Decoding here first and registering through `addTextureFromData` (which takes an already-decoded element
-// and calls texture.create synchronously) means the dimensions are correct the instant this returns.
+// A tileset STORES the atlas's pixel dimensions and never re-derives them (the published player has no
+// decoded image when it parses a scene), so the image must be decoded BEFORE it is registered — hence
+// `addTextureFromData`, not the explorer's register-then-decode `addTextureFromBase64`.
 
 export interface ImportedAtlas {
   /** The TextureManager id, which is also the texture's permanent name. */
@@ -31,14 +26,11 @@ function uniqueTextureId(filename: string): string {
 
 /**
  * Register an image file as a texture and report its real pixel size. Null when the file cannot be decoded.
- *
- * Emits `TEXTURES_CHANGED` on success so the Assets explorer indexes the new texture — an atlas imported
- * here is a normal texture asset like any other, reusable by other tilesets and by materials.
+ * Emits `TEXTURES_CHANGED` on success so the Assets explorer indexes the new texture.
  */
 export async function importAtlasImage(file: File, emit: (event: string) => void): Promise<ImportedAtlas | null> {
-  // Read the compressed bytes up front and hand them to the TextureManager alongside the decoded image.
-  // `addTextureFromData` retains no source of its own, and a texture with no source bytes is skipped by
-  // the editor's texture store — the atlas would draw this session and be missing after a reload.
+  // `addTextureFromData` retains no source of its own, and the editor's texture store skips a texture with
+  // no source bytes — the atlas would draw this session and be missing after a reload.
   const bytes = new Uint8Array(await file.arrayBuffer())
   const mime = file.type || 'image/png'
   return new Promise(resolve => {

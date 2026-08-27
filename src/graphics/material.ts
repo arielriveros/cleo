@@ -10,6 +10,22 @@ interface BasicProperties {
     color?: number[];
     texture?: string;
     opacity?: number;
+    /**
+     * Alpha-cutout threshold. Below it the fragment is DISCARDED — no blending, no sorting; the surface
+     * stays ordinary opaque geometry. **0 disables it**, which is the "off" encoding, so 0 is not a
+     * valid threshold.
+     *
+     * The value tested is the `mask` texture's RED channel when one is assigned. (PBR additionally
+     * falls back to the base-colour texture's alpha when there is no mask, which is what glTF's
+     * `alphaMode: MASK` uses.)
+     */
+    alphaCutoff?: number;
+    /**
+     * Opacity/cutout mask, read from RED. Assign a grayscale map; `alphaCutoff` decides where it cuts.
+     *
+     * This is where an FBX/OBJ opacity map (aiTextureType_OPACITY) lands on import.
+     */
+    mask?: string;
 }
 
 interface DefaultProperties {
@@ -20,6 +36,16 @@ interface DefaultProperties {
     shininess?: number;
     opacity?: number;
     reflectivity?: number;
+    /**
+     * Alpha-cutout threshold. Below it the fragment is DISCARDED — no blending, no sorting; the surface
+     * stays ordinary opaque geometry. **0 disables it**, which is the "off" encoding, so 0 is not a
+     * valid threshold.
+     *
+     * The value tested is the `mask` texture's RED channel when one is assigned. (PBR additionally
+     * falls back to the base-colour texture's alpha when there is no mask, which is what glTF's
+     * `alphaMode: MASK` uses.)
+     */
+    alphaCutoff?: number;
 
     textures?: {
         base?: string;
@@ -36,23 +62,58 @@ interface PBRProperties {
     metallic?: number;
     roughness?: number;
     opacity?: number;
+    /**
+     * glTF `alphaMode: MASK`. Below this base-colour alpha the fragment is discarded; the surface
+     * stays opaque G-buffer geometry, with no blending or sorting. 0 disables it.
+     */
+    alphaCutoff?: number;
     emissiveFactor?: number[];
+    /** Parallax occlusion mapping depth, in UV units. Inert without a `displacementMap`. */
+    displacementScale?: number;
     textures?: {
         baseColorTexture?: string;
         /**
-         * Authored source maps. They are never bound directly: `systems/texturePacker.ts` combines them
-         * into one ORM texture (r=occlusion, g=roughness, b=metallic) in the derived `ormTexture` slot,
-         * which is what the shaders sample. Assigning one texture to several of these slots marks it as
-         * pre-packed, and the packer reuses it as-is.
+         * Authored source maps, never bound directly: `systems/texturePacker.ts` combines them into the
+         * derived `ormTexture` slot. One texture in several of these slots means it is already packed.
          */
         metallicMap?: string;
         roughnessMap?: string;
         occlusionMap?: string;
         normalMap?: string;
         emissiveMap?: string;
+        /**
+         * Opacity/cutout mask, read from RED. Assign a grayscale map; `alphaCutoff` decides where it cuts.
+         *
+         * This is where an FBX/OBJ opacity map (aiTextureType_OPACITY) lands on import.
+         */
+        mask?: string;
+        /**
+         * Height field for parallax occlusion mapping, read from RED (0 = floor, 1 = surface). Unlike
+         * the ORM sources above, this is bound directly on its own texture unit.
+         */
+        displacementMap?: string;
         /** Legacy/glTF input only: a pre-packed map, fanned out to metallicMap + roughnessMap. Never written back. */
         metallicRoughnessTexture?: string;
     }
+}
+
+/**
+ * Assign the cutout mask and its threshold, for any material type.
+ *
+ * The default is CONDITIONAL, and that is the whole point of centralising it. Blinn-Phong's mask used
+ * to discard at a literal 0.5 with no property behind it, so defaulting `alphaCutoff` to the usual 0
+ * ("off") would have silently switched masking off on every material authored before this existed.
+ * A mask with no stated threshold therefore means 0.5 — the constant it replaced — and no mask means
+ * 0, which leaves a material that never had a cutout exactly as it was.
+ *
+ * `Material.parse` applies the same rule, so a project saved before the property existed reloads
+ * rendering identically.
+ */
+export function applyMask(material: Material, mask: string | undefined | null,
+                          alphaCutoff: number | undefined): void {
+    material.properties.set('hasMaskMap', mask ? true : false);
+    if (mask) material.textures.set('maskMap', mask);
+    material.properties.set('alphaCutoff', alphaCutoff ?? (mask ? 0.5 : 0));
 }
 
 enum MaterialType {
@@ -94,6 +155,8 @@ export class Material {
             const tex = properties.texture;
             material.textures.set('texture', tex);
         }
+
+        applyMask(material, properties.mask, properties.alphaCutoff);
 
         return material;
     }
@@ -137,12 +200,7 @@ export class Material {
             material.textures.set('normalMap', tex);
         }
 
-        material.properties.set('hasMaskMap', properties.textures?.mask ? true : false);
-
-        if (properties.textures?.mask) {
-            const tex = properties.textures.mask;
-            material.textures.set('maskMap', tex);
-        }
+        applyMask(material, properties.textures?.mask, properties.alphaCutoff);
 
         material.properties.set('hasReflectivityMap', properties.textures?.reflectivity ? true : false);
 
@@ -168,9 +226,8 @@ export class Material {
         material.properties.set('hasBaseColorTexture', tex.baseColorTexture ? true : false);
         if (tex.baseColorTexture) material.textures.set('baseColorTexture', tex.baseColorTexture);
 
-        // A pre-packed map (glTF, or a scene saved before the slots were split) fans out to both source
-        // slots. Two slots on one texture is what tells the packer it is already ORM-packed, so it takes
-        // the identity path and hands the very same texture straight back.
+        // A pre-packed map fans out to both source slots, which is what tells the packer to take the
+        // identity path and hand the same texture straight back.
         const metallicId = tex.metallicMap ?? tex.metallicRoughnessTexture;
         const roughnessId = tex.roughnessMap ?? tex.metallicRoughnessTexture;
 
@@ -189,14 +246,23 @@ export class Material {
         material.properties.set('hasEmissiveMap', tex.emissiveMap ? true : false);
         if (tex.emissiveMap) material.textures.set('emissiveMap', tex.emissiveMap);
 
+        // `alphaCutoff` is set HERE and nowhere else on this path. It has to receive the raw authoring
+        // value rather than an already-defaulted one: a glTF `alphaMode` other than MASK leaves it
+        // undefined, and only an undefined can pick up the "mask present => 0.5" default. Pre-setting
+        // it to 0 first would hand applyMask a concrete 0 and leave every hand-assigned mask inert.
+        applyMask(material, tex.mask, properties.alphaCutoff);
+
+        // Always written, so a material that gains a height map later already has a usable depth.
+        material.properties.set('dispScale', properties.displacementScale ?? 0.05);
+        material.properties.set('hasDisplacementMap', tex.displacementMap ? true : false);
+        if (tex.displacementMap) material.textures.set('displacementMap', tex.displacementMap);
+
         return material;
     }
 
     /**
-     * Terrain splat material: up to 4 tiled layers blended by an RGBA splat map, with optional
-     * per-layer automatic height/slope masking. Uniform names match shaders/deferred/geometryTerrain.fs.
-     * The `Terrain` subsystem owns/updates the splat + layer textures and the per-layer properties;
-     * this factory just seeds the defaults.
+     * Terrain splat material: up to 4 tiled layers blended by an RGBA splat map, with optional per-layer
+     * height/slope masking. Seeds defaults only — `Terrain` owns the splat and layer textures.
      */
     public static Terrain(properties: { baseColor?: number[] } = {}, config?: MaterialConfig): Material {
         const material = new Material(config);
@@ -223,10 +289,8 @@ export class Material {
     }
 
     /**
-     * Flatten this material to a plain JSON object keyed by shader type. Geometry-independent, so it
-     * can snapshot a standalone material (e.g. a material asset) as well as back Model.serialize().
-     * Skinned types normalize to their base type; terrain and anything unrecognized fall through to
-     * the Blinn-Phong shape (matching the historical Model.serialize behavior).
+     * Flatten this material to plain JSON keyed by shader type. Skinned types normalize to their base
+     * type; terrain and anything unrecognized fall through to the Blinn-Phong shape.
      */
     public serialize(): any {
         const cfg = {
@@ -244,7 +308,11 @@ export class Material {
                 type,
                 color: this.properties.get('color'),
                 opacity: this.properties.get('opacity'),
-                textures: { texture: this.textures.get('texture') },
+                alphaCutoff: this.properties.get('alphaCutoff'),
+                textures: {
+                    texture: this.textures.get('texture'),
+                    mask: this.textures.get('maskMap')
+                },
                 config: cfg
             };
         } else if (type === 'pbr') {
@@ -254,16 +322,19 @@ export class Material {
                 metallic: this.properties.get('metallic'),
                 roughness: this.properties.get('roughness'),
                 opacity: this.properties.get('opacity'),
+                alphaCutoff: this.properties.get('alphaCutoff'),
                 emissiveFactor: this.properties.get('emissiveFactor'),
-                // Source maps only. Enumerating fixed keys (rather than dumping the map) is what keeps
-                // the packer's derived `ormTexture` out of every asset, template and publish.
+                displacementScale: this.properties.get('dispScale'),
+                // Fixed keys, not a dump of the map: that keeps the derived `ormTexture` out of assets.
                 textures: {
                     baseColorTexture: this.textures.get('baseColorTexture'),
                     metallicMap: this.textures.get('metallicMap'),
                     roughnessMap: this.textures.get('roughnessMap'),
                     normalMap: this.textures.get('normalMap'),
                     occlusionMap: this.textures.get('occlusionMap'),
-                    emissiveMap: this.textures.get('emissiveMap')
+                    emissiveMap: this.textures.get('emissiveMap'),
+                    displacementMap: this.textures.get('displacementMap'),
+                    mask: this.textures.get('maskMap')
                 },
                 config: cfg
             };
@@ -276,6 +347,7 @@ export class Material {
                 emissive: this.properties.get('emissive'),
                 shininess: this.properties.get('shininess'),
                 opacity: this.properties.get('opacity'),
+                alphaCutoff: this.properties.get('alphaCutoff'),
                 textures: {
                     base: this.textures.get('baseTexture'),
                     specular: this.textures.get('specularMap'),
@@ -294,10 +366,8 @@ export class Material {
         m = m || {};
         // A serialized TerrainMaterial carries the extra terrain/foliage fields; delegate to its subclass.
         if (m.terrainMaterial) return TerrainMaterial.parse(m);
-        // A serialized CustomMaterial carries user GLSL + uniform declarations; delegate to its subclass.
-        // Route on the discriminator flag OR a self-identifying `custom:`/`customGeom:` type prefix, so
-        // blobs saved before the flag existed still reconstruct as a CustomMaterial instead of silently
-        // downgrading to a base Material (which keeps the custom type and crashes the inspector).
+        // Route on the discriminator flag OR a `custom:`/`customGeom:` type prefix — a blob without the
+        // flag must still reconstruct as a CustomMaterial, not a base Material carrying a custom type.
         if (m.customMaterial ||
             (typeof m.type === 'string' && (m.type.startsWith('custom:') || m.type.startsWith('customGeom:') || m.type.startsWith('customScreen:'))))
             return CustomMaterial.parse(m);
@@ -313,7 +383,11 @@ export class Material {
             return Material.Basic({
                 color: m.color || [1, 1, 1],
                 opacity: m.opacity ?? 1.0,
-                texture: m.textures?.texture
+                texture: m.textures?.texture,
+                // Undefined when absent, never 0: applyMask has to tell "no cutoff stored" from
+                // "cutoff explicitly off" so a mask can still pick up its 0.5 default.
+                alphaCutoff: m.alphaCutoff,
+                mask: m.textures?.mask
             }, config);
         } else if (type === 'pbr') {
             return Material.PBR({
@@ -321,10 +395,13 @@ export class Material {
                 metallic: m.metallic ?? 0.0,
                 roughness: m.roughness ?? 1.0,
                 opacity: m.opacity ?? 1.0,
+                // Left undefined when absent rather than forced to 0: applyMask needs to tell "no
+                // cutoff stored" from "cutoff explicitly off", so a mask can still pick up its 0.5
+                // default. With no mask, undefined resolves to 0 and an old scene reloads unchanged.
+                alphaCutoff: m.alphaCutoff,
                 emissiveFactor: m.emissiveFactor || [0, 0, 0],
-                // `metallicRoughnessTexture` is the pre-split key. Material.PBR fans it out to both
-                // source slots, so a scene saved before the split reloads onto the identity path and
-                // renders identically; it is then re-serialized under the new keys.
+                displacementScale: m.displacementScale ?? 0.05,
+                // `metallicRoughnessTexture` is the pre-split key; Material.PBR fans it out to both slots.
                 textures: {
                     baseColorTexture: m.textures?.baseColorTexture,
                     metallicMap: m.textures?.metallicMap,
@@ -332,7 +409,9 @@ export class Material {
                     metallicRoughnessTexture: m.textures?.metallicRoughnessTexture,
                     normalMap: m.textures?.normalMap,
                     occlusionMap: m.textures?.occlusionMap,
-                    emissiveMap: m.textures?.emissiveMap
+                    emissiveMap: m.textures?.emissiveMap,
+                    displacementMap: m.textures?.displacementMap,
+                    mask: m.textures?.mask
                 }
             }, config);
         } else { // 'blinn_phong' (or legacy 'default')
@@ -344,6 +423,7 @@ export class Material {
                 emissive: m.emissive,
                 shininess: m.shininess,
                 opacity: m.opacity,
+                alphaCutoff: m.alphaCutoff,
                 textures: {
                     base: texData.base,
                     specular: texData.specular,
@@ -361,10 +441,8 @@ export class Material {
 export type TerrainBaseType = 'basic' | 'blinn_phong' | 'pbr';
 
 /**
- * An optional physics proxy for a foliage prototype. Instances of a rule carrying one get a static
- * collider while they are near the camera (see `terrain/foliageColliders.ts`); rules without one are
- * never collidable, which is what keeps grass free. Every dimension is in PROTOTYPE units and is
- * multiplied by the instance's own random scale.
+ * An optional physics proxy for a foliage prototype: instances near the camera get a static collider.
+ * Dimensions are in prototype units, multiplied by the instance's own random scale.
  */
 export interface FoliageCollision {
     shape: 'cylinder' | 'box' | 'sphere';
@@ -386,9 +464,8 @@ export const FOLIAGE_DENSITY_UNIT = 'm2';
 export const DEFAULT_FOLIAGE_DENSITY = { billboard: 2.0, mesh: 0.05 };
 
 /**
- * Bring a serialized foliage rule up to the per-m² density unit, in place. Rules written before the
- * unit change expressed `density` as instances per 100x100 world-unit tile, so they divide by 10000/100
- * = 100. IDEMPOTENT: the `densityUnit` marker is what stops a serialize→parse round trip dividing twice.
+ * Bring a serialized foliage rule up to the per-m² density unit, in place. Idempotent — the
+ * `densityUnit` marker stops a serialize/parse round trip dividing twice.
  */
 export function migrateFoliageRule<T extends { density?: number; densityUnit?: string }>(rule: T): T {
     if (rule.densityUnit === FOLIAGE_DENSITY_UNIT) return rule;
@@ -398,9 +475,8 @@ export function migrateFoliageRule<T extends { density?: number; densityUnit?: s
 }
 
 /**
- * A foliage prototype a TerrainMaterial auto-instances (or, referenced by name in a material's
- * exclude list, a foliage type to keep off that material). Plain data only — no runtime engine
- * imports — so `material.ts` stays free of a circular dependency with `terrain/foliage.ts`.
+ * A foliage prototype a TerrainMaterial auto-instances, or — named in an exclude list — one to keep
+ * off that material. Plain data only, to keep this module free of a cycle with `terrain/foliage.ts`.
  */
 export interface TerrainFoliageRule {
     kind: 'mesh' | 'billboard';
@@ -422,8 +498,7 @@ export interface TerrainFoliageRule {
     billboard?: { textureId: string; distance: number } | null;
     /** Hide instances beyond this camera distance; 0/absent = the renderer's global foliage cull. */
     cullDistance?: number;
-    /** Rasterize these instances into the shadow cascades. Off by default — a dense grass layer costs
-     *  one instanced draw per cell per cascade, so existing scenes must opt in. */
+    /** Rasterize these instances into the shadow cascades. Off by default: one instanced draw per cell per cascade. */
     castShadows?: boolean;
     /** Instances per SQUARE METRE — the same unit for the brush disc and whole-terrain generation. */
     density?: number;
@@ -436,13 +511,8 @@ export interface TerrainFoliageRule {
 }
 
 /**
- * An authorable, reusable **paint-layer** material for terrains. It *is* a {@link Material} of a
- * base type (basic / blinn_phong / pbr) — so it inherits all base shading and any future extension —
- * plus terrain-specific blend fields (tiling + automatic height/slope masking) and foliage rules.
- *
- * A TerrainMaterial is never rendered on its own: when assigned to one of a terrain's 4 paint layers,
- * the `Terrain` reads its surface (albedo/normal/metallic-roughness) into the composite terrain
- * material's per-layer uniforms, and its foliage rules drive the material-driven foliage brush.
+ * A reusable paint-layer material for terrains: a {@link Material} of a base type plus terrain blend
+ * fields and foliage rules. Never rendered on its own — `Terrain` reads it into a paint layer.
  */
 export class TerrainMaterial extends Material {
     /** UV repeat of this layer across the whole terrain. */
@@ -483,13 +553,11 @@ export class TerrainMaterial extends Material {
             auto: this.auto,
             hRange: [this.hRange[0], this.hRange[1]],
             sRange: [this.sRange[0], this.sRange[1]],
-            // Displacement lives in the inherited textures map; super.serialize() only emits fixed base-type
-            // keys, so carry the terrain-specific displacement texture + params explicitly.
+            // super.serialize() emits fixed base-type keys only, so carry displacement explicitly.
             displacementMap: this.textures.get('displacementMap') ?? null,
             displacementScale: this.displacementScale,
             heightBlend: this.heightBlend,
-            // Stamping the unit on the way OUT is what makes the round trip idempotent: it also rescues
-            // rules the editor built by hand (which never pass through parse) from a spurious migration.
+            // Stamping the unit on the way out is what makes the round trip idempotent.
             foliageInclude: this.foliageInclude.map(r => ({ ...r, densityUnit: FOLIAGE_DENSITY_UNIT })),
             foliageExclude: [...this.foliageExclude],
         };
@@ -511,9 +579,8 @@ export class TerrainMaterial extends Material {
         if (m.displacementMap) tm.textures.set('displacementMap', m.displacementMap);
         tm.displacementScale = m.displacementScale ?? 0.05;
         tm.heightBlend = m.heightBlend ?? 0;
-        // The ONLY JSON -> live-rule path (Terrain.deserialize and the editor's asset parse both funnel
-        // here), so it is where the density-unit migration runs. Downstream consumers may assume every
-        // live foliageInclude entry is already per-m².
+        // The only JSON -> live-rule path, so the density migration runs here. Downstream consumers
+        // may assume every live foliageInclude entry is already per-m².
         tm.foliageInclude = Array.isArray(m.foliageInclude)
             ? m.foliageInclude.map((r: any) => migrateFoliageRule({ ...r })) : [];
         tm.foliageExclude = Array.isArray(m.foliageExclude) ? [...m.foliageExclude] : [];
@@ -525,10 +592,8 @@ export class TerrainMaterial extends Material {
 export type CustomBaseType = 'basic' | 'blinn_phong' | 'pbr' | null;
 
 /**
- * Whether a custom material's fragment shader outputs a final lit color (forward, drawn in the forward
- * overlay with full lighting control), writes G-buffer surface channels (deferred, lit by the engine's
- * deferred pass with SSAO/IBL), or is a fullscreen post-process pass (screen, run from the active
- * camera's ordered screenMaterials list). Governs both the assembled shader template and the render path.
+ * Whether a custom material's fragment shader outputs a final lit colour (`forward`), writes G-buffer
+ * channels (`deferred`), or is a fullscreen post pass (`screen`). Governs template and render path.
  */
 export type CustomRenderMode = 'forward' | 'deferred' | 'screen';
 
@@ -549,8 +614,7 @@ function toPlainValue(v: any): any {
     return v;
 }
 
-/** cyrb53 — small, stable, non-crypto string hash. Used to derive a unique-but-dedupable shader key
- *  (and, in `systems/texturePacker.ts`, a packed-texture key from its source spec). */
+/** cyrb53 — small, stable, non-crypto string hash. Derives dedupable shader and packed-texture keys. */
 export function cyrb53(str: string, seed = 0): string {
     let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
     for (let i = 0; i < str.length; i++) {
@@ -566,16 +630,9 @@ export function cyrb53(str: string, seed = 0): string {
 }
 
 /**
- * A material whose surface is defined by a **user-written GLSL fragment shader** plus user-declared
- * {@link CustomUniform}s. It is a plain {@link Material} for all asset/serialization purposes (library,
- * thumbnails, `__materialId` links) — the runtime shader for its `type` key is compiled/registered lazily
- * by `graphics/systems/customShaders.ts` (kept out of this data-only module to avoid a GL import cycle).
- *
- * - `renderMode` selects forward (`fragment()` → final color) vs deferred (`surface()` → G-buffer).
- * - Scalar/vector uniform **values** live in the inherited `properties` map (bare name), samplers in
- *   `textures` (bare name → TextureManager id); `uniforms[]` is the declaration list driving assembly.
- * - `type` is a content hash (`custom:<h>` / `customGeom:<h>`) so identical shaders share one program and
- *   any edit mints a fresh key (which also rebuilds the VAO via `ModelNode.initialized`).
+ * A material whose surface is a user-written GLSL fragment shader plus {@link CustomUniform}s, compiled
+ * lazily by `systems/customShaders.ts`. Uniform values live in `properties`, samplers in `textures`, both
+ * under the bare name; `type` is a content hash, so identical shaders share one program.
  */
 export class CustomMaterial extends Material {
     public renderMode: CustomRenderMode = 'forward';
@@ -584,21 +641,14 @@ export class CustomMaterial extends Material {
     public uniforms: CustomUniform[] = [];
 
     /**
-     * The WGSL this material's source last translated to, for the WebGPU backend.
-     *
-     * Written by the editor's Compile button, never at runtime: naga does not ship to players, so a
-     * published game can only use WGSL that was translated while the project was being authored.
+     * The WGSL this material's source last translated to. Written by the editor's Compile button, never
+     * at runtime — naga does not ship to players.
      */
     public compiledWgsl: string | null = null;
 
     /**
-     * The `type` hash `compiledWgsl` was produced from.
-     *
-     * The alternative — clearing `compiledWgsl` whenever the source changes — cannot actually be
-     * implemented here: `fragmentSource` and `uniforms` are public fields that the editor writes
-     * directly, so there is no setter to hook. Stamping the hash instead makes staleness a comparison
-     * rather than an event, which additionally survives a save/load round trip: `parse` restores both
-     * and `refreshType` recomputes `type`, and they agree if and only if the source really is unchanged.
+     * The `type` hash `compiledWgsl` was produced from. Comparing it against the current `type` is how
+     * staleness is detected — `fragmentSource` and `uniforms` are public fields with no setter to hook.
      */
     public compiledWgslType: string | null = null;
 
@@ -612,9 +662,8 @@ export class CustomMaterial extends Material {
     }
 
     /**
-     * Recompute the shader-registry key from the shader's semantic inputs (mode + source + uniform
-     * declarations). Must be called after any edit to those fields. The value is used verbatim as the
-     * ShaderManager key that `ensureCustomShader` registers the compiled program under, and as the VAO key.
+     * Recompute the shader-registry key from mode, source and uniform declarations. Must be called after
+     * editing any of those; the value is the ShaderManager key and the VAO key.
      */
     public refreshType(): void {
         const sig = this.renderMode + '|' + (this.baseType ?? '') + '|' + this.fragmentSource + '|' +

@@ -1,17 +1,5 @@
-/**
- * The RHI's string vocabulary translated into WebGL2's numeric enums.
- *
- * The constants are written out as literals rather than read off a `WebGL2RenderingContext`, which is
- * the same call `indexFormat.ts` already makes for `GL_UNSIGNED_SHORT` / `GL_UNSIGNED_INT`. Two
- * reasons, and the second is the one that matters: the values are frozen by the specification and can
- * never change, and hardcoding them keeps this module free of a context — so the whole translation
- * layer is reachable from the DOM-free vitest suite, where a wrong table would otherwise only ever
- * surface as a mis-rendered frame.
- *
- * `tests/glEnums.test.ts` covers the tables here; `scratchpad/enumCheck` verifies them once against a
- * real context, because a literal that is merely self-consistent is still wrong if it is the wrong
- * literal.
- */
+// The RHI's string vocabulary translated into WebGL2's numeric enums. The constants are literals, not
+// reads off a context, which keeps the whole translation layer testable without one.
 
 import type {
     PrimitiveTopology, CompareFunction, BlendFactor, BlendOperation, CullMode, FrontFace,
@@ -116,16 +104,8 @@ const BLEND_OP: Readonly<Record<BlendOperation, number>> = {
 export function glBlendOperation(operation: BlendOperation): number { return BLEND_OP[operation]; }
 
 /**
- * Face to cull. `'none'` has no enum of its own — it is `gl.disable(CULL_FACE)` — so it maps to null
- * and the caller must branch rather than pass a mode.
- */
-/**
- * The side to cull, or null for none.
- *
- * Returns the SIDE rather than the GL enum, because `GLState.cullFace` takes a side now - a call site
- * holding `gl.BACK` evaluates it before any guard can run, which is what made every one of them fatal
- * on a backend with no context. `CullMode` and the argument are the same union, so this is a null check
- * with a name rather than a translation.
+ * The side to cull, or null for none — `'none'` is `gl.disable(CULL_FACE)`, so the caller must branch.
+ * Returns the SIDE, not a GL enum: evaluating `gl.BACK` at a call site is fatal without a context.
  */
 export function glCullMode(cull: CullMode): 'front' | 'back' | null {
     return cull === 'none' ? null : cull;
@@ -148,11 +128,8 @@ export function glMagFilter(filter: FilterMode): number {
 }
 
 /**
- * Minification filter, which folds the mip filter in.
- *
- * WebGL2 has one enum for both halves, so a `mipmap` of null means "no mip chain" and collapses to the
- * plain filter. Getting this pair wrong is invisible until a texture is viewed at a distance, which is
- * why it is a table rather than a nest of conditionals.
+ * Minification filter, folding the mip filter in — WebGL2 has one enum for both halves. A `mipmap` of
+ * null means no mip chain and collapses to the plain filter.
  */
 export function glMinFilter(filter: FilterMode, mipmap: FilterMode | null): number {
     if (mipmap === null) return filter === 'nearest' ? GL.NEAREST : GL.LINEAR;
@@ -195,12 +172,8 @@ const TEXTURE_FORMAT: Readonly<Record<Exclude<TextureFormat, 'bgra8unorm'>, GlTe
 };
 
 /**
- * Translate an RHI format for `texImage2D` / `texStorage2D`.
- *
- * Throws for `bgra8unorm`: WebGL2 has no BGRA *internal* format at all, and the format only exists in
- * the union because WebGPU's `getPreferredCanvasFormat()` commonly returns it for the swap chain. It
- * can therefore never reach a WebGL2 allocation, and quietly substituting RGBA8 would turn a
- * misrouted swap-chain format into a silent channel swap rather than an error.
+ * Translate an RHI format for `texImage2D` / `texStorage2D`. Throws for `bgra8unorm` — WebGL2 has no
+ * BGRA internal format, and substituting RGBA8 would turn a misrouted format into a channel swap.
  */
 export function glTextureFormat(format: TextureFormat): GlTextureFormat {
     if (format === 'bgra8unorm')
@@ -249,15 +222,8 @@ export function glVertexFormat(format: VertexFormat): GlVertexFormat { return VE
 // ------------------------------------------------------------------------------------------------
 
 /**
- * The GL target a buffer of this usage should be bound to.
- *
- * WebGL2 has no usage mask — a buffer belongs to a target — so a usage that names several roles has to
- * pick one. Index beats vertex beats uniform, because ELEMENT_ARRAY_BUFFER is the binding that is
- * actually load-bearing: it is VAO state, and getting it wrong silently draws from the wrong memory.
- * A buffer that genuinely needs two roles is a WebGPU-only construct and should be two buffers here.
- *
- * COPY_READ_BUFFER is the neutral landing spot for a buffer that is only ever a copy source or
- * destination: binding it to ARRAY_BUFFER instead would clobber whatever vertex binding was live.
+ * The GL target a buffer of this usage binds to. WebGL2 has no usage mask, so a multi-role usage picks
+ * one: index beats vertex beats uniform, and a copy-only buffer lands on the neutral COPY_READ_BUFFER.
  */
 export function glBufferTarget(usage: BufferUsageFlags): number {
     if (usage & BufferUsage.INDEX) return GL.ELEMENT_ARRAY_BUFFER;
@@ -267,12 +233,8 @@ export function glBufferTarget(usage: BufferUsageFlags): number {
 }
 
 /**
- * The draw hint for a buffer of this usage.
- *
- * WebGPU has no equivalent — it infers access patterns from the usage flags alone — so the hint is
- * derived rather than passed in, keeping the descriptor WebGPU-shaped. `COPY_DST` is the signal: a
- * buffer declared writable is one the engine intends to rewrite (instance matrices every frame, a
- * tilemap chunk on every edit), and everything else is uploaded once at creation.
+ * The draw hint for a buffer of this usage, derived rather than passed in so descriptors stay
+ * WebGPU-shaped. `COPY_DST` is the signal that the engine intends to rewrite the buffer.
  */
 export function glBufferUsageHint(usage: BufferUsageFlags): number {
     return (usage & BufferUsage.COPY_DST) ? GL.DYNAMIC_DRAW : GL.STATIC_DRAW;

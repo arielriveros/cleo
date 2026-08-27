@@ -1,20 +1,6 @@
-/**
- * The WebGPU implementation of the RHI device.
- *
- * Unlike `WebGL2Device`, this one declares `implements Device` from the start, and that asymmetry is
- * deliberate. The interface in `../device.ts` was written in WebGPU's vocabulary precisely because the
- * mapping only runs downhill: every concept it names — immutable pipelines, bind groups, explicit
- * render passes with load/store ops, texture views onto a single layer — exists natively here, so
- * there is nothing to stub and nothing to lie about. `WebGL2Device` is the one that has to synthesise
- * the missing halves, which is why it is still migrating resource type by resource type.
- *
- * That makes this file the reference implementation, and its real value right now is as a check on the
- * interface: anything the RHI describes that cannot be expressed cleanly here was described wrong.
- *
- * What it does NOT do yet is drive `renderer.ts`. The renderer still issues 160 raw `gl.*` calls, so
- * the path from a scene to this device does not exist — see WEBGPU_ROADMAP.md M5/M6. This is the
- * device tier only, exercised end to end by `tools/harness/webgpuCheck.js`.
- */
+// The WebGPU implementation of the RHI device, and the reference implementation of the interface:
+// every concept `../device.ts` names exists natively here, so anything that cannot be expressed
+// cleanly was described wrong. Exercised end to end by `tools/harness/webgpuCheck.js`.
 
 import { Logger } from '../../../core/logger';
 import { frameStats, setViewportSize } from '../../renderStats';
@@ -49,33 +35,17 @@ import { TEXTURE_FORMAT_INFO, textureByteSize, isDepthFormat, ShaderStage, Textu
 
 const SCOPE = 'WebGPU';
 
-/**
- * What a texture is sampled with until `configure` says otherwise.
- *
- * Only the fields the sampler is built from matter here; `format` and `isDepth` are answered by the
- * texture itself in `_samplerFor`. It exists so `uploadBytes` can record an address mode on a texture
- * that was never configured, rather than dropping it.
- */
+// What a texture is sampled with until `configure` says otherwise, so `uploadBytes` can record an
+// address mode on a texture that was never configured.
 const DEFAULT_SAMPLING: TextureConfigureDescriptor = {
     format: 'rgba8unorm', addressMode: 'clamp-to-edge', minFilter: 'linear', flipY: false, isDepth: false,
 };
 
-/**
- * `copyTextureToBuffer` requires each row to start on a 256-byte boundary.
- *
- * Not a performance hint — a validation rule. A readback of a 100x100 RGBA8 texture needs a 512-byte
- * row stride carrying 400 bytes of pixels, and the padding has to be stripped afterwards. This is the
- * single biggest shape difference between `readPixels` here and on WebGL2, and the reason the RHI made
- * readback asynchronous for both backends rather than only for this one.
- */
+// `copyTextureToBuffer` requires each row to start on a 256-byte boundary — a validation rule, not a
+// hint, so a readback's padding has to be stripped afterwards.
 const COPY_BYTES_PER_ROW_ALIGNMENT = 256;
 
-/**
- * Distinct uniform slot signatures one program may keep bind groups for before the cache is dropped.
- *
- * Sized well above the busiest pass — the geometry pass draws a few hundred objects at most, and the
- * cache is per program, so the real occupancy is the draws of one program in one pass.
- */
+// Distinct uniform slot signatures one program keeps bind groups for before the cache is dropped.
 const UNIFORM_BIND_GROUP_CACHE_CAP = 4096;
 
 function alignUp(value: number, alignment: number): number {
@@ -116,20 +86,8 @@ class WebGPUBuffer implements Buffer {
 
 
 /**
- * Mip-chain generation, which WebGPU does not have.
- *
- * WebGL2 has `generateMipmap` — one call, the driver fills the chain. WebGPU has nothing: a chain is
- * built by RENDERING each level from the one above, so it needs a shader, a sampler, a pipeline per
- * texture format, and one render pass per level. That is why this is an object and not a method.
- *
- * The same loop covers 2D and CUBE. A cube face is an array layer, so "for each layer, for each level,
- * blit from the level above" is the whole algorithm — the only difference is how many layers there are.
- * The plan for this work intended to implement 2D and defer cube, but the first thing that actually
- * needed a chain was the sky-atmosphere bake, which is a cube; splitting the loop to defer half of it
- * would have been more code than doing both.
- *
- * A pipeline is cached per format because a render pipeline names its colour target's format and the
- * engine mips `rgba8unorm` content textures and `rgba16float` capture cubes alike.
+ * Mip-chain generation, which WebGPU has no call for: each level is RENDERED from the one above, so
+ * this needs a shader, a sampler and a pipeline per format. One loop covers 2D and cube.
  */
 class WebGPUMipGenerator {
     private readonly _pipelines = new Map<GPUTextureFormat, GPURenderPipeline>();
@@ -138,13 +96,8 @@ class WebGPUMipGenerator {
 
     constructor(private readonly _device: GPUDevice) {}
 
-    /**
-     * A fullscreen triangle, not a quad.
-     *
-     * Three vertices covering the viewport with no vertex buffer at all: the positions come from the
-     * vertex index, so there is nothing to allocate and nothing to bind. The UV falls out of the same
-     * arithmetic. A quad would need a buffer, a layout, and a reason.
-     */
+    // A fullscreen TRIANGLE, not a quad: the positions come from the vertex index, so there is no
+    // buffer to allocate and no layout to declare.
     private _shader(): GPUShaderModule {
         if (this._module) return this._module;
         this._module = this._device.createShaderModule({
@@ -211,14 +164,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     /**
-     * Fill levels 1..N-1 of `texture` from level 0, one pass per level per layer.
-     *
-     * Requires RENDER_ATTACHMENT as well as TEXTURE_BINDING, because every level above the first is a
-     * target before it is a source. The engine's colour textures carry both; a texture that does not
-     * is refused by name rather than producing an empty chain nobody notices until it is sampled at
-     * distance.
+     * Fill levels 1..N-1 of `texture` from level 0, one pass per level per layer. Requires
+     * RENDER_ATTACHMENT as well as TEXTURE_BINDING — every level above the first is a target first.
      */
-    public generate(texture: WebGPUTexture): void {
+    public generate(texture: WebGPUTexture, into: GPUCommandEncoder | null = null): void {
         if (texture.mipLevelCount <= 1) return;
         if ((texture.usage & TextureUsage.RENDER_ATTACHMENT) === 0)
             throw new Error(`${texture.label}: cannot generate mips without RENDER_ATTACHMENT usage — ` +
@@ -229,7 +178,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         const sampler = this._linearSampler();
         // Cube faces are array layers; a 2D texture is the same loop with one of them.
         const layers = texture.dimension === 'cube' ? 6 : texture.depthOrArrayLayers;
-        const encoder = this._device.createCommandEncoder({ label: 'mip-blit' });
+        // Recording into the caller's `into` is what ORDERS this blit after the passes that drew level
+        // 0; a private encoder submits immediately, ahead of the caller's unsubmitted work.
+        // Only an encoder this method OWNS is submitted here.
+        const encoder = into ?? this._device.createCommandEncoder({ label: 'mip-blit' });
 
         for (let layer = 0; layer < layers; layer++) {
             for (let level = 1; level < texture.mipLevelCount; level++) {
@@ -259,7 +211,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 pass.end();
             }
         }
-        this._device.queue.submit([encoder.finish()]);
+        if (!into) this._device.queue.submit([encoder.finish()]);
     }
 }
 
@@ -302,15 +254,9 @@ class WebGPUTexture implements Texture {
     }
 
     // --- uploads -----------------------------------------------------------------------------
-    //
-    // The half of the Texture interface that WebGL2 satisfies by allocating storage through the
-    // upload calls themselves. WebGPU cannot: a GPUTexture fixes its size, format and mip count at
-    // creation, so an "allocate" here has nothing left to allocate.
-    //
-    // That is a real difference in the ownership model, not a missing call, and it is the last thing
-    // standing between `graphics/texture.ts` and this backend. Where an operation maps, it is
-    // implemented; where it needs the storage created later, it throws saying exactly that rather
-    // than silently doing nothing to a texture the caller believes it just filled.
+    // A GPUTexture fixes its size, format and mip count at creation, so the "allocate" half of the
+    // Texture interface has nothing to allocate here. Where an operation maps it is implemented;
+    // where it needs storage created later it THROWS rather than silently doing nothing.
 
     private _config: TextureConfigureDescriptor | null = null;
 
@@ -321,9 +267,7 @@ class WebGPUTexture implements Texture {
     public get samplingConfig(): TextureConfigureDescriptor | null { return this._config; }
 
     public upload2D(image: TexImageSource | null, width: number, height: number, mipMap: boolean): void {
-        // A null image means "allocate, do not fill", which `setSize` has already done by the time this
-        // runs - `graphics/texture.ts` syncs the dimensions into the device BEFORE uploading, precisely
-        // so this backend has storage to write into.
+        // A null image means "allocate, do not fill", which `setSize` has already done.
         if (!image) return this._requireSize(width, height, 'upload2D(null)');
         this._copyExternal(image, width, height, 0, 0);
         if (mipMap && this.mipLevelCount > 1) this.generateMipmaps();
@@ -342,18 +286,8 @@ class WebGPUTexture implements Texture {
     }
 
     /**
-     * Raw RGBA8 bytes, and the ADDRESS MODE they are to be sampled with.
-     *
-     * The wrapping argument used to be omitted here — TypeScript lets a method with fewer parameters
-     * satisfy an interface, so dropping it compiled cleanly and silently. WebGL2 sets it on the texture
-     * with `texParameteri`; this backend keeps sampler state in `_config`, so an omitted argument left
-     * the default `clamp-to-edge` in place.
-     *
-     * The one caller that passes anything else is the SSAO rotation noise, a 4x4 texture sampled at
-     * `uv * screenSize / 4` and therefore entirely dependent on repeating. Clamped, every pixel read
-     * the same edge texel, every kernel got the same rotation, and any surface whose normal happened to
-     * align with it produced a degenerate tangent basis — which is why the whole floor came back fully
-     * occluded on WebGPU and softly shaded on WebGL2.
+     * Raw RGBA8 bytes, and the ADDRESS MODE they are sampled with. The mode must be honoured: this
+     * backend keeps sampler state in `_config`, and the SSAO rotation noise depends on repeating.
      */
     public uploadBytes(data: Uint8Array, width: number, height: number, wrapping: AddressMode): void {
         this.uploadRegion(0, 0, width, height, data);
@@ -373,74 +307,40 @@ class WebGPUTexture implements Texture {
         this._requireSize(width, height, 'allocateVolume');
     }
     /**
-     * The size is already satisfied by `setSize`; the COMPARISON FLAG is not, and it is the whole
-     * reason this call still carries an argument on this backend.
-     *
-     * WebGL2 stamps `TEXTURE_COMPARE_MODE` onto the texture object here. On WebGPU a comparison sampler
-     * is a SAMPLER, not texture state, so the flag is recorded for `_samplerFor` to pair with. Dropping
-     * it - which this did - left every shadow binding holding an ordinary filtering sampler against a
-     * `sampler_comparison` declaration, and WebGPU refuses that outright: "Non-comparison sampler is
-     * incompatible with comparison sampler binding". Both shadow maps are affected, cascades and the
-     * spot atlas, because both declare `texture_depth_2d_array` + `sampler_comparison`.
+     * `setSize` already satisfied the size; the COMPARISON FLAG is what this call is still for. It is
+     * recorded for `_samplerFor` to pair with — WebGPU refuses an ordinary sampler at a
+     * `sampler_comparison` binding, which is what both shadow maps declare.
      */
     public allocateDepthArray(size: number, _layers: number, compare: boolean = true): void {
         this._requireSize(size, size, 'allocateDepthArray');
         this.setCompareMode(compare);
     }
 
-    /**
-     * Assert that `setSize` already allocated what this call is about to assume, rather than no-opping.
-     *
-     * These calls are satisfied before they run, so the honest body is empty - but an empty body is also
-     * what a caller that FORGOT to sync would see, and the symptom of that is a texture full of nothing
-     * surfacing several passes later. Checking costs two comparisons and turns it into a message naming
-     * the call that was unsatisfied.
-     */
+    // Assert that `setSize` already allocated what this call assumes. An empty body is what a caller
+    // that FORGOT to sync would also see, and that surfaces as an empty texture several passes later.
     private _requireSize(width: number, height: number, operation: string): void {
         if (this.width === width && this.height === height) return;
         throw new Error(`${this.label}: ${operation} expects storage at ${width}x${height}, but this ` +
                         `texture is ${this.width}x${this.height} - call setSize before uploading`);
     }
 
-    /**
-     * A comparison sampler is a SAMPLER on this backend, not texture state.
-     *
-     * Recorded rather than applied, for the bind group to pair with. WebGL2 sets
-     * `TEXTURE_COMPARE_MODE` on the texture object, which is the difference the RHI already documents
-     * at `WebGL2Sampler`.
-     */
+    /** Recorded, not applied: a comparison sampler is a SAMPLER here, for the bind group to pair with. */
     public setCompareMode(enabled: boolean): void {
         this._compare = enabled;
     }
     private _compare = false;
     public get compareEnabled(): boolean { return this._compare; }
 
-    /**
-     * Build this texture's mip chain by rendering each level from the one above.
-     *
-     * WebGL2's `generateMipmap` is one call into the driver; WebGPU has no equivalent, so the work is a
-     * pass per level per layer. See {@link WebGPUMipGenerator}, which owns the pipeline because it is
-     * cached per format and shared by every texture.
-     */
-    public generateMipmaps(): void {
+    /** Build this texture's mip chain by rendering each level from the one above. */
+    public generateMipmaps(encoder?: CommandEncoder): void {
         if (!this._mips)
             throw new Error(`${this.label}: no mip generator — this texture was not created by the device`);
-        this._mips.generate(this);
+        this._mips.generate(this, encoder ? (encoder as WebGPUCommandEncoder).raw : null);
     }
 
     /**
-     * Give this texture storage at these dimensions, REPLACING the `GPUTexture` when they change.
-     *
-     * A `GPUTexture` fixes its size at creation and cannot be resized, so this is the WebGPU analogue of
-     * `reallocateBuffer`: same wrapper, new handle. It exists because the engine's `graphics/texture.ts`
-     * creates every texture at 0x0 and learns its dimensions later - from an upload, a `createVolume`, a
-     * `Framebuffer.resize`. On WebGL2 that is free (`texImage2D` re-specifies storage in place and
-     * `setSize` only records the numbers); here it is an allocation, and this is where it happens.
-     *
-     * The wrapper survives, so anything holding a `Texture` keeps working. A `TextureView` does NOT -
-     * it wraps the old `GPUTexture` - which is why the engine asks for its render targets through
-     * `Framebuffer.renderTarget` on every pass rather than caching one, and why the device evicts
-     * targets whose attachments are destroyed.
+     * Give this texture storage, REPLACING the `GPUTexture` when the dimensions change — one cannot be
+     * resized. The wrapper survives, so a `Texture` keeps working; every `TextureView` of it does NOT.
      */
     public setSize(width: number, height: number, depthOrArrayLayers: number = 1,
                    mipLevelCount: number = 1): void {
@@ -476,14 +376,8 @@ class WebGPUTexture implements Texture {
             { width, height, depthOrArrayLayers: 1 });
     }
 
-    /**
-     * The one shape that does not port, named at the point it is reached.
-     *
-     * Every one of these allocates storage on WebGL2 — `texImage2D` with null data, `texStorage3D`,
-     * an immutable array. A GPUTexture already has its storage and cannot grow one. Closing this means
-     * `graphics/texture.ts` creating its GPU texture once it knows its dimensions instead of
-     * discovering them through the upload, which is a change to the class, not to this method.
-     */
+    // Refuse an operation that would allocate storage on WebGL2: a GPUTexture already has its own and
+    // cannot grow one. Closing this means `graphics/texture.ts` sizing at creation.
     private _needsCreationTimeSize(operation: string): never {
         throw new Error(`${this.label}: ${operation} allocates storage, and a GPUTexture fixes its ` +
                         'size at creation. The texture has to be created at its final dimensions.');
@@ -545,13 +439,7 @@ class WebGPUSampler implements Sampler {
 
 class WebGPUShaderModule implements ShaderModule {
     public readonly label: string;
-    /**
-     * The engine-facing program NAME, which is what `ShaderManager` is keyed by.
-     *
-     * `WebGL2ShaderModule` has carried this all along and `WebGL2RenderPipeline.apply` uses it to bind
-     * the program; this backend had no equivalent, which is why `ShaderManager.bound` could be a
-     * different program than the pipeline about to draw. See `setPipeline`.
-     */
+    /** The engine-facing program NAME, which `ShaderManager` is keyed by. Used by `setPipeline`. */
     public readonly program: string;
     public readonly stage: ShaderStageFlags;
     public readonly entryPoints: { readonly vertex?: string; readonly fragment?: string; readonly compute?: string };
@@ -560,20 +448,13 @@ class WebGPUShaderModule implements ShaderModule {
     public readonly handle: GPUShaderModule;
     public compilationInfo: readonly string[] = [];
     /**
-     * Group indices the module actually declares.
-     *
-     * Needed because a pipeline built with `layout: 'auto'` throws from `getBindGroupLayout(i)` for any
-     * group the shader does not use, and there is no way to ask how many there are. Scanning the source
-     * is exact: `@group(N)` is the only way to declare one in WGSL.
+     * Group indices the module declares. Needed because a `layout: 'auto'` pipeline throws from
+     * `getBindGroupLayout(i)` for an unused group, and there is no way to ask how many there are.
      */
     public readonly groups: readonly number[];
     /**
-     * `group -> the bindings in it this module declares as a SAMPLER`.
-     *
-     * Read off the SOURCE rather than off `descriptor.resources`, because a module can legitimately
-     * arrive without reflection — the harness builds several straight from a WGSL string, and a
-     * custom material assembled at runtime has none — and this has to be right for those too. See
-     * {@link samplerBindingsOf} for what `createBindGroup` does with it.
+     * `group -> the bindings in it this module declares as a SAMPLER`. Read off the SOURCE, not
+     * `descriptor.resources`, since a module can legitimately arrive without reflection.
      */
     public readonly samplerBindings: ReadonlyMap<number, ReadonlySet<number>>;
 
@@ -590,12 +471,8 @@ class WebGPUShaderModule implements ShaderModule {
     }
 
     /**
-     * Pull the compiler log.
-     *
-     * Separate from the constructor because `getCompilationInfo()` is a promise and module creation is
-     * not — WebGPU reports shader errors asynchronously, and a module that failed to compile still
-     * hands back an object. Callers that care (the editor's custom-material panel) await this; the
-     * device awaits it once at creation so a broken built-in shader is not silent.
+     * Pull the compiler log. Separate from the constructor because WebGPU reports shader errors
+     * asynchronously and still hands back a module object for a failed compile.
      */
     public async fetchCompilationInfo(): Promise<readonly string[]> {
         const info = await this.handle.getCompilationInfo();
@@ -649,14 +526,8 @@ class WebGPURenderPipeline implements RenderPipeline {
     /** See the interface. */
     public readonly resources: readonly ShaderResource[];
     /**
-     * Group indices BELOW the highest one the shaders declare that they never declared themselves.
-     *
-     * WebGPU requires a bind group at every index up to the pipeline's highest, and an `'auto'`
-     * layout duly produces an empty one for each gap. The engine's shaders are full of gaps —
-     * `outline` uses groups 1 and 2, `overdraw` uses 0 and 1, the lit families reach group 5 —
-     * because the numbering is by ROLE (0 textures, 1 transform, 2 material, 3 shadows, ...) and no
-     * program plays every role. Leaving the gaps to the caller would mean every draw site knowing
-     * which roles its shader happens to skip, so the pass fills them instead.
+     * Group indices below the pipeline's highest that its shaders never declared. WebGPU requires a
+     * bind group at every index, and this engine numbers groups by ROLE, so gaps are the norm.
      */
     public readonly emptyGroups: readonly number[];
 
@@ -679,27 +550,33 @@ class WebGPURenderPipeline implements RenderPipeline {
         this.emptyGroups = gaps;
     }
 
+    /**
+     * The gap-filling bind groups, built once — they depend on nothing but the pipeline's own layout,
+     * and each one is a real driver object on this backend.
+     */
+    public emptyBindGroups(device: GPUDevice): readonly { group: number; handle: GPUBindGroup }[] {
+        if (!this._emptyBindGroups)
+            this._emptyBindGroups = this.emptyGroups.map(group => ({
+                group,
+                handle: device.createBindGroup({
+                    label: `${this.label}:empty${group}`,
+                    layout: this.handle.getBindGroupLayout(group),
+                    entries: [],
+                }),
+            }));
+        return this._emptyBindGroups;
+    }
+    private _emptyBindGroups: { group: number; handle: GPUBindGroup }[] | null = null;
+
     /** The layout for a group index, or undefined when the shaders never declared it. */
     public layoutForGroup(group: number): WebGPUBindGroupLayout | undefined {
         return this.bindGroupLayouts.find(l => l.group === group);
     }
 
     /**
-     * Bind groups over `program`'s uniform blocks AT THEIR CURRENT SLOTS, one per group this pipeline
-     * declares.
-     *
-     * A block is an arena and each draw reads a different slot of it (see `UniformSet`), so a bind
-     * group names a byte range rather than a buffer: `{ buffer, offset, size }`. Two draws that left
-     * every block on the same slot share one; a draw that advanced any block gets its own.
-     *
-     * **Cached by the slot signature, not by the program.** Caching by program was correct while every
-     * draw read offset 0 — and that was the bug: twenty objects, twenty writes, one struct, so all
-     * twenty draws rendered the last one. The signature also carries each arena's generation, because a
-     * grown arena is a different `GPUBuffer` and a bind group names the buffer, not the block.
-     *
-     * A block whose group this pipeline does not declare is skipped rather than bound - the engine
-     * numbers groups by ROLE, and a program's `ProgramUniforms` describes the whole module while a
-     * pipeline built from it may legitimately reference only some of them.
+     * Bind groups over `program`'s uniform blocks AT THEIR CURRENT SLOTS, so each names a byte range
+     * rather than a buffer. Cached by the SLOT SIGNATURE, never by the program — caching by program
+     * gives every draw offset 0. A block whose group this pipeline does not declare is skipped.
      */
     public uniformGroupsFor(program: WebGPUShaderProgram,
                             device: GPUDevice): readonly { group: number; handle: GPUBindGroup }[] {
@@ -710,20 +587,16 @@ class WebGPURenderPipeline implements RenderPipeline {
         const cached = cache.get(signature);
         if (cached) return cached;
 
-        // Grouped by GROUP INDEX, not one bind group per block. A group can declare several
-        // bindings - the lit families put more than one block in the same group - and WebGPU
-        // rejects a bind group whose entry count does not match its layout exactly ("Number of
-        // entries (1) did not match the expected number of entries (2)"), so every block sharing an
-        // index has to arrive in the same bind group.
+        // Grouped by GROUP INDEX, not one bind group per block: WebGPU rejects a bind group whose
+        // entry count does not match its layout exactly.
         const byGroup = new Map<number, GPUBindGroupEntry[]>();
         for (const set of program.uniforms.blocks) {
             if (!this.layoutForGroup(set.layout.group)) continue;
             const entries = byGroup.get(set.layout.group) ?? [];
             entries.push({
                 binding: set.layout.binding,
-                // `size` is the BLOCK, not the arena. Without it the binding would span every slot,
-                // which both overruns `maxUniformBufferBindingSize` and makes the shader read slot 0
-                // whatever offset it was given.
+                // `size` is the BLOCK, not the arena: spanning every slot overruns
+                // `maxUniformBufferBindingSize` and makes the shader read slot 0 at any offset.
                 resource: {
                     buffer: (set.buffer as WebGPUBuffer).handle,
                     offset: set.byteOffset,
@@ -745,9 +618,8 @@ class WebGPURenderPipeline implements RenderPipeline {
             });
         }
 
-        // The signature space is bounded — slots reset at every submit, so a program cycles through
-        // the same handful of tuples pass after pass. The cap is insurance against a shape nobody
-        // predicted, not a working eviction policy: dropping the map costs one rebuild per signature.
+        // Insurance, not an eviction policy: the signature space is bounded because slots reset at
+        // every submit, and dropping the map costs one rebuild per signature.
         if (cache.size >= UNIFORM_BIND_GROUP_CACHE_CAP) cache.clear();
         cache.set(signature, groups);
         return groups;
@@ -759,13 +631,8 @@ class WebGPURenderPipeline implements RenderPipeline {
 }
 
 /**
- * A compute pipeline: the module, and the bind-group layouts `layout: 'auto'` derived from it.
- *
- * No `emptyGroups` counterpart to {@link WebGPURenderPipeline}'s, and that is not an omission. The
- * gap-filling exists because the engine's RASTER shaders number their groups by role (0 textures,
- * 1 transform, 2 material, ...) and so leave holes below their highest index. The one compute module
- * uses group 0 and only group 0, so there is no hole to fill — and inventing the machinery for a case
- * that does not occur would be guessing at what a second compute shader might do.
+ * A compute pipeline: the module, plus the bind-group layouts `layout: 'auto'` derived from it. No
+ * `emptyGroups` counterpart — the one compute module uses group 0 and nothing else.
  */
 class WebGPUComputePipeline implements ComputePipeline {
     public readonly label: string;
@@ -809,81 +676,32 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
                 private readonly _device: GPUDevice) {}
 
     /**
-     * Bind the pipeline, and an empty group at every index its shaders skipped.
-     *
-     * See {@link WebGPURenderPipeline.emptyGroups}: WebGPU rejects a draw with any index below the
-     * pipeline's highest left unset, and the engine numbers groups by role rather than densely. The
-     * empties are built here rather than by the caller because a draw site has no business knowing
-     * which roles its shader happens not to play — and because the failure is a validation error at
-     * DRAW time ("No bind group set at group index 0"), far from the pass that forgot.
+     * Bind the pipeline, and an empty group at every index its shaders skipped — see
+     * {@link WebGPURenderPipeline.emptyGroups}. A missing one fails at DRAW time, far from its cause.
      */
     public setPipeline(pipeline: RenderPipeline): void {
         const p = pipeline as WebGPURenderPipeline;
         this._topology = p.primitive.topology;
         this._pass.setPipeline(p.handle);
-        for (const group of p.emptyGroups)
-            this._pass.setBindGroup(group, this._device.createBindGroup({
-                layout: p.handle.getBindGroupLayout(group), entries: [],
-            }));
+        for (const { group, handle } of p.emptyBindGroups(this._device))
+            this._pass.setBindGroup(group, handle);
 
-        // The uniform blocks are NOT bound here - see `_flushUniforms`, which does it at draw time.
-        //
-        // WebGL2 has nothing to do here: `Shader` uploads its std140 blocks to global UNIFORM_BUFFER
-        // binding points and the draw finds them. WebGPU has no globals - a uniform buffer reaches a
-        // shader only through a bind group - so without this every uniform group is unset and the
-        // driver drops the draw with "No bind group set at group index N". That was the whole reason a
-        // frame with the correct draw count rendered nothing.
-        //
-        // Done HERE rather than at the ~330 `setUniform` call sites, which is the migration's standing
-        // constraint: a draw site should not have to know which groups its shader declares. The encoder
-        // already reaches `ShaderManager` for the WebGL2 flush; this is the same reach.
-        // Bind the program, the same way `WebGL2RenderPipeline.apply` does with
-        // `ShaderManager.Instance.bind(this.module.program)`.
-        //
-        // Not a nicety: several passes NEVER call `bind` themselves and rely entirely on this. The
-        // shadow pass is the clearest - it selects `shadowMap` or `shadowMapSkinned`, calls
-        // `setPipeline`, and then sets `u_lightSpace` and `u_model` straight onto "the bound program",
-        // which on this backend was still whatever the previous pass left behind. The uniforms went
-        // into one program's buffers while the draw read another's; the driver reported it as
-        // "Binding size (192) ... is smaller than the minimum binding size (6528)", and the bind group
-        // labels showed it outright once they named both sides: `shadowMap<-tilemap:uniforms1`.
-        // `bindIfRegistered`, not `bind`: a pipeline built straight from a shader module has no
-        // engine-level program, and that is a pipeline with no uniforms rather than an error. Binding
-        // nothing is the right answer there — `_flushUniforms` returns early on a null binding, where
-        // leaving the previous pass's program bound would feed this pipeline another program's buffers.
+        // Bind the PROGRAM here, or a pass that never calls `bind` itself writes its uniforms into
+        // whichever program the previous pass left bound. The blocks themselves are bound at draw
+        // time by `_flushUniforms`. `bindIfRegistered`, not `bind`: a pipeline built straight from a
+        // shader module has no engine-level program, and that is a pipeline with no uniforms.
         ShaderManager.Instance.bindIfRegistered(p.program);
         this._pipeline = p;
     }
     /** Remembered from `setPipeline` so the draw can bind against it. See `_flushUniforms`. */
     private _pipeline: WebGPURenderPipeline | null = null;
 
-    /**
-     * Upload whatever the pass wrote since the last draw.
-     *
-     * Mirrors `WebGL2RenderPassEncoder._beginDraw`, which calls `ShaderManager.flushBound()` for the
-     * same reason: uniforms are buffered on the CPU and uploaded once, immediately before the draw that
-     * reads them.
-     *
-     * **A known limitation, stated rather than hidden.** `queue.writeBuffer` is ordered against the
-     * SUBMIT, not against the commands already recorded in this encoder - so when one pass draws many
-     * objects with different `u_model`, every draw in it ends up reading the LAST value written. Single
-     * draw passes (every fullscreen pass, the cube-face bakes) are correct today; multi-object passes
-     * are not, and the fix is per-draw storage - dynamic offsets into one buffer, which is what WebGPU
-     * expects and what the engine has no notion of yet.
-     */
+    // Upload whatever the pass wrote since the last draw: uniforms are buffered on the CPU and
+    // uploaded once, immediately before the draw that reads them.
     private _flushUniforms(): void {
-        // The program is read HERE, at the draw, not at `setPipeline`.
-        //
-        // `setPipeline` runs before the engine has finished setting up the draw, and the program bound
-        // at that moment is frequently the PREVIOUS pass's. Binding uniform groups there fed a pipeline
-        // another program's buffers - visible in the labels as `shadowMap` holding
-        // `tilemap:u_transform`, and reported by the driver as "Binding size (192) is smaller than the
-        // minimum binding size (6528)", because the buffer bound was the wrong struct entirely.
-        //
-        // At the draw the bound program is by definition the one about to run, which is also exactly
-        // what WebGL2 means by it: `ShaderManager.flushBound()` in `WebGL2RenderPassEncoder._beginDraw`
-        // reads the same thing at the same moment. The bind groups are cached per program on the
-        // pipeline, so re-binding per draw costs a lookup and a `setBindGroup`, not an allocation.
+        // Read the program HERE, at the draw, never at `setPipeline`: the program bound at that moment
+        // is frequently the previous pass's, and binding its groups feeds this pipeline another
+        // program's buffers. At the draw, the bound program is by definition the one about to run.
         const program = ShaderManager.Instance.bound;
         if (!program) return;
         program.flushUniformBlocks();
@@ -894,12 +712,8 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
 
     public setBindGroup(group: number, bindGroup: BindGroup, dynamicOffsets?: readonly number[]): void {
         const handle = (bindGroup as WebGPUBindGroup).handle;
-        // The third argument is OMITTED when there are no offsets, never passed as `undefined`.
-        //
-        // `setBindGroup` is an overloaded WebIDL operation and resolution looks at how many arguments
-        // were supplied, not at their values: an explicit `undefined` selects the sequence overload and
-        // is then converted, which throws "The provided value cannot be converted to a sequence". No
-        // caller in this engine passes offsets yet, so every call took that branch.
+        // The third argument must be OMITTED when there are no offsets, never passed as `undefined`:
+        // `setBindGroup` is overloaded on ARGUMENT COUNT, and an explicit undefined throws.
         if (dynamicOffsets) this._pass.setBindGroup(group, handle, Array.from(dynamicOffsets));
         else this._pass.setBindGroup(group, handle);
     }
@@ -933,18 +747,8 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
         this._countDraw(indexCount, instanceCount);
     }
 
-    /**
-     * The per-frame counters, which this backend was not keeping at all.
-     *
-     * Every number the performance HUD shows and every `rhiDrawCalls` baseline the mesh harness pins
-     * came from `webgl2Commands.ts` alone, so on WebGPU they all read zero — and a zero draw count next
-     * to a black frame says "nothing drew" when the truth was "nothing counted". That cost a wrong
-     * diagnosis before it cost anything else, which is the only reason it is worth a comment: an
-     * instrument that reads zero on a backend it was never wired to is worse than no instrument.
-     *
-     * Mirrors `WebGL2RenderPassEncoder._countDraw` exactly, including charging instanced draws by
-     * instance count, so the two backends' numbers are comparable rather than merely both present.
-     */
+    // The per-frame counters. Mirrors `WebGL2RenderPassEncoder._countDraw` exactly, instanced charging
+    // included, so the two backends' numbers are comparable.
     private _countDraw(elements: number, instanceCount: number): void {
         frameStats.drawCalls++;
         frameStats.rhiDrawCalls++;
@@ -961,13 +765,7 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
     }
 }
 
-/**
- * Records dispatches inside one compute pass.
- *
- * Thin to the point of being uninteresting, which is the point: everything that makes the render-pass
- * encoder above non-trivial — empty bind groups for skipped role indices, viewport and scissor state,
- * two draw forms — has no compute analogue here.
- */
+/** Records dispatches inside one compute pass. */
 class WebGPUComputePassEncoder implements ComputePassEncoder {
     private _ended = false;
 
@@ -998,16 +796,8 @@ const BIGINT_ZERO = BigInt(0);
 const TIMESTAMP_QUERY_CAPACITY = 128;
 /** One `u64` per timestamp. */
 const TIMESTAMP_BYTES = 8;
-/**
- * Staging buffers in flight at once.
- *
- * Sized for the shape the renderer actually has TODAY: `_beginFullscreenPass` opens one command
- * encoder per pass, so a frame is ~35 separate submissions and each one that carries a timed pass
- * wants a staging buffer. Eight is a little over a fifth of that on purpose — a `mapAsync` resolves
- * within a frame or two, so the ring recycles far faster than it fills, and running out simply drops
- * that submission's timings rather than growing the pool without bound. Dropping is the correct
- * failure: a timing that had to wait for memory is not a timing of the GPU any more.
- */
+// Staging buffers in flight at once. Running out drops that submission's timings rather than growing
+// the pool — a timing that had to wait for memory is not a timing of the GPU.
 const TIMESTAMP_STAGING_RING = 8;
 
 interface TimestampStaging {
@@ -1018,22 +808,9 @@ interface TimestampStaging {
 }
 
 /**
- * The device's timestamp-query machinery: a `GPUQuerySet`, the `QUERY_RESOLVE` buffer it resolves
- * into, and a small `MAP_READ` staging ring the results are copied to for reading.
- *
- * Entirely internal to this file. Above the RHI the only two spellings are
- * `Device.setTimestampCollection` and `Device.collectTimestamps`, because a query set is not something
- * the renderer or the profiler should be able to name.
- *
- * TIMEBASE. WebGPU timestamps are nanoseconds since an unspecified epoch, and only differences are
- * meaningful — so a pass's cost is `end - begin` on the same query set, which is exactly what
- * `timestampWrites` gives. Browsers quantise the values (Chrome to ~100µs unless the origin trial for
- * finer resolution is on), so a pass under that is reported as 0 rather than as noise; that is a real
- * limit of the measurement and not something to smooth over here.
- *
- * QUERY INDEX REUSE is safe even though every submission restarts at 0. Queue submissions execute in
- * order, and each encoder's `resolveQuerySet` is recorded immediately after its own passes, so the
- * next submission's writes cannot overtake the previous one's resolve.
+ * The device's timestamp-query machinery: a query set, its resolve buffer, and a small staging ring.
+ * Only differences are meaningful, and browsers quantise, so a pass under the quantum reads 0.
+ * Query indices may restart at 0 per submission — submissions execute in order.
  */
 class TimestampCollector {
     private _querySet: GPUQuerySet | null = null;
@@ -1054,9 +831,8 @@ class TimestampCollector {
         if (on === this._enabled) return;
         this._enabled = on;
         if (on) this._allocate();
-        // Resources are NOT released on disable. Re-enabling is a checkbox in the profiler panel, and
-        // a staging buffer that is still `mapping` when its owner is destroyed rejects its own
-        // `mapAsync` — the drain below has to be able to finish for anything already submitted.
+        // Resources are NOT released on disable: a staging buffer destroyed mid-map rejects its own
+        // `mapAsync`, and the drain has to finish for anything already submitted.
     }
 
     private _allocate(): void {
@@ -1083,10 +859,8 @@ class TimestampCollector {
     }
 
     /**
-     * Record the resolve + copy for one finished encoder, if a staging buffer is free.
-     *
-     * Must run BEFORE the encoder is submitted — `resolveQuerySet` is a command, not a queue
-     * operation, and it has to sit in the same command buffer as the passes it is resolving.
+     * Record the resolve and copy for one finished encoder. Must run BEFORE it is submitted:
+     * `resolveQuerySet` is a command and has to sit in the same buffer as the passes it resolves.
      */
     public recordResolve(encoder: GPUCommandEncoder, labels: string[]): void {
         if (!this._enabled || !this._querySet || !this._resolve || labels.length === 0) return;
@@ -1111,11 +885,9 @@ class TimestampCollector {
                 this._drain(entry);
             } else if (entry.state === 'submitted') {
                 entry.state = 'mapping';
-                // `mapAsync` resolves only once the submission that wrote the buffer has completed, so
-                // this IS the "has it finished" test — asked without blocking on the answer. The
-                // rejection path matters: a device loss or a destroy rejects every outstanding map, and
-                // an unhandled rejection here would surface as a page-level error from a profiler that
-                // is meant to be invisible when off.
+                // `mapAsync` resolves only once the writing submission completes, so this IS the
+                // "has it finished" test. The rejection path must be handled: a device loss rejects
+                // every outstanding map.
                 entry.buffer.mapAsync(GPUMapMode.READ).then(
                     () => { entry.state = 'ready'; },
                     () => { entry.labels = []; entry.state = 'free'; },
@@ -1129,16 +901,9 @@ class TimestampCollector {
         if (this._sink) {
             for (let i = 0; i < entry.labels.length; i++) {
                 const begin = times[i * 2], end = times[i * 2 + 1];
-                // Drop only what is not a measurement: an untouched pair of slots (both exactly zero
-                // — the driver is allowed to leave them alone) and an end before its begin.
-                //
-                // A pass whose end EQUALS its begin is reported, as 0.000ms, and that is not a bug to
-                // filter out. MEASURED on this driver: an empty clear pass reads back a zero delta
-                // every time, because browsers quantise timestamps — Chrome to ~100µs unless the
-                // fine-resolution origin trial is on — so anything under the quantum lands on the same
-                // tick at both ends. Dropping those made a cheap pass VANISH from the profiler rather
-                // than show up as "below the measurement floor", which is the more misleading of the
-                // two readings and is what the first version of this line did.
+                // Drop only what is not a measurement: untouched slots, and an end before its begin.
+                // A zero DELTA is reported as 0.000ms — quantisation puts a cheap pass on the same
+                // tick at both ends, and dropping those makes it vanish rather than read as floor.
                 if (end < begin || (end === BIGINT_ZERO && begin === BIGINT_ZERO)) continue;
                 this._sink(entry.labels[i], Number(end - begin) / 1e6);
             }
@@ -1169,13 +934,8 @@ class WebGPUCommandEncoder implements CommandEncoder {
     constructor(private readonly _device: GPUDevice,
                 private readonly _timestamps: TimestampCollector | null,
                 /**
-                 * Called after `queue.submit`, to release every uniform slot this submission read.
-                 *
-                 * The reset point is exactly here and nowhere earlier. `queue.writeBuffer` is ordered on
-                 * the QUEUE timeline, so a write issued after a submit lands after every command that
-                 * submit contained — which is what makes a slot safe to reuse. Reset a frame boundary
-                 * instead and a pass with more draws than the arena has slots would rewrite a value an
-                 * already-recorded draw has not read yet.
+                 * Called after `queue.submit` to release every uniform slot this submission read. The
+                 * reset point is exactly there — a frame boundary is too late for a many-draw pass.
                  */
                 private readonly _onSubmit: () => void = () => {},
                 label?: string) {
@@ -1188,9 +948,8 @@ class WebGPUCommandEncoder implements CommandEncoder {
     public beginRenderPass(target: RenderTarget, descriptor: RenderPassDescriptor): RenderPassEncoder {
         const rt = target as WebGPURenderTarget;
 
-        // An attachment the descriptor does not mention still has to be listed, or WebGPU treats the
-        // target as having fewer attachments than the pipeline writes and rejects the draw. Unmentioned
-        // attachments load and store, which is WebGL2's implicit behaviour.
+        // An attachment the descriptor does not mention must still be listed, or WebGPU rejects the
+        // draw for writing more targets than the pass has. Unmentioned ones load and store.
         const colorAttachments: GPURenderPassColorAttachment[] = rt.colorViews.map((view, index) => {
             const declared = descriptor.colorAttachments.find(a => a.target === index);
             const loadOp = declared ? gpuLoadOp(declared.loadOp) : 'load';
@@ -1208,15 +967,8 @@ class WebGPUCommandEncoder implements CommandEncoder {
         if (rt.depthView) {
             const declared = descriptor.depthAttachment;
             const loadOp = declared ? gpuLoadOp(declared.loadOp) : 'load';
-            // Narrowed to the requested LAYER when one is named, not the whole array. The shadow
-            // cascades and the spot atlas are ONE texture rendered a layer at a time, so without this
-            // every cascade would target the same view and the last one written would win.
-            // `WebGL2Device.beginRenderPass` already honours it, by re-pointing the framebuffer's depth
-            // attachment; this is the same instruction spelled the way WebGPU spells it.
-            //
-            // Created on demand rather than cached: a cascade pass runs a handful of times a frame, and
-            // caching would need the generation-keyed eviction `graphics/texture.ts` carries for
-            // exactly this reason.
+            // Narrowed to the requested LAYER, not the whole array: the cascades and the spot atlas
+            // are one texture rendered a layer at a time. Created on demand rather than cached.
             const layer = declared?.baseArrayLayer;
             const view = layer === undefined ? rt.depthView.handle
                 : rt.depthView.texture.handle.createView({
@@ -1234,11 +986,8 @@ class WebGPUCommandEncoder implements CommandEncoder {
 
         setViewportSize(rt.width, rt.height);
 
-        // GPU timing, when the profiler has it switched on. A timestamp can only be attached to a
-        // pass — there is no WebGPU spelling for "time this span of the frame" — so the pass LABEL is
-        // the only name a cost can be reported under, and gpuProfiler.ts maps it back onto a scope
-        // name where that is honest. The pair is claimed here and resolved in `finish()`; a pass past
-        // the query set's capacity is simply untimed rather than an error.
+        // A timestamp attaches only to a PASS, so its label is the only name a cost reports under.
+        // The query pair is claimed here and resolved in `finish()`; past capacity, a pass is untimed.
         const timestamps = this._timestamps;
         const queryIndex = this._timedPasses.length * 2;
         const timed = timestamps?.active && timestamps.querySet !== null
@@ -1271,12 +1020,8 @@ class WebGPUCommandEncoder implements CommandEncoder {
     }
 
     /**
-     * Open a compute pass.
-     *
-     * Placed between the copy and the finish deliberately: a dispatch is recorded work like any other,
-     * so it shares this encoder's submission and orders against the passes around it. No
-     * `timestampWrites` — WebGPU would accept them on a compute pass, but the profiler above the RHI
-     * reports render passes, and the one compute workload the engine has runs once at startup.
+     * Open a compute pass. A dispatch is recorded work like any other, so it shares this encoder's
+     * submission and orders against the passes around it. Not timestamped.
      */
     public beginComputePass(label?: string): ComputePassEncoder {
         return new WebGPUComputePassEncoder(
@@ -1365,10 +1110,8 @@ export class WebGPUDevice implements Device {
     /** The raw allocation, shared by `createTexture` and by `WebGPUTexture.setSize` re-creating one. */
     private _createGpuTexture(descriptor: TextureDescriptor): GPUTexture {
         const dimension = descriptor.dimension ?? '2d';
-        // Clamped to 1, because `graphics/texture.ts` creates every texture at 0x0 and sizes it later.
-        // WebGPU rejects a zero extent ASYNCHRONOUSLY, so it does not throw — it fires one uncaptured
-        // validation error per texture, ~40 of them at boot, which buries whatever real error you are
-        // actually looking for. A 1x1 placeholder is replaced by the first real `setSize`.
+        // Clamped to 1: `graphics/texture.ts` creates every texture at 0x0, and WebGPU rejects a zero
+        // extent ASYNCHRONOUSLY — a wall of uncaptured validation errors that buries the real one.
         const width = Math.max(1, descriptor.width);
         const height = Math.max(1, descriptor.height);
         return this._device.createTexture({
@@ -1399,9 +1142,8 @@ export class WebGPUDevice implements Device {
                              baseArrayLayer: number = 0): TextureView {
         const tex = texture as WebGPUTexture;
 
-        // A view onto ONE layer is `2d`, never `2d-array`/`cube`, even when the texture is an array or a
-        // cube — that is how a shadow cascade or a cube face becomes a render attachment. A view that
-        // spans the whole thing keeps the texture's own dimension so shaders can sample it as declared.
+        // A view onto ONE layer is `2d`, never `2d-array`/`cube` — that is how a cascade or a cube face
+        // becomes an attachment. A whole-texture view keeps the texture's own dimension.
         const wholeTexture = tex.depthOrArrayLayers === 1;
         const dimension = wholeTexture ? gpuViewDimension(tex.dimension) : '2d';
         const arrayLayerCount = wholeTexture ? tex.depthOrArrayLayers : 1;
@@ -1417,14 +1159,8 @@ export class WebGPUDevice implements Device {
     }
 
     /**
-     * A view of the whole texture: every mip, every layer, the texture's own view dimension.
-     *
-     * Distinct from {@link createTextureView}, which narrows to one mip and one layer for use as an
-     * attachment. Sampling a cascade array or a cube needs the opposite, and so does binding a 3D
-     * texture as `texture_storage_3d` — the narrowed view is a `2d` view of one z-slice, which the
-     * storage-texture binding rejects outright. That second use is why this is on the `Device`
-     * interface now rather than a WebGPU-only extra: the cloud-noise compute bake cannot be written
-     * without it.
+     * A view of the whole texture: every mip, every layer, the texture's own dimension. What sampling a
+     * cascade array or a cube needs, and the only thing a `texture_storage_3d` binding accepts.
      */
     public createWholeTextureView(texture: Texture): TextureView {
         const tex = texture as WebGPUTexture;
@@ -1441,20 +1177,15 @@ export class WebGPUDevice implements Device {
     /**
      * The sampler that pairs with `texture`, built from the state the texture itself carries.
      *
-     * Cached on the STATE rather than on the texture: two textures configured the same way want the
-     * same sampler, and WebGPU has a hard cap on how many a pipeline may bind. A depth texture in
-     * comparison mode gets a `sampler_comparison`, which is a different WGSL type and cannot be shared
-     * with the ordinary kind - `Texture.setDepthCompare` is what records that, and `WebGL2Sampler`
-     * documents why the two backends disagree about where it lives.
+     * Cached on the STATE, not the texture, since WebGPU caps how many samplers a pipeline may bind.
+     * A depth texture in comparison mode gets a `sampler_comparison`, which cannot be shared.
      */
     private _samplerFor(texture: WebGPUTexture): Sampler {
         const c = texture.samplingConfig;
         const depth = isDepthFormat(texture.format);
         const compare = depth && texture.compareEnabled;
-        // A depth texture may only be FILTERED through a comparison sampler. Sampled ordinarily - which
-        // is what every screen-space pass does with the G-buffer depth - it must take a non-filtering
-        // sampler, or WebGPU refuses the bind group. WebGL2 has no such rule, so the linear filter that
-        // was being requested here was silently fine there and fatal on this backend.
+        // A depth texture may only be FILTERED through a comparison sampler; sampled ordinarily it
+        // must take a non-filtering one, or WebGPU refuses the bind group.
         const filter = depth && !compare ? 'nearest' as const
                      : (c?.minFilter === 'nearest' ? 'nearest' as const : 'linear' as const);
         const key = c ? `${c.addressMode}|${filter}|${compare}` : `default|${filter}|${compare}`;
@@ -1480,13 +1211,8 @@ export class WebGPUDevice implements Device {
     }
 
     /**
-     * Build a program from the BUILD-TIME layout.
-     *
-     * Nothing is compiled here: the module is compiled by the pipeline that uses it. What this owns
-     * is the uniform storage and the attribute list, neither of which WebGPU can be asked for at
-     * runtime — which is why a descriptor without them is refused rather than guessed at. That is
-     * the case for a custom material assembled from a user's GLSL, and refusing is the honest
-     * outcome: it cannot run on this backend and should say so.
+     * Build a program from the BUILD-TIME layout — the uniform storage and attribute list, neither of
+     * which WebGPU can be asked for at runtime. A descriptor without them is refused, not guessed at.
      */
     public createShaderProgram(descriptor: ShaderProgramDescriptor): ShaderProgram {
         if (!descriptor.vertexInputs || !descriptor.uniformBlocks)
@@ -1496,37 +1222,25 @@ export class WebGPUDevice implements Device {
                                                descriptor.uniformBlocks as UniformBlockLayout[],
                                                this._device.limits.minUniformBufferOffsetAlignment,
                                                p => this._programs.delete(p));
-        // Registered so `releaseUniformSlots` can reach it. The device owns the submission, and the
-        // submission is what makes a slot reusable, so the device is where the list belongs — a
-        // program has no way to know when the queue drained.
+        // Registered so `releaseUniformSlots` can reach it: a program cannot know when the queue drained.
         this._programs.add(program);
         return program;
     }
 
     /**
-     * Free every program's uniform slots. Called after each `queue.submit`.
-     *
-     * See {@link UniformSet.resetCursor} for why this is safe only here: a slot holds the value one
-     * recorded draw will read, and stays claimed until the command buffer containing that draw has
-     * been handed to the queue.
+     * Free every program's uniform slots. Safe ONLY after `queue.submit` — a slot holds the value a
+     * recorded draw will read until its command buffer reaches the queue.
      */
     public releaseUniformSlots(): void {
         for (const program of this._programs) program.uniforms.resetCursors();
     }
-    /**
-     * Every program built on this device.
-     *
-     * A strong set on purpose. Programs are registered at creation and removed at `dispose`, and the
-     * renderer holds all 56 of them for the life of the device; a weak one would risk a program being
-     * collected between its last draw and the reset that has to reach it.
-     */
+    // Every program built on this device. A STRONG set: a weak one risks a program being collected
+    // between its last draw and the slot reset that has to reach it.
     private readonly _programs = new Set<WebGPUShaderProgram>();
 
     public createShaderModule(descriptor: ShaderModuleDescriptor): ShaderModule {
-        // Refuse an empty module by name rather than compiling nothing and failing at pipeline creation
-        // with no clue which program it was. The one caller that legitimately has no WGSL is a custom
-        // material assembled from a user's GLSL at runtime - it cannot run on this backend and should
-        // say so, exactly as `createShaderProgram` already does.
+        // Refuse an empty module BY NAME, rather than failing at pipeline creation with no clue which
+        // program it was.
         if (!descriptor.source)
             throw new Error(`${descriptor.label ?? descriptor.program ?? 'shader'}: no WGSL - a ` +
                             `runtime-assembled GLSL program cannot be compiled by WebGPU`);
@@ -1601,9 +1315,8 @@ export class WebGPUDevice implements Device {
             layout: 'auto',
             compute: {
                 module: module.handle,
-                // No `cs_main` fallback to match the vertex/fragment ones above: those exist because
-                // 55 hand-registered raster programs share a naming convention, and a compute module
-                // that reaches here without its entry point named has nothing to fall back ON.
+                // No `cs_main` fallback: a compute module without its entry point named has nothing
+                // to fall back on.
                 entryPoint: module.entryPoints.compute,
             },
         });
@@ -1626,35 +1339,17 @@ export class WebGPUDevice implements Device {
 
     public createBindGroup(descriptor: BindGroupDescriptor): BindGroup {
         const layout = descriptor.layout as WebGPUBindGroupLayout;
-        // The SAMPLER the caller did not pass.
-        //
-        // This engine keeps filter and wrap state on the TEXTURE, not in a separate sampler object, so
-        // `_textureBindGroup` emits one entry per texture at binding 2N and nothing at 2N+1. WebGL2 is
-        // happy with that - a combined sampler is one uniform - but a WGSL `texture_2d` + `sampler`
-        // pair is two bindings, and WebGPU rejects a bind group whose entry count does not match its
-        // layout ("Number of entries (1) did not match the expected number of entries (2)").
-        //
-        // Synthesised here rather than at the call site, for the same reason the uniform groups are:
-        // the engine's model is that a texture carries its own sampling state, and a draw site should
-        // not have to learn otherwise to satisfy one backend. `WebGPUTexture.samplingConfig` is exactly
-        // that state, recorded by `configure()`.
-        // Only where the caller left the slot empty. A caller that DID pass its own sampler - the
-        // device harness does, and so would anything binding a sampler that is not a texture's own -
-        // otherwise ends up with two entries at the same binding, and WebGPU rejects the whole bind
-        // group on the count ("Number of entries (3) did not match the expected number of entries
-        // (2)"). That invalidates the command buffer, so the pass does not even clear and the target
-        // reads back as zeros - which looks like a shader that produced nothing rather than a bind
-        // group that was never valid.
+        // Synthesise the SAMPLER the caller did not pass: this engine keeps sampling state on the
+        // TEXTURE, so a bind group arrives one entry short of a `texture_2d` + `sampler` layout, and
+        // WebGPU rejects it on the count. Only where the slot is empty — a caller that passed its own
+        // would otherwise get two entries at one binding, which is rejected the same way.
         const declared = new Set(descriptor.entries.map(e => e.binding));
         const withSamplers: BindGroupEntry[] = [];
         for (const entry of descriptor.entries) {
             withSamplers.push(entry);
             if (!('textureView' in entry)) continue;
-            // Two ways this must NOT fire, both of which produce an entry count the layout does not
-            // expect - and WebGPU rejects the bind group on the count alone, which invalidates the
-            // whole command buffer, so the pass does not even clear and the target reads back as zeros:
-            //   - the caller passed its OWN sampler for the slot;
-            //   - the shader declares no sampler there at all, which is every `textureLoad` read.
+            // Must not fire when the caller passed its own sampler, nor when the shader declares none
+            // there at all — every `textureLoad` read. Either produces a rejected entry count.
             if (declared.has(entry.binding + 1)) continue;
             if (!layout.samplerBindings.has(entry.binding + 1)) continue;
             const texture = (entry.textureView as WebGPUTextureView).texture;
@@ -1676,11 +1371,8 @@ export class WebGPUDevice implements Device {
                 return { binding: entry.binding, resource: (entry.textureView as WebGPUTextureView).handle };
             }
 
-            // A storage texture binds as the same `GPUTextureView` a sampled one does — the arms
-            // differ because WebGL2 has to be able to refuse this one, not because WebGPU treats it
-            // differently. What WebGPU does check is that the texture carries STORAGE_BINDING usage
-            // and that the view's dimension matches the shader's `texture_storage_*` type, which is
-            // what `createWholeTextureView` is for on a 3D volume.
+            // Binds as the same `GPUTextureView` a sampled one does; the separate arm exists so
+            // WebGL2 can refuse it. WebGPU checks STORAGE_BINDING usage and the view's dimension.
             if ('storageTextureView' in entry) {
                 return { binding: entry.binding, resource: (entry.storageTextureView as WebGPUTextureView).handle };
             }
@@ -1732,15 +1424,8 @@ export class WebGPUDevice implements Device {
     // -- uploads ---------------------------------------------------------------------------------
 
     /**
-     * Replace a buffer's contents, growing it if the data no longer fits.
-     *
-     * A `GPUBuffer`'s size is fixed at creation, so growing one means destroying it and making
-     * another — which is why this returns the buffer to use from now on rather than mutating in
-     * place. When the data still fits, the same buffer comes back and this is a plain queue write.
-     *
-     * Shrinking reuses the buffer too: the tail is simply not written, and nothing reads past the
-     * range a draw was told about. Reallocating on every shrink would churn allocations for a caller
-     * whose instance count merely dipped for a frame.
+     * Replace a buffer's contents, growing it if the data no longer fits — a `GPUBuffer` cannot be
+     * resized, so growing returns a NEW buffer. Shrinking reuses the old one and leaves the tail unwritten.
      */
     public reallocateBuffer(buffer: Buffer, data: ArrayBufferView): Buffer {
         const existing = buffer as WebGPUBuffer;
@@ -1757,10 +1442,18 @@ export class WebGPUDevice implements Device {
     }
 
     public writeBuffer(buffer: Buffer, offset: number, data: ArrayBufferView): void {
-        // `queue.writeBuffer` copies immediately from the caller's memory, so a typed array reused on
-        // the next line is safe — unlike `mapAsync`, which is why uploads go through the queue here.
-        this._device.queue.writeBuffer((buffer as WebGPUBuffer).handle, offset,
-                                       data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
+        // `queue.writeBuffer` copies immediately, so the caller may reuse its typed array.
+        // The SIZE must be a multiple of 4 — an odd-count uint16 index buffer fails the whole upload —
+        // so odd sizes are padded. `WebGPUBuffer` already rounds its allocation up, so there is room.
+        const handle = (buffer as WebGPUBuffer).handle;
+        if (data.byteLength % 4 === 0) {
+            this._device.queue.writeBuffer(handle, offset,
+                                           data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
+            return;
+        }
+        const padded = new Uint8Array(alignUp(data.byteLength, 4));
+        padded.set(new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength));
+        this._device.queue.writeBuffer(handle, offset, padded.buffer, 0, padded.byteLength);
     }
 
     public writeTexture(texture: Texture, data: ArrayBufferView, width: number, height: number,
@@ -1793,12 +1486,8 @@ export class WebGPUDevice implements Device {
     public collectTimestamps(): void { this._timestamps.collect(); }
 
     /**
-     * Read a colour attachment back to the CPU.
-     *
-     * Three things make this longer than `gl.readPixels`: rows must start on 256-byte boundaries, the
-     * copy has to be submitted before it can be mapped, and the mapped range is only valid until
-     * `unmap()`. The padding strip at the end is what turns the aligned staging layout back into the
-     * tightly packed buffer callers expect.
+     * Read a colour attachment back to the CPU. Rows must start on 256-byte boundaries, the copy must
+     * be submitted before it can be mapped, and the padding is stripped to give callers a tight buffer.
      */
     public async readPixels(view: TextureView, x: number, y: number,
                             width: number, height: number): Promise<Uint8Array> {
@@ -1874,43 +1563,21 @@ export interface WebGPUAcquireOptions {
     powerPreference?: GPUPowerPreference;
 }
 
-/**
- * Optional features worth having when the adapter offers them.
- *
- * Each has to be requested explicitly at `requestDevice` — an adapter that *supports* a feature still
- * produces a device without it — and requesting one the adapter lacks is an outright failure rather
- * than a downgrade. Hence: intersect first, request second, then report what was actually granted.
- *
- * `float32-filterable` is the exact analogue of WebGL2's `OES_texture_float_linear`, whose absence
- * already silently demotes every `precision: 'high'` render target to RGBA8 in texture.ts.
- */
+// Optional features worth having when the adapter offers them. Each must be requested explicitly, and
+// requesting one the adapter lacks fails outright — so intersect first, then request.
 const OPTIONAL_FEATURES: GPUFeatureName[] = [
     'float32-filterable',
     'timestamp-query',
     'depth32float-stencil8',
 ];
 
-/**
- * How many bind groups the engine's shaders actually declare.
- *
- * Four: group 0 textures, 1 every uniform block, 2 light-probe cubes, 3 shadow maps. That is also the
- * DEFAULT `maxBindGroups`, and adapters commonly report 4 as their maximum, so this is the ceiling
- * rather than a preference - see the group table in `chunks/modelVertex.wgsl`.
- *
- * It was six, one group per role, which put lit programs at group 5 and made Dawn reject them:
- * `[EntryPoint "fs_main"] infringes limits: the entry-point uses a binding with a group decoration (5)
- * that exceeds the maximum (4)`. Nothing else failed. The pipeline was simply invalid, the draws
- * recorded against it did nothing, and the pass still performed its clear - a frame that counted the
- * right number of draw calls and rendered not one pixel.
- */
+// How many bind groups the engine's shaders declare: 0 textures, 1 uniforms, 2 probe cubes, 3 shadows.
+// Also the default `maxBindGroups` and a common adapter maximum, so it is a CEILING, not a preference.
 const REQUIRED_BIND_GROUPS = 4;
 
 /**
- * Acquire a WebGPU device, or explain why not.
- *
- * Returns null rather than throwing on every "this machine cannot" path — no `navigator.gpu`, no
- * adapter, a blocklisted driver — because all three are ordinary outcomes that the caller answers by
- * falling back to WebGL2, not by failing to start.
+ * Acquire a WebGPU device, or explain why not. Returns null rather than throwing on every "this
+ * machine cannot" path, since the caller answers all of them by falling back to WebGL2.
  */
 export async function acquireWebGPUDevice(
     options: WebGPUAcquireOptions = {},
@@ -1930,10 +1597,8 @@ export async function acquireWebGPUDevice(
 
     const requiredFeatures = OPTIONAL_FEATURES.filter(feature => adapter.features.has(feature));
 
-    // Asked for against the ADAPTER's ceiling rather than as a constant, because requesting a limit an
-    // adapter cannot meet fails `requestDevice` outright rather than degrading to what it can do. If an
-    // adapter ever reports fewer than the engine needs, that is a real incompatibility and it should be
-    // said plainly here rather than discovered later as a pipeline that silently draws nothing.
+    // Asked against the ADAPTER's ceiling, never as a constant: a limit it cannot meet fails
+    // `requestDevice` outright rather than degrading.
     const requiredLimits: Record<string, number> = {};
     if (adapter.limits.maxBindGroups >= REQUIRED_BIND_GROUPS)
         requiredLimits.maxBindGroups = REQUIRED_BIND_GROUPS;

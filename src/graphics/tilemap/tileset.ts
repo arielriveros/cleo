@@ -1,11 +1,6 @@
-// The runtime half of a tileset: an atlas image sliced into a grid of tiles, plus whatever per-tile
-// metadata authoring attached to them (solidity, animation, depth anchoring, tint, auto-tile rules).
-//
-// The editor's `.tileset` asset is a superset of this — it also carries a name, a thumbnail and the
-// bookkeeping the asset explorer needs — and a TilemapNode embeds a full copy of every tileset its
-// layers reference when it serializes. That embedding is deliberate: it means `Tilemap.deserialize`
-// never needs an asset library in scope, so the published player, templates, bundle import and runtime
-// `Scene.instantiate` all work with no extra plumbing.
+// The runtime half of a tileset: an atlas sliced into a grid, plus per-tile metadata. The editor's
+// `.tileset` asset is a superset. A TilemapNode EMBEDS a full copy of every tileset it references, so
+// `Tilemap.deserialize` never needs an asset library in scope.
 
 /** A tile that cycles through other tiles' images. `frames` are tile indices into the same tileset. */
 export interface TileAnimation {
@@ -16,26 +11,18 @@ export interface TileAnimation {
 /** Which family of auto-tiling rules a terrain set uses. */
 export type WangKind = 'edge' | 'corner' | 'blob';
 
-/**
- * Everything authoring can attach to one tile of the atlas. Every field is optional: the overwhelmingly
- * common tile is a plain opaque square with no metadata at all, and a sparse record keeps both the
- * asset and the embedded copy small.
- */
+/** Everything authoring can attach to one tile. All optional — the common tile is a plain square. */
 export interface TileMeta {
     /** Contributes a collider when placed on a collision-bearing layer. */
     solid?: boolean;
     /**
-     * Collider outline in tile-local space (0..1, origin at the cell's bottom-left), as flat xy pairs.
-     * Absent means "the whole cell", which is also what lets the merger fold the tile into a big box —
-     * a custom shape opts the cell out of merging and gets its own convex prism.
+     * Collider outline in tile-local space (0..1 from the bottom-left), as flat xy pairs. Absent means
+     * the whole cell, which is what lets the merger fold it into a box; a shape opts out of merging.
      */
     shape?: number[];
     /** World-space nudge applied to this tile's Y-sort key. The manual override when anchoring is wrong. */
     zBias?: number;
-    /**
-     * Row offset within the tile's own footprint that the whole tile sorts at. A two-cell-tall tree
-     * drawn from its top cell sets 1, so both of its cells sort at the trunk's row.
-     */
+    /** Row offset within the tile's footprint that the whole tile sorts at — a tree's trunk row. */
     anchorRow?: number;
     /** Footprint in cells, for multi-cell props. Defaults to 1x1. */
     spanX?: number;
@@ -79,10 +66,8 @@ export interface TilesetConfig {
     /** Gap between adjacent tiles, in pixels. */
     spacing?: number;
     /**
-     * Grid dimensions. Stored rather than derived: deriving them needs the decoded image, which the
-     * published player does not have when it parses a scene. The editor computes them once at import
-     * (it has the HTMLImageElement) and bakes them in — the same reason AnimatedSpriteNode stores its
-     * own columns/rows instead of measuring the sheet.
+     * Grid dimensions. STORED, not derived: deriving them needs the decoded image, which the published
+     * player has not got when it parses a scene.
      */
     columns: number;
     rows: number;
@@ -133,11 +118,8 @@ export class Tileset {
     public get metaEntries(): IterableIterator<[number, TileMeta]> { return this._meta.entries(); }
 
     /**
-     * Texture-space rect of `tileIndex` as [u0, v0, u1, v1] = [left, bottom, right, top].
-     *
-     * Tile 0 is the atlas's TOP-LEFT cell and indices run left-to-right then down, which is what an
-     * artist means by "the third tile". The V flip is because textures upload with UNPACK_FLIP_Y set,
-     * so texture v = 0 is the image's bottom edge, not its top.
+     * Texture-space rect of `tileIndex` as [left, bottom, right, top]. Tile 0 is the atlas's TOP-LEFT
+     * cell, running left-to-right then down; the V flip is because textures upload with UNPACK_FLIP_Y.
      */
     public uvOf(tileIndex: number, out?: Float32Array): Float32Array {
         const o = out && out.length >= 4 ? out : new Float32Array(4);

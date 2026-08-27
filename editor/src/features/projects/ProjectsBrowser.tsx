@@ -3,13 +3,11 @@ import ProjectsExplorer from './ProjectsExplorer'
 import ExamplesGallery, { useExampleIndex } from './ExamplesGallery'
 import { ProjectRecord } from '../../utils/projects'
 
-// Hosts the two ways to arrive at a project: the ones you already have, and the examples this build ships
-// with. Both the boot launcher and the in-editor Projects modal render this, so a starting point is offered
-// in the same place whether it is your first visit or your fiftieth.
+// Hosts the two ways to arrive at a project: existing ones and the examples this build ships with.
+// Rendered by both the boot launcher and the in-editor Projects modal.
 //
-// Switching tabs unmounts the explorer. That is not a compromise — it is exactly the lifecycle SVAR's file
-// manager wants (mount once, `data` passed once), the same reason the project browser is hosted in a modal
-// rather than a dock panel.
+// Switching tabs unmounts the explorer, which is the lifecycle SVAR's file manager requires: mount once,
+// `data` passed once.
 
 type Tab = 'projects' | 'examples'
 
@@ -19,8 +17,7 @@ export default function ProjectsBrowser({ projects, onChanged, className = '' }:
   className?: string
 }) {
   const [tab, setTab] = useState<Tab>('projects')
-  // null while loading, [] when this build carries no examples. In both cases the tab stays hidden, so a
-  // checkout with an empty examples/ folder looks exactly as it did before.
+  // null while loading, [] when this build carries no examples; the tab stays hidden either way.
   const examples = useExampleIndex()
   const hasExamples = !!examples?.length
 

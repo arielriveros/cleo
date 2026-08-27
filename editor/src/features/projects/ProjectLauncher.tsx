@@ -4,12 +4,9 @@ import { ProjectRecord } from '../../utils/projects'
 import { VERSION_LABEL } from '../../version'
 
 /**
- * The full-screen picker shown before the workspace exists — a fresh install, or a browser whose registry
- * points at nothing openable.
- *
- * It is the SAME explorer the menu-bar modal hosts, so creating a project looks identical whether you are
- * arriving for the first time or switching later. Nothing here may touch scoped storage: no project is open
- * yet, and `scoped()` throws by design until one is.
+ * The full-screen picker shown before the workspace exists: a fresh install, or a registry pointing at
+ * nothing openable. Nothing here may touch scoped storage — no project is open yet, and `scoped()` throws
+ * by design until one is.
  */
 export default function ProjectLauncher({ projects }: { projects: ProjectRecord[] }) {
   const [list, setList] = useState(projects)

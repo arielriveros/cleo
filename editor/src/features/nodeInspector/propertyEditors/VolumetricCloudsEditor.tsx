@@ -51,18 +51,16 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
   const eventEmitter = useEventBus()
   const [state, setState] = useState<CloudsState>(() => readNode(props.node))
 
-  // Re-seed when a different clouds node is selected.
   useEffect(() => { setState(readNode(props.node)) }, [props.node])
 
-  // Write changed fields straight to the live node (the renderer reads it every frame) and mark dirty.
+  // The renderer reads the node every frame, so changed fields are written straight to it.
   const apply = (patch: Partial<CloudsState>) => {
     for (const k in patch) (props.node as any)[k] = (patch as any)[k]
     setState(prev => ({ ...prev, ...patch }))
     eventEmitter.emit('SCENE_CHANGED')
   }
 
-  // Plain render helpers (invoked as functions, not JSX components) so the inputs keep their
-  // identity across re-renders and don't remount mid-drag.
+  // Invoked as functions, not JSX components, so the inputs keep identity and do not remount mid-drag.
   const slider = (label: string, k: keyof CloudsState, min: number, max: number, step: number, fixed = 2) => (
     <Slider label={label} min={min} max={max} step={step} value={state[k] as number}
       labelClassName='w-[104px]' readout={(v) => v.toFixed(fixed)}

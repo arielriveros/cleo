@@ -6,9 +6,8 @@ import { TilesetAsset, toRuntimeTileset } from '../../../utils/tilesets'
 import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
 import { TilesetIcon } from '../sectionIcons'
 
-// The tileset reference control on a sprite node — the sprite counterpart of MaterialSlot, and the only
-// way a sprite gets an image. Assigning stores the runtime copy on the node (the sprite embeds its
-// tileset the way a tilemap does), so the sprite keeps drawing even if the library is not in scope.
+// The tileset reference control on a sprite node, and the only way a sprite gets an image. Assigning stores
+// the runtime copy on the node, so the sprite keeps drawing even if the library is not in scope.
 
 export function tilesetAssetOf(node: SpriteNode, tilesets: TilesetAsset[]): TilesetAsset | undefined {
   const id = node.tileset?.id

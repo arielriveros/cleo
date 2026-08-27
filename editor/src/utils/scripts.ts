@@ -2,23 +2,21 @@ import { Node } from 'cleo'
 import type { NodeVariableType, NodeVariableAccess } from 'cleo'
 import { cryptoRandomId } from './ids'
 
-// A reusable, class-based Script asset (mirrors MaterialAsset / Template). Authored once, referenced by many
-// nodes via the SCRIPT_ID_VAR node variable — editing the script updates every node that uses it.
+// A reusable, class-based Script asset, referenced by many nodes via the SCRIPT_ID_VAR node variable.
 //
-// The source is a single class (`export default class XNode extends Node { ... }`). Its handler methods
-// (onStart/onUpdate/…) are overrides; its class FIELDS are the node's variables — declared in the script,
-// not in a UI panel. Fields are NATIVE per-node properties at runtime (this.speed is a real property, not a
-// Map lookup); access modifiers (public/private/protected) are enforced by the editor's type-checker at
-// author time. A leading underscore marks a field internal (hidden from the inspector's reflection view).
+// The source is a single class (`export default class XNode extends Node { ... }`): handler methods are
+// overrides, and class FIELDS are the node's variables, held as NATIVE per-node properties at runtime.
+// Access modifiers are enforced by the editor's type-checker at author time; a leading underscore marks a
+// field internal and hides it from the inspector's reflection view.
 
-// Node variable that links a node to a shared script asset (mirrors MATERIAL_ID_VAR / TEMPLATE_ID_VAR).
-// This is a link marker, not a script variable — it stays in the node's variable Map like the others.
+// Node variable linking a node to a shared script asset. A link marker, not a script variable, but it
+// still lives in the node's variable Map.
 export const SCRIPT_ID_VAR = '__scriptId'
 
 // The node types a script may extend from (`class X extends <Base>Node`). Matches the engine's NodeType.
 export type ScriptBaseType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'cameraRig'
-  | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'lodGroup'
+  | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput'
 
@@ -36,9 +34,9 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
   landscape: 'LandscapeNode',
   volumetricClouds: 'VolumetricCloudsNode',
   skyAtmosphere: 'SkyAtmosphereNode',
+  skyLight: 'SkyLightNode',
   lodGroup: 'LodGroupNode',
-  // UI. Concrete classes rather than a single UINode base, so `class HealthBar extends UIProgressBarNode`
-  // gives the script a typed `this.value` in Monaco instead of an untyped payload.
+  // Concrete UI classes, not a single UINode base, so a script gets typed members in Monaco.
   uiRoot: 'UIRootNode',
   uiPanel: 'UIPanelNode',
   uiText: 'UITextNode',
@@ -55,7 +53,8 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
 export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   node: 'Node', model: 'Model', light: 'Light', lightProbe: 'Light Probe', skybox: 'Skybox',
   camera: 'Camera', cameraRig: 'Camera Rig', sprite: 'Sprite', animatedSprite: 'Animated Sprite', landscape: 'Landscape',
-  volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', lodGroup: 'LOD Group',
+  volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', skyLight: 'Sky Light',
+  lodGroup: 'LOD Group',
   uiRoot: 'UI Canvas', uiPanel: 'UI Panel', uiText: 'UI Text', uiImage: 'UI Image',
   uiButton: 'UI Button', uiStack: 'UI Stack', uiSpacer: 'UI Spacer',
   uiProgressBar: 'UI Progress Bar', uiSlider: 'UI Slider', uiToggle: 'UI Toggle',
@@ -162,9 +161,9 @@ const ACCESS_KEYWORDS = new Set(['public', 'private', 'protected'])
 const MODIFIER_KEYWORDS = new Set(['public', 'private', 'protected', 'readonly', 'declare', 'static', 'override', 'abstract'])
 
 /**
- * Reflect a script's class fields into variable schemas. Underscore-prefixed fields are hidden (internal).
- * Statements that are methods, getters, or dynamic-type fields are skipped. Best-effort and resilient: a
- * declaration it cannot parse is simply not reflected, rather than throwing.
+ * Reflect a script's class fields into variable schemas. Underscore-prefixed fields are hidden (internal);
+ * methods, getters and dynamic-type fields are skipped. Never throws — an unparseable declaration is
+ * simply not reflected.
  */
 export function parseScriptVariables(source: string): ScriptVarSchema[] {
   const body = classBody(stripComments(source))
@@ -173,8 +172,8 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
   const out: ScriptVarSchema[] = []
   const seen = new Set<string>()
 
-  // Walk statements at class-body depth 0, split on ';' and '}' boundaries while tracking brace/paren depth
-  // so method bodies and object/array initializers are skipped as single units.
+  // Walk statements at class-body depth 0, tracking brace/paren depth so method bodies and
+  // object/array initializers are skipped as single units.
   let i = 0
   let depth = 0
   let stmtStart = 0
@@ -183,7 +182,7 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     stmtStart = end + 1
     if (!stmt) return
 
-    // Reject anything with a call/parameter list before an '=' — that's a method or getter/setter.
+    // A call/parameter list before '=' means a method or getter/setter, not a field.
     const eq = stmt.indexOf('=')
     const head = eq >= 0 ? stmt.slice(0, eq) : stmt
     if (head.includes('(') || head.startsWith('get ') || head.startsWith('set ') || head.startsWith('*')) return
@@ -217,9 +216,8 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     })
   }
 
-  // Split statements on ';' and newline at class-body depth 0. TypeScript class fields routinely omit their
-  // semicolons (ASI), so newlines must split too; brace/paren/bracket depth tracking keeps method bodies and
-  // multi-line array/object/paren initializers together as single units.
+  // Split on ';' AND newline at class-body depth 0: class fields routinely omit their semicolons (ASI).
+  // Depth tracking keeps method bodies and multi-line initializers together as single units.
   for (; i < body.length; i++) {
     const c = body[i]
     if (c === '{' || c === '(' || c === '[') depth++
@@ -242,8 +240,6 @@ export function scriptClassName(name: string): string {
   return ident.endsWith('Node') ? ident : `${ident}Node`
 }
 
-/** The starter class source for a new script of `name` extending `baseType`. Handlers are method overrides;
- *  fields are the node's variables (public shows in the inspector, a leading _ stays internal). */
 /** Handler stubs that actually apply to a given UI base type. */
 const UI_STARTERS: Partial<Record<ScriptBaseType, string>> = {
   uiButton: `  onPress() {
@@ -274,12 +270,16 @@ const UI_STARTERS: Partial<Record<ScriptBaseType, string>> = {
   }`,
 }
 
+/**
+ * The starter class source for a new script of `name` extending `baseType`. Handlers are method overrides;
+ * fields are the node's variables (public shows in the inspector, a leading _ stays internal).
+ */
 export function defaultScriptClass(name: string, baseType: ScriptBaseType): string {
   const base = BASE_CLASS[baseType]
   const className = scriptClassName(name)
 
-  // UI scripts get a starter built from the handlers that actually exist on their base class. The generic
-  // stub below moves the node and reacts to collisions, neither of which a screen rectangle can do.
+  // UI scripts need a starter built from the handlers their base class actually has; the generic stub
+  // below moves the node and reacts to collisions, which a screen rectangle cannot do.
   if (base.startsWith('UI')) {
     const body = UI_STARTERS[baseType] ?? `  onStart() {
     Logger.log('Started: ' + this.name, 'Script')
@@ -339,9 +339,8 @@ export function buildScriptAsset(name: string, baseType: ScriptBaseType, source:
 
 /**
  * Link a script asset to a node: stamp the SCRIPT_ID_VAR marker, seed the script's native field defaults as
- * own properties on the node (unless already present), and cache the resolved source in the per-node scripts
- * map (so the existing serialize/inject/publish pipeline keeps working unchanged). Enforces the base type.
- * Returns false (and does nothing) if the script's base type is incompatible with the node.
+ * own properties (unless already present), and cache the resolved source in the per-node `scripts` map.
+ * Returns false and does nothing if the script's base type is incompatible with the node.
  */
 export function applyScriptAsset(node: Node, asset: ScriptAsset, scripts: Map<string, string>): boolean {
   if (!baseTypeMatchesNode(asset.baseType, node.nodeType)) return false
@@ -353,8 +352,7 @@ export function applyScriptAsset(node: Node, asset: ScriptAsset, scripts: Map<st
 
 /**
  * Ensure a node carries each of the script's fields as a native own property. With `overwrite=false` an
- * existing per-node value is kept (so re-linking or a schema edit never clobbers authored values); missing
- * or removed fields are added/pruned to match the current schema.
+ * existing per-node value is kept; missing or removed fields are added/pruned to match the schema.
  */
 export function seedScriptFields(node: Node, asset: ScriptAsset, overwrite: boolean): void {
   const n = node as any
@@ -362,7 +360,7 @@ export function seedScriptFields(node: Node, asset: ScriptAsset, overwrite: bool
   for (const v of asset.variables) {
     if (overwrite || !(v.name in n) || n[v.name] === undefined) n[v.name] = cloneDefault(v.default)
   }
-  // Prune native fields that the schema no longer declares (a field removed from the script).
+  // Prune native fields the schema no longer declares.
   for (const name of scriptFieldNames(node, asset)) {
     if (!wanted.has(name)) delete n[name]
   }
@@ -388,8 +386,8 @@ export function unlinkScript(node: Node, asset: ScriptAsset | undefined, scripts
 
 /**
  * Read a node's native script-field values into a `{ name: value }` object for serialization. Injected onto
- * the node JSON as `scriptVars` at save/play/publish time (mirrors how script SOURCE is injected), so the
- * engine restores them as native own properties in _commonParse without knowing the field schema.
+ * the node JSON as `scriptVars` at save/play/publish time; the engine restores them as native own
+ * properties in _commonParse without knowing the field schema.
  */
 export function collectScriptVars(node: Node, asset: ScriptAsset): Record<string, any> {
   const n = node as any
@@ -399,11 +397,9 @@ export function collectScriptVars(node: Node, asset: ScriptAsset): Record<string
 }
 
 /**
- * Fan a shared script library out onto the nodes that reference it. For every node carrying a SCRIPT_ID_VAR
- * link to a known asset: caches the asset's SOURCE into the per-node `scripts` map (so the existing
- * serialize/inject/publish pipeline emits `node.script` unchanged) and collects the node's native field
- * values. Returns a `nodeId -> scriptVars` map for injection into the serialized tree. Call before
- * serializing a scene for save/play/publish.
+ * Fan a shared script library out onto the nodes that reference it: caches each asset's SOURCE into the
+ * per-node `scripts` map and collects the node's native field values.
+ * Returns `nodeId -> scriptVars` for injection. Must be called before serializing a scene.
  */
 export function fanOutScripts(
   nodes: Iterable<Node>,

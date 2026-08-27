@@ -1,18 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Animator } from 'cleo'
 
-// Every link in the chain from a machine parameter to the pose, sampled live, with the spread each value has
-// covered over the last second.
-//
-// A blend that vibrates is one link in that chain moving, and the only useful question is WHICH. The spread is
-// what answers it: a value that has settled reads 0.000, and a value that is buzzing reads its amplitude even
-// though the instantaneous number looks calm. A restless RAW with a calm probe means the noise is in whatever
-// writes the parameter; a calm probe with restless WEIGHTS means the field's own layout; everything calm while
-// the character still shakes means the pose blend or the machine.
-//
-// Shared by the State Machine inspector (which can only ever show the editor's physics-less preview) and the
-// in-Play viewport overlay. One component, because two copies of a diagnostic drift and then disagree about
-// what they are measuring.
+// Every link in the chain from a machine parameter to the pose, sampled live, with the spread each value
+// covered over the last second — a settled value reads 0.000, a buzzing one reads its amplitude.
+// Shared by the State Machine inspector and the in-Play viewport overlay.
 
 /** How long a value's history is kept, in ms. The window the ± column reports over. */
 const WINDOW_MS = 1000
@@ -32,8 +23,8 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
   const lastState = useRef<string | null>(null)
   const snap = useRef<Snapshot | null>(null)
 
-  // Sampling runs every frame; the render is throttled separately. Both matter: a machine flipping state at
-  // 60Hz is invisible to a 10Hz sampler, and a 60Hz *render* would cost more than the thing being measured.
+  // Sampling runs every frame while the render is throttled separately: a 60Hz state flip is invisible to
+  // a 10Hz sampler, and a 60Hz render would cost more than the thing being measured.
   useEffect(() => {
     let raf = 0
     let lastRender = 0
@@ -58,15 +49,13 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
         for (const w of d.weights) push('w:' + w.clipName, w.weight * 100)
       }
 
-      // State ping-pong. Counted here rather than inferred from `stateTime` in the render, because a state
-      // that enters and leaves between two renders resets the clock invisibly — which is exactly the failure
-      // this is looking for.
+      // State ping-pong must be counted per sample, not inferred from `stateTime` at render time: a state
+      // that enters and leaves between two renders resets the clock invisibly.
       const name = d.stateName ?? null
       if (name !== lastState.current) {
         if (lastState.current !== null) {
           flips.current.push(now)
-          // Remember what it flipped BETWEEN, not just how often. "Locomotion ⇄ TurnLeft" names the pair of
-          // transitions to go and look at; a bare counter leaves you guessing which two.
+          // Record what it flipped BETWEEN, not just how often, so a ping-pong names its pair.
           recent.current.push(`${lastState.current} → ${name ?? '—'}`)
           while (recent.current.length > 4) recent.current.shift()
         }
@@ -74,8 +63,7 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
       }
       while (flips.current.length && now - flips.current[0] > WINDOW_MS) flips.current.shift()
 
-      // Parameters are sampled whether or not a field is active: a machine that keeps LEAVING its field state
-      // is exactly the case where the field rows vanish and the condition parameters are all that matter.
+      // Parameters are sampled whether or not a field is active; the field rows vanish when it is not.
       for (const p of d.params) push('p:' + p.name, typeof p.value === 'boolean' ? (p.value ? 1 : 0) : p.value)
 
       if (now - lastRender >= RENDER_MS) { lastRender = now; tick(x => x + 1) }

@@ -8,14 +8,9 @@ import { useCleoEngine } from '../../EngineContext';
 import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint, Button } from '../../../components/ui';
 import { SpriteIcon } from '../sectionIcons';
 
-// An animated sprite is a tileset plus an ordered list of tiles.
-//
-// The old editor asked for columns/rows and a frame range over a sheet the user had to count cells in by
-// hand. Now the atlas is on screen: dragging a rectangle over it produces the frame list directly, since
-// TileGrid already emits its selection row-major in exactly that order.
-//
-// The alternative source is the tile's own animation, authored once in the tileset editor
-// (TileMeta.animation) and shared by every sprite that picks that tile.
+// An animated sprite is a tileset plus an ordered list of tiles. Dragging a rectangle over the atlas
+// produces that list directly, since TileGrid emits its selection row-major. The alternative source is the
+// tile's own animation (TileMeta.animation), shared by every sprite that picks that tile.
 
 export default function SpriteSheetEditor() {
   const { editorScene, selectedNode, tilesets, eventEmitter, enterTilesetEditor } = useCleoEngine();
@@ -34,9 +29,8 @@ export default function SpriteSheetEditor() {
   const [fps, setFps] = useState(12);
   const [loop, setLoop] = useState(true);
   const [zoom, setZoom] = useState(2);
-  // The tileset lives on the engine node, which React cannot observe. `revision` is bumped whenever the
-  // slot reassigns it, and is a memo dependency — without it the lookup below stays stale and the frame
-  // picker keeps saying "assign a tileset" after one has been assigned.
+  // The tileset lives on the engine node, which React cannot observe: `revision` is bumped whenever the
+  // slot reassigns it, and is a memo dependency of the lookup below.
   const [revision, bump] = useState(0);
 
   useEffect(() => {
@@ -63,8 +57,8 @@ export default function SpriteSheetEditor() {
     changed();
   };
 
-  // The text field is the escape hatch for a non-rectangular order (a ping-pong, a held frame). It is
-  // parsed leniently and only pushed to the node when it yields something usable.
+  // The text field is the escape hatch for a non-rectangular order. Parsed leniently, and pushed to the
+  // node only when it yields something usable.
   const applyFramesText = (text: string) => {
     setFramesText(text);
     const max = asset ? asset.columns * asset.rows : Infinity;

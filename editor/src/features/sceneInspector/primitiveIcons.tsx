@@ -2,13 +2,10 @@ import { Glyph as S } from './iconBase';
 
 /**
  * Glyphs for the Primitive and Complex geometry catalogs.
- *
- * Every shape here is drawn rather than imported: `AddItem.icon` is a component, so a new geometry costs
- * no binary asset and the glyph tints with its cell's text colour.
- *
- * The solids are drawn as a silhouette plus the visible half of the near-side ellipse — that near edge is
- * what separates a cylinder from a capsule from a cone at 28px. The structural shapes are drawn in the
- * same loose isometric so the two categories read as one family.
+ * Every shape is drawn rather than imported: `AddItem.icon` is a component, so a new geometry costs no
+ * binary asset and the glyph tints with its cell's text colour.
+ * Solids are a silhouette plus the visible half of the near-side ellipse; the structural shapes use the
+ * same loose isometric so both categories read as one family.
  */
 
 // ---------------------------------------------------------------------------------------------------
@@ -35,10 +32,7 @@ export const CapsuleIcon = () => (
 export const ConeIcon = () => (
   <S><path d="M12 3.5 19 17.5" /><path d="M12 3.5 5 17.5" /><ellipse cx="12" cy="17.5" rx="7" ry="3" /></S>
 );
-/**
- * A ring in perspective. The hole is deliberately half the outer width: with a small inner ellipse this
- * read as an eye, which is the glyph sitting two rows away in the scene tree.
- */
+/** A ring in perspective. The hole is half the outer width; a smaller inner ellipse reads as an eye. */
 export const TorusIcon = () => (
   <S><ellipse cx="12" cy="12" rx="9.5" ry="6" /><ellipse cx="12" cy="12" rx="4.8" ry="2.8" /></S>
 );
@@ -81,10 +75,8 @@ export const ArchIcon = () => (
 export const TubeIcon = () => (
   <S><ellipse cx="12" cy="7" rx="7.5" ry="3.2" /><ellipse cx="12" cy="7" rx="3.6" ry="1.5" /><path d="M4.5 7v10M19.5 7v10" /><path d="M4.5 17a7.5 3.2 0 0 0 15 0" /></S>
 );
-/**
- * Open-top shell, seen from just above the rim: the outer rim, the inner rim a wall-thickness inside it,
- * and the walls dropping away. The inner rim is the whole point — without it this is just a cube.
- */
+/** Open-top shell seen from just above the rim: outer rim, inner rim a wall-thickness inside it, and the
+ *  walls dropping away. Without the inner rim this is a cube. */
 export const HollowBoxIcon = () => (
   <S><path d="M12 2.5 21 7 12 11.5 3 7Z" /><path d="M12 5 17 7.5 12 10 7 7.5Z" opacity="0.5" /><path d="M3 7v9l9 4.5 9-4.5V7" /></S>
 );

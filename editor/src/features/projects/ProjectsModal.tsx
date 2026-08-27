@@ -5,10 +5,9 @@ import { ProjectRecord, loadProjects } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 
 /**
- * The in-editor project browser. Opened from the menu bar; a fresh mount each time, which is what keeps
- * SVAR's "data is passed once" constraint satisfied without any refresh plumbing.
- *
- * The explorer needs an explicit height: inside a modal it has no flex parent to fill.
+ * The in-editor project browser, opened from the menu bar. A fresh mount each time, which satisfies SVAR's
+ * "data is passed once" constraint. The explorer needs an explicit height: inside a modal it has no flex
+ * parent to fill.
  */
 export default function ProjectsModal({ onClose }: { onClose: () => void }) {
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null)

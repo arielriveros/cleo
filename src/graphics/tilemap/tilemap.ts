@@ -1,9 +1,6 @@
 // The tilemap data model: an unbounded stack of tile layers on the XY plane, plus the physics bodies
-// derived from them. This is the `Terrain` of the 2D authoring path — it owns the data and the collider
-// lifecycle, while TilemapNode gives it a place in the scene graph and the renderer draws it.
-//
-// Nothing in here touches WebGL. Chunk meshes are built lazily by the renderer and only ever flagged
-// stale from here, which is what keeps the whole model unit-testable and safe to parse in a worker.
+// derived from them. Nothing here touches WebGL — chunk meshes are built lazily by the renderer and
+// only flagged stale from here, which keeps the model testable and worker-safe.
 
 // Aliased because `Material` is not imported here but the physics one reads better named for what it is.
 import { Body, Box, ConvexPolyhedron, Vec3, World, Material as PhysicsMaterial } from 'cannon-es';
@@ -53,9 +50,8 @@ export class Tilemap {
     private _tilesets: Map<string, Tileset> = new Map();
 
     /**
-     * Index of the layer whose draw band SpriteNodes join. Characters therefore Y-sort against that
-     * layer's tiles and nothing else, which is the whole point: a tree on the entity layer occludes a
-     * character standing behind it, while a background layer never can.
+     * Index of the layer whose draw band SpriteNodes join, so characters Y-sort against that layer's
+     * tiles and nothing else.
      */
     public entityLayer: number = 0;
     /** Half-extent along Z given to generated colliders, so a body on the XY plane actually hits them. */
@@ -146,9 +142,8 @@ export class Tilemap {
     // --- coordinates --------------------------------------------------------------------------
 
     /**
-     * Move the map's origin (the node's world position). Rotation and scale are deliberately ignored,
-     * exactly as Terrain ignores them: the collider and picking math would have to invert an arbitrary
-     * transform per cell, and a rotated tilemap is not a thing 2D authoring wants.
+     * Move the map's origin. Rotation and scale are IGNORED, as `Terrain` ignores them — the collider
+     * and picking math would have to invert an arbitrary transform per cell.
      */
     public setOrigin(p: vec3): void {
         if (p[0] === this._origin[0] && p[1] === this._origin[1] && p[2] === this._origin[2]) return;
@@ -188,9 +183,8 @@ export class Tilemap {
     }
 
     /**
-     * Whether anything at this cell blocks movement: a tile its tileset marks solid on any ordinary
-     * layer, or any tile at all on a dedicated collision layer. Parallaxed layers never count — their
-     * art is drawn at a camera-dependent offset, so a collider matching it would be a lie.
+     * Whether anything at this cell blocks movement: a tile its tileset marks solid, or any tile on a
+     * collision layer. Parallaxed layers never count — their art is drawn at a camera-dependent offset.
      */
     public isSolid(col: number, row: number): boolean {
         for (let i = 0; i < this._layers.length; i++) {
@@ -264,11 +258,8 @@ export class Tilemap {
     }
 
     /**
-     * Flood fill the contiguous region of cells matching the one under (col, row).
-     *
-     * Bounded by `limit` because the grid has no edges: filling from an empty cell on a sparse map would
-     * otherwise allocate chunks outward until the tab dies. Hitting the limit stops cleanly and logs —
-     * a partial fill the user can see beats a hang they cannot.
+     * Flood fill the contiguous region matching the cell under (col, row). `limit` is required: the grid
+     * has no edges, so filling from an empty cell would allocate chunks outward forever.
      */
     public bucketFill(layer: number, col: number, row: number, tileIndex: number,
                       orient?: TileOrientation, limit: number = DEFAULT_FILL_LIMIT): void {
@@ -346,10 +337,7 @@ export class Tilemap {
 
     // --- batching and undo --------------------------------------------------------------------
 
-    /**
-     * Bracket a group of writes. Re-entrant by design: a script that calls beginEdit inside an editor
-     * stroke's beginEdit must not trigger a collider rebuild when its own endEdit runs.
-     */
+    /** Bracket a group of writes. RE-ENTRANT: only the outermost `endEdit` rebuilds colliders. */
     public beginEdit(): void { this._editDepth++; }
 
     public endEdit(): void {
@@ -433,11 +421,8 @@ export class Tilemap {
     }
 
     /**
-     * Create/refresh the static colliders and keep them registered with the world (self-heals).
-     *
-     * `material` matters even though a tilemap has no friction settings of its own: cannon only honours
-     * a ContactMaterial when BOTH bodies carry a material, so a material-less tilemap would silently
-     * force every character back to the world default friction.
+     * Create or refresh the static colliders and keep them registered with the world. `material` is
+     * required even with no friction settings: cannon honours a ContactMaterial only when BOTH bodies carry one.
      */
     public ensureRegistered(world: World, material?: PhysicsMaterial): void {
         if (this._disposed) return;
@@ -518,14 +503,8 @@ export class Tilemap {
         return { solid, shaped };
     }
 
-    /**
-     * Bodies for one chunk.
-     *
-     * Square grids greedy-merge into as few boxes as the shape allows. Isometric and hexagonal grids
-     * emit one convex prism per solid cell instead: a box does not fit a diamond or a hexagon, and
-     * merging non-rectangular cells needs outline extraction plus convex decomposition — a chunk of
-     * work in its own right, deliberately not attempted here.
-     */
+    // Bodies for one chunk. Square grids greedy-merge into boxes; isometric and hexagonal ones emit one
+    // convex prism per solid cell, since merging those needs outline extraction and decomposition.
     private _buildChunkBodies(key: number): Body[] {
         const cx = Math.floor(key / 0x10000) - 0x8000;
         const cy = (key % 0x10000) - 0x8000;
@@ -567,13 +546,8 @@ export class Tilemap {
         return bodies;
     }
 
-    /**
-     * A static convex prism for one cell: its footprint (the grid's cell outline, or the tile's own
-     * `shape` when it has one) extruded along Z.
-     *
-     * The polyhedron is built around the cell's centre and the body carries the offset, because cannon
-     * validates a hull's face planes against its own origin.
-     */
+    // A static convex prism for one cell, its footprint extruded along Z. Built around the cell's
+    // CENTRE with the body carrying the offset — cannon validates face planes against the origin.
     private _prismBody(col: number, row: number, shape: number[] | null, depth: number,
                        mat: PhysicsMaterial | undefined): Body | null {
         const centre = cellToWorld(this._grid, col, row);
@@ -615,10 +589,7 @@ export class Tilemap {
         }
     }
 
-    /**
-     * Release every GPU and physics resource. Idempotent, because PhysicsSystem calls it once per frame
-     * for a tilemap flagged `markForRemoval` until the node actually leaves the scene.
-     */
+    /** Release every GPU and physics resource. Idempotent — PhysicsSystem may call it repeatedly. */
     public dispose(world?: World): void {
         if (this._disposed) return;
         this._disposed = true;
@@ -636,11 +607,8 @@ export class Tilemap {
     // --- serialization ------------------------------------------------------------------------
 
     /**
-     * Every referenced tileset is embedded in full, keyed by its asset id.
-     *
-     * That redundancy is the point: `deserialize` then needs no asset library in scope, so the published
-     * player, template instantiation, bundle import and runtime `Scene.instantiate` all reconstruct a
-     * tilemap with nothing but its own JSON. The editor re-embeds after a tileset is edited.
+     * Flatten to JSON, EMBEDDING every referenced tileset in full — `deserialize` then needs no asset
+     * library in scope. The editor re-embeds after a tileset is edited.
      */
     public serialize(): any {
         const used = new Set<string>();
@@ -683,12 +651,8 @@ function firstTileOf(tiles: Record<number, number[]>): number {
     return -1;
 }
 
-/**
- * Apply a placed cell's orientation bits to a tile-local collider outline.
- *
- * The transform order matches the one the tilemap shader applies to UVs — diagonal (transpose) first,
- * then the two mirrors — so a rotated tile's collider lines up with the pixels it draws.
- */
+// Apply a placed cell's orientation bits to a tile-local collider outline. The order must match the
+// tilemap shader's UV transform — diagonal first, then the two mirrors.
 function orientShape(shape: number[], packed: number): number[] {
     const rot = cellRot90(packed), fx = cellFlipX(packed), fy = cellFlipY(packed);
     if (!rot && !fx && !fy) return shape;

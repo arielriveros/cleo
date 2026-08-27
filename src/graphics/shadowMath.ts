@@ -1,13 +1,6 @@
 import { mat4, vec3 } from 'gl-matrix';
 
-/**
- * Pure shadow-mapping math, deliberately free of any GL call.
- *
- * The cascade fit is the part of shadow mapping that silently produces "everything is black" or
- * "the shadows swim when I turn the camera", and neither failure is visible in a screenshot review.
- * Keeping it here — as functions over numbers, with no renderer state and no GL context — is what
- * makes it unit-testable (see tests/shadowMath.test.ts); the renderer holds the buffers and calls in.
- */
+// Pure shadow-mapping math: functions over numbers, no renderer state and no GL calls.
 
 /** The most cascades the shaders declare (see shaders/environment/shadows.glsl `MAX_CASCADES`). */
 export const MAX_CASCADES = 4;
@@ -31,8 +24,7 @@ export function computeCascadeSplits(near: number, far: number, count: number, l
         const uniformSplit = n + (far - n) * p;
         splits[i - 1] = l * logSplit + (1 - l) * uniformSplit;
     }
-    // Float error in pow/lerp can leave the last split a hair short of `far`, which would drop a thin
-    // shell of the world out of every cascade. The contract is that the last cascade reaches exactly far.
+    // Contract: the last cascade reaches exactly `far`, whatever float error pow/lerp introduced.
     splits[count - 1] = far;
     return splits;
 }
@@ -44,14 +36,8 @@ export interface CascadeSphere {
 }
 
 /**
- * Exact bounding sphere of a PERSPECTIVE sub-frustum, computed from the camera's parameters rather
- * than its orientation.
- *
- * This is the whole reason cascades can be stabilized: the radius depends only on (near, far, fov,
- * aspect) and the centre only on (camera position, camera forward), so rotating the camera moves the
- * sphere rigidly and never changes its size. The old 8-corner min/max fit was taken in LIGHT space,
- * whose axes do not rotate with the camera — so the box grew and shrank as the camera turned, and the
- * shadow texels crawled across the world with it.
+ * Exact bounding sphere of a perspective sub-frustum. Rotation-invariant: the radius depends only on
+ * (near, far, fov, aspect), which is what lets cascades be stabilized against camera turns.
  */
 export function cascadeSphereFromPerspective(
     near: number, far: number, fovYRadians: number, aspect: number,
@@ -84,10 +70,8 @@ export function cascadeSphereFromPerspective(
 }
 
 /**
- * Bounding sphere of an arbitrary sub-frustum given its 8 world-space corners. Used for orthographic
- * cameras, where the slice is a box and the centroid IS the exact centre. Also rotation-invariant:
- * turning the camera transforms every corner rigidly, so the centroid and every corner distance move
- * with it unchanged.
+ * Bounding sphere of a sub-frustum given its 8 world-space corners, for orthographic cameras where
+ * the centroid is the exact centre. Rotation-invariant like {@link cascadeSphereFromPerspective}.
  */
 export function cascadeSphereFromCorners(corners: ArrayLike<ArrayLike<number>>, out?: CascadeSphere): CascadeSphere {
     const res = out ?? { center: vec3.create(), radius: 0 };
@@ -109,12 +93,8 @@ export function cascadeSphereFromCorners(corners: ArrayLike<ArrayLike<number>>, 
 }
 
 /**
- * Round a cascade radius up to a fixed ladder of values.
- *
- * The radius is invariant under camera rotation but not under a viewport resize or an fov change,
- * both of which shift it by a hair every frame while the user drags a panel divider. Since the texel
- * grid the snap quantizes to is derived from the radius, a continuously-changing radius means a
- * continuously-changing grid — which is exactly the shimmer the snap exists to remove.
+ * Round a cascade radius up to a fixed ladder, so a viewport resize or fov change cannot drift the
+ * texel grid that {@link snapToTexelGrid} quantizes against.
  */
 export function quantizeRadius(radius: number, steps: number = 16): number {
     if (!(radius > 0)) return 0;
@@ -129,24 +109,15 @@ export function snapToTexelGrid(value: number, texelSize: number): number {
 
 /**
  * Convert a world-space depth bias into the [0,1] depth units the shadow map stores, for a cascade
- * whose orthographic depth range is `depthRange` world units.
- *
- * Without this, one bias slider is correct for exactly one cascade at one shadow distance: cascade 0
- * might span 30 world units of depth and cascade 3 six hundred, so the same raw depth constant is
- * 20x more (or less) aggressive depending on which cascade a pixel lands in.
+ * spanning `depthRange` world units. Keeps one bias value correct across every cascade.
  */
 export function cascadeDepthScale(depthRange: number): number {
     return depthRange > 1e-6 ? 1 / depthRange : 0;
 }
 
 /**
- * Build one cascade's light-space matrix: an orthographic box around `sphere`, oriented along
- * `lightDir`, with its footprint snapped to the shadow map's texel grid.
- *
- * `casterPad` pulls the near plane back toward the light so occluders BETWEEN the light and the
- * slice still rasterize into the map — without it, a wall just outside the slice casts nothing.
- *
- * Returns the cascade's world-space depth range, which the caller needs for `cascadeDepthScale`.
+ * Build one cascade's light-space matrix: an orthographic box around `sphere` along `lightDir`, snapped to
+ * the texel grid. `casterPad` pulls the near plane back. Returns the depth range for {@link cascadeDepthScale}.
  */
 export function buildCascadeMatrix(
     sphere: CascadeSphere, lightDir: ArrayLike<number>, resolution: number, casterPad: number,
@@ -155,21 +126,17 @@ export function buildCascadeMatrix(
     const r = sphere.radius;
     const texelWorldSize = (2 * r) / Math.max(1, resolution);
 
-    // A light pointing straight down (or up) is parallel to the default up vector, which makes
-    // lookAt degenerate (a zero-length cross product -> NaN through the whole matrix).
+    // A light pointing straight down or up is parallel to the default up vector, and lookAt degenerates.
     const up = Math.abs(lightDir[1]) > 0.99 ? vec3.set(scratch.up, 0, 0, 1) : vec3.set(scratch.up, 0, 1, 0);
 
-    // Rotation only: the eye sits at the world origin, so the matrix is a pure change of basis and
-    // the ortho bounds below carry ALL of the translation. That is what makes snapping possible —
-    // there is exactly one place the footprint's position is expressed, and it is a pair of scalars.
+    // Rotation only: the eye is at the world origin, so the ortho bounds below carry all translation.
     const dir = vec3.set(scratch.center, lightDir[0], lightDir[1], lightDir[2]);
     vec3.normalize(dir, dir);
     mat4.lookAt(scratch.view, [0, 0, 0], dir as vec3, up);
 
     const c = vec3.transformMat4(scratch.center, sphere.center as vec3, scratch.view);
 
-    // Snap the footprint's corner (not its centre) to the texel grid: a half-texel offset in the
-    // projection is what makes the depth samples land on the same world positions frame to frame.
+    // Snap the corner, not the centre: a half-texel offset would move the samples every frame.
     const left = snap ? snapToTexelGrid(c[0] - r, texelWorldSize) : c[0] - r;
     const bottom = snap ? snapToTexelGrid(c[1] - r, texelWorldSize) : c[1] - r;
 
@@ -187,9 +154,6 @@ export function buildCascadeMatrix(
 /**
  * Distance at which a spot light's attenuation has fallen to `cutoffRatio` of its peak, used as the
  * far plane of its shadow frustum. Solves `1 / (c + l*d + q*d^2) = cutoffRatio` for d.
- *
- * A spot light has no authored range in this engine — only the three attenuation coefficients — so
- * the frustum has to be derived from them or every spot would need a hand-tuned far plane.
  */
 export function spotShadowFar(
     constant: number, linear: number, quadratic: number, maxFar: number, cutoffRatio: number = 1 / 256,
@@ -203,7 +167,7 @@ export function spotShadowFar(
     } else if (linear > 1e-9) {
         d = b / linear;
     } else {
-        // No falloff at all: the light reaches forever, so only the global cap bounds it.
+        // No falloff at all: only the global cap bounds it.
         d = maxFar;
     }
     if (!(d > 0) || !isFinite(d)) d = maxFar;
@@ -211,12 +175,8 @@ export function spotShadowFar(
 }
 
 /**
- * Stable layer assignment for spot-light shadow maps, keyed by node id.
- *
- * `LightNode.index` looks like the obvious key and is a trap: Scene assigns it as a dense compaction
- * over traversal order, so adding, removing or reparenting ANY node renumbers every spotlight after
- * it. Keying the atlas by index would silently hand light B the depth map that was rendered for
- * light A, one frame after an unrelated node was spawned.
+ * Stable layer assignment for spot-light shadow maps, keyed by node id. Must not key on
+ * `LightNode.index` — Scene recomputes it from traversal order whenever any node is added or moved.
  */
 export class SpotShadowSlots {
     private _capacity: number;
@@ -240,9 +200,8 @@ export class SpotShadowSlots {
     }
 
     /**
-     * Reconcile the assignment with this frame's caster list. Ids that already hold a layer keep it
-     * (that is the point); ids that dropped out release theirs; new ids take the lowest free layer,
-     * in the order given. Casters past capacity get -1 and simply go unshadowed.
+     * Reconcile the assignment with this frame's caster list: existing ids keep their layer, departed
+     * ids release theirs, new ids take the lowest free one. Casters past capacity go unshadowed.
      */
     public update(ids: readonly string[]): Map<string, number> {
         const wanted = new Set(ids);

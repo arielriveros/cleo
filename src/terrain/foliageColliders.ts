@@ -26,16 +26,10 @@ const REFRESH_INTERVAL_MS = 250;
 interface Wanted { sig: string; x: number; y: number; z: number; yaw: number; scale: number; d2: number }
 
 /**
- * Static physics proxies for the collidable foliage instances near the camera.
- *
- * A terrain can hold six figures of foliage instances; a world can hold hundreds of bodies. The gap is
- * closed by only ever materialising the instances the player can reach, and by recycling the bodies as
- * the activation disc slides across the terrain — a walk across the map allocates a bounded number of
- * bodies once and then reuses them forever.
- *
- * Bodies are pooled by SHAPE SIGNATURE (the post-scale dimensions, rounded), not by instance: a recycled
- * body keeps the shape it was built with and only its position changes, so no step ever mutates
- * `body.shapes` or has to recompute mass properties.
+ * Static physics proxies for the collidable foliage instances near the camera, materialised only inside
+ * an activation disc and recycled as it slides. Bodies are pooled by SHAPE SIGNATURE (post-scale
+ * dimensions, rounded), not by instance, so a recycled body only ever changes position — nothing mutates
+ * `body.shapes` or recomputes mass properties.
  */
 export class FoliageColliderField {
     private _world: World | null = null;

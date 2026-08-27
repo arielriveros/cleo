@@ -1,29 +1,12 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { Animation, AnimationSampler, Joint } from '../animatedModel';
 
-// Collapsing assimp's FBX pivot decomposition.
+// Collapsing assimp's FBX pivot decomposition. Assimp wraps every bone in a chain of synthetic
+// `$AssimpFbx$` nodes, and emits each one only when its FBX property is non-default — so two files
+// from one rig can get different chains, which a name-matching retarget then drops or double-applies.
 //
-// Assimp's FBX importer preserves pivots by default, and there is no way to turn that off from here — the
-// vendored assimpjs exposes only FileList/ConvertFile*, with no importer-property API. So every bone
-// arrives wrapped in a chain of synthetic nodes:
-//
-//     mixamorig:Hips
-//       └ mixamorig:LeftUpLeg_$AssimpFbx$_Translation      (static)
-//           └ mixamorig:LeftUpLeg_$AssimpFbx$_PreRotation  (static, often 180 degrees)
-//               └ mixamorig:LeftUpLeg_$AssimpFbx$_Rotation (the node the CLIP animates)
-//                   └ mixamorig:LeftUpLeg                  (the actual joint)
-//
-// Assimp emits a given pivot node ONLY when its FBX property is non-default, so two files exported from
-// the same rig do not necessarily get the same chain. That is what produced constant per-bone rotation
-// offsets on exactly the pre-rotated bones (legs, shoulders): a retarget matches pivots by name, so a
-// `_PreRotation` present on one side and absent on the other is either dropped — leaving the target short
-// one pre-rotation — or applied twice, once from the target's rest and once folded into the clip's values.
-//
-// Rather than teach every consumer about pivots (this repo already tried, in five places), remove them.
-// The fold needs NO knowledge of FBX semantics, which is what makes it safe: for a chain
-// `parent -> p1 -> ... -> pn -> bone`, the bone's world transform is
-// `parentWorld * T(p1) * ... * T(pn) * T(bone)`, so folding that product into the bone and re-parenting it
-// is an identity by matrix associativity. The tests assert exactly that, at bind and at every keyframe.
+// The fold needs no FBX knowledge: for `parent -> p1 -> ... -> pn -> bone` the bone's world transform
+// is `parentWorld * T(p1) * ... * T(bone)`, so folding the product in is an identity by associativity.
 
 /** Assimp's own marker for a node it synthesized from an FBX pivot property. */
 const PIVOT_MARKER = '$AssimpFbx$';
@@ -49,14 +32,9 @@ export interface CollapseResult extends NodeGraph {
 type NodeChannels = { translation?: AnimationSampler; rotation?: AnimationSampler; scale?: AnimationSampler };
 
 /**
- * Fold every `$AssimpFbx$` node into the node beneath it, rewriting animation channels to match.
- *
- * A graph with no such nodes — any plain glTF — is returned untouched, so this is a no-op for every
- * source but assimp's FBX conversion.
- *
- * `joints`, when given, has its `parentIndex` refreshed in place to the new (pivot-free) parent. The joint
- * ORDER is never changed: for a real skin it is indexed by the per-vertex JOINTS_0 attribute. Inverse bind
- * matrices are world-space and stay valid untouched, which is precisely why a world-preserving fold is safe.
+ * Fold every `$AssimpFbx$` node into the node beneath it, rewriting animation channels to match. A graph
+ * with none is returned untouched. `joints` has its `parentIndex` refreshed in place; the joint ORDER is
+ * never changed, since JOINTS_0 indexes it, and world-space inverse bind matrices stay valid.
  */
 export function collapseFbxPivots(graph: NodeGraph, animations: Animation[], joints?: Joint[]): CollapseResult {
     const pivots = new Set<number>();
@@ -64,8 +42,7 @@ export function collapseFbxPivots(graph: NodeGraph, animations: Animation[], joi
 
     if (pivots.size === 0) return { ...graph, animations, removed: pivots };
 
-    // A pivot with more than one child is not assimp's linear decomposition and folding it would move its
-    // siblings. Leave those alone rather than guess.
+    // A pivot with more than one child is not assimp's linear decomposition; folding it moves siblings.
     const childCount = new Map<number, number>();
     for (const [, parent] of graph.nodeParents) childCount.set(parent, (childCount.get(parent) ?? 0) + 1);
     const foldable = (node: number) => pivots.has(node) && (childCount.get(node) ?? 0) === 1;
@@ -121,13 +98,8 @@ export function collapseFbxPivots(graph: NodeGraph, animations: Animation[], joi
     return { nodeParents, nodeTransforms, nodeNames, animations: rewritten, removed: pivots };
 }
 
-/**
- * Move every channel that targeted a folded pivot onto the bone it belonged to.
- *
- * The composed local is sampled at the union of the chain's keyframe times and decomposed back into T/R/S.
- * That is exact for the rigid, uniformly-scaled transforms a skeleton uses, and in the overwhelmingly
- * common case — one animated node per chain — the keyframe count is unchanged.
- */
+// Move every channel that targeted a folded pivot onto its bone, sampling the composed local at the
+// union of the chain's keyframe times. Exact for the rigid, uniformly-scaled transforms a skeleton uses.
 function rewriteClip(
     clip: Animation,
     graph: NodeGraph,
@@ -157,29 +129,17 @@ function rewriteClip(
 
     for (const [node, chain] of foldedInto) {
         const all = [...chain, node];
-        // An assimp animation channel carries the node's COMPLETE local, pivot chain included — so the
-        // deepest keyed node in a chain supersedes everything above it and those must not be multiplied
-        // in again. Measured against the two Mixamo files in tools/dump-rig.mjs: reconstructing each
-        // joint's global from the character's own rest-pose clip and comparing with its bind (the inverse
-        // of its inverse-bind matrix), composing the pivots on top of a keyed bone is closer on 0 of 65
-        // joints and off by 118 degrees / 146 units on average; superseding them is off by 11 degrees /
-        // 5.5 units, the residue being the genuine bind-vs-T-pose difference. The error concentrates on
-        // whichever bones carry a large FBX PreRotation — for Mixamo that is UpLeg (179 degrees) and
-        // Shoulder (129 degrees), which is exactly the reported symptom.
-        //
-        // The REST fold below is untouched and stays a full composition: with nothing animating, the
-        // pivots are the only thing holding the bind, and the folded rest reproduces the inverse-bind
-        // matrices exactly on every joint of both files.
+        // An assimp channel carries the node's COMPLETE local, pivot chain included, so the deepest
+        // keyed node SUPERSEDES everything above it and those must not be composed in again.
+        // The REST fold below is different and stays a full composition.
         let deepest = -1;
         for (let i = 0; i < all.length; i++) if (perNode.has(all[i])) deepest = i;
         const involved = deepest < 0 ? all : all.slice(deepest);
         const times = unionTimes(involved, perNode);
         if (times.length === 0) continue; // nothing in this chain is animated; the folded rest covers it
 
-        // Once the pivots above a keyed node are superseded, that node's own pre-fold rest is only half a
-        // transform and is meaningless as a fallback. A component nothing in the chain keys means "stays at
-        // bind", so it comes from the FOLDED rest — otherwise animating a bone's rotation would also
-        // teleport it, because the pivot translation it used to sit behind is gone.
+        // A component nothing in the chain keys means "stays at bind", so it must come from the FOLDED
+        // rest — the pre-fold one is half a transform once the pivots above it are superseded.
         const rest = graph.nodeTransforms.get(node) ?? mat4.create();
         const foldedRest = foldedRests.get(node) ?? rest;
         const restT = mat4.getTranslation(vec3.create(), foldedRest);
@@ -210,8 +170,8 @@ function rewriteClip(
             mat4.getScaling(s, m);
             mat4.getRotation(r, m);
             quat.normalize(r, r);
-            // Keep the quaternion track continuous. Decomposing each key independently can flip the sign
-            // between neighbours, and slerp would then take the long way round — a visible spin.
+            // Keep the track continuous: an independently decomposed key can flip sign, and slerp
+            // would then take the long way round.
             if (havePrev && quat.dot(prev, r) < 0) quat.scale(r, r, -1);
             quat.copy(prev, r);
             havePrev = true;
@@ -221,11 +181,8 @@ function rewriteClip(
             if (keyed.r) out.r.push(r[0], r[1], r[2], r[3]); else out.r.push(restR[0], restR[1], restR[2], restR[3]);
         }
 
-        // Emit only what actually moves, or differs from the rest the bone will otherwise hold. Emitting
-        // all three unconditionally was a real regression: on the retarget's raw path a translation
-        // channel passes straight through, so a rotation-only source clip silently overwrote the target
-        // character's bone offsets with the animation file's — invisible same-rig, a deformed skeleton on
-        // any proportion difference.
+        // Emit only what moves or differs from the rest: on the retarget's raw path a translation
+        // channel passes straight through, overwriting the target's own bone offsets.
         if (varies(out.t, 3, restT)) addChannel(node, 'translation', times.slice(), out.t);
         if (varies(out.r, 4, restR)) addChannel(node, 'rotation', times.slice(), out.r);
         if (varies(out.s, 3, restS)) addChannel(node, 'scale', times.slice(), out.s);
@@ -234,11 +191,8 @@ function rewriteClip(
     return { ...clip, samplers, channels };
 }
 
-/**
- * Whether a sampled track is worth a channel at all: false when every key equals `rest`, in which case the
- * bone's rest fallback already produces it. Compared per component with a tolerance well under anything
- * visible, so a track that merely repeats the bind is dropped and one that holds a constant OFFSET is kept.
- */
+// Whether a sampled track is worth a channel: false when every key equals `rest`, which the bone's
+// fallback already produces. A track holding a constant OFFSET is kept.
 function varies(out: number[], size: number, rest: ArrayLike<number>): boolean {
     const EPS = 1e-5;
     for (let i = 0; i < out.length; i += size) {
@@ -281,13 +235,8 @@ function sampleLocal(out: mat4, _node: number, time: number, channels: NodeChann
     return mat4.fromRotationTranslationScale(out, r, t, s);
 }
 
-/**
- * Where `time` sits in a sampler's keys: the index below it and how far between that key and the next.
- *
- * CUBICSPLINE output carries in-tangent/value/out-tangent per key, so its values are read at a stride of
- * three and interpolated linearly. That is an approximation, and a deliberate one — assimp's glTF2 exporter
- * emits LINEAR, so this path exists for completeness rather than for the files this collapse is aimed at.
- */
+// Where `time` sits in a sampler's keys. CUBICSPLINE is read at a stride of three and interpolated
+// LINEARLY — an approximation, and one assimp's glTF2 exporter never produces.
 function locate(sampler: AnimationSampler, time: number): { i: number; f: number; stride: number } {
     const stride = sampler.interpolation === 'CUBICSPLINE' ? 3 : 1;
     const input = sampler.input;

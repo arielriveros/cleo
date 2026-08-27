@@ -12,9 +12,8 @@ export class LightProbeNode extends Node {
     private _mode: 'baked' | 'realtime';
     private _updateFrequency: number; // seconds (realtime mode)
     private _intensity: number;
-    // Influence volume: an oriented box (the node's transform applied to a unit cube scaled by _size
-    // full extents in world units at scale 1). [0,0,0] = unbounded — the probe affects the whole scene
-    // (the legacy global behavior, and what pre-volume scenes deserialize to).
+    // Influence volume: an oriented box, full extents in world units at scale 1.
+    // [0,0,0] means unbounded — the probe affects the whole scene.
     private _size: [number, number, number];
     // Feather width in world units: IBL fades to zero over this distance inside the volume boundary.
     private _blendDistance: number;

@@ -5,7 +5,6 @@ export const GridGeometry = (size: number) => {
     indices: [] as number[],
   };
 
-  // Generate grid vertices
   for (let i = 0; i <= size; i++) {
     for (let j = 0; j <= size; j++) {
       let x = -size / 2 + i;
@@ -15,18 +14,15 @@ export const GridGeometry = (size: number) => {
     }
   }
 
-  // Generate grid indices for lines
   for (let i = 0; i <= size; i++) {
     for (let j = 0; j <= size; j++) {
       let current = i * (size + 1) + j;
 
-      // Connect horizontally
       if (j < size) {
         let nextHorizontal = current + 1;
         output.indices.push(current, nextHorizontal);
       }
 
-      // Connect vertically
       if (i < size) {
         let nextVertical = current + size + 1;
         output.indices.push(current, nextVertical);

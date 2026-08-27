@@ -9,20 +9,18 @@ import { UIBinding, UIRegistry, syncUI } from './uiSync';
 /**
  * The game UI, rendered as DOM over the WebGL canvas.
  *
- * Shared VERBATIM between the editor viewport and the published player, which is why it takes everything
- * as props and reads no React context: the player bundle has no `EngineContext`, and
+ * Shared verbatim between the editor viewport and the published player, so it must take everything as
+ * props and read no React context: the player bundle has no `EngineContext`, and
  * `webpack.player.config.js` forbids anything editor-only from being reachable from its entry.
  *
- * Structure comes from the scene's UI nodes and re-renders only when the scene tree changes. Geometry and
- * content are written imperatively once per frame by {@link syncUI} — see that file for why.
+ * Structure comes from the scene's UI nodes; geometry and content are written imperatively once per frame
+ * by {@link syncUI}.
  */
 
 export interface UILayerProps {
     /**
-     * The scene to render UI from.
-     *
-     * A FUNCTION, not a `Scene`: `Game.loadScene` replaces `engine.scene` wholesale, so a captured
-     * reference would keep painting a scene that is no longer running.
+     * The scene to render UI from. A function, not a `Scene`: `Game.loadScene` replaces `engine.scene`
+     * wholesale, so a captured reference would paint a scene that is no longer running.
      */
     getScene: () => Scene | null;
     /** Whether widgets accept input. False in the editor while authoring. */
@@ -43,8 +41,7 @@ const BOX_STYLE: React.CSSProperties = {
     position: 'absolute',
     boxSizing: 'border-box',
     margin: 0,
-    // Everything below is overwritten on the first sync; these are only so a fresh element cannot flash
-    // at the wrong size before the first frame lands.
+    // Overwritten on the first sync; present so a fresh element cannot flash at the wrong size.
     left: 0, top: 0, width: 0, height: 0,
 };
 
@@ -74,8 +71,8 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
             fill: fillRef.current,
             knob: knobRef.current,
             input: inputRef.current,
-            // -1 so the first sync always writes: a fresh element has no styles yet, and the node's
-            // versions may well already be past 0 by the time React commits.
+            // -1 so the first sync always writes: the node's versions may be past 0 by the time React
+            // commits.
             lastLayout: -1,
             lastRevision: -1,
         };
@@ -86,8 +83,7 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
     const selected = selectedId === node.id;
     const forced = forceVisibleIds?.has(node.id) ?? false;
 
-    // In the editor a click selects rather than activates. stopPropagation so the click lands on the
-    // innermost element rather than every ancestor selecting in turn.
+    // stopPropagation so the click lands on the innermost element, not every ancestor in turn.
     const handleClick = useCallback((e: React.MouseEvent) => {
         if (onSelect && !interactive) {
             e.stopPropagation();
@@ -100,8 +96,7 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
         else if (node instanceof UIToggleNode) { e.stopPropagation(); node.toggle(); }
     }, [node, onSelect, interactive]);
 
-    // A slider drags on the element itself: pointer capture means the drag keeps tracking even when the
-    // cursor leaves the (often very thin) track.
+    // Pointer capture keeps a slider drag tracking when the cursor leaves the thin track.
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
         if (!interactive || !(node instanceof UISliderNode)) return;
         e.stopPropagation();
@@ -131,8 +126,8 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
             ? { outline: '1px dashed rgba(255,255,255,0.6)', outlineOffset: 0 }
             : {};
 
-    // A forced-visible node is one the editor is showing despite `visible === false`. The sync pass writes
-    // `display: none` from the node's own flag, so the override has to win here in the inline style.
+    // The sync pass writes `display: none` from the node's own flag, so a forced-visible override has to
+    // win here in the inline style.
     const forceStyle: React.CSSProperties = forced && !node.visible
         ? { display: 'block', opacity: 0.4 }
         : {};
@@ -179,21 +174,20 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
     if (node instanceof UIProgressBarNode)
         return <div {...common}><div ref={fillRef} />{children}</div>;
 
-    // Root, panel, stack, spacer: the box IS the element.
     return <div {...common}>{children}</div>;
 }
 
 export default function UILayer({ getScene, interactive, onSelect, forceVisibleIds, selectedId }: UILayerProps) {
     const registry = useMemo<UIRegistry>(() => new Map(), []);
-    // "The editor is picking": clicks select instead of activating, and every element becomes hit-testable.
+    // Editor picking: clicks select instead of activating, and every element becomes hit-testable.
     const editorPick = !!onSelect && !interactive;
     // Bumped to force React to rebuild the element tree; the actual tree is read from the scene.
     const [structureTick, setStructureTick] = useState(0);
 
     const scene = getScene();
 
-    // Structure only. The same filter SceneInspector and Scene itself use — a transform or component
-    // change must NOT re-render here, or the whole point of the imperative sync is lost.
+    // Structure only: a transform or component change must not re-render here, or the imperative sync
+    // is pointless.
     useEffect(() => {
         const onChanged = (e?: SceneChange) => {
             if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
@@ -203,8 +197,7 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
         return () => { CleoEngine.eventEmitter.off('SCENE_CHANGED', onChanged); };
     }, []);
 
-    // Top-level roots only: a root nested under another root is rendered by its parent's subtree walk, so
-    // rendering every root here as well would draw it twice.
+    // Top-level roots only: a nested root is already rendered by its parent's subtree walk.
     const roots = useMemo(() => {
         if (!scene) return [];
         const all = Array.from(scene.uiRoots);
@@ -212,11 +205,9 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
             for (let p = root.parent; p; p = p.parent) if (p instanceof UIRootNode) return false;
             return true;
         });
-        // structureTick is the dependency that matters — the set is rebuilt from the scene each time.
     }, [scene, structureTick]);
 
-    // The per-frame sync. Registered after mount, so it runs after the engine's own rAF (scheduled first
-    // each frame) has already solved the layout for this frame.
+    // Registered after mount so it runs after the engine's own rAF has solved this frame's layout.
     useEffect(() => {
         let raf = 0;
         let forceNext = true;
@@ -229,8 +220,7 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
         return () => cancelAnimationFrame(raf);
     }, [registry, interactive, editorPick]);
 
-    // A structural change produces brand-new elements with no styles; force one full write immediately so
-    // they are never visible at their placeholder size.
+    // A structural change produces elements with no styles; force one full write immediately.
     useEffect(() => { syncUI(registry, interactive, true, editorPick); }, [structureTick, registry, interactive, editorPick, roots]);
 
     return (
@@ -238,11 +228,9 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
             data-cleo-overlay
             style={{
                 position: 'absolute', inset: 0, overflow: 'hidden',
-                // Click-through while playing so the HUD never blocks the viewport; in the editor the
-                // backdrop itself has to be hittable so clicking empty space can clear the selection.
+                // Click-through while playing; hittable in the editor so empty space clears the selection.
                 pointerEvents: editorPick ? 'auto' : 'none',
             }}
-            // Clicking empty space clears the selection, which is what every other editor surface does.
             onClick={editorPick ? () => onSelect!(null) : undefined}
         >
             {roots.map(root => (

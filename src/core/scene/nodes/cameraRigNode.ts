@@ -20,20 +20,12 @@ export type AimMode = 'orbit' | 'lookAt' | 'none';
 /**
  * Drives a child CameraNode: follow, aim, spring arm, collision, shake.
  *
- * Hierarchy contract — the rig sits ABOVE a CameraNode and may itself be nested under anything (a
- * vehicle, a bone). The rig node carries the *pivot* (its position) and the *aim* (its rotation);
- * the camera child carries only the boom as a local offset with identity rotation, so it inherits
- * the aim. That split is what makes a local offset of `(0, 0, -armLength)` actually mean "behind".
- *
- * Consequence: **the camera child's local position and rotation become rig-derived state** and are
- * overwritten every frame. They still serialize; the rig just reasserts them on the next pass.
- *
- * Terminology follows the industry split (Cinemachine, Unreal's Cine Camera): `follow` drives
- * position, `lookAt` drives aim, and they are independent — a camera can orbit a player while
- * staring at a boss.
+ * Hierarchy contract — the rig sits ABOVE a CameraNode and may itself be nested under anything. The rig
+ * carries the *pivot* (its position) and the *aim* (its rotation); the camera child carries only the
+ * boom, as a local offset with identity rotation. **The camera child's local position and rotation are
+ * therefore rig-derived state**, overwritten every frame.
  *
  * Driven by `Scene.update`'s late pass (see `lateUpdate`), NOT by the normal `update` loop.
- *
  * Angles are DEGREES; damping values are time constants in SECONDS where 0 means rigid.
  */
 export class CameraRigNode extends Node {
@@ -141,9 +133,8 @@ export class CameraRigNode extends Node {
     /** The node whose position the rig follows, or null. */
     public get follow(): Node | null { return this._resolveFollow(); }
     public set follow(node: Node | null) {
-        // The script proxy's `set` trap forwards values untouched, so a script assigning
-        // `rig.follow = this.findNode('Player')` would otherwise store a Proxy that never compares
-        // equal to the real node.
+        // The script proxy's `set` trap forwards values untouched, so an assignment from a script would
+        // otherwise store a Proxy that never compares equal to the real node.
         const raw = node ? unwrapScriptNode(node) : null;
         this._followNode = raw;
         this._followId = raw ? raw.id : null;
@@ -182,10 +173,8 @@ export class CameraRigNode extends Node {
 
     /**
      * Adds RAW input (a mouse delta in pixels, a stick axis) to yaw, scaled by `yawSensitivity`.
-     *
-     * Deliberately does not multiply by frame delta: mouse deltas are already per-frame quantities,
-     * and scaling them by dt makes the camera speed depend on frame rate. Analog-stick callers, whose
-     * input is a rate, should multiply by delta themselves.
+     * Does NOT multiply by frame delta — mouse deltas are already per-frame quantities. Analog-stick
+     * callers, whose input is a rate, must scale by delta themselves.
      */
     public addYaw(raw: number): CameraRigNode {
         this._yaw = this._clampYaw(this._yaw + raw * this.yawSensitivity);
@@ -298,13 +287,11 @@ export class CameraRigNode extends Node {
     // --- the per-frame pass ----------------------------------------------------------------------------
 
     /**
-     * Drives the camera child. Called by `Scene.update` AFTER every node's `onUpdate` has run and the
-     * whole tree's transforms have been re-synced — a rig cannot do this work from its own `update()`,
-     * because a follow target that sorts later in the traversal would not have moved yet and the rig
-     * would trail it by a frame (visible as shimmer during fast movement).
+     * Drives the camera child. Must run from `Scene.update` AFTER every node's `onUpdate` and the whole
+     * tree's transform re-sync: from the rig's own `update()`, a follow target that sorts later in the
+     * traversal would not have moved yet and the rig would trail it by a frame.
      *
-     * `snap` (editor-stopped or paused) makes every damper instant and skips collision and shake, so
-     * the viewport previews the rig's resting pose live while its properties are being edited.
+     * `snap` (editor-stopped or paused) makes every damper instant and skips collision and shake.
      */
     public lateUpdate(delta: number, snap: boolean): void {
         const cam = this.camera;
@@ -352,8 +339,7 @@ export class CameraRigNode extends Node {
 
         if (!target) {
             if (this._followId) {
-                // Dangling: hold the last pivot rather than snapping to the origin. A target dying
-                // mid-frame should park the camera where it was, which is what a death-cam wants.
+                // Dangling: hold the last pivot rather than snapping to the origin.
                 if (!this._warnedDanglingFollow) {
                     Logger.warn(`Camera rig '${this._name}' follows a node that no longer exists (${this._followId}); holding position.`, 'Scene');
                     this._warnedDanglingFollow = true;
@@ -361,8 +347,8 @@ export class CameraRigNode extends Node {
                 if (!this._initialized) vec3.copy(this._pivot, this.worldPosition);
                 return;
             }
-            // No target set at all is a legitimate authoring state: the rig's own authored position
-            // is the pivot, which makes a static orbit camera work with zero configuration.
+            // No target set at all is a legitimate authoring state: the rig's own authored position is
+            // the pivot.
             vec3.copy(this._pivot, this.worldPosition);
             return;
         }
@@ -403,9 +389,8 @@ export class CameraRigNode extends Node {
             const target = this._resolveLookAt();
             if (target) {
                 this._warnedDanglingLookAt = false;
-                // Aim from the PIVOT, not from the camera: aiming from the camera is circular, since
-                // the camera's position depends on the very rotation being solved for. The camera sits
-                // behind the pivot on the boom and so looks through it at the target.
+                // Aim from the PIVOT, not the camera: the camera's position depends on the very rotation
+                // being solved for, so aiming from it is circular.
                 const focus = vec3.add(CameraRigNode._v0, target.worldPosition, this.lookAtOffset);
                 const direction = vec3.subtract(CameraRigNode._v0, focus, this._pivot);
                 const { yaw, pitch } = aimFromDirection(direction);
@@ -453,31 +438,21 @@ export class CameraRigNode extends Node {
         const hit = this._probe(direction, boomDistance, worldRotation);
         const target = collisionRatio(hit, boomDistance, this.collisionRadius, this.collisionMinRatio);
 
-        // Fast in, slow out. Easing the pull-in would leave the camera inside the wall for several
-        // frames, which reads as a rendering bug; easing the return stops it popping backwards the
-        // instant a corner clears.
+        // Fast in, slow out: easing the pull-in leaves the camera inside the wall for several frames,
+        // while easing the return stops it popping backwards the instant a corner clears.
         this._armRatio = target < this._armRatio
             ? dampTime(this._armRatio, target, this.collisionPullTime, dt)
             : dampTime(this._armRatio, target, this.collisionReturnTime, dt);
     }
 
     /**
-     * Nearest obstruction between the pivot and the camera, or null.
-     *
-     * Probes the PHYSICS world, not render geometry. Raycasting the meshes meant testing their
-     * axis-aligned bounding boxes, which is hopeless for an imported asset carrying a rotation: a
-     * 0.2-thick wall rotated 45 degrees measures 7.2 deep as an AABB, so the boom stopped ~3.6 units
-     * short of the surface and registered phantom hits against empty corners. Collider shapes are
-     * convex and exact, they are what the character already collides with, and cannon brings a
-     * broadphase the engine otherwise lacks for rays. It also subsumes terrain, whose heightfield
-     * body lives in the same world — hence no separate analytic terrain march here any more.
+     * Nearest obstruction between the pivot and the camera, or null. Probes the PHYSICS world, not
+     * render geometry: collider shapes are convex and exact, and terrain's heightfield body is in the
+     * same world.
      *
      * Takes `worldRotation` rather than reading `this.worldQuaternion`: the rig's world cache is not
-     * refreshed until step 8 of `lateUpdate`, so reading it here would offset the probe rays by the
-     * PREVIOUS frame's orientation.
-     *
-     * Uses its own scratch vectors — `_v0.._v3` still hold the caller's boom, which is read again
-     * after this returns.
+     * refreshed until step 8 of `lateUpdate`. Uses its own scratch vectors — `_v0.._v3` still hold the
+     * caller's boom, which is read again after this returns.
      */
     private _probe(direction: vec3, distance: number, worldRotation: quat): number | null {
         const physics = this._scene?.physics;
@@ -490,13 +465,8 @@ export class CameraRigNode extends Node {
         const from = CameraRigNode._rayFrom;
         const to = CameraRigNode._rayTo;
 
-        // Floored so the four offset rays never collapse onto the centre one. At collisionRadius 0
-        // that would fire five identical queries — wasteful, and it removes the redundancy that
-        // covers a cannon Heightfield quirk: a ray originating exactly on a terrain grid line and
-        // running almost exactly along an axis misses the surface entirely (erratically, depending
-        // on the float epsilon). Measured over a hilly terrain: 1-in-8 sample points missed with the
-        // rays collapsed, 0-in-8 once they are spread. A millimetre of spread is imperceptible next
-        // to any real probe radius and makes the degenerate case unreachable.
+        // Floored so the four offset rays never collapse onto the centre one: a cannon Heightfield
+        // erratically misses a ray that starts exactly on a grid line and runs along an axis.
         const spread = Math.max(this.collisionRadius, 1e-3);
 
         let nearest: number | null = null;
@@ -517,16 +487,12 @@ export class CameraRigNode extends Node {
     }
 
     /**
-     * Which bodies the probe must ignore, by owning node. Bound once (not per ray) so handing it to
-     * the physics system allocates nothing per frame.
+     * Which bodies the probe must ignore, by owning node. Bound once, not per ray, so handing it to the
+     * physics system allocates nothing per frame.
      *
-     * The ancestor check is the load-bearing one: a rig is typically a CHILD of the character, and the
-     * character is what carries the body, so the pivot sits inside its own capsule. Excluding only
-     * descendants — which is all the old mesh-based path needed — would leave the probe hitting the
-     * character on frame one and pinning the camera to its head.
-     *
-     * `owner` is null for bodies the engine did not create, notably the terrain heightfield; those are
-     * kept, which is what lets terrain collide through this same path.
+     * Must exclude ANCESTORS as well as descendants: a rig is typically a child of the character that
+     * carries the body, so the pivot sits inside its own capsule. `owner` is null for bodies the engine
+     * did not create, notably the terrain heightfield; those are kept.
      */
     private readonly _rejectHit = (owner: Node | null): boolean => {
         if (!owner) return false;
@@ -554,10 +520,9 @@ export class CameraRigNode extends Node {
     /**
      * Writes the final view to the Camera, with shake applied as a pure post-offset.
      *
-     * Shake never touches `_pivot`, `_yaw`, `_pitch`, `_armRatio` or the camera node's transform, so
-     * it cannot feed back into a damper, and gameplay code reading `cameraNode.worldPosition` (to
-     * spawn a projectile, say) still sees stable values. The Camera's setters copy, so handing it
-     * scratch vectors is safe.
+     * Shake must never touch `_pivot`, `_yaw`, `_pitch`, `_armRatio` or the camera node's transform, or
+     * it feeds back into a damper and gameplay code reading `cameraNode.worldPosition` sees the wobble.
+     * The Camera's setters copy, so handing them scratch vectors is safe.
      */
     private _writeCamera(cam: CameraNode, dt: number, snap: boolean): void {
         const position = vec3.copy(CameraRigNode._v0, cam.worldPosition);

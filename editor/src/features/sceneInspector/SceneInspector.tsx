@@ -5,7 +5,7 @@ import { Logger, Node, isUINodeType } from 'cleo';
 import type { SceneChange } from 'cleo';
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
-  CameraIcon, CameraRigIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, CloudsIcon,
+  CameraIcon, CameraRigIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
@@ -20,16 +20,13 @@ import {
   ButtonIcon, ProgressIcon, SliderIcon, ToggleIcon, TextInputIcon,
 } from './uiIcons';
 
-/**
- * Glyph per node type. A table rather than a run of `type === 'x' && <icon>` conditionals: as PNGs they
- * had drifted (a light probe was drawn with the skybox icon, an animated sprite with the static one), and
- * the row rendered every branch on every node just to have ten of them evaluate false.
- */
+/** Glyph per node type, as a table rather than a chain of per-type conditionals in the row. */
 const TYPE_ICONS: Record<string, () => JSX.Element> = {
   camera: CameraIcon, cameraRig: CameraRigIcon, model: ModelIcon,
   sprite: SpriteIcon, animatedSprite: AnimatedSpriteIcon, tilemap: TilemapIcon,
   light: LightIcon, lightProbe: LightProbeIcon,
-  skybox: SkyboxIcon, volumetricClouds: CloudsIcon, skyAtmosphere: SkyIcon, landscape: LandscapeIcon,
+  skybox: SkyboxIcon, volumetricClouds: CloudsIcon, skyAtmosphere: SkyIcon, skyLight: SkyLightIcon,
+  landscape: LandscapeIcon,
 };
 
 /** UI node types, kept separate because `isUINodeType` also gates the inspector and picking. */
@@ -75,10 +72,9 @@ const ScriptIcon = () => (
 );
 
 /**
- * Nodes the tree never shows. Debug/editor helpers and the chunks a landscape subdivides itself into are
- * implementation detail — the unit of frustum culling and LOD, not something anyone authors. The names are
- * load-bearing elsewhere (the publish pass strips every node whose name contains '__editor__' or
- * '__debug__'), so this only mirrors them.
+ * Nodes the tree never shows: debug/editor helpers and the chunks a landscape subdivides itself into.
+ * The names are load-bearing elsewhere — the publish pass strips every node whose name contains
+ * '__editor__' or '__debug__' — so this only mirrors them.
  */
 const isHiddenInTree = (node: Node): boolean =>
   node.name.includes('__debug__') || node.name.includes('__editor__') || node.name.startsWith('__terrain_chunk__');
@@ -91,10 +87,7 @@ const isAncestorOf = (maybeAncestor: Node, node: Node): boolean => {
   return false;
 };
 
-/**
- * Disclosure arrow. A rotating chevron rather than two different glyphs: the turn reads as the row
- * opening, and one shape at one weight keeps a long list from looking speckled.
- */
+/** Disclosure arrow: one rotating chevron rather than two glyphs. */
 const Chevron = ({ open }: { open: boolean }) => (
   <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="3.2"
        strokeLinecap="round" strokeLinejoin="round"
@@ -104,10 +97,9 @@ const Chevron = ({ open }: { open: boolean }) => (
 );
 
 /**
- * The faint vertical rules tying a child to its parent. Absolutely positioned, one per level, centred on
- * the chevron of the ancestor at that level, so a rule points straight up at the row it belongs to. Drawn
- * inside the row rather than as padding, so hover and selection fills still sweep the full width — a fill
- * that stops short of the left edge is what makes an indented list look ragged.
+ * The faint vertical rules tying a child to its parent: one per level, absolutely positioned and centred
+ * on that level's ancestor chevron. Drawn inside the row rather than as padding, so hover and selection
+ * fills still sweep the full width.
  */
 const IndentGuides = ({ level }: { level: number }) => (
   <>
@@ -139,31 +131,27 @@ function RenameInput({ node }: { node: NodeRendererProps<NodeDescription>['node'
 }
 
 /**
- * One row. Its chrome — type icon, script/template shortcuts, visibility toggle, the dormant dimming and
- * the UI tint — is what the hand-rolled tree drew; only selection, expansion and dragging now come off the
- * node api instead of per-row state.
+ * One row: type icon, script/template shortcuts, visibility toggle, dormant dimming and UI tint.
+ * react-arborist's `style` (its indent, as padding) is re-derived below instead of applied, so the row can
+ * add its own gutter and paint the guides behind a fill that runs the full width.
  */
-// react-arborist's `style` (its indent, as padding) is re-derived below instead of applied, so the row can
-// add its own gutter and paint the guides behind a fill that runs the full width.
 function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) {
   const { editorScene, isPlayMode, enterTemplateEditor, enterScriptEditor } = useCleoEngine();
   const data = node.data;
   const hoveredScript = useHoveredScript();
   const selected = node.isSelected;
-  // A script glyph on a template-instance node is greyed (its script is authored in the template, not here)
-  // but stays clickable. Highlight this node's glyph when its script is the one being hovered anywhere.
+  // A script glyph on a template-instance node is greyed (its script is authored in the template) but
+  // stays clickable, and is highlighted while its script is the one hovered anywhere.
   const scriptGrey = !!data.templateId;
   const scriptHot = !!data.scriptId && data.scriptId === hoveredScript;
-  // UI elements are tinted so a HUD subtree is distinguishable from world geometry at a glance. A SELECTED
-  // row drops the tint for the standard indigo fill and white text: selection is the one signal that must
-  // never be ambiguous, so it wins outright rather than blending with the type colour.
+  // UI elements are tinted so a HUD subtree is distinguishable from world geometry. A SELECTED row drops
+  // the tint for the standard indigo fill and white text: selection must never be ambiguous.
   const isUI = isUINodeType(data.type);
   const TypeIcon = isUI ? UI_ICONS[data.type] : TYPE_ICONS[data.type];
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
-    // react-dnd carries the move *within* the tree; these are for everything outside it — the Assets
-    // explorer (drop a node there to save it as a template) and node-reference fields. Dedicated MIME so
-    // those targets can tell a scene node from other text/plain drags; text/plain is the generic fallback.
+    // react-dnd carries moves within the tree; these are for targets outside it (the Assets explorer,
+    // node-reference fields). The dedicated MIME tells a scene node from other text/plain drags.
     event.dataTransfer.setData('text/cleo-node', data.id);
     event.dataTransfer.setData('text/plain', data.id);
   };
@@ -236,10 +224,8 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
   );
 }
 
-/**
- * Drop cursor drawn between rows: a capped line in the editor's indigo accent rather than
- * react-arborist's stock blue. The dot marks the level the row would land at.
- */
+/** Drop cursor drawn between rows: a capped line in the editor's indigo accent. The dot marks the level
+ *  the row would land at. */
 const DropCursor = ({ top, left, indent }: { top: number; left: number; indent: number }) => (
   <div style={{ position: 'absolute', pointerEvents: 'none', top: top - 3, left, right: indent }}
        className='flex items-center gap-[1px]'>
@@ -259,27 +245,20 @@ export default function SceneInspector() {
   const { ref: viewportRef, element: viewportEl, size } = useElementSize<HTMLDivElement>();
   const dndManager = useScopedDndManager(viewportEl);
 
-  // The scene tab's root row is labelled with the scene asset, not the engine node's name. The node itself
-  // stays named 'root' — Scene.parse re-finds the root by that literal name, so renaming it would make the
-  // scene fail to load. The name lives on SceneMeta; this is display only.
+  // The scene tab's root row is labelled from SceneMeta; the engine node stays named 'root' because
+  // Scene.parse re-finds the root by that literal name. Display only.
   const sceneName = activeTab.kind === 'scene' ? sceneList.find(s => s.id === openSceneId)?.name : undefined;
 
   // In template mode the inspector is rooted at the template node itself, so the editor camera/light
-  // (siblings under the real scene root) fall outside the rendered subtree and stay hidden.
-  //
-  // Mesh mode deliberately keeps the real scene root: its root row is load-bearing there (it is the drop
-  // target and the parent for the LOD level nodes), so rooting at the mesh hides something needed. The
-  // viewing light is kept out of the tree by its `__editor__` name instead, not by the root choice.
+  // (siblings under the real scene root) stay hidden. Mesh mode keeps the real scene root: its root row is
+  // the drop target and the parent for the LOD level nodes.
   const treeRoot = useCallback((): Node | undefined =>
     (editorMode === 'template' && templateRootId) ? editorScene.getNodeById(templateRootId) : editorScene.root,
     [editorScene, editorMode, templateRootId]);
 
-  // generate a recursive list of id nodes where each node has a list of children
   const generateNodeList = useCallback(function build(node: Node): NodeDescription {
-    // Template instance roots collapse to a single leaf row (with a pen icon) in scene mode.
-    // The guard is essential: in template mode the tree is rooted at the template's own
-    // instance root, which also carries the marker — pruning there would hide the very
-    // content being edited.
+    // Template instance roots collapse to a single leaf row in scene mode. The mode guard is essential:
+    // in template mode the tree is rooted at the template's own instance root, which carries the marker.
     const templateId = editorMode === 'scene' ? node.getVariable(TEMPLATE_ID_VAR) : undefined;
     return {
       id: node.id,
@@ -302,8 +281,8 @@ export default function SceneInspector() {
       setNodes(list);
     };
     rebuild(); // also rebuild immediately when the mode / template root / scene name changes
-    // Only structural changes (add/remove/rename/visibility) alter the tree — ignore the per-setter
-    // transform/material/... events the engine now emits, so a gizmo drag doesn't rebuild the tree 60x/sec.
+    // Only structural changes (add/remove/rename/visibility) alter the tree; ignore the per-setter
+    // transform/material events, or a gizmo drag rebuilds the tree 60x/sec.
     const onSceneChanged = (e?: SceneChange) => {
       if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
       rebuild();
@@ -317,10 +296,9 @@ export default function SceneInspector() {
 
   // --- selection ------------------------------------------------------------------------------------
 
-  // Deliberately NOT the `selection` prop: that one collapses the tree to a single row every time it
-  // changes, which would undo a ctrl/shift multi-selection the instant it was reported. The engine's
-  // selection is pushed in only when the tree does not already hold it — i.e. the pick came from the
-  // viewport rather than from a click in here.
+  // NOT the `selection` prop: it collapses the tree to a single row on every change, undoing a ctrl/shift
+  // multi-selection the instant it is reported. The engine's selection is pushed in only when the tree
+  // does not already hold it.
   const selectedRef = useRef<string | null>(selectedNode ?? null);
   selectedRef.current = selectedNode ?? null;
 
@@ -329,8 +307,8 @@ export default function SceneInspector() {
     if (!tree) return;
     if (!selectedNode) { if (tree.selectedIds.size) tree.deselectAll(); return; }
     if (tree.selectedIds.has(selectedNode)) return;
-    // The row may sit inside a collapsed subtree: scrollTo opens its parents and waits for it to exist
-    // before the selection lands, because tree.get only resolves nodes that are currently visible.
+    // The row may sit inside a collapsed subtree: scrollTo opens its parents and waits for it to exist,
+    // since tree.get only resolves nodes that are currently visible.
     const scrolled = tree.scrollTo(selectedNode);
     const select = () => {
       const t = treeRef.current;
@@ -350,9 +328,8 @@ export default function SceneInspector() {
 
   // --- moving nodes ---------------------------------------------------------------------------------
 
-  // Rows are deliberately left draggable even when they cannot be re-parented (a node with a body, the
-  // root): the same gesture drops a node onto the Assets explorer to save it as a template, so refusing
-  // the drag outright would take that away. What a move may actually do is decided here.
+  // Rows stay draggable even when they cannot be re-parented (a node with a body, the root): the same
+  // gesture drops a node onto the Assets explorer to save it as a template. What a move may do is here.
   const handleMove = ({ dragIds, parentId, index }: { dragIds: string[]; parentId: string | null; index: number }) => {
     if (isPlayMode) return;
     const parent = parentId ? editorScene?.getNodeById(parentId) : undefined;
@@ -383,10 +360,7 @@ export default function SceneInspector() {
     // place; addChild indexes the real children array, which also holds terrain chunks and editor helpers.
     // Anchoring on the sibling the rows land in front of translates between the two, and the -1 accounts
     // for addChild detaching the node before it splices it back in.
-    //
-    // Dropped ON a row rather than between two: react-arborist reports that as index 0, which would make
-    // the node the parent's FIRST child. Appending is what re-parenting has always done here, and what
-    // "drop it in there" reads as, so the two cases are told apart by the cursor that was showing.
+    // A drop ON a row is also reported as index 0, so the two cases are told apart by the cursor shown.
     const siblings = shownChildren(parent);
     const anchor = treeRef.current?.cursorOverFolder ? undefined : siblings[index];
     let engineIndex = anchor ? parent.children.indexOf(anchor) : parent.children.length;
@@ -404,8 +378,8 @@ export default function SceneInspector() {
     if (!node || name === node.name) return;
     const problem = validateNodeName(name);
     if (problem) { Logger.warn(problem, 'Editor'); return; }
-    // No event of our own: the engine's name setter emits SCENE_CHANGED { kind: 'name' }, which is what
-    // rebuilds this tree, refreshes the Properties panel and marks the tab unsaved.
+    // No event of our own: the engine's name setter emits SCENE_CHANGED { kind: 'name' }, which rebuilds
+    // this tree, refreshes the Properties panel and marks the tab unsaved.
     node.name = name;
   };
 
@@ -415,8 +389,7 @@ export default function SceneInspector() {
       if (id === rootId) continue;
       const node = editorScene?.getNodeById(id);
       if (!node) continue;
-      // The instance root itself is deletable — it is a normal node in the scene. Only its interior is
-      // off limits, and that is authored in the template rather than here.
+      // The instance root itself is deletable; only its interior is off limits.
       if (editorMode === 'scene' && isWithinTemplateInstance(node.parent)) {
         Logger.warn('Cannot delete a node inside a template instance', 'Editor');
         continue;
@@ -428,17 +401,15 @@ export default function SceneInspector() {
 
   // --- drops from outside the tree ------------------------------------------------------------------
 
-  // What this panel accepts from elsewhere in the editor. Node-to-node moves are deliberately NOT here:
-  // those belong to react-arborist, and leaving them out is what stops both drag systems acting on one drop.
+  // What this panel accepts from elsewhere in the editor. Node-to-node moves must NOT be listed: they
+  // belong to react-arborist, and leaving them out stops both drag systems acting on one drop.
   const nativeDrag = (types: readonly string[]) =>
     types.includes(SCRIPT_MIME) ? 'script' : types.includes(NEW_NODE_MIME) ? 'new-node' : null;
 
   /*
    * Both handlers run in the CAPTURE phase and stop propagation, so these drags never reach the react-dnd
    * listeners on the tree container below: that backend force-sets dropEffect='none' for any drag it does
-   * not own (which cancels the drop before it happens) and throws "cannot hover while not dragging" on
-   * release. Sitting on an ancestor makes the ordering structural rather than a race over which listener
-   * was registered first.
+   * not own and throws "cannot hover while not dragging" on release.
    */
   const handleDragOver: React.DragEventHandler<HTMLDivElement> = (event) => {
     if (!nativeDrag(event.dataTransfer.types)) return;
@@ -453,11 +424,10 @@ export default function SceneInspector() {
     event.preventDefault();
     event.stopPropagation();
 
-    // Find the closest parent div with the class 'scene-item'
     const targetElement = (event.target as HTMLElement).closest('.scene-item');
 
-    // A script asset dragged from the Assets explorer: attach it to the node it was dropped on (base-type
-    // enforced by attachScriptToNode). Read-only template-instance nodes are skipped.
+    // A script asset from the Assets explorer: attach it to the node it was dropped on (base type enforced
+    // by attachScriptToNode). Read-only template-instance nodes are skipped.
     if (kind === 'script') {
       const scriptId = event.dataTransfer.getData(SCRIPT_MIME);
       const node = targetElement ? editorScene?.getNodeById(targetElement.id) : null;
@@ -470,8 +440,7 @@ export default function SceneInspector() {
       return;
     }
 
-    // A new node dragged out of the Add section: parent it under the row it was dropped on, or under the
-    // tree root when dropped on the empty space below the tree.
+    // A new node from the Add section: parent it under the row it was dropped on, or under the tree root.
     const item = findAddItem(event.dataTransfer.getData(NEW_NODE_MIME));
     const parent = targetElement ? editorScene?.getNodeById(targetElement.id) : treeRoot();
     if (!item || !parent) return;
@@ -482,10 +451,8 @@ export default function SceneInspector() {
     addItemTo(item, parent, { editorScene, eventEmitter, triggers }).catch(err => console.error(err));
   };
 
-  // Delete and F2, on top of react-arborist's own keymap (which binds Backspace and Enter to the same two
-  // actions). In the capture phase, and stopping propagation, because react-arborist's own handler treats
-  // any unrecognised key as type-ahead and would jump the focus to a node beginning with "delete".
-  // Ignored while a field has focus, so typing in the filter box can never delete a node.
+  // Delete and F2, on top of react-arborist's own keymap. Capture phase and stopping propagation, because
+  // react-arborist treats any unrecognised key as type-ahead. Ignored while a field has focus.
   const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (event) => {
     const tree = treeRef.current;
     if (!tree || tree.isEditing) return;
@@ -503,8 +470,6 @@ export default function SceneInspector() {
   };
 
   return (
-    // The tree alone: the Add palettes are their own dock panels above this one, so there is no longer a
-    // second section here for a drag to be released over by mistake.
     <div className='flex flex-col text-white bg-surface-raised w-full h-full min-h-[40px] overflow-hidden'
          onDragOverCapture={handleDragOver} onDropCapture={handleDrop} onKeyDownCapture={handleKeyDown}>
       <div className='shrink-0 px-[5px] py-1'>

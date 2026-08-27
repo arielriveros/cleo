@@ -3,11 +3,9 @@ import { useCleoEngine } from '../EngineContext'
 import { Raycaster, Vec, skeletonTopology } from 'cleo'
 import { getAnimationTarget, bonePairsOf, computeBindMatrices, computeJointWorldMatrices, worldPositionOf } from './skeleton'
 
-// Viewport overlay for the Animation Editor. Instead of one ModelNode per joint/bone (~130 draw
-// calls), it packs per-instance world matrices into flat Float32Arrays each frame and hands them to
-// the renderer's instanced skeleton overlay (renderer.setSkeletonOverlay) — 3 draw calls total, drawn
-// always-on-top (depth off). Joint picking is a CPU ray-sphere test against the joint world positions;
-// a hit selects the JOINT (routed to the skeleton tree via SELECT_JOINT).
+// Viewport overlay for the Animation Editor: per-instance world matrices packed into flat Float32Arrays
+// each frame and submitted to renderer.setSkeletonOverlay, drawn always-on-top. Joint picking is a CPU
+// ray-sphere test that emits SELECT_JOINT.
 
 const JOINT_COLOR: [number, number, number] = [0.25, 0.6, 1.0]
 const SELECTED_COLOR: [number, number, number] = [1.0, 0.85, 0.1]
@@ -28,8 +26,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
   const jointRadiusRef = useRef<Float32Array>(new Float32Array(0))
   const bindMatsRef = useRef<any[]>([])
   const selectedRef = useRef<number | null>(null)
-  // Joints the IK rig has given a role to. Rebuilt on ANIM_IK_CHANGED rather than polled: the rig only moves
-  // when someone edits it, and this loop already runs every frame doing real work.
+  // Joints the IK rig has given a role to. Rebuilt on ANIM_IK_CHANGED, never polled per frame.
   const markerMatRef = useRef<Float32Array>(new Float32Array(0))
   const ikJointsRef = useRef<number[]>([])
 
@@ -115,7 +112,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
           }
         }
 
-        // Mark the joints the IK rig uses, so the legs it will drive are visible on the skeleton itself.
+        // Mark the joints the IK rig uses so its chain is visible on the skeleton.
         const ikJoints = ikJointsRef.current
         if (markerMatRef.current.length < ikJoints.length * 16) markerMatRef.current = new Float32Array(ikJoints.length * 16)
         const mm = markerMatRef.current
@@ -160,15 +157,14 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
     return () => { eventEmitter.off('SELECT_JOINT', onSelectJoint) }
   }, [eventEmitter])
 
-  // Which joints the IK rig names. Recomputed when the rig changes and when the target does — never per
-  // frame, since it is a node-index lookup over the whole skeleton and the answer only moves when edited.
+  // Which joints the IK rig names. Recomputed on rig or target change only, never per frame.
   useEffect(() => {
     const refresh = () => {
       const target = getAnimationTarget(editorScene, animationTargetId)
       const rig = target?.skin?.ikRig
       if (!target || !rig) { ikJointsRef.current = []; return }
-      // The shared topology's map, not another local copy of it — the copies are how the parent lookup
-      // in this same file drifted out of step with the hierarchy the Animator actually poses.
+      // Must be the shared topology's map, not a local copy: a copy drifts from the hierarchy the
+      // Animator actually poses.
       const jointOfNode = skeletonTopology(target.skin).jointOfNode
       const out: number[] = []
       const push = (node: number | undefined) => {

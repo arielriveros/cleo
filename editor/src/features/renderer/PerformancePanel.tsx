@@ -4,27 +4,14 @@ import { useCleoEngine } from '../EngineContext';
 import { Section, Slider, Toggle, SegmentedControl, Button, Hint } from '../../components/ui';
 import Sparkline from './Sparkline';
 
-// The renderer's performance panel: what the frame costs, and where.
+// The renderer's performance panel: what the frame costs, and where. Cost is attributed two ways:
 //
-// This was two surfaces — a floating HUD pinned over the viewport ("is the frame fast?") and a docked
-// Profiler ("which pass is spending the time?"). They ran two independent sampling loops over the same
-// counters, disagreed by up to a refresh interval, and the HUD covered the top-right corner of the
-// viewport in the one editor mode whose whole purpose is looking at the image. They are one panel now,
-// with one loop.
+//  1. GPU timers, gated by the backend — WebGL2 needs EXT_disjoint_timer_query_webgl2, WebGPU needs the
+//     adapter's `timestamp-query`. `gpuProfiler.attribution` says which name space the rows are in:
+//     WebGL2 times renderer scopes, WebGPU times render passes, and they are not the same list.
+//  2. Per-pass kill switches, which measure a pass's marginal cost including downstream savings.
 //
-// Cost is attributed two independent ways, because neither is always available or always sufficient:
-//
-//  1. GPU timers give a direct per-pass number, but they are gated by the backend: WebGL2 needs
-//     EXT_disjoint_timer_query_webgl2 (driver and browser flags both withhold it) and WebGPU needs the
-//     adapter's `timestamp-query` feature. `gpuProfiler.unavailableReason` names whichever is missing,
-//     and `gpuProfiler.attribution` says which NAME SPACE the rows are in — WebGL2 times renderer
-//     scopes, WebGPU times render passes, and they are not the same list (see gpuProfiler.ts).
-//  2. Per-pass kill switches measure a pass's MARGINAL cost by removing it and watching the frame
-//     time. That needs no extension, and it captures downstream savings (bandwidth, dependent passes)
-//     that a timer wrapped around the draw call does not.
-//
-// Explanatory prose lives in `title` tooltips rather than in visible captions: this is a long column of
-// controls, and a paragraph under each group reads well once and then costs vertical space forever.
+// Explanatory prose belongs in `title` tooltips, not visible captions: this is a long column already.
 
 const REFRESH_MS = 250; // fast enough to feel live, slow enough not to churn React
 /** Slack on the frame budget before the readout turns red — see `overBudget`. */
@@ -50,14 +37,9 @@ const QUALITY_OPTIONS = [
 
 type PassRow = { name: string; avgMs: number; maxMs: number };
 
-// Counters sampled EVERY frame and reported as mean + range, not grabbed once per refresh.
-//
-// A single raw frame is a badly misleading sample of these. Shadow cascades are staggered on a 4-frame
-// cycle (cascade 1 every 2nd frame, cascade 2 every 4th), each cascade being a full re-draw of every
-// caster — so draw calls and triangles genuinely swing several-fold frame to frame. Read one frame in
-// fifteen, at an interval unrelated to that cycle, and a perfectly regular pattern looks like noise:
-// "draw calls jump between 91 and 213 with a still camera" is the same 4-frame cycle sampled at random
-// phases. The range makes it legible.
+// Counters sampled EVERY frame and reported as mean + range, never grabbed once per refresh: shadow
+// cascades are staggered on a 4-frame cycle, so draw calls and triangles swing several-fold frame to
+// frame and a single raw sample reads as noise.
 const RANGED = ['drawCalls', 'instancedDrawCalls', 'objects', 'instances', 'triangles',
                 'culledObjects', 'culledInstances', 'fullscreenPasses', 'shadedMpx',
                 'stateChanges', 'stateChangesSaved'] as const;
@@ -125,8 +107,8 @@ export default function PerformancePanel() {
   const [quality, setQuality] = useState<string>(() => renderer?.quality ?? 'high');
   const [renderScale, setRenderScale] = useState<number>(() => renderer?.renderScale ?? 1);
   const [detail, setDetail] = useState(sceneStatsDetail.enabled);
-  // Mirror of renderer.passEnabled, held in React state so the switches re-render. The renderer stays
-  // the source of truth and is written through setPassEnabled.
+  // Mirror of renderer.passEnabled so the switches re-render. The renderer stays the source of truth
+  // and is written through setPassEnabled.
   const [passes, setPasses] = useState<Record<string, boolean>>({});
 
   const [rows, setRows] = useState<PassRow[]>([]);
@@ -140,7 +122,6 @@ export default function PerformancePanel() {
   /** Per-counter accumulator for the current refresh window; drained and zeroed on each boundary. */
   const bins = useRef(RANGED.map(() => ({ min: Infinity, max: -Infinity, sum: 0, n: 0 })));
 
-  // Seed the mirrors once the renderer exists.
   useEffect(() => {
     if (!renderer) return;
     setPasses({ ...renderer.passEnabled });
@@ -156,9 +137,7 @@ export default function PerformancePanel() {
       last.current = now;
       frames.current++;
 
-      // Sample the geometry/fill counters EVERY frame, not once per refresh — see RANGED above for why
-      // one raw frame is a misleading sample of a staggered-cascade workload. `stateChanges` comes from
-      // frameStats rather than renderer.stats only because that is where it already came from.
+      // Geometry/fill counters are sampled every frame, not once per refresh (see RANGED).
       {
         const s: any = renderer?.stats ?? null;
         for (let i = 0; i < RANGED.length; i++) {
@@ -174,13 +153,12 @@ export default function PerformancePanel() {
         }
       }
 
-      // All rAF callbacks fire once per display frame, so this interval IS the real frame rate. The
-      // history ring behind the percentiles is filled by the engine's game loop, not here — this
-      // component unmounts outside renderer mode, and a history with holes makes the percentiles lie.
+      // rAF fires once per display frame, so this interval is the real frame rate. The percentile
+      // history must be filled by the engine's game loop, not here: this component unmounts outside
+      // renderer mode, and a history with holes makes the percentiles lie.
       if (acc.current >= REFRESH_MS) {
         const stats: any = renderer?.stats ?? null;
-        // Physics only steps in Play mode (the editing scene's nodes have no bodies), so these read 0
-        // while stopped — that is the honest answer, not a missing value.
+        // Physics only steps in Play mode, so these read 0 while stopped.
         const phys: any = instance?.physics ? (instance.physics as any).stats : null;
         const scene: any = instance?.scene ?? null;
         const sceneS: any = scene ? (scene as any).stats : null;
@@ -253,12 +231,10 @@ export default function PerformancePanel() {
   }, [renderer, instance]);
 
   const budgetMs = 1000 / budgetHz;
-  // A vsynced frame sits AT the budget, not under it, so an exact comparison flickers red half the
-  // time on a machine that is comfortably hitting its refresh rate. The tolerance makes "locked to
-  // vsync" read as green, which is what it is.
+  // A vsynced frame sits AT the budget, not under it, so an exact comparison flickers red.
   const overBudget = d.frameMs > budgetMs * (1 + BUDGET_TOLERANCE);
-  // Bars scale against the slowest pass, not the frame budget: passes are usually a small fraction of
-  // the frame, and a budget-relative scale would render them all as invisible slivers.
+  // Bars scale against the slowest pass, not the frame budget: a budget-relative scale renders every
+  // pass as an invisible sliver.
   const maxPassMs = rows.length > 0 ? Math.max(...rows.map(r => r.avgMs)) : 1;
 
   const togglePass = (name: string, on: boolean) => {
@@ -276,8 +252,7 @@ export default function PerformancePanel() {
     const lines = [
       `frame ${fmt(d.frameMs)}ms (${fmt(d.fps, 0)} fps) - p50 ${fmt(d.p50)} - p95 ${fmt(d.p95)} - worst ${fmt(d.worst)}`,
       `cpu render ${fmt(d.cpuMs)}ms - gpu ${fmt(d.gpuMs)}ms`,
-      // Ranges, not a single frame: a staggered-cascade scene reads very differently depending on which
-      // frame you happen to catch, and a report pasted into an issue should not depend on that.
+      // Ranges, not a single frame: a staggered-cascade scene depends on which frame you catch.
       `draws ${fmt(r.drawCalls.mean, 0)} (${r.drawCalls.min}-${r.drawCalls.max})`
         + ` - screen passes ${fmt(r.fullscreenPasses.mean, 0)} - fill ${fmt(r.shadedMpx.mean, 1)} Mpx`,
       `triangles ${fmt(r.triangles.mean, 0)} (${r.triangles.min}-${r.triangles.max})`
@@ -295,10 +270,8 @@ export default function PerformancePanel() {
   const unattributed = Math.max(0, d.frameMs - d.cpuMs - d.physicsMs - d.sceneMs);
 
   return (
-    // The content column is capped rather than filling the dock group. Renderer mode hides the rest of
-    // the right rail, so this group can end up 700px+ wide, and a readout stretched that far puts every
-    // value at the end of a 600px runway. The panel stays resizable; the content stops widening once it
-    // is comfortable to read.
+    // The content column is capped rather than filling the dock group: renderer mode hides the rest of
+    // the right rail, so this group can end up 700px+ wide. The panel itself stays resizable.
     <div className='h-full overflow-y-auto p-3 text-[11px] text-white'>
       <div className='w-full max-w-[420px]'>
       <Section

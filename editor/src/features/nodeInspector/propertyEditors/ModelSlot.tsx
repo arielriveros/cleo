@@ -7,12 +7,8 @@ import { Button, valueClass } from '../../../components/ui'
 import { ShapeIcon } from '../sectionIcons'
 import { modelIdOf, modelNodeOf } from '../../../utils/models'
 
-// The way into the model editor from a node that has geometry.
-//
-// It used to be a "Model asset" section that existed to explain a LINK: which library asset this subtree
-// was copied from, and which of its edits would propagate. That link is real, but it is bookkeeping — the
-// user should never have to know a node is or isn't "linked", and the section renders for anything with
-// geometry now, adopting the subtree into the library on the way in when it has no asset yet.
+// The way into the model editor from a node that has geometry. Renders for anything with geometry, adopting
+// the subtree into the library on the way in when it has no asset yet.
 export default function ModelSlot(props: { node: Node }) {
   const { models } = useAssetLibrary()
   const { enterModelEditor, adoptModelAsset } = useEditorSessions()
@@ -21,8 +17,8 @@ export default function ModelSlot(props: { node: Node }) {
   // Inside a model tab this is the thing being edited, so a button that opens it is noise.
   if (activeTab.kind === 'model') return null
 
-  // Walks down: an imported model is a holder Node with its ModelNodes beneath it, so "does this selection
-  // contain geometry" cannot be answered from the selected node alone.
+  // Walks down: an imported model is a holder Node with its ModelNodes beneath it, so the selected node
+  // alone cannot answer whether the selection contains geometry.
   if (!modelNodeOf(props.node)) return null
 
   const asset = models.find(m => m.id === modelIdOf(props.node))

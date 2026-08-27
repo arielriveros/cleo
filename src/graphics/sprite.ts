@@ -3,22 +3,10 @@ import { Mesh } from './mesh';
 import { Material } from './material';
 import { Tileset } from '../graphics/tilemap/tileset';
 
-// A sprite is a unit quad textured from ONE TILE of a Tileset.
+// A sprite is a unit quad textured from ONE TILE of a Tileset, via `Tileset.uvOf`.
 //
-// Sprites used to hold a raw TextureManager id on a public Material and sample the whole image; an
-// animated sprite re-derived a uniform columns x rows grid of its own. Tilesets already do that job
-// properly — margin/spacing-aware slicing, stored columns/rows, a correct V-flip, and per-tile
-// metadata — so sprites now go through `Tileset.uvOf` and the second grid implementation is gone.
-//
-// Two consequences worth knowing:
-//
-// 1. The Material is a PRIVATE implementation detail. It exists only so the renderer's `_applyMaterial`
-//    and the `basic` shader keep working untouched; it is never serialized and the editor never links a
-//    material asset to a sprite. Tint/opacity/blending are plain fields that write through to it.
-//
-// 2. The tileset is EMBEDDED on serialize, exactly like `Tilemap.serialize` does. `parse` then needs no
-//    asset library in scope, so the published player, templates, bundle import and runtime
-//    `Scene.instantiate` all reconstruct a sprite from nothing but its own JSON.
+// Two invariants: the Material is a private implementation detail, never serialized and never linked to
+// a material asset; and the tileset is EMBEDDED on serialize, so `parse` needs no asset library in scope.
 
 export type SpriteSide = 'front' | 'back' | 'double';
 
@@ -36,13 +24,8 @@ export interface SpriteOptions {
 const FULL_RECT: [number, number, number, number] = [0, 0, 1, 1];
 
 /**
- * Marks a tileset that was synthesized rather than authored — a bare texture wrapped in a 1x1 grid, a
- * migrated sprite sheet, a demo scene's inline sheet.
- *
- * These are real tilesets and draw normally, but they have no asset behind them in the editor's library.
- * Anything that reconciles a scene against that library (reference collection, resync, delete-unlink)
- * must skip them, or an editor helper icon would be "unlinked" on the first scene open for referencing a
- * tileset that was never in the library to begin with.
+ * Marks a tileset that was synthesized rather than authored. These draw normally but have no asset in
+ * the editor's library, so anything reconciling a scene against that library must skip them.
  */
 export const INLINE_TILESET_PREFIX = '@';
 export function isInlineTilesetId(id: string | null | undefined): boolean {
@@ -50,8 +33,7 @@ export function isInlineTilesetId(id: string | null | undefined): boolean {
 }
 
 export class Sprite {
-  // Lazy: `new Mesh()` allocates a VAO, so touching these before a GL context exists throws. A sprite
-  // must be constructible outside one — templates, scene parse and the tests all build nodes headless.
+  // Lazy: a sprite must be constructible with no GL context, for templates, scene parse and tests.
   private _geometry: Geometry | null = null;
   private _mesh: Mesh | null = null;
   /** Private: sprites have no material asset. Kept in sync so the renderer needs no special case. */
@@ -69,8 +51,7 @@ export class Sprite {
       this._material = Material.Basic(
           { color: this._tint, opacity: this._opacity, texture: this._tileset?.textureId },
           {
-              // Sprites are drawn blended regardless (see Renderer._renderSprite), but the flag also
-              // drives `u_isTransparent`, so keep it truthful.
+              // Sprites draw blended regardless, but this also drives `u_isTransparent`.
               transparent: options?.transparent ?? true,
               side: options?.side ?? 'double',
               wireframe: options?.wireframe ?? false,
@@ -82,11 +63,8 @@ export class Sprite {
   }
 
   /**
-   * A sprite that samples a whole texture, via a synthetic 1x1 tileset.
-   *
-   * `uvOf(0)` on a 1x1 set is [0,0,1,1] whatever the pixel dimensions are, so this needs no decoded
-   * image — which is what makes it usable for the editor's own helper icons and for scripts that only
-   * have a texture id. The id is derived from the texture so two sprites on the same image share one.
+   * A sprite that samples a whole texture, via a synthetic 1x1 tileset. Needs no decoded image, so it
+   * works from a texture id alone; the tileset id is derived from the texture, so sprites share one.
    */
   public static fromTexture(textureId: string, options?: Omit<SpriteOptions, 'tileset' | 'tileIndex'>): Sprite {
       return new Sprite({ ...options, tileset: Sprite.textureTileset(textureId), tileIndex: 0 });
@@ -194,12 +172,8 @@ export class Sprite {
 }
 
 /**
- * What a legacy sprite payload means in the tileset world.
- *
- * Pre-tileset JSON looked like `{ material: { color, texture, opacity, config } }` (note the double
- * nesting: `Sprite.serialize` returned `{material}` and `SpriteNode` stored that under `sprite.material`).
- * It has to keep parsing here rather than only in the editor, because the published player and
- * `Scene.instantiate` reconstruct scenes with no migration pass in front of them.
+ * Read a pre-tileset sprite payload (`{ material: { color, texture, opacity, config } }`). Must live in
+ * the engine, not the editor: the player and `Scene.instantiate` have no migration pass in front of them.
  */
 export function migrateLegacySprite(data: any): {
     tileset: Tileset | null;
@@ -237,12 +211,8 @@ export function migrateLegacySprite(data: any): {
 }
 
 /**
- * A tileset over an evenly divided sheet, described only by its grid.
- *
- * Pixel dimensions are expressed in TILES (tileWidth/tileHeight of 1 over an imageWidth/imageHeight of
- * columns/rows), which makes `uvOf` exact without a decoded image — the editor's library migration
- * substitutes real pixel sizes once it has one, but nothing depends on that to draw correctly. Only
- * usable for sheets with no margin and no spacing; anything padded needs a real tileset asset.
+ * A tileset over an evenly divided sheet, described only by its grid — dimensions are in TILES, so
+ * `uvOf` is exact with no decoded image. Only valid for sheets with no margin and no spacing.
  */
 export function gridTileset(id: string, textureId: string, columns: number, rows: number): Tileset {
     const c = Math.max(1, Math.floor(columns));
@@ -256,10 +226,7 @@ export function gridTileset(id: string, textureId: string, columns: number, rows
     });
 }
 
-/**
- * The tileset a legacy animated sprite's columns x rows sheet becomes. `remapLegacyFrame` is what puts
- * the visual result back where it was after the row origin moves to the top.
- */
+/** The tileset a legacy animated sprite's columns x rows sheet becomes. Pair with {@link remapLegacyFrame}. */
 export function legacySheetTileset(textureId: string, columns: number, rows: number): Tileset {
     const c = Math.max(1, Math.floor(columns));
     const r = Math.max(1, Math.floor(rows));
@@ -267,11 +234,8 @@ export function legacySheetTileset(textureId: string, columns: number, rows: num
 }
 
 /**
- * Legacy frame index -> tileset tile index.
- *
- * The old `getUVTransform` measured rows from the BOTTOM (`offsetY = row / rows` against a V that starts
- * at the image's bottom edge), while tile 0 of a tileset is the atlas's TOP-left cell. Mirroring the row
- * makes a migrated animation sample the very same cells it did before.
+ * Legacy frame index -> tileset tile index. Legacy frames counted rows from the BOTTOM; tile 0 of a
+ * tileset is the top-left cell, so the row is mirrored.
  */
 export function remapLegacyFrame(index: number, columns: number, rows: number): number {
     const c = Math.max(1, Math.floor(columns));

@@ -22,9 +22,9 @@ function download(bytes: ArrayBuffer, filename: string): void {
 }
 
 /**
- * Gather the current project (or just its assets) into a portable .zip and download it. Scene blobs are
- * read from IndexedDB; libraries + the VFS index come from the caller (the live editor state); texture
- * payloads come from the live TextureManager as raw bytes. The zip is assembled off the main thread.
+ * Gather the current project (or just its assets) into a portable .zip and download it. Scene blobs come
+ * from IndexedDB, libraries and the VFS index from the caller, texture payloads from the live
+ * TextureManager as raw bytes. The zip is assembled off the main thread.
  */
 export async function exportBundle(opts: {
   kind: ExportKind
@@ -58,24 +58,21 @@ export async function exportBundle(opts: {
   const exportedVfs: VfsIndex =
     kind === 'project' ? vfs : { ...vfs, entries: vfs.entries.filter(e => e.kind !== 'scene') }
 
-  // Textures: gather straight from the live TextureManager — the same source publishing uses — not the
-  // IndexedDB texture store. The store is filled by a debounced (500ms) effect and, crucially, never holds
-  // path-loaded textures at all (they retain no source bytes), so reading it silently dropped textures from
-  // the bundle. serializeTextureBytes returns every live texture's original compressed bytes, re-encoding
-  // the few path-loaded ones through a canvas. A project bundle ships every live texture (a texture can
-  // belong to a scene without any library referencing it); an asset pack narrows to referenced textures.
+  // Textures must come from the live TextureManager, not the IndexedDB texture store: the store is filled
+  // by a debounced effect and never holds path-loaded textures at all. serializeTextureBytes returns each
+  // texture's original compressed bytes, re-encoding path-loaded ones through a canvas.
+  // A project bundle ships every live texture; an asset pack narrows to referenced ones.
   const wanted = kind === 'project'
     ? undefined
-    // Tilesets belong in this list: their atlas is reached only through `TilesetAsset.textureIds`, which
-    // is mirrored from `textureId` for exactly this call. Leaving them out shipped tilesets with no image.
+    // Tilesets must be in this list: their atlas is reached only through `TilesetAsset.textureIds`.
     : referencedTextureIds(libraries.materials, libraries.terrainMaterials, libraries.templates,
                            libraries.models, libraries.tilesets)
   const textures: BundleTexture[] = TextureManager.Instance.serializeTextureBytes(wanted).map(t => ({
     id: t.id,
     mime: t.mime,
     config: t.config,
-    // A standalone copy: the returned Uint8Array may be a view onto a larger/shared buffer, and we must
-    // not hand the texture's own retained source bytes across the worker (structured-clone) boundary.
+    // A standalone copy: the returned Uint8Array may view a shared buffer, and the texture's own retained
+    // source bytes must not cross the worker's structured-clone boundary.
     bytes: t.bytes.slice().buffer,
   }))
 

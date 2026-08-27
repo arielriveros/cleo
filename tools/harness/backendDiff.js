@@ -279,7 +279,17 @@ const WHY =
   'records how far apart they are today, and refuses to let them drift further, without ever claiming ' +
   'the current difference is correct. Lower an entry in the commit that earns it; raising one needs a ' +
   'reason written next to it. Motion-dependent configurations are excluded — they are phase-dependent ' +
-  'and no seed fixes that.';
+  'and no seed fixes that. ' +
+  'RAISED 2026-08-27, one reason: WebGPU had no usable mip chain on any cube it rendered itself. ' +
+  '`generateMipmaps` submitted a private encoder while the passes that drew level 0 were still ' +
+  'unsubmitted in the frame encoder, so every level above the first was built from a level nothing ' +
+  'had written. Both cubes were affected — the probe capture and the sky atmosphere bake. The probe ' +
+  'inspector preview measured mean luminance 0.0 against WebGL2 s 110.6, and `prefilter.wgsl`, which ' +
+  'samples the source cube at a roughness-derived mip, returned black for every roughness above 0. ' +
+  'The chain is real now and agrees with WebGL2 to 0.2 in mean luminance, differing in ~7% of pixels ' +
+  'concentrated at cube-face borders. These entries record THAT residual. They went up because a term ' +
+  'that was missing came back, not because the backends drifted: a zero here previously meant both ' +
+  'backends agreed on nothing, which is exactly the false green the paragraph above warns about.';
 
 function finish() {
   for (const w of openWindows) { try { w.destroy(); } catch { /* already gone */ } }

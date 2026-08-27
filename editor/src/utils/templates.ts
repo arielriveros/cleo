@@ -45,8 +45,8 @@ export function isWithinTemplateInstance(node: Node | null | undefined): boolean
 export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promise<Template> {
   const nodeJson = await node.serialize()
   stripDebug(nodeJson)
-  // A template definition must never carry an instance back-link (the editing scene instantiates the
-  // template, which stamps __templateId onto the root); strip it so it isn't baked into the definition.
+  // A template definition must never carry an instance back-link; strip the __templateId the editing
+  // scene stamped onto the root.
   if (nodeJson.variables) delete nodeJson.variables[TEMPLATE_ID_VAR]
 
   const ids = collectIds(nodeJson)
@@ -59,8 +59,7 @@ export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promi
     const t = maps.triggers.get(id); if (t) triggers[id] = t
   }
 
-  // Only the texture IDS — the payloads live once in the texture store (textureStore.ts), not embedded
-  // in every asset that happens to reference them.
+  // Only the texture IDS; the payloads live once in the texture store (textureStore.ts).
   const texIds = new Set<string>()
   collectTextureIds(nodeJson, texIds)
 
@@ -68,12 +67,10 @@ export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promi
 }
 
 /**
- * Instantiate a template under `parent`, regenerating ids and restoring assets/scripts. Returns the new
- * root id.
- *
- * `materials` re-resolves the subtree's __materialId links against the library, so an instance placed after
- * one of its materials was edited gets the current material rather than the copy frozen into the template
- * when it was saved. Optional: callers with no library at hand (and legacy paths) get the embedded copies.
+ * Instantiate a template under `parent`, regenerating ids and restoring assets/scripts.
+ * Returns the new root id.
+ * `materials` re-resolves the subtree's __materialId links against the library, so the instance gets the
+ * current material rather than the copy frozen into the template. Omit it to keep the embedded copies.
  */
 export function instantiateTemplate(template: Template, parent: Node, maps: EngineMaps, materials?: MaterialAsset[]): string {
   const clone = JSON.parse(JSON.stringify(template.nodeJson))
@@ -81,12 +78,11 @@ export function instantiateTemplate(template: Template, parent: Node, maps: Engi
   const idMap = new Map<string, string>()
   regenerateIds(clone, idMap)
 
-  // Tag the instance root so it can be recognized as a template instance (read-only in Scene mode)
-  // and re-synced when the template is edited. Persists via the node's serialized `variables`.
+  // Tag the instance root: read-only in Scene mode, and re-synced when the template is edited.
+  // Persists via the node's serialized `variables`.
   clone.variables = { ...(clone.variables || {}), [TEMPLATE_ID_VAR]: { type: 'string', value: template.id } }
 
-  // New templates carry no payloads — their textures come from the texture store, preloaded at boot. This
-  // loop only still matters for legacy templates with embedded base64.
+  // Only legacy templates carry embedded base64; current ones take their textures from the store.
   for (const t of template.textures || []) {
     if (!TextureManager.Instance.getTexture(t.id))
       TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id)

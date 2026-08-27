@@ -14,9 +14,9 @@ const TERRAIN_ATTRIBUTES = ['position', 'normal', 'uv', 'tangent', 'bitangent'];
 
 /**
  * Scene node for a sculptable heightfield terrain. Owns a `Terrain` (heights + physics) and wraps each
- * of its render chunks in a child ModelNode. The chunk children are NOT serialized (they are rebuilt from
- * the compact terrain blob on load), so save/play stay small. Deforming the terrain (sculpt/import) flags
- * chunks dirty; `update()` re-uploads the affected chunk meshes to the GPU once they are initialized.
+ * of its render chunks in a child ModelNode.
+ *
+ * The chunk children are NOT serialized — they are rebuilt from the compact terrain blob on load.
  */
 export class LandscapeNode extends Node {
     private _terrain: Terrain;
@@ -59,10 +59,8 @@ export class LandscapeNode extends Node {
             const chunk = chunks[i];
             const node = this._chunkNodes[i];
             if (!chunk.dirty || !node) continue;
-            // Sculpting moved the chunk's vertices without moving the node, so nothing marked the
-            // node's cached world sphere/box dirty — do it here. (The geometry's own object-space
-            // caches were dropped by Terrain._refreshChunkGeometry.) Done before the `initialized`
-            // gate: the bounds are wrong whether or not the GPU buffer exists yet.
+            // Sculpting moves chunk vertices without moving the node, so nothing else invalidates the
+            // cached world bounds. Must run before the `initialized` gate.
             node.invalidateWorldBounds();
             if (node.initialized) {
                 chunk.model.mesh.updateVertexData(chunk.model.geometry.getData(TERRAIN_ATTRIBUTES));
@@ -72,10 +70,8 @@ export class LandscapeNode extends Node {
     }
 
     /**
-     * Pick each chunk's detail level for this camera position (called once per frame by the renderer,
-     * before any pass, so the shadow maps draw the reduced terrain too). The coarse index buffers are
-     * uploaded lazily on first use and re-built only when the configured vertex steps change; they index
-     * the chunk's existing vertex buffer, so this never interferes with sculpting's vertex re-uploads.
+     * Pick each chunk's detail level for this camera position. Must run once per frame before any pass,
+     * so the shadow maps draw the reduced terrain too.
      */
     public updateLod(camPos: vec3, settings: TerrainLodSettings): void {
         const chunks = this._terrain.chunks;
@@ -134,14 +130,3 @@ export class LandscapeNode extends Node {
         Node.finishParse(node, parent, json);
     }
 }
-
-/**
- * Scene node for a 2D tilemap. Owns a {@link Tilemap} (cells, layers, embedded tilesets and the static
- * colliders derived from them) positioned on the XY plane at this node's world position.
- *
- * Unlike LandscapeNode, the render chunks are NOT wrapped in child ModelNodes. Doing so would put every
- * chunk into `scene.models`, where the deferred geometry pass would rasterize it as opaque lit geometry
- * and the raycaster would pick it cell by cell. The tilemap owns its chunk meshes directly and the
- * renderer reaches them through `scene.tilemaps`, which also means this node has no internal children to
- * filter out when it serializes.
- */

@@ -1,21 +1,15 @@
 /**
- * Convex hull generation for collider authoring. cannon-es ships `ConvexPolyhedron` but no hull
- * builder, so this is a self-contained quickhull producing exactly the `{ vertices, faces }` pair
- * cannon expects (faces are index loops, wound CCW seen from outside).
+ * Convex hull generation for collider authoring: a self-contained quickhull producing the
+ * `{ vertices, faces }` pair cannon expects (index loops, wound CCW seen from outside).
  *
- * Definition semantics (v3):
- *  - **Low is exactly the mesh's bounding box.** Every mesh vertex is inside it by construction.
- *  - Each higher level carves volume off that box with *supporting half-spaces* of the mesh — a
- *    supporting plane's offset is measured against every mesh position, so no accepted cut can ever
- *    push a mesh vertex outside. Plane selection is incremental, so each level's planes are a
- *    superset of the level below: volume shrinks monotonically with quality.
- *  - Each carve step is validated (valid polytope, volume must not grow) and skipped on failure, so
- *    the worst possible output at any level is the bounding box itself. A final audit checks every
- *    input vertex against every face plane and falls back to the box outright if containment is
- *    violated — degradation is allowed, a vertex outside the hull is not.
+ * Definition semantics: Low is exactly the mesh's bounding box; higher levels carve it with
+ * supporting half-spaces whose offsets are measured against every mesh position, so plane sets are
+ * a superset of the level below and volume shrinks monotonically with quality. Every carve step is
+ * validated and skipped on failure, and a final containment audit falls back to the box outright —
+ * degradation is allowed, a vertex outside the hull is not.
  *
- * Collision support (cannon-es 0.20): convex collides with convex, box, sphere, plane, cylinder,
- * heightfield and particle. There is no convex/trimesh narrowphase.
+ * cannon-es 0.20 collides convex with convex, box, sphere, plane, cylinder, heightfield and
+ * particle. There is no convex/trimesh narrowphase.
  */
 
 import { Logger } from "../core/logger";
@@ -33,8 +27,7 @@ export type HullQuality = 'low' | 'medium' | 'high' | 'veryHigh';
 
 /**
  * Total face budgets per quality level: the 6 bounding-box planes plus carve planes. cannon's
- * convex/convex narrowphase tests every face axis plus every edge-edge pair, so face count is a
- * real runtime cost and not just a memory one.
+ * convex/convex narrowphase tests every face axis plus every edge-edge pair, so faces cost runtime.
  */
 export const HULL_BUDGETS: Record<HullQuality, number> = {
     low: 6,       // the bounding box, untouched
@@ -92,17 +85,15 @@ function epsilonFor(points: number[][]): number {
 }
 
 /**
- * Ceiling on how many points the quickhull runs over. Quickhull is superlinear in the number of
- * points that end up *on* the hull, and an organic 40k-vertex mesh puts most of them there. It is
- * safe to cap: the silhouette hull only proposes carve-plane *normals* — containment comes from
- * measuring each plane's offset against the full point set.
+ * Ceiling on how many points the quickhull runs over; it is superlinear in the points that end up
+ * ON the hull. Safe to cap: the silhouette hull only proposes carve-plane NORMALS, and containment
+ * comes from measuring each plane's offset against the full point set.
  */
 const MAX_HULL_POINTS = 600;
 
 /**
  * Reduce a cloud to at most `budget` points by support mapping: for each of N spread-out directions,
- * keep the furthest point along it. Every point kept is genuinely on the hull, so the normals
- * derived from them are representative of the real silhouette.
+ * keep the furthest point along it. Every point kept is genuinely on the hull.
  */
 function supportSample(points: V3[], budget: number): V3[] {
     if (points.length <= budget) return points;
@@ -291,10 +282,8 @@ function quickhull(points: V3[], eps: number): Poly | null {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Merge adjacent coplanar faces into polygon loops (a carved box becomes 6 quads, not 12
- * triangles), which cuts both cannon's SAT axis count and its O(E^2) edge construction. If a
- * group's boundary doesn't walk into a single clean loop, its triangles are kept as-is — more
- * faces, but still valid geometry.
+ * Merge adjacent coplanar faces into polygon loops, cutting cannon's SAT axis count and its O(E^2)
+ * edge construction. A group whose boundary does not walk into one clean loop keeps its triangles.
  */
 function mergeCoplanar(poly: Poly, eps: number): Poly {
     const groups: { normal: V3; offset: number; faces: number[][] }[] = [];
@@ -304,10 +293,9 @@ function mergeCoplanar(poly: Poly, eps: number): Poly {
         if (area <= eps * eps) continue; // zero-area sliver — drop
         const n: V3 = [raw[0] / area, raw[1] / area, raw[2] / area];
         const offset = dot(n, poly.vertices[face[0]]);
-        // Only faces lying on the SAME carve/box plane merge — those are exactly coplanar by
-        // construction, so the tolerance can be razor thin. A loose tolerance here is dangerous:
-        // merging two planes ~1 mrad apart yields a "face" whose representative plane is tilted by
-        // that much, which reads as a containment violation of tilt × face-size at the far corners.
+        // The tolerance must stay razor thin: faces on the same carve/box plane are exactly coplanar
+        // by construction, and merging planes ~1 mrad apart tilts the representative plane enough to
+        // read as a containment violation at the far corners.
         const group = groups.find((g) => dot(g.normal, n) > 1 - 1e-9 && Math.abs(g.offset - offset) < eps * 2);
         if (group) group.faces.push(face);
         else groups.push({ normal: n, offset, faces: [face] });
@@ -354,10 +342,9 @@ function mergeCoplanar(poly: Poly, eps: number): Poly {
 }
 
 /**
- * Weld near-coincident vertices and remove collinear ones. Removal is *edge-consistent*: a vertex
- * is dropped only when it is collinear with its neighbours on EVERY face that references it, so
- * shared edges can never desync between faces (cannon derives each face's normal from the loop's
- * first three vertices, and a T-junction would also leave cracks in the wireframe).
+ * Weld near-coincident vertices and remove collinear ones. Removal must be edge-consistent: a vertex
+ * is dropped only when collinear with its neighbours on EVERY face referencing it, or shared edges
+ * desync — cannon derives each face's normal from the loop's first three vertices.
  */
 function weld(poly: Poly, eps: number): Poly {
     // 1. Weld by epsilon grid (global, so remapping is identical across all faces).
@@ -436,11 +423,9 @@ export function convexHull(points: number[][], eps?: number): Hull | null {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Distinct face normals of the silhouette hull, deduplicated (same-plane triangles aggregate their
- * area) and returned largest-area first, capped. These are the carve-plane candidates; which of
- * them actually get used is decided greedily by cut depth in `hullFromPositions` — selecting by
- * angular spread is a trap, because meshes dominated by near-axis-aligned faces then fill the
- * whole budget with planes that coincide with the bounding box and cannot cut anything.
+ * Distinct face normals of the silhouette hull, deduplicated and returned largest-area first, capped.
+ * These are the carve-plane candidates; `hullFromPositions` picks among them greedily by cut depth,
+ * NOT by angular spread, which fills the budget with planes coincident with the bounding box.
  */
 function candidateNormals(poly: Poly, cap: number): V3[] {
     const list: { n: V3; area: number }[] = [];
@@ -482,14 +467,10 @@ function boundingBoxPoly(positions: number[][]): Poly | null {
 }
 
 /**
- * Cut `poly` with the half-space `dot(n, x) <= d`, rebuilding the topology with quickhull rather
- * than maintaining face loops by hand: the clipped polytope is exactly the convex hull of the kept
- * vertices plus the plane/edge crossing points. Vertices within eps of the plane count as kept and
- * crossings are only computed for strict sign changes, so the interpolation denominator is bounded
- * below by 2·eps — a vertex sitting exactly on the plane (ubiquitous in real meshes: flat bases on
- * the AABB bottom, cylinder caps) can never produce a runaway intersection point.
- *
- * Returns null when the cut degenerates; the caller skips the plane in that case.
+ * Cut `poly` with the half-space `dot(n, x) <= d`, rebuilding topology with quickhull: the clipped
+ * polytope is the convex hull of the kept vertices plus the plane/edge crossings. Vertices within
+ * eps of the plane count as kept and crossings only come from strict sign changes, bounding the
+ * interpolation denominator below by 2·eps. Returns null when the cut degenerates.
  */
 function cutPoly(poly: Poly, n: V3, d: number, eps: number): Poly | null {
     const dist = poly.vertices.map((v) => dot(n, v) - d);
@@ -529,9 +510,8 @@ function cutPoly(poly: Poly, n: V3, d: number, eps: number): Poly | null {
 
 /**
  * Convex hull of a mesh at the requested definition. Low is the mesh's bounding box; higher levels
- * carve it down with supporting half-spaces of the mesh, each measured against every input
- * position — the result always contains the entire mesh, at every level. Null only for degenerate
- * geometry (flat / fewer than 4 distinct points).
+ * carve it with supporting half-spaces measured against every input position, so the result always
+ * contains the whole mesh. Null only for degenerate geometry (flat, or fewer than 4 distinct points).
  */
 export function hullFromPositions(positions: number[][], quality: HullQuality): Hull | null {
     if (positions.length < 4) return null;
@@ -544,8 +524,7 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
     let extent = 0;
     for (const p of positions) extent = Math.max(extent, Math.abs(p[0]), Math.abs(p[1]), Math.abs(p[2]));
 
-    // Defensive: a corrupt/legacy quality value must degrade to medium, not to a NaN budget that
-    // silently skips the carve and leaves every definition identical to the bounding box.
+    // An unrecognized quality value must degrade to medium, not to a NaN budget that skips the carve.
     const planeBudget = (HULL_BUDGETS[quality] ?? HULL_BUDGETS.medium) - 6;
     if (planeBudget > 0) {
         // Candidate normals come from the exact hull of a bounded silhouette sample; offsets are
@@ -564,11 +543,9 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
             const supports = candidates.map((n) => support(n));
             const used: boolean[] = new Array(candidates.length).fill(false);
 
-            // Greedy deepest-cut-first: each round applies the remaining supporting plane that the
-            // current polytope overhangs the most, until the budget is filled or nothing cuts
-            // deeper than tolerance. Box-parallel candidates have ~zero depth so they never waste
-            // budget, and the sequence is deterministic and quality-independent — a higher
-            // definition always extends the lower one's cuts, keeping volume monotone.
+            // Greedy deepest-cut-first, until the budget is filled or nothing cuts deeper than
+            // tolerance. The sequence is deterministic and quality-independent, so a higher
+            // definition always extends the lower one's cuts and volume stays monotone.
             let cut = 0, failed = 0;
             let vol = volumeOf(poly);
             while (cut < planeBudget) {
@@ -595,8 +572,8 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
             }
 
             if (cut === 0 && failed > 0) {
-                // Candidates wanted to cut but every attempt degenerated — a genuine anomaly worth
-                // capturing (a boxy mesh where nothing cuts at all is normal and stays silent).
+                // Candidates wanted to cut but every attempt degenerated. A boxy mesh where nothing
+                // cuts at all is normal and stays silent.
                 Logger.warn(
                     `convexHull: all ${failed} cutting planes failed (quality='${quality}'). ` +
                     `candidates=${candidates.length} positions=${positions.length} extent=${extent.toExponential(3)} eps=${eps.toExponential(3)}. ` +
@@ -608,10 +585,9 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
         }
     }
 
-    // Absolute containment audit: every input vertex must be on or inside every face plane. Each
-    // plane is anchored at its own loop's outermost vertex (not an arbitrary first vertex), and the
-    // tolerance covers the legitimate eps-scale drift finalize introduces (weld snapping, coplanar
-    // merging) while remaining far below any user-visible violation.
+    // Containment audit: every input vertex must be on or inside every face plane. Each plane is
+    // anchored at its own loop's outermost vertex, and the tolerance covers the eps-scale drift
+    // finalize introduces through weld snapping and coplanar merging.
     const tol = Math.max(eps * 20, extent * 5e-4);
     const containsAll = (hull: Hull): boolean => {
         const planes = hull.faces.map((f) => {
@@ -630,8 +606,7 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
     };
 
     // Failure ladder: a bad coplanar merge must cost faces, never definition. The unmerged variant
-    // keeps the carve's exact planes (as triangles), so only a genuine carve bug ever reaches the
-    // bounding-box fallback — which contains everything by construction.
+    // keeps the carve's exact planes as triangles, so only a carve bug reaches the box fallback.
     const merged = finalize(poly, eps);
     if (merged && containsAll(merged)) return merged;
 

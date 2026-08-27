@@ -7,14 +7,10 @@ import {
 } from '../../utils/examples'
 
 // The gallery of example projects that ship with this build. Picking one downloads its folder from
-// examples/ and opens it as a brand-new project — the user's own projects are never touched.
+// examples/ and opens it as a brand-new project.
 //
-// Not another SVAR file manager, unlike the sibling ProjectsExplorer: there are no folders here, nothing can
-// be renamed, moved, duplicated or deleted, and the whole interaction is "click a card". None of that
-// widget's machinery would earn its weight, and a plain grid is what lets a card show a large cover image.
-//
-// Nothing in this component may touch scoped storage. It renders on the boot launcher too, where no project
-// is open and `scoped()` throws by design — see importExample's note on why that holds.
+// Nothing here may touch scoped storage: it renders on the boot launcher too, where no project is open
+// and `scoped()` throws by design.
 
 /** Above this, downloading is a decision rather than a click, so it gets a confirmation. */
 const CONFIRM_BYTES = 25 * 1024 * 1024
@@ -34,8 +30,7 @@ function Thumbnail({ entry }: { entry: ExampleEntry }) {
       />
     )
   }
-  // No cover image (the export carried no scene thumbnail) — fall back to the same scene glyph the project
-  // cards use, so an example without art still reads as a project rather than as a broken image.
+  // No cover image: fall back to the same scene glyph the project cards use.
   return (
     <div className='w-full h-full flex items-center justify-center bg-surface-sunken'>
       <img src={iconFor('scene')} alt='' className='w-8 h-8 opacity-50' />
@@ -69,8 +64,7 @@ export default function ExamplesGallery({ examples, className = '' }: {
     try {
       task.setStep(0, { status: 'running', detail: formatBytes(entry.bytes), progress: 0 })
       await importExample(entry, fraction => task.setStep(0, { progress: fraction }))
-      // importExample ends in openProject's reload, so this is really just what the card shows if the
-      // browser is slow to navigate away.
+      // importExample ends in openProject's reload, so this only shows if navigation is slow.
       task.setStep(0, { status: 'done' })
       task.setStep(1, { status: 'done', detail: 'Opening' })
     } catch (e: any) {
@@ -126,10 +120,8 @@ export default function ExamplesGallery({ examples, className = '' }: {
 }
 
 /**
- * Load the catalogue once for a host that needs to know whether the Examples tab is worth showing.
- *
- * Returns null while loading so the host can hold the tab back rather than flashing it in and out. A build
- * with no examples folder resolves to an empty list, not an error.
+ * Load the catalogue once, for a host deciding whether to show the Examples tab. Returns null while
+ * loading; a build with no examples folder resolves to an empty list, not an error.
  */
 export function useExampleIndex(): ExampleEntry[] | null {
   const [examples, setExamples] = useState<ExampleEntry[] | null>(null)

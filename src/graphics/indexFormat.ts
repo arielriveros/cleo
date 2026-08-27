@@ -1,40 +1,21 @@
-// Choosing the element-index width for a mesh upload.
-//
-// This is deliberately its own module rather than a static on Mesh: mesh.ts imports the live `gl` from
-// renderer.ts at module scope, so anything that reaches Mesh drags the whole WebGL graph in with it. Kept
-// standalone and pure, this is directly unit-testable under vitest's node environment like the rest of the
-// tested core (base64, bvh, convexHull).
-//
-// Every caller in the engine passes indices as plain `number[]` — JS numbers, so values are lossless right
-// up to the GL boundary. The engine used to unconditionally do `new Uint16Array(indices)` there, which
-// silently wraps: index 70000 became 4464 and any mesh over 65535 vertices rendered as scrambled
-// triangles with nothing logged. The glTF loader had already decoded 32-bit indices correctly; the data
-// was only destroyed on upload.
+// Choosing the element-index width for a mesh upload. Pure and GL-free.
 
 import type { IndexFormat } from './rhi/types';
 
 /**
- * First index value that `UNSIGNED_SHORT` cannot carry — 65535, not 65536.
- *
- * WebGL2 behaves as though `PRIMITIVE_RESTART_FIXED_INDEX` were always enabled, and the restart index is
- * fixed to the maximum value of the index type (`2^16 - 1` for `UNSIGNED_SHORT`). So 65535 is a
- * "start a new primitive here" marker rather than a vertex reference, and a mesh that used it as a real
- * index would silently drop every triangle touching its last vertex — the same class of invisible
- * corruption this module exists to prevent. Treating it as out of range costs one vertex of headroom.
+ * First index value `UNSIGNED_SHORT` cannot carry — 65535, not 65536: WebGL2 reserves the type's
+ * maximum as the fixed primitive-restart marker.
  */
 export const INDEX_16_LIMIT = 65535;
 
-/** WebGL enum for 16-bit element indices. Fixed by the spec, so it needs no live context. */
+/** WebGL enum for 16-bit element indices. */
 export const GL_UNSIGNED_SHORT = 0x1403;
-/** WebGL enum for 32-bit element indices. Core in WebGL2 — no extension required. */
+/** WebGL enum for 32-bit element indices. */
 export const GL_UNSIGNED_INT = 0x1405;
 
 /**
- * Largest value in `indices`, or -1 for an empty array.
- *
- * Uses an explicit loop rather than `Math.max(...indices)` on purpose: the spread form throws
- * `RangeError: too many function arguments` somewhere around 125k elements, which is precisely the
- * large-mesh case this module is here to support. Do not "simplify" it back.
+ * Largest value in `indices`, or -1 for an empty array. Must stay an explicit loop —
+ * `Math.max(...indices)` throws `RangeError` past roughly 125k elements.
  */
 export function maxIndex(indices: ArrayLike<number>): number {
     let max = -1;
@@ -49,19 +30,13 @@ export function needs32Bit(indices: ArrayLike<number>): boolean {
 }
 
 /**
- * Narrowest typed array that represents `indices` losslessly: `Uint16Array` for ordinary meshes,
- * `Uint32Array` once any index reaches {@link INDEX_16_LIMIT}. Keeping the common path 16-bit avoids
- * doubling index memory for the meshes that never needed 32-bit in the first place.
+ * Narrowest typed array that represents `indices` losslessly: `Uint16Array`, or `Uint32Array` once any
+ * index reaches {@link INDEX_16_LIMIT}.
  *
- * @throws If any index is negative, fractional or NaN. These are always caller bugs, and silence is the
- *         worse outcome: `new Uint16Array([-1])` yields 65535 — which is also the primitive-restart index
- *         — so bad input currently corrupts geometry with no diagnostic. This runs once per upload, not
- *         per frame, so the scan is free in context.
+ * @throws If any index is negative, fractional or NaN.
  */
 export function createIndexArray(indices: ArrayLike<number>): Uint16Array | Uint32Array {
-    // A Uint32Array cannot hold a negative, fractional or NaN index by construction, so the scan is
-    // only meaningful for plain arrays — and skipping it matters because Geometry now stores indices
-    // as Uint32Array and this runs on every upload.
+    // A Uint32Array cannot hold a bad index by construction, so only plain arrays need the scan.
     if (!(indices instanceof Uint32Array)) {
         for (let i = 0; i < indices.length; i++) {
             const v = indices[i];
@@ -78,14 +53,7 @@ export function glTypeFor(array: Uint16Array | Uint32Array): number {
     return array instanceof Uint32Array ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
 }
 
-/**
- * The RHI index format matching an array from {@link createIndexArray}.
- *
- * The backend-neutral counterpart of {@link glTypeFor}, and the one meshes now carry: a `Mesh` used to
- * hold the GL enum itself, which made `Mesh.indexFormat` a translation back out of a value that had no
- * meaning on any other backend. `glTypeFor` stays because the GL enums are still what the WebGL2 draw
- * path needs, and `rhi/webgl2/glEnums.ts` derives them from this.
- */
+/** The backend-neutral index format matching an array from {@link createIndexArray}. */
 export function indexFormatFor(array: Uint16Array | Uint32Array): IndexFormat {
     return array instanceof Uint32Array ? 'uint32' : 'uint16';
 }

@@ -123,12 +123,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // translation is irrelevant — matching the skybox draw, which strips the view translation.
     let ro = vec3<f32>(0.0, u_sky.u_planetRadius + 1.0, 0.0);
 
-    var col = atmosphere(dir, ro, sunDir) * u_sky.u_sunColor;
+    // Which side of the horizon this ray is on, BEFORE the march: the march direction depends on it.
+    let viewPlanet = raySphere(ro, dir, u_sky.u_planetRadius);
+    let viewHitsGround = viewPlanet.x > 0.0;
+
+    // A ray into the planet is occluded, so marching it returns near-black. That is physically right
+    // and it reads as a black wall wherever a scene's terrain does not reach the true horizon — the
+    // ground blend below then ramps FROM that black rather than from sky, which is the dark band that
+    // used to sit between a landscape's silhouette and the sky. March the horizon ray instead, so the
+    // lower hemisphere goes sky -> ground with nothing dark in between. Still one march per texel.
+    // Straight down has no horizontal component, and both `normalize` of a zero vector and a march
+    // along one produce NaN — which `mix` below then carries through the fully-ground end of the
+    // blend. The nadir texel is fully ground anyway, so any horizon direction does for it.
+    let flat = vec3<f32>(dir.x, 0.0, dir.z);
+    let flatLen = length(flat);
+    let horizonDir = select(vec3<f32>(1.0, 0.0, 0.0), flat / flatLen, flatLen > 1e-5);
+    let marchDir = select(dir, horizonDir, viewHitsGround);
+    var col = atmosphere(marchDir, ro, sunDir) * u_sky.u_sunColor;
 
     // Sun disk: only when looking toward the sun, the sun is above the horizon, and the view ray is
     // not looking into the ground. Mie forward-scatter has already tinted it by sunset.
-    let viewPlanet = raySphere(ro, dir, u_sky.u_planetRadius);
-    let viewHitsGround = viewPlanet.x > 0.0;
     let sunCos = dot(dir, sunDir);
     let diskCos = cos(radians(max(u_sky.u_sunDiskSize, 0.001)));
     if (!viewHitsGround && sunDir.y > -0.02 && sunCos > diskCos) {
@@ -136,8 +150,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         col += u_sky.u_sunColor * u_sky.u_sunIntensity * 0.35 * disk;
     }
 
-    // Lower hemisphere: rays into the planet come back near-black, so blend a lit ground tint and the
-    // bottom of the cubemap reads as ground rather than a void.
+    // Lower hemisphere: fade the horizon sky (see `marchDir`) into a lit ground tint, so the bottom of
+    // the cubemap reads as ground rather than a void.
     if (viewHitsGround) {
         let lambert = max(sunDir.y, 0.0) * 0.9 + 0.1;
         let ground = u_sky.u_groundColor * lambert * u_sky.u_sunColor * (u_sky.u_sunIntensity * 0.05);

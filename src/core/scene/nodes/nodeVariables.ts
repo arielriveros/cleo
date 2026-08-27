@@ -4,10 +4,8 @@ import { Logger } from "../../logger";
 /**
  * Node variables and the access rules that govern them across the scripting boundary.
  *
- * These were always free functions taking a `Node` — they lived inside node.ts only because everything
- * did. They reach the node through its PUBLIC surface (`variables`, `setVariable`, `isDescendantOf`), which
- * is what lets `Node` be a type-only import here: this module adds no runtime edge back to the base class,
- * so it stays a near-leaf.
+ * Reaches the node through its public surface only, which keeps `Node` a type-only import here and this
+ * module a near-leaf.
  */
 
 
@@ -40,16 +38,11 @@ export function canAccessVariable(target: Node, requester: Node, name: string): 
 }
 
 /**
- * Returns a plain snapshot of a node's custom variables (name -> value). Read-only: assigning to
- * the returned object does NOT change the node — use `setData(node, name, value)` to write.
+ * Returns a plain snapshot of a node's custom variables (name -> value). Read-only: assigning to the
+ * returned object does NOT change the node — use `setData(node, name, value)` to write.
  *
- * When `requester` is supplied (the node running a script), variables that `requester` is not
- * allowed to read (private/protected owned by another node) are omitted. Called without a
- * requester (engine/editor/self) it returns every variable.
- *
- *   const data = getData(player);
- *   if (data.HealthPoints <= 0) { ... }
- *   console.log(data);                 // { HealthPoints: 3, ... }
+ * With `requester` (the node running a script), variables it may not read are omitted; without one,
+ * every variable is returned.
  */
 export function getData(node: Node, requester?: Node): Record<string, any> {
     const out: Record<string, any> = {};
@@ -64,9 +57,7 @@ export function getData(node: Node, requester?: Node): Record<string, any> {
 
 /**
  * Sets a custom variable on a node (including a different node than the one running the script).
- * Pass a single value, or multiple components for a vec3 (setData(node, 'pos', x, y, z)).
- *
- *   setData(other, 'HealthPoints', getData(other).HealthPoints - 1);
+ * Pass a single value, or multiple components for a vec3 (`setData(node, 'pos', x, y, z)`).
  */
 export function setData(node: Node, name: string, ...params: any[]): void {
     if (!node || typeof node.setVariable !== 'function') return;
@@ -76,9 +67,8 @@ export function setData(node: Node, name: string, ...params: any[]): void {
 
 /**
  * Build the getData/setData a user script sees, bound to the running node as the "requester" so
- * cross-node access respects each variable's public/private/protected level. Used by both the
- * editor-play eval path (_parseScript) and the published no-eval path (attachScripts). Reads are
- * filtered; blocked writes warn and no-op. Access to the script's OWN node is always allowed.
+ * cross-node access respects each variable's public/private/protected level. Reads are filtered;
+ * blocked writes warn and no-op. Access to the script's OWN node is always allowed.
  */
 export function bindDataAccessors(requester: Node): {
     getData: (target: Node) => Record<string, any>;

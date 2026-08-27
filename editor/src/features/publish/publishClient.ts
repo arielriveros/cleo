@@ -31,14 +31,10 @@ export function isDesktop(): boolean {
 const STALE_PLAYER_HINT =
   'Run "npm run build:player" (repo root), then reload the editor.';
 
-// Load the prebuilt player templates (produced by `npm run build:player` into public/player/,
-// so they are served same-origin by both the dev server and the production editor build).
-//
-// The contract check is not paranoia. public/player/ is git-ignored and no build step depended on it,
-// so the bundle drifted a month behind the packer and every publish in that window shipped a flat
-// landscape and dead animation fields — with nothing to see at publish time and nothing in the
-// player's console. A stale bundle now stops the publish instead of poisoning it. See pack.ts
-// PLAYER_CONTRACT.
+// Load the prebuilt player templates (`npm run build:player` into public/player/, served same-origin by
+// both the dev server and the production editor build).
+// public/player/ is git-ignored and no build step depends on it, so a bundle can silently drift behind
+// the packer; the contract check stops the publish instead. See pack.ts PLAYER_CONTRACT.
 async function loadPlayerTemplates(): Promise<PlayerTemplates> {
   let htmlRes: Response, jsRes: Response, buildRes: Response;
   try {
@@ -51,8 +47,7 @@ async function loadPlayerTemplates(): Promise<PlayerTemplates> {
   if (!htmlRes.ok || !jsRes.ok)
     throw new Error(`Player bundle not found. ${STALE_PLAYER_HINT}`);
 
-  // No build.json at all means a bundle built before the guard existed — which is exactly the
-  // month-stale case, so it is treated as a mismatch rather than waved through.
+  // No build.json at all means a bundle built before the guard existed; treated as a mismatch.
   let built: number | undefined;
   if (buildRes.ok) {
     try { built = (await buildRes.json())?.contract; } catch { /* treat as unstamped */ }
@@ -69,12 +64,9 @@ async function loadPlayerTemplates(): Promise<PlayerTemplates> {
 
 /**
  * Assemble a publish, doing the expensive part in the project worker.
- *
- * Split of labour: script *extraction* happens here, because wrapping each script needs the engine's
- * buildFactoryBody (see extractScripts.ts) and it is cheap. Everything genuinely costly — obfuscating
- * that source, deduping geometry, packing the whole game into game.bin and (optionally) zipping —
- * runs off-thread. Note `data` is cloned into the worker, so although the packer mutates its copy,
- * the caller's object is untouched.
+ * Script extraction stays here because wrapping each script needs the engine's buildFactoryBody;
+ * obfuscation, geometry dedupe, packing and zipping run off-thread. `data` is cloned into the worker,
+ * so the packer's mutations never reach the caller's object.
  */
 async function assemble(data: any, zip: boolean) {
   const templates = await loadPlayerTemplates();

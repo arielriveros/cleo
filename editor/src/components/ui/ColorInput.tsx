@@ -14,7 +14,6 @@ const hexToVec3 = (color: string): [number, number, number] => {
 
 /**
  * Color swatch that reports a normalized `[r, g, b]` (0..1) triple.
- * Promoted from LightEditor so every color control shares one implementation.
  */
 export function ColorInput({ color, onChange, className }: ColorInputProps) {
   return (

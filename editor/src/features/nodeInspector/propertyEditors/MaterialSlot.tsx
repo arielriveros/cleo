@@ -6,12 +6,9 @@ import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt } from '../../..
 import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
 import { MaterialIcon } from '../sectionIcons'
 
-// The material reference control for model/sprite nodes: replaces inline material editing. Shows the
-// linked material (thumbnail + edit/unlink) or a create/link affordance when none is set.
-//
-// A model merged at import carries one material per SUBMESH — an index range of the shared mesh — so this
-// renders one slot per submesh rather than one per node. Unmerged models have exactly one and look
-// unchanged.
+// The material reference control for model/sprite nodes: the linked material (thumbnail + edit/unlink), or
+// a create/link affordance when none is set. A model merged at import carries one material per SUBMESH — an
+// index range of the shared mesh — so this renders one slot per submesh rather than one per node.
 export default function MaterialSlot(props: { node: Node }) {
   const [, force] = useState(0) // node mutations don't trigger React; bump to re-read the links
 
@@ -58,9 +55,7 @@ function Slot(props: {
     applyMaterialAsset(props.node, a, props.submesh)
     changed()
   }
-  // Clears THIS submesh only. It used to call the whole-node unlink, so ✕ on one slot of a merged model
-  // reset every slot and dropped both link variables — `setNodeMaterial` has always written a single
-  // index, so nothing ever required that.
+  // Clears THIS submesh only, never the whole node.
   const unlink = () => { unlinkMaterialAt(props.node, props.submesh); changed() }
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)

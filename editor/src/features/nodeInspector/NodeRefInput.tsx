@@ -16,22 +16,14 @@ export interface NodeRefInputProps {
 }
 
 /**
- * Picks another node in the scene as a property value.
- *
- * Two ways in, because neither alone covers the workflow: a dropdown for when you know the name, and
- * a drop target for dragging straight off the scene tree (the tree's rows already publish their id as
- * `text/cleo-node`, so this needs nothing from them).
- *
- * Lives here rather than in `components/ui` on purpose — it needs scene data, and `components/ui` is
- * a deliberately dependency-free primitive layer.
+ * Picks another node in the scene as a property value, either from a dropdown or by dropping a row
+ * dragged off the scene tree (tree rows publish their node id as `text/cleo-node`).
  */
 export default function NodeRefInput(props: NodeRefInputProps) {
   const eventEmitter = useEventBus()
   const [version, setVersion] = useState(0)
   const [dragOver, setDragOver] = useState(false)
 
-  // The offered list is scene state, so it has to be rebuilt whenever the scene changes -- otherwise
-  // a node added after this inspector mounted would never appear.
   useEffect(() => {
     const bump = () => setVersion(v => v + 1)
     eventEmitter.on('SCENE_CHANGED', bump)
@@ -48,8 +40,7 @@ export default function NodeRefInput(props: NodeRefInputProps) {
     }
     nodes.sort((a, b) => a.name.localeCompare(b.name))
 
-    // Node names are explicitly not unique, so a duplicate name gets a short id suffix -- otherwise
-    // two entries read identically and picking the right one is guesswork.
+    // Node names are not unique, so duplicates are disambiguated with a short id suffix.
     const nameCounts = new Map<string, number>()
     for (const node of nodes) nameCounts.set(node.name, (nameCounts.get(node.name) ?? 0) + 1)
 

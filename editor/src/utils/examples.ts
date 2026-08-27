@@ -4,18 +4,13 @@ import { BundleSource, readBundle } from './bundleRead';
 import { applyBundleAsNewProject } from './bundleImport';
 import { parseJsonBuffer } from '../workers/workerClient';
 
-// Example projects that ship with the editor.
+// Example projects that ship with the editor: a project bundle exported and then UNZIPPED into a folder
+// under `editor/public/examples/<slug>/` (see editor/tools/add-example.mjs), served as static files with
+// no server, API or CDN involved.
 //
-// Each one is a project bundle that was exported from a local editor and then UNZIPPED into a folder under
-// `editor/public/examples/<slug>/` (see editor/tools/add-example.mjs, which does the unzipping and writes
-// the index). CopyWebpackPlugin puts `public/` into `dist/`, the Firebase workflow deploys `dist/`, and the
-// Electron package ships it too — so an example is just static files next to the app, with no server, no
-// API and no CDN involved. It also means examples work offline on desktop.
-//
-// The folder is not listable over HTTP, and it does not need to be: the file set is fully derivable. The
-// seven library filenames are fixed, `manifest.sceneMetas` names every scene file, and `textures/index.json`
-// names every texture payload. Only the human-facing catalogue (which examples exist, what they are called)
-// needs writing down, and that is `index.json`.
+// The folder is not listable over HTTP and does not need to be: the library filenames are fixed,
+// `manifest.sceneMetas` names every scene file, and `textures/index.json` names every texture payload.
+// Only the human-facing catalogue is written down, in `index.json`.
 
 /** Where the example folders live, relative to the document. Matches publishClient's `fetch('player/…')`. */
 const EXAMPLES_BASE = 'examples/';
@@ -44,18 +39,14 @@ interface ExampleIndexFile {
 
 /**
  * Fetch one static file under examples/, refusing an SPA fallback.
- *
- * `editor/firebase.json` rewrites `"**" -> "/index.html"`, so a path that does not exist comes back as
- * **HTTP 200 carrying the editor's own HTML** rather than a 404. Left unchecked that turns a typo into a
- * texture made of markup, or a JSON.parse failure reading `Unexpected token '<'` with nothing to say about
- * which file was missing. So every response is checked for being HTML before it is believed.
+ * `editor/firebase.json` rewrites `"**" -> "/index.html"`, so a missing path returns HTTP 200 carrying the
+ * editor's own HTML rather than a 404. Every response must be checked for being HTML before it is believed.
  */
 async function fetchEntry(path: string): Promise<Response | null> {
   const res = await fetch(EXAMPLES_BASE + path);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`examples/${path}: HTTP ${res.status}`);
-  // The hosting rewrite always serves index.html, so content-type is the reliable tell. Real bundle entries
-  // are application/json or an octet-stream; none of them is ever text/html.
+  // Content-type is the reliable tell: a real bundle entry is never text/html.
   if ((res.headers.get('content-type') ?? '').includes('text/html')) return null;
   return res;
 }
@@ -64,8 +55,7 @@ async function fetchJson(path: string): Promise<any | null> {
   const res = await fetchEntry(path);
   if (!res) return null;
   const text = await res.text();
-  // Belt and braces: a static host with no content-type at all would slip an HTML fallback past the check
-  // above, and "unexpected <" is a far worse error message than naming the file.
+  // A static host with no content-type at all slips an HTML fallback past the check above.
   if (text.trimStart().startsWith('<')) return null;
   try {
     return JSON.parse(text);
@@ -76,9 +66,7 @@ async function fetchJson(path: string): Promise<any | null> {
 
 /**
  * The catalogue of bundled examples, in display order.
- *
- * A missing or malformed index is NOT an error: most checkouts ship no examples at all, and the gallery
- * simply does not appear. Only a present-but-broken index is worth a log line.
+ * A missing index is NOT an error — most checkouts ship no examples and the gallery simply does not appear.
  */
 export async function loadExampleIndex(): Promise<ExampleEntry[]> {
   let index: ExampleIndexFile | null = null;
@@ -104,9 +92,8 @@ function fetchSource(slug: string, onEntry?: (done: number, total: number) => vo
   const dir = `${slug}/`;
   return {
     async json(path) {
-      // Scene blobs are the one big JSON in a bundle (geometry is embedded per model), so they are parsed
-      // in the project worker. Everything else is small enough that the round trip would cost more than the
-      // parse.
+      // Scene blobs are the one big JSON in a bundle, so they are parsed in the project worker; for
+      // everything else the round trip costs more than the parse.
       if (!path.startsWith(BUNDLE_PATHS.scenesDir)) return fetchJson(dir + path);
       const res = await fetchEntry(dir + path);
       if (!res) return null;
@@ -118,9 +105,8 @@ function fetchSource(slug: string, onEntry?: (done: number, total: number) => vo
       const res = await fetchEntry(dir + path);
       return res ? await res.arrayBuffer() : null;
     },
-    // No directory listing over HTTP, so the manifest is the authority on which scenes exist. An example is
-    // always freshly exported, so its metas are always present — but falling back to nothing rather than
-    // guessing keeps a malformed folder loud instead of half-loaded.
+    // No directory listing over HTTP, so the manifest is the authority on which scenes exist. Fall back to
+    // nothing rather than guessing, so a malformed folder is loud instead of half-loaded.
     async scenePaths(manifest: BundleManifest) {
       return (manifest.sceneMetas ?? []).map(m => `${BUNDLE_PATHS.scenesDir}${m.id}.json`);
     },
@@ -129,14 +115,11 @@ function fetchSource(slug: string, onEntry?: (done: number, total: number) => vo
 }
 
 /**
- * Download a bundled example and open it as a brand-new project.
- *
- * Resolves by reloading the page (openProject), so callers should treat a resolved promise as "we are
- * leaving" rather than "we are done".
+ * Download a bundled example and open it as a brand-new project. Resolves by reloading the page, so a
+ * resolved promise means "we are leaving", not "we are done".
  *
  * Nothing here may touch scoped storage: the gallery also renders on the boot launcher, where no project is
- * open and `scoped()` throws by design. It holds because `applyBundleAsNewProject` mints the project first
- * and threads its id explicitly through every key helper.
+ * open and `scoped()` throws.
  */
 export async function importExample(
   entry: ExampleEntry,

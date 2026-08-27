@@ -19,10 +19,8 @@ import { eulerFromQuatDeg } from "../../math";
 
 
 /**
- * Downward speed (units/s, gravity-relative) past which {@link Node.isFalling} reports true.
- *
- * Not zero: a body resting on a surface is pressed into it by gravity every step and measures a small
- * downward drift, so a zero threshold would call a standing character a falling one.
+ * Downward speed (units/s, gravity-relative) past which {@link Node.isFalling} reports true. Not zero:
+ * a resting body is pressed into its surface by gravity and measures a small downward drift.
  */
 const FALLING_SPEED = -0.5;
 
@@ -51,9 +49,6 @@ export class Node {
   protected _worldSphereDirty: boolean = true;
 
   // Same deal for the world-space AABB used by picking and camera collision — see getBoundingBox().
-  // Without this the raycaster recomputed a mesh's box from every one of its vertices, once per node
-  // *per ray*, allocating two vec3s per vertex; a 5-ray camera probe over a handful of meshes was
-  // enough to cost more than the rest of the frame combined.
   protected _worldBox: { min: vec3; max: vec3 } = { min: vec3.create(), max: vec3.create() };
   protected _worldBoxDirty: boolean = true;
 
@@ -71,17 +66,14 @@ export class Node {
   protected _markForRemoval: boolean = false;
 
   // Spawn lifecycle. `_spawnOnStart` is authored (inspector + serialized); `_spawned` is the runtime state.
-  // Both default to the pre-existing behaviour — every node that never touches them is spawned, always —
-  // so old scenes and code-built scenes are unaffected. A dormant node is dropped from the scene's derived
-  // lists (Scene._filterByType), which is what makes despawn cover EVERY consumer at once rather than the
-  // subset that happens to check `visible`.
+  // A dormant node is dropped from the scene's derived lists (Scene._filterByType), which is what makes
+  // despawn cover EVERY consumer at once rather than the subset that checks `visible`.
   protected _spawnOnStart: boolean = true;
   protected _spawned: boolean = true;
   // onConstruct is once per node per scene load, so it needs its own latch — _hasStarted cannot serve, since
   // a dormant node receives onConstruct and never starts.
   protected _hasConstructed: boolean = false;
-  // onSpawn is once per LIFE: set when it fires, cleared by despawn. Without it a node woken from another
-  // node's onConstruct would get onSpawn from spawn() and again from Scene.start's spawn pass.
+  // onSpawn is once per LIFE: set when it fires, cleared by despawn.
   protected _spawnNotified: boolean = false;
 
   protected _body: RigidBody | null;
@@ -89,33 +81,23 @@ export class Node {
 
   protected _visible: boolean;
 
-  // Renderer-driven visibility for LOD level switching and distance culling (see LodGroupNode).
-  // Kept separate from _visible: the `visible` setter emits SCENE_CHANGED and (on ModelNode) writes
-  // material.config.castShadow — both unacceptable for a flag that flips per frame.
+  // Renderer-driven visibility for LOD level switching and distance culling (see LodGroupNode). Must stay
+  // separate from _visible: that setter emits SCENE_CHANGED and, on ModelNode, writes castShadow.
   protected _lodVisible: boolean = true;
 
   // Custom user-defined variables editable in the inspector, serialized with the node, and
   // readable from scripts via getData(node) and writable via setData(node, name, value).
   protected _variables: Map<string, NodeVariable> = new Map();
 
-  // Script handlers, declared as overridable methods so a class-based script (`class X extends Node`) can
-  // override them with matching signatures. `this` IS the node, so there is no `node` self-parameter.
-  // attachScriptFactory/attachClassScript install a script's handlers as own-properties shadowing these.
+  // Script handlers, declared as overridable methods so a class-based script can override them with
+  // matching signatures. `this` IS the node, so there is no `node` self-parameter.
 
   /**
    * Called once for **every** node in the scene, spawned or not — the one handler a dormant node still
    * receives. Runs before {@link onSpawn} and {@link onStart}, with {@link scene} already available.
    *
-   * This is where a node decides its own fate, since a node flagged `spawnOnStart = false` gets no other
-   * handler until something wakes it:
-   *
-   *   onConstruct() {
-   *     if (Game.difficulty > 2) this.spawn();
-   *   }
-   *
-   * Fires once per node per scene load, never again — not on re-parenting, and not on a later
-   * spawn/despawn cycle. Note that a script class is never CONSTRUCTED (its methods are bound onto the
-   * live node), so this, not a `constructor()`, is the hook that replaces one.
+   * Fires once per node per scene load: not on re-parenting, and not on a later spawn/despawn cycle. A
+   * script class is never constructed, so this is the hook that replaces a `constructor()`.
    */
   public onConstruct(): void {}
 
@@ -131,11 +113,8 @@ export class Node {
 
   /**
    * Called once each time this node becomes live — at scene start, or when {@link spawn} wakes it — after
-   * {@link onConstruct} and before {@link onStart}. A node that is despawned and spawned again gets a fresh
-   * one, so this is the place for per-life setup (reset health, clear state); use {@link onStart} for setup
-   * that must happen only once, and {@link onConstruct} for anything a dormant node must still do.
-   *
-   * Re-parenting does not re-fire it: moving a node in the tree does not begin a new life.
+   * {@link onConstruct} and before {@link onStart}. The place for per-life setup; use {@link onStart} for
+   * setup that must happen only once. Re-parenting does not re-fire it.
    */
   public onSpawn(): void {}
 
@@ -208,21 +187,15 @@ export class Node {
    * The child keeps its *local* transform, so its world position moves with the new parent.
    *
    * @param index Where among the existing children to insert. Appends when omitted or out of range.
-   *              Undo/redo passes it so restoring a deleted node puts it back where it was rather than
-   *              at the end of its siblings.
    */
   public addChild(node: Node, index?: number): void {
-    // Where it came from, captured before the detach so the structural event below can describe the whole
-    // move as one edit. A recorder that saw only "removed" then "added" would need two undos to put a
-    // re-parented node back, and one undo would leave it detached.
+    // Captured before the detach so the structural event below can describe the whole move as one edit.
     const from = node.parent
       ? { parentId: node.parent.id, index: node.parent._children.indexOf(node) }
       : null;
 
-    // if the node already has a parent, remove it from the parent's children
     if (node.parent) {
-      // removeChild emits the detach itself (flagged `reparent-detach`); the emit that used to be
-      // duplicated here was byte-identical to it.
+      // removeChild emits the detach itself, flagged `reparent-detach`.
       node.parent.removeChild(node, true);
     }
 
@@ -230,15 +203,13 @@ export class Node {
     if (index === undefined || index < 0 || index >= this._children.length) this._children.push(node);
     else this._children.splice(index, 0, node);
 
-    // Scene FIRST, then the handlers. onStart routinely calls this.after/this.every, and those go through
-    // `this.scene` — running start() before the scene was attached made every timer scheduled from onStart
-    // a silent no-op. It is also what lets start() below read `scene.spawnRulesEnabled`.
+    // Scene FIRST, then the handlers: onStart routinely calls this.after/this.every, which go through
+    // `this.scene`, and start() below reads `scene.spawnRulesEnabled`.
     if (this.scene)
       node.scene = this.scene;
 
-    // Only when the scene is already running. During a scene LOAD the parent has not started yet and every
-    // node is attached before Scene.start runs the three passes over the finished tree — firing here as well
-    // would deliver each handler twice (a descendant fires on its own attach, then again on its parent's).
+    // Only when the scene is already running. During a scene LOAD every node is attached before Scene.start
+    // walks the finished tree, so firing here too would deliver each handler twice.
     if (this._hasStarted) {
       node.applySpawnRules();
       node.runConstructHandlers();
@@ -249,8 +220,7 @@ export class Node {
       kind: 'structure', node,
       prop: from ? 'reparent' : 'add',
       prev: from,
-      // The real landing slot, not `length - 1`: an indexed insert (a drag that drops a row *between* two
-      // siblings) reports where it actually went, so undo/redo puts it back there rather than at the end.
+      // The real landing slot, not `length - 1`: an indexed insert must report where it actually went.
       next: { parentId: this._id, index: this._children.indexOf(node) },
     });
   }
@@ -264,9 +234,8 @@ export class Node {
    *                 treats the detach as a despawn.
    */
   public removeChild(node: Node, reparent: boolean = false): void {
-    // A node that is already dormant has had all of this done by despawn() — firing onDespawn again here is
-    // what used to make node.remove() deliver it twice (remove() fires it, then the Scene.update sweep
-    // reached this line).
+    // A node that is already dormant has had all of this done by despawn(); firing onDespawn again here
+    // would deliver it twice.
     if (!reparent && node._spawned) {
       // Before onDespawn, and before `scene` is cleared below: a pending this.after/this.every must not
       // fire against a node no longer in the tree.
@@ -277,8 +246,8 @@ export class Node {
     node.parent = null;
     node.scene = null;
     this._children.splice(index, 1);
-    // The detach half of a re-parent is flagged so a recorder can ignore it: the addChild that follows
-    // describes the same move in full, and treating both as edits would need two undos to reverse one.
+    // The detach half of a re-parent is flagged so a recorder can ignore it — the addChild that follows
+    // describes the same move in full.
     engineEventBus.emit('SCENE_CHANGED', {
       kind: 'structure', node,
       prop: reparent ? 'reparent-detach' : 'remove',
@@ -290,9 +259,8 @@ export class Node {
   /**
    * Move an existing child to a different position among its siblings.
    *
-   * Purely an ordering change — no detach, no handlers, and deliberately no `structure` event, because
-   * nothing about which nodes exist has changed. Used by undo to restore sibling order after a subtree
-   * has been re-parsed in place (parsing always appends).
+   * Purely an ordering change — no detach, no handlers, and no `structure` event, since which nodes exist
+   * has not changed.
    */
   public moveChildTo(node: Node, index: number): void {
     const from = this._children.indexOf(node);
@@ -341,22 +309,18 @@ export class Node {
    *                             it from that parent's transform.
    */
   public updateTransforms(parentWorldTransform: mat4 | null = null): void {
-    // Update local transform
     mat4.fromRotationTranslationScale(this._localTransform, this._quaternion, this._position, this._scale);
 
-    // Update world transform
     if (parentWorldTransform)
       mat4.multiply(this._worldTransform, parentWorldTransform, this._localTransform);
     else
       mat4.copy(this._worldTransform, this._localTransform);
 
-    // World transform changed: invalidate the derived world-space cache.
     this._worldCacheDirty = true;
     this._worldSphereDirty = true;
     this._worldBoxDirty = true;
 
-    // Dormant subtrees cost nothing per frame — nothing reads their matrices while they are asleep, and
-    // spawn() recomputes them before anything can.
+    // Dormant subtrees are skipped: nothing reads their matrices, and spawn() recomputes them first.
     for (const child of this._children) {
       if (child._spawned)
         child.updateTransforms(this._worldTransform);
@@ -366,10 +330,8 @@ export class Node {
   private _updateWorldCache(): void {
     vec3.set(this._worldPosition, this._worldTransform[12], this._worldTransform[13], this._worldTransform[14]);
     mat4.getScaling(this._worldScale, this._worldTransform);
-    // mat4.getRotation assumes an unscaled matrix: under non-uniform scale the quaternion comes out
-    // skewed and non-normalized (90° about Y reads back as ~94.6° with scale [3,1,2]), which then
-    // mis-rotates every physics body created from worldQuaternion. Divide the scale out of the
-    // basis vectors before extracting the rotation.
+    // mat4.getRotation assumes an unscaled matrix: under non-uniform scale the quaternion comes back
+    // skewed and non-normalized. Divide the scale out of the basis vectors before extracting it.
     const m = this._worldTransform;
     const sx = this._worldScale[0] || 1;
     const sy = this._worldScale[1] || 1;
@@ -393,8 +355,8 @@ export class Node {
    * Destroys this node and its whole subtree: it is {@link despawn}ed immediately (onDespawn, timers
    * cancelled, physics bodies dropped) and unlinked from the scene at the next update.
    *
-   * This is permanent — the node cannot be brought back. For something that should reappear later (a pooled
-   * projectile, a door, an enemy wave), use {@link despawn} and {@link spawn} instead.
+   * Permanent — the node cannot be brought back. For something that should reappear later, use
+   * {@link despawn} and {@link spawn} instead.
    */
   public remove(): void {
     this.despawn();
@@ -405,24 +367,18 @@ export class Node {
    * Brings a dormant node (and its subtree) back to life: it renders, updates, animates and simulates again.
    * No-op if it is already spawned.
    *
-   * Fires {@link onSpawn} every time. {@link onStart} runs only on the FIRST spawn — a node returning from
-   * despawn keeps whatever state it had, so put per-life setup in `onSpawn` and one-time setup in `onStart`.
-   *
    *   this.findNode('Door').spawn();
    *
-   * Descendants that carry their own `spawnOnStart = false` stay asleep, so waking a spawner does not fire
-   * every projectile parked under it. Pass `{ subtree: true }` when you mean the whole group instead:
-   *
-   *   this.findNode('EnemyCamp').spawn({ subtree: true });
+   * Fires {@link onSpawn} every time; {@link onStart} runs only on the FIRST spawn. Descendants carrying
+   * their own `spawnOnStart = false` stay asleep unless `subtree` is passed.
    *
    * @param options `subtree: true` wakes every descendant, ignoring their own spawnOnStart flags.
    */
   public spawn(options: { subtree?: boolean } = {}): void {
     if (this._spawned) return;
 
-    // Exactly which nodes wake, decided before anything fires: this one unconditionally — an explicit spawn
-    // overrides its own flag, or it could never be woken at all — and each descendant only if its own
-    // spawnOnStart allows. Waking a spawner must not fire every projectile parked under it.
+    // Decided before anything fires: this node unconditionally (an explicit spawn overrides its own flag),
+    // and each descendant only if its own spawnOnStart allows.
     const waking: Node[] = [];
     const collect = (node: Node, applySpawnRules: boolean) => {
       if (node._spawned) return;   // already awake, and so is everything beneath it
@@ -439,8 +395,7 @@ export class Node {
     this.updateTransforms(this._parent ? this._parent.worldTransform : null);
 
     for (const node of waking) {
-      // A pooled node must not resume the momentum it had when it despawned. The body re-enters the world on
-      // the next PhysicsSystem.update, which finds it through the scene lists this node just rejoined.
+      // A pooled node must not resume the momentum it had when it despawned.
       if (node._body) {
         node._body.velocity.set(0, 0, 0);
         node._body.angularVelocity.set(0, 0, 0);
@@ -449,8 +404,7 @@ export class Node {
       try { node.onSpawn(); } catch (e) { Logger.error(`Error in onSpawn for node ${node.name}: ${e}`); }
     }
 
-    // onStart is once per node lifetime, so a node returning from despawn does not get it again — and none
-    // of this runs before the scene itself starts, which will reach these nodes on its own.
+    // onStart is once per node lifetime, so a node returning from despawn does not get it again.
     if (this._scene?.hasStarted) {
       for (const node of waking) {
         if (node._hasStarted) continue;
@@ -470,26 +424,23 @@ export class Node {
    * {@link after}/{@link every} timers are cancelled and {@link onDespawn} fires once. No-op if it is
    * already dormant.
    *
-   * The node stays in the scene tree and remains findable by name/id, so a script can always
-   * {@link spawn} it again. Use {@link remove} instead when it should never come back.
-   *
-   *   this.findNode('Enemy').despawn();
+   * The node stays in the scene tree and remains findable by name/id. Use {@link remove} instead when it
+   * should never come back.
    */
   public despawn(): void {
     if (!this._spawned) return;
 
     this._forEachInSubtree(n => {
-      // A descendant that was already dormant on its own has had all of this done — firing its onDespawn
-      // again from an ancestor's despawn would deliver the handler twice for one sleep.
+      // A descendant that was already dormant has had all of this done; firing its onDespawn again from
+      // an ancestor's despawn would deliver the handler twice for one sleep.
       if (!n._spawned) return;
 
       // Before onDespawn: a pending this.after/this.every must not fire against a node that is going away.
       n._scene?.cancelTimers(n);
       try { n.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn function for node ${n.name}: ${e}`); }
 
-      // PhysicsSystem walks scene.nodes, which no longer contains this node once the flag is cleared below —
-      // so it will never get another chance to drop these itself. Without this the collider keeps blocking
-      // and colliding while its mesh is gone.
+      // PhysicsSystem walks scene.nodes, which no longer contains this node once the flag is cleared below,
+      // so this is the last chance to take its body and trigger out of the world.
       const physics = n._scene?.physics;
       if (physics) {
         if (n._body) physics.removeBody(n._body);
@@ -506,10 +457,8 @@ export class Node {
   /**
    * Put every subtree flagged `spawnOnStart = false` to sleep, without starting anything.
    *
-   * Called by `Scene.parse` so the rule takes effect the moment a scene is built rather than at
-   * `scene.start()`. Both the editor and the player defer that start behind a timeout, and the engine
-   * renders during the gap — so a pool of dormant nodes would otherwise be drawn for a beat and then pop
-   * out of existence. Harmless to run twice; `start()` reaches the same state on its own.
+   * Called by `Scene.parse` so the rule takes effect the moment a scene is built: the editor and the
+   * player both defer `scene.start()`, and the engine renders during the gap. Harmless to run twice.
    */
   public applySpawnRules(): void {
     if (this._scene?.spawnRulesEnabled === false) return;
@@ -535,9 +484,8 @@ export class Node {
   /**
    * Fire {@link onConstruct} across this subtree, once per node, dormant nodes included.
    *
-   * Driven by Scene.start (and by addChild for a node added to a running scene) rather than from the attach
-   * itself, so `this.scene` is always live inside the handler — during a load a node is attached to its
-   * parent before that parent joins the scene, so at attach time a nested node cannot see the scene at all.
+   * Driven by Scene.start (and by addChild into a running scene) rather than from the attach itself, so
+   * `this.scene` is always live inside the handler.
    */
   public runConstructHandlers(): void {
     this._forEachInSubtree(n => {
@@ -580,20 +528,14 @@ export class Node {
   }
 
   public start(): void {
-    // A node flagged dormant does not start: no onStart, and no descent into its children (a subtree under a
-    // dormant root is dormant too). onDespawn is deliberately NOT fired — it never spawned, so there is
-    // nothing to tear down. Editor scenes opt out via `scene.spawnRulesEnabled = false` so a node the user
-    // has flagged dormant still shows and can be selected while authoring. {@link spawn} is the way past
-    // this, and it bypasses the check rather than going through here.
-    // `!_hasStarted` guards against undoing an explicit spawn: the scene's start walk reaches nodes in tree
-    // order, so a script that spawns something declared LATER in the tree would otherwise have its work
-    // reverted a moment later when the walk arrives and re-applies the flag.
+    // A node flagged dormant does not start: no onStart, and no descent into its children. onDespawn is
+    // NOT fired — it never spawned. Editor scenes opt out via `scene.spawnRulesEnabled = false`.
+    // `!_hasStarted` guards against undoing an explicit spawn: the start walk reaches nodes in tree order,
+    // so a script spawning something declared LATER would otherwise have that reverted when it arrives.
     if (!this._hasStarted && !this._spawnOnStart && this._scene?.spawnRulesEnabled !== false) {
       this._forEachInSubtree(n => { n._spawned = false; });
-      // The emit is not optional. Scene caches its node lists and only rebuilds them on a structural change;
-      // by the time start() runs, the play bootstrap has already rendered frames (setScene -> update, then a
-      // deferred start()), so those lists exist and still hold this node. Without this it stays in
-      // scene.models forever and keeps drawing, despawned in name only.
+      // The emit is not optional: Scene caches its node lists and rebuilds them only on a structural
+      // change, so without it this node stays in scene.models and keeps drawing.
       engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'sleep' });
       return;
     }
@@ -613,8 +555,8 @@ export class Node {
 
   public update(delta: number, time: number): void {
     try {
-      // Attributes user-script time separately from the rest of the node loop. Gated because it is
-      // two performance.now() calls per node per frame — cheap, but not free on a large scene.
+      // Attributes user-script time separately from the rest of the node loop. Gated: two
+      // performance.now() calls per node per frame.
       if (sceneStatsDetail.enabled) {
         const start = performance.now();
         this.onUpdate(delta, time);
@@ -629,27 +571,18 @@ export class Node {
 
   /**
    * The keys this node adds on top of the common block. Subclasses override this instead of
-   * reimplementing {@link serialize}.
-   *
-   * May be async: `LightNode` builds its payload from a switch, and nothing stops an override from
-   * awaiting. Returning `{}` (the default) means the node is fully described by the common block.
+   * reimplementing {@link serialize}. May be async. `{}` means the common block fully describes the node.
    */
   protected _serializePayload(): any | Promise<any> { return {}; }
 
   /**
-   * Which children go into the serialized subtree.
-   *
-   * A hook because `LandscapeNode` subdivides itself into generated terrain chunks that are children in the
-   * live tree but must never be persisted — they are rebuilt from the heightfield on load.
+   * Which children go into the serialized subtree. A hook because `LandscapeNode`'s generated terrain
+   * chunks are children in the live tree but must never be persisted.
    */
   protected _serializableChildren(): Node[] { return this._children; }
 
   /**
-   * Serialize this node and its subtree.
-   *
-   * Deliberately `final` in spirit: every subclass used to carry a byte-identical copy of the nine common
-   * keys and append its own on the end — thirteen copies of the same block, which is precisely the kind of
-   * duplication that made this file unmanageable. Override {@link _serializePayload} instead.
+   * Serialize this node and its subtree. Treat as final — override {@link _serializePayload} instead.
    */
   public async serialize(): Promise<any> {
     const children = await Promise.all(this._serializableChildren().map(child => child.serialize()));
@@ -667,10 +600,8 @@ export class Node {
     };
   }
 
-  // Editor-play path: the script is a source string in the scene JSON, so it is compiled here. Published
-  // games never reach this — their scripts ship pre-compiled in game.scripts.js and are bound by
-  // attachScriptFactory directly. A script that fails to compile (syntax error, unknown import) is
-  // reported and skipped: it must not take the rest of the scene down with it.
+  // Editor-play path: the script is a source string in the scene JSON, compiled here. Published games ship
+  // pre-compiled factories instead. A script that fails to compile is reported and skipped.
   private static _parseScript(node: Node, script: string): void {
     try {
       attachScriptFactory(node, compileScript(script));
@@ -683,42 +614,34 @@ export class Node {
    * The shared parse tail: transforms, spawn rules, variables, script fields, the script itself, physics
    * shapes, children, and finally attaching the node to its parent.
    *
-   * **Attaches the node — never call `addChild` after it.** Eight subclasses used to, adding the node a
-   * second time and firing a spurious detach + reparent pair per node on every scene load. `tests/
-   * nodeParse.test.ts` pins that at zero.
+   * **Attaches the node — never call `addChild` after it**, or the load fires a spurious detach +
+   * reparent pair per node. `tests/nodeParse.test.ts` pins that at zero.
    */
   protected static finishParse(node: Node, parent: Node, json: any) {
-    // Apply the serialized transform before anything that derives from it: the rigid body is created
-    // at the node's world position/orientation, collider shapes are sized by its world scale, and
-    // children compound their world transforms from this node's. These assignments used to run at
-    // the tail of this function, which created every physics body at the origin with unscaled
-    // shapes — position/rotation were silently corrected afterwards by the setters pushing into the
-    // body, but scale has no such path, so colliders never matched a scaled node.
+    // Apply the serialized transform before anything that derives from it: the rigid body is created at
+    // the node's world position/orientation, collider shapes are sized by its world scale, and children
+    // compound their world transforms from this node's.
     if (json.position) node.setPosition(json.position);
     if (json.rotation) node.setRotation(json.rotation);
     if (json.scale) node.setScale(json.scale);
     node.updateTransforms(parent.worldTransform);
 
-    // Absent in scenes saved before the spawn lifecycle existed, which is exactly the `true` default — so
-    // every pre-existing scene keeps spawning everything. Must land before the trailing addChild, which is
-    // what may immediately start() the node.
+    // Absent in older saves, which is exactly the `true` default. Must land before the trailing addChild,
+    // which may immediately start() the node.
     if (json.spawnOnStart === false) node._spawnOnStart = false;
 
     // Restore custom variables before scripts so onStart can read them.
     Node._parseVariables(node, json.variables);
 
-    // Restore a class-script's native fields as own properties before the script binds, so its methods
-    // read them directly (`this.speed`). The editor injects `scriptVars` at serialize time (like it injects
-    // `script`), reading each schema field off the node — the engine never has to know the field schema.
+    // Restore a class-script's native fields as own properties before the script binds, so its methods read
+    // them directly (`this.speed`). The editor injects `scriptVars` at serialize time.
     Node._parseScriptVars(node, json.scriptVars);
 
     if (json.script)
       Node._parseScript(node, json.script);
     else {
       // No-eval (published) path: the source was stripped at publish time and lives as a real function in
-      // game.scripts.js. Doing this HERE rather than in a pass over the finished scene is what makes a node
-      // created later — by Scene.instantiate — get its script too; `__sourceId` is the template's original
-      // id, which is the key those factories are registered under.
+      // game.scripts.js. `__sourceId` is the template's original id, the key those factories use.
       const factory = resolveNodeScript(json.__sourceId ?? json.id);
       if (factory) {
         try { attachScriptFactory(node, factory); }
@@ -726,9 +649,8 @@ export class Node {
       }
     }
 
-    // Shape dimensions and offsets are authored in node-local units, so the node's world scale is
-    // applied here. Rotations are scale-invariant and pass through untouched, which is what keeps a
-    // scaled node's colliders in the same place and orientation relative to its mesh.
+    // Shape dimensions and offsets are authored in node-local units, so the node's world scale is applied
+    // here. Rotations are scale-invariant and pass through untouched.
     const setShapes = (shapes: any, target: RigidBody | Trigger) => {
       const scale = node.worldScale;
       const scaledOffset = (offset: number[]) => vec3.fromValues(
@@ -753,11 +675,9 @@ export class Node {
             target.attachShape(Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments, scale), offset, rotation);
             break;
           case 'capsule': {
-            // The only descriptor that expands into several cannon shapes: a capsule is a cylinder plus two
-            // sphere caps. `attachShape` places a shape at bodyPos + bodyQuat * offset — the shape's OWN
-            // rotation never moves it (body.ts) — and the caps are offset along the capsule's local Y, so
-            // their offsets have to be rotated here. Skip this and a tilted capsule keeps its caps upright
-            // while the cylinder leans out from between them.
+            // A capsule expands into a cylinder plus two sphere caps. `attachShape` places a shape at
+            // bodyPos + bodyQuat * offset — a shape's OWN rotation never moves it (body.ts) — so the caps'
+            // offsets, which run along the capsule's local Y, must be rotated here.
             const q = quat.create();
             quat.fromEuler(q, rotation[0], rotation[1], rotation[2]);
             for (const part of Shape.Capsule(shape.radius, shape.height, shape.numSegments, scale)) {
@@ -791,19 +711,17 @@ export class Node {
 
     if (json.body) {
       // setBody/setTrigger return the body they just created, so the shapes go straight onto that rather
-      // than re-reading node._body — which is typed nullable and which the checker cannot know was just
-      // assigned by the call above.
+      // than re-reading node._body, which is typed nullable.
       setShapes(json.body.shapes, node.setBody(
         json.body.mass,
         json.body.linearDamping,
         json.body.angularDamping,
         json.body.linearConstraints,
         json.body.angularConstraints,
-        // Absent in scenes saved before surfaces existed; RigidBody defaults them to the old behavior.
+        // Absent in older saves; RigidBody supplies its own defaults for them.
         json.body.friction,
         json.body.restitution,
-        // Likewise for the two channels — absent means true, so every pre-existing scene keeps
-        // simulating and keeps blocking the camera exactly as it did.
+        // Likewise for the two channels — absent means true.
         json.body.simulatePhysics,
         json.body.cameraCollision,
         // Absent in scenes saved before the ground probe existed; RigidBody defaults it to 0 (off).
@@ -827,9 +745,6 @@ export class Node {
   /**
    * Post-attach restore, for state that only makes sense once the children exist and the node is in the
    * tree — `LodGroupNode` picking its initial level, `CameraNode` restoring `active` and its screen passes.
-   *
-   * This hook is why a subclass's `static parse` is now only ever *construct then finishParse*: work that
-   * used to trail after the `finishParse` call had a habit of trailing a stray `parent.addChild` with it.
    */
   protected _afterParse(_json: any): void { }
 
@@ -844,8 +759,7 @@ export class Node {
   public get name(): string { return this._name; }
   public set name(name: string) {
     this._name = name;
-    // The scene indexes nodes by name for getNodesByName/findNode; a rename must invalidate that
-    // exactly like the visible setter already invalidates scene-derived state below.
+    // The scene indexes nodes by name for getNodesByName/findNode; a rename must invalidate that index.
     engineEventBus.emit('SCENE_CHANGED', { kind: 'name', node: this });
   }
   /**
@@ -859,8 +773,8 @@ export class Node {
    * This node's direct children.
    *
    * Returns the **live internal array**, not a copy — mutating it bypasses {@link addChild} /
-   * {@link removeChild} and their lifecycle and scene bookkeeping. Treat it as read-only, and copy it
-   * before iterating if the loop body may add or remove children.
+   * {@link removeChild} and their bookkeeping. Treat it as read-only, and copy it before a loop that may
+   * add or remove children.
    */
   public get children(): Node[] { return this._children; }
   // --- Custom variables -------------------------------------------------------------------------
@@ -888,10 +802,9 @@ export class Node {
   }
 
   // --- Scene lookups ----------------------------------------------------------------------------
-  // Real methods, not just conveniences synthesized by the legacy script proxy (wrapNode). A CLASS-based
-  // script runs natively on the node — no proxy — so without these `this.findNode('Player')` is simply not a
-  // function there, while the identical line works in a legacy `this.onStart = ...` script. The proxy still
-  // intercepts these names ahead of the node, so a legacy script keeps getting access-checked proxies back.
+  // Real methods, not conveniences synthesized by the script proxy: a CLASS-based script runs natively on
+  // the node, so without these `this.findNode('Player')` would not exist there. The proxy still intercepts
+  // these names ahead of the node, so a legacy script keeps getting access-checked proxies back.
 
   /**
    * The first node in this node's scene named `name`, or `undefined`. Searches the whole scene, not just
@@ -944,9 +857,8 @@ export class Node {
 
   /**
    * Restore a class-script's native fields (`{ name: value }`) as own properties on the node, so the
-   * script's methods read/write them directly (`this.speed`). Deliberately native — script variables are
-   * real instance properties, not entries in the {@link _variables} Map (which stays for the legacy,
-   * editor-created variable system). The editor serializes these from the linked script's field schema.
+   * script's methods read/write them directly (`this.speed`) rather than through the {@link _variables}
+   * Map, which stays for the editor-created variable system.
    */
   protected static _parseScriptVars(node: Node, json: any): void {
     if (!json || typeof json !== 'object') return;
@@ -972,14 +884,9 @@ export class Node {
   /**
    * Whether this node wakes up on its own when the scene starts (default `true`).
    *
-   * Set it `false` to author a node in place — positioned, textured, scripted, with its collider — that stays
-   * dormant until a script calls {@link spawn} on it. Nothing else can wake it: it does not render, update,
-   * animate or collide, and its {@link onStart} has not run yet. It IS still findable by name and id, which
-   * is how a script gets hold of it:
-   *
-   *   this.findNode('Enemy').spawn();
-   *
-   * Editing scenes ignore this flag (see `Scene.spawnRulesEnabled`) so the node stays visible in the editor.
+   * `false` authors a node in place — positioned, textured, scripted, with its collider — that stays
+   * dormant until a script calls {@link spawn} on it. It does not render, update, animate or collide, but
+   * IS findable by name and id. Editing scenes ignore the flag (see `Scene.spawnRulesEnabled`).
    */
   public get spawnOnStart(): boolean { return this._spawnOnStart; }
   public set spawnOnStart(value: boolean) {
@@ -1001,9 +908,7 @@ export class Node {
 
   /**
    * Unit +Z axis of this node's **local** rotation, ignoring any parent. For the direction the node
-   * actually faces in the world, use {@link worldForward}.
-   *
-   * Allocates a new vector on every read — hoist it out of hot loops.
+   * actually faces in the world, use {@link worldForward}. Allocates a new vector on every read.
    */
   public get forward(): vec3 {
     let forward = vec3.fromValues(0, 0, 1);
@@ -1013,15 +918,12 @@ export class Node {
   }
 
   // The four world-space getters below share one contract: each returns the LIVE cached vector, filled
-  // lazily on first read after a transform change. Never mutate what they return, and never hold the
-  // reference across a frame — the cache is rewritten in place, so a stored reference silently changes
-  // value underneath you. Copy (`vec3.clone`) if you need either.
+  // lazily on first read after a transform change. Never mutate one and never hold it across a frame —
+  // the cache is rewritten in place. Copy with `vec3.clone` to keep a value.
 
   /**
-   * This node's position in world space, with every ancestor transform applied.
-   *
-   * Live cached reference — do not mutate, and copy it if you need to keep it. To *move* the node, set
-   * {@link position} (local space); there is no world-space position setter.
+   * This node's position in world space, with every ancestor transform applied. Live cached reference.
+   * To *move* the node, set {@link position} (local space); there is no world-space position setter.
    */
   public get worldPosition(): vec3 {
     if (this._worldCacheDirty) this._updateWorldCache();
@@ -1029,10 +931,8 @@ export class Node {
   }
 
   /**
-   * This node's orientation in world space, normalized and correct under non-uniform ancestor scale
-   * (the scale is divided out of the basis before extraction — see `_updateWorldCache`).
-   *
-   * Live cached reference — do not mutate, and copy it if you need to keep it.
+   * This node's orientation in world space, normalized and correct under non-uniform ancestor scale.
+   * Live cached reference.
    */
   public get worldQuaternion(): quat {
     if (this._worldCacheDirty) this._updateWorldCache();
@@ -1041,8 +941,7 @@ export class Node {
 
   /**
    * This node's accumulated scale in world space (its own scale times every ancestor's).
-   *
-   * Live cached reference — do not mutate, and copy it if you need to keep it.
+   * Live cached reference.
    */
   public get worldScale(): vec3 {
     if (this._worldCacheDirty) this._updateWorldCache();
@@ -1051,9 +950,7 @@ export class Node {
 
   /**
    * Unit +Z axis of this node's world orientation — the direction it actually faces in the scene.
-   * Prefer this over {@link forward}, which ignores parent transforms.
-   *
-   * Live cached reference — do not mutate, and copy it if you need to keep it.
+   * Prefer this over {@link forward}, which ignores parent transforms. Live cached reference.
    */
   public get worldForward(): vec3 {
     if (this._worldCacheDirty) this._updateWorldCache();
@@ -1112,19 +1009,15 @@ export class Node {
   /** Moves by `value` along this node's own forward vector (its local -Z/+Z facing, not a world axis) —
    *  the usual "walk forward" control. */
   public addForward(value: number) {
-    //vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.worldForward, value));
     vec3.add(this._position, this._position, vec3.scale(vec3.create(), this.forward, value));
     this._updateTranslationMatrix();
   }
 
   /** Moves by `value` along this node's own right vector (perpendicular to `forward`) — "strafe". */
   public addRight(value: number) {
-    // normalize forward vector
     vec3.normalize(this.forward, this.forward);
-    // normalize right vector
     let right = vec3.cross(vec3.create(), this.forward, vec3.fromValues(0, 1, 0));
     vec3.normalize(right, right);
-    // move along right vector
     vec3.add(this._position, this._position, vec3.scale(vec3.create(), right, value));
     this._updateTranslationMatrix();
   }
@@ -1142,13 +1035,11 @@ export class Node {
 
   /**
    * Notify observers (the editor) that a *property* of this node changed, of the given {@link ChangeKind}.
-   * Gated on {@link authoring.enabled}: outside the editor's edit mode this is a complete no-op, so
-   * the setters that call it — run every frame by scripts and physics — allocate nothing and never touch
-   * the bus in Play mode or a published game. Structural changes do NOT go through here; they emit
-   * unconditionally because the Scene relies on them to re-filter its node lists.
+   * Gated on {@link authoring.enabled}, so it is a complete no-op outside the editor's edit mode.
+   * Structural changes do NOT go through here: they emit unconditionally, because the Scene relies on
+   * them to re-filter its node lists.
    *
-   * `prop`/`prev`/`next` are optional detail (e.g. a variable name and its old/new value) — enough for a
-   * panel to refresh precisely and for a future undo/redo recorder to build the inverse edit.
+   * `prop`/`prev`/`next` are optional detail — a variable name and its old/new value, say.
    */
   protected _notifyChange(kind: ChangeKind, prop?: string, prev?: unknown, next?: unknown): void {
     if (authoring.enabled)
@@ -1188,8 +1079,7 @@ export class Node {
    * Sets local-space rotation as Euler angles in DEGREES `[x, y, z]` (pitch, yaw, roll).
    *
    * The angles compose as `Rz(roll) * Ry(yaw) * Rx(pitch)`, so the singular orientation is
-   * **yaw = +/-90 degrees** (where pitch and roll collapse into one axis), not pitch. Use
-   * `setQuaternion` for orientations that pass through it.
+   * **yaw = +/-90 degrees**, not pitch. Use `setQuaternion` for orientations that pass through it.
    */
   public setRotation(value: vec3): Node {
     vec3.copy(this._euler, value);
@@ -1200,13 +1090,11 @@ export class Node {
   /**
    * Sets local-space rotation directly as a quaternion — use this over setRotation to avoid gimbal lock.
    *
-   * Keeps `_euler` in sync with the quaternion, because the two are parallel state: without the
-   * sync, a later `rotateY()` would compose from whatever euler was last written and snap the node
-   * back to that orientation. The euler that comes back is not necessarily the one a caller would
-   * have written (the mapping is many-to-one) but it always describes the same rotation.
+   * Keeps `_euler` in sync with the quaternion, because the two are parallel state: without the sync a
+   * later `rotateY()` would compose from whatever euler was last written. The euler that comes back is
+   * not necessarily the one a caller would have written, but it describes the same rotation.
    *
-   * Note it deliberately does NOT push into the physics body, unlike the `setRotation` path. That
-   * asymmetry predates this and changing it would alter how existing scenes drive kinematic bodies.
+   * Deliberately does NOT push into the physics body, unlike the `setRotation` path.
    */
   public setQuaternion(quaternion: quat): Node {
     quat.copy(this._quaternion, quaternion);
@@ -1282,20 +1170,14 @@ export class Node {
   public get body(): RigidBody | null { return this._body; }
 
   /**
-   * True when this node's rigid body is resting on something solid — terrain or another body — in the
-   * CURRENT gravity direction. Works under any gravity configuration: "down" is the world's gravity vector,
-   * not -Y, so inverted or sideways gravity behaves correctly (and under zero gravity nothing is grounded).
+   * True when this node's rigid body is resting on something solid in the CURRENT gravity direction —
+   * "down" is the world's gravity vector, not -Y, so inverted or sideways gravity behaves correctly and
+   * nothing is grounded under zero gravity. Answered from physics contacts; always false without a body.
    *
    *   if (this.isGrounded) this.velocity = [v[0], JUMP_SPEED, v[2]];
    *
-   * Answered from the physics contacts, so it costs no raycast and needs no per-scene wiring. Always false
-   * for a node with no body, so a caller never has to check for one.
-   *
-   * Allows a short grace (~0.1s) after the last real ground contact, because cannon drops the contact of a
-   * perfectly resting body for the odd frame and the body plainly has not left the ground — see
-   * PhysicsSystem's GROUND_GRACE. Two consequences worth knowing: you get coyote-time jumping for free, and
-   * this stays true for that grace after you genuinely walk off a ledge, so it is not the way to ask "am I
-   * falling right now" — `velocity[1]` is.
+   * Allows a ~0.1s grace after the last ground contact (see PhysicsSystem's GROUND_GRACE), so it stays
+   * true briefly after walking off a ledge — use {@link isFalling} to ask about falling.
    */
   public get isGrounded(): boolean {
     if (!this._body) return false;
@@ -1303,15 +1185,12 @@ export class Node {
   }
 
   /**
-   * Surface normal of the ground this node is standing on, pointing up out of it: `[0, 1, 0]` on level ground
-   * under normal gravity, tilted on a slope. Use it to move ALONG the ground rather than through it:
+   * Surface normal of the ground this node is standing on, pointing up out of it: `[0, 1, 0]` on level
+   * ground under normal gravity, tilted on a slope. Project a movement direction onto it to move ALONG
+   * the ground rather than through it.
    *
-   *   const n = this.groundNormal;
-   *   const d = dir[0]*n[0] + dir[1]*n[1] + dir[2]*n[2];
-   *   dir = normalize([dir[0]-n[0]*d, dir[1]-n[1]*d, dir[2]-n[2]*d]);  // now parallel to the surface
-   *
-   * Falls back to up (gravity reversed) when airborne, bodyless, or under zero gravity — so the projection
-   * above is a no-op in those cases and callers need no special case. Returns a fresh vec3.
+   * Falls back to up (gravity reversed) when airborne, bodyless, or under zero gravity, so that projection
+   * is a no-op in those cases. Returns a fresh vec3.
    */
   public get groundNormal(): vec3 {
     const up = vec3.fromValues(0, 1, 0);
@@ -1320,15 +1199,13 @@ export class Node {
   }
 
   /**
-   * This node's world-space velocity, in units per second: `[0, 0, 0]` when it is still (or has no body),
-   * `[0, 0, 5]` when it is moving along +Z at 5. Assigning drives the body — the component along gravity is
-   * yours to preserve, which is what keeps falling and jumping intact while steering horizontally:
+   * This node's world-space velocity, in units per second. Assigning drives the body — the component
+   * along gravity is yours to preserve, which is what keeps falling and jumping intact while steering:
    *
    *   const v = this.velocity;
    *   this.velocity = [dirX * speed, v[1], dirZ * speed];
    *
-   * A fresh vector each read (like `forward`), so it is safe to hold on to. Assigning to a node with no body
-   * does nothing.
+   * A fresh vector each read. Assigning to a node with no body does nothing.
    */
   public get velocity(): vec3 {
     if (!this._body) return vec3.create();
@@ -1344,9 +1221,8 @@ export class Node {
    * This node's angular velocity in radians per second, about each world axis. `[0, 2, 0]` is spinning
    * anticlockwise about the world up at 2 rad/s.
    *
-   * The rotational counterpart to {@link velocity}, and read the same way: commanded, not measured. A body
-   * whose `angularConstraints` lock an axis still reports whatever was written to it — {@link turnRate} is
-   * what the node actually did. A fresh vector each read; assigning to a bodyless node does nothing.
+   * Commanded, not measured: a body whose `angularConstraints` lock an axis still reports whatever was
+   * written to it — {@link turnRate} is what the node actually did. A fresh vector each read.
    */
   public get angularVelocity(): vec3 {
     if (!this._body) return vec3.create();
@@ -1361,15 +1237,12 @@ export class Node {
   //
   // How fast this node is ACTUALLY moving, measured from its body's position delta each physics step.
   //
-  // This is the counterpart to `velocity`, and the difference matters: `velocity` is what the body was TOLD
-  // to do — the value a controller script wrote — so it reads full speed while the character is jammed
-  // against a wall. These read ~0, because the body did not move. Anything that stops you shows up here:
-  // walls, friction, constraints, a platform carrying you.
+  // The counterpart to `velocity`, which is what the body was TOLD to do: these read ~0 while a character
+  // is jammed against a wall, and anything that stops you shows up here.
   //
-  // Every one of them is safe on a node with no body (0 or a zero vector), so a caller never has to check
-  // and every vector is a fresh copy. The smoothed family (`currentVelocity` and everything derived from it)
-  // is what to bind to animation; `rawVelocity` / `rawSpeed` are the unfiltered per-frame values for logic
-  // that needs an immediate answer. See physics/motion.ts for why smoothing is not optional in practice.
+  // All are safe on a node with no body (0 or a zero vector) and every vector is a fresh copy. Bind
+  // animation to the smoothed family (`currentVelocity` and what derives from it); `rawVelocity` /
+  // `rawSpeed` are the unfiltered per-frame values. See physics/motion.ts for the filtering.
 
   /** The physics motion record for this node's body, or null. */
   private get _motion(): MotionRecord | null {
@@ -1415,10 +1288,8 @@ export class Node {
   }
 
   /**
-   * Actual speed across the ground plane — the component perpendicular to gravity.
-   *
-   * This, not {@link currentSpeed}, is what a locomotion blend wants: falling is fast, and a character in
-   * mid-air should not read as sprinting.
+   * Actual speed across the ground plane — the component perpendicular to gravity. This, not
+   * {@link currentSpeed}, is what a locomotion blend wants: falling is fast.
    */
   public get planarSpeed(): number {
     const m = this._motion;
@@ -1427,10 +1298,9 @@ export class Node {
   }
 
   /**
-   * Signed actual speed along gravity — positive rising, negative falling.
-   *
-   * Correct under any gravity direction, unlike reading `velocity[1]`, and measured rather than commanded:
-   * a body pressed into the floor reports ~0 instead of the downward velocity gravity keeps applying.
+   * Signed actual speed along gravity — positive rising, negative falling. Correct under any gravity
+   * direction, unlike `velocity[1]`, and measured rather than commanded: a body pressed into the floor
+   * reports ~0.
    */
   public get verticalSpeed(): number {
     const m = this._motion;
@@ -1459,18 +1329,13 @@ export class Node {
    * Where this node is travelling relative to where it is FACING, in degrees: `0` straight ahead,
    * **`-90` strafing RIGHT, `+90` strafing LEFT**, `±180` backpedalling.
    *
-   * **Mind the sign.** Angles here are counter-clockwise, because they share the engine's yaw convention
-   * (`atan2(x, z)`, see {@link worldPlanarAngle}) — and with forward `+Z` and up `+Y`, a node's right is
-   * `forward x up` = `-X`, so turning right is a NEGATIVE rotation. Several engines label strafe-right `+90`;
-   * this one cannot, without `planarAngle` contradicting the yaw that every other angle in the engine uses.
-   * Lay a strafe blend space out accordingly, or its left and right clips play mirrored.
+   * **Mind the sign.** Angles here are counter-clockwise, sharing the engine's yaw convention
+   * (`atan2(x, z)`, see {@link worldPlanarAngle}): with forward `+Z` and up `+Y` a node's right is
+   * `forward x up` = `-X`, so turning right is a NEGATIVE rotation. Lay a strafe blend space out
+   * accordingly, or its left and right clips play mirrored.
    *
-   * This is the axis a directional locomotion blend needs — it is what picks strafe-left vs strafe-right vs
-   * walk-backwards, and it keeps meaning the same thing as the character turns.
-   *
-   * The node's own heading is derived from {@link worldForward}, never from `rotation[1]`. That is
-   * load-bearing: euler composition is Rz·Ry·Rx, so past a quarter turn a quaternion-oriented node's yaw
-   * folds into pitch and roll and a node turned 179° reads as 1°.
+   * The node's own heading comes from {@link worldForward}, never `rotation[1]`: euler composition is
+   * Rz·Ry·Rx, so past a quarter turn a quaternion-oriented node's yaw folds into pitch and roll.
    */
   public get planarAngle(): number {
     const m = this._motion;
@@ -1492,20 +1357,15 @@ export class Node {
    * Signed speed along the way this node is FACING: positive walking forward, **negative backpedalling**,
    * ~0 while strafing dead sideways.
    *
-   * This is the only speed that can go negative. {@link planarSpeed}, {@link currentSpeed} and
+   * The only speed here that can go negative — {@link planarSpeed}, {@link currentSpeed} and
    * {@link rawSpeed} are vector magnitudes, so a blend-space sample authored at a negative speed on one of
-   * those axes sits where the probe can never reach and its clip silently never plays — the gradient band
-   * gives it weight exactly 0 at every reachable point.
+   * those axes sits where the probe can never reach.
    *
-   * There are two valid ways to lay out a locomotion blend space, and mixing them is the trap:
+   * A locomotion blend space uses one of two layouts, and mixing them is the trap:
    *
-   *   - `forwardSpeed` x {@link lateralSpeed} — signed on both axes, backwards at negative forward. Neither
-   *     axis wraps.
+   *   - `forwardSpeed` x {@link lateralSpeed} — signed on both axes, neither wrapping.
    *   - {@link planarAngle} x `planarSpeed` — direction and magnitude, backwards at ±180 on a WRAPPING
    *     direction axis (`AnimationFieldAxis.wrap`).
-   *
-   * Pick one. Combining `planarAngle` with a signed speed gives backwards two different coordinates, and the
-   * region between them is dead space no clip covers.
    */
   public get forwardSpeed(): number {
     const m = this._motion;
@@ -1516,11 +1376,9 @@ export class Node {
   /**
    * Signed speed across this node's facing — the strafe axis. ~0 walking straight ahead or straight back.
    *
-   * **Mind the sign: positive is LEFT.** It shares the counter-clockwise convention of {@link planarAngle}
-   * (see the sign note there), and deliberately so — `atan2(lateralSpeed, forwardSpeed)` in degrees is exactly
-   * `planarAngle`, so a blend laid out with these two axes and one laid out with angle-and-speed agree about
-   * which side is which. Several engines label strafe-right positive; this one cannot without contradicting
-   * the yaw every other angle in the engine uses.
+   * **Mind the sign: positive is LEFT.** It shares the counter-clockwise convention of {@link planarAngle},
+   * so `atan2(lateralSpeed, forwardSpeed)` in degrees is exactly `planarAngle` and a blend laid out with
+   * these two axes agrees with one laid out as angle-and-speed about which side is which.
    */
   public get lateralSpeed(): number {
     const m = this._motion;
@@ -1530,10 +1388,9 @@ export class Node {
 
   // ---- Measured motion: change over time -------------------------------------------------------------
   //
-  // Everything above answers "what is this node doing"; these answer "what is it in the middle of doing".
-  // That distinction is the whole reason they exist: a locomotion machine can pick a gait from `planarSpeed`
-  // alone, but it cannot tell a character breaking into a run from one already running at that speed, and so
-  // it cannot play a start or a stop. `planarSpeed` says WHERE on the curve; these say WHICH WAY along it.
+  // Everything above answers "what is this node doing"; these answer "what is it in the middle of doing" —
+  // `planarSpeed` says WHERE on the curve, these say WHICH WAY along it, which is what tells a character
+  // breaking into a run from one already running at that speed.
   //
   // All measured, all smoothed, all safe on a bodyless node. See physics/motion.ts for the filtering, and
   // `Body.motionSmoothing` to retune it per character.
@@ -1565,11 +1422,8 @@ export class Node {
   }
 
   /**
-   * Whether this node counts as moving across the ground, with hysteresis.
-   *
-   * Not the same as `planarSpeed > 0`, and the difference is the point: the threshold to start moving is
-   * higher than the threshold to stop, so a node drifting at walking-pace-minus-epsilon reports one steady
-   * answer instead of alternating every frame and dragging a state machine with it.
+   * Whether this node counts as moving across the ground, with hysteresis: the threshold to start moving
+   * is higher than the threshold to stop, so a node drifting near it reports one steady answer.
    */
   public get isMoving(): boolean {
     return this._motion?.moving ?? false;
@@ -1581,10 +1435,8 @@ export class Node {
   }
 
   /**
-   * Seconds this node has been continuously NOT {@link isMoving}; 0 while moving.
-   *
-   * The right gate for "settle into idle": `StopRun -> Idle when stillTime > 0.2` waits for the character to
-   * have actually stopped, where a bare `planarSpeed < 0.1` fires on the first frame it dips.
+   * Seconds this node has been continuously NOT {@link isMoving}; 0 while moving. The right gate for
+   * "settle into idle", where a bare `planarSpeed < 0.1` fires on the first frame it dips.
    */
   public get stillTime(): number {
     return this._motion?.stillTime ?? 0;
@@ -1592,10 +1444,8 @@ export class Node {
 
   /**
    * How fast this node is turning, in degrees per second, signed. Measured from its body's FACING, not its
-   * direction of travel — so it is non-zero for a character turning in place, where every other value here
-   * reads zero.
-   *
-   * Wrap-safe: a turn through ±180 reports its true rate rather than a full-circle spike.
+   * direction of travel, so it is non-zero for a character turning in place. Wrap-safe: a turn through
+   * ±180 reports its true rate rather than a full-circle spike.
    */
   public get turnRate(): number {
     return this._motion?.turnRate ?? 0;
@@ -1611,9 +1461,8 @@ export class Node {
   /**
    * True while this node is genuinely falling: off the ground and losing height.
    *
-   * Ask this rather than `!isGrounded`. `isGrounded` holds true for a ~0.1s grace after the last ground
-   * contact (deliberately — see its own docs), so it is late to report a fall; and it goes false the instant a
-   * character jumps, so its negation reports a fall on the way UP.
+   * Ask this rather than `!isGrounded`, which holds true for a ~0.1s grace after the last ground contact
+   * and goes false the instant a character jumps — so its negation reports a fall on the way UP.
    */
   public get isFalling(): boolean {
     return !this.isGrounded && this.verticalSpeed < FALLING_SPEED;
@@ -1634,9 +1483,8 @@ export class Node {
   /**
    * Distance from this node's collider to the ground below it, in world units, or `-1` when unknown.
    *
-   * Requires a `groundProbeDistance` on the body — the value comes from that probe's raycast, and without one
-   * there is nothing measuring the gap. Capped by the probe distance, so it answers "how close to landing",
-   * not "how high up". `-1`, never 0, for unknown: 0 means resting on the ground.
+   * Requires a `groundProbeDistance` on the body, and is capped by it — so it answers "how close to
+   * landing", not "how high up". `-1`, never 0, for unknown: 0 means resting on the ground.
    */
   public get groundDistance(): number {
     if (!this._body) return -1;
@@ -1645,9 +1493,7 @@ export class Node {
 
   /**
    * Tilt of the ground under this node, in degrees from level: 0 on the flat, 90 against a wall.
-   *
-   * Derived from {@link groundNormal}, so it reads 0 while airborne (that normal falls back to up) — which is
-   * the harmless answer for the slope-lean blends this feeds.
+   * Derived from {@link groundNormal}, so it reads 0 while airborne (that normal falls back to up).
    */
   public get slopeAngle(): number {
     const n = this.groundNormal;
@@ -1666,9 +1512,8 @@ export class Node {
    * Gives this node a rigid body, created at its current world position and orientation, and wires
    * {@link onCollision}. The body drives the node's transform from here on.
    *
-   * Note the body is built from the node's world transform at call time, so set the node's transform
-   * *before* calling this. Only meaningful on root-level nodes today — a body on a child node does not
-   * track its parent's transform.
+   * The body is built from the node's world transform at call time, so set the node's transform *before*
+   * calling this. Only meaningful on root-level nodes — a body on a child node does not track its parent.
    *
    * @param mass              Kilograms. `0` makes the body static: immovable, but still collidable.
    * @param linearDamping     Fraction of linear velocity bled off per second (0 = none, 1 = frozen).
@@ -1725,7 +1570,6 @@ export class Node {
       groundProbeDistance, motionSmoothing
     }, this);
 
-    // handle onCollision event
     this._body.addEventListener('collide', (event: any) => {
       if (event.body instanceof RigidBody || event.body instanceof Trigger)
         this.onCollision(event.body.owner);
@@ -1749,7 +1593,6 @@ export class Node {
       quaternion: this.worldQuaternion
     }, this);
 
-    // handle onTrigger event
     this._trigger.addEventListener('collide', (event: any) => {
       if (event.body instanceof RigidBody || event.body instanceof Trigger)
         this.onTrigger(event.body.owner);
@@ -1758,16 +1601,14 @@ export class Node {
     return this._trigger;
   }
 
-  // These four return the node's LIVE internal vectors, so writing through them —
-  // `node.position[0] += 1` — skips the bookkeeping the setters do: the translation/rotation/scale
-  // matrix is not recomposed and the change is never pushed into the physics body, leaving the node
-  // and its collider disagreeing about where it is. Read through them; write with setPosition/
-  // setRotation/setQuaternion/setScale (or setX/addX/rotateY/...).
+  // These four return the node's LIVE internal vectors, so writing through them — `node.position[0] += 1`
+  // — skips the setters' bookkeeping: the local matrix is not recomposed and nothing is pushed into the
+  // physics body. Read through them; write with setPosition/setRotation/setQuaternion/setScale.
 
   /** Local-space position, relative to the parent. Live reference — write with {@link setPosition}. */
   public get position(): vec3 { return this._position; }
   /**
-   * Local-space rotation as Euler angles in radians `[pitch, yaw, roll]`.
+   * Local-space rotation as Euler angles in DEGREES `[pitch, yaw, roll]`.
    * Live reference — write with {@link setRotation}.
    */
   public get rotation(): vec3 { return this._euler; }
@@ -1805,9 +1646,8 @@ export class Node {
    * World-space axis-aligned bounding box. The default is a unit cube scaled by the world scale;
    * {@link ModelNode} overrides it with the geometry's actual bounds.
    *
-   * Cached and invalidated with the transform (`_worldBoxDirty`), so the returned object is a **live
-   * reference rewritten in place** — exactly like {@link worldPosition} and {@link getBoundingSphere}.
-   * Clone it if you need to keep a box across frames or compare two nodes' boxes.
+   * Cached against `_worldBoxDirty`, so the returned object is a **live reference rewritten in place**.
+   * Clone it to keep a box across frames or to compare two nodes' boxes.
    */
   public getBoundingBox(): { min: vec3, max: vec3 } {
     if (!this._worldBoxDirty) return this._worldBox;
@@ -1853,11 +1693,9 @@ export class Node {
   /**
    * Force the next {@link getBoundingSphere} / {@link getBoundingBox} to recompute.
    *
-   * The world caches are normally invalidated by `updateTransforms`, which is the only thing that can
-   * move a node. Editing the underlying VERTICES moves the bounds without moving the node, so the
-   * transform never goes dirty and the stale sphere survives — call this after such an edit (terrain
-   * sculpting is the one in-tree case; see `Geometry.invalidateBounds`, which handles the object-space
-   * half).
+   * The world caches are normally invalidated by `updateTransforms`. Editing the underlying VERTICES moves
+   * the bounds without moving the node, so call this after such an edit (see `Geometry.invalidateBounds`
+   * for the object-space half).
    */
   public invalidateWorldBounds(): void {
     this._worldSphereDirty = true;

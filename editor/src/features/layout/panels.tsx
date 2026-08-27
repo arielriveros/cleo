@@ -29,9 +29,8 @@ import RendererSettingsPanel from '../renderer/RendererSettingsPanel';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
 
-// The viewport panel reproduces the old Center stack: a `relative` wrapper so UIOverlay/StateGraph/
-// LoadingScreen (absolute inset-0) and the data-cleo-overlay HUD keep anchoring to the viewport,
-// not the dock. Its group is locked and headerless (see DockLayout) — the immovable center anchor.
+// The wrapper must stay `relative` so UIOverlay/StateGraph/LoadingScreen (absolute inset-0) and the
+// data-cleo-overlay HUD anchor to the viewport, not the dock. Its group is locked and headerless.
 function ViewportPanel(_: IDockviewPanelProps) {
   const { isSceneReady, loadingProgress, editorMode } = useCleoEngine();
   return (
@@ -56,9 +55,8 @@ function ViewportPanel(_: IDockviewPanelProps) {
   );
 }
 
-// Side panels keep the old Sidebar's container behavior (vertical scroll, no horizontal overflow).
-// `scroll={false}` is for a panel that scrolls its own content — the trees virtualize their rows and need a
-// bounded height, and an outer scroller would give them a second, always-idle scrollbar.
+// Vertical scroll, no horizontal overflow. `scroll={false}` is for a panel that scrolls its own content:
+// the virtualized trees need a bounded height, and an outer scroller adds a second idle scrollbar.
 function SidePanel({ children, scroll = true }: { children: React.ReactNode; scroll?: boolean }) {
   return (
     <div className={`flex flex-col h-full w-full overflow-x-hidden select-none ${scroll ? 'overflow-y-auto' : 'overflow-y-hidden'}`}>
@@ -73,9 +71,8 @@ function ScenePanel(_: IDockviewPanelProps) {
   return <SidePanel scroll={false}>{editorMode === 'animation' ? <SkeletonTree /> : <SceneInspector />}</SidePanel>;
 }
 
-// The two Add palettes. Both are the same `AddNew` grid over the same catalog and the same drop handlers;
-// `scope` picks which half of the categories each shows. Two panels rather than one mode-switched panel so
-// they can sit next to each other as tabs — a UI element and a mesh are added the same way.
+// The two Add palettes: the same `AddNew` grid over the same catalog and drop handlers, with `scope`
+// picking which half of the categories each shows.
 function SceneAddPanel(_: IDockviewPanelProps) {
   return <SidePanel><AddNew scope='scene' /></SidePanel>;
 }
@@ -105,15 +102,14 @@ function MaterialPanel() {
   );
 }
 
-// The Properties panel hosts the mode-specific inspectors too (material and terrain-material authoring),
-// which is why DockLayout retitles its tab per mode. Animation is the exception: it has its own three
-// panels (below) and hides Properties entirely.
+// The Properties panel hosts the mode-specific inspectors too, so DockLayout retitles its tab per mode.
+// Animation is the exception: it has its own three panels and hides Properties entirely.
 function PropertiesPanel(_: IDockviewPanelProps) {
   const { editorMode, editingTerrainMaterialNode } = useCleoEngine();
   const { node, readOnly } = useSelectedNode();
 
-  // Terrain-material mode edits the dedicated (unrendered) edit node — the visible preview node
-  // carries the composite terrain material.
+  // Terrain-material mode edits the dedicated unrendered edit node; the visible preview node carries
+  // the composite terrain material.
   if (editorMode === 'terrainMaterial') return <SidePanel><TerrainMaterialInspector node={editingTerrainMaterialNode} /></SidePanel>;
   if (editorMode === 'material') return <SidePanel><MaterialPanel /></SidePanel>;
   if (editorMode === 'tileset') return <SidePanel><TilesetInspector /></SidePanel>;
@@ -167,25 +163,17 @@ function AssetsPanel(_: IDockviewPanelProps) {
   );
 }
 
-// The animation editor's three panels. They share one StateMachineProvider session (it wraps the whole
-// dock, see Editor.tsx), so each is free to be dragged anywhere without losing the working copy. Shown
-// only in animation mode — see hiddenPanelIds. Each already fills and scrolls itself, so no SidePanel.
+// The animation editor's three panels. They share one StateMachineProvider session wrapping the whole
+// dock (Editor.tsx), so each can be dragged anywhere. Each fills and scrolls itself, so no SidePanel.
 function AnimClipsPanel(_: IDockviewPanelProps) { return <AnimClips />; }
-// The Animation Field editor's single panel. Like the animation panels it lives inside the shared provider
-// that wraps the whole dock (see Editor.tsx), so it can be dragged anywhere without losing the session.
+// The Animation Field editor's single panel, inside the same dock-wide provider (Editor.tsx).
 function AnimFieldPanel(_: IDockviewPanelProps) { return <AnimationFieldPanel />; }
 function AnimVariablesPanel(_: IDockviewPanelProps) { return <AnimVariables />; }
 function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachine />; }
 // The tilemap editor's two panels. Shown only in tilemap mode — see hiddenPanelIds.
 function TilePalettePanel(_: IDockviewPanelProps) { return <TilePalette />; }
 function TilemapLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><TilemapLayersPanel /></SidePanel>; }
-// The two renderer-mode panels. Both own their scrolling (each is a long column of sections), so
-// neither takes a SidePanel wrapper.
-//
-// Performance absorbed the floating stats HUD that used to sit over the viewport: one sampling loop
-// instead of two over the same counters, and nothing covering the corner of the image in the one mode
-// whose purpose is looking at it. Renderer Settings is the former floating options overlay, for the
-// same reason — it was a 64-wide column pinned over the left of the viewport.
+// The two renderer-mode panels. Both own their scrolling, so neither takes a SidePanel wrapper.
 function PerformanceDockPanel(_: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
@@ -202,8 +190,8 @@ function RendererSettingsDockPanel(_: IDockviewPanelProps) {
   );
 }
 
-// Panels are movable but not closable — a lost panel would need Reset Layout, so the tab renders
-// the title only (dockview's tab wrapper still owns drag behavior and colors).
+// Panels are movable but not closable, so the tab renders the title only; dockview's tab wrapper still
+// owns drag behavior and colors.
 export function PanelTab(props: IDockviewPanelHeaderProps) {
   return (
     <div className="flex items-center h-full px-2 text-xs whitespace-nowrap select-none">

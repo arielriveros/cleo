@@ -2,11 +2,9 @@ import React from 'react'
 import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 import type { BundleData } from '../../utils/bundle'
 
-// Shown after a .zip project/asset-pack is parsed, before anything is written.
-//
-// Three destinations, in increasing order of destructiveness: New project puts the bundle in a project of
-// its own and leaves everything you have alone; Merge appends it to the open project, re-minting colliding
-// ids; Replace discards the open project's contents. All three reload the editor afterwards.
+// Shown after a .zip project/asset-pack is parsed, before anything is written. Three destinations, in
+// increasing order of destructiveness: New project, Merge (re-mints colliding ids), Replace (discards the
+// open project's contents). All three reload the editor afterwards.
 export default function ImportBundleModal(props: {
   bundle: BundleData
   onNewProject: () => void

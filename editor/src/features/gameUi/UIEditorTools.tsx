@@ -5,14 +5,12 @@ import { useCleoEngine } from '../EngineContext';
 /**
  * Direct manipulation for the selected UI element: drag to move, eight grips to resize.
  *
- * Everything is expressed as a delta on `offsetMin` / `offsetMax`, which works out simpler than it sounds.
- * The solve is
+ * Everything is a delta on `offsetMin` / `offsetMax`. The solve is
  *
  *     minX = parent.x + anchorMin.x * parent.width + offsetMin.x
  *
- * and the anchors, the parent rect and the root scale are all fixed for the duration of a drag — so a
- * change in an edge's position IS the change in its offset, on a pinned and a stretched axis alike. There
- * is no per-mode branch anywhere below.
+ * and anchors, parent rect and root scale are fixed for the duration of a drag, so a change in an edge's
+ * position IS the change in its offset on pinned and stretched axes alike.
  */
 
 /** Which edges a grip moves. `null` on an axis means "leave it alone". */
@@ -53,7 +51,6 @@ function snap(value: number, guides: number[], tolerance: number): number {
 
 export default function UIEditorTools() {
     const { editorScene, eventEmitter, selectedNode } = useCleoEngine();
-    // Bumped when the tracked rect moves; see the rAF below.
     const [, setTick] = useState(0);
     const dragRef = useRef<{
         grip: Grip | null;
@@ -71,21 +68,17 @@ export default function UIEditorTools() {
     } | null>(null);
 
     const node = selectedNode ? editorScene?.getNodeById(selectedNode) : null;
-    // Roots are excluded: a screen root IS the viewport, and a world root is placed by its scene transform
-    // (which keeps the ordinary 3D gizmo).
+    // Roots are excluded: a screen root is the viewport, a world root keeps the ordinary 3D gizmo.
     const target = node instanceof UINode && !(node instanceof UIRootNode) ? node : null;
 
-    // The handles read `screenRect`, which the layout pass rewrites every frame. Without a per-frame
-    // re-render they would lag the element during a drag, and drift away entirely when a world-space
-    // ancestor moves.
+    // The handles read `screenRect`, which the layout pass rewrites every frame.
     useEffect(() => {
         if (!target) return;
         let raf = 0;
         let lastKey = '';
         const tick = () => {
-            // Re-render only when the rect actually moved. The handles must track a dragging or
-            // camera-driven element, but a settled selection is the common case and should cost nothing —
-            // an unconditional setState here would re-render every frame for the entire session.
+            // Re-render only when the rect actually moved: an unconditional setState here re-renders
+            // every frame for the whole session.
             const r = target.screenRect;
             const key = `${r.x},${r.y},${r.width},${r.height}`;
             if (key !== lastKey) { lastKey = key; setTick(t => t + 1); }
@@ -112,7 +105,7 @@ export default function UIEditorTools() {
             offsetMin: [...target.offsetMin] as [number, number],
             offsetMax: [...target.offsetMax] as [number, number],
             scale,
-            // Guides in the same absolute reference space the rects live in: the parent's edges and centre.
+            // Guides live in the same absolute reference space as the rects.
             guidesX: [pr.x, pr.x + pr.width / 2, pr.x + pr.width],
             guidesY: [pr.y, pr.y + pr.height / 2, pr.y + pr.height],
             rectX: target.rect.x,
@@ -139,8 +132,7 @@ export default function UIEditorTools() {
         const max: [number, number] = [...drag.offsetMax] as [number, number];
 
         if (!grip) {
-            // Body drag: snap whichever edge lands on a guide first, then move both by the same amount so
-            // the element translates rather than resizes.
+            // Body drag: snap whichever edge lands on a guide first, then move both by the same amount.
             const left = snap(drag.rectX + dx, drag.guidesX, tol);
             const right = snap(drag.rectX + drag.rectW + dx, drag.guidesX, tol);
             dx = Math.abs(left - (drag.rectX + dx)) <= Math.abs(right - (drag.rectX + drag.rectW + dx))
@@ -170,9 +162,7 @@ export default function UIEditorTools() {
         if (!dragRef.current) return;
         dragRef.current = null;
         try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* already gone */ }
-        // Close the history interaction explicitly. HistoryContext brackets a drag on this event rather
-        // than leaving it to the idle timer, so the whole drag undoes in one step — the same signal the
-        // landscape and tilemap brushes send.
+        // HistoryContext brackets a drag on this event, so the whole drag undoes in one step.
         eventEmitter.emit('GIZMO_DRAG_END', { axis: null, nodeId: target?.id ?? null });
     }, [eventEmitter, target]);
 
@@ -187,8 +177,7 @@ export default function UIEditorTools() {
                 className='absolute'
                 style={{
                     left: rect.x, top: rect.y, width: rect.width, height: rect.height,
-                    // Only the frame itself is hittable, so a click on empty space still reaches the
-                    // UI layer underneath and clears the selection.
+                    // Only the frame is hittable, so a click on empty space reaches the UI layer below.
                     pointerEvents: 'auto',
                     cursor: 'move',
                     outline: '1px solid rgb(var(--node-ui))',

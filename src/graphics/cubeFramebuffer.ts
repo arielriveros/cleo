@@ -5,52 +5,31 @@ import type { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 import { Texture } from './texture';
 
 /**
- * Renders into individual cube-map faces (and mip levels) of a cubemap render target. Used by the IBL
- * pipeline: capturing the scene into a cubemap, and the irradiance / prefilter convolution passes.
- *
- * There is nothing left here that a plain {@link Framebuffer} does differently — a face at a mip level
- * is just a `TextureView` with a `baseArrayLayer` and a `baseMipLevel`, and the device keeps one render
- * target per distinct view set. What survives as a class is the one thing that is genuinely this
- * pipeline's own: a scratch DEPTH attachment that only the scene-capture pass wants, sized to whichever
- * face size it is capturing at, while the convolution passes are colour-only.
- *
- * That depth attachment used to be a `WebGLRenderbuffer`, reallocated in place and attached or detached
- * per face. It is a depth TEXTURE now, because WebGPU has no renderbuffers at all and a depth texture is
- * what both backends can express — same DEPTH_COMPONENT24 storage, same result.
+ * Renders into individual cube-map faces and mip levels of a cubemap target, with an optional scratch
+ * depth attachment. Used by the IBL pipeline for scene capture and the convolution passes.
  */
 export class CubeFramebuffer {
     private _depth: Texture | null = null;
     private _depthSize: number = 0;
 
     /**
-     * Bind a cube face (and mip level) of `cube` as colour attachment 0.
-     * @param withDepth attach a depth texture sized to `size` (needed for scene capture).
-     * @param size face size at this mip (only required when withDepth is true).
-     */
-    /**
-     * The render target for one face/mip, for a caller recording through the RHI rather than binding.
-     *
-     * Same cached target `bindFace` uses — the deduplication in `createRenderTarget` is what keeps a
-     * six-face bake from stranding six framebuffers per mip level.
+     * The render target for one face/mip of `cube`, for callers recording through the RHI.
+     * @param withDepth attach a depth texture of `size` (needed for scene capture).
      */
     public targetFor(cube: Texture, face: number, mip: number = 0,
                      withDepth: boolean = false, size: number = 0): RenderTarget {
         return this._target(cube, face, mip, withDepth, size);
     }
 
-    /**
-     * The legacy bind model — see the note on `Framebuffer.bind`. `RenderTarget.bind()` is WebGL2-only
-     * because binding a framebuffer object is not something WebGPU has, so the cast is the coupling
-     * stated rather than the interface widened to hide it.
-     */
+    /** Bind a cube face/mip as colour attachment 0. WebGL2 only; a no-op on other backends. */
     public bindFace(cube: Texture, face: number, mip: number = 0, withDepth: boolean = false, size: number = 0): void {
-        if (device.backend !== 'webgl2') return;   // see Framebuffer.bind
+        if (device.backend !== 'webgl2') return;
         (this._target(cube, face, mip, withDepth, size) as WebGL2RenderTarget).bind(false);
     }
 
-    /** Hand the draw target back to the canvas. The viewport is the caller's — see bindFace. */
+    /** Hand the draw target back to the canvas. The viewport is the caller's. */
     public unbind(): void {
-        if (device.backend !== 'webgl2') return;   // see Framebuffer.bind
+        if (device.backend !== 'webgl2') return;
 
         glDevice().getCurrentSurfaceTarget().bind(false);
     }
@@ -63,13 +42,8 @@ export class CubeFramebuffer {
         });
     }
 
-    /**
-     * The scratch depth texture at `size`.
-     *
-     * Reallocated only when the size changes, which is what the renderbuffer did. Deleting the old one
-     * also evicts every render target it was attached to, so the next capture builds a target over the
-     * new storage rather than reusing a framebuffer pointing at freed memory.
-     */
+    // Reallocated only on a size change; deleting the old texture also evicts every render target
+    // that referenced it.
     private _depthFor(size: number): Texture {
         if (this._depth && this._depthSize === size) return this._depth;
         this._depth?.delete();

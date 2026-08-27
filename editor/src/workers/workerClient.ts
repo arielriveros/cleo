@@ -1,12 +1,6 @@
 // Main-thread client for the project worker (save / export / import / publish).
-//
-// One long-lived worker is spawned lazily on first use and reused — these jobs are chunky and
-// infrequent, so a pool buys nothing and a fresh worker per job would pay the bundle's startup cost
-// every time.
-//
-// If the worker cannot be created, or dies, we fall back to running the identical job inline via
-// runJob(). That path blocks the main thread exactly like the old code did — it is a correctness
-// backstop, not the happy path, so publishing never becomes impossible just because a worker failed.
+// One long-lived worker, spawned lazily and reused; falls back to running the identical job inline
+// via runJob() when the worker cannot be created or dies.
 
 import { runJob, ProjectJob, ProjectJobResult, PublishFiles, PlayerTemplates } from './projectJobs';
 import type { BundleData } from '../utils/bundle';
@@ -34,7 +28,7 @@ function getWorker(): Worker | null {
   if (worker) return worker;
 
   try {
-    // webpack 5 resolves this form natively and emits the worker as its own chunk.
+    // webpack 5 only emits the worker as its own chunk for this exact `new Worker(new URL(...))` form.
     worker = new Worker(new URL('./projectWorker.ts', import.meta.url));
   } catch {
     unavailable = true;
@@ -50,10 +44,8 @@ function getWorker(): Worker | null {
     else entry.reject(new Error(error || 'Project worker job failed'));
   };
 
-  // A worker-level `error` event means the worker script itself failed to load or parse — a job that
-  // throws is caught inside the worker and comes back as a normal { ok: false } reply instead. So
-  // nothing in flight has run yet, and we can safely re-run it inline rather than failing the user's
-  // save/publish. From here on the worker is abandoned and every job takes the inline path.
+  // A worker-level `error` means the worker script never ran (a throwing job comes back as a normal
+  // { ok: false } reply), so stranded jobs are safe to re-run inline.
   worker.onerror = () => {
     const stranded = [...pending.values()];
     pending.clear();
@@ -95,9 +87,7 @@ export async function stringifyJson(data: any): Promise<ArrayBuffer> {
 
 /** JSON.parse raw UTF-8 bytes off the main thread. */
 export async function parseJsonBuffer(buffer: ArrayBuffer): Promise<any> {
-  // Deliberately NOT transferred: transferring detaches the buffer here, which would leave the inline
-  // retry in getWorker().onerror holding an empty one. Copying the bytes is negligible next to the
-  // JSON.parse we are offloading.
+  // Must NOT be transferred: detaching the buffer would leave the inline retry holding an empty one.
   const result = await dispatch({ kind: 'parse', buffer });
   if (result.kind !== 'parse') throw new Error('Unexpected job result');
   return result.data;
@@ -133,8 +123,7 @@ export async function runPublishJob(input: PublishJobInput): Promise<PublishJobO
 
 /** Zip a gathered project/asset-pack bundle off the main thread. Returns the archive bytes. */
 export async function exportBundleJob(bundle: BundleData): Promise<ArrayBuffer> {
-  // Inputs deliberately NOT transferred: transferring detaches the texture ArrayBuffers here, which
-  // would strand the inline retry in getWorker().onerror. The result zip IS transferred back.
+  // Inputs must NOT be transferred: detaching the texture ArrayBuffers would strand the inline retry.
   const result = await dispatch({ kind: 'exportBundle', bundle });
   if (result.kind !== 'exportBundle') throw new Error('Unexpected job result');
   return result.zip;

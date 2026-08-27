@@ -36,9 +36,8 @@ export class TilemapNode extends Node {
     /**
      * World-space extent of everything painted.
      *
-     * Syncs the map's origin first, because this is one of the two entry points that read the map in
-     * WORLD space outside the per-frame update — and the editor never runs that update (Scene.update only
-     * ticks nodes once the scene has started). The other is the tilemap brush's cell picking.
+     * Syncs the map origin first: this reads the map in world space outside the per-frame update, which
+     * the editor never runs.
      */
     public getBoundingBox(): { min: vec3, max: vec3 } {
         const p = this.worldPosition;

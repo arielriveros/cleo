@@ -2,17 +2,9 @@ import { Logger } from 'cleo';
 import type { SceneChange } from 'cleo';
 
 /**
- * Debug channel for unsaved-changes (dirty) tracking.
- *
- * Since the event-system overhaul every edit marks the active tab unsaved, driven by the engine's
- * per-setter SCENE_CHANGED events. That breadth is the point, but it makes a *false positive* — a tab
- * going dirty when the user did nothing — hard to attribute, because the mark can come from any of ~16
- * call sites or any engine setter. This logs what dirtied a tab, and (verbosely) which guard rejected a
- * mark, so either can be pinned to a specific change kind, node or code path.
- *
- * Everything goes to the editor Console panel under the `Dirty` scope, which ConsolePanel renders with
- * its own colour chip and a per-scope checkbox filter — so the channel is hideable from the UI without
- * touching this flag.
+ * Debug channel for unsaved-changes (dirty) tracking: logs what dirtied a tab, and verbosely which guard
+ * rejected a mark, so a false positive can be pinned to a change kind, node or code path.
+ * Output goes to the editor Console panel under the `Dirty` scope, which has its own filter checkbox.
  *
  * Toggle at runtime from devtools, no rebuild needed:
  *   cleoDirtyDebug.off()          // silence
@@ -36,9 +28,8 @@ function persist(key: string, value: boolean): void {
   try { localStorage.setItem(key, value ? '1' : '0'); } catch { /* ignore */ }
 }
 
-// Cached in module state rather than re-read from localStorage per call: logDirtySkip runs on EVERY
-// change event — which during a camera orbit is every frame — and a storage read there would cost real
-// time for a channel that is usually off.
+// Cached in module state, never re-read from localStorage per call: logDirtySkip runs on EVERY change
+// event, which during a camera orbit is every frame.
 let enabled = readFlag(KEY_ON, true);
 let verbose = readFlag(KEY_VERBOSE, false);
 
@@ -59,20 +50,16 @@ export function logDirtyMark(tabLabel: string, reason: string): void {
   Logger.info(`dirty  ${tabLabel}  <- ${reason}`, 'Dirty');
 }
 
-/** A tab was saved / reset. Logged too so the panel reads as a timeline and a false positive right
- *  after a save stands out. */
+/** A tab was saved or reset. Logged so the panel reads as a timeline. */
 export function logDirtyClear(tabLabel: string): void {
   if (!enabled) return;
   Logger.info(`clean  ${tabLabel}`, 'Dirty');
 }
 
 /**
- * A mark was rejected by one of the guards. Verbose-only.
- *
- * Takes the raw {@link SceneChange} rather than a formatted string so nothing is built when verbose is
- * off — this is the hot path. Uses Logger's *named flush*, which rewrites that row wherever it already
- * sits, so an orbiting camera keeps a single self-updating `x143` row instead of thousands of rows; a
- * flushed row also skips the native console entirely, so it cannot flood devtools either.
+ * A mark was rejected by one of the guards. Verbose-only, and the hot path — it takes the raw
+ * {@link SceneChange} rather than a formatted string so nothing is built when verbose is off.
+ * Logger's named flush rewrites one self-updating row rather than appending thousands.
  */
 export function logDirtySkip(reason: string, e?: SceneChange): void {
   if (!enabled || !verbose) return;

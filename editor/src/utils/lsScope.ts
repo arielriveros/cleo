@@ -1,11 +1,8 @@
-// Project-scoped localStorage keys.
+// Project-scoped localStorage keys. Only what belongs to the PROJECT (panel layout, open documents) goes
+// through here; what belongs to the PERSON (themes, collapsed sections, debug flags) does not.
 //
-// Some of what the editor keeps in localStorage is a property of the PERSON (code-editor theme, which
-// inspector sections they leave collapsed, debug flags) and some is a property of the PROJECT (the panel
-// layout, which documents were open). Only the second kind goes through here.
-//
-// The project id is a PREFIX, not a suffix, so deleting a project is one sweep over `localStorage` for keys
-// starting with `p:<id>:` — no inventory of key names to keep in sync with whoever adds the next one.
+// The project id is a PREFIX, never a suffix, so deleting a project is one sweep over `localStorage` for
+// keys starting with `p:<id>:` and needs no inventory of key names.
 
 import { projectPrefix, scoped } from './projectScope';
 
@@ -19,9 +16,7 @@ export const LS_KEYS = {
 /** The names above, for the migration that moves an existing install's keys under its Default Project. */
 export const MIGRATABLE_LS_KEYS: readonly string[] = Object.values(LS_KEYS);
 
-// Via `scoped`, so this throws rather than writing to a shared `p::` bucket if it is ever reached before a
-// project is open. Every caller lives inside the boot gate, so that should be unreachable — but a layout or
-// session bleeding between projects is exactly the kind of bug that would go unnoticed for a long time.
+// Via `scoped`, so this THROWS rather than writing to a shared `p::` bucket when no project is open.
 export function lsKey(name: string, projectId?: string): string {
   return scoped(name, projectId);
 }

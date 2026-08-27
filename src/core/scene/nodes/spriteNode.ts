@@ -102,14 +102,11 @@ export class SpriteNode extends Node {
      */
     public uvRect(): [number, number, number, number] { return this._sprite.uvRect(); }
 
-    /**
-     * Get bounding box for SpriteNode - returns a small sphere bounding box
-     */
+    /** Selection bounds: a small box around the sprite's origin. */
     public getBoundingBox(): { min: vec3, max: vec3 } {
         const position = this.worldPosition;
         const scale = this.worldScale;
         
-        // Sprite has a small bounding box
         const radius = Math.max(scale[0], scale[1], scale[2]) * 0.3;
         
         const min = vec3.fromValues(
@@ -127,26 +124,8 @@ export class SpriteNode extends Node {
     }
 }
 
-/**
- * Where an animated sprite's frames come from.
- *
- * - `node`: the ordered `frames` list on the node — one tileset, many different animations.
- * - `tile`: the selected tile's own `TileMeta.animation`, resolved through `Tileset.frameOf`. Authored
- *   once in the tileset editor and reusable by every sprite that picks that tile.
- */
-
+/** The sprite payload to hand `Sprite.parse`. Legacy saves nest the material one level deeper. */
 export function spritePayload(json: any): any {
     const sprite = json?.sprite ?? {};
     return 'tileset' in sprite ? sprite : (sprite.material ?? {});
 }
-
-/**
- * A legacy animated sprite's columns x rows grid, as an explicit frame list.
- *
- * The old model walked `startFrame..endFrame` (or an explicit `sequence`) over a bottom-up grid. Expanding
- * that range through `remapLegacyFrame` produces tile indices into the synthesized sheet tileset that
- * sample exactly the same cells in the same order — so a migrated animation is visually unchanged.
- *
- * Assigning the sheet tileset is done here too: `Sprite.parse` only sees the material payload and cannot
- * know the sheet was columns x rows rather than a single image.
- */

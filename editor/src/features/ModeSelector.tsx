@@ -62,9 +62,8 @@ function Segment({ active, disabled, title, onClick, children }: SegmentProps) {
 }
 
 /**
- * Toggleable, icon-based editor-mode selector. Scene/Landscape switch mode directly (leaving
- * template mode auto-saves). Template focuses the Templates bottom panel where you pick/create a
- * template to edit; it only highlights while a template is actually being edited.
+ * Toggleable, icon-based editor-mode selector. Scene/Landscape switch mode directly. Template focuses the
+ * Templates bottom panel where you pick or create a template; it highlights only while one is being edited.
  */
 export default function ModeSelector() {
   const { editorMode, setEditorMode, isPlayMode, activeTab } = useCleoEngine();

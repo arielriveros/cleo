@@ -4,8 +4,7 @@ import { useCleoEngine } from '../EngineContext';
 import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Hint } from '../../components/ui';
 import BackendSelector from './BackendSelector';
 
-// Debug channels map 1:1 to the renderer's `debugView` setter (see renderer.ts). Grouped only for
-// display; clicking one blits that internal buffer to the viewport instead of the composited image.
+// Debug channels map 1:1 to the renderer's `debugView` setter; the grouping here is display only.
 const CHANNELS: { key: string; label: string }[] = [
   { key: 'final',     label: 'Final' },
   { key: 'scene',     label: 'Lit Scene' },
@@ -22,9 +21,8 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'bloom',     label: 'Bloom' },
   { key: 'bloomMask', label: 'Bloom Mask' },
   { key: 'velocity',  label: 'Velocity' },
-  // Overdraw re-rasterizes the scene with additive blending into its own target, so unlike every
-  // other channel here it costs an extra pass — but it is the only view that shows how many times
-  // each pixel was shaded, which is what a fill-rate-bound frame is actually spending its time on.
+  // Overdraw re-rasterizes the scene additively into its own target, so unlike every other channel
+  // here it costs an extra pass.
   { key: 'overdraw',  label: 'Overdraw' },
 ];
 
@@ -35,8 +33,8 @@ const LOD_DETAIL: { label: string; step: number; title: string }[] = [
   { label: '⅛', step: 8, title: 'Every 8th vertex — a sixty-fourth of the triangles' },
 ];
 
-// Shadow map resolution per cascade layer. VRAM is size² x 4 bytes x cascade count, so 4096 x 4
-// layers is ~268MB of depth — the top of the ladder is a "capture a still" setting, not a default.
+// Shadow map resolution per cascade layer. VRAM is size² x 4 bytes x cascade count, so 4096 x 4 layers
+// is ~268MB of depth.
 const SHADOW_RES: { label: string; size: number; title: string }[] = [
   { label: '512',  size: 512,  title: '512px per cascade — lowest cost, visibly blocky up close' },
   { label: '1K',   size: 1024, title: '1024px per cascade' },
@@ -44,8 +42,7 @@ const SHADOW_RES: { label: string; size: number; title: string }[] = [
   { label: '4K',   size: 4096, title: '4096px per cascade — ~268MB of depth at 4 cascades' },
 ];
 
-// Cascade count. More cascades spend resolution where the camera actually is, at one extra depth
-// rasterization each (the distant ones are staggered, so the real cost is well under linear).
+// Cascade count: one extra depth rasterization each, staggered for the distant ones.
 const SHADOW_CASCADES = [1, 2, 3, 4].map((n) => ({ value: n, label: String(n), title: `${n} cascade${n > 1 ? 's' : ''}` }));
 
 // PCF kernels. Both sample a hardware comparison texture, so every tap is already a 2x2 filter.
@@ -54,8 +51,8 @@ const SHADOW_FILTER: { label: string; mode: number; title: string }[] = [
   { label: 'Poisson', mode: 1, title: '16 taps on a per-pixel rotated disk — softer at wide radii' },
 ];
 
-// Spot-light shadow map resolution. One map PER casting spot light, re-rendered every frame (there
-// is no equivalent of the cascade stagger), so this ladder tops out lower than the cascades'.
+// Spot-light shadow map resolution. One map per casting spot light, re-rendered every frame with no
+// cascade-style stagger, so this ladder tops out lower than the cascades'.
 const SPOT_RES: { label: string; size: number }[] = [
   { label: '256', size: 256 },
   { label: '512', size: 512 },
@@ -82,6 +79,7 @@ export default function RendererSettingsPanel() {
   const [bloomIntensity, setBloomIntensity] = useState<number>(() => renderer?.bloomIntensity ?? 0.6);
   const [bloomMask, setBloomMask] = useState<boolean>(() => renderer?.bloomMaskEnabled ?? false);
   const [chromatic, setChromatic] = useState<number>(() => renderer?.chromaticAberrationStrength ?? 0);
+  const [saturation, setSaturation] = useState<number>(() => renderer?.saturation ?? 1);
   const [ssaoEnabled, setSsaoEnabled] = useState<boolean>(() => renderer?.ssaoEnabled ?? true);
   const [ssaoRadius, setSsaoRadius] = useState<number>(() => renderer?.ssaoRadius ?? 0.5);
   const [ssaoPower, setSsaoPower] = useState<number>(() => renderer?.ssaoPower ?? 1.5);
@@ -122,13 +120,9 @@ export default function RendererSettingsPanel() {
   // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => { if (renderer) renderer.debugView = 'final'; }, [renderer]);
 
-  // Pull every mirrored value back off the renderer.
-  //
-  // Everything the renderer can change behind this panel's back belongs here, not just what play/stop
-  // touches: selecting a quality preset (from the Performance panel) rewrites bloom, SSAO, motion blur
-  // and render scale in one move. Bloom used to be left out, so choosing the `low` tier — which
-  // switches bloom off — left the Intensity slider reading 0.6 while the renderer held 0, and bloom
-  // looked broken rather than switched off.
+  // Pull every mirrored value back off the renderer. Everything the renderer can change behind this
+  // panel's back belongs here, not just what play/stop touches: a quality preset from the Performance
+  // panel rewrites bloom, SSAO, motion blur and render scale in one move.
   const syncFromRenderer = useCallback(() => {
     if (!renderer) return;
     setDebugViewState(renderer.debugView);
@@ -138,6 +132,7 @@ export default function RendererSettingsPanel() {
     setBloomIntensity(renderer.bloomIntensity);
     setBloomMask(renderer.bloomMaskEnabled);
     setChromatic(renderer.chromaticAberrationStrength);
+    setSaturation(renderer.saturation);
     setSsaoEnabled(renderer.ssaoEnabled);
     setSsaoRadius(renderer.ssaoRadius);
     setSsaoPower(renderer.ssaoPower);
@@ -179,16 +174,15 @@ export default function RendererSettingsPanel() {
   // Play/stop resets debugView and toggles the grid on the renderer directly.
   useEffect(() => { syncFromRenderer(); }, [isPlayMode, syncFromRenderer]);
 
-  // A quality preset moves a dozen knobs at once, from a different panel. Without this the mirror
-  // only refreshes when this panel remounts, so the two panels can sit side by side disagreeing.
+  // A quality preset moves a dozen knobs at once from a different panel; without this the mirror only
+  // refreshes on remount and the two panels sit side by side disagreeing.
   useEffect(() => {
     engineEventBus.on('RENDER_SETTINGS_CHANGED', syncFromRenderer);
     return () => { engineEventBus.off('RENDER_SETTINGS_CHANGED', syncFromRenderer); };
   }, [syncFromRenderer]);
 
-  // Bloom has kill switches this panel does not own — the Performance panel's per-pass toggles, and the
-  // quality preset, which zeroes the intensity on tiers without bloom. Say so here rather than letting
-  // the sliders imply bloom is on when nothing can reach the screen.
+  // Bloom has kill switches this panel does not own: the Performance panel's per-pass toggles, and the
+  // quality preset, which zeroes the intensity on tiers without bloom.
   const bloomOff = (() => {
     if (!renderer) return null;
     if (renderer.bloomIntensity <= 0) return 'intensity is 0 (the Low quality preset switches bloom off).';
@@ -203,8 +197,8 @@ export default function RendererSettingsPanel() {
   const setDebug = (key: string) => { renderer.debugView = key; setDebugViewState(key); };
 
   return (
-    // The content column is capped rather than filling the dock group — see PerformancePanel. The
-    // panel stays resizable; a two-digit number input just stops getting a 600px runway.
+    // The content column is capped rather than filling the dock group (see PerformancePanel); the panel
+    // itself stays resizable.
     <div className='h-full overflow-y-auto p-3 text-[11px] text-white'>
       <div className='w-full max-w-[420px]'>
       <Section
@@ -270,9 +264,14 @@ export default function RendererSettingsPanel() {
         </div>
       </Section>
 
-      <Section title='Tone / Post' hint='Exposure scales linear HDR before the ACES tonemap and sRGB encode at the final present. Chromatic aberration offsets the colour channels radially.'>
+      <Section title='Tone / Post' hint={'Exposure scales linear HDR before the ACES tonemap and sRGB encode at the final present. '
+        + 'Saturation is a trim applied in linear, before the tonemap, so the filmic shoulder still rolls off correctly — '
+        + 'a Sky Light with clouds multiplies its own desaturation on top of this. '
+        + 'Chromatic aberration offsets the colour channels radially.'}>
         <Slider label='Exposure' value={exposure} min={0} max={5} step={0.05}
           onChange={(v) => { renderer.exposure = v; setExposure(v); }} />
+        <Slider label='Saturation' value={saturation} min={0} max={2} step={0.01}
+          onChange={(v) => { renderer.saturation = v; setSaturation(v); }} />
         <Slider label='Chromatic' value={chromatic} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.chromaticAberrationStrength = v; setChromatic(v); }} />
       </Section>

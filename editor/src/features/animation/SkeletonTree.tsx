@@ -6,11 +6,8 @@ import { useElementSize } from '../../utils/useElementSize'
 import { useScopedDndManager } from '../../utils/treeDnd'
 import IkRigPanel from './IkRigPanel'
 
-// Left-sidebar skeleton hierarchy for the Animation Editor. Same react-arborist tree as the scene
-// inspector — virtualized, keyboard-navigable, filterable, which matters here because a humanoid rig runs
-// to a few hundred bones — but read-only: a skeleton's shape comes from the model, so nothing is dragged,
-// renamed or deleted in here. Selection drives a parallel SELECT_JOINT event (kept separate from the
-// scene's SELECT_NODE selection).
+// Left-sidebar skeleton hierarchy for the Animation Editor: a react-arborist tree that is READ-ONLY, since
+// a skeleton's shape comes from the model. Selection emits SELECT_JOINT, separate from scene SELECT_NODE.
 
 const ROW_HEIGHT = 22
 const INDENT = 12
@@ -33,7 +30,7 @@ const toRows = (joints: JointTreeNode[], skin: any): JointRow[] =>
     children: toRows(joint.children, skin),
   }))
 
-/** Disclosure arrow — one rotating shape, so a long rig doesn't read as a field of speckles. */
+/** Disclosure arrow: one shape, rotated. */
 const Chevron = ({ open }: { open: boolean }) => (
   <svg viewBox='0 0 24 24' width='9' height='9' fill='none' stroke='currentColor' strokeWidth='3.2'
        strokeLinecap='round' strokeLinejoin='round'
@@ -78,8 +75,8 @@ export default function SkeletonTree() {
   const [selectedJoint, setSelectedJoint] = useState<number | null>(null)
   const [filter, setFilter] = useState('')
   const treeRef = useRef<TreeApi<JointRow> | undefined>(undefined)
-  // Measured for react-arborist's virtualization; the same element scopes its drag-and-drop backend so it
-  // cannot disable native drops elsewhere in the editor (see treeDnd) even though this tree never drags.
+  // Measured for react-arborist's virtualization. The same element scopes the tree's drag-and-drop backend
+  // (see treeDnd) so it cannot disable native drops elsewhere in the editor.
   const { ref: viewportRef, element: viewportEl, size } = useElementSize<HTMLDivElement>()
   const dndManager = useScopedDndManager(viewportEl)
 
@@ -93,8 +90,8 @@ export default function SkeletonTree() {
     return () => { eventEmitter.off('SELECT_JOINT', onSelectJoint) }
   }, [eventEmitter])
 
-  // Push a viewport pick into the tree, opening and scrolling to the row. Only when the tree does not
-  // already hold it, so a click in here never fights the sync (see SceneInspector for the same pattern).
+  // Push a viewport pick into the tree only when the tree does not already hold it, so a click in here
+  // never fights the sync.
   const selectedRef = useRef<number | null>(selectedJoint)
   selectedRef.current = selectedJoint
   useEffect(() => {

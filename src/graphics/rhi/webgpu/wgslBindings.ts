@@ -1,30 +1,12 @@
-/**
- * Reading a WGSL module's own binding declarations, at runtime.
- *
- * `tools/wgslTranslate.mjs` does the same scan at BUILD time and ships the result on every `.wgsl`
- * import, which is where `ShaderResource` comes from. This exists because a shader module does not
- * always arrive with that reflection — the device harness builds several straight from a WGSL string,
- * and a custom material assembled at runtime has none either — and the one question below has to be
- * answered correctly for those too.
- */
+// Reading a WGSL module's binding declarations at runtime, for shader modules that arrive without the
+// build-time reflection `tools/wgslTranslate.mjs` ships.
 
 /**
- * `group -> the bindings in it declared as a SAMPLER`.
- *
- * The question this answers is narrow and load-bearing: **may the backend put a sampler at this
- * binding?** This engine keeps filter and wrap state on the TEXTURE rather than in a separate sampler
- * object, so `Renderer._textureBindGroup` emits one entry per texture at binding 2N and nothing at
- * 2N+1, and `WebGPUDevice.createBindGroup` fills the gap. WebGL2 is happy either way — a combined
- * sampler is one uniform — but on WebGPU a bind group whose entry COUNT disagrees with its layout is
- * rejected outright, which invalidates the entire command buffer. The pass then does not even run its
- * clear, and the target reads back as zeros: it looks exactly like a shader that produced nothing.
- *
- * So the gap must be filled where the shader declares a sampler and nowhere else. A shader that reads
- * a texture with `textureLoad` declares none, and adding one there is the failure above.
+ * `group -> the bindings in it declared as a SAMPLER`, so `createBindGroup` fills a sampler gap only
+ * where one is declared — a bind group whose entry count disagrees with its layout is rejected.
  */
 export function samplerBindingsOf(source: string): Map<number, Set<number>> {
-    // Comments stripped first: a commented-out declaration is not a declaration, and this engine's
-    // shaders comment their bindings heavily. Same reason `tools/wgslTranslate.mjs` does it.
+    // Comments stripped first: a commented-out declaration is not a declaration.
     const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
     const declaration =
         /@group\(\s*(\d+)\s*\)\s*@binding\(\s*(\d+)\s*\)\s*var(?:<[^>]*>)?\s+\w+\s*:\s*([^;]+);/g;

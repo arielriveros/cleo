@@ -8,17 +8,16 @@ import { Button } from '../../../components/ui/Button'
 // Monaco (and monaco-editor itself) is heavy, so it downloads only when a Script tab is actually opened.
 const MonacoScriptEditor = React.lazy(() => import('./MonacoScriptEditor'))
 
-// The dedicated Script editor tab body: a full-height Monaco editor over the viewport for the active script
-// tab. Edits go to the tab's working buffer (setScriptTabSource marks it dirty); the MenuBar's Save Script
-// commits them to the asset. Rendered by ViewportPanel when editorMode === 'script'.
+// The dedicated Script editor tab body. Edits go to the tab's working buffer (setScriptTabSource marks it
+// dirty); the MenuBar's Save Script commits them to the asset. Rendered when editorMode === 'script'.
 export default function ScriptTabView() {
   const { activeTab, scriptAssets, getScriptTabSource, setScriptTabSource } = useCleoEngine()
   const workspace = useScriptWorkspace()
   if (activeTab.kind !== 'script' || !activeTab.scriptId) return null
   const scriptId = activeTab.scriptId
   const asset = scriptAssets.find(a => a.id === scriptId)
-  // Connected: reveal this script's file. Not connected: offer to set the workspace up. Neither is
-  // possible in the browser, which has no filesystem to mirror into.
+  // Neither revealing a file nor setting the workspace up is possible in the browser, which has no
+  // filesystem to mirror into.
   const connected = workspace.status !== 'off'
 
   return (

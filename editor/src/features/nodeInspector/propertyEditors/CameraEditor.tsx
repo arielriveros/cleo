@@ -20,8 +20,7 @@ function findRig(node: CameraNode): CameraRigNode | null {
 
 export default function CameraEditor(props: { node: CameraNode }) {
   const rig = findRig(props.node);
-  // The rig writes camera.fov every frame while it owns FOV; leaving this slider live would let the
-  // two fight, with the rig winning and the slider looking broken.
+  // The rig writes camera.fov every frame while it owns FOV, so the slider has to be disabled.
   const fovDrivenByRig = !!rig?.fovEnabled;
   const eventEmitter = useEventBus();
 
@@ -112,8 +111,8 @@ export default function CameraEditor(props: { node: CameraNode }) {
   );
 }
 
-// Ordered list of screen-space (post-process) custom-material passes run by this camera. Each row
-// references a material asset by id; the live materials are rebuilt from the assets on every edit.
+// Ordered list of screen-space (post-process) custom-material passes run by this camera. Rows reference a
+// material asset by id; the live materials are rebuilt from the assets on every edit.
 function ScreenMaterialsList(props: { node: CameraNode }) {
   const { materials } = useAssetLibrary();
   const { enterMaterialEditor } = useEditorSessions();

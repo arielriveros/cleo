@@ -1,13 +1,9 @@
 import { useProject } from '../ProjectContext'
 import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
 
-// Shown when a scene is switched between 2D and 3D while it still holds the OTHER dimension's authoring:
-// a landscape in a scene going 2D, or a tilemap in one going 3D. `setSceneDimension` parks a promise
-// (confirmDimensionSwitch) and this resolves it.
-//
-// The point is that the loss is deferred, not immediate: nothing is deleted, the switch is reversible, and
-// the data survives every save and project export. It is only a PUBLISHED build that drops it — which is
-// exactly the moment it would be too late to mention. Mounted globally in Editor.
+// Shown when a scene is switched between 2D and 3D while it still holds the other dimension's authoring.
+// `setSceneDimension` parks a promise (confirmDimensionSwitch) that this resolves. Nothing is deleted;
+// only a published build drops the unused dimension. Mounted globally in Editor.
 export default function DimensionSwitchModal() {
   const { pendingDimensionConfirm, resolveDimensionConfirm } = useProject()
 

@@ -8,12 +8,8 @@ import AnimationAssetPicker from '../../animation/AnimationAssetPicker'
 import { skinnedModelNodeOf } from '../../../utils/models'
 
 // Everything about the selected model's animation, in the inspector — clips, the shared `.anim` assets it
-// plays, its blend spaces, and the way into the Animation Editor.
-//
-// It shows for any node that IS or CONTAINS a skinned model, so selecting a character's holder root (a
-// template instance, say) is enough. Nothing here is gated on the node being "linked" to a library model
-// any more: the clip list is read off the live node, and the two actions that genuinely need an asset
-// (linking an animation, creating a blend space) adopt the subtree into the library on the way.
+// plays, its blend spaces, and the way into the Animation Editor. Shows for any node that IS or CONTAINS a
+// skinned model; the actions that need an asset adopt the subtree into the library on the way.
 export default function AnimationSlot(props: { node: Node }) {
   const { enterAnimationEditor, createAnimationFieldForModel, enterAnimationFieldEditor, adoptModelAsset, resolveModelAssetId } = useEditorSessions()
   const { animationFields } = useAssetLibrary()
@@ -23,9 +19,8 @@ export default function AnimationSlot(props: { node: Node }) {
 
   const model = modelNode.model as AnimatedModel
   const clips = model.animations
-  // Walks UP from the skinned node (an imported model is a holder with the ModelNode beneath it, so the
-  // asset reference sits on the holder), and falls back to the asset the current tab is editing — see
-  // resolveModelAssetId.
+  // Walks UP from the skinned node: an imported model is a holder with the ModelNode beneath it, so the
+  // asset reference sits on the holder.
   const modelId = resolveModelAssetId(modelNode)
   const fields = modelId ? animationFields.filter(f => f.modelId === modelId) : []
 

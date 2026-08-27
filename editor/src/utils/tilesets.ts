@@ -3,12 +3,11 @@ import type { Scene, TileMeta, TerrainSet, VariantSet, TilesetConfig } from 'cle
 import { cryptoRandomId } from './ids'
 
 // A reusable, named Tileset asset — an atlas image sliced into a grid, plus the per-tile metadata that
-// makes tiles solid, animated, tinted or depth-anchored (mirrors MaterialAsset / AnimationFieldAsset).
+// makes tiles solid, animated, tinted or depth-anchored.
 //
-// NOTE on the runtime: a TilemapNode stores `tilesetId` per layer (the link) AND a full embedded copy of
-// every tileset it references, written by `Tilemap.serialize`. The embedded copy is what draws and
-// collides, so a tileset travels inside the serialized scene through saves, templates, bundles and the
-// published game with no extra plumbing. See reembedTilesets for how an edit reaches already-placed maps.
+// A TilemapNode stores `tilesetId` per layer AND a full embedded copy of every tileset it references. The
+// EMBEDDED copy is what draws and collides, so it travels with the serialized scene; see reembedTilesets
+// for how an edit reaches already-placed maps.
 
 export type { TileMeta, TerrainSet, VariantSet }
 
@@ -31,10 +30,7 @@ export type TilesetAsset = {
   terrains: TerrainSet[]
   variantSets: VariantSet[]
   thumbnail?: string
-  /**
-   * Duplicated from `textureId` on purpose: `referencedTextureIds` (utils/textureStore) already scans an
-   * asset's `textureIds`, so asset-pack export narrows correctly with no new code.
-   */
+  /** Duplicated from `textureId`: `referencedTextureIds` (utils/textureStore) scans `textureIds` only. */
   textureIds: string[]
 }
 
@@ -58,11 +54,8 @@ const MIN_GUESS_GRID = 4
 
 /**
  * A plausible starting tile size for a freshly imported atlas: the largest candidate that divides BOTH
- * dimensions evenly and still leaves at least a 4x4 grid.
- *
- * Honestly a heuristic — 256x256 guesses 64 and could well have been 16. It is worth having anyway because
- * the grid is drawn straight over the atlas, so a wrong guess is visible at a glance and is one field to
- * correct; the alternative is retyping the size for almost every sheet.
+ * dimensions evenly and still leaves at least a 4x4 grid. A heuristic — the user corrects it against the
+ * grid drawn over the atlas.
  */
 export function guessTileSize(imageWidth: number, imageHeight: number): number {
   if (imageWidth <= 0 || imageHeight <= 0) return DEFAULT_TILE_SIZE
@@ -113,8 +106,8 @@ export function resliceTileset(asset: TilesetAsset, patch: Partial<TilesetAsset>
                                    next.margin, next.spacing)
   next.columns = columns
   next.rows = rows
-  // Metadata keyed by a tile index that no longer exists would be invisible but still ship, and would
-  // silently reattach to a different tile if the grid ever grew back.
+  // Metadata on a tile index that no longer exists must be dropped: it still ships, and it reattaches to
+  // a different tile if the grid grows back.
   const kept: Record<number, TileMeta> = {}
   for (const key of Object.keys(next.tiles)) {
     const index = Number(key)
@@ -172,10 +165,7 @@ export function fromRuntimeTileset(ts: Tileset, name: string): TilesetAsset {
 
 /**
  * Push the current library into every tilemap in a live scene, so an edited tileset reaches maps that
- * already embedded an older copy.
- *
- * This is what keeps embed-on-save honest — the same job `reembedFields` does for animation fields.
- * Returns true when anything changed, so the caller can skip a pointless save.
+ * already embedded an older copy. Returns true when anything changed, so the caller can skip a save.
  */
 export function reembedTilesets(scene: Scene | null | undefined, tilesets: TilesetAsset[]): boolean {
   if (!scene) return false
@@ -193,7 +183,7 @@ export function reembedTilesets(scene: Scene | null | undefined, tilesets: Tiles
       changed = true
     }
   }
-  // Sprites embed one tileset each, for the same reason and with the same staleness problem.
+  // Sprites embed one tileset each, with the same staleness problem.
   for (const sprite of scene.sprites) {
     const current = sprite.tileset
     if (!current || isInlineTilesetId(current.id)) continue

@@ -4,12 +4,9 @@ import type { TilesetAsset } from '../../utils/tilesets'
 import { awaitTextureImage, textureImage } from '../../utils/textureReady'
 
 // The atlas with its slicing grid drawn over it, plus rectangular selection. Shared by the tileset editor
-// (where the selection picks the tile whose metadata is being edited) and the tilemap palette (where it
-// picks the brush, and a multi-cell rectangle becomes a stamp).
-//
-// The image is an <img>, not a canvas draw: it keeps the browser's own decoding and scaling, and lets
-// `image-rendering: pixelated` do the right thing for pixel art at any zoom. Only the grid, the metadata
-// markers and the selection are drawn, on a canvas over the top.
+// (picking the tile being edited) and the tilemap palette (picking the brush, a rectangle being a stamp).
+// The image is an <img>, not a canvas draw, so `image-rendering: pixelated` works at any zoom; only the
+// grid, the metadata markers and the selection are drawn on a canvas over the top.
 
 export type TileRect = { col: number; row: number; w: number; h: number }
 
@@ -47,18 +44,13 @@ export default function TileGrid({
   const [drag, setDrag] = useState<TileRect | null>(null)
   /**
    * The live drag rect, mirrored out of state.
-   *
-   * `onUp` needs the final rect to report it, and reading it out of a `setDrag` updater instead — which is
-   * what this used to do — put a side effect inside a reducer. React runs updaters during render and may
-   * run them more than once, so each pass re-fired `onSelect`, which emits on the event bus, which sets
-   * state in another component: "Maximum update depth exceeded". A ref costs nothing and keeps the
-   * updater pure.
+   * `onUp` needs the final rect; reading it from inside a `setDrag` updater would put a side effect in a
+   * reducer, and React may run an updater more than once, re-firing `onSelect` onto the event bus.
    */
   const dragRectRef = useRef<TileRect | null>(null)
 
-  // Resolved in an effect, not a memo. TextureManager decodes asynchronously, so a texture that has only
-  // just been registered has no image yet — a memo would compute '' once and never recompute when the
-  // decode landed, leaving the "no atlas image" placeholder up over a perfectly good texture.
+  // Resolved in an effect, not a memo: TextureManager decodes asynchronously, so a just-registered texture
+  // has no image yet and a memo would never recompute when the decode landed.
   const [src, setSrc] = useState('')
   useEffect(() => {
     let cancelled = false
@@ -73,8 +65,7 @@ export default function TileGrid({
   const height = asset.imageHeight * zoom
   const selected = useMemo(() => new Set(selection), [selection])
 
-  // Redraw whenever anything that affects the overlay changes. Kept in a layout effect so the grid never
-  // lags the image by a frame when the zoom or the slicing changes.
+  // A layout effect, so the grid never lags the image by a frame when the zoom or the slicing changes.
   useLayoutEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -167,9 +158,8 @@ export default function TileGrid({
       for (let c = 0; c < rect.w; c++) indices.push((rect.row + r) * asset.columns + rect.col + c)
     onSelect(indices, rect)
   }
-  // Behind a ref so the window listener below can register ONCE. `emit` closes over `asset` and the
-  // `onSelect` prop, both of which change identity on most renders — depending on it directly would
-  // re-register the listener on every render, which is the other half of what the React warning names.
+  // Behind a ref so the window listener below can register ONCE: `emit` closes over `asset` and the
+  // `onSelect` prop, both of which change identity on most renders.
   const emitRef = useRef(emit)
   emitRef.current = emit
 
@@ -201,8 +191,8 @@ export default function TileGrid({
     })
   }
 
-  // On window rather than the element: a drag that leaves the grid must still finish, or the selection
-  // stays stuck mid-gesture. Registered once — everything it touches is a ref.
+  // On window rather than the element: a drag that leaves the grid must still finish. Registered once —
+  // everything it touches is a ref.
   useEffect(() => {
     const onUp = () => {
       if (!dragRef.current) return
@@ -210,7 +200,7 @@ export default function TileGrid({
       const rect = dragRectRef.current
       setDragRect(null)
       // AFTER the state write, never inside its updater: emit() reaches the event bus and sets state in
-      // other components, and a reducer is not allowed to do that.
+      // other components.
       if (rect) emitRef.current(rect)
     }
     window.addEventListener('mouseup', onUp)

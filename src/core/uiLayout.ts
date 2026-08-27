@@ -2,18 +2,11 @@ import { mat4, vec3 } from "gl-matrix";
 import { clamp, lerp, RAD2DEG } from "./math";
 
 /**
- * The UI layout solve, extracted from the UI node classes as pure functions over plain rects.
- *
- * Same arrangement as `cameraRigMath.ts` and for the same reason: `node.ts` cannot be imported by the
- * unit suite (it transitively needs a GL context), so anything here is the part of the UI system that
- * can actually be tested — which is deliberately the part where a silent sign or ordering error is
- * invisible until the HUD lands in the wrong corner.
- *
- * ## Coordinate convention
+ * The UI layout solve as pure functions over plain rects, testable without a GL context.
  *
  * UI space is **top-left origin, Y grows DOWN**, matching CSS and the DOM layer that consumes these
- * rects — and deliberately NOT matching WebGL NDC, which is bottom-up. The single place the two meet
- * is {@link projectToScreen}, which does the flip. Everything downstream of it is DOM-handed.
+ * rects, and NOT WebGL NDC, which is bottom-up. {@link projectToScreen} is the one place the two meet
+ * and does the flip; everything downstream of it is DOM-handed.
  */
 
 /** An axis-aligned rectangle in UI space. `x`/`y` are the top-left corner. */
@@ -48,23 +41,15 @@ export function rectsEqual(a: UIRect, b: UIRect): boolean {
 }
 
 /**
- * Resolve one element's rect from its anchors and offsets against its parent's rect.
- *
- * This is `RectTransform`'s solve, and it is deliberately branch-free — one line per edge:
+ * Resolve one element's rect from its anchors and offsets against its parent's rect — `RectTransform`'s
+ * solve, branch-free, one line per edge:
  *
  *     minX = parent.x + anchorMin.x * parent.width + offsetMin.x
  *     maxX = parent.x + anchorMax.x * parent.width + offsetMax.x
  *
- * Every authoring case falls out of that pair with no special-casing. When `anchorMin[i] === anchorMax[i]`
- * the element is PINNED on that axis and the offsets read as position + size; when they differ it is
- * STRETCHED and the offsets read as insets from each edge. The inspector presents those two readings
- * with different labels (see the editor's `UIRectEditor`), but the stored data is one shape.
- *
- * Storing the anchor PAIR rather than a nine-slice preset is what makes "stretch horizontally, pinned to
- * the top" expressible at all — a preset enum cannot say it, and every preset IS derivable from the pair.
- *
- * A negative extent (offsets crossed over) is clamped to zero rather than allowed to invert, since a
- * negative width has no meaning to the DOM and would silently flip the element.
+ * When `anchorMin[i] === anchorMax[i]` the element is PINNED on that axis and the offsets read as
+ * position + size; when they differ it is STRETCHED and they read as insets from each edge — one stored
+ * shape either way. A negative extent (offsets crossed over) is clamped to zero, never inverted.
  */
 export function solveRect(
     out: UIRect,
@@ -82,12 +67,9 @@ export function solveRect(
 }
 
 /**
- * The scale a UI root applies to convert reference units into viewport pixels.
- *
- * `scaleWithScreen` interpolates in LOG space, not linear. The difference is not cosmetic: with a 1920x1080
- * reference on a 960x1080 viewport, a linear lerp at match=0.5 gives 0.75 while the log-lerp gives ~0.707,
- * and only the latter keeps a UI scaled by width and one scaled by height meeting in the middle
- * proportionally. Linear blending of two ratios warps everything between the endpoints.
+ * The scale a UI root applies to convert reference units into viewport pixels. `scaleWithScreen` must
+ * interpolate in LOG space, not linear: linearly blending two ratios warps everything between the
+ * endpoints.
  *
  * @param match 0 = follow width only, 1 = follow height only, 0.5 = split the difference.
  */
@@ -104,8 +86,7 @@ export function rootScale(
     if (mode === 'constantPixel') return 1;
     if (mode === 'constantPhysical') return referenceDpr > 0 ? dpr / referenceDpr : 1;
 
-    // scaleWithScreen. Guard every denominator: a zero reference resolution is authorable in the
-    // inspector for exactly as long as it takes to type over the old value.
+    // A zero reference resolution is authorable in the inspector, so guard every denominator.
     if (referenceWidth <= 0 || referenceHeight <= 0) return 1;
     const byWidth = viewportWidth / referenceWidth;
     const byHeight = viewportHeight / referenceHeight;
@@ -128,16 +109,9 @@ export interface ScreenProjection {
 /**
  * Project a world position into UI space through a view-projection matrix.
  *
- * Two things here are easy to get wrong and both are load-bearing:
- *
- * 1. **The behind-camera guard.** The perspective divide by `w` flips the sign of everything behind the
- *    camera plane, so a point behind you projects to a perfectly plausible on-screen coordinate — a
- *    world-space label that should be hidden instead appears mirrored across the screen. `w <= 0` is the
- *    only reliable test; a distance check is not equivalent for off-axis points. Same guard as the
- *    renderer's `_sunScreenInfo`.
- * 2. **The Y flip.** WebGL NDC is bottom-up; UI space (and the DOM) is top-down. Without the `1 -` the
- *    UI is mirrored vertically, which reads as "roughly right" for anything near the middle of the
- *    screen and is therefore not noticed until something is anchored near an edge.
+ * `w <= 0` is the only reliable behind-camera test: the perspective divide flips the sign, so a point
+ * behind the camera otherwise projects to a plausible on-screen coordinate, and a distance check is not
+ * equivalent for off-axis points. The `1 -` on Y is the NDC-bottom-up to UI-top-down flip.
  *
  * @param viewProj Row-major-consumed `projection * view`, i.e. what `mat4.multiply(out, proj, view)` gives.
  */
@@ -148,8 +122,7 @@ export function projectToScreen(
     viewportHeight: number,
 ): ScreenProjection {
     const x = world[0], y = world[1], z = world[2];
-    // Manual transform: gl-matrix's vec3.transformMat4 divides by w internally and discards it, and w
-    // is precisely the value the behind-camera guard needs.
+    // Manual transform: gl-matrix's vec3.transformMat4 divides by w and discards it, and the guard needs w.
     const cx = viewProj[0] * x + viewProj[4] * y + viewProj[8] * z + viewProj[12];
     const cy = viewProj[1] * x + viewProj[5] * y + viewProj[9] * z + viewProj[13];
     const cw = viewProj[3] * x + viewProj[7] * y + viewProj[11] * z + viewProj[15];
@@ -170,11 +143,9 @@ export function projectToScreen(
 /**
  * Scale for a world-space UI root, so it shrinks with distance like the thing it labels.
  *
- * Orthographic cameras get a different formula, and this is not a rounding detail: an ortho projection
- * has no perspective divide, so "distance" does not affect apparent size at all and a distance-based
- * scale would make a label grow and shrink while the world stayed put. For ortho the correct constant is
- * pixels-per-world-unit, taken from the VERTICAL extent — `Camera.projectionMatrix` scales left/right by
- * the aspect ratio but leaves top/bottom alone, so height is the axis that is actually stable.
+ * An orthographic projection has no perspective divide, so distance must not affect its apparent size:
+ * theirs is a constant pixels-per-world-unit taken from the VERTICAL extent, because
+ * `Camera.projectionMatrix` scales left/right by the aspect ratio and leaves top/bottom alone.
  *
  * @param distance Camera-space depth from {@link projectToScreen}.
  */
@@ -223,11 +194,9 @@ export interface StackItem {
 export type StackJustify = 'start' | 'center' | 'end' | 'spaceBetween' | 'spaceAround';
 
 /**
- * Distribute children along a stack's main axis, returning each one's offset and final size.
- *
- * Flex items absorb leftover space in proportion to their `flex` weight; when anything flexes, the
- * justification has nothing left to distribute and is ignored (the same rule CSS flexbox follows).
- * Results are written into `out`, which is reused across frames.
+ * Distribute children along a stack's main axis, returning each one's offset and final size. Flex items
+ * absorb leftover space in proportion to their `flex` weight; when anything flexes, the justification is
+ * ignored (the same rule CSS flexbox follows). Results are written into `out`, reused across frames.
  */
 export function stackLayout(
     out: { offset: number, size: number }[],
@@ -295,14 +264,12 @@ export interface EdgeClamp {
 
 /**
  * Pin an element to the viewport edge when its anchor leaves the screen, and report which way it went.
- *
- * `angleDeg` is measured in UI space, so it grows CLOCKWISE (Y is down) — which is what a CSS `rotate()`
- * on a marker glyph wants, with no sign flip at the call site.
+ * `angleDeg` is measured in UI space, so it grows CLOCKWISE (Y is down) — what a CSS `rotate()` wants.
  *
  * @param x,y   Desired top-left of the element, in UI pixels.
- * @param behind Pass true when the anchor is behind the camera. The point is then mirrored through the
- *               viewport centre before clamping: a projection from behind lands on the OPPOSITE side of
- *               the screen from where the thing actually is, so an unmirrored marker points exactly wrong.
+ * @param behind Pass true when the anchor is behind the camera; the point is then mirrored through the
+ *               viewport centre before clamping, because a projection from behind lands on the OPPOSITE
+ *               side of the screen.
  */
 export function edgeClamp(
     x: number, y: number, width: number, height: number,
@@ -313,7 +280,6 @@ export function edgeClamp(
     const cx = viewportWidth / 2;
     const cy = viewportHeight / 2;
 
-    // Centre of the element, which is what the direction is measured from.
     let px = x + width / 2;
     let py = y + height / 2;
     if (behind) {
@@ -342,12 +308,9 @@ export function edgeClamp(
 }
 
 /**
- * The CSS `matrix3d` that maps the rect `(0,0)-(w,h)` onto four projected screen corners.
- *
- * This is how a world-space UI panel lies flat in the scene — a poster on a wall, a screen on a console —
- * without reconstructing the camera as a CSS `perspective`. The quad is planar, so its image under a
- * perspective camera is exactly a 2D homography; solving for that directly is both simpler and more robust
- * than composing view/projection matrices into CSS, and it needs nothing from the browser but the result.
+ * The CSS `matrix3d` that maps the rect `(0,0)-(w,h)` onto four projected screen corners — how a
+ * world-space UI panel lies flat in the scene without a CSS `perspective`. The quad is planar, so its
+ * image under a perspective camera is exactly a 2D homography.
  *
  * @param corners Projected screen positions of the rect's corners, in the order
  *                top-left, top-right, bottom-right, bottom-left.
@@ -400,10 +363,8 @@ export function quadHomography(
     }
 
     const [h11, h12, h13, h21, h22, h23, h31, h32] = b;
-    // CSS matrix3d is COLUMN-major, and the homography's third row acts on w — which in a 4x4 lands in the
-    // fourth row of the third... no: in CSS the perspective terms are the fourth ROW, i.e. elements 3, 7, 15
-    // in column-major order. Laying it out wrong is the classic failure and produces a plausible-looking
-    // but subtly sheared quad.
+    // CSS matrix3d is COLUMN-major and its perspective terms are the fourth ROW, i.e. elements 3, 7 and
+    // 15 in column-major order.
     return [
         h11, h21, 0, h31,
         h12, h22, 0, h32,

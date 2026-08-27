@@ -15,9 +15,7 @@ import { cryptoRandomId } from '../../utils/ids'
 import { deleteTextures } from '../../utils/textureStore'
 import { AssetKind, KIND_LABEL } from '../../utils/vfs'
 
-// One adapter per asset kind, so the file-manager event bridge never has to branch five ways. Everything
-// the explorer does to an asset — read its name/thumbnail, rename it, duplicate it, delete it, open its
-// editor — goes through here.
+// One adapter per asset kind, so the file-manager event bridge never has to branch five ways.
 
 export type AssetDeps = {
   materials: MaterialAsset[]
@@ -119,16 +117,15 @@ export function thumbnailOf(kind: AssetKind, id: string, deps: AssetDeps): strin
     const data = TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined
     return data instanceof HTMLImageElement && data.src ? data.src : null
   }
-  // Templates have no thumbnail field at all; materials/terrain materials start with an empty one until
-  // their first save. Both fall through to the kind's icon.
+  // Templates have no thumbnail field; materials/terrain materials have an empty one until first save.
   const asset = findAsset(kind, id, deps) as { thumbnail?: string } | undefined
   return asset?.thumbnail || null
 }
 
 /**
  * Rename an asset to `stem` (the new basename without its extension).
- * Textures are deliberately exempt: a texture's id is its name, and that id is baked into every serialized
- * material that references it — renaming it would orphan them. The VFS path carries the display name instead.
+ * Textures are exempt: a texture's id is its name and is baked into every serialized material that
+ * references it. The VFS path carries the display name instead.
  */
 export function renameAsset(kind: AssetKind, id: string, stem: string, deps: AssetDeps): void {
   switch (kind) {
@@ -199,8 +196,7 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     }
     case 'texture':
       TextureManager.Instance.removeTexture(id)
-      // Drop the payload too, or the texture store keeps it forever. Only done for an explicit texture
-      // delete: deleting a material or mesh must NOT evict its maps, which are shared by id.
+      // Explicit texture deletes only: deleting a material or mesh must NOT evict its maps, shared by id.
       void deleteTextures([id])
       deps.emit('TEXTURES_CHANGED')
       break
@@ -254,16 +250,14 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
     case 'animation': {
       const a = deps.animations.find(x => x.id === id)
       if (!a) return null
-      // The copy keeps the same source skin and clips, so it retargets exactly like the original. No model
-      // references it yet — duplicating an animation does not give it to anything.
+      // The copy keeps the same source skin and clips, so it retargets exactly like the original.
       deps.addAnimation({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
     case 'tileset': {
       const a = deps.tilesets.find(t => t.id === id)
       if (!a) return null
-      // textureId carries over: duplicating a tileset means re-slicing the same atlas, or keeping a
-      // second variant of its per-tile metadata.
+      // textureId carries over: a duplicated tileset re-slices the same atlas.
       deps.addTileset({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
@@ -278,8 +272,7 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       if (!source) return null
       const data = tm.serializeTexture(id) // re-encodes the image to a PNG data URL
       if (!data) return null
-      // Keep the pretty name as the TextureManager id when it is free — that id is what shows up inside
-      // serialized materials — but never collide with an existing texture.
+      // The TextureManager id appears inside serialized materials; keep the pretty name when it is free.
       const texId = tm.getTexture(stem) ? `${stem}-${newId.slice(0, 6)}` : stem
       tm.addTextureFromBase64(data, source.config, texId)
       deps.emit('TEXTURES_CHANGED')
@@ -290,9 +283,7 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
 
 /**
  * Re-render an asset's thumbnail from its saved data and store it. Returns true if a new image was written.
- *
- * Only the kinds whose preview is *rendered* can be regenerated: a template has no thumbnail field, and a
- * texture's preview is the texture image itself — neither involves the renderer, so both are no-ops.
+ * Only kinds whose preview is actually rendered can be regenerated; the rest are no-ops.
  */
 export async function regenerateThumbnail(
   kind: AssetKind, id: string, engine: CleoEngine, deps: AssetDeps,
@@ -326,11 +317,9 @@ export async function regenerateThumbnail(
       return false
     case 'template':
     case 'script':
-    // A tileset's card shows its atlas image, produced by a canvas downscale on save rather than by
-    // the 3D thumbnail renderer this function drives.
+    // A tileset's card shows its atlas image, downscaled on save rather than rendered here.
     case 'tileset':
-    // A field's card shows its kind icon: its content is a 2D plot, not something the 3D thumbnail
-    // renderer (which poses a model in a preview scene) has any way to draw.
+    // A field's card shows its kind icon: its content is a 2D plot, not a posed model.
     case 'animationField':
     // Clips in source-rig space, with no character attached — there is nothing to pose for a picture.
     case 'animation':
@@ -341,9 +330,7 @@ export async function regenerateThumbnail(
 
 /**
  * Open the asset's editor. Returns false for kinds that have no editor (textures).
- *
- * A mesh opens a read-only preview tab. That is deliberate: imports no longer render thumbnails (each one
- * cost a full GL frame and stalled the editor), so opening an asset is what renders its preview.
+ * A mesh opens a read-only preview tab; opening an asset is what renders its preview.
  */
 export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean {
   switch (kind) {
@@ -353,8 +340,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'model': deps.enterModelEditor(id); return true
     case 'script': deps.enterScriptEditor(id); return true
     case 'animationField': deps.enterAnimationFieldEditor(id); return true
-    // An animation has no editor of its own: it is source-space clip data, meaningful only against a rig.
-    // Returning false lets the explorer show its preview card instead of opening an empty tab.
+    // An animation has no editor: source-space clip data, meaningful only against a rig.
     case 'animation': return false
     case 'tileset': deps.enterTilesetEditor(id); return true
     case 'scene': void deps.openScene(id); return true
@@ -403,11 +389,10 @@ export function labelOf(kind: AssetKind): string {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Icons. Inlined as data URIs: the SVAR default hits its CDN for one SVG per card, which we never want.
+// Icons. Inlined as data URIs: the SVAR default fetches one SVG per card from its CDN.
 // ---------------------------------------------------------------------------------------------------
 
-// Line icons in the same stroke style as the chrome glyphs in filemanager.css, tinted per kind so a card
-// without a thumbnail still reads at a glance.
+// Line icons in the stroke style of filemanager.css's chrome glyphs, tinted per kind.
 function svg(stroke: string, body: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`,

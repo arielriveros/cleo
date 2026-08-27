@@ -1,17 +1,11 @@
 // Animation clips as a shared library asset.
 //
-// A clip used to live only INSIDE the model asset that imported it (`model.animations` on the serialized
-// ModelNode — see modelClips.ts). Two characters on the same rig therefore stored two byte-identical
-// copies of the same walk, and shipped two copies in the published game.
+// An `.anim` asset stores its clips in their ORIGINAL source-rig space together with the skeleton they
+// were authored against. Both sides are required: `buildBoneMapping` needs the source skin, so keeping it
+// is what lets one asset be retargeted onto any rig, and re-retargeted later if the mapping improves.
 //
-// An `.anim` asset stores the clip in its ORIGINAL source-rig space, together with the skeleton it was
-// authored against. That skeleton is the part that makes sharing possible: `buildBoneMapping` needs both
-// sides, so keeping the source skin is what lets the same asset be retargeted onto any rig, at any time,
-// and re-retargeted later if the mapping improves. Baking one retargeted copy per rig instead would put
-// the duplication straight back.
-//
-// Deliberately engine-free — no `cleo` import — so it is unit-testable without a GL context. The engine
-// types below are structural restatements of `Animation`/`Skin` for exactly that reason.
+// Must stay engine-free (no `cleo` import) so it is unit-testable without a GL context; the types below
+// are structural restatements of `Animation`/`Skin`.
 
 import { cryptoRandomId } from './ids'
 
@@ -25,11 +19,8 @@ export type StoredClip = {
 
 /**
  * A {@link Skin} flattened for JSON.
- *
- * `nodeParents`/`nodeTransforms`/`nodeNames` are `Map`s on the live type. They survive a structured clone
- * (which is why the import worker can hand one back as-is) but NOT `JSON.stringify`, which turns a Map
- * into `{}` — so anything persisted has to carry entry pairs. `AnimatedModel.serialize` already does
- * exactly this for the model's own skin; the shape here matches it so the two can be read by one reader.
+ * `nodeParents`/`nodeTransforms`/`nodeNames` are `Map`s live and must be persisted as ENTRY PAIRS —
+ * `JSON.stringify` turns a Map into `{}`. The shape matches `AnimatedModel.serialize` so one reader does both.
  */
 export type StoredSkin = {
   name?: string
@@ -53,12 +44,10 @@ export type AnimationAsset = {
 }
 
 /**
- * Flatten a `Skin` for storage.
- *
- * Accepts BOTH shapes, and must: the import path hands it a live skin (Maps, Float32Arrays), while the
- * migration reads a model asset's already-serialized skin (entry pairs, plain arrays) straight out of
- * `nodeJson`. Re-flattening an entry-pair array as if it were a Map silently produced a skin with no bone
- * names — which retargets against nothing.
+ * Flatten a `Skin` for storage. Must accept BOTH shapes: the import path hands it a live skin (Maps,
+ * Float32Arrays) and the migration hands it an already-serialized one (entry pairs, plain arrays).
+ * Re-flattening entry pairs as if they were a Map yields a skin with no bone names, which retargets
+ * against nothing.
  */
 export function storeSkin(skin: any): StoredSkin | null {
   if (!skin) return null
@@ -80,9 +69,8 @@ export function storeSkin(skin: any): StoredSkin | null {
 }
 
 /**
- * Rebuild a live `Skin` from storage. `mat4` is passed in rather than imported so this module stays
- * engine-free; callers hand it `mat4.clone` (a stored matrix must become a Float32Array, since the
- * retarget maths indexes it as one).
+ * Rebuild a live `Skin` from storage. `toMat4` is passed in rather than imported to keep this module
+ * engine-free; it must produce a Float32Array, which is what the retarget maths indexes.
  */
 export function loadSkin(stored: StoredSkin | null | undefined, toMat4: (a: number[]) => any): any | null {
   if (!stored) return null
@@ -106,11 +94,8 @@ export function buildAnimationAsset(name: string, clips: StoredClip[], sourceSki
 
 /**
  * A content fingerprint for a clip: everything that affects playback, and nothing else.
- *
- * Name is EXCLUDED on purpose — the same Mixamo walk imported into two characters is routinely called
- * "mixamo.com" in one and "Walk" in the other, and those are the copies most worth collapsing. Keyframe
- * numbers are rounded before hashing so a value that round-tripped through float32 in one asset and not
- * the other still matches.
+ * The name is EXCLUDED — the same download is routinely renamed per character. Keyframe numbers are
+ * rounded before hashing so a float32 round trip in one asset and not the other still matches.
  */
 export function clipFingerprint(clip: StoredClip): string {
   const q = (n: number) => (Math.abs(n) < 1e-6 ? 0 : Math.round(n * 1e5) / 1e5)
@@ -133,9 +118,8 @@ export function findEquivalentAnimation(assets: AnimationAsset[], clips: StoredC
 }
 
 /**
- * The animation assets a model asset uses. Stored on the MODEL, not on each placed node: clips already
- * belong to the model asset (see modelClips.ts), so every instance of a character picking up the same
- * clip list is the behaviour that is already expected everywhere else.
+ * The animation assets a model asset uses. Stored on the MODEL, not on each placed node, so every
+ * instance of a character picks up the same clip list.
  */
 export type AnimationRefBearing = { animationIds?: string[] }
 
@@ -152,18 +136,15 @@ export function withoutAnimationRef<T extends AnimationRefBearing>(asset: T, ani
 }
 
 /**
- * One-shot migration: lift every clip embedded in a model asset into a shared `.anim` asset.
+ * One-shot migration: lift every clip embedded in a model asset into a shared `.anim` asset. Identical
+ * clips collapse onto one asset, matched on CONTENT rather than name.
  *
- * Clips used to live inside the model that imported them, so the same Mixamo walk given to two characters
- * was stored twice — the duplication this asset type exists to remove. Identical clips (matched on
- * CONTENT, not name, since the same download is routinely renamed) collapse onto one asset.
- *
- * What makes this safe to run over existing projects:
- *  - a model with no skin, or no clips, is returned unchanged (same object), so nothing else is rewritten;
- *  - the extracted clips keep their names, so state machines and Animation Field samples — which reference
- *    clips BY NAME — keep resolving after the round trip through the library;
- *  - the source skin recorded for each new asset is the MODEL'S OWN skin, so re-resolving it onto that same
- *    model is an identity retarget and cannot move anything. Only a DIFFERENT rig gets a real retarget.
+ * Three properties make it safe over existing projects:
+ *  - a model with no skin, or no clips, comes back as the SAME object, so nothing else is rewritten;
+ *  - extracted clips keep their names, because state machines and Animation Field samples reference
+ *    clips BY NAME;
+ *  - each new asset records the MODEL'S OWN skin as its source, so re-resolving onto that model is an
+ *    identity retarget.
  *
  * Pure: takes the libraries, returns new ones. The caller decides whether to persist.
  */
@@ -174,7 +155,7 @@ export function extractEmbeddedClips<M extends { id: string; name: string; nodeJ
   stripClips: (asset: M) => M,
 ): { models: M[]; animations: AnimationAsset[]; extracted: number; shared: number } {
   const animations = [...existing]
-  // Fingerprint -> asset, so the SECOND character carrying the same walk links rather than storing a copy.
+  // Fingerprint -> asset, so a second character carrying the same walk links rather than copies.
   const byPrint = new Map<string, AnimationAsset>()
   for (const a of animations) for (const c of a.clips) byPrint.set(clipFingerprint(c), a)
 
@@ -192,7 +173,7 @@ export function extractEmbeddedClips<M extends { id: string; name: string; nodeJ
       let asset = byPrint.get(print)
       if (asset) shared++
       else {
-        // Named after the clip, not the model: the clip's name is what every state machine already says.
+        // Named after the clip, not the model: that is the name every state machine already says.
         asset = buildAnimationAsset(clip.name || 'clip', [clip], skin)
         animations.push(asset)
         byPrint.set(print, asset)
@@ -200,7 +181,7 @@ export function extractEmbeddedClips<M extends { id: string; name: string; nodeJ
       }
       next = withAnimationRef(next, asset.id)
     }
-    // Only strip once the references are in place, so a throw part-way cannot lose clips.
+    // Strip only once the references are in place, so a throw part-way cannot lose clips.
     return stripClips(next)
   })
 

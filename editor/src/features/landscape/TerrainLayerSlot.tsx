@@ -5,8 +5,7 @@ import { applyTerrainMaterialToLayer } from '../../utils/terrainMaterials'
 import { Toggle } from '../../components/ui'
 
 // The active-paint-layer control in the Landscape inspector: a terrain-material slot (drop / link /
-// edit / clear) plus per-layer blend overrides (tiling + automatic height/slope masking). Assigning a
-// terrain material reads its surface into the composite terrain material; the overrides tweak this layer.
+// edit / clear) plus per-layer blend overrides (tiling + automatic height/slope masking).
 export default function TerrainLayerSlot(props: { landscape: LandscapeNode | null; layerIndex: number }) {
   const { terrainMaterials, enterTerrainMaterialEditor, eventEmitter } = useCleoEngine()
   const [dragOver, setDragOver] = useState(false)

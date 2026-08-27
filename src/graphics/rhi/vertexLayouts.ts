@@ -1,17 +1,5 @@
-/**
- * The engine's vertex layouts, written down.
- *
- * These were previously three separate encodings of the same fact, none of which named it: a
- * `_CANON_ATTR` table of names to sizes in `Mesh`, a hand-rolled `offsets` map with the 56-byte stride
- * spelled out as `14 * floatSize` in `initializeAnimatedVAO`, and the shader's own `layout(location=)`
- * declarations. A WebGPU pipeline has to be handed the whole layout up front — it cannot recover it by
- * reflecting a linked program the way WebGL2's `getActiveAttrib` does — so the layout has to exist as
- * data before there is a second backend to hand it to.
- *
- * Pure data and pure functions. No context, no GL enums (those live in `webgl2/glEnums.ts`), so the
- * offset and stride arithmetic that used to be inline in the middle of GL calls is now reachable from
- * the DOM-free test suite.
- */
+// The engine's vertex layouts as data, because a WebGPU pipeline is handed the whole layout up front
+// and cannot recover it by reflecting a linked program. Pure functions — no context, no GL enums.
 
 import type { VertexBufferLayout, VertexAttribute, VertexFormat } from './types';
 import { vertexFormatSize } from './types';
@@ -28,11 +16,8 @@ interface ModelAttribute {
 }
 
 /**
- * The canonical interleaved model vertex: position, normal, uv, tangent, bitangent.
- *
- * This order is the single source of truth — deliberately NOT the shader's reflected attribute
- * enumeration, whose order is driver- and program-dependent and would otherwise scramble the buffer
- * differently for, say, the `default` and `pbr` programs over the same mesh.
+ * The canonical interleaved model vertex: position, normal, uv, tangent, bitangent. This ORDER is the
+ * source of truth, never the shader's reflected enumeration, which is driver-dependent.
  */
 export const MODEL_ATTRIBUTES: readonly ModelAttribute[] = [
     { name: 'a_position',  order: 0, format: 'float32x3', aliases: ['position'] },
@@ -62,23 +47,16 @@ export interface ReflectedAttribute {
 }
 
 /**
- * The full 14-float, 56-byte model vertex, with every attribute present.
- *
- * What `createAnimated` writes and what the skinned vertex shaders read. Shader locations are the
- * canonical order here; a program that assigns them differently is handled by
- * {@link packedModelLayout}, which takes the reflected locations instead.
+ * The full 14-float, 56-byte model vertex — what `createAnimated` writes. Locations follow canonical
+ * order; a program that assigns them differently goes through {@link packedModelLayout}.
  */
 export const MODEL_VERTEX_LAYOUT: VertexBufferLayout = buildLayout(
     MODEL_ATTRIBUTES.map((attribute, index) => ({ name: attribute.name, location: index })),
 );
 
 /**
- * The packed layout for whichever standard attributes a program actually declares.
- *
- * The non-animated path interleaves only the attributes present, so the stride is not a constant: a
- * position-and-uv program packs to 20 bytes, not 56. Unknown names are dropped — the caller keeps
- * handling those through the reflected fallback — and the survivors are laid out in canonical order
- * regardless of the order they were reflected in.
+ * The packed layout for whichever standard attributes a program declares — the stride is not constant,
+ * a position-and-uv program packs to 20 bytes. Unknown names are dropped; survivors keep canonical order.
  */
 export function packedModelLayout(attributes: readonly ReflectedAttribute[]): VertexBufferLayout {
     return buildLayout(attributes);
@@ -86,8 +64,7 @@ export function packedModelLayout(attributes: readonly ReflectedAttribute[]): Ve
 
 function buildLayout(attributes: readonly ReflectedAttribute[]): VertexBufferLayout {
     const known: { attribute: ModelAttribute; location: number }[] = [];
-    // A program may declare the same attribute under two spellings only by mistake; keep the first so
-    // the stride cannot double behind the caller's back.
+    // Keep the first of two spellings of one attribute, so the stride cannot double.
     const seen = new Set<string>();
     for (const reflected of attributes) {
         const attribute = BY_NAME.get(reflected.name);
@@ -107,23 +84,8 @@ function buildLayout(attributes: readonly ReflectedAttribute[]): VertexBufferLay
 }
 
 /**
- * The shared fullscreen quad: position, then uv, interleaved - 20 bytes.
- *
- * The arithmetic is `packedModelLayout`'s, unchanged, because the quad IS a two-attribute model
- * vertex: `MODEL_ATTRIBUTES` orders position before texCoord, so the offsets fall out as 0 and 12 and
- * the stride as 20 - exactly what `Renderer._screenQuad` uploads.
- *
- * It carries its own name because the caller's QUESTION is different. `packedModelLayout` is asked how
- * a mesh is packed. This is asked whether a program consumes the screen quad at all, and returns a list
- * so it can answer "no": a stage that declares no vertex attributes must get NO layout rather than a
- * zero-stride one, which WebGPU rejects.
- *
- * Why this exists at all: fullscreen pipelines used to be built with `vertexLayouts: []` on the grounds
- * that "the shared quad still owns its own VAO". That is true on WebGL2 and meaningless on WebGPU,
- * which has no VAO - a pipeline whose vertex stage reads `@location(0)` with an empty buffer list is
- * invalid, so every screen-space pass failed to build and every one of its draws was dropped. The pass
- * still ran its CLEAR, which is why the symptom was a frame that counted the right number of draws and
- * rendered nothing.
+ * The shared fullscreen quad: position then uv, 20 bytes. Returns a LIST so it can be empty — a stage
+ * declaring no vertex attributes must get no layout, and WebGPU rejects a zero-stride one.
  */
 export function screenQuadLayout(attributes: readonly ReflectedAttribute[]): VertexBufferLayout[] {
     const layout = buildLayout(attributes);
@@ -131,11 +93,8 @@ export function screenQuadLayout(attributes: readonly ReflectedAttribute[]): Ver
 }
 
 /**
- * Per-instance model matrix: a mat4 spread across four consecutive attribute slots.
- *
- * Neither API has a mat4 vertex format — both consume one as four vec4s — so the four-slot expansion
- * is not an implementation detail that can be hidden. `baseLocation` is 5 for every current caller,
- * immediately after the five model attributes.
+ * Per-instance model matrix, spread across four consecutive slots — neither API has a mat4 vertex
+ * format. `baseLocation` is 5 for every current caller, immediately after the five model attributes.
  */
 export function instanceMatrixLayout(baseLocation: number = 5): VertexBufferLayout {
     const attributes: VertexAttribute[] = [];
@@ -151,12 +110,8 @@ export function instanceMatrixLayout(baseLocation: number = 5): VertexBufferLayo
 }
 
 /**
- * Bone indices and weights, each in a buffer of its own rather than interleaved with the model vertex.
- *
- * They are separate because `createAnimated` receives them as separate arrays from the importers, and
- * because the indices are integers — bound with `vertexAttribIPointer`, not the float path. Packing
- * them into the main vertex is the obvious optimisation once the layout is explicit; it is not a
- * change this milestone makes.
+ * Bone indices, in a buffer of their own. Integers, so they bind with `vertexAttribIPointer` rather
+ * than the float path.
  */
 export const BONE_INDEX_LAYOUT: VertexBufferLayout = {
     arrayStride: 16,
@@ -171,14 +126,8 @@ export const BONE_WEIGHT_LAYOUT: VertexBufferLayout = {
 };
 
 /**
- * The two bone layouts, at the locations a particular program declares them.
- *
- * The locations are NOT fixed, which is the whole reason this is a function. The lit skinned families
- * put bone data at 5 and 6, after normal/uv/tangent/bitangent; the unlit Basic family has none of those
- * and uses 2 and 3. Binding one family's buffers at the other's locations leaves the attributes unbound
- * — GL_INVALID_OPERATION on the draw, and the reason `AnimatedModel` keys its VAO by layout.
- *
- * Returns null when the program declares no bone attributes, which is every non-skinned program.
+ * The two bone layouts at the locations a program declares them, or null for a non-skinned program.
+ * Locations are NOT fixed: the lit families use 5 and 6, the unlit Basic family 2 and 3.
  */
 export function boneLayouts(attributes: readonly ReflectedAttribute[]): [VertexBufferLayout, VertexBufferLayout] | null {
     let indices = -1, weights = -1;
@@ -194,30 +143,13 @@ export function boneLayouts(attributes: readonly ReflectedAttribute[]): [VertexB
 }
 
 /**
- * The interleaved model vertex, read by a program that may declare only part of it.
- *
- * Two different programs are involved and conflating them is the trap this function exists to close:
- *
- *   `builtWith`  the program the BUFFER was written for. `ModelNode.initializeModel` calls
- *                `Geometry.getData` with exactly the attributes that program declares, so the stride
- *                and the offsets are its business, not the caller's. A `basic` model is 20 bytes per
- *                vertex (position + uv); a `pbr` one is 56 (all five). Pass null for an ANIMATED mesh,
- *                which `createAnimated` always writes at the full 56 bytes whatever draws it.
- *   `drawnBy`    the program doing the drawing, which supplies only the shader LOCATIONS, and may
- *                declare a subset — a depth-only pass wants position out of a five-attribute vertex.
- *
- * Getting `builtWith` wrong does not fail loudly. Reading a 20-byte buffer at a 56-byte stride walks
- * every third vertex and renders geometry that is still the right colour in roughly the right place —
- * a cube came out as a flat stretched bar, and only a pixel signature said so.
- *
- * The predecessor of this function hard-coded the full layout and was right for the lit families and
- * silently wrong for the unlit one.
+ * The interleaved model vertex, read by a program that may declare only part of it. `builtWith` is the
+ * program the BUFFER was packed for and owns the stride; `drawnBy` supplies only the shader locations.
  */
 export function modelVertexLayout(drawnBy: readonly ReflectedAttribute[],
                                   builtWith?: readonly ReflectedAttribute[] | null): VertexBufferLayout {
     const base = builtWith ? packedModelLayout(builtWith) : MODEL_VERTEX_LAYOUT;
-    // Reflected names vary in spelling between programs (`uv` vs `a_texCoord`), so match through the
-    // canonical table rather than on the string.
+    // Reflected names vary in spelling (`uv` vs `a_texCoord`); match through the canonical table.
     const declared = new Map<string, number>();
     for (const attribute of drawnBy) {
         const canonical = BY_NAME.get(attribute.name);
@@ -232,14 +164,8 @@ export function modelVertexLayout(drawnBy: readonly ReflectedAttribute[],
 }
 
 /**
- * The tilemap chunk vertex: position.xy | uv.xy | colour.rgba, 8 floats and a 32-byte stride.
- *
- * Genuinely different from the model vertex, and deliberately so — per-cell tint and opacity need a
- * colour attribute, and smuggling it through the normal slot would work today and be a trap forever.
- * What it does NOT need is its own copy of the attribute-binding code, which is what it had.
- *
- * Locations are fixed here rather than reflected, matching the explicit `layout(location = ...)` in
- * shaders/materials/tilemap.vs.
+ * The tilemap chunk vertex: position.xy | uv.xy | colour.rgba, 32-byte stride. Locations are fixed
+ * here rather than reflected, matching the explicit `layout(location = ...)` in tilemap.vs.
  */
 export const TILE_VERTEX_LAYOUT: VertexBufferLayout = {
     arrayStride: 32,

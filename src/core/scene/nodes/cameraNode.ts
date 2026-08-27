@@ -11,9 +11,8 @@ import { Node } from "./node";
 export class CameraNode extends Node {
     private readonly _camera: Camera;
     private _active: boolean;
-    // Ordered fullscreen post-process passes (screen-mode CustomMaterials) run by the renderer for
-    // this camera, in array order. Serialized inline like mesh materials; the editor links them to
-    // material assets via the '__screenMaterialIds' node variable.
+    // Fullscreen post passes, run by the renderer in array order. The editor links them to material
+    // assets via the '__screenMaterialIds' node variable.
     private _screenMaterials: CustomMaterial[] = [];
 
     constructor(name: string, camera: Camera, id: string = uuidv4()) {
@@ -72,14 +71,11 @@ export class CameraNode extends Node {
     public get screenMaterials(): CustomMaterial[] { return this._screenMaterials; }
     public set screenMaterials(mats: CustomMaterial[]) { this._screenMaterials = mats; }
 
-    /**
-     * Get bounding box for CameraNode - returns a small sphere bounding box
-     */
+    /** Selection bounds: a small box around the camera's origin. */
     public getBoundingBox(): { min: vec3, max: vec3 } {
         const position = this.worldPosition;
         const scale = this.worldScale;
         
-        // Camera has a larger bounding box for easier selection
         const radius = Math.max(scale[0], scale[1], scale[2]) * 0.5;
         
         const min = vec3.fromValues(

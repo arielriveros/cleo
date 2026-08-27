@@ -17,9 +17,8 @@ const ESTIMATE_SIZE = 200
 const estimateFor = (r: TerrainFoliageRule): number =>
   Math.round((r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * ESTIMATE_SIZE * ESTIMATE_SIZE)
 
-// The right-sidebar inspector shown while a terrain-material tab is active. Edits the preview sphere's
-// TerrainMaterial in place: the base surface (via the shared MaterialEditor), the terrain blend fields,
-// and the foliage include/exclude lists. All edits emit SCENE_CHANGED so the tab tracks unsaved state.
+// Right-sidebar inspector for the active terrain-material tab: the base surface, the terrain blend
+// fields and the foliage include/exclude lists, edited on the preview sphere's TerrainMaterial in place.
 export default function TerrainMaterialInspector(props: { node: Node | null }) {
   const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials, models, refreshTerrainMaterialPreview } = useCleoEngine()
   const [, force] = useState(0)
@@ -31,7 +30,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   const tm = node && node.nodeType === 'model' ? ((node as ModelNode).model?.material as TerrainMaterial | undefined) : undefined
   const isTerrain = tm instanceof TerrainMaterial
 
-  // Union of foliage prototype names across the library (+ this material's own) for the exclude picker.
+  // Union of foliage prototype names across the library and this material, for the exclude picker.
   const knownFoliageNames = useMemo(() => {
     const names = new Set<string>()
     for (const asset of terrainMaterials) {
@@ -59,8 +58,8 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   const addBillboard = () => {
     if (!newFoliageTex) { alert('Pick a texture for the grass billboard.'); return }
     const name = `${newFoliageTex.slice(0, 10)}_${mat.foliageInclude.length}`
-    // densityUnit must be stamped here: rules pushed straight onto a live material never pass through
-    // TerrainMaterial.parse, which is where an unmarked rule would be treated as legacy and divided by 100.
+    // densityUnit must be stamped here: a rule pushed straight onto a live material never passes through
+    // TerrainMaterial.parse, where an unmarked rule is treated as legacy and divided by 100.
     mat.foliageInclude.push({
       kind: 'billboard', name, textureId: newFoliageTex,
       density: DEFAULT_FOLIAGE_DENSITY.billboard, densityUnit: FOLIAGE_DENSITY_UNIT,
@@ -73,7 +72,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     Model.fromFile({ files: Array.from(files) }).then(models => {
       if (!models.length) return
       const rule: TerrainFoliageRule = {
-        kind: 'mesh', // rendering mode (real geometry vs 'billboard'), not the old asset-type name
+        kind: 'mesh', // rendering mode: real geometry, as opposed to 'billboard'
         name: `${models[0].name}_${mat.foliageInclude.length}`,
         model: models[0].model.serialize(),
         density: DEFAULT_FOLIAGE_DENSITY.mesh, densityUnit: FOLIAGE_DENSITY_UNIT,
@@ -83,8 +82,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
       changed()
     }).catch(err => console.error(err))
   }
-  // Model-library prop: carries the asset's LOD levels + cull distance and stays linked (rule.modelId) —
-  // saving the model asset refreshes the rule (and live foliage) automatically.
+  // Stays linked through rule.modelId, so saving the model asset refreshes the rule and live foliage.
   const addModelFromLibrary = () => {
     const asset = models.find(m => m.id === newFoliageModel)
     if (!asset) { alert('Pick a model from the library.'); return }
@@ -97,7 +95,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
       Logger.warn(`${e}`, 'Editor')
     }
   }
-  // Rebuild a library-linked rule's payload from its current model asset (keeps name/density/impostor).
+  // Rebuilds from the linked model asset, keeping name/density/impostor.
   const resyncRule = (i: number) => {
     const r = mat.foliageInclude[i]
     const asset = r.modelId ? models.find(m => m.id === r.modelId) : undefined

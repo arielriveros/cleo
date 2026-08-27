@@ -4,8 +4,8 @@ import type { TilemapTool } from '../EngineContext'
 import { Button, Hint, Select, Toggle } from '../../components/ui'
 import { useActiveTilemap } from './useActiveTilemap'
 
-// The floating tool card for tilemap mode. Mirrors LandscapeInspector: a `data-cleo-overlay` panel over
-// the viewport whose controls write straight into the shared brush ref, then announce the change.
+// The floating tool card for tilemap mode: a `data-cleo-overlay` panel over the viewport whose controls
+// write straight into the shared brush ref, then announce the change.
 
 const TOOLS: { id: TilemapTool; label: string; title: string }[] = [
   { id: 'brush', label: 'Brush', title: 'Paint the selected tile' },
@@ -28,9 +28,8 @@ export default function TilemapInspector() {
   const [variantSetId, setVariantSetId] = useState<number | null>(tilemapBrush.current.variantSetId)
   const [terrainId, setTerrainId] = useState<number | null>(tilemapBrush.current.terrainId)
 
-  // The brush is also written from elsewhere — the palette switches to Stamp on a rectangle drag, the
-  // eyedropper switches back to Brush, X/Y/Z flip the orientation — so the card follows the ref rather
-  // than assuming it is the only writer.
+  // The brush is also written from elsewhere (the palette, the eyedropper, the X/Y/Z keys), so the card
+  // follows the ref rather than assuming it is the only writer.
   useEffect(() => {
     const b = tilemapBrush.current
     setTool(b.tool)

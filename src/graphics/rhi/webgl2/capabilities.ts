@@ -1,45 +1,19 @@
 import type { DeviceCapabilities } from '../device';
 
+// Read the WebGL2 device's real limits back, once, at boot. Takes its context by injection: this runs
+// while the context is being acquired, before the `gl` live binding is published.
+
 /**
- * Read the WebGL2 device's real limits back, once, at boot.
- *
- * Takes its context by injection rather than importing the `gl` live binding, for the same reason
- * gpuProfiler does: this runs while the context is being acquired, before anything has published it,
- * and a module-level import would be reading a binding that is still undefined.
- *
- * Everything here is queried rather than assumed — but the first thing the query established is that
- * the assumption was right. Measured on ANGLE/D3D11 (RTX 3060), `MAX_TEXTURE_IMAGE_UNITS` is exactly
- * 16: the ES 3.00 guaranteed minimum, not a floor the driver comfortably exceeds. So renderer.ts's
- * former `SHADOW_UNIT = 6` / `SPOT_SHADOW_UNIT = 15` were not over-cautious — the deferred pass
- * really did sit one unit from the ceiling on mainstream desktop hardware, and custom materials
- * really did have nowhere to put a sampler past 15. That budget does not loosen on WebGL2 anywhere;
- * what removed the constants was moving unit assignment into the bind groups, which pack each pass
- * from 0 instead of reserving numbers across the whole frame.
- *
- * Other measurements from the same device, for scale: maxTextureSize 16384, arrayLayers 2048,
- * colorAttachments 8, EXT_color_buffer_float and OES_texture_float_linear both present.
- */
-/**
- * The GPU timer-query extension, or null when the driver/browser withholds it.
- *
- * The one place that asks. `hasTimestampQuery` below and `WebGL2GpuProfiler.initialize` both used to
- * call `getExtension` themselves, which is two lookups that can disagree about whether timing is
- * possible — the capability said yes while the profiler said no, or the reverse, with nothing
- * reconciling them. The profiler needs the OBJECT (for `TIME_ELAPSED_EXT` and `GPU_DISJOINT_EXT`),
- * not just the boolean, which is why this returns it rather than being folded into the capability.
- *
- * Typed `any` because lib.dom has no interface for it: it is an extension, and its two constants are
- * the entire API surface anything here uses.
+ * The GPU timer-query extension object, or null when the driver withholds it. The single place that
+ * asks, so `hasTimestampQuery` and the profiler cannot disagree about whether timing is possible.
  */
 export function timerQueryExtension(gl: WebGL2RenderingContext): any {
     return gl.getExtension('EXT_disjoint_timer_query_webgl2');
 }
 
 export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapabilities {
-    // Both are optional on real hardware and they fail independently — a device can render to a float
-    // target while refusing to sample it with anything but NEAREST. texture.ts already requires BOTH
-    // before it will allocate an RGBA16F target, so a device with only the first silently gets the
-    // 8-bit fallback and an LDR pipeline. Reported separately so that stops being invisible.
+    // Optional and independent: a device can render to a float target while refusing to filter it.
+    // Reported separately because texture.ts requires both before allocating RGBA16F.
     const floatRenderable = gl.getExtension('EXT_color_buffer_float') !== null;
     const floatFilterable = gl.getExtension('OES_texture_float_linear') !== null;
 
@@ -56,8 +30,7 @@ export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapa
         max3DTextureSize: gl.getParameter(gl.MAX_3D_TEXTURE_SIZE) as number,
 
         maxColorAttachments: gl.getParameter(gl.MAX_COLOR_ATTACHMENTS) as number,
-        // The fragment-stage texture units. This is the number the deferred lighting pass is measured
-        // against, not the combined vertex+fragment total, which is always larger and would flatter it.
+        // Fragment-stage units, not the combined vertex+fragment total, which would flatter the budget.
         maxSamplersPerStage: gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) as number,
         maxVertexAttributes: gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number,
         maxUniformBufferBindingSize: gl.getParameter(gl.MAX_UNIFORM_BLOCK_SIZE) as number,
@@ -65,29 +38,21 @@ export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapa
         floatRenderable,
         floatFilterable,
 
-        // Not "not yet" — WebGL2 has no compute stage and no storage buffers at all. Anything gated on
-        // these is a WebGPU-only path by construction.
+        // Not "not yet": WebGL2 has no compute stage and no storage buffers at all.
         hasCompute: false,
         hasStorageBuffers: false,
         hasTimestampQuery: timerQueryExtension(gl) !== null,
 
         maxAnisotropy,
-        // WebGL2 always presents through the canvas's own RGBA8 drawing buffer; there is no swap-chain
-        // format to negotiate the way WebGPU's `getPreferredCanvasFormat()` does.
+        // WebGL2 always presents through the canvas's own RGBA8 buffer; no format to negotiate.
         preferredCanvasFormat: 'rgba8unorm',
 
         adapterInfo: readAdapterInfo(gl),
     };
 }
 
-/**
- * Best-effort GPU identification.
- *
- * `WEBGL_debug_renderer_info` is a fingerprinting vector, so browsers increasingly withhold it — Firefox
- * gates it behind a pref and Chrome returns masked strings in some configurations. Absent adapter info
- * is therefore the expected case, not an error, and nothing may depend on these strings being present.
- * They exist only to make a bug report from a user's machine legible.
- */
+// Best-effort GPU identification. `WEBGL_debug_renderer_info` is a fingerprinting vector that browsers
+// withhold, so absence is the expected case and nothing may depend on these strings.
 function readAdapterInfo(gl: WebGL2RenderingContext): DeviceCapabilities['adapterInfo'] {
     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
     if (!debugInfo) return undefined;

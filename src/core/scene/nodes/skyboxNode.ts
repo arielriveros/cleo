@@ -49,13 +49,10 @@ export class SkyboxNode extends Node {
     public get skybox(): Skybox { return this._skybox; }
     public get initialized(): boolean { return this._initialized; }
 
-    /**
-     * Get bounding box for SkyboxNode - returns a large sphere bounding box
-     */
+    /** Selection bounds: large enough to enclose the sky. */
     public getBoundingBox(): { min: vec3, max: vec3 } {
         const position = this.worldPosition;
-        // Skybox is typically very large, use a large bounding box
-        const radius = 1000; // Large radius for skybox
+        const radius = 1000;
         
         const min = vec3.fromValues(
             position[0] - radius,
@@ -72,5 +69,3 @@ export class SkyboxNode extends Node {
     }
 }
 
-/** Config for a VolumetricCloudsNode. Every field is optional so freshly-created nodes and old
- *  saves both fall back to the defaults below (a mid-coverage cumulus layer). */

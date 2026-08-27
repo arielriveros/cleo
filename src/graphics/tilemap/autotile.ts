@@ -1,22 +1,13 @@
-// Auto-tiling: turning "which of my neighbours are the same terrain?" into "which tile do I draw?".
-//
-// A terrain set maps a neighbour bitmask to the tiles that fit it. The masks below are the standard
-// Wang families, so a set authored against a Tiled/RPG-Maker-style sheet transfers without relabelling:
-//   edge   — 4 bits, the orthogonal neighbours (N, E, S, W)
-//   corner — 4 bits, the diagonals (NE, SE, SW, NW)
-//   blob   — 8 bits, all of them, with the 47-blob normalization applied
-// Hexagonal grids have six neighbours and always use all six bits regardless of the declared kind.
+// Auto-tiling: a terrain set maps a neighbour bitmask to the tiles that fit it. The masks are the
+// standard Wang families — `edge` (4 orthogonal bits), `corner` (4 diagonals), `blob` (all 8, with
+// 47-blob normalization). Hexagonal grids always use all six bits whatever the declared kind.
 
 import type { TerrainSet, VariantSet, WangKind } from "./tileset";
 
 /**
- * Fold a neighbour-sameness ring into the bitmask a terrain set is keyed by. `same` must be in the
- * order {@link neighbours} returns: clockwise from north, 8 entries on square/isometric grids and 6 on
- * hexagonal ones.
- *
- * The blob case drops any diagonal whose two adjacent edges are not BOTH set. Without that, the eight
- * bits span 256 combinations of which only 47 are visually distinct, and an artist would have to draw
- * (or an author to assign) five times more tiles than the silhouette actually needs.
+ * Fold a neighbour-sameness ring into the bitmask a terrain set is keyed by. `same` must be in
+ * {@link neighbours} order. The blob case drops any diagonal whose two adjacent edges are not both set,
+ * which is what collapses 256 combinations into the 47 that are visually distinct.
  */
 export function autoTileMask(kind: WangKind, same: boolean[]): number {
     if (same.length === 6) {
@@ -49,10 +40,8 @@ export function autoTileMask(kind: WangKind, same: boolean[]): number {
 }
 
 /**
- * Tile to draw for `mask`, or -1 when the set has nothing for it.
- *
- * Falls back to the edge-only mask before giving up: a set authored with edge rules still produces a
- * sensible tile when a blob mask is thrown at it, which beats punching a hole in the map.
+ * Tile to draw for `mask`, or -1 when the set has nothing for it. Falls back to the edge-only mask
+ * first, so an edge-authored set still answers a blob mask rather than punching a hole in the map.
  */
 export function resolveAutoTile(set: TerrainSet, mask: number, rng: () => number = Math.random): number {
     const pick = (candidates: number[] | undefined): number => {
@@ -71,8 +60,8 @@ export function resolveAutoTile(set: TerrainSet, mask: number, rng: () => number
 }
 
 /**
- * Draw one tile from a variant set, respecting the per-tile weights. Returns -1 for an empty set.
- * Non-positive weights are treated as zero so an author can park a variant without deleting it.
+ * Draw one tile from a variant set by weight, or -1 when it is empty. A non-positive weight parks a
+ * variant without deleting it.
  */
 export function pickWeightedVariant(set: VariantSet, rng: () => number = Math.random): number {
     let total = 0;
@@ -87,9 +76,8 @@ export function pickWeightedVariant(set: VariantSet, rng: () => number = Math.ra
 }
 
 /**
- * Deterministic per-cell hash in [0, 1). Used instead of Math.random when scattering variants so that
- * repainting the same cells produces the same map — a randomize brush that reshuffles on every stroke
- * is unusable, and a saved map that reshuffles on load is worse.
+ * Deterministic per-cell hash in [0, 1). Used instead of `Math.random` when scattering variants, so
+ * repainting the same cells — or reloading the map — produces the same result.
  */
 export function cellNoise(col: number, row: number, seed: number = 0): number {
     let h = (col * 374761393 + row * 668265263 + seed * 1274126177) | 0;

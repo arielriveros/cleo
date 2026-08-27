@@ -1,18 +1,10 @@
 import { createContext, useContext } from 'react';
 
 /**
- * Per-category visibility of the viewport's debug/helper overlays, split into an EDITOR channel (shown
- * while authoring) and a RUNTIME channel (shown during in-editor Play). The two are independent, so a
- * category can be visible while editing and hidden on Play, or vice-versa.
- *
- * The state lives in and is driven by EngineProvider (the reconcilers that build the helper meshes read
- * it via a ref, and toggling emits DEBUG_VISIBILITY_CHANGED so they re-run); this context re-exposes it
- * as a narrow value, mirroring PlaybackContext/SelectionContext.
- *
- * Every helper is an `__editor__`/`__debug__`-named node built only in the editor app, so NONE of this
- * ships in a published game — Play/Publish both rebuild the scene through buildGameData, which strips
- * those names and never links this code. There is intentionally no build-time flag: the guarantee is
- * structural, not conditional-compilation.
+ * Per-category visibility of the viewport's debug/helper overlays, split into an independent EDITOR
+ * channel (authoring) and RUNTIME channel (in-editor Play). The state lives in EngineProvider; the
+ * reconcilers read it via a ref, and toggling emits DEBUG_VISIBILITY_CHANGED so they re-run.
+ * Every helper is an `__editor__`/`__debug__`-named node, which buildGameData strips from any build.
  */
 
 export type DebugCategory =
@@ -38,7 +30,7 @@ export interface DebugCategoryMeta {
   runtimeAvailable: boolean;
 }
 
-/** Menu order + labels. Existing helpers first, then the newer overlays, grid last. */
+/** Menu order + labels; grid last. */
 export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   { key: 'colliders', label: 'Collision wireframes', runtimeAvailable: true },
   { key: 'triggers', label: 'Trigger volumes', runtimeAvailable: true },
@@ -55,8 +47,8 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   { key: 'grid', label: 'Reference grid', runtimeAvailable: true },
 ];
 
-// The overlays the editor drew before this menu existed default to Editor-on (so nothing visibly changes
-// for existing users); the brand-new overlays default fully off, to be opted into. Runtime is off for all.
+// These categories default to Editor-on; every other overlay defaults off and is opted into. Runtime is
+// off for all.
 const EDITOR_ON_BY_DEFAULT = new Set<DebugCategory>(['colliders', 'triggers', 'lights', 'cameras', 'probes', 'grid']);
 
 export function defaultDebugVisibility(): DebugVisibility {

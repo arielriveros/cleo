@@ -1,20 +1,16 @@
 import { TextureManager } from 'cleo'
 import type { TilesetAsset } from '../../utils/tilesets'
 
-// A tileset's card preview: its atlas, downscaled.
-//
-// Canvas 2D rather than the shared 3D thumbnail renderer (modelThumbnails.ts): there is nothing to pose
-// and nothing to light, and going through the renderer would cost a full GL frame and serialize behind
-// every other thumbnail refresh for an image the browser has already decoded.
+// A tileset's card preview: its atlas, downscaled with canvas 2D rather than the shared 3D thumbnail
+// renderer — there is nothing to pose or light, and the browser has already decoded the image.
 
 const SIZE = 96
 
 /**
  * A data-URL preview of `asset`'s atlas, or null when it has no image yet (or the image is cross-origin,
  * which taints the canvas and makes toDataURL throw).
- *
- * Letterboxed rather than cropped, and drawn with smoothing off: pixel art shrunk with bilinear filtering
- * turns to mush at card size, which is precisely when the user is trying to tell two tilesets apart.
+ * Letterboxed rather than cropped, and drawn with smoothing off: bilinear filtering turns pixel art to
+ * mush at card size.
  */
 export function renderTilesetThumbnail(asset: TilesetAsset): string | null {
   const image = TextureManager.Instance.getTexture(asset.textureId)?.data as HTMLImageElement | undefined

@@ -4,18 +4,14 @@ import { awaitTextureImage } from './textureReady'
 
 // Promoting pre-tileset sprites into real tileset assets.
 //
-// A sprite saved before the tileset standardization carried a raw texture id (plus, if animated, its own
-// columns/rows). `Sprite.parse` already turns that into a working INLINE tileset — the published player
-// and runtime instantiation need no editor in scope, so migration has to be possible with no decoded
-// image, and an inline tileset expresses its grid in tile units rather than pixels.
+// A legacy sprite carries a raw texture id, which `Sprite.parse` turns into a working INLINE tileset — its
+// grid in tile units, since the published player has no decoded image to measure. That draws but cannot be
+// authored: an inline tileset has no library asset, so it cannot be renamed, resliced or given per-tile
+// metadata. This pass runs where a decoded image IS available and relinks each sprite onto a real asset
+// with true pixel dimensions.
 //
-// That is enough to draw, but not enough to author: an inline tileset has no library asset, so it cannot
-// be renamed, resliced, given margin/spacing, or given per-tile metadata. This pass closes that gap in
-// the editor, where a decoded image IS available: it creates one real asset per distinct sheet and
-// relinks the sprites onto it, with true pixel dimensions.
-//
-// Editor-owned helper sprites (the light and probe icons) keep their inline tilesets on purpose — they
-// are not the user's content and must not appear in the asset explorer.
+// Editor-owned helper sprites (the light and probe icons) must keep their inline tilesets: they are not
+// the user's content and must not appear in the asset explorer.
 
 /** Textures belonging to the editor's own gizmos, which never become library assets. */
 function isEditorTexture(textureId: string): boolean {
@@ -37,9 +33,8 @@ export interface SpriteMigrationResult {
 /**
  * Relink every sprite in `scene` that still draws from an inline tileset onto a real library asset,
  * creating assets as needed.
- *
- * Awaits each atlas's decode before reading `naturalWidth` — `addTextureFromBase64` registers an id
- * synchronously and decodes later, so reading too early bakes a 1x1 grid in permanently.
+ * Each atlas's decode MUST be awaited before reading `naturalWidth`: `addTextureFromBase64` registers an
+ * id synchronously and decodes later, so reading early bakes in a 1x1 grid permanently.
  */
 export async function migrateSceneSprites(
   scene: Scene | null | undefined,
@@ -61,9 +56,8 @@ export async function migrateSceneSprites(
   }
   if (!pending.length) return { created: [], changed: false }
 
-  // An asset already built for this exact sheet by an earlier run (or an earlier scene this session) is
-  // reused rather than duplicated. Matching on the grid as well as the atlas matters: the same image can
-  // legitimately be sliced two ways by two sprites.
+  // Reuse an asset already built for this exact sheet. The key must include the GRID as well as the
+  // atlas: the same image can legitimately be sliced two ways by two sprites.
   const byKey = new Map<SheetKey, TilesetAsset>()
   for (const asset of tilesets) byKey.set(sheetKey(asset.textureId, asset.columns, asset.rows), asset)
 
@@ -74,17 +68,16 @@ export async function migrateSceneSprites(
     let asset = byKey.get(item.key)
     if (!asset) {
       const image = await awaitTextureImage(item.textureId)
-      // No decode, no honest pixel size. Leaving the sprite inline keeps it drawing correctly; a later
-      // run migrates it once the image is available.
+      // No decode, no honest pixel size. Left inline the sprite still draws, and a later run migrates it.
       if (!image) continue
       const name = item.textureId.replace(/\.[^./\\]+$/, '') || item.textureId
       const candidate = buildTilesetAsset(name, item.textureId, image.naturalWidth, image.naturalHeight, {
         tileWidth: Math.max(1, Math.floor(image.naturalWidth / item.columns)),
         tileHeight: Math.max(1, Math.floor(image.naturalHeight / item.rows)),
       })
-      // buildTilesetAsset re-derives the grid from the pixel size, which will not match when the sheet
-      // does not divide evenly. Tile indices are positions in that grid, so a mismatch would silently
-      // repoint every frame at a different cell — leave the sprite inline instead. It still draws.
+      // buildTilesetAsset re-derives the grid from the pixel size, which will not match a sheet that does
+      // not divide evenly. Tile indices are positions in that grid, so a mismatch repoints every frame at
+      // a different cell; leave the sprite inline instead.
       if (candidate.columns !== item.columns || candidate.rows !== item.rows) continue
       asset = candidate
       byKey.set(item.key, asset)

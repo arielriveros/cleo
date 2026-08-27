@@ -1,9 +1,7 @@
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api'
 
-// Registers a lightweight GLSL language for Monaco (syntax highlighting + bracket/comment behaviour). GLSL
-// is not one of Monaco's built-in languages, but it is C-like enough that a small Monarch tokenizer covers
-// fragment-shader source well. No language worker is involved (Monarch tokenizes on the main thread), so
-// this needs no monaco-editor-webpack-plugin entry. Registered once from ensureMonaco().
+// Registers a lightweight GLSL language for Monaco: a Monarch tokenizer only, no language worker, so it
+// needs no monaco-editor-webpack-plugin entry. Registered once from ensureMonaco().
 
 let registered = false
 
@@ -52,9 +50,7 @@ export function registerGlsl(monaco: typeof Monaco): void {
     symbols: /[=><!~?:&|+\-*/^%]+/,
     tokenizer: {
       root: [
-        // preprocessor
         [/^\s*#\w+/, 'keyword.directive'],
-        // gl_ / built-in globals
         [/gl_\w+/, 'variable.predefined'],
         [/[a-zA-Z_]\w*/, {
           cases: {

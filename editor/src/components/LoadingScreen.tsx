@@ -1,17 +1,15 @@
-// `import type` so the pre-engine boot gate (app.tsx) can render this without pulling EngineContext — and
-// everything it constructs at module scope — into the bundle before a project has been opened.
+// `import type` is load-bearing: the pre-engine boot gate (app.tsx) must be able to render this
+// without pulling EngineContext, and everything it constructs at module scope, into the bundle.
 import type { LoadingProgress } from '../features/EngineContext';
-// A value import, unlike the one above: version.ts compiles to two string constants and pulls in nothing.
+// A value import is safe here: version.ts compiles to two string constants and pulls in nothing.
 import { VERSION_LABEL } from '../version';
 
 interface LoadingScreenProps {
   progress: LoadingProgress;
 }
 
-// Branded splash shown while the editor loads its startup assets. Mounted inside
-// the viewport's `relative` container (Editor.tsx) so it covers only the 3D view
-// and leaves the rest of the editor UI visible. Opaque background hides the
-// (still empty) canvas behind it.
+// Branded splash shown while the editor loads its startup assets. Mounted inside the viewport's
+// `relative` container (Editor.tsx) so it covers only the 3D view.
 export default function LoadingScreen({ progress }: LoadingScreenProps) {
   const pct = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
 

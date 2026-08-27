@@ -1,21 +1,5 @@
-/**
- * Writing uniforms by NAME into a uniform buffer, from a build-time layout.
- *
- * `UniformBlockSet` does this on WebGL2 using offsets the driver reports. WebGPU reports nothing — a
- * uniform buffer is bytes and the shader reads whatever sits where its struct says — so the offsets
- * come from `tools/wgslLayout.mjs` instead, shipped on every `.wgsl` import and checked member for
- * member against a real driver by `tools/harness/uniformLayoutCheck.js`.
- *
- * The point of the exercise is that `setUniform('u_exposure', 2.0)` keeps working. ~380 call sites in
- * `renderer.ts` pass values by name and must not learn which backend they are talking to, so the
- * name-to-offset step is the backend's problem, and this is where it is solved for WebGPU.
- *
- * **A block is an ARENA of slots, not a single struct.** `queue.writeBuffer` is ordered against the
- * SUBMIT, not against the commands already recorded — so a pass that draws twenty objects, writing
- * `u_model` before each one, would have every one of those draws read the LAST value written, and the
- * pass would render twenty copies of the last object. So a write that follows a draw lands in a FRESH
- * slot, and the bind group for that draw names the slot's byte offset. See {@link UniformSet}.
- */
+// Writing uniforms by NAME into a WebGPU uniform buffer, from the layout each `.wgsl` import ships.
+// A block is an ARENA of slots, not one struct — a write following a draw must land in a fresh slot.
 
 import type { Device } from './device';
 import type { Buffer } from './resources';
@@ -39,14 +23,8 @@ export interface UniformBlockLayout {
     readonly flat: readonly UniformMember[];
 }
 
-/**
- * How to write one member: N elements of M components, each element `stride` bytes apart.
- *
- * Collapsing every type onto this shape is what keeps the writer branch-free at call time. A matrix is
- * "4 elements of 4 components, 16 bytes apart" because its columns are padded to their alignment; an
- * `array<vec4<f32>, 8>` is "8 elements of 4 components, 16 bytes apart" for the same reason. Only the
- * derivation differs, and it happens once, here.
- */
+// How to write one member: N elements of M components, each `stride` bytes apart. Every type collapses
+// onto this shape once, here, so the writer stays branch-free at call time.
 interface WriteShape {
     readonly offset: number;
     readonly elements: number;
@@ -61,11 +39,8 @@ const MATRIX = /^mat([234])x([234])<\s*([a-z0-9]+)\s*>$/;
 const ARRAY = /^array<\s*([\s\S]+)\s*>$/;
 
 /**
- * The offset alignment WebGPU requires of a uniform binding, when the caller supplies none.
- *
- * The real value comes off `GPUSupportedLimits.minUniformBufferOffsetAlignment`. 256 is the spec's
- * DEFAULT — the largest an adapter may report — so it is safe everywhere and merely wasteful on one
- * that would have accepted less.
+ * Fallback uniform-binding offset alignment. 256 is the largest an adapter may report, so it is safe
+ * everywhere; the real value comes off `minUniformBufferOffsetAlignment`.
  */
 export const DEFAULT_UNIFORM_OFFSET_ALIGNMENT = 256;
 
@@ -104,8 +79,7 @@ function shapeOf(member: UniformMember): WriteShape {
         const stride = member.arrayStride ?? 16;
         const matrix = MATRIX.exec(of);
         if (matrix) {
-            // An array of matrices, written as `count` contiguous runs. Safe only while the columns
-            // themselves are tight — true for mat4x4, which is every such array in this engine.
+            // An array of matrices, as `count` contiguous runs. Valid only while the columns are tight.
             const columns = Number(matrix[1]), rows = Number(matrix[2]);
             return { offset: member.offset, elements: count, components: columns * rows, stride,
                      integer: isInteger(matrix[3]) };
@@ -134,20 +108,8 @@ function shapeOf(member: UniformMember): WriteShape {
 }
 
 /**
- * A CPU-side uniform block, and the GPU ARENA its successive values are written into.
- *
- * One per uniform block. The CPU half is a plain `ArrayBuffer` written by name; the GPU half is a
- * buffer holding `slots` copies of the block, and {@link flush} moves to a fresh slot whenever the
- * contents changed since the last draw read them.
- *
- * **Why a slot rather than one struct.** `queue.writeBuffer` is ordered on the QUEUE timeline — against
- * the submit, not against the commands already recorded in the encoder. Overwriting one struct per draw
- * therefore does not give each draw its own value; it gives every draw in the submission the last one.
- * Slots are what make "set `u_model`, draw, set `u_model`, draw" mean what it says, and they are why
- * the ~380 `setUniform` call sites above this could stay exactly as they were.
- *
- * The cursor is reset by the backend after each `queue.submit` — at that point every command that could
- * read a slot has been enqueued, so the slots are free again. See `WebGPUCommandEncoder.finish`.
+ * A CPU-side uniform block and the GPU arena its successive values are written into. Slots are what
+ * make "set, draw, set, draw" mean what it says; the backend resets the cursor after `queue.submit`.
  */
 export class UniformSet {
     private readonly _cpu: ArrayBuffer;
@@ -182,9 +144,7 @@ export class UniformSet {
         for (const member of layout.flat) {
             const shape = shapeOf(member);
             this._shapes.set(member.name, shape);
-            // Suffix aliases, so the renderer's shorter names resolve: `u_present.u_exposure` is also
-            // reachable as `u_exposure`. Same rule `UniformBlockSet` applies to GL's reflected names,
-            // and for the same reason — the call sites predate both layouts.
+            // Suffix aliases, so `u_present.u_exposure` is also reachable as `u_exposure`.
             for (const alias of suffixesOf(member.name))
                 if (!this._shapes.has(alias)) this._shapes.set(alias, shape);
         }
@@ -210,11 +170,8 @@ export class UniformSet {
     public get generation(): number { return this._generation; }
 
     /**
-     * Write a value by name. Returns false when this block declares no such member, so a caller can
-     * try the next block rather than failing.
-     *
-     * A value shorter than the member is written in full and the tail left alone — which is what the
-     * SSAO kernel relies on, uploading only the samples in use rather than all 64.
+     * Write a value by name; false when this block declares no such member. A value shorter than the
+     * member is written in full and the tail left alone.
      */
     public set(name: string, value: unknown): boolean {
         const shape = this._shapes.get(name);
@@ -225,8 +182,7 @@ export class UniformSet {
         let written = 0;
 
         for (let element = 0; element < shape.elements && written < source.length; element++) {
-            // Byte offset -> typed-array index. Both views are 4 bytes per entry, and every WGSL
-            // uniform offset is a multiple of 4, so this division is always exact.
+            // Byte offset -> typed-array index; exact, since every WGSL uniform offset is a multiple of 4.
             const base = (shape.offset + element * shape.stride) >> 2;
             for (let c = 0; c < shape.components && written < source.length; c++)
                 target[base + c] = source[written++];
@@ -236,11 +192,8 @@ export class UniformSet {
     }
 
     /**
-     * Move to a fresh slot and upload, if anything changed since the last draw read this block.
-     *
-     * An unchanged block keeps its slot, which is what stops a per-PASS block — the lights, the camera,
-     * the cascade matrices — from consuming one slot per draw. A changed one advances, because the draw
-     * already recorded against the previous slot must keep reading the value it was given.
+     * Move to a fresh slot and upload, if anything changed since the last draw read this block. An
+     * unchanged block keeps its slot, so a per-pass block does not consume one per draw.
      */
     public flush(device: Device): void {
         if (!this._dirty && this._cursor >= 0) return;
@@ -250,14 +203,8 @@ export class UniformSet {
         device.writeBuffer(this._buffer, this._cursor * this.slotSize, new Uint8Array(this._cpu));
     }
 
-    /**
-     * Double the arena and start again at its first slot.
-     *
-     * The OLD buffer is deliberately not destroyed: draws already recorded in this submission hold bind
-     * groups over it and must keep reading it until the queue drains. Dropping the reference is enough
-     * — those bind groups keep it alive, and it is collected once they are not. Growth doubles, so it
-     * happens a handful of times per arena for the life of the process.
-     */
+    // Double the arena and start again at its first slot. The OLD buffer must NOT be destroyed: draws
+    // already recorded hold bind groups over it. Dropping the reference is enough.
     private _grow(device: Device): void {
         this._slots *= 2;
         this._buffer = this._allocate(device);
@@ -266,12 +213,8 @@ export class UniformSet {
     }
 
     /**
-     * Release every slot.
-     *
-     * Called after `queue.submit`, where it is safe by construction: `writeBuffer` is ordered on the
-     * queue timeline, so anything written after a submit lands after every command that submit
-     * contained. Before it, reusing a slot would rewrite a value a recorded draw has not read yet —
-     * which is the entire bug this class exists to fix.
+     * Release every slot. Only safe AFTER `queue.submit` — before it, reusing a slot rewrites a value
+     * a recorded draw has not read yet.
      */
     public resetCursor(): void {
         this._cursor = -1;
@@ -282,38 +225,12 @@ export class UniformSet {
 }
 
 /**
- * Every uniform block one PROGRAM declares, written by name and bound by group.
- *
- * This is the piece that makes `setUniform('u_exposure', 2.0)` work on WebGPU. A `UniformSet` knows one
- * block; a program has several — `outline` has its transforms in group 1 and its colour in group 2, the
- * lit families spread four across groups 1, 2, 4 and 5 — and the ~330 call sites in the renderer name
- * a member without knowing or caring which. Routing by name is therefore not a convenience here, it is
- * the entire compatibility story.
- *
- * **A name is written to EVERY block that declares it**, in declaration order. One program really can
- * declare the same member twice, in two blocks with two jobs: `modelVertex.wgsl` puts `u_view` in the
- * transform block because the vertex stage needs it, and `pbrForward.wgsl` puts it in the lighting
- * block because cascade selection needs the view-space depth. GLSL has one global per name and both
- * uses read it; splitting them into blocks turned that into two destinations, and writing only the
- * first left the other holding zeros forever.
- *
- * Which is not a subtle wrongness. A custom forward material's blocks come out in the order
- * `[engine, shadow, user, transform]` — the transform is appended last, since it is the one block the
- * FRAGMENT does not declare — so `u_view` landed in the prelude's engine block and never reached the
- * vertex stage. `projection * 0 * model * p` is the origin with w = 0, every triangle is clipped, and
- * the draw records normally and rasterises nothing: right draw count, empty frame. The built-in
- * programs escaped only because their transform block happens to come first.
- *
- * Blocks of the same PROGRAM, to be clear. `u_material.emissive` exists in both the forward and the
- * deferred Blinn-Phong structs at different offsets, and those are different programs — which is why
- * `uniformLayoutCheck` matches per MODULE rather than across all of them.
+ * Every uniform block one PROGRAM declares, written by name and bound by group. A name goes to EVERY
+ * block declaring it — `u_view` lives in two, and writing only the first leaves the other zeroed.
  */
 export class ProgramUniforms {
     private readonly _sets: UniformSet[] = [];
-    /**
-     * Resolved name -> every set that declares it, memoised. A miss is cached as null so a stray name
-     * costs one search; almost every hit is a one-element array.
-     */
+    // Resolved name -> every set that declares it, memoised. A miss caches null.
     private readonly _route = new Map<string, UniformSet[] | null>();
 
     constructor(device: Device, blocks: readonly UniformBlockLayout[], label = 'program',
@@ -330,12 +247,8 @@ export class ProgramUniforms {
     }
 
     /**
-     * Write a value by name into EVERY block that declares it.
-     *
-     * Returns false when none does — which is NOT an error: the renderer sets uniforms that only some
-     * programs have (`u_uvScale` on the unlit family, the shadow members on the lit one), and every
-     * call site relies on the miss being silent. A throw here would turn one shader gaining a member
-     * into a crash in an unrelated pass.
+     * Write a value by name into EVERY block that declares it. False when none does, which is not an
+     * error — the renderer sets uniforms only some programs have, and every call site relies on that.
      */
     public set(name: string, value: unknown): boolean {
         const cached = this._route.get(name);
@@ -362,11 +275,8 @@ export class ProgramUniforms {
     }
 
     /**
-     * Which slot of which arena every block is currently reading from.
-     *
-     * The cache key for a bind group built over these blocks: two draws with the same signature share
-     * one, and a draw that advanced any block gets its own. The generation rides along because a grown
-     * arena is a different `GPUBuffer`, and a bind group names the buffer, not the block.
+     * Which slot of which arena every block is reading from — the cache key for a bind group built over
+     * them. The arena generation rides along, since a grown arena is a different `GPUBuffer`.
      */
     public bindingSignature(): string {
         let key = '';
@@ -389,12 +299,8 @@ function suffixesOf(name: string): string[] {
     return out;
 }
 
-/**
- * Coerce whatever the renderer passed into a flat run of numbers.
- *
- * Booleans become 0/1 because WGSL forbids `bool` in a uniform buffer — every flag in the engine's
- * shaders is an `i32` and every call site still passes a boolean.
- */
+// Coerce whatever the renderer passed into a flat run of numbers. Booleans become 0/1: WGSL forbids
+// `bool` in a uniform buffer, so every shader flag is an `i32`.
 function toNumbers(value: unknown): ArrayLike<number> {
     if (typeof value === 'number') return [value];
     if (typeof value === 'boolean') return [value ? 1 : 0];

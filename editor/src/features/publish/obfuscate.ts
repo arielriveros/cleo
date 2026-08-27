@@ -1,12 +1,8 @@
-// Script obfuscation for publish. Split out of extractScripts.ts so it stays free of any `cleo` import:
-// this module runs inside the project worker (extractScripts cannot — it needs the engine's
-// buildFactoryBody), and obfuscation is by far the most expensive step of a publish.
+// Script obfuscation for publish. Free of any `cleo` import so it can run inside the project worker.
 
-// Aggressive-but-eval-free obfuscation. transformObjectKeys/renameGlobals are OFF on purpose so the
-// public interface survives: the returned { onStart, onUpdate, ... } keys are read by the engine when it
-// binds a factory, and `window.CLEO_GAME_SCRIPTS` must keep its name — the player registers a script
-// provider over it (player/index.tsx). No debugProtection/selfDefending
-// so we never reintroduce the Function constructor / eval.
+// transformObjectKeys/renameGlobals must stay OFF: the returned { onStart, onUpdate, ... } keys are read
+// by the engine when it binds a factory, and `window.CLEO_GAME_SCRIPTS` must keep its name
+// (player/index.tsx). No debugProtection/selfDefending — they reintroduce the Function constructor.
 const OBFUSCATOR_OPTIONS = {
   compact: true,
   controlFlowFlattening: true,
@@ -26,10 +22,9 @@ const OBFUSCATOR_OPTIONS = {
 };
 
 /**
- * Heavily obfuscate the generated game.scripts.js source. The obfuscator is lazy-loaded so it
- * code-splits out of the initial bundle. If obfuscation fails for any reason we fall back to the
- * readable source rather than block a publish, and hand the reason back as a `warning` for the caller
- * to log (this module has no Logger — it must stay engine-free to run in the worker).
+ * Heavily obfuscate the generated game.scripts.js source. The obfuscator is lazy-loaded so it code-splits
+ * out of the initial bundle. On failure returns the readable source and the reason as `warning` for the
+ * caller to log — this module has no Logger, since it must stay engine-free to run in the worker.
  */
 export async function obfuscateScripts(source: string): Promise<{ code: string; warning?: string }> {
   try {

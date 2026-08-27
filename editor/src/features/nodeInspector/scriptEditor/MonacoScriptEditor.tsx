@@ -6,10 +6,8 @@ import CodeEditorHeader from './CodeEditorHeader'
 import { subscribe, getRevision, externalSourceOf } from '../../scriptWorkspace/externalSourceStore'
 
 // The Monaco code editor for a Script asset (the dedicated Script tab). A class-based script is a normal TS
-// module — `class X extends Node { … }` — so Monaco's own TypeScript worker gives full IntelliSense against
-// the engine's real types (registered by monacoSetup/cleoTypes): completions, signature help, hovers and
-// error squiggles on `this.<member>`, imports, handler overrides, everything. The parent owns the working
-// source (a per-tab buffer); edits are reported through `onChange` and committed by Save Script.
+// module, so Monaco's TypeScript worker types it against the engine's real declarations (monacoSetup /
+// cleoTypes). The parent owns the working buffer; edits go out via `onChange` and are committed by Save.
 export default function MonacoScriptEditor(props: {
   scriptId: string
   initialSource: string
@@ -26,11 +24,11 @@ export default function MonacoScriptEditor(props: {
   readOnlyRef.current = !!props.readOnly
   // Bumped when the script workspace (VSCode) reports an edit to this script from disk.
   const externalRevision = useSyncExternalStore(subscribe, getRevision, getRevision)
-  // While an external source is being written into the model, the content listener below must not report
-  // it back out as a user edit — that would re-dirty the tab we are in the middle of reconciling.
+  // While an external edit is being written into the model the content listener must not report it back
+  // out as a user edit, which would re-dirty the tab being reconciled.
   const applyingExternalRef = useRef(false)
 
-  // Created once (the component is re-keyed per script by ScriptTabView, so one editor+model per script).
+  // Created once: ScriptTabView re-keys this component per script, so there is one editor+model per script.
   useEffect(() => {
     if (!containerRef.current) return
     const monaco = ensureMonaco()
@@ -62,8 +60,8 @@ export default function MonacoScriptEditor(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Take an edit made in the external script workspace. Applied as an edit operation rather than
-  // setValue so the undo stack and (roughly) the cursor survive.
+  // External-workspace edits are applied as an edit operation rather than setValue, so the undo stack
+  // and (roughly) the cursor survive.
   useEffect(() => {
     const editor = editorRef.current
     const model = editor?.getModel()

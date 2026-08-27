@@ -3,13 +3,11 @@ import { CleoEngine } from 'cleo';
 /**
  * Mouse capture for viewport drags (camera orbit/pan, gizmo handles).
  *
- * The lock must target the *canvas*: `InputManager` only flips `mouse.captured` when
- * `document.pointerLockElement` is the canvas it was initialized with, and that flag is what makes it
- * feed `movementX/Y` into `mouse.velocity` instead of client coordinates. Locking the viewport div
- * instead would silently leave the camera reading a frozen cursor.
+ * The lock MUST target the canvas: `InputManager` flips `mouse.captured` only when
+ * `document.pointerLockElement` is the canvas it was initialized with, and that flag is what feeds
+ * `movementX/Y` into `mouse.velocity`. Locking the viewport div leaves the camera on a frozen cursor.
  *
- * Callers must not assume the lock succeeded — browsers reject a re-lock issued too soon after an
- * exit, and every drag path here still works (bounded by the window) without it.
+ * Callers must not assume the lock succeeded — a browser rejects a re-lock issued too soon after an exit.
  */
 export function captureViewport(instance: CleoEngine | null): void {
   const canvas = instance?.renderer?.canvas;

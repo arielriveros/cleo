@@ -21,9 +21,8 @@ const DEFAULT_PARAMS: FoliageParams = { density: DEFAULT_FOLIAGE_DENSITY.billboa
 export const MAX_INSTANCES = 200000;
 
 /**
- * GPU buffers left behind by layers that were disposed with their terrain. The renderer's foliage pass
- * only walks LIVE landscapes, so a detached terrain's own `collectStaleBuffers()` would never be called
- * again — this module-level queue is how those buffers still reach a `destroy()`.
+ * GPU buffers left behind by layers disposed with their terrain. The renderer's foliage pass only walks
+ * LIVE landscapes, so this queue is the only way those buffers still reach a `destroy()`.
  */
 const ORPHANED_FOLIAGE_BUFFERS: RhiBuffer[] = [];
 
@@ -34,10 +33,9 @@ export function collectOrphanedFoliageBuffers(): RhiBuffer[] {
 }
 
 /**
- * A spatial-grid cell of a foliage layer: the packed instance matrices whose XZ position falls in this
- * cell, plus a cached world-space AABB used for frustum/distance culling. Each cell owns its own static
- * GPU buffer (lazily created by the renderer's foliage pass) so off-screen/far cells can be skipped
- * without any per-frame re-upload.
+ * A spatial-grid cell of a foliage layer: the packed instance matrices whose XZ position falls in it,
+ * plus a cached world-space AABB for frustum/distance culling. Each cell owns a static GPU buffer,
+ * lazily created by the renderer's foliage pass.
  */
 export interface FoliageCell {
     matrices: Float32Array;              // packed mat4s for this cell (16 floats/instance)
@@ -57,11 +55,16 @@ export interface FoliageLodLevel {
     distance: number;                     // levels[0].distance is always 0
 }
 
-/** Build a two-quad crossed billboard (an "X"), base at y=0 up to y=1, UV 0..1, up-facing normals. */
-export function crossQuadGeometry(): Geometry {
+/**
+ * Build a two-quad crossed billboard (an "X"), base at y=0, UV 0..1, up-facing normals. Unit-sized by
+ * default, which is the BILLBOARD layer contract: per-instance scale is then the tuft height in metres.
+ * A mesh layer's impostor passes the prototype's authored footprint instead (`_applyMeshPrototype`).
+ */
+export function crossQuadGeometry(width: number = 1, height: number = 1): Geometry {
+    const hw = width * 0.5;
     const positions: [number, number, number][] = [
-        [-0.5, 0, 0], [0.5, 0, 0], [0.5, 1, 0], [-0.5, 1, 0],
-        [0, 0, -0.5], [0, 0, 0.5], [0, 1, 0.5], [0, 1, -0.5],
+        [-hw, 0, 0], [hw, 0, 0], [hw, height, 0], [-hw, height, 0],
+        [0, 0, -hw], [0, 0, hw], [0, height, hw], [0, height, -hw],
     ];
     const normals: [number, number, number][] = positions.map(() => [0, 1, 0]);
     const uvs: [number, number][] = [
@@ -81,7 +84,7 @@ export function crossQuadGeometry(): Geometry {
 export class FoliageLayer {
     public readonly kind: FoliageKind;
     public name: string;
-    /** The primary model — always levels[0].models[0] (kept as a field: legacy single-model paths use it). */
+    /** The primary model — always levels[0].models[0]. */
     public model: Model;
     public textureId: string | null;
     public params: FoliageParams;
@@ -96,17 +99,14 @@ export class FoliageLayer {
     /** Hide instances beyond this camera distance; 0 = use the renderer's global foliage cull distance. */
     public cullDistance = 0;
     /**
-     * Whether these instances rasterize into the shadow cascades.
-     *
-     * Off by default, and deliberately: a dense grass layer can be tens of thousands of instances, and
-     * switching it on adds one instanced draw per cell PER CASCADE. Existing scenes must not silently
-     * get slower when this arrives. The layer flag drives the shadow pass directly — the impostor
-     * materials are authored `castShadow: false` for the colour pass and stay that way.
+     * Whether these instances rasterize into the shadow cascades. Off by default: switching it on adds
+     * one instanced draw per cell PER CASCADE. This flag drives the shadow pass directly — the impostor
+     * materials stay authored `castShadow: false` for the colour pass.
      */
     public castShadows = false;
-    /** Static physics proxy for nearby instances, or null for non-collidable foliage (grass). Mirrored
-     *  from the rule onto the LAYER so a published build — which rebuilds layers straight from the
-     *  serialized foliage blob, without re-parsing every terrain material — still gets colliders. */
+    /** Static physics proxy for nearby instances, or null for non-collidable foliage. Mirrored from the
+     *  rule onto the LAYER, since a published build rebuilds layers from the serialized foliage blob
+     *  without re-parsing terrain materials. */
     public collision: FoliageCollision | null = null;
 
     // Compact instance data, stride 5: [x, y, z, yaw, scale].
@@ -160,6 +160,9 @@ export class FoliageLayer {
             const bb = FoliageLayer.Billboard(rule.name, rule.textureId || 'Null', params);
             bb.collision = rule.collision ?? null;
             bb.castShadows = !!rule.castShadows;
+            // Must be read here as well as in `_applyMeshPrototype`, or a billboard rule's cull distance
+            // is dropped and the layer falls back to the renderer's global.
+            bb.cullDistance = Math.max(0, Number(rule.cullDistance) || 0);
             return bb;
         }
         const base = (rule.models?.length ? rule.models[0] : rule.model);
@@ -187,7 +190,10 @@ export class FoliageLayer {
         this.model = this.levels[0].models[0];
         if (src.billboard?.textureId) {
             const material = Material.Basic({ color: [1, 1, 1], texture: src.billboard.textureId }, { side: 'double', castShadow: false });
-            this.billboardModel = new Model(crossQuadGeometry(), material);
+            // Sized to the prototype it replaces, NOT 1x1: an instance scale MULTIPLIES the authored size
+            // on the mesh but IS the size in metres on a unit quad, so a unit card would not match.
+            const [w, h] = this._prototypeFootprint();
+            this.billboardModel = new Model(crossQuadGeometry(w, h), material);
             this.billboardTextureId = src.billboard.textureId;
             this.billboardDistance = Math.max(0, Number(src.billboard.distance) || 0);
         } else {
@@ -201,6 +207,24 @@ export class FoliageLayer {
         this.initialized = false; // new Model objects — the foliage pass re-uploads their meshes
     }
 
+    /**
+     * Authored width and height of LOD0, in the prototype's own space — the box the impostor must match.
+     * Width is the LARGER horizontal extent.
+     */
+    private _prototypeFootprint(): [number, number] {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (const model of this.levels[0]?.models ?? []) {
+            const bb = model.geometry.boundingBox;
+            minX = Math.min(minX, bb.min[0]); maxX = Math.max(maxX, bb.max[0]);
+            minY = Math.min(minY, bb.min[1]); maxY = Math.max(maxY, bb.max[1]);
+            minZ = Math.min(minZ, bb.min[2]); maxZ = Math.max(maxZ, bb.max[2]);
+        }
+        const w = Math.max(maxX - minX, maxZ - minZ);
+        const h = maxY - minY;
+        // A degenerate or empty prototype falls back to the unit quad rather than collapsing the card.
+        return [Number.isFinite(w) && w > 1e-4 ? w : 1, Number.isFinite(h) && h > 1e-4 ? h : 1];
+    }
+
     /** Swap this layer's prototypes for an updated rule WITHOUT touching the scattered instances (used
      *  when the source mesh asset or terrain material was edited). Cells are re-bucketed only to refresh
      *  their AABB extents against the new geometry. */
@@ -211,6 +235,7 @@ export class FoliageLayer {
         this.castShadows = !!rule.castShadows;
         if (this.kind === 'billboard') {
             this.collision = rule.collision ?? null;
+            this.cullDistance = Math.max(0, Number(rule.cullDistance) || 0);
             const tex = rule.textureId || 'Null';
             if (tex !== this.textureId) {
                 this.textureId = tex;
@@ -247,8 +272,7 @@ export class FoliageLayer {
 
     /** Remove all instances (used before regenerating foliage across the whole terrain). */
     public clear(): void {
-        // Reset the pending-push flag FIRST: the early return below would otherwise leave it set and
-        // cost a redundant full _rebuild() on the next commit().
+        // Must be reset before the early return below, or the next commit() pays a redundant _rebuild().
         this._dirty = false;
         if (this._instances.length === 0) return;
         this._instances = [];
@@ -271,7 +295,7 @@ export class FoliageLayer {
     /** Scatter new instances within the brush disc; Y is sampled from the terrain surface. */
     public scatter(worldX: number, worldZ: number, radius: number, sampleHeight: (x: number, z: number) => number): boolean {
         if (this.count >= MAX_INSTANCES) return false;
-        // density is per m², so the disc area sets the count — the same number reads the same at any radius.
+        // density is per m², so the disc area sets the count.
         const n = Math.max(1, Math.round(this.params.density * Math.PI * radius * radius));
         let added = 0;
         for (let i = 0; i < n && this.count + added < MAX_INSTANCES; i++) {
@@ -314,11 +338,8 @@ export class FoliageLayer {
     }
 
     /**
-     * Visit every instance whose base falls within `radius` of world (x, z). The spatial grid's cell
-     * AABBs reject whole buckets with one test each, so this stays cheap on a 100k-instance layer.
-     *
-     * `index` is only stable until the next rebuild (any scatter/erase/clear) — consumers that cache it
-     * must watch {@link version} and re-query when it changes.
+     * Visit every instance whose base falls within `radius` of world (x, z). `index` is only stable until
+     * the next rebuild (any scatter/erase/clear); consumers that cache it must watch {@link version}.
      */
     public forEachInstanceNear(
         x: number, z: number, radius: number,
@@ -358,7 +379,7 @@ export class FoliageLayer {
     }
 
     /** Largest absolute local-space coordinate of the instance geometry, scaled by the max instance scale.
-     *  Used to expand each cell's AABB so it fully contains the meshes/billboards standing on it. */
+     *  Expands each cell's AABB so it fully contains the meshes/billboards standing on it. */
     private _instanceExtent(): number {
         let e = 0;
         for (const m of this.levels[0].models) {
@@ -437,8 +458,8 @@ export class FoliageLayer {
             // its own unit marker (see deserialize).
             densityUnit: FOLIAGE_DENSITY_UNIT,
             collision: this.collision ?? undefined,
-            // `model` stays the single primary model so older builds still load this JSON; the full
-            // multi-sub-mesh + LOD payload rides in `models`/`lods`.
+            // `model` is the single primary model, for older builds; the full multi-sub-mesh + LOD
+            // payload rides in `models`/`lods`.
             model: this.kind === 'mesh' ? this.model.serialize() : undefined,
             models: this.kind === 'mesh' && this.levels[0].models.length > 1
                 ? this.levels[0].models.map(m => m.serialize()) : undefined,
@@ -454,7 +475,7 @@ export class FoliageLayer {
     }
 
     public static deserialize(json: any): FoliageLayer {
-        // Migrate the density unit into a COPY — `json.params` is re-read by the editor's resync paths,
+        // Migrate the density unit into a COPY: `json.params` is re-read by the editor's resync paths,
         // so mutating it in place would divide a second time on the next load.
         const params = { ...(json.params || {}) };
         if (json.densityUnit !== FOLIAGE_DENSITY_UNIT && params.density !== undefined)
@@ -464,6 +485,7 @@ export class FoliageLayer {
         if (json.kind === 'billboard') {
             layer = FoliageLayer.Billboard(json.name, json.textureId, params);
             layer.collision = json.collision ?? null;
+            layer.cullDistance = Math.max(0, Number(json.cullDistance) || 0);
         } else {
             layer = FoliageLayer.Mesh(json.name, Model.parse(json.models?.length ? json.models[0] : json.model), params);
             layer._applyMeshPrototype(json);

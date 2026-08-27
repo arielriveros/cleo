@@ -76,9 +76,7 @@ export class AnimatedSpriteNode extends SpriteNode {
     public uvRect(): [number, number, number, number] { return this.sprite.uvRectOf(this.currentTile); }
 
     protected _serializePayload(): any {
-        // Spreads the parent's payload rather than replacing it: this is the only two-level node subclass
-        // outside the UI family, so it is the one place where forgetting `super` silently drops a key —
-        // it cost the sprite's `constraints` and tileset on the first attempt.
+        // Must spread the parent's payload rather than replace it, or the sprite's own keys are dropped.
         return {
             ...super._serializePayload(),
             animation: {
@@ -133,15 +131,7 @@ export class AnimatedSpriteNode extends SpriteNode {
     }
 }
 
-/**
- * The sprite payload to hand `Sprite.parse`, across both formats.
- *
- * Legacy nodes nested one level deeper than they looked: `Sprite.serialize` returned `{material}`, and
- * `SpriteNode.serialize` stored THAT under `sprite.material` — so the legacy material object is at
- * `json.sprite.material.material`. Unwrapping one level here hands `Sprite.parse` a `{material}` in both
- * eras and keeps the double-nesting quirk contained to this function.
- */
-
+/** Expand a legacy columns x rows sheet animation into an explicit list of tile indices. */
 function migrateLegacyAnimation(json: any, sprite: Sprite): {
     frames: number[]; frameSource: SpriteFrameSource; fps: number; loop: boolean;
 } {
@@ -170,33 +160,3 @@ function migrateLegacyAnimation(json: any, sprite: Sprite): {
 
     return { frames: legacy.map(i => remapLegacyFrame(i, columns, rows)), frameSource: 'node', fps, loop };
 }
-/**
- * Reconstruct a serialized subtree under `parent`, dispatching on its `type`.
- *
- * `Node.parse` alone always builds a plain Node, so anything routed through it loses its subclass — a model
- * comes back as an empty transform. Every path that materializes a subtree (scene parse via
- * `_commonParse`, runtime `Scene.instantiate`, the editor's template/mesh instantiation) goes through here,
- * so a new node type only has to be registered in one place. `ModelNode.parse` detects animated vs static
- * models itself, so skinned meshes round-trip through the single `'model'` case.
- *
- * Declared last in this module because it needs every node class above it in scope.
- */
-
-// ============================================================================================
-// UI NODES
-//
-// A UI element is a Node. That is the whole design: parenting, `visible`, spawn/despawn
-// serialization, templates, undo/redo, dirty-tracking and the class-based script system all come
-// from the base class rather than being reimplemented against a parallel element tree.
-//
-// Layout is resolved once per frame by the scene's UI late pass (see `Scene.update`), never during
-// render. The resolved rects are plain derived fields that deliberately do NOT emit SCENE_CHANGED —
-// a solve that notified would mark the tab permanently unsaved and push sixty undo entries per
-// second. The AUTHORED fields do notify, which is what makes a UI edit dirty the tab and be
-// undoable — neither of which the legacy overlay ever managed.
-//
-// The layout math lives in `src/core/uiLayout.ts` so the unit suite can reach it (node.ts
-// transitively needs a GL context) — the same split `cameraRigMath.ts` uses for the camera rig.
-// ============================================================================================
-
-/** How an image fills its element's rect. */

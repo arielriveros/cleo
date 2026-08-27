@@ -5,13 +5,9 @@ type EngineValue = ReturnType<typeof useCleoEngine>;
 
 /**
  * The multi-scene project slice: the scene list, which scene is open / is the main one, and the
- * scene-level operations — split out of the large EngineContext.
- *
- * Cohesive because it is all backed by one persisted record (the project meta at `cleo_project_meta`,
- * whose authoritative copy is `projectMetaRef`); the state here is the reactive mirror of it. The
- * unsaved-scene confirm dialog lives here too, since it gates switching the open scene.
- *
- * Derived via `Pick` so the signatures stay in lockstep with the context they are lifted from.
+ * scene-level operations — the reactive mirror of the project meta at `cleo_project_meta`, whose
+ * authoritative copy is `projectMetaRef`. The unsaved-scene confirm dialog lives here too, since it gates
+ * switching the open scene. Derived via `Pick` to stay in lockstep with the context it is lifted from.
  */
 export type ProjectContextValue = Pick<EngineValue,
   | 'sceneList' | 'mainSceneId' | 'openSceneId'

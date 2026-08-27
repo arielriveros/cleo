@@ -6,15 +6,13 @@ import { NumberInput, TextInput, Toggle, VectorInput, cn, labelClass, ACCESS_MET
 import { VariablesIcon } from '../sectionIcons'
 import type { ScriptVarSchema } from '../../../utils/scripts'
 
-// The reflection view for a class-based script asset. Unlike the legacy CustomVariablesEditor, variables are
-// NOT created here — they are DECLARED IN THE SCRIPT as class fields. This panel shows the parsed schema
-// (name, type and access are read-only, owned by the script) and lets you edit each node's own VALUE, which
-// lives as a native own-property on the node. Underscore-prefixed (hidden/internal) fields are omitted.
+// The reflection view for a class-based script asset. Variables are not created here: they are declared in
+// the script as class fields, so name, type and access are read-only. Only each node's own VALUE is editable,
+// and it lives as a native own-property on the node. Underscore-prefixed fields are omitted.
 
 export default function ScriptVariablesEditor(props: { node: Node }) {
   const { eventEmitter, scriptAssetOf } = useCleoEngine()
   const asset = scriptAssetOf(props.node)
-  // Local mirror of the node's native field values, re-read whenever the node or its script changes.
   const [values, setValues] = useState<Record<string, any>>({})
 
   const visible: ScriptVarSchema[] = (asset?.variables ?? []).filter(v => !v.hidden)
@@ -55,8 +53,7 @@ export default function ScriptVariablesEditor(props: { node: Node }) {
         </p>
         {visible.length === 0 && <p className='mb-2 text-[11px] text-dim'>No exposed variables. Declare a public/protected field in the script.</p>}
         {visible.map(v => {
-          // Same access glyphs the old Variables panel used (AccessSelect): globe/lock/shield. Read-only
-          // here — the access level is declared in the script, not chosen in the inspector.
+          // Read-only: the access level is declared in the script, not chosen in the inspector.
           const access = ACCESS_META[v.access]
           return (
             <div key={v.name} className='flex items-center gap-1.5 mb-2'>

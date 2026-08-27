@@ -1,6 +1,5 @@
-// The strip above every code surface: the theme picker, plus a note about the keys that behave unusually
-// inside a code editor. The picker writes to the shared store, so switching here also switches every other
-// code editor on screen.
+// The strip above every code surface: the theme picker plus a note about keys that behave unusually inside
+// a code editor. The picker writes to the shared store, so it switches every code editor on screen.
 import React from 'react';
 import { SegmentedControl } from '../../../components/ui';
 import { codeThemeStore, useCodeTheme, type CodeThemeName } from './codeThemeStore';

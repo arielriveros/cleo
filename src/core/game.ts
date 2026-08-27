@@ -1,14 +1,6 @@
 // The runtime "game" facade a user script reaches for session control: `import { Game } from 'cleo'`.
-//
-// Scene switching is owned by whatever is hosting the running game — the editor's play mode or the
-// standalone player — because only the host knows where the other scenes' data lives and how to swap the
-// engine's active scene, restart scripts, and reset physics/UI/input. So the engine exposes a small
-// host-pluggable facade rather than implementing the switch itself. Outside a running game no host is
-// registered and the methods throw, which surfaces the mistake instead of failing silently.
-//
-// Pause, time, gravity and render settings need no such indirection — CleoEngine/PhysicsSystem/Renderer
-// already own all of it directly, so those members forward straight to CleoEngine.instance (the one
-// engine running in this process; see engine.ts) rather than going through a host.
+// Scene switching goes through a host the editor's play mode / the player installs; with no host the
+// scene members throw. Everything else forwards straight to CleoEngine.instance.
 
 import { CleoEngine } from "./engine";
 import type { RenderSettings } from "../graphics/renderer";
@@ -52,8 +44,7 @@ export const Game = {
   get isPaused(): boolean {
     return CleoEngine.instance?.isPaused ?? false;
   },
-  /** Pauses the game loop: onUpdate stops firing and physics stops stepping (timers scheduled with
-   *  this.wait/after/every pause too — they all run off the same clock). */
+  /** Pauses the game loop: onUpdate stops firing, physics stops stepping, this.wait/after/every pause. */
   pause(): void {
     const engine = CleoEngine.instance;
     if (engine) engine.isPaused = true;

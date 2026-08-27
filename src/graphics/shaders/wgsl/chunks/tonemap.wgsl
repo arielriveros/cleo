@@ -24,3 +24,19 @@ fn acesFilm(x: vec3<f32>) -> vec3<f32> {
 fn tonemap(hdr: vec3<f32>, exposure: f32) -> vec3<f32> {
     return toSrgb(acesFilm(hdr * exposure));
 }
+
+/**
+ * The same resolve with a saturation trim, applied in LINEAR HDR before the tonemap.
+ *
+ * Before, not after, and that is the whole reason this is a separate function rather than a lerp at
+ * the end: desaturating after ACES pulls an already-rolled-off highlight toward an already-rolled-off
+ * grey, which flattens the filmic shoulder into mush. Doing it in linear lets the tonemapper roll off
+ * the corrected colour, so a de-saturated overcast frame keeps its highlight response.
+ *
+ * The weights are Rec.709 luma, which is the right basis for a linear signal.
+ */
+fn tonemapGraded(hdr: vec3<f32>, exposure: f32, saturation: f32) -> vec3<f32> {
+    let lum = dot(hdr, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let graded = mix(vec3<f32>(lum), hdr, saturation);
+    return toSrgb(acesFilm(graded * exposure));
+}

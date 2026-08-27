@@ -11,8 +11,7 @@ interface AxisInputProps {
 }
 
 /**
- * XYZ numeric triad. Thin wrapper over the generalized `VectorInput` (colored draggable axis labels,
- * clamped drag, click-to-type) that preserves the original `[x, y, z]` tuple API.
+ * XYZ numeric triad over `VectorInput`, keeping the `[x, y, z]` tuple API.
  */
 export default function AxisInput(props: AxisInputProps) {
   return (

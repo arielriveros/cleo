@@ -2,8 +2,7 @@ import { Button } from '../components/ui'
 import { useHistory } from './HistoryContext'
 import { usePlayback } from './PlaybackContext'
 
-// Undo/Redo for the active tab. A sibling of the Save controls in the menu bar, because that is what the
-// pair is: the two things you do to a document.
+// Undo/Redo for the active tab, sitting beside the Save controls in the menu bar.
 
 const UndoGlyph = () => (
   <svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>

@@ -2,15 +2,11 @@ import { Logger } from 'cleo';
 import { cryptoRandomId } from './ids';
 
 /**
- * Convert the legacy DOM-overlay UI blob into UI nodes in the scene tree.
+ * Convert the legacy DOM-overlay UI blob — a sibling `ui: { version, elements }` key of absolutely
+ * positioned CSS style bags — into UI nodes in the serialized scene tree.
  *
- * The old system stored UI as a sibling `ui: { version, elements }` key next to the scene JSON: absolutely
- * positioned CSS style bags, four element types, no anchors, and a `script` string compiled by a sandbox
- * that no longer exists. This maps that shape onto the serialized node subtree `Scene.parse` consumes, so
- * a project that never opened this build comes back as real nodes with its HUD in the same place.
- *
- * Works on SERIALIZED JSON, never on live nodes: it has to run before `Scene.parse`, and it also has to run
- * on scene blobs that are never opened at all (publish reads closed scenes straight from storage).
+ * Works on SERIALIZED JSON, never on live nodes: it must run before `Scene.parse`, and on scene blobs that
+ * are never opened at all (publish reads closed scenes straight from storage).
  */
 
 /** Fields the legacy model understood. Anything else is reported rather than silently dropped. */
@@ -63,9 +59,8 @@ function convertElement(el: any, warnings: string[]): any | null {
 
     const left = num(style.left);
     const top = num(style.top);
-    // A legacy element with no explicit size was sized by its content. There is no measurement available
-    // here, so a sensible default beats collapsing it to nothing — `sizing: 'content'` then lets the DOM
-    // layer measure it for real on the first frame.
+    // A legacy element with no explicit size was content-sized. Nothing can measure here, so pick a
+    // default and let `sizing: 'content'` have the DOM layer measure it on the first frame.
     const hasSize = typeof style.width === 'number' || typeof style.height === 'number';
     const width = num(style.width, el.type === 'text' ? 200 : 100);
     const height = num(style.height, el.type === 'text' ? 24 : 40);
@@ -74,8 +69,8 @@ function convertElement(el: any, warnings: string[]): any | null {
     const background = parseCssColor(style.backgroundColor, [0, 0, 0, 0]);
     const foreground = parseCssColor(style.color, [1, 1, 1, 1]);
 
-    // `display: flex` plus a justify/align pair is the only layout the legacy model could express, and it
-    // maps exactly onto a stack — which is strictly better than a container whose children all overlap.
+    // `display: flex` plus a justify/align pair is the only layout the legacy model could express; it maps
+    // exactly onto a stack.
     const isFlex = style.display === 'flex';
     const type = el.type === 'container' ? (isFlex ? 'uiStack' : 'uiPanel')
         : el.type === 'text' ? 'uiText'
@@ -94,8 +89,7 @@ function convertElement(el: any, warnings: string[]): any | null {
         offsetMax: [left + width, top + height],
         pivot: [0, 0], rotationDeg: 0, scale2d: [1, 1],
         opacity: 1,
-        // `tint` means background on a box and text colour on a text run, so each type reads the one that
-        // its CSS counterpart actually controlled.
+        // `tint` is the background on a box and the text colour on a text run.
         tint: type === 'uiText' ? foreground : background,
         zOrder: num(style.zIndex),
         // Only a button was ever clickable in the legacy overlay.
@@ -118,9 +112,8 @@ function convertElement(el: any, warnings: string[]): any | null {
         ui.wrap = true;
         ui.lineHeight = 1.2;
     } else if (type === 'uiImage') {
-        // The legacy `src` was a raw URL or data URI that bypassed the texture store entirely — which is
-        // why legacy UI images were never packed into a published build. There is no id to map it to, so
-        // the reference is dropped with a warning and the element has to be re-pointed at a real texture.
+        // The legacy `src` was a raw URL or data URI that bypassed the texture store, so there is no id to
+        // map it to; the reference is dropped with a warning and must be re-pointed at a real texture.
         if (el.src) warnings.push(`${el.name || 'image'}: image source '${String(el.src).slice(0, 40)}…' must be re-assigned from the texture library`);
         ui.textureId = null;
         ui.fit = 'fill';
@@ -153,8 +146,7 @@ function convertElement(el: any, warnings: string[]): any | null {
         name: el.name || type,
         type,
         position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
-        // The legacy sanitizer DROPPED `visible`, so a saved-hidden element came back visible on every
-        // load. Read straight off the raw JSON here, which fixes that in passing.
+        // Read `visible` straight off the raw JSON: the legacy sanitizer dropped it.
         visible: el.visible !== false,
         variables: [],
         spawnOnStart: true,
@@ -173,10 +165,8 @@ function hasUINodes(json: any): boolean {
 
 /**
  * Fold a legacy `ui` blob into a serialized scene tree, as a `uiRoot` named 'UI' under the scene root.
- *
- * Idempotent twice over: it no-ops when there is no blob, and again when the tree already holds UI nodes.
- * In practice it runs at most once per scene (the next save writes no `ui` key at all), but publish and the
- * play builder both read closed-scene blobs, so it can genuinely be reached more than once.
+ * Idempotent twice over — no blob, or a tree that already holds UI nodes — because publish and the play
+ * builder both read closed-scene blobs and can reach it more than once.
  *
  * @param sceneJson The serialized ROOT node (`{ name: 'root', children: [...] }`).
  * @returns whether anything was migrated.
@@ -205,9 +195,8 @@ export function migrateLegacyUI(sceneJson: any, ui: any): boolean {
             opacity: 1, tint: [1, 1, 1, 1], zOrder: 0, interactive: false, clip: false,
             sizing: 'fixed', padding: [0, 0, 0, 0], borderRadius: 0, borderWidth: 0, borderColor: [0, 0, 0, 1],
             space: 'screen',
-            // The legacy overlay positioned everything in raw CSS pixels against whatever size the window
-            // happened to be. `constantPixel` reproduces that exactly; anything else would silently rescale
-            // every migrated HUD. Switch it to `scaleWithScreen` per project once the layout is checked.
+            // The legacy overlay positioned everything in raw CSS pixels, which only `constantPixel`
+            // reproduces; anything else silently rescales every migrated HUD.
             referenceResolution: [1920, 1080],
             scaleMode: 'constantPixel',
             matchWidthOrHeight: 0.5,
@@ -226,10 +215,7 @@ export function migrateLegacyUI(sceneJson: any, ui: any): boolean {
 
 /**
  * Run the migration against a game-data blob and strip the legacy key.
- *
- * The `ui` key lives at the top level, and older saves put it on `scene.ui`. Both are consumed here so
- * every read path — opening a scene, publishing a closed one, building a play scene — gets the same
- * treatment from one place.
+ * The `ui` key lives at the top level, and older saves put it on `scene.ui`; both are consumed here.
  */
 export function migrateGameDataUI(json: any): boolean {
     if (!json) return false;

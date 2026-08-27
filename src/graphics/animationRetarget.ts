@@ -3,18 +3,13 @@ import { Animation, AnimationChannel, AnimationSampler, Skin } from './animatedM
 import { normalizeBoneName, humanoidSlotOf } from './boneNames';
 import { skeletonTopology } from './skeletonTopology';
 
-// Retargeting an imported animation clip onto a model's skeleton.
+// Retargeting an imported animation clip onto a model's skeleton, in three stages so the editor can put
+// a mapping review between them: buildBoneMapping, mappingReport, retargetAnimation.
+// remapAnimationToSkin runs all three for callers that do not review.
 //
-// The work splits into three stages, deliberately separated so the editor can put a mapping review between
-// them: MATCH source bones to target bones (buildBoneMapping), REPORT the result cheaply for the modal
-// (mappingReport, re-run on every manual edit), and REBUILD the clip's samplers once on accept
-// (retargetAnimation). remapAnimationToSkin ties all three together for callers that don't review.
-//
-// Two skeletons almost never share bone names OR bind poses. Matching climbs three tiers — exact name,
-// normalized name, humanoid dictionary (see boneNames.ts) — and the rotation of every matched bone is
-// re-expressed through the bind-pose difference of the two rigs, so a Mixamo clip drives a custom rig
-// without limbs sweeping through the body. A clip from the SAME rig skips all of it and is copied raw, which
-// is exact and preserves translation channels a cross-rig retarget would drop.
+// Matching climbs three tiers — exact name, normalized name, humanoid dictionary (boneNames.ts) — and
+// every matched rotation is re-expressed through the two rigs' bind-pose difference. A same-rig clip
+// skips all of it and is copied raw, which is exact and keeps translation channels.
 
 export interface HierarchyMismatch {
     bone: string;
@@ -54,9 +49,8 @@ export interface BoneMapping {
     /** One entry per DISTINCT animated source bone, in the order the clips animate them. */
     entries: BoneMappingEntry[];
     /**
-     * Same rig: every animated bone maps AND its retarget correction is identity (bind poses agree,
-     * including the armature at the root), so the clip can be copied verbatim. Judged on the corrections,
-     * NOT name equality — `mixamorig:` and `mixamorig1:` are the same skeleton renamed.
+     * Every animated bone maps and every correction is identity, so the clip can be copied verbatim.
+     * Judged on the corrections, never on name equality.
      */
     sameRig: boolean;
     /** True when both skins carry the rest data the delta retarget needs (names + local rest transforms). */
@@ -81,28 +75,16 @@ function isIdentityMatrix(m: mat4, eps = 1e-6): boolean {
     return true;
 }
 
-/**
- * LOCAL bind rotation of a bone — its rest orientation relative to its PARENT.
- *
- * This is what the retarget actually needs. Working in local space keeps a difference in the armature (the
- * non-joint root above the hips) or drift in a source skin's frame-0 node transforms LOCALIZED to the bone
- * it belongs to, instead of accumulating down the whole chain into every descendant — which is what made a
- * same-rig Mixamo import twist every limb.
- *
- * From the inverse bind matrices when present: `localBind = worldParent⁻¹ · worldBone`, and since
- * `worldBind = inverse(IBM)`, that is `IBM_parent · inverse(IBM_bone)` (identity parent at the root). Falls
- * back to the node's OWN local transform otherwise — its own value, never an accumulation, so a source with
- * no IBMs still contributes a usable per-bone local rest.
- */
+// LOCAL bind rotation of a bone — its rest orientation relative to its parent, so a difference stays
+// confined to that bone rather than accumulating down the chain. From the IBMs when present
+// (`IBM_parent · inverse(IBM_bone)`), else the node's own local transform.
 function localBindRotation(skin: Skin, node: number): quat {
     const joint = skin.joints.find(j => j.nodeIndex === node);
     if (joint && !isIdentityMatrix(joint.inverseBindMatrix as any)) {
         const worldBone = mat4.invert(mat4.create(), joint.inverseBindMatrix as any);
         if (worldBone) {
-            // Nearest ancestor JOINT, not the immediate parent node. On an assimp-converted FBX a bone's
-            // immediate parent is a `$AssimpFbx$` pivot, so a one-level `joints.find(parentIndex)` misses
-            // every time and this silently returned the WORLD bind — reintroducing exactly the accumulation
-            // down the chain that working in local space exists to prevent.
+            // Nearest ancestor JOINT, not the immediate parent node: on an assimp-converted FBX that
+            // parent is a `$AssimpFbx$` pivot, and a one-level lookup would return the world bind.
             const parentJoint = ancestorJointOf(skin, node);
             let local: mat4;
             if (parentJoint && !isIdentityMatrix(parentJoint.inverseBindMatrix as any)) {
@@ -150,10 +132,7 @@ function nearIdentity(q: quat): boolean {
     return Math.acos(Math.min(1, Math.abs(q[3]))) < IDENTITY_EPS;
 }
 
-/**
- * Per-skin topology cache. Keyed on the Skin object, which is fixed once parsed — the same invalidation
- * rule the Animator uses.
- */
+// Per-skin topology cache, keyed on the Skin object, which is fixed once parsed.
 const topoCache = new WeakMap<Skin, ReturnType<typeof skeletonTopology>>();
 function topoOf(skin: Skin) {
     let t = topoCache.get(skin);
@@ -161,13 +140,7 @@ function topoOf(skin: Skin) {
     return t;
 }
 
-/**
- * The nearest ANCESTOR JOINT of a node, climbing through any non-joint nodes in between, or undefined.
- *
- * Everything in this file used to ask `skin.joints.find(j => j.nodeIndex === joint.parentIndex)`, which is
- * a one-level test in NODE space. Rigs routinely have non-joints between bones — assimp's FBX pivots being
- * the case that broke — so the shared topology answers this instead.
- */
+// The nearest ANCESTOR JOINT of a node, climbing through non-joint nodes in between, or undefined.
 function ancestorJointOf(skin: Skin, node: number) {
     const topo = topoOf(skin);
     const jointIndex = topo.jointOfNode.get(node);
@@ -181,8 +154,7 @@ function isRootJoint(skin: Skin, node: number): boolean {
     const topo = topoOf(skin);
     const jointIndex = topo.jointOfNode.get(node);
     if (jointIndex === undefined) return true;
-    // `parentJoint < 0` means no JOINT above it — pivots and armature nodes do not make a bone a root,
-    // which is what made every bone take the armature-difference branch of boneCorrection.
+    // `parentJoint < 0` means no JOINT above it; pivots and armature nodes do not make a bone a root.
     return topo.parentJoint[jointIndex] < 0;
 }
 
@@ -198,13 +170,8 @@ function hipsNodeOf(skin: Skin): number | null {
     return root ? root.nodeIndex : null;
 }
 
-/**
- * The spine chain of a skin: the joints strictly between hips and neck, hips-side first.
- *
- * Rigs disagree on spine naming irreconcilably (`Spine/Spine1/Spine2` vs `spine_01..03` vs `spine/chest`),
- * so these are paired by ORDER rather than by name — which is only possible if they are collected as an
- * ordered chain. Returns [] when either end can't be located, leaving the tier matcher's guesses in place.
- */
+// The spine chain of a skin: joints strictly between hips and neck, hips-side first, so two rigs can be
+// paired by ORDER — spine naming is irreconcilable across conventions. [] when either end is missing.
 function spineChain(skin: Skin): number[] {
     const hips = hipsNodeOf(skin);
     let neck: number | null = null;
@@ -239,8 +206,7 @@ export function buildBoneMapping(clips: Animation[], sourceSkin: Skin, targetSki
 
     const targetJointNodes = new Set(targetSkin.joints.map(j => j.nodeIndex));
 
-    // Target lookups, most specific first. First writer wins so an exact name is never shadowed by a
-    // normalized collision.
+    // Most specific first, and first writer wins, so a normalized collision cannot shadow an exact name.
     const byExact = new Map<string, number>();
     const byNormalized = new Map<string, number>();
     const byHumanoid = new Map<string, number>();
@@ -254,14 +220,8 @@ export function buildBoneMapping(clips: Animation[], sourceSkin: Skin, targetSki
             const slot = humanoidSlotOf(nm);
             if (slot && !byHumanoid.has(slot)) byHumanoid.set(slot, j.nodeIndex);
         }
-        // Non-joint nodes, by EXACT name only, and only where a joint has not already claimed the name.
-        //
-        // A clip does not only animate joints. Assimp's FBX importer preserves pivots, so a bone's rotation
-        // curve targets `Bone_$AssimpFbx$_Rotation` — not a joint, and so previously unmatchable: every one
-        // of those channels mapped to null, which both dropped the curve and made `entries.every(targetNode
-        // !== null)` false, so two identical Mixamo rigs could never take the verbatim same-rig path.
-        // Exact-name only on purpose: these names are structural, and normalizing or humanoid-matching one
-        // would let a pivot capture the slot its own bone should have.
+        // Non-joint nodes (assimp `$AssimpFbx$` pivots carry rotation curves) by EXACT name only, and
+        // only where no joint claimed it: normalizing would let a pivot capture its own bone's slot.
         for (const [nodeIndex, nm] of targetSkin.nodeNames!) {
             if (targetJointNodes.has(nodeIndex) || !nm) continue;
             if (!byExact.has(nm)) byExact.set(nm, nodeIndex);
@@ -312,10 +272,8 @@ export function buildBoneMapping(clips: Animation[], sourceSkin: Skin, targetSki
         }
     }
 
-    // sameRig: every animated bone maps AND its LOCAL-bind correction is identity (same rest orientation)
-    // AND its rest proportions match. Judged on LOCAL binds, not names — `mixamorig:` and `mixamorig1:` are
-    // the same skeleton under a renamed namespace, so name equality is the wrong test; the correction being
-    // identity is the right one. When true a raw copy is exact and preserves translations a retarget drops.
+    // sameRig: every bone maps, every LOCAL-bind correction is identity, and rest proportions match.
+    // Judged on the binds, never on names — a renamed namespace is still the same skeleton.
     let sameRig = canRetarget && entries.length > 0 && entries.every(e => e.targetNode !== null);
     if (sameRig) {
         for (const e of entries) {
@@ -330,16 +288,8 @@ export function buildBoneMapping(clips: Animation[], sourceSkin: Skin, targetSki
     return { entries, sameRig, canRetarget, matchMode };
 }
 
-/**
- * WORLD rotation of a node's ARMATURE — the accumulated rest rotation of every ancestor ABOVE it (the node
- * itself excluded). For a root joint this is the non-joint armature/scene rotation the engine applies above
- * the hips. Static (armature nodes are never animated), so `nodeTransforms` is reliable here on both skins.
- *
- * "Never animated" holds only because `isRootJoint` now identifies the TRUE root. It is emphatically false
- * for an assimp `$AssimpFbx$_Rotation` pivot, whose node transform is the clip's frame-0 value rather than a
- * rest pose — while every bone wrongly reported as a root, this walked those and produced a correction that
- * grew with depth, which is what twisted arms and legs.
- */
+// WORLD rotation of a node's ARMATURE: the accumulated rest rotation of every ancestor above it.
+// Only valid for a TRUE root joint — an assimp pivot's node transform is a frame-0 pose, not a rest one.
 function armatureWorldRotation(skin: Skin, node: number): quat {
     const chain: number[] = [];
     let n = parentOf(skin, node);
@@ -356,50 +306,13 @@ function armatureWorldRotation(skin: Skin, node: number): quat {
     return quat.normalize(q, q);
 }
 
-/**
- * The retarget correction for a matched bone: the quaternion `corr` such that `At = corr · As` transfers an
- * animated local rotation onto the target bone.
- *
- * Three regimes:
- *  - The ROOT bone (hips) uses the ARMATURE difference `Awt⁻¹ · Aws`. The engine applies each skin's static
- *    armature above the hips, so making the target's displayed hips world equal the source's is EXACT:
- *    `displayed = Awt·At = Awt·Awt⁻¹·Aws·As = Aws·As = source`. This keeps a Mixamo clip upright instead of
- *    lying down — the two rigs' armatures differ by ~90° (Z-up FBX → Y-up glTF).
- *  - A non-root bone whose SOURCE has no usable inverse bind matrix is copied straight through (`identity`).
- *    MEASURE THIS BEFORE CHANGING IT. The claim that used to sit here — "without an IBM the source's node
- *    transforms are the animation's FRAME-0 pose, not the bind" — is FALSE for assimp's FBX conversion, and
- *    believing it cost a wrong fix. `tools/dump-rig.mjs` compares each node's authored glTF TRS (folded
- *    through its `$AssimpFbx$` chain) against the local bind derived from the inverse bind matrices, and
- *    they agree on 52 of 52 joints in a Mixamo animation file and 65 of 65 in a character: the node
- *    transforms ARE the bind. A rest delta against them would therefore be valid.
- *    It is left as a raw copy anyway, because a bind-less import is necessarily the same skeleton (so the
- *    raw rotation is already right) and because no bind-less file was on hand to verify a change against —
- *    not because the delta is unsound. Both Mixamo exports we have carry a real skin and never reach here.
- *  - Otherwise (both skins have real binds) a non-root bone uses the LOCAL bind delta `Bt · Bs⁻¹`, which
- *    keeps a genuine cross-rig difference confined to the bone it belongs to.
- *
- * A matched node that is not a JOINT at all — an assimp `$AssimpFbx$` pivot carrying the bone's rotation
- * curve — is handled before any of that, from the two nodes' local rest rotations. It has no inverse bind
- * matrix and is not a root; without this it fell into the armature branch and got an accumulated world
- * delta applied as if it were local.
- */
+// The retarget correction for a matched bone: `corr` such that `At = corr · As`. Four regimes, in order:
+// a non-joint node (assimp pivot) copies through; the ROOT bone uses the armature difference
+// `Awt⁻¹ · Aws`; a source with no usable IBM copies through; otherwise the local bind delta `Bt · Bs⁻¹`.
 function boneCorrection(sourceSkin: Skin, sNode: number, targetSkin: Skin, tNode: number): quat {
-    // A matched node that is not a JOINT — an assimp `$AssimpFbx$` pivot carrying the bone's rotation
-    // curve. Copied straight through, for the same reason as the bind-less case below and more strongly:
-    // a pivot has no inverse bind matrix on EITHER side, so there is no rest to take a delta against.
-    //
-    // Deriving one from `nodeTransforms` is actively wrong, and was the bug: an animation-only file
-    // (Mixamo "Without Skin") has no skin at all, so gltfLoader synthesizes its joints from the animated
-    // nodes with identity IBMs and its node transforms are the clip's FRAME 0. Every channel of such a
-    // clip targets a pivot, so every one took that branch and none reached the guard below — deltaing the
-    // character file's bind against the animation file's frame-0 value, which twists each limb by an
-    // arbitrary amount. Mixamo's own T-Pose clip, which should be a visual no-op, rotated the model.
-    //
-    // Known limitation, worth knowing before touching this: with pivots present the hips curve lands on
-    // `Hips_$AssimpFbx$_Rotation`, so the armature branch below never runs for a converted FBX and its
-    // "keeps a Mixamo clip upright" compensation is inert. Harmless same-rig (both files convert
-    // identically, so the armature delta is identity anyway); a genuinely cross-rig import would need it
-    // applied to the highest mapped node above the hips, which is not this function's shape today.
+    // A pivot has no inverse bind matrix on EITHER side, so there is no rest to delta against, and
+    // `nodeTransforms` is frame 0 for an animation-only file. This makes the armature branch below
+    // unreachable for a converted FBX, which only matters cross-rig.
     if (!topoOf(targetSkin).jointOfNode.has(tNode)) return quat.create();
 
     if (isRootJoint(targetSkin, tNode)) {
@@ -418,8 +331,8 @@ function boneCorrection(sourceSkin: Skin, sNode: number, targetSkin: Skin, tNode
 export function applyManualMapping(mapping: BoneMapping, sourceNode: number, targetNode: number | null): BoneMapping {
     const entries = mapping.entries.map(e =>
         e.sourceNode === sourceNode ? { ...e, targetNode, kind: (targetNode === null ? 'none' : 'manual') as BoneMatchKind } : e);
-    // A manual edit means the rig is being treated as different; drop the raw fast-path so the delta
-    // retarget actually runs (it also stops a same-rig raw copy from ignoring the override entirely).
+    // A manual edit means the rigs are being treated as different: drop the raw fast path, or the
+    // override would be ignored entirely.
     return { ...mapping, entries, sameRig: false };
 }
 
@@ -442,8 +355,7 @@ export function mappingReport(
         if (e && e.targetNode !== null) {
             matched.add(label);
             covered.add(e.targetNode);
-            // Parent-mismatch is only meaningful for an exact match — a humanoid/normalized match crosses
-            // naming conventions by design, so its parents differing is expected, not a warning.
+            // Only meaningful for an exact match: a humanoid match crosses conventions by design.
             if (e.kind === 'exact' && !hierarchyChecked.has(ch.targetNodeIndex)) {
                 hierarchyChecked.add(ch.targetNodeIndex);
                 const sp = parentName(sourceSkin, ch.targetNodeIndex);
@@ -481,15 +393,8 @@ interface Correction {
 }
 
 /**
- * Rebuild a clip's samplers so it drives the target skeleton. When `mapping.sameRig` (or rest data is
- * missing) the channels are copied verbatim; otherwise every matched bone's ROTATION is transferred through
- * its LOCAL bind-orientation difference (`At = Bt·Bs⁻¹·As`), the hips translation is re-based and
- * height-scaled, and all other translation and scale channels are dropped (bone lengths differ between rigs,
- * so copying them stretches the target).
- *
- * Working in LOCAL space is deliberate: a difference in the armature above the hips, or drift in a source
- * skin whose node transforms are its animation's frame-0 pose, stays confined to the bone it belongs to
- * instead of accumulating down the chain and twisting every descendant limb.
+ * Rebuild a clip's samplers so it drives the target skeleton. `mapping.sameRig` copies verbatim; otherwise
+ * rotations go through the local bind delta (`At = Bt·Bs⁻¹·As`) and non-hips translation/scale is dropped.
  */
 export function retargetAnimation(
     clip: Animation, sourceSkin: Skin, targetSkin: Skin, mapping: BoneMapping,
@@ -571,10 +476,7 @@ export function retargetAnimation(
     return { name: clip.name, samplers: outSamplers, channels: outChannels };
 }
 
-/**
- * Match, retarget and report in one call, for callers that don't review the mapping. Kept as the original
- * entry point so nothing outside the import flow has to change.
- */
+/** Match, retarget and report in one call, for callers that do not review the mapping. */
 export function remapAnimationToSkin(
     clip: Animation, sourceSkin: Skin, targetSkin: Skin,
 ): { remapped: Animation; report: AnimationCompatibility } {
@@ -583,8 +485,7 @@ export function remapAnimationToSkin(
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Diagnostics. A single structured dump of what the retarget decided and why — logged once per import so a
-// broken retarget can be diagnosed from a user's console without their asset files. Pure and read-only.
+// Diagnostics. A structured dump of what the retarget decided, logged once per import. Pure, read-only.
 // ---------------------------------------------------------------------------------------------------
 
 /** WORLD bind rotation of a node from nodeTransforms accumulation ONLY (never the IBM). For diagnostics. */
@@ -620,15 +521,8 @@ function nodeScale(skin: Skin, node: number): [number, number, number] {
 }
 
 /**
- * The DISTINCT humanoid-slot bones on a skin, NODE index keyed by slot (`hips`, `foot.L`, `hand.R`, ...).
- *
- * Retargeting needs this to pair two skeletons; anything that has to find a body part by meaning rather than
- * by name needs exactly the same answer. That is why it is public: it is the "where are this character's
- * feet" query, and re-deriving it elsewhere would mean a second bone-naming heuristic that could disagree
- * with the one retargeting already uses.
- *
- * Empty for a skin with no `nodeNames` (an animation-only file, or a rig whose bones are named nothing
- * recognizable) — absence of a slot is a normal answer, not a failure.
+ * The distinct humanoid-slot bones on a skin: NODE index keyed by slot (`hips`, `foot.L`, `hand.R`).
+ * Empty for a skin with no `nodeNames`; a missing slot is a normal answer, not a failure.
  */
 export function humanoidRigOf(skin: Skin): Map<string, number> {
     const out = new Map<string, number>();
@@ -644,11 +538,8 @@ export function humanoidRigOf(skin: Skin): Map<string, number> {
 const slotIndex = humanoidRigOf;
 
 /**
- * A plain, loggable snapshot of a retarget: the header the modal shows plus, for a handful of key bones, the
- * bind rotation computed BOTH ways (inverse-IBM vs nodeTransforms accumulation) and the per-pair corrections.
- *
- * The IBM-vs-nodeTransforms disagreement is the direct signal for the frame-0-pose bug: when they differ on
- * the source skin, the animation file's node transforms are not its bind pose.
+ * A loggable snapshot of a retarget: the modal's header plus, for key bones, the bind rotation computed
+ * both ways. The two disagreeing on the source means its node transforms are not a bind pose.
  */
 export function describeRetarget(clips: Animation[], sourceSkin: Skin, targetSkin: Skin, mapping: BoneMapping): any {
     const round = (q: quat) => `${angleDeg(q).toFixed(1)}°`;
@@ -677,8 +568,7 @@ export function describeRetarget(clips: Animation[], sourceSkin: Skin, targetSki
                 worldBind_fromNodeTransforms: round(nodeTransformsWorldBindRotation(skin, node)),
             };
         };
-        // `corr` is what the retarget actually applies for this pair: At = corr·As. ~0° means "no correction
-        // needed" (same bind orientation); a large value on a limb bone is the twist.
+        // `corr` is what the retarget applies: At = corr·As. ~0° means the bind orientations agree.
         let corr = 'n/a', mapped: number | null = null;
         if (sNode !== undefined) {
             const e = bySource.get(sNode);

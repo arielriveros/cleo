@@ -1,16 +1,8 @@
-// Grid geometry for the three tilemap layouts. Pure math — no GL, no scene graph — so it is cheap to
-// import and directly unit-testable.
+// Grid geometry for the three tilemap layouts. Pure math — no GL, no scene graph.
 //
-// CONVENTIONS, fixed once here and relied on everywhere else:
-//   * The tile plane is XY (+Y up, +X right). A tilemap lives at some Z and the 2D editor camera looks
-//     down -Z at it, matching the orthographic rig the editor installs for a 2D scene.
-//   * ROW INDICES GROW DOWNWARD, i.e. row 0 is the topmost row and row 1 sits BELOW it in world space
-//     (world y decreases). This is the Tiled convention and the one every 2D artist expects; it is also
-//     what makes Y-sorting a plain ascending sort on world Y.
-//   * cellToWorld returns the CENTRE of a cell, never a corner.
-//
-// Isometric here means a screen-space diamond on the XY plane (again, Tiled's model) — NOT a true 3D
-// isometric projection. The tiles are flat quads; only their footprint is diamond-shaped.
+// CONVENTIONS, fixed here and relied on everywhere else: the tile plane is XY (+Y up, +X right);
+// ROW INDICES GROW DOWNWARD, so row 1 sits below row 0 in world space; and `cellToWorld` returns a
+// cell's CENTRE. Isometric means a screen-space diamond on the XY plane, not a 3D projection.
 
 import { vec2 } from "gl-matrix";
 
@@ -32,10 +24,8 @@ export interface GridSpec {
     hexOrientation?: HexOrientation;
     hexOffset?: HexOffset;
     /**
-     * Length of the hexagon's two axis-aligned sides (the "straight" part of the silhouette). Defaults
-     * to half the cell extent along the stacking axis, which yields a regular hexagon when the bounding
-     * box is proportioned sqrt(3):2. Tiled calls this the same thing, and it is what lets a hex grid be
-     * squashed without the neighbour math falling apart.
+     * Length of the hexagon's two axis-aligned sides. Defaults to half the cell extent along the
+     * stacking axis, giving a regular hexagon at a sqrt(3):2 bounding box.
      */
     hexSideLength?: number;
 }
@@ -115,35 +105,27 @@ function cubeRound(qf: number, rf: number): [number, number] {
 }
 
 /**
- * Cell containing the world-space point (x, y). Never returns null — the grid is infinite, so every
- * point is in some cell.
- *
- * The hex branch goes through cube-coordinate rounding rather than dividing by the spacing: a naive
- * division treats each hex as its bounding box and therefore mis-picks roughly the outer third of every
- * cell, right where the user is aiming when they paint an edge.
+ * Cell containing the world-space point (x, y); never null, since the grid is infinite. The hex branch
+ * rounds in cube coordinates — dividing by the spacing treats each hex as its bounding box.
  */
 export function worldToCell(grid: GridSpec, x: number, y: number): [col: number, row: number] {
     const g = normalizeGrid(grid);
-    // `| 0` throughout: Math.floor/round happily return -0 just left of or above the origin, and a -0
-    // coordinate compares unequal under Object.is even though it indexes the same cell. Cell coordinates
-    // are bounded well inside int32, so the truncation is free.
+    // `| 0` throughout: floor/round return -0 near the origin, which compares unequal under Object.is
+    // while indexing the same cell.
     switch (g.kind) {
         case 'orthogonal':
             return [Math.floor(x / g.cellWidth) | 0, Math.floor(-y / g.cellHeight) | 0];
         case 'isometric': {
-            // In (p,q) = (2x/w, -2y/h - 1) space a cell's diamond becomes the unit square centred on
-            // ((col-row), (col+row)) rotated 45 degrees, so the half-sum/half-difference coordinates
-            // below land exactly on integers at cell centres and round correctly everywhere else.
+            // In (p,q) space a cell's diamond is a rotated unit square, so the half-sum and
+            // half-difference below land on integers at cell centres.
             const p = (2 * x) / g.cellWidth;
             const q = (-2 * y) / g.cellHeight - 1;
             return [Math.round((p + q) * 0.5) | 0, Math.round((q - p) * 0.5) | 0];
         }
         case 'hexagonal': {
             const spacing = hexStackSpacing(g);
-            // Normalize so one column of spacing is 1 unit across and one row is 1 unit down; in that
-            // space the axial layout is the plain shear x = q + r/2, y = r. The `even-*` variants shift
-            // the whole grid half a cell relative to the `odd-*` ones (their row/column 0 is the shifted
-            // one), which is exactly the extra half unit taken off below.
+            // Normalized so the axial layout is the plain shear x = q + r/2, y = r. The `even-*`
+            // variants shift the whole grid half a cell, which is the extra half taken off below.
             const half = (g.hexOffset === 'even-r' || g.hexOffset === 'even-q') ? 1 : 0.5;
             if (g.hexOrientation === 'pointy') {
                 const xn = x / g.cellWidth - half;
@@ -170,8 +152,7 @@ export function worldToCell(grid: GridSpec, x: number, y: number): [col: number,
 
 /**
  * Outline of cell (col, row) as flat world-space xy pairs, counter-clockwise: 4 points for orthogonal
- * and isometric, 6 for hexagonal. Used for the editor's cell cursor and for the per-cell convex
- * colliders non-orthogonal grids fall back to.
+ * and isometric, 6 for hexagonal.
  */
 export function cellCorners(grid: GridSpec, col: number, row: number, out?: Float32Array): Float32Array {
     const g = normalizeGrid(grid);
@@ -212,11 +193,8 @@ export function cellCorners(grid: GridSpec, col: number, row: number, out?: Floa
 }
 
 /**
- * World Y a cell sorts at, given the tile's anchor row.
- *
- * `anchorRow` is a row offset INTO the tile's own footprint: a two-cell-tall tree drawn from its top
- * cell anchors at 1, i.e. its trunk. Everything in the same visual object therefore reports the trunk's
- * Y and sorts as one unit against the characters walking past it.
+ * World Y a cell sorts at. `anchorRow` is an offset INTO the tile's own footprint, so a two-cell-tall
+ * tree anchored at 1 sorts by its trunk and the whole object moves as one.
  */
 export function cellSortY(grid: GridSpec, col: number, row: number, anchorRow: number = 0): number {
     return cellToWorld(grid, col, row + anchorRow)[1];
@@ -231,9 +209,8 @@ const RING_8: readonly [number, number][] = [
 ];
 
 /**
- * The cells touching (col, row), in a stable clockwise order: 8 for orthogonal/isometric grids,
- * 6 for hexagonal ones. Hex neighbours depend on the row/column parity, which is exactly the sort of
- * detail auto-tiling gets wrong when it is open-coded at the call site.
+ * The cells touching (col, row), clockwise: 8 for orthogonal and isometric grids, 6 for hexagonal.
+ * Hex neighbours depend on row/column PARITY, which is why this is not open-coded per call site.
  */
 export function neighbours(grid: GridSpec, col: number, row: number): [number, number][] {
     const g = normalizeGrid(grid);

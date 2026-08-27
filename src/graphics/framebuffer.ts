@@ -9,21 +9,13 @@ interface FrameBufferOptions {
     usage?: 'color' | 'depth';
     colorAttachments?: number;
     colorTextureOptions?: TextureConfig;
-    /**
-     * Allocate a depth attachment. Default true. Set false for targets that only ever receive
-     * fullscreen passes with depth testing off — every framebuffer used to get a
-     * DEPTH_COMPONENT24 texture whether or not anything could possibly read or write it.
-     */
+    /** Allocate a depth attachment. Default true; set false for depth-test-off fullscreen targets. */
     depth?: boolean;
 }
 
 /**
  * A screen-sized render target: N colour textures and an optional depth texture, reallocated together.
- *
- * Owns the TEXTURES and nothing else. The framebuffer object, the attachment calls and the completeness
- * check all live in {@link WebGL2Device.createRenderTarget} now, which is what let this class,
- * `CubeFramebuffer` and `LayeredDepthFramebuffer` collapse onto one shape: the three differed only in
- * which `TextureView`s they attached, and a view carries its own mip level and array layer.
+ * Owns the textures; the framebuffer object itself belongs to the device's render-target cache.
  */
 export class Framebuffer {
     private _width: number;
@@ -49,18 +41,13 @@ export class Framebuffer {
         this._width = width;
         this._height = height;
 
-        // Release any textures from a previous create()/resize() so we don't leak GPU memory
-        // (and grow the _colors array) every time the viewport is resized. Deleting them also evicts
-        // the render target they were attached to — see WebGL2Device._releaseTexture — so the target
-        // rebuilt below is a new framebuffer over the new storage rather than a stale one.
+        // Deleting the old attachments also evicts the render target they belonged to.
         for (const color of this._colors) color.delete();
         this._colors = [];
         this._depth?.delete();
         this._depth = null;
 
-        // `usage: 'depth'` means depth and nothing else. It used to allocate a full-size colour texture
-        // anyway and then set draw buffers to NONE, so the texture could never be written or read — a
-        // whole screen-sized RGBA8 target per depth framebuffer, paid for and unreachable.
+        // `usage: 'depth'` means depth and nothing else — no colour attachments at all.
         if (this._options.usage === 'color') {
             for (let i = 0; i < (this._options.colorAttachments as number); i++) {
                 const color = new Texture(this._options.colorTextureOptions);
@@ -79,23 +66,8 @@ export class Framebuffer {
         return this;
     }
 
-    /**
-     * Make this the current draw target, viewport included.
-     *
-     * `bind`/`unbind` are the LEGACY model, and the last thing keeping this class off the RHI
-     * interface. Binding a framebuffer object is not a concept WebGPU has — there a target is named by
-     * the pass that opens it and stops being current when the pass ends — so `RenderTarget.bind()` is
-     * WebGL2-only and the cast below says so rather than widening the interface to accommodate it.
-     *
-     * They go away with the last draw that is not recorded against a pass encoder: every remaining
-     * caller is a site that draws (or clears) outside a pass and therefore depends on inherited target
-     * state. See the `glDevice()` worklist for the rest of that set.
-     */
+    /** Make this the current draw target, viewport included. WebGL2 only; a no-op elsewhere. */
     public bind(): Framebuffer {
-        // A no-op off WebGL2, and deliberately not a stub. There is nothing to make current where a
-        // target is named by the pass that opens it. This is NOT hiding a failure: every remaining
-        // caller precedes a LEGACY draw, and that draw fails loudly on its own the moment it is
-        // reached — which is the right place to fail, because it names the draw rather than the bind.
         if (device.backend !== 'webgl2') return this;
         (this.renderTarget as WebGL2RenderTarget).bind();
         return this;
@@ -103,7 +75,7 @@ export class Framebuffer {
 
     /** Hand the canvas back the draw target — the default framebuffer, at its own resolution. */
     public unbind(): Framebuffer {
-        if (device.backend !== 'webgl2') return this;   // see Framebuffer.bind
+        if (device.backend !== 'webgl2') return this;
         glDevice().getCurrentSurfaceTarget().bind();
         return this;
     }
@@ -119,14 +91,7 @@ export class Framebuffer {
         this.recreate();
     }
 
-    /**
-     * This framebuffer as an RHI render target.
-     *
-     * Asked for rather than held: the device dedupes targets by their attachment set, so repeating this
-     * every pass is a map lookup and not an allocation, while `resize()` — which deletes every
-     * attachment and therefore evicts the target — cannot leave a stale one behind. Holding one here
-     * instead would mean two places that have to agree about when the attachments changed.
-     */
+    /** This framebuffer as an RHI render target. Deduped by the device, so calling it per pass is free. */
     public get renderTarget(): RenderTarget {
         return device.createRenderTarget({
             label: 'framebuffer',

@@ -11,21 +11,18 @@ interface Props {
 }
 
 /**
- * Viewport-mounted terrain sculpting tool (modelled on PositionGizmo). Active only in landscape mode.
- * Owns pointer listeners: left-drag ray-casts the active LandscapeNode's terrain and applies the current
- * brush, suppressing camera movement + selection via the existing GIZMO_DRAG_* events. Shows a wireframe
- * ring cursor at the hovered surface point.
+ * Viewport-mounted terrain sculpt/paint tool, active only in landscape mode. Left-drag ray-casts the
+ * active LandscapeNode's terrain and applies the current brush; a wireframe ring marks the hovered point.
  */
 export default function LandscapeBrush({ viewportRef }: Props) {
     const { instance, editorScene, eventEmitter, editorMode, terrainBrush } = useCleoEngine();
     const paintingRef = useRef(false);
     const lastTimeRef = useRef(0);
     const cursorRef = useRef<ModelNode | null>(null);
-    // When foliage was last scattered/erased during the current stroke, and where. See foliageDue.
+    // When and where foliage was last scattered during the current stroke; read by foliageDue.
     const lastFoliageRef = useRef({ t: 0, x: NaN, z: NaN });
 
-    // A flat wireframe ring (unit radius) built as a line loop. Uses calculateTangents=false to avoid the
-    // buggy tangent path in Geometry.Circle, and needs no tangents for a Basic wireframe material anyway.
+    // Unit-radius line loop. calculateTangents must stay false: Geometry.Circle's tangent path is broken.
     const buildRingGeometry = (segments = 48): Geometry => {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];
@@ -41,7 +38,7 @@ export default function LandscapeBrush({ viewportRef }: Props) {
         return new Geometry(positions, normals, uvs, [], [], indices, false);
     };
 
-    // Lazily create the ring cursor once; keep it out of selection/serialization via the __editor__ prefix.
+    // The `__editor__` name prefix keeps the cursor out of selection and serialization.
     const ensureCursor = (): ModelNode | null => {
         if (!editorScene) return null;
         if (cursorRef.current) return cursorRef.current;
@@ -88,10 +85,8 @@ export default function LandscapeBrush({ viewportRef }: Props) {
         };
         const hideCursor = () => { if (cursorRef.current) cursorRef.current.visible = false; };
 
-        // Foliage work is rate-limited while the splat paint is not: both scatter and erase re-bucket the
-        // whole spatial grid of every touched layer, which at grass density is far too expensive to run on
-        // every mousemove. Fires when enough wall-clock has passed OR the cursor has covered enough ground,
-        // so a slow deliberate drag and a fast flick both lay down an even trail.
+        // Foliage scatter/erase re-buckets the whole spatial grid, so it is rate-limited while paint is
+        // not: due when either enough wall-clock has passed OR the cursor has covered enough ground.
         const FOLIAGE_MIN_MS = 120;
         const FOLIAGE_MIN_TRAVEL = 0.35; // fraction of the brush radius
         const foliageDue = (point: Vec3Like, radius: number): boolean => {
@@ -109,18 +104,13 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             if (b.mode === 'paint') {
                 h.node.terrain.paint(h.point as any, { radius: b.radius, strength: b.strength, falloff: b.falloff, layer: b.paintLayer }, dt);
                 if (foliageDue(h.point, b.radius)) {
-                    // Erase FIRST, then scatter: the other way round the erase would take out the instances
-                    // this very stroke just placed.
+                    // Erase FIRST, then scatter: the other order removes what this stroke just placed.
                     const m = h.node.terrain.layers[b.paintLayer]?.material;
                     h.node.terrain.eraseFoliageExcept(h.point as any, b.radius, m ? m.foliageInclude.map(r => r.name) : []);
-                    // Painting a material lays down that material's own foliage. Without this, painting could
-                    // only ever REMOVE foliage — the whole point of a material-driven foliage system is that
-                    // the paint stroke is what instances it.
                     h.node.terrain.scatterFoliageFromMaterials(h.point as any, b.radius);
                 }
             }
             else if (b.mode === 'foliage') {
-                // Material-driven: scatter each painted material's included foliage; erase clears all near the point.
                 if (foliageDue(h.point, b.radius)) {
                     if (b.foliageErase) h.node.terrain.eraseAllFoliage(h.point as any, b.radius);
                     else h.node.terrain.scatterFoliageFromMaterials(h.point as any, b.radius);
@@ -131,8 +121,8 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             showCursor(h.point);
         };
 
-        // The brush listens in the capture phase on the viewport (the panel's ancestor), so a click on a
-        // floating panel control would otherwise start a stroke and never reach the control. Bail on those.
+        // Listeners are capture-phase on the viewport, the floating panels' ancestor, so clicks on a panel
+        // control must be filtered out here or they start a stroke and never reach the control.
         const inOverlay = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-cleo-overlay]');
 
         const onDown = (e: MouseEvent) => {
@@ -142,9 +132,9 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             if (!h) return;
             paintingRef.current = true;
             lastTimeRef.current = performance.now();
-            // A fresh stroke always applies foliage on its first sample — a click should do something.
+            // NaN x/z makes the first sample of a fresh stroke always due.
             lastFoliageRef.current = { t: 0, x: NaN, z: NaN };
-            // Reuse the gizmo suppression so camera + click-selection ignore this drag.
+            // Reuses the gizmo suppression so camera + click-selection ignore this drag.
             eventEmitter.emit('GIZMO_DRAG_START', { axis: 'terrain', nodeId: h.node.id });
             apply(e.clientX, e.clientY, 1 / 60);
             e.preventDefault();
@@ -153,7 +143,6 @@ export default function LandscapeBrush({ viewportRef }: Props) {
 
         const onMove = (e: MouseEvent) => {
             if (editorMode !== 'landscape') return;
-            // While hovering a floating panel (and not mid-stroke), don't preview/apply the brush.
             if (!paintingRef.current && inOverlay(e.target)) { hideCursor(); return; }
             const now = performance.now();
             const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);

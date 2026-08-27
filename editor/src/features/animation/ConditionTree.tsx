@@ -2,15 +2,14 @@ import { isConditionGroup } from 'cleo'
 import type { AnimationConditionNode, AnimationConditionOp } from 'cleo'
 import { useStateMachine, OPS_FOR, OP_LABEL, effectiveType, treeOf, CondPath } from './StateMachineContext'
 
-// Recursive editor for a transition's AND/OR condition tree. A group renders as an indented box with a gate
-// toggle; a condition renders as [param][op][value?][x]. Every node addresses itself by its `path` (the child
-// index at each level), so nothing here needs to know where the transition sits in the machine.
+// Recursive editor for a transition's AND/OR condition tree. Every node addresses itself by `path`, the
+// child index at each level, so nothing here needs to know where the transition sits in the machine.
 
 const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
 const ghost = 'px-1.5 py-0.5 rounded border border-control-hover hover:bg-control text-xs'
 const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
 
-/** The gate toggle. Deliberately tiny and inline — a group is usually two conditions, not a form. */
+/** The AND/OR gate toggle for one group. */
 function GateToggle({ op, onChange }: { op: 'and' | 'or'; onChange: (op: 'and' | 'or') => void }) {
   return (
     <div className='flex rounded overflow-hidden border border-control-hover'>

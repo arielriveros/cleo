@@ -11,14 +11,10 @@ import { AssetDeps, sizeOfAsset } from './assetKinds'
 
 // Owns the asset explorer's virtual filesystem: the folder layout, persisted to IndexedDB under
 // `cleo_vfs`, and the reconciliation that keeps it in step with the five flat asset libraries.
-//
-// It lives above <Editor> rather than inside the explorer so it keeps reconciling while the Assets tab is
-// hidden (renderer mode collapses the whole bottom bar) — otherwise an import made from the left sidebar
-// wouldn't be indexed until the user happened to look at the explorer.
+// Mounted above <Editor> so it keeps reconciling while the Assets tab is hidden.
 
-// Built-in textures the explorer must never show. `__packed__` ids are engine-derived channel packs
-// (e.g. metallic + roughness + occlusion combined into one texture): they are rebuilt from the source
-// maps on demand, so they are not assets and have no bytes to store.
+// Built-in textures the explorer must never show. `__packed__` ids are engine-derived channel packs,
+// rebuilt from the source maps on demand, so they are not assets and have no bytes to store.
 function isUserTexture(id: string): boolean {
   return !(id.includes('__editor__') || id.includes('__debug__') || isDerivedTextureId(id) || id === 'Null')
 }
@@ -50,8 +46,7 @@ export function useVfs(): VfsContextValue {
 export function VfsProvider({ children }: { children: React.ReactNode }) {
   const engine = useCleoEngine()
   const { eventEmitter, isSceneReady, texturesPreloaded, sceneList } = engine
-  // The five libraries come from the split-out slice, so reconciliation re-runs on library changes
-  // rather than on every unrelated EngineContext update.
+  // The five libraries come from the split-out slice, so reconciliation re-runs on library changes only.
   const {
     assetsLoaded,
     materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets,
@@ -61,8 +56,8 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   const vfsLoadedRef = useRef(false)
   const [vfsLoaded, setVfsLoaded] = useState(false)
 
-  // Textures aren't React state — they live in the TextureManager singleton — so mirror their ids here and
-  // refresh on the events that add/remove them.
+  // Textures live in the TextureManager singleton, not React state; mirror their ids here and refresh on
+  // the events that add/remove them.
   const [textureIds, setTextureIds] = useState<string[]>([])
   useEffect(() => {
     const refresh = () => {
@@ -126,14 +121,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
 
   const landingFolderRef = useRef<string>('/')
 
-  // Initial read. On a first run this stays EMPTY_VFS, and the reconcile below lands every existing asset
-  // at the root — that is the whole migration.
-  //
-  // Everything that comes off disk goes through repairVfs first. A stored index can be structurally
-  // broken — an entry whose ancestor folder is missing, a path claimed twice — and the file manager does
-  // not survive that: FileTree.parse quietly unlinks the orphan, the store sync then tries to create it,
-  // and FileTree.add dereferences the absent parent. Since the damage is persisted, the explorer would
-  // throw on every load until the index is fixed, which is what this does.
+  // Initial read; on a first run this stays EMPTY_VFS and the reconcile below lands every existing asset
+  // at the root. Everything off disk goes through repairVfs first: a stored index with a missing ancestor
+  // folder or a twice-claimed path makes FileTree.add dereference an absent parent on every load.
   useEffect(() => {
     (async () => {
       try {
@@ -151,15 +141,10 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     })()
   }, [])
 
-  // Index assets created outside the explorer, follow renames made in the material/template editors, and
-  // (once the libraries have actually loaded) drop entries whose asset is gone.
-  // Pruning is destructive and irreversible once the debounced write below lands, so `assetsLoaded` is not
-  // trusted on its own. It flips from imperative refs set the moment each IndexedDB read resolves, which
-  // can be a commit BEFORE the library values themselves reach this component — and pruning against
-  // libraries that merely look empty deletes the user's entire folder layout for every non-texture kind.
-  // (Textures are exempt inside reconcileVfs and scenes come from their own list, which is why those two
-  // were the only survivors when this fired.) Requiring at least one asset to be present costs nothing:
-  // with every library empty there is, by definition, nothing that needs pruning.
+  // Index assets created outside the explorer, follow renames, and (once the libraries have loaded) drop
+  // entries whose asset is gone. Pruning is irreversible once the debounced write lands, and `assetsLoaded`
+  // can flip a commit BEFORE the library values reach this component; pruning against libraries that
+  // merely look empty deletes the whole folder layout, so require at least one asset to be present.
   const librariesPopulated = !!(materials.length || terrainMaterials.length || templates.length
     || models.length || scriptAssets.length || animationFields.length || animations.length || tilesets.length)
 
@@ -169,10 +154,8 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
       const { next, changed } = reconcileVfs(prev, libs, {
         landingFolder: landingFolderRef.current,
         prune: assetsLoaded && librariesPopulated,
-        // Textures have no library of their own to look "populated"; the preload settling is the
-        // equivalent signal. `isSceneReady` on top of it because restoring the initial scene registers
-        // more textures (a legacy ModelAsset re-registers its embedded ones when it is instantiated),
-        // and pruning between those two points would drop entries that were about to be filled in.
+        // Textures have no library to look "populated"; preload settling is the equivalent signal.
+        // `isSceneReady` on top of it: restoring the initial scene registers more textures.
         pruneTextures: assetsLoaded && texturesPreloaded && isSceneReady,
         sizeOf: (kind: AssetKind, assetId: string) => sizeOfAsset(kind, assetId, depsRef.current),
       })
@@ -193,8 +176,8 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   const pathIndexRef = useRef(pathIndex)
   pathIndexRef.current = pathIndex
 
-  // Latched: the file manager keeps its tree, open folders and current path in its own store, so it must
-  // mount exactly once. Anything that made `ready` flicker back to false would remount it and lose all of that.
+  // Latched: the file manager keeps its tree, open folders and current path in its own store, so a flicker
+  // back to false would remount it and lose all of that.
   const [ready, setReady] = useState(false)
   useEffect(() => {
     if (!ready && vfsLoaded && assetsLoaded && isSceneReady) setReady(true)

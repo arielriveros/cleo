@@ -1,21 +1,10 @@
 import { base64ToBytes } from 'cleo'
 
-// Publish-time compression of a landscape's bulk terrain data.
-//
-// A serialized Terrain carries two large base64 strings inside the scene JSON: the Uint16 height field
-// (~44 KB at the default resolution, 260 KB at 513) and the raw RGBA splat map (~88 KB / 1 MB). Base64
-// costs a further 33% on top, and both sit in the manifest STRING, so they are neither deduped nor
-// compressed by anything downstream.
-//
-// DEFLATE rather than PNG, deliberately. The splat's four channels are the four paint layers' blend
-// weights, so alpha is data, not transparency — and canvas 2D is premultiplied, which means encoding
-// through a canvas destroys the RGB of every texel where layer 3's weight is zero (the common case).
-// There is no canvas-based path that round-trips this losslessly. DEFLATE is the same algorithm PNG
-// uses for its IDAT chunks, so the compression ratio is effectively identical, and it is byte-exact.
-//
-// Runs on the MAIN THREAD (CompressionStream is not available to the project worker's constrained
-// context in the same way, and this sits alongside the other main-thread publish prep in
-// buildMultiSceneGameData). The packer then moves the resulting byte arrays into game.bin.
+// Publish-time compression of a landscape's bulk terrain data: the Uint16 height field and the raw RGBA
+// splat map, both base64 strings in the scene JSON that nothing downstream dedupes or compresses.
+// DEFLATE, not PNG: the splat's alpha is a paint layer's blend weight, not transparency, and canvas 2D is
+// premultiplied, so encoding through a canvas destroys the RGB wherever layer 3's weight is zero.
+// Runs on the MAIN THREAD (CompressionStream); the packer moves the byte arrays into game.bin.
 
 /** Weight-map/height payloads below this many bytes are left as base64 — the framing isn't worth it. */
 const MIN_COMPRESS_BYTES = 512
@@ -27,9 +16,7 @@ async function deflate(bytes: Uint8Array): Promise<Uint8Array> {
 
 /**
  * Replace each landscape's base64 `heights`/`splat` with deflated byte arrays, in place.
- *
- * Best-effort: any failure leaves the base64 fields exactly as they were, so the publish degrades to
- * the previous behaviour rather than shipping a terrain with no shape. `Terrain.deserialize` reads
+ * Best-effort: any failure leaves the base64 fields exactly as they were. `Terrain.deserialize` reads
  * either form, and prefers the decoded one.
  */
 export async function compressTerrainData(node: any): Promise<void> {
@@ -63,11 +50,8 @@ export async function compressTerrainData(node: any): Promise<void> {
 
 /**
  * The same treatment for a tilemap's cell grids, in place.
- *
- * A chunk is 1024 Uint32 cells = 4 KB raw, 5.5 KB as base64, and a painted map has many of them — but the
- * data is extremely compressible (long runs of the same tile, and every cell's high byte is zero), so this
- * is where the ratio is best. Best-effort, exactly like the terrain path: a failure leaves the base64
- * intact and `TilemapLayer.parse` reads either form.
+ * Best-effort like the terrain path: a failure leaves the base64 intact and `TilemapLayer.parse` reads
+ * either form.
  */
 export async function compressTilemapData(node: any): Promise<void> {
   if (!node || typeof node !== 'object') return

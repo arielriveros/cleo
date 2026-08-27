@@ -1,27 +1,17 @@
 // Moving every bulk payload of an export bundle into one `assets.bin`, and putting it back on import.
+// Numbers are written as raw little-endian bytes into a blob of 4-byte-aligned chunks with a reference
+// left behind; the container primitives are shared with the publish packer — see utils/chunkBlob.ts.
 //
-// Before this, a .cleoproj.zip stored its asset data twice-badly: texture bytes as one zip entry each,
-// and everything else as text inside the JSON entries — mesh vertex arrays as decimal strings (a float
-// costs ~19 bytes written as `0.011335190385580063` and 4 as a Float32), animation samplers the same,
-// and terrain/tilemap/cubemap/thumbnail payloads as base64. On the shipped 3D example that was 56.6 MB of
-// JSON, of which nearly all was numbers, plus one animation clip stored three times over (in the model
-// asset, in a template, and in the scene) at ~10 MB a copy. Packed, the same project is 1.4 MB of JSON
-// and a 4.8 MB blob.
+// Three rules this packer must hold to that the publish packer does not:
 //
-// The fix is the one publishing already uses for game.bin: write the numbers as raw little-endian bytes
-// into a blob of 4-byte-aligned chunks and leave a reference behind. The container primitives are shared
-// — see utils/chunkBlob.ts. Three things differ from the publish packer, all on purpose:
-//
-//  1. EVERY payload is content-interned, not just geometry. That is what collapses the triplicated clip:
-//     identical bytes reaching the writer from a model, a template and a scene get one chunk.
-//  2. A payload is replaced IN PLACE by a marker (see `Marker` below) rather than moved to a new field.
-//     Deleting `geometry` and adding `geometryRef` reorders the object's keys, and `hashAsset` compares
-//     `JSON.stringify` output — so every model and template in the project would come back with a
-//     different content hash and trigger a pointless resync of every placement on first open.
-//  3. Inflate restores the ORIGINAL JSON — plain `number[]`, base64 strings, data URLs, in their original
-//     key order. The player wants zero-copy typed-array views; an import wants the editor's data model
-//     untouched, because `bundleMerge` deep-clones and id-remaps these objects and `Scene.parse` reads
-//     them. An export/import round trip of the 3D example is byte-identical.
+//  1. EVERY payload is content-interned, not just geometry, so a clip reaching the writer from a model,
+//     a template and a scene gets one chunk.
+//  2. A payload is replaced IN PLACE by a marker (see `Marker` below), never moved to a new field:
+//     `hashAsset` compares `JSON.stringify` output, so reordering an object's keys changes every
+//     model's and template's content hash and resyncs every placement on first open.
+//  3. Inflate restores the ORIGINAL JSON — plain `number[]`, base64 strings, data URLs, in their
+//     original key order — because `bundleMerge` deep-clones and id-remaps these objects and
+//     `Scene.parse` reads them. An export/import round trip must be byte-identical.
 //
 // Engine-free and DOM-free: this runs inside projectWorker.ts.
 
@@ -34,19 +24,13 @@ import {
 /**
  * What a packed value looks like while it sits in the JSON.
  *
- * One key each, so recognizing one is a single property test and no ordinary editor object can be
- * mistaken for one: `$geo` is an id into the geometry table, `$f32`/`$f64`/`$idx` are number arrays,
- * `$b64` is a base64 string (`z` when the bytes were deflated first) and `$url` is a `data:` URI.
+ * Exactly one key each, so recognizing a marker is a single property test: `$geo` is an id into the
+ * geometry table, `$f32`/`$f64`/`$idx` are number arrays, `$b64` is a base64 string (`z` when the bytes
+ * were deflated first) and `$url` is a `data:` URI.
  *
- * Float width is chosen per array by `narrowest`, on the same principle as the 16-vs-32-bit index
- * narrowing: take the smallest form that loses nothing. Most float payloads are read off a Float32Array
- * before they are serialized (`Model.serialize` does `Array.from(this._geometry.positions)`, a joint's
- * inverse-bind matrix is a `mat4`) so they cost 4 bytes each — but animation samplers are typed
- * `number[]` and really do carry float64, as does the geometry the foliage baker computes. Guessing
- * either way is wrong: measured on the shipped 3D example, forcing f32 was the only thing stopping an
- * export/import round trip from being byte-identical, and forcing f64 would double the largest payload
- * in the bundle for nothing. A round trip that changes a value changes that asset's content hash, which
- * makes importing a project resync every placement of it.
+ * Float width must be chosen per array by `narrowest`, never fixed: forcing f32 breaks the byte-identical
+ * round trip (animation samplers and baked foliage geometry really carry float64), and forcing f64
+ * doubles the largest payload in the bundle. A changed value changes that asset's content hash.
  */
 type Marker =
   | { $geo: string }
@@ -65,8 +49,8 @@ const FACES = ['positiveX', 'negativeX', 'positiveY', 'negativeY', 'positiveZ', 
 
 /**
  * Narrowest lossless index width. Mirrors `needs32Bit`/`createIndexArray` in src/graphics/indexFormat.ts
- * and the copy in publish/pack.ts, duplicated for the same reason both of those are: the worker may not
- * import `cleo`. 65535 is excluded because WebGL2 reads it as the primitive-restart index.
+ * and the copy in publish/pack.ts; duplicated because the worker may not import `cleo`.
+ * 65535 is excluded: WebGL2 reads it as the primitive-restart index.
  */
 const INDEX_16_LIMIT = 65535
 
@@ -81,11 +65,7 @@ const isNestedArray = (v: any): boolean =>
 
 /**
  * Flatten `[[x,y,z], …]` into one array; a flat array passes straight through.
- *
- * Float64Array, NOT Float32Array: narrowing is `narrowest`'s decision to make and it has to see the
- * original values to make it. Flattening through float32 here silently threw away the precision of the
- * one geometry that actually needs it — the foliage baker computes in float64 and emits nested tuples —
- * and the loss then showed up as a changed content hash on the terrain material.
+ * Float64Array, NOT Float32Array: narrowing is `narrowest`'s call and it must see the original values.
  */
 function toFlat(input: any, stride: number): ArrayLike<number> {
   if (!input || input.length === 0) return EMPTY_FLAT
@@ -114,9 +94,7 @@ const isNumberArray = (v: any): v is number[] =>
 
 /**
  * The narrowest float array that holds `values` exactly.
- *
- * `Math.fround` is the float32 round-trip, so a value that survives it came from a Float32Array (or is
- * representable in one either way) and can go back into 4 bytes.
+ * `Math.fround` is the float32 round trip: a value that survives it fits back into 4 bytes.
  */
 function narrowest(values: ArrayLike<number>): Float32Array | Float64Array {
   for (let i = 0; i < values.length; i++) {
@@ -141,16 +119,13 @@ export interface PackBundleResult {
 
 /**
  * Move every payload in `bundle` into a blob, replacing each with a marker.
- *
- * MUTATES `bundle`, exactly as packGameBin mutates its input and for the same reason: the caller sent the
- * object into the worker by structured clone, so the editor's own copy is untouched.
+ * MUTATES `bundle`; the caller sent it in by structured clone, so the editor's own copy is untouched.
  */
 export async function packBundleAssets(bundle: BundleData): Promise<PackBundleResult> {
   const writer = new ChunkWriter()
   const geometries: Record<string, BundleGeometry> = {}
-  // record-shape -> id. Keying on the stringified REF SET rather than on the mesh means the comparison is
-  // six tiny objects instead of a megabyte of vertices — the chunks are already content-addressed by the
-  // writer, so two identical meshes necessarily produce identical refs.
+  // record-shape -> id, keyed on the stringified REF SET, not the mesh: chunks are content-addressed by
+  // the writer, so two identical meshes necessarily produce identical refs.
   const geometryIds = new Map<string, string>()
 
   const floats = (values: ArrayLike<number>): Marker => {
@@ -201,10 +176,9 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
   }
 
   /**
-   * The base64 payloads are the only async work here (DEFLATE has no synchronous form), so they are
-   * queued rather than awaited inline — that keeps the walk a plain synchronous recursion instead of
-   * allocating a promise per node across a graph with millions of them. Run in order, so the chunk
-   * layout a given bundle produces is deterministic.
+   * Base64 payloads are the only async work here (DEFLATE has no synchronous form), so they are queued
+   * rather than awaited inline to keep the walk a plain synchronous recursion.
+   * Must run in order: the chunk layout a given bundle produces has to be deterministic.
    */
   const deferred: (() => Promise<void>)[] = []
 
@@ -216,8 +190,7 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
       try { bytes = base64ToBytes(value) } catch { return }
       if (bytes.length === 0) return
       // DEFLATE, never a PNG re-encode: a splat map's alpha is layer 3's blend weight and canvas 2D is
-      // premultiplied, so an image round-trip destroys the RGB of every texel where layer 3 is unused.
-      // Same reasoning as publish/terrainImages.ts.
+      // premultiplied, so an image round trip destroys the RGB of every texel where layer 3 is unused.
       if (compress) { try { bytes = await deflateBytes(bytes) } catch { /* ship it raw */ } }
       owner[slot] = compress
         ? { $b64: writer.addInterned(bytes), z: 1 }
@@ -236,9 +209,8 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
 
   /**
    * The regular float grids inside a serialized skin: one inverse-bind matrix per joint and one local
-   * transform per skeleton node. Both are mat4s (Float32Array) on the live object, so Float32 is exact,
-   * and interning collapses the identity matrices a rig is full of. The index/name maps stay in JSON —
-   * they are small, and they are what makes the record readable.
+   * transform per skeleton node. Both are mat4s (Float32Array) live, so Float32 is exact.
+   * The index/name maps stay in JSON.
    */
   const packSkin = (skin: any): void => {
     if (!skin || typeof skin !== 'object') return
@@ -259,17 +231,12 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
 
   /**
    * One recursive pass over the whole bundle graph.
-   *
-   * Shapes are recognized by the KEY that owns them (`o.model`, `o.terrain`, `o.faces`, `o.thumbnail`)
-   * rather than by loose field names, so a `positions` array that is not geometry is never touched. And
-   * it is one generic walk rather than a list of paths — scene trees, ModelAsset.nodeJson, Template.node,
-   * AnimationAsset.clips, and the foliage prototype meshes buried in a terrain material's
-   * `foliageInclude` all get visited without anyone having to remember they exist.
+   * Shapes must be recognized by the KEY that owns them (`o.model`, `o.terrain`, `o.faces`,
+   * `o.thumbnail`), never by loose field names, so a `positions` array that is not geometry is untouched.
    */
   const visit = (value: any): void => {
     if (Array.isArray(value)) {
-      // A leaf array of numbers is the common case by a wide margin (every vertex attribute is one) and
-      // recursing into it would cost a call per float. Nothing here mixes numbers with objects.
+      // A leaf array of numbers is the common case; nothing here mixes numbers with objects.
       if (value.length === 0 || typeof value[0] === 'number') return
       for (const item of value) if (item && typeof item === 'object') visit(item)
       return
@@ -286,8 +253,8 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
       if (marker) value.thumbnail = marker
     }
 
-    // A serialized skybox: six PNG data URLs, the one texture family that never reaches the texture
-    // store (serializeTexture bails on a cubemap, so they ride inside the scene JSON).
+    // A serialized skybox: six PNG data URLs. serializeTexture bails on a cubemap, so these never reach
+    // the texture store and ride inside the scene JSON instead.
     const faces = value.faces
     if (faces && typeof faces === 'object' && typeof faces.positiveX === 'string') {
       for (const face of FACES) {
@@ -303,7 +270,7 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
     }
 
     // A scattered foliage layer's instance buffer: stride-5 float32 `[x,y,z,yaw,scale]`, base64'd by
-    // FoliageLayer.serialize. Left uncompressed — it is float data, which deflate barely touches.
+    // FoliageLayer.serialize. Left uncompressed; deflate barely touches float data.
     if (typeof value.instances === 'string') packBase64(value, 'instances', false)
 
     // A tilemap chunk, recognized by its grid coordinates so an unrelated `data` string is never taken.
@@ -342,8 +309,7 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
 
 /**
  * Replace every marker with the payload it points at, restoring the JSON a format-1 bundle had.
- *
- * MUTATES `bundle` — including refilling `bundle.textures`, which packing emptied.
+ * MUTATES `bundle`, including refilling `bundle.textures`, which packing emptied.
  */
 export async function inflateBundleAssets(
   bundle: BundleData,
@@ -352,8 +318,7 @@ export async function inflateBundleAssets(
 ): Promise<void> {
   const reader = new ChunkReader(blob, 0, 'assets.bin')
 
-  // Copied out rather than viewed: Float64Array needs 8-byte alignment and the blob aligns to 4. The
-  // result becomes a plain number[] anyway, so this is a copy that was already being paid.
+  // Copied out, not viewed: Float64Array needs 8-byte alignment and the blob aligns to 4.
   const readDoubles = (ref: ChunkRef): Float64Array =>
     new Float64Array(reader.bytes(ref)!.slice().buffer)
 
@@ -390,10 +355,7 @@ export async function inflateBundleAssets(
   /** Deferred for the same reason packing defers: DEFLATE has no synchronous form. */
   const deferred: (() => Promise<void>)[] = []
 
-  /**
-   * The mirror of pack's walk, and simpler than it: a marker announces itself, so this needs none of the
-   * shape knowledge — which is the point of packing in place. The two stay in step by construction.
-   */
+  /** The mirror of pack's walk. A marker announces itself, so this needs none of the shape knowledge. */
   const visit = (value: any): void => {
     if (!value || typeof value !== 'object') return
 
@@ -424,9 +386,8 @@ export async function inflateBundleAssets(
   visit(bundle.libraries)
   for (const job of deferred) await job()
 
-  // Each texture is SLICED out into its own buffer rather than handed a view onto the container.
-  // bundleImport does `new Blob([t.bytes])` and bundleMerge dedupes on `byteLength`; a view would make
-  // both of those read the whole multi-hundred-megabyte blob.
+  // Each texture must be SLICED into its own buffer, never handed a view onto the container: bundleImport
+  // does `new Blob([t.bytes])` and bundleMerge dedupes on `byteLength`, and a view exposes the whole blob.
   bundle.textures = (index.textures ?? []).map(t => ({
     id: t.id,
     mime: t.mime,

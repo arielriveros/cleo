@@ -1,7 +1,6 @@
-// Typography tokens — the single place the inspector's label / value / hint type is defined. Same
-// pattern as `controlClass` in inputs.tsx: an exported string composed via `cn` at the call site.
-// The sizes, family and weights themselves live in index.css (--text-ui, --font-ui, --weight-ui);
-// the .type-* classes bind them to a role, and these constants add the role's color.
+// Typography tokens — the single place the inspector's label / value / hint type is defined.
+// The sizes, family and weights live in index.css (--text-ui, --font-ui, --weight-ui); the .type-*
+// classes bind them to a role, and these constants add the role's color.
 
 /** Row labels ("Mass", "Position", "Damping") — muted, so values and controls are what read first. */
 export const labelClass = 'type-label text-muted';

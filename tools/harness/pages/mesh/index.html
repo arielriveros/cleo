@@ -614,6 +614,106 @@ window.__error = null;
         return String(n.model.material.textures.get('ormTexture') ?? null);
       };
 
+      // 1b. Parallax occlusion mapping on a STANDARD material.
+      //
+      // Terrain has had a height map in this scene for a while, but the standard-material POM path is
+      // a different shader (chunks/pbrGBuffer.wgsl and its forward twin) reading a different sampler,
+      // and nothing gated it at all. A cube rather than a sphere: POM is a flat-surface approximation
+      // and a face gives it the large, planar, obliquely-viewed area where the march actually does
+      // something — and where a mirrored V axis, the defect this feature was built to fix, is visible
+      // as relief running the wrong way.
+      //
+      // `heightGrad` is a RIDGED field, not the smooth ramp the `solid` helper draws: a monotonic ramp
+      // has no local maxima, so the march can never step over one, and a POM bug that shows up as
+      // stepping over a ridge would pass against it.
+      const hgt = document.createElement('canvas');
+      hgt.width = hgt.height = 64;
+      const hg = hgt.getContext('2d');
+      for (let y = 0; y < 64; y++)
+        for (let x = 0; x < 64; x++) {
+          const v = Math.round(255 * (0.5 + 0.5 * Math.sin(x * 0.5) * Math.sin(y * 0.5)));
+          hg.fillStyle = `rgb(${v}, ${v}, ${v})`;
+          hg.fillRect(x, y, 1, 1);
+        }
+      cleo.TextureManager.Instance.addTextureFromBase64(hgt.toDataURL('image/png'), { mipMap: true }, 'heightGrad');
+
+      const parallax = new cleo.ModelNode('parallaxCube', new cleo.Model(
+        cleo.Geometry.Cube(1.4, 1.4, 1.4),
+        cleo.Material.PBR({
+          baseColor: [0.8, 0.75, 0.7], metallic: 0.0, roughness: 0.7,
+          // Deeper than the 0.05 default so the march runs several steps at this camera angle; a depth
+          // small enough to resolve in one step would gate the plumbing and not the algorithm.
+          displacementScale: 0.12,
+          textures: { baseColorTexture: 'checker', normalMap: 'normalGrad', displacementMap: 'heightGrad' },
+        }),
+      ));
+      parallax.setPosition([-3.4, 0.9, 4.6]);
+      parallax.setRotation([0, 34, 0]);   // oblique, so the offset is non-zero on two visible faces
+      scene.addNode(parallax);
+      window.__parallaxMaterial = () => {
+        const n = engine.scene && [...engine.scene.models].find(m => m.name === 'parallaxCube');
+        if (!n) return 'missing';
+        const m = n.model.material;
+        // The flag is what the shader branches on, and the scale is what it marches with. Reporting
+        // both means a scene that silently lost its height map cannot read as "parallax covered".
+        return JSON.stringify({
+          map: String(m.textures.get('displacementMap') ?? null),
+          has: m.properties.get('hasDisplacementMap') === true || m.properties.get('hasDisplacementMap') === 1,
+          scale: m.properties.get('dispScale'),
+        });
+      };
+
+      // 1c. An alpha-CUTOUT material, and a masked shadow caster.
+      //
+      // The mask slot exists on Basic, Blinn-Phong and PBR, and the cutout has to agree in three
+      // places at once: the forward shader, the deferred G-buffer twin, and the DEPTH pass. The depth
+      // pass is the one that had nothing — an ordinary mesh cast a solid silhouette no matter what its
+      // surface discarded — so this object is positioned to drop a shadow onto the ground, where a
+      // regression shows as a solid rectangle instead of a pierced one.
+      //
+      // The mask is read from RED, so this is a grayscale map, not an RGBA cutout.
+      const msk = document.createElement('canvas');
+      msk.width = msk.height = 64;
+      const mg = msk.getContext('2d');
+      for (let y = 0; y < 64; y++)
+        for (let x = 0; x < 64; x++) {
+          // Big holes on a coarse grid: a fine pattern would alias into the shadow map and make the
+          // baseline depend on filtering rather than on the cutout.
+          const on = ((x >> 4) + (y >> 4)) & 1;
+          const v = on ? 255 : 0;
+          mg.fillStyle = `rgb(${v}, ${v}, ${v})`;
+          mg.fillRect(x, y, 1, 1);
+        }
+      cleo.TextureManager.Instance.addTextureFromBase64(msk.toDataURL('image/png'), { mipMap: true }, 'cutoutMask');
+
+      const cutout = new cleo.ModelNode('cutoutQuad', new cleo.Model(
+        cleo.Geometry.Plane(2.4, 2.4),
+        cleo.Material.PBR({
+          baseColor: [0.85, 0.8, 0.7], metallic: 0.0, roughness: 0.6,
+          // A mask TAKES PRECEDENCE over the base colour's alpha, so this also pins that ordering:
+          // 'checker' is opaque, and if the mask were ignored nothing would be discarded at all.
+          textures: { baseColorTexture: 'checker', mask: 'cutoutMask' },
+          alphaCutoff: 0.5,
+        }, { side: 'double' }),
+      ));
+      // Tilted and raised so it both faces the camera and casts onto the ground below it.
+      cutout.setPosition([-1.2, 2.4, 5.2]);
+      cutout.setRotation([70, 0, 0]);
+      scene.addNode(cutout);
+      window.__cutoutMaterial = () => {
+        const n = engine.scene && [...engine.scene.models].find(m => m.name === 'cutoutQuad');
+        if (!n) return 'missing';
+        const m = n.model.material;
+        // Both halves reported: a scene that lost the mask, or kept it with the threshold reset to 0,
+        // would still draw and would otherwise read as "cutout covered".
+        return JSON.stringify({
+          mask: String(m.textures.get('maskMap') ?? null),
+          has: m.properties.get('hasMaskMap') === true || m.properties.get('hasMaskMap') === 1,
+          cutoff: m.properties.get('alphaCutoff'),
+          casts: m.config.castShadow !== false,
+        });
+      };
+
       // 2. Transparent, wireframe, and the two non-default cull modes.
       //
       // Four separate nodes rather than one with flags flipped: they take different queues and

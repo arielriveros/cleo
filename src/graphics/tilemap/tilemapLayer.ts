@@ -11,10 +11,7 @@ export interface TilemapLayerConfig {
     visible: boolean;
     /** Multiplied into every tile's alpha. */
     opacity: number;
-    /**
-     * Draw band. Layers sort by this first, and it is also the band SpriteNodes join when the tilemap
-     * names this layer as its entity layer — so it is what interleaves characters with scenery.
-     */
+    /** Draw band. Layers sort by this, and SpriteNodes join the entity layer's — see `entityLayer`. */
     order: number;
     /** World-Z nudge, so two layers at the same band don't z-fight. */
     zOffset: number;
@@ -23,15 +20,11 @@ export interface TilemapLayerConfig {
     /** Asset id of the tileset this layer paints from. */
     tilesetId: string | null;
     /**
-     * When true the layer's tiles are depth-sorted by row against sprites instead of drawn as one flat
-     * batch. Costs a draw call per populated row, so it is off by default and turned on for the one or
-     * two layers that actually hold props characters walk behind.
+     * Depth-sort this layer's tiles by row against sprites rather than drawing one flat batch. Costs a
+     * draw call per populated row, so it is off by default.
      */
     ySorted: boolean;
-    /**
-     * Marks this as a collision layer: every tile on it contributes a collider regardless of whether
-     * its tileset marks it solid. The escape hatch for collision that doesn't line up with the art.
-     */
+    /** A collision layer: every tile on it collides, whether or not its tileset marks it solid. */
     collision: boolean;
 }
 
@@ -74,8 +67,7 @@ export class TilemapLayer {
 
     /**
      * Write a packed cell and return what was there before, which is what the undo diff records.
-     * Allocates a chunk on demand and frees it again once its last tile is erased, so an unbounded map
-     * only ever costs memory where it was actually painted.
+     * Allocates a chunk on demand and frees it once its last tile is erased.
      */
     public set(col: number, row: number, packed: number): number {
         const cx = chunkCoord(col), cy = chunkCoord(row);
@@ -186,14 +178,8 @@ export class TilemapLayer {
     }
 
     /**
-     * Rebuild a layer from any of the shapes a chunk's cells can arrive in:
-     *   `cellsU32`  — a pre-decoded typed array, which is what the published player hands over after
-     *                 inflating the blob out of game.bin
-     *   `data`      — base64 of the Uint32 buffer, which is what the editor saves
-     *   `cells`     — a plain number array, for hand-authored or legacy content
-     *   none        — an empty chunk
-     * Mirrors Terrain.deserialize's contract deliberately: the publish pipeline swaps the base64 form
-     * for the typed-array form and nothing else in the load path needs to know.
+     * Rebuild a layer from any shape a chunk's cells arrive in: `cellsU32` (pre-decoded, from the
+     * published player), `data` (base64, what the editor saves), `cells` (plain array), or none.
      */
     public static parse(json: any): TilemapLayer {
         const layer = new TilemapLayer(json ?? {});

@@ -44,8 +44,7 @@ export interface SegmentedControlProps<T extends string | number> {
 }
 
 /**
- * A row (or grid) of mutually-exclusive buttons. Unifies the mode selector, gizmo toolbar,
- * and the renderer debug-channel / quality / plane pickers.
+ * A row (or grid) of mutually-exclusive buttons.
  */
 export function SegmentedControl<T extends string | number>({
   options,

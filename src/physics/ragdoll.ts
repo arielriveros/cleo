@@ -40,9 +40,8 @@ export interface RagdollOptions {
 
 /** Shared default ragdoll simulation parameters — single source of truth for the engine and editor UI. */
 export const RAGDOLL_DEFAULTS: Required<Omit<RagdollOptions, 'inheritVelocity'>> = {
-    // Cone-twist by default: the cone (swing) limit keeps limbs from bending the wrong way, while the
-    // twist limit is kept LOOSE — cannon-es's twist equation jitters badly when tight (bones spin in
-    // place), whereas free twist settles cleanly. So limit swing, leave twist relaxed.
+    // Cone-twist by default. The twist limit must stay LOOSE: cannon-es's twist equation jitters badly
+    // when tight and bones spin in place. Limit swing, leave twist relaxed.
     jointType: 'coneTwist',
     coneAngle: 45,
     twistAngle: 90,
@@ -60,15 +59,9 @@ export const RAGDOLL_DEFAULTS: Required<Omit<RagdollOptions, 'inheritVelocity'>>
 const DEG2RAD = Math.PI / 180;
 
 /**
- * Ragdoll: hands a skinned ModelNode's skeleton over to physics.
- *
- * Every skeleton joint becomes a sphere-collider rigid body spawned at the bone's current
- * animated world pose; each body is linked to its parent bone's body by a swing/twist-limited
- * cone-twist joint (or a free ball joint), configurable via RagdollOptions / the node's ragdollConfig.
- * The owning Animator is switched to ragdoll mode so it reads bone matrices back from these bodies
- * each frame instead of from animation.
- *
- * Fully generic — works on any skinned GLTF, no per-model tuning.
+ * Hands a skinned ModelNode's skeleton over to physics: every joint becomes a sphere-collider rigid
+ * body at the bone's current animated world pose, linked to its parent's body by a cone-twist or ball
+ * joint. Switches the owning Animator to ragdoll mode so it reads bone matrices back from the bodies.
  */
 export class Ragdoll {
     private _physics: PhysicsSystem;
@@ -117,12 +110,8 @@ export class Ragdoll {
         }
 
         // Children lists + parent lookup, in NODE space but resolved through the shared topology.
-        //
-        // `joint.parentIndex` is the immediate parent NODE, which on many rigs is not a joint at all —
-        // assimp's FBX importer preserves pivots, so `Bone_$AssimpFbx$_Rotation` sits between every pair
-        // of bones. Keying off it directly made `childrenOf` keyed by pivots, so every joint looked
-        // childless (no branch detection, fallback radii everywhere) and `nearestKeptAncestor` terminated
-        // on the first pivot — meaning no cone-twist constraints at all, and a ragdoll of loose spheres.
+        // `joint.parentIndex` is the immediate parent NODE, which on many rigs is a pivot rather than a
+        // joint (assimp's FBX importer preserves them), so it must not be used directly.
         const topo = skeletonTopology(skin);
         const childrenOf = new Map<number, number[]>();
         const parentIndexOf = new Map<number, number | undefined>();
@@ -139,10 +128,9 @@ export class Ragdoll {
         /** The parent NODE of a joint, skipping any non-joint nodes between them. */
         const parentNodeOf = (nodeIndex: number): number | undefined => parentIndexOf.get(nodeIndex);
 
-        // Prune tiny bones (fingers/toes/twist helpers): only substantial segments get a physics body.
-        // A 1kg body on a 3cm sphere has near-zero rotational inertia, so cone-twist torques spin it
-        // violently and the whole ragdoll blows up. Pruned bones ride rigidly on the nearest kept
-        // ancestor (handled in Animator.enableRagdoll). Keep roots, branch points, and long segments.
+        // Prune tiny bones (fingers/toes/twist helpers): a body on a 3cm sphere has near-zero rotational
+        // inertia and cone-twist torques blow the ragdoll up. Pruned bones ride rigidly on the nearest
+        // kept ancestor (see Animator.enableRagdoll). Keep roots, branch points and long segments.
         let maxSeg = 0;
         const segLen = new Map<number, number>();
         for (const joint of joints) {
@@ -191,11 +179,9 @@ export class Ragdoll {
             return vec3.normalize(out, out);
         };
 
-        // 2) A sphere body per joint. Orientation is built cleanly from the bone direction (a
-        //    shortest-arc rotation of local +Y onto it) rather than extracted from the bone matrix,
-        //    which can be sheared/non-uniformly-scaled on skinned rigs and yield garbage quaternions
-        //    that make cone-twist joints explode. The Animator's relative-delta hand-off is invariant
-        //    to the body frame, so any consistent rigid orientation renders correctly.
+        // 2) A sphere body per joint. Orientation must come from the bone DIRECTION (shortest-arc
+        //    rotation of local +Y onto it), not the bone matrix, which can be sheared or non-uniformly
+        //    scaled on skinned rigs and yield quaternions that explode the cone-twist joints.
         for (const joint of joints) {
             const nodeIndex = joint.nodeIndex;
             if (!kept.has(nodeIndex)) continue; // pruned bone: no body (rides on nearest kept ancestor)
@@ -232,8 +218,8 @@ export class Ragdoll {
             });
             body.addShape(new Sphere(radius));
             body.updateMassProperties();
-            // Bones live in group 2. Mask includes the static world (group 1); add group 2 to enable
-            // bone-vs-bone collision when requested (off by default — avoids jitter).
+            // Bones live in group 2. The mask includes the static world (group 1); adding group 2
+            // enables bone-vs-bone collision.
             body.collisionFilterGroup = 2;
             body.collisionFilterMask = cfg.selfCollision ? (1 | 2) : 1;
             if (inheritVel) body.velocity.set(inheritVel[0], inheritVel[1], inheritVel[2]);

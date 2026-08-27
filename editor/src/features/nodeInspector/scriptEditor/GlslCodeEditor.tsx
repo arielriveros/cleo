@@ -5,12 +5,8 @@ import { useCodeTheme } from './codeThemeStore'
 import CodeEditorHeader from './CodeEditorHeader'
 
 // A Monaco editor for GLSL fragment-shader source (language registered in glslMonaco.ts via ensureMonaco).
-// The parent owns the value; edits are pushed out via `onChange`, and a compile-error banner is rendered
-// from the `error` prop.
-//
-// `onSubmit` is bound to Ctrl/Cmd+Enter — the parent uses it to compile, which is a deliberate user action
-// rather than something that happens while typing (see CustomMaterialEditor). `headerRight` puts controls
-// in the header strip alongside the theme picker.
+// The parent owns the value; edits are pushed out via `onChange`, `onSubmit` is bound to Ctrl/Cmd+Enter,
+// and `headerRight` puts controls in the header strip alongside the theme picker.
 export default function GlslCodeEditor(props: {
   value: string,
   onChange: (src: string) => void,
@@ -30,8 +26,8 @@ export default function GlslCodeEditor(props: {
   onChangeRef.current = props.onChange
   const readOnlyRef = useRef(!!props.readOnly)
   readOnlyRef.current = !!props.readOnly
-  // Same ref indirection as onChange: the editor is created once, so the command handler installed below
-  // must read the current prop rather than close over the one from first render.
+  // The editor is created once, so the command handler below must read the current prop through a ref
+  // rather than close over the one from first render.
   const onSubmitRef = useRef(props.onSubmit)
   onSubmitRef.current = props.onSubmit
 
@@ -55,8 +51,7 @@ export default function GlslCodeEditor(props: {
       tabSize: 2,
     })
     editorRef.current = editor
-    // Ctrl/Cmd+Enter compiles. Monaco swallows the keystroke itself, so this does not also insert a
-    // newline. Registered unconditionally — the handler no-ops when the parent passes no onSubmit.
+    // Monaco swallows the Ctrl/Cmd+Enter keystroke, so this does not also insert a newline.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => { onSubmitRef.current?.() })
     const sub = model.onDidChangeContent(() => {
       if (!readOnlyRef.current) onChangeRef.current(model.getValue())
@@ -68,8 +63,7 @@ export default function GlslCodeEditor(props: {
   useEffect(() => { editorRef.current?.updateOptions({ readOnly: !!props.readOnly }) }, [props.readOnly])
   useEffect(() => { monacoRef.current?.editor.setTheme(theme === 'light' ? 'cleo-light' : 'cleo-dark') }, [theme])
 
-  // Push external value changes (a reseed on base/mode change) into the model, guarded against the feedback
-  // loop from our own onChange (which already made value === current text).
+  // Push external value changes into the model, guarded against the feedback loop from our own onChange.
   useEffect(() => {
     const model = modelRef.current
     if (model && model.getValue() !== props.value) model.setValue(props.value)

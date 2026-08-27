@@ -5,14 +5,8 @@ import { Texture } from './texture';
 import type { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 
 /**
- * A depth-only render target over one `TEXTURE_2D_ARRAY`, rendered a LAYER at a time.
- * This is the cascaded shadow map (and, for spot lights, the shadow atlas).
- *
- * What is left here is the ARRAY, not the framebuffer: immutable `texStorage3D` storage is allocated
- * exactly once and only the attachment changes per layer, which is why this could never share
- * `Framebuffer`'s reallocate-everything `create()`. Which layer a pass writes is the pass descriptor's
- * business (`depthAttachment.baseArrayLayer`) rather than the target's — the same split WebGPU makes,
- * and the reason one render target serves every cascade.
+ * A depth-only render target over one `TEXTURE_2D_ARRAY`, rendered a layer at a time: the cascaded
+ * shadow map, and the spot-light shadow atlas. A pass picks its layer via `depthAttachment.baseArrayLayer`.
  */
 export class LayeredDepthFramebuffer {
     private _texture: Texture;
@@ -24,14 +18,12 @@ export class LayeredDepthFramebuffer {
     }
 
     /**
-     * (Re)allocate the array at `size` x `size` x `layers`. Immutable storage cannot be resized, so a
-     * change in either dimension throws the whole texture away and builds a new one — which is why the
-     * resolution and cascade-count setters share this one path in the renderer.
+     * (Re)allocate the array at `size` x `size` x `layers`. Immutable storage cannot be resized, so any
+     * dimension change replaces the whole texture.
      */
     public create(size: number, layers: number, compare: boolean = true): void {
         if (this._size === size && this._layers === layers && this._texture.width === size) return;
-        // Deleting the old array also evicts the render target it was attached to, so the next
-        // `renderTarget` builds a framebuffer over the new storage. See WebGL2Device._releaseTexture.
+        // Deleting the old array also evicts the render target it belonged to.
         this._texture.delete();
         this._texture = new Texture({ usage: 'depth', target: 'texture2DArray', mipMap: false });
         this._texture.createArrayTarget(size, layers, compare);
@@ -40,27 +32,17 @@ export class LayeredDepthFramebuffer {
     }
 
     public unbind(): void {
-        if (device.backend !== 'webgl2') return;   // see Framebuffer.bind
+        if (device.backend !== 'webgl2') return;
 
         glDevice().getCurrentSurfaceTarget().bind();
     }
 
     /**
-     * Reset every layer to depth 1.0, so every shadow lookup passes and nothing is occluded.
-     * Used when a scene has no shadow-casting light: the depth pass is skipped entirely, and without
-     * this the layers keep whatever the previously rendered scene left in them — which is how a
-     * thumbnail or preview render inherits the shadows of the scene before it.
-     *
-     * A pass per layer with `loadOp: 'clear'` and nothing drawn. No explicit `clearDepth(1.0)` and no
-     * `depthMask(true)`: the standing clear depth is 1.0 and nothing in the engine ever sets it
-     * otherwise, and `beginRenderPass` forces the depth mask before clearing precisely because a GL
-     * depth clear is masked by it while WebGPU's load op is not.
+     * Reset every layer to depth 1.0, so every shadow lookup passes and nothing is occluded. Required
+     * when a scene has no casting light, or the layers keep the previous scene's shadows.
      */
     public clearAll(): void {
         const target = this.renderTarget;
-        // Through a command encoder, not the WebGL2 device's own `beginRenderPass`. Same calls on this
-        // backend — `createCommandEncoder` forwards to it and `finish()` is a no-op — but it is the
-        // spelling that exists on both, and a pass that is opened has to be ended.
         const encoder = device.createCommandEncoder('shadow.clear');
         for (let layer = 0; layer < this._layers; layer++) {
             encoder.beginRenderPass(target, {
@@ -70,14 +52,11 @@ export class LayeredDepthFramebuffer {
             }).end();
         }
         encoder.finish();
-        // No trailing `unbind()`: the clears above are RHI passes and the next pass binds its own
-        // target. That call was the last thing keeping this method off the interface.
     }
 
     /**
-     * Switch hardware depth comparison off/on. Only the editor's cascade debug blit needs this: it
-     * samples the array through a plain sampler2DArray to READ the depth, which is undefined while
-     * the texture is in comparison mode.
+     * Switch hardware depth comparison off/on. The editor's cascade debug blit needs it off to read
+     * raw depth through a plain sampler2DArray.
      */
     public setCompareEnabled(enabled: boolean): void { this._texture.setDepthCompare(enabled); }
 

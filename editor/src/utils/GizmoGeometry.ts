@@ -2,9 +2,9 @@ import { Geometry } from "cleo";
 
 export class GizmoGeometry {
     /**
-     * Torus (ring) lying in the plane perpendicular to `axis`, used as the rotation-gizmo handle for
-     * that axis. `radius` is the ring's major radius (matches the arrow length); `tube` is the tube
-     * thickness. Kept thin so it reads as a ring but still has a pickable bounding box.
+     * Torus (ring) in the plane perpendicular to `axis` — the rotation-gizmo handle for that axis.
+     * `radius` is the major radius (matches the arrow length); `tube` is the tube thickness, kept thin
+     * enough to read as a ring but thick enough to give a pickable bounding box.
      */
     private static torus(axis: 'x' | 'y' | 'z', radius: number, tube: number, majorSeg = 32, minorSeg = 6): Geometry {
         const positions: [number, number, number][] = [];
@@ -51,9 +51,7 @@ export class GizmoGeometry {
     /** Rotation ring in the XY plane (rotates about the Z axis). */
     public static RingZ(radius: number = 1, tube: number = 0.04): Geometry { return this.torus('z', radius, tube); }
 
-    /**
-     * Creates geometry for a 3D arrow pointing along the X axis
-     */
+    /** Geometry for a 3D arrow pointing along the X axis. */
     public static ArrowX(length: number = 1, headSize: number = 0.2): Geometry {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];
@@ -65,7 +63,6 @@ export class GizmoGeometry {
         const headRadius = 0.15;
         const segments = 8;
 
-        // Create shaft cylinder - properly oriented along X axis
         for (let i = 0; i <= segments; i++) {
             const theta = (i / segments) * 2 * Math.PI;
             const sinTheta = Math.sin(theta);
@@ -80,7 +77,6 @@ export class GizmoGeometry {
                 const u = i / segments;
                 const v = sign; // Map start to 0 and end to 1
 
-                // Normal points outward from the cylinder surface
                 const normal: [number, number, number] = [0, cosTheta, sinTheta];
 
                 positions.push([x, y, z]);
@@ -89,16 +85,13 @@ export class GizmoGeometry {
             }
         }
 
-        // Create arrow head cone
         const headStart = shaftLength;
         const headEnd = length;
         
-        // Center of cone base
         positions.push([headStart, 0, 0]);
         normals.push([1, 0, 0]);
         uvs.push([0.5, 0.8]);
 
-        // Cone base vertices
         for (let i = 0; i <= segments; i++) {
             const angle = (i / segments) * Math.PI * 2;
             const y = Math.cos(angle) * headRadius;
@@ -109,12 +102,10 @@ export class GizmoGeometry {
             uvs.push([0.5 + Math.cos(angle) * 0.2, 0.8 + Math.sin(angle) * 0.2]);
         }
 
-        // Tip of cone
         positions.push([headEnd, 0, 0]);
         normals.push([1, 0, 0]);
         uvs.push([0.5, 1]);
 
-        // Generate indices for shaft
         for (let i = 0; i < segments; i++) {
             for (let j = 0; j < 1; j++) {
                 const k1 = i * 2 + j;
@@ -130,7 +121,6 @@ export class GizmoGeometry {
             }
         }
 
-        // Generate indices for cone base
         const coneBaseStart = (segments + 1) * 2;
         const coneBaseCenter = coneBaseStart;
         
@@ -141,7 +131,6 @@ export class GizmoGeometry {
             indices.push(coneBaseCenter, base, next);
         }
 
-        // Generate indices for cone sides
         const coneTip = positions.length - 1;
         for (let i = 0; i < segments; i++) {
             const base = coneBaseStart + 1 + i;
@@ -153,9 +142,7 @@ export class GizmoGeometry {
         return new Geometry(positions, normals, uvs, [], [], indices);
     }
 
-    /**
-     * Creates geometry for a 3D arrow pointing along the Y axis
-     */
+    /** Geometry for a 3D arrow pointing along the Y axis. */
     public static ArrowY(length: number = 1, headSize: number = 0.2): Geometry {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];
@@ -167,7 +154,6 @@ export class GizmoGeometry {
         const headRadius = 0.15;
         const segments = 8;
 
-        // Create shaft cylinder - properly oriented along Y axis
         for (let i = 0; i <= segments; i++) {
             const theta = (i / segments) * 2 * Math.PI;
             const sinTheta = Math.sin(theta);
@@ -182,7 +168,6 @@ export class GizmoGeometry {
                 const u = i / segments;
                 const v = sign; // Map start to 0 and end to 1
 
-                // Normal points outward from the cylinder surface
                 const normal: [number, number, number] = [cosTheta, 0, sinTheta];
 
                 positions.push([x, y, z]);
@@ -191,16 +176,13 @@ export class GizmoGeometry {
             }
         }
 
-        // Create arrow head cone
         const headStart = shaftLength;
         const headEnd = length;
         
-        // Center of cone base
         positions.push([0, headStart, 0]);
         normals.push([0, 1, 0]);
         uvs.push([0.5, 0.8]);
 
-        // Cone base vertices
         for (let i = 0; i <= segments; i++) {
             const angle = (i / segments) * Math.PI * 2;
             const x = Math.cos(angle) * headRadius;
@@ -212,12 +194,10 @@ export class GizmoGeometry {
             uvs.push([0.5 + Math.cos(angle) * 0.2, 0.8 + Math.sin(angle) * 0.2]);
         }
 
-        // Tip of cone
         positions.push([0, headEnd, 0]);
         normals.push([0, 1, 0]);
         uvs.push([0.5, 1]);
 
-        // Generate indices for shaft
         for (let i = 0; i < segments; i++) {
             for (let j = 0; j < 1; j++) {
                 const k1 = i * 2 + j;
@@ -233,7 +213,6 @@ export class GizmoGeometry {
             }
         }
 
-        // Generate indices for cone base
         const coneBaseStart = (segments + 1) * 2;
         const coneBaseCenter = coneBaseStart;
         
@@ -244,7 +223,6 @@ export class GizmoGeometry {
             indices.push(coneBaseCenter, base, next);
         }
 
-        // Generate indices for cone sides
         const coneTip = positions.length - 1;
         for (let i = 0; i < segments; i++) {
             const base = coneBaseStart + 1 + i;
@@ -256,9 +234,7 @@ export class GizmoGeometry {
         return new Geometry(positions, normals, uvs, [], [], indices);
     }
 
-    /**
-     * Creates geometry for a 3D arrow pointing along the Z axis
-     */
+    /** Geometry for a 3D arrow pointing along the Z axis. */
     public static ArrowZ(length: number = 1, headSize: number = 0.2): Geometry {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];
@@ -270,7 +246,6 @@ export class GizmoGeometry {
         const headRadius = 0.15;
         const segments = 8;
 
-        // Create shaft cylinder - properly oriented along Z axis
         for (let i = 0; i <= segments; i++) {
             const theta = (i / segments) * 2 * Math.PI;
             const sinTheta = Math.sin(theta);
@@ -285,7 +260,6 @@ export class GizmoGeometry {
                 const u = i / segments;
                 const v = sign; // Map start to 0 and end to 1
 
-                // Normal points outward from the cylinder surface
                 const normal: [number, number, number] = [cosTheta, sinTheta, 0];
 
                 positions.push([x, y, z]);
@@ -294,16 +268,13 @@ export class GizmoGeometry {
             }
         }
 
-        // Create arrow head cone
         const headStart = shaftLength;
         const headEnd = length;
         
-        // Center of cone base
         positions.push([0, 0, headStart]);
         normals.push([0, 0, 1]);
         uvs.push([0.5, 0.8]);
 
-        // Cone base vertices
         for (let i = 0; i <= segments; i++) {
             const angle = (i / segments) * Math.PI * 2;
             const x = Math.cos(angle) * headRadius;
@@ -315,12 +286,10 @@ export class GizmoGeometry {
             uvs.push([0.5 + Math.cos(angle) * 0.2, 0.8 + Math.sin(angle) * 0.2]);
         }
 
-        // Tip of cone
         positions.push([0, 0, headEnd]);
         normals.push([0, 0, 1]);
         uvs.push([0.5, 1]);
 
-        // Generate indices for shaft
         for (let i = 0; i < segments; i++) {
             for (let j = 0; j < 1; j++) {
                 const k1 = i * 2 + j;
@@ -336,7 +305,6 @@ export class GizmoGeometry {
             }
         }
 
-        // Generate indices for cone base
         const coneBaseStart = (segments + 1) * 2;
         const coneBaseCenter = coneBaseStart;
         
@@ -347,7 +315,6 @@ export class GizmoGeometry {
             indices.push(coneBaseCenter, base, next);
         }
 
-        // Generate indices for cone sides
         const coneTip = positions.length - 1;
         for (let i = 0; i < segments; i++) {
             const base = coneBaseStart + 1 + i;

@@ -7,21 +7,11 @@ import { MissingAsset, OrphanEntry, KIND_LABEL, applyDelete, baseOf, restoreMiss
 import { cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
 
 // The two-way audit between the asset libraries and the explorer.
-//
-// Assets that exist in a library but aren't showing — the case where a node's material dropdown lists a
-// material the Assets tab doesn't have. Two distinct failures land here, and the panel names which one,
-// because that is the part you cannot see from the outside:
-//
-//   no-entry     the VFS index never got an entry for it (reconcileVfs didn't index it)
-//   not-in-tree  it HAS an entry, but the file manager's store isn't showing that path (a desync)
-//
-// Restore fixes the first by indexing the asset into the folder you're browsing. The second needs only a
-// re-sync, which the store-sync effect does as soon as the index object identity changes.
-//
-// And the mirror image: entries whose asset is gone. Those draw nothing, so the only symptom is that the
-// path stays reserved and a re-import of the same file silently arrives as "Rock (2)". They are normally
-// collected by reconcileVfs's prune, but that is deliberately disarmed while a library could still be
-// loading — including the case where you deleted your last asset — so they also get a manual sweep.
+//   no-entry     the VFS index never got an entry for the asset (reconcileVfs didn't index it)
+//   not-in-tree  it has an entry, but the file manager's store isn't showing that path (a desync)
+// Restore indexes a no-entry asset into the browsed folder; not-in-tree needs only a re-sync. Orphan
+// entries — asset gone, path still reserved — get a manual sweep because reconcileVfs's prune is
+// disarmed while a library could still be loading.
 
 const REASON_TEXT: Record<MissingAsset['reason'], string> = {
   'no-entry': 'never indexed',
@@ -43,8 +33,8 @@ export default function MissingAssetsPopover(
       let next = prev
       for (const m of missing)
         next = restoreMissing(next, m, folder, sizeOfAsset(m.kind, m.assetId, depsRef.current))
-      // A new object identity even when nothing was indexed: that alone re-runs the store-sync effect,
-      // which is exactly the fix for the 'not-in-tree' half.
+      // A new object identity even when nothing was indexed re-runs the store-sync effect, which is the
+      // fix for the 'not-in-tree' half.
       return next === prev ? { ...prev } : next
     })
 
@@ -59,8 +49,7 @@ export default function MissingAssetsPopover(
     onClose()
   }
 
-  // Only the index is touched: the assets these point at are already gone, so there is nothing to delete
-  // behind them — which is also why this can't go through the explorer's own delete action.
+  // Only the index is touched: the assets these point at are already gone.
   const cleanOrphans = () => {
     if (busy || orphans.length === 0) return
     setBusy(true)

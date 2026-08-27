@@ -1,11 +1,4 @@
-// Base64 <-> bytes. Chunked on purpose.
-//
-// The naive form — `for (…) binary += String.fromCharCode(bytes[i])` — is what the glTF loader used to do,
-// and it is catastrophically slow: a 30 MB embedded texture meant 30 million string concatenations. Going
-// through `String.fromCharCode.apply` on 32 KB slices is orders of magnitude faster for the same result.
-//
-// No DOM here (btoa/atob are available on both the window and worker globals), so this stays importable
-// from anywhere in the engine.
+// Base64 <-> bytes. Uses only btoa/atob, so this stays importable from workers as well as the window.
 
 // Comfortably under the argument-count limit for Function.prototype.apply.
 const CHUNK = 0x8000;
@@ -38,13 +31,13 @@ export function parseBase64DataUri(uri: string): { mime: string; bytes: Uint8Arr
     const comma = uri.indexOf(',');
     if (comma < 0) return null;
 
-    const header = uri.slice(5, comma); // e.g. "image/png;base64"
+    const header = uri.slice(5, comma);
     if (!header.endsWith(';base64')) return null;
 
     const mime = header.slice(0, -';base64'.length) || 'application/octet-stream';
     try {
         return { mime, bytes: base64ToBytes(uri.slice(comma + 1)) };
     } catch {
-        return null; // malformed payload
+        return null;
     }
 }

@@ -1,10 +1,8 @@
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 
-// The right-sidebar inspector shown while a model tab is active: asset name, LOD levels (each a
-// reference to another model asset plus the camera distance where it takes over) and the distance-cull
-// threshold. A model's parts, transforms and material are edited through the normal Scene + Properties
-// panels; this panel owns only what lives on the ModelAsset itself. Saved with "Save Model".
+// Right-sidebar inspector for the active model tab: asset name, LOD levels (each another model asset
+// plus the camera distance where it takes over) and the distance-cull threshold.
 export default function ModelInspector() {
   const {
     activeTab, modelSession, setActiveModelName, models,
@@ -16,7 +14,7 @@ export default function ModelInspector() {
 
   const fields = animationFields.filter(f => f.modelId === activeTab.modelId)
 
-  // Models selectable as a level: not this model (a model cannot be its own level) and not one already used.
+  // A model may not be its own LOD level, nor appear twice.
   const candidates = models.filter(m =>
     m.id !== activeTab.modelId && !modelSession.lodRefs.some(l => l.modelId === m.id))
   const nameOf = (modelId?: string) => modelId ? (models.find(m => m.id === modelId)?.name ?? 'missing model') : 'embedded (legacy)'

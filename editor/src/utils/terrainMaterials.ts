@@ -23,13 +23,9 @@ function collectModelTextureIds(modelJson: any, set: Set<string>): void {
 }
 
 /**
- * Every texture id a list of foliage RULES references: the billboard albedo, the impostor, and each
- * LOD level's sub-mesh model materials.
- *
- * This is the one true walker for the shape — `references.ts` and the publish texture filter both call
- * it. A partial version that missed `models[]` / `lods[]` / `billboard` used to live there too, which
- * merely mis-flagged assets as orphaned; now that the same set decides what ships in a published game,
- * missing an id would strip a texture the build needs.
+ * Every texture id a list of foliage RULES references: the billboard albedo, the impostor, and each LOD
+ * level's sub-mesh model materials. The ONE walker for this shape — `references.ts` and the publish
+ * texture filter both call it, and a missed id strips a texture the published build needs.
  */
 export function collectFoliageRuleTextureIds(rules: any, set: Set<string>): void {
   if (!Array.isArray(rules)) return
@@ -102,16 +98,12 @@ export function parseTerrainMaterialAsset(asset: TerrainMaterialAsset): TerrainM
 /**
  * Assign a terrain-material asset to a terrain paint layer (0..3): restore textures, parse, link by id.
  *
- * If the material defines foliage, the layer actually covers some of the terrain, and nothing has been
- * scattered yet, populate it across the whole terrain so assigning a grass material visibly does something.
+ * When the material defines foliage, the layer covers some of the terrain, and nothing has been scattered
+ * yet, populate it across the whole terrain. The emptiness check is the safety: an author who has already
+ * scattered by hand must never be overwritten.
  *
- * The coverage bar used to be `> 0.98`, which only a pristine terrain's layer 0 can ever clear (the
- * constructor fills splat channel R) — so this never fired for layers 1-3, or for layer 0 after any
- * painting at all. The emptiness check is what replaces it as the safety: an author who has already
- * scattered by hand is never overwritten.
- *
- * `skipAutoGenerate` is used by the sync paths, which re-apply an EDITED material and must preserve the
- * already-scattered instances — they refresh prototypes instead of re-scattering.
+ * `skipAutoGenerate` is for the sync paths, which re-apply an EDITED material and must preserve the
+ * already-scattered instances by refreshing prototypes instead.
  */
 export function applyTerrainMaterialToLayer(
   terrain: Terrain, index: number, asset: TerrainMaterialAsset,
@@ -119,7 +111,7 @@ export function applyTerrainMaterialToLayer(
 ): void {
   const tm = parseTerrainMaterialAsset(asset)
   terrain.setLayer(index, tm, { materialId: asset.id })
-  // Existing scattered layers pick up the (possibly changed) prototypes without losing instances.
+  // Existing scattered layers pick up changed prototypes without losing instances.
   terrain.refreshFoliagePrototypes()
   if (opts?.skipAutoGenerate) return
   const alreadyScattered = terrain.foliage.some(f => f.count > 0)

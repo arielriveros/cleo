@@ -1,12 +1,5 @@
 // Per-frame physics statistics, accumulated during PhysicsSystem.update() and read by the editor's
-// performance HUD via `physics.stats`. Kept in a standalone module (imports nothing engine-specific)
-// so physicsSystem.ts can increment it without dragging the cleo barrel into anything, exactly like
-// renderStats.ts does for the renderer.
-//
-// The step/write-back split is the point of this module rather than a single total: `stepMs` is
-// cannon's solver, which a worker could take off the main thread, while `writeBackMs` is scene-graph
-// work that would remain no matter where the simulation runs. Deciding whether to move physics to a
-// worker needs those two numbers apart, not added together.
+// performance HUD via `physics.stats`. Must import nothing engine-specific.
 
 export interface PhysicsStats {
     /** `world.step()` alone — the simulation itself. */
@@ -17,11 +10,7 @@ export interface PhysicsStats {
     terrainMs: number;
     /** Tilemap registration plus any collider rebuild that fired this frame. */
     tilemapMs: number;
-    /**
-     * Static bodies the tilemaps currently have in the world. Surfaced because the greedy merge's cost
-     * is shape-dependent: an open field of solid tiles collapses to one box, a checkerboard does not
-     * collapse at all, and that difference is invisible without a number to look at.
-     */
+    /** Static bodies the tilemaps currently have in the world, after the greedy merge. */
     tilemapColliders: number;
     /** Total time in `raycastCamera` this frame, across every ray. */
     rayMs: number;
@@ -35,7 +24,7 @@ export interface PhysicsStats {
     frameMs: number;
 }
 
-// Mutable singleton accumulator, mirroring renderStats' frameStats.
+// Mutable singleton accumulator.
 export const physicsStats: PhysicsStats = {
     stepMs: 0,
     writeBackMs: 0,
@@ -50,12 +39,9 @@ export const physicsStats: PhysicsStats = {
 };
 
 /**
- * Zero the per-frame accumulators at the start of a step.
- *
- * `frameMs` is deliberately not reset here — it is written at the end of `update()`, so between
- * frames it holds the last completed measurement rather than 0. Same convention as
- * `resetFrameStats()`. `bodies`/`contacts` are levels rather than accumulators and are likewise
- * overwritten at the end of the step.
+ * Zero the per-frame accumulators at the start of a step. `frameMs`, `bodies` and `contacts` are NOT
+ * reset: they are overwritten at the end of `update()` and hold the last completed measurement between
+ * frames.
  */
 export function resetPhysicsStats(): void {
     physicsStats.stepMs = 0;

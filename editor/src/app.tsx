@@ -16,14 +16,9 @@ type BootState =
 /**
  * Nothing that reads storage may mount until a project is open.
  *
- * Every storage key the editor uses is namespaced by the open project, and `scoped()` throws while there
- * isn't one — deliberately, so a stray early read fails loudly instead of writing to a shared `p::` bucket.
- * So `initProjects()` (which also performs the one-time migration of a pre-multi-project install) has to
- * finish before <EngineProvider>, <VfsProvider> or <Editor> exist: the library loaders, setupInitialScene,
- * the VFS index read and DockLayout's synchronous localStorage reads all live inside that subtree.
- *
- * This is also the only place that can surface openDB's `onblocked` ("close the editor in other tabs")
- * — every other caller wraps it in a try/catch and degrades to empty data, which reads as data loss.
+ * Every storage key is namespaced by the open project and `scoped()` throws while there isn't one, so
+ * `initProjects()` must finish before <EngineProvider>, <VfsProvider> or <Editor> exist. This is also
+ * the only place that surfaces openDB's `onblocked` ("close the editor in other tabs").
  */
 export default function App() {
   const [state, setState] = useState<BootState>({ phase: 'loading' })

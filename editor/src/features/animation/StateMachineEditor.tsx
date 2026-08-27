@@ -10,12 +10,9 @@ import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '../../components/Collapsable'
 import { SegmentedControl, Toggle } from '../../components/ui'
 
-// The Animation State Machine inspector, as three DOCK PANELS (Clips / Variables / State Machine) rather than
-// one panel with tabs — see DockLayout. They all edit the same working copy from StateMachineContext, which
-// wraps the whole dock, so nothing is plumbed between them.
-//
-// The graph (StateGraph) stays the only place to add / move / connect states, and now also the place to set
-// the entry state (right-click a node).
+// The Animation State Machine inspector, as three DOCK PANELS (Clips / Variables / State Machine) sharing
+// one working copy from StateMachineContext, which wraps the whole dock. Adding, moving and connecting
+// states, and setting the entry state, all belong to StateGraph.
 
 const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
 const btn = 'px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
@@ -27,9 +24,7 @@ function NoModel() {
 }
 
 /**
- * Apply is machine-wide and every panel mutates the machine (Clips too — deleting a clip rewrites states and
- * events), so it sits on all three rather than on whichever one happens to own it. The graph toolbar has its
- * own copy, but that toolbar is gone in Animations view.
+ * Apply is machine-wide and every panel mutates the machine, Clips included, so it sits on all three.
  */
 function ApplyBar() {
   const { apply } = useStateMachine()
@@ -51,9 +46,8 @@ export function ClipsPanel() {
   } = useStateMachine()
   if (!target) return <NoModel />
 
-  // Where a clip lives decides what can be done to it here. A shared clip is one stored copy retargeted
-  // onto this rig, so removing it is unlinking its ASSET (one level up, in the picker) — deleting it off
-  // this model alone would be undone by the next resolve.
+  // A shared clip is one stored copy retargeted onto this rig, so removing it means unlinking its ASSET;
+  // deleting it off this model alone is undone by the next resolve.
   const clipRow = (name: string) => {
     const sharedId = clipAssetId(name)
     return (
@@ -195,43 +189,32 @@ function SelectedState() {
   if (i < 0) return null
   const s = sm.states[i]
 
-  // Only a numeric parameter can be a rate; a trigger is momentary and has no meaningful value. The same
-  // set is what a field's axes may be driven by, for the same reason — and it already includes
-  // variable-bound parameters, which is how a field ends up driven by a node variable.
+  // Only a numeric parameter can be a rate; a trigger is momentary. The same set drives a field's axes,
+  // variable-bound parameters included.
   const speedParams = sm.parameters.filter(p => p.type === 'float' || (p.type === 'variable' && p.variable?.varType !== 'boolean'))
   const byParam = !!s.speedParam
   const linked = links.filter(l => l.a === s.name || l.b === s.name)
 
-  // A state plays either ONE clip or a whole blend space. `fieldId` is the discriminator, so switching to
-  // Clip clears it (and the embedded copy that rides with it) rather than leaving a field the runtime would
-  // still prefer over clipName.
+  // `fieldId` is the clip-vs-blend-space discriminator and the runtime prefers it over clipName, so
+  // switching to Clip must clear it and the embedded copy riding with it.
   const playsField = !!s.fieldId
   const field = fieldOf(s.fieldId)
   const setPlays = (kind: 'clip' | 'field') => {
     if (kind === 'clip') setState(i, { fieldId: undefined, field: undefined, fieldInputs: undefined })
-    // Switching to a field also drops any speed PARAMETER. On a clip, binding the rate to movement speed is
-    // how you fake speed matching; a field does that properly through the blend, so carrying the binding
-    // over would apply the speed twice — the run clip ends up playing at runSpeed×, i.e. wildly too fast.
-    // The fixed `speed` is kept, so an intentional 0.5× or 2× survives the switch.
+    // Switching to a field drops any speed PARAMETER: the blend already matches speed, so keeping the
+    // binding applies it twice. The fixed `speed` is kept.
     else setState(i, { clipName: '', fieldId: animationFields[0]?.id ?? '', fieldInputs: {}, speedParam: undefined })
   }
 
-  // A field already matches speed by CHOOSING clips, so a playback-rate parameter multiplies on top of a
-  // blend that is already correct. Worth flagging for ANY parameter, not just an axis one: two parameters
-  // can read the same value (one bound to planarSpeed, one to a script's moveSpeed) and produce exactly the
-  // same double-apply without sharing a name. The axis case is called out harder because it is unambiguous.
+  // A field matches speed by choosing clips, so a playback-rate parameter multiplies on top of a correct
+  // blend. Flagged for ANY parameter: two differently-named parameters can read the same value.
   const speedByParamOnField = playsField && !!s.speedParam
   const speedFeedsAxis = speedByParamOnField
     && (s.speedParam === s.fieldInputs?.x || s.speedParam === s.fieldInputs?.y)
 
-  // The mirror of the UNSIGNED_BUILTINS check on a field axis, and a nastier failure. There is no reverse
-  // playback, so a Speed parameter that goes negative is clamped to exactly 0 — the clip FREEZES, and because
-  // the blend keeps being recomputed from an unsmoothed probe while it holds, what you see is the whole pose
-  // vibrating rather than an animation that stopped. Only on one side of the parameter's range, which is what
-  // makes it so hard to read as a speed problem at all.
-  //
-  // Read off NODE_BUILTINS rather than a list kept here: the engine's getters are the authority on which
-  // values are signed, and a second copy would drift the first time one is added.
+  // There is no reverse playback, so a Speed parameter going negative is clamped to exactly 0 and the clip
+  // freezes. Read the signedness off NODE_BUILTINS, never a list kept here: the engine's getters are the
+  // authority and a second copy drifts.
   const speedBuiltin = sm.parameters.find(p => p.name === s.speedParam)?.variable
   const signedSpeed = speedBuiltin?.source === 'builtin' && !!NODE_BUILTINS[speedBuiltin.varName]?.signed
     ? speedBuiltin.varName
@@ -405,11 +388,6 @@ function SelectedState() {
   )
 }
 
-/**
- * Binds one of a field's axes to a machine parameter — the join between the animation system's inputs and
- * the blend space's. Only numeric parameters are offered (a trigger is momentary and has no axis value);
- * a 'variable' parameter is in that set too, which is what lets an axis read a node variable live.
- */
 /** The lowest coordinate any sample occupies on one of a field's axes. 0 for a field with no samples. */
 function minSampleOn(field: AnimationFieldAsset, axis: 'x' | 'y'): number {
   const vs = field.samples.map(s => (axis === 'x' ? s.x : s.y ?? 0)).filter(v => Number.isFinite(v))
@@ -426,11 +404,8 @@ function FieldAxisBinding({ label, params, value, onPick, minSample }: {
 }) {
   const missing = !!value && !params.some(p => p.name === value)
 
-  // The silent failure this catches: an axis with samples at negative coordinates driven by a parameter that
-  // reads a MAGNITUDE. The probe can then never enter the half of the field those samples live in, so their
-  // clips have weight exactly 0 forever — "the walk-backwards animation just never plays", with a field that
-  // looks correct and a binding that looks correct. Only reachable statically, which is why it is checked here
-  // rather than left to be discovered in Play.
+  // Catches an axis with samples at negative coordinates driven by a parameter that reads a MAGNITUDE: the
+  // probe can never enter that half of the field, so those clips hold weight 0 forever.
   const bound = params.find(p => p.name === value)
   const builtin = bound?.variable?.source === 'builtin' ? bound.variable.varName : undefined
   const unsigned = builtin !== undefined && builtin in UNSIGNED_BUILTINS
@@ -472,17 +447,9 @@ function leafConditions(t: any): any[] {
 }
 
 /**
- * A `>` and a `<` on the same parameter whose engage points do not actually separate.
- *
- * This is THE way a locomotion machine ends up vibrating, and it is invisible in the editor because each
- * transition looks perfectly reasonable on its own — you have to hold both directions in your head at once to
- * see it. `Speed > 0.1` leaving Idle and `Speed < 0.1` leaving Locomotion are each obviously right; together
- * they mean a speed hovering at 0.1 satisfies both on alternating frames and the machine flips every frame.
- *
- * The criterion is the real one rather than "thresholds are equal": a band of `h` moves an engage point by
- * `h/2`, so what matters is whether `(gt + hGt/2)` ends up above `(lt - hLt/2)`. A genuine gap authored by
- * separating the two thresholds counts just as much as one authored with hysteresis. A `minDwell` on either
- * direction also settles it — bluntly, but it settles it — so that is taken as answered too.
+ * A `>` and a `<` on the same parameter whose engage points do not actually separate, which makes the pair
+ * flip every frame. A hysteresis band of `h` moves an engage point by `h/2`, so the criterion is whether
+ * `(gt + hGt/2)` exceeds `(lt - hLt/2)`. A `minDwell` on either direction counts as answered.
  */
 function chatteringPair(fwd: any, bwd: any): { param: string; gap: number } | null {
   if ((fwd?.minDwell ?? 0) > 0 || (bwd?.minDwell ?? 0) > 0) return null
@@ -498,17 +465,9 @@ function chatteringPair(fwd: any, bwd: any): { param: string; gap: number } | nu
 }
 
 /**
- * A reciprocal pair whose two directions test entirely DIFFERENT parameters.
- *
- * Such a pair can never be mutually exclusive, because nothing links the two truths: `Idle -> Run` on
- * `Speed > 1` and `Run -> Idle` on `Direction < 1` are both satisfied the whole time a character walks
- * forward, so the machine bounces every frame for as long as that holds. It is almost always a mis-picked
- * parameter in one dropdown — the intended condition was the MIRROR of the other direction, on the same
- * signal — and the graph gives no hint, because each edge reads perfectly sensibly on its own.
- *
- * Worth a check of its own rather than folding into the threshold one: no hysteresis band can fix it, so the
- * advice is different. Skipped when either direction uses a trigger (momentary and consumed, so it cannot
- * sustain a bounce) or is gated by dwell/exit time.
+ * A reciprocal pair whose two directions test entirely DIFFERENT parameters, which can never be mutually
+ * exclusive and so bounces every frame. No hysteresis band fixes it. Skipped when either direction uses a
+ * trigger (momentary and consumed) or is gated by dwell/exit time.
  */
 function disjointReciprocal(fwd: any, bwd: any): { fwd: string[]; bwd: string[] } | null {
   if (!fwd || !bwd) return null
@@ -626,9 +585,8 @@ function SelectedTransition() {
 }
 
 // ---- Live preview ------------------------------------------------------------------------------------
-// `simulate` runs the machine (checkTriggers each frame) instead of the raw clip. It lives here rather than
-// on the transport because everything it feeds — the parameter drivers below and the graph's active-state
-// highlight — is here.
+// `simulate` runs the machine (checkTriggers each frame) instead of the raw clip, feeding the parameter
+// drivers below and the graph's active-state highlight.
 function PreviewSection() {
   const { target, sm, simulate, setSimulate } = useStateMachine()
   if (!target) return null
@@ -672,8 +630,8 @@ function PreviewSection() {
 }
 
 /**
- * A bool parameter driver. The live value lives on the animator, not in `sm`, and Toggle is controlled — so it
- * keeps its own state rather than reading back a value nothing re-renders on.
+ * A bool parameter driver. The live value lives on the animator, not in `sm`, and nothing re-renders on it,
+ * so this holds its own state for the controlled Toggle.
  */
 function BoolDriver({ name, initial, onSet }: { name: string; initial: boolean; onSet: (v: boolean) => void }) {
   const [v, setV] = useState(initial)
@@ -681,11 +639,9 @@ function BoolDriver({ name, initial, onSet }: { name: string; initial: boolean; 
 }
 
 /**
- * Grouped dropdown of the values a Variable parameter can bind to: the engine's own measured Built-ins
- * first, then node variables by access group (Self / Parent / Scene).
- *
- * The option key includes `source` deliberately. A built-in `currentSpeed` and a script field of the same
- * name are two different bindings, and keying on nodeRef+varName alone would make each select the other.
+ * Grouped dropdown of the values a Variable parameter can bind to: measured built-ins first, then node
+ * variables by access group. The option key must include `source` — a built-in and a script field can
+ * share a name and nodeRef.
  */
 function VariablePicker({ vars, value, onPick }: {
   vars: AccessibleVariable[]

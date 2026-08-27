@@ -1,10 +1,7 @@
 /**
- * Shared camera framing for asset-thumbnail preview scenes (mesh previews, the material preview sphere).
- *
- * Thumbnails are captured through `Renderer.screenshotOffscreen`, which renders into a **square** target —
- * so the camera's aspect is 1 and the vertical FOV governs both axes. That means fitting the subject's
- * bounding *sphere* against the vertical FOV is enough to guarantee the whole object is inside the frustum,
- * on every axis, at any scale.
+ * Shared camera framing for asset-thumbnail preview scenes.
+ * Thumbnails render into a square target, so aspect is 1 and the vertical FOV governs both axes; fitting
+ * the subject's bounding sphere against it frames the whole object on every axis.
  */
 
 /** Vertical FOV used by every preview camera. */
@@ -17,8 +14,7 @@ export const PREVIEW_MARGIN = 1.4;
 export const MATERIAL_SPHERE_RADIUS = 1;
 
 /**
- * Distance at which a sphere of `radius` is fully inside a `fovDeg` vertical FOV (tangent to the frustum),
- * times a margin. With a square render this fits it horizontally too.
+ * Distance at which a sphere of `radius` is tangent to a `fovDeg` vertical FOV, times a margin.
  */
 export function fitDistance(radius: number, fovDeg: number = PREVIEW_FOV, margin: number = PREVIEW_MARGIN): number {
   const r = Math.max(radius, 1e-6);
@@ -26,10 +22,8 @@ export function fitDistance(radius: number, fovDeg: number = PREVIEW_FOV, margin
 }
 
 /**
- * Near/far planes derived from the framing, so the subject can't be clipped at either end. Camera defaults
- * (near 0.1 / far 100) only suit human-scale objects: a small enough mesh sits entirely inside the default
- * near plane and a large enough one runs past the default far plane, and either way the thumbnail comes out
- * empty or cut. Both planes scale with the subject instead.
+ * Near/far planes derived from the framing so the subject cannot be clipped at either end. Both scale
+ * with the subject; the camera defaults (near 0.1 / far 100) only suit human-scale objects.
  */
 export function previewClipPlanes(distance: number, radius: number): { near: number; far: number } {
   return {

@@ -11,10 +11,8 @@ const EyeIcon = () => (
 
 /**
  * Expandable viewport menu (next to the 2D/3D switch) for toggling debug overlays. Each row is one
- * category with independent Editor and Runtime switches: e.g. Collision on/off while authoring is
- * separate from on/off during Play. State lives in DebugVisibilityContext; the reconcilers react to it.
- *
- * Shown in play mode as well as edit mode, so Runtime toggles can be flipped live during a playtest.
+ * category with independent Editor and Runtime switches; state lives in DebugVisibilityContext. Shown in
+ * play mode as well as edit mode, so Runtime toggles can be flipped live during a playtest.
  */
 export default function DebugVisibilityMenu() {
     const { visibility, setCategory } = useDebugVisibility();

@@ -28,26 +28,12 @@ interface CleoConfig {
 }
 
 /**
- * Longest frame delta, in seconds, the loop will report. Matches Unity's `maximumDeltaTime` default.
+ * Longest frame delta, in seconds, the loop will report (matches Unity's `maximumDeltaTime` default).
  *
- * requestAnimationFrame stops firing in a backgrounded tab, so without a ceiling the first frame back
- * carries the entire away duration — minutes, potentially. Every script that correctly integrates
- * `speed * delta` would then take one enormous step and teleport across the map, and a repeating
- * `this.every(...)` timer would be driven so far negative it fires once per frame for many frames
- * clawing back (Scene._updateTimers does `remaining += interval`). Clamping turns all of that into a
- * single slow frame. It also covers GC pauses, debugger breakpoints and `alert()` — none of which fire
- * `visibilitychange`, which is why this is preferred to a lifecycle listener.
- *
- * The trade is that game time and wall-clock time diverge permanently across a pause of any kind: a
- * `this.after(5, ...)` scheduled before a 30s tab-out fires ~5s AFTER the tab is restored, not on
- * return. That is the correct behaviour for a game clock and matches `_timeSinceStart` being defined as
- * unpaused *game* time.
- *
- * Note this exceeds what physics can absorb in one frame: PhysicsSystem steps `world.step(1/60, delta, 5)`,
- * so the simulation advances at most 5 * 1/60 = 0.083s per frame regardless. On a recovery frame scripts
- * therefore advance further than the simulation does, and script-driven motion runs briefly ahead of
- * physics-driven motion. That resolves itself on the next frame, and raising cannon's substep cap to
- * match would trade this rare one-frame artifact for a rare 20-substep CPU spike — the worse failure.
+ * Two consequences to respect: game time and wall-clock time diverge permanently across a tab-out, GC
+ * pause or breakpoint — a `this.after(5, ...)` spanning a 30s tab-out fires ~5s AFTER the tab returns;
+ * and PhysicsSystem absorbs at most 5 * 1/60 = 0.083s per frame, so on a recovery frame scripts advance
+ * further than the simulation does.
  */
 const MAX_DELTA = 0.333;
 
@@ -64,32 +50,22 @@ export class CleoEngine {
 
   private _paused: boolean = true;
 
-  /**
-   * Why {@link initialize} failed, or null. See {@link initializeError}.
-   */
+  /** Why {@link initialize} failed, or null. See {@link initializeError}. */
   private _initializeError: Error | null = null;
 
   public onUpdate: (delta: number, time: number) => void;
   public onPreInitialize: () => Promise<void>;
   public onPostInitialize: () => void;
 
-  // The engine-wide event bus lives in its own module (see eventBus.ts) so lightweight producers like
-  // Logger can emit without importing the renderer graph; this is the same object, unchanged for consumers.
   public static eventEmitter = engineEventBus;
 
-  // Authoring gate for property-level SCENE_CHANGED events (transform/material/variable/... — the kinds
-  // fired from every setter). Default false so a published game and Play mode pay nothing: those setters
-  // run every frame from scripts and physics, and their changes must not allocate a payload, walk the
-  // bus, or mark the editor "unsaved". The editor flips this true only while editing and false on Play.
-  // STRUCTURAL changes (add/remove/visible) ignore this flag — the Scene relies on them for correctness.
-  // Delegates to `authoring.enabled` in eventBus.ts — see there for why the flag lives in a leaf module.
-  // Kept as a static so every existing `CleoEngine.authoringMode` reader and writer is unaffected.
+  // Authoring gate for property-level SCENE_CHANGED events (the kinds fired from every setter). Default
+  // false, so Play mode and a published game pay nothing. STRUCTURAL changes (add/remove/visible) ignore
+  // it — the Scene relies on those for correctness. Delegates to `authoring.enabled` in eventBus.ts.
   public static get authoringMode(): boolean { return authoring.enabled; }
   public static set authoringMode(value: boolean) { authoring.enabled = value; }
 
-  // The one engine running in this process — the editor reuses a single instance for both the edit-time
-  // viewport and Play mode, and a published build only ever constructs one. Lets a script-facing facade
-  // (Game, src/core/game.ts) reach the live engine without every caller threading it through by hand.
+  // The one engine running in this process; how the script-facing Game facade reaches it (game.ts).
   private static _instance: CleoEngine | null = null;
   public static get instance(): CleoEngine | null { return CleoEngine._instance; }
 
@@ -112,20 +88,11 @@ export class CleoEngine {
   }
 
   /**
-   * Acquire the graphics device and bring the engine up.
+   * Acquire the graphics device and bring the engine up. Awaitable because device acquisition is
+   * asynchronous; nothing may construct a GPU resource — a Texture, a Mesh, a Material's shader —
+   * until this has resolved. Idempotent, and also called by `run()` for embedders that never awaited it.
    *
-   * Public and awaitable because device acquisition is asynchronous: WebGL2's `getContext` is not, but
-   * `navigator.gpu.requestAdapter()` is, and the renderer presents one interface for both. Nothing may
-   * construct a GPU resource — a Texture, a Mesh, a Material's shader — until this has resolved, which
-   * is why both hosts await it immediately after `new CleoEngine(...)` and before they load anything.
-   *
-   * Idempotent, and still called by `run()` for embedders that never awaited it.
-   *
-   * REJECTS on failure. It used to catch everything and only log, which left `_ready === false` and no
-   * signal at all: an awaiting host carried on and built a scene against a renderer with no device, and
-   * the first symptom was an unrelated exception several hundred lines later. The log stays — it is
-   * what a user pastes — but the error is also stored on {@link initializeError} and re-thrown, so a
-   * host can say "the engine did not start" instead of showing an empty viewport.
+   * REJECTS on failure, and stores the error on {@link initializeError}.
    */
   public async initialize(): Promise<void> {
     try {
@@ -153,11 +120,9 @@ export class CleoEngine {
   }
 
   /**
-   * The error that stopped {@link initialize}, or null.
-   *
-   * A host that awaits `initialize()` gets this as a rejection and does not need it. A host that only
-   * calls `run()` never sees the rejection at all, because that path is fire-and-forget — this is where
-   * it can find out. `renderer.deviceProbe` says at which STAGE it happened.
+   * The error that stopped {@link initialize}, or null. A host that awaits `initialize()` gets it as a
+   * rejection instead; `run()` is fire-and-forget, so this is that path's only signal.
+   * `renderer.deviceProbe` says at which STAGE it happened.
    */
   public get initializeError(): Error | null { return this._initializeError; }
 
@@ -165,15 +130,8 @@ export class CleoEngine {
     try {
       Logger.info('Engine starting');
       if (!this._ready) {
-        // A host that did not await initialize() cannot have its first frame this tick: the device is
-        // not up yet, and running the loop against a renderer with no context would throw on the first
-        // draw. Start the loop when the device lands instead. Hosts that DID await fall through to the
-        // synchronous path below and start immediately, exactly as before.
-        // The `.catch` is not decoration: initialize() re-throws now, and an un-caught rejection on a
-        // fire-and-forget promise is an unhandled rejection — reported by the host, attributed to
-        // nothing, and in a packaged Electron build shown to nobody. Logged here, and left on
-        // `initializeError` for whoever asks. The loop is simply never started, which is correct: there
-        // is no device to draw with.
+        // A host that did not await initialize() has no device yet, so the loop starts when it lands.
+        // The `.catch` is required: initialize() re-throws, and this promise is fire-and-forget.
         void this.initialize().then(() => this._startLoop()).catch((e) => Logger.error(e));
         return;
       }
@@ -185,10 +143,8 @@ export class CleoEngine {
   }
 
   private _startLoop(): void {
-    // _lastTimestamp is set when the engine is CONSTRUCTED, which can be long before run() — the editor
-    // builds its scene and loads textures in between. Without this reset that whole gap is charged to
-    // the first frame's delta. The clamp would cap it, but starting the clock here is exact rather than
-    // merely bounded, and mirrors what uiRuntime.start() already does.
+    // _lastTimestamp is set at CONSTRUCTION, which can be long before run(); without this reset the
+    // whole gap is charged to the first frame's delta.
     this._lastTimestamp = performance.now();
     this._gameLoop();
   }
@@ -205,10 +161,8 @@ export class CleoEngine {
   private _gameLoop(): void {
     try {
       const currentTimestamp = performance.now();
-      // Clamped at the source rather than per-consumer: _timeSinceStart accumulates this same value and
-      // is handed to scripts as `time` alongside `delta`, so clamping only some readers would make `time`
-      // stop equalling the sum of the deltas anyone observed. One ceiling keeps physics, timers,
-      // node.update, onUpdate and _timeSinceStart on a single clock. See MAX_DELTA.
+      // Clamped at the source, not per-consumer: _timeSinceStart accumulates this same value, so
+      // physics, timers, node.update, onUpdate and `time` stay on one clock. See MAX_DELTA.
       const deltaTime = Math.min((currentTimestamp - this._lastTimestamp) / 1000, MAX_DELTA);
       
       if (!this._paused) {
@@ -223,11 +177,8 @@ export class CleoEngine {
 
       this.onUpdate(deltaTime, this._timeSinceStart);
   
-      // Record the frame for the profiler's rolling history. Done HERE, in the loop that owns the
-      // clock, rather than in an editor component: the panels that read this history are dock tabs
-      // that unmount when hidden, so anything sampled from their own rAF would be missing exactly
-      // when you switched to the panel to look at it. Unclamped wall-clock on purpose — MAX_DELTA
-      // exists to protect the simulation, but a 300ms hitch is precisely what a p95 should show.
+      // Sampled here, in the loop that owns the clock: the editor panels that read it unmount when
+      // hidden. Unclamped wall-clock on purpose — a 300ms hitch is precisely what a p95 should show.
       frameHistory.push({
         frameMs: currentTimestamp - this._lastTimestamp,
         cpuRenderMs: frameStats.frameMs,

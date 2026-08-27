@@ -1,17 +1,11 @@
-// Storage for a tilemap's cells.
-//
-// The map is unbounded, so cells live in fixed-size chunks allocated on first paint and freed when
-// their last tile is erased. A chunk is also the unit of everything expensive downstream: one mesh, one
-// batch of colliders, one frustum test, one entry in the serialized blob.
+// Storage for a tilemap's cells: fixed-size chunks allocated on first paint and freed when their last
+// tile is erased. A chunk is also the unit of one mesh, one collider batch and one frustum test.
 
 import type { TileMesh } from "./tileMesh";
 
 /**
- * Cells per chunk side. A module constant rather than per-tilemap configuration: the mesh builder's
- * row index, the serializer and the collider merger all bake it in, and making it variable would mean
- * threading it through every one of them for no authoring benefit.
- *
- * 32x32 = 1024 cells -> 4096 vertices per chunk mesh, which keeps the index buffer inside Uint16.
+ * Cells per chunk side. A constant, not configuration — the mesh builder, serializer and collider
+ * merger all bake it in. 32x32 gives 4096 vertices, which keeps the index buffer inside Uint16.
  */
 export const CHUNK_SIZE = 32;
 export const CHUNK_CELLS = CHUNK_SIZE * CHUNK_SIZE;
@@ -19,12 +13,8 @@ export const CHUNK_CELLS = CHUNK_SIZE * CHUNK_SIZE;
 /** A cell with no tile in it. Zero on purpose, so a fresh Uint32Array is already an empty chunk. */
 export const CELL_EMPTY = 0;
 
-// Packed cell layout (Uint32):
-//   bits  0..23  tile index + 1  (0 => empty, so index 0 is a real tile)
-//   bit   24     flip X
-//   bit   25     flip Y
-//   bit   26     rotate 90 (the diagonal flip; combined with the two mirrors this spans all 8 orientations)
-// The H/V/D triple is Tiled's encoding, which means an imported .tmx maps across without a conversion table.
+// Packed cell layout (Uint32): bits 0..23 tile index + 1 (0 means empty), bit 24 flip X, bit 25 flip Y,
+// bit 26 rotate 90. Tiled's H/V/D encoding, so an imported .tmx maps across with no conversion.
 const TILE_MASK = 0x00ffffff;
 export const FLAG_FLIP_X = 1 << 24;
 export const FLAG_FLIP_Y = 1 << 25;
@@ -61,13 +51,8 @@ export function withTile(packed: number, tileIndex: number): number {
 }
 
 /**
- * One chunk of cells plus the derived state the renderer hangs off it.
- *
- * `mesh` and `rowIndex` are built lazily by the renderer; the data layer only ever flags them stale.
- * That split is what lets the tilemap be serialized, diffed and unit-tested with no GL in scope.
- *
- * Colliders deliberately do NOT live here: they are the union of every layer at this chunk coordinate,
- * so the Tilemap owns them keyed by chunk position rather than any one layer's chunk.
+ * One chunk of cells plus the derived state the renderer hangs off it. `mesh` and `rowIndex` are built
+ * lazily by the renderer. Colliders live on the Tilemap — they are the union of every layer here.
  */
 export interface TileChunk {
     /** Chunk coordinates (cell coordinates divided by CHUNK_SIZE, floored). */
@@ -75,10 +60,7 @@ export interface TileChunk {
     cy: number;
     /** Packed cells, row-major within the chunk. */
     cells: Uint32Array;
-    /**
-     * Per-cell tint/opacity override as packed RGBA8, 0 meaning "no override, use the tileset's". Left
-     * null until something actually tints a cell, so the common map pays nothing for the feature.
-     */
+    /** Per-cell tint override as packed RGBA8; 0 means none. Null until something tints a cell. */
     tint: Uint32Array | null;
     /** Non-empty cells. The chunk is dropped from its layer when this reaches zero. */
     count: number;
@@ -101,12 +83,8 @@ export function createChunk(cx: number, cy: number): TileChunk {
 }
 
 /**
- * Key for a chunk's position in its layer's Map.
- *
- * Numeric rather than `${cx},${cy}`: a bucket fill writes a cell at a time and would otherwise build and
- * hash a string per write. The cost is a bound of +/-32768 chunks per axis, i.e. +/-1,048,576 cells —
- * far past any hand-authored map, but it is a real ceiling and painting past it would alias onto an
- * existing chunk, so `chunkAt` refuses coordinates outside it.
+ * Bound on a chunk coordinate. The key is NUMERIC to keep a per-cell bucket fill off string hashing,
+ * which costs this ceiling; painting past it would alias onto an existing chunk, so `chunkAt` refuses.
  */
 export const MAX_CHUNK_COORD = 0x7fff;
 export function chunkKey(cx: number, cy: number): number {
@@ -119,11 +97,8 @@ export function chunkCoord(cell: number): number {
 }
 
 /**
- * Key for a single CELL, for visited-sets during a flood fill.
- *
- * Separate from `chunkKey` because cells span 32768x more ground than chunks do; reusing the chunk key
- * here would alias distant cells onto each other and silently truncate a large fill. The product stays
- * inside Number.MAX_SAFE_INTEGER across the whole addressable range.
+ * Key for a single CELL, for flood-fill visited sets. Separate from `chunkKey`, whose range would
+ * alias distant cells together and silently truncate a large fill.
  */
 export function cellKey(col: number, row: number): number {
     return (col + 0x100000) * 0x200000 + (row + 0x100000);

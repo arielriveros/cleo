@@ -2,18 +2,13 @@ import { Geometry } from "../core/geometry";
 import { Material } from "./material";
 import { OutputMaterial, AssimpParseResult, loadAssimpModel, parseMaterial, convertToGltf2FromFiles, parseAssimpFiles } from "./utils/assimpLoader";
 import { GLTFLoader, ImportTransform, GltfParseResult } from "./utils/gltfLoader";
-// Cycle (model.ts imports Loader), but a benign one: Model is only referenced inside method bodies,
-// long after both modules have evaluated. Same shape as node.ts importing the cleo barrel.
+// A cycle (model.ts imports Loader), but benign: Model is only referenced inside method bodies.
 import { Model } from "./model";
 import { AnimatedModel, Animation, Skin } from "./animatedModel";
 import { TextureManager } from "./systems/textureManager";
 import { Logger } from "../core/logger";
 
-/**
- * Determines the correct base path for assets based on the current environment
- * @param path The original path (e.g., '/assets/damagedHelmet/damaged_helmet.obj')
- * @returns The corrected path for the current environment
- */
+/** Resolve an asset path against the current environment's base path. */
 
 /** One texture reference a model made that did not end up as a texture. */
 export type UnresolvedTexture = {
@@ -24,13 +19,8 @@ export type UnresolvedTexture = {
 };
 
 /**
- * Texture references a model made that did not end up as a texture.
- *
- * A loader that quietly drops them is indistinguishable from a model that genuinely has none, which is
- * how an FBX could import looking correct and completely untextured with nothing in the log. The split
- * matters to the caller: `missingFiles` names images that simply weren't in the upload and can be fixed
- * by picking them, while `unloadable` covers references no file can repair — an embedded texture in a
- * format that cannot be decoded, or bytes that failed to decode.
+ * Texture references a model made that did not become a texture. `missingFiles` are images absent from
+ * the upload, which the user can supply; `unloadable` are references no file can repair.
  */
 export type TextureLoadReport = { missingFiles: UnresolvedTexture[], unloadable: UnresolvedTexture[] };
 
@@ -60,8 +50,8 @@ function uniqueTextureId(base: string): string {
 
 export class Loader {
     /**
-     * Load models from file paths. Automatically detects GLTF files and uses appropriate loader.
-     * For GLTF files with animations/skinning, use loadAnimatedModelsFromPath instead.
+     * Load models from file paths, detecting glTF automatically. For skinned glTF use
+     * {@link loadAnimatedModelsFromPath} instead.
      */
     public static async loadModelsFromPath(filePaths: string[]): Promise<{name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[]> {
         // Check if this is a GLTF file
@@ -73,8 +63,6 @@ export class Loader {
 
         // Fall back to Assimp loader for other formats
         return new Promise(async (resolve, reject) => {
-            // `material` is required, not optional: the only push into this array supplies a real
-            // Material.Default(...). The vestigial `?` made the copy into `models` below unassignable.
             const output: {name: string, geometry: Geometry, material: Material }[] = [];
     
             const res = await loadAssimpModel(filePaths);
@@ -209,8 +197,8 @@ export class Loader {
     }
 
     /**
-     * Load models from uploaded files. Automatically detects GLTF files and uses appropriate loader.
-     * For GLTF files with animations/skinning, use loadAnimatedModelsFromFile instead.
+     * Load models from uploaded files, detecting glTF automatically. For skinned glTF use
+     * {@link loadAnimatedModelsFromFile} instead.
      */
     public static async loadModelsFromFile(files: File[]): Promise<{name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[]> {
         // Check if this is a GLTF file
@@ -220,20 +208,13 @@ export class Loader {
             return await gltfLoader.loadFromFiles(files);
         }
 
-        // Fall back to Assimp loader for other formats. Split in two so the expensive half can run in
-        // a worker: parseAssimpFiles is pure data, assembleAssimpModels does the GL work.
+        // Split in two so the expensive half can run in a worker: parseAssimpFiles is pure data.
         return Loader.assembleAssimpModels(await parseAssimpFiles(files), files);
     }
 
     /**
-     * Turn the pure output of `GLTFLoader.parseDescriptorsFromFiles` into live engine objects.
-     *
-     * This is the half that **must** run on the main thread: every image becomes a GL texture. Each
-     * image is uploaded exactly once and shared by every material referencing it, which is what the
-     * descriptor's image-index indirection is for.
-     *
-     * Returns `AnimatedModel`s when the descriptors carry skinning data, plain `Model`s otherwise —
-     * matching what the eager loaders returned.
+     * Turn the pure output of `GLTFLoader.parseDescriptorsFromFiles` into live engine objects. Must run
+     * on the main thread: it uploads every image as a GPU texture, once, shared across materials.
      */
     public static assembleGltfModels(
         parsed: GltfParseResult,
@@ -242,8 +223,7 @@ export class Loader {
     ): { name: string, model: Model | AnimatedModel, transform?: ImportTransform }[] {
         const cfg = { wrapping: 'repeat' as const };
 
-        // Which material/slot first referenced each image, so an unresolved one can say where it came
-        // from. The descriptors carry no material names, so the index is the best label available.
+        // Which material/slot first referenced each image, so an unresolved one can name its origin.
         const referencedBy = new Map<number, string>();
         parsed.materials.forEach((d, mi) => {
             for (const [slot, index] of Object.entries(d.textures) as [string, number | undefined][])
@@ -264,11 +244,8 @@ export class Loader {
                     }
                     case 'path': return TextureManager.Instance.addTextureFromPath(image.uri, cfg);
                     default:
-                        // 'missing' — the glTF named an image that resolved to no source. When it named a
-                        // URI it is an ordinary absent file and the user can supply it, so it belongs in
-                        // missingFiles (which drives the review modal's picker) and NOT in unloadable,
-                        // which renders as unfixable. This is the sole reporting path for every external
-                        // texture of a converted FBX/GLB.
+                        // A named URI is an absent file the user can supply, so it is missingFiles (which
+                        // drives the review modal's picker) rather than unloadable, which reads as unfixable.
                         if (image.uri) report?.missingFiles.push({ name: textureBaseName(image.uri), from });
                         else report?.unloadable.push({ name: `image #${i}`, from });
                         return undefined;
@@ -290,6 +267,7 @@ export class Loader {
                 metallic: d.metallic,
                 roughness: d.roughness,
                 opacity: d.opacity,
+                alphaCutoff: d.alphaCutoff ?? 0,
                 emissiveFactor: d.emissiveFactor,
                 textures
             }, {
@@ -316,15 +294,8 @@ export class Loader {
     }
 
     /**
-     * Turn the pure output of `parseAssimpFiles` into live `Geometry` + `Material` objects.
-     *
-     * This is the half that **must** run on the main thread: it creates GL textures via
-     * `TextureManager`. Kept separate so the editor can run the parse in a Web Worker and call only
-     * this on the main thread, while `loadModelsFromFile` above runs both back to back — so the
-     * worker and inline paths execute the identical assembly code.
-     *
-     * `files` is still needed here: a material may reference a texture by filename, which is resolved
-     * against the uploaded file list rather than embedded in the model.
+     * Turn the pure output of `parseAssimpFiles` into live `Geometry` and `Material` objects. Must run
+     * on the main thread: it creates textures. `files` resolves materials that name a texture by filename.
      */
     public static async assembleAssimpModels(
         parsed: AssimpParseResult,
@@ -343,8 +314,7 @@ export class Loader {
         const loadTextureFromSources = async (
             texturePath: string | undefined, textureData: string | undefined, id: string, from: string
         ) => {
-            // One line per reference, so "did this file actually embed its textures?" is answerable from
-            // the console. Without it the only symptom of any failure below is an untextured model.
+            // One line per reference: otherwise the only symptom of a failure below is an untextured model.
             if (texturePath)
                 Logger.print('info', [`${from}: ${texturePath}${textureData ? ' (embedded data found)' : ''}`], 'Import');
 
@@ -363,9 +333,8 @@ export class Loader {
 
             if (!texturePath) return undefined;
 
-            // `*N` is assimp's reference to a texture embedded in the model file. Reaching here means the
-            // parse could not turn it into bytes (an unsupported format, or raw pixels) — it is emphatically
-            // NOT a filename, and searching the upload for one would silently report nothing at all.
+            // `*N` is assimp's reference to an embedded texture, NOT a filename: reaching here means the
+            // parse could not decode it, and searching the upload would report nothing.
             if (texturePath.startsWith('*')) {
                 report?.unloadable.push({ name: `embedded texture ${texturePath}`, from });
                 return undefined;
@@ -383,16 +352,14 @@ export class Loader {
                 report?.missingFiles.push({ name: textureFileName, from });
                 return undefined;
             }
-            // Named after the file rather than a UUID: the id IS the name the asset explorer shows, and it
-            // is baked into every material that references it, so it has to be both readable and unique.
+            // Named after the file, not a UUID: the id is what the asset explorer shows.
             return TextureManager.Instance.addTextureFromFile(
                 textureFile, { wrapping: 'repeat' }, uniqueTextureId(textureFile.name));
         };
 
         const models: { name: string, geometry: Geometry, material: Material }[] = [];
         for (const mesh of parsed.meshes) {
-            // Adopts the typed arrays directly — no copy, and they may have been transferred here
-            // from a worker.
+            // Adopts the typed arrays directly; they may have been transferred from a worker.
             const geometry = new Geometry(
                 mesh.positions, mesh.normals, mesh.uvs,
                 mesh.tangents, mesh.bitangents, mesh.indices);
@@ -465,10 +432,7 @@ export class Loader {
         });
     }
 
-    /**
-     * Load animated models with skinning and animation data from file paths.
-     * Only works with GLTF files. For other formats, falls back to loadModelsFromPath.
-     */
+    /** Load skinned, animated models from file paths. glTF only; other formats fall back to {@link loadModelsFromPath}. */
     public static async loadAnimatedModelsFromPath(filePath: string): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
         // Check if this is a GLTF file
         if (filePath.toLowerCase().endsWith('.gltf')) {
@@ -480,10 +444,7 @@ export class Loader {
         throw new Error('Animated models are only supported for GLTF files. Use loadModelsFromPath for static models.');
     }
 
-    /**
-     * Load animated models with skinning and animation data from uploaded files.
-     * Only works with GLTF files. For other formats, falls back to loadModelsFromFile.
-     */
+    /** Load skinned, animated models from uploaded files. glTF only; other formats fall back to {@link loadModelsFromFile}. */
     public static async loadAnimatedModelsFromFile(files: File[]): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
         // Check if this is a GLTF file
         const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
@@ -497,9 +458,8 @@ export class Loader {
     }
 
     /**
-     * Parse animation clips (+ the source skeleton, with bone names) from an uploaded model file for
-     * IMPORT/retargeting. Supports glTF natively; glb/fbx/obj are converted to glTF2 via assimp first.
-     * Returns the first parsed model's clips + skin (all models in a file share one animations array).
+     * Parse animation clips and their source skeleton from an uploaded model file, for retargeting.
+     * glTF natively; glb/fbx/obj convert to glTF2 via assimp first. Returns the first model's clips.
      */
     public static async loadAnimationsFromFile(files: File[]): Promise<{ animations: Animation[]; skin: Skin | null }> {
         const hasGltf = files.some(f => f.name.toLowerCase().endsWith('.gltf'));

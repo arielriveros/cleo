@@ -11,37 +11,13 @@ import { EditorMode, useCleoEngine } from '../EngineContext';
 import { LS_KEYS, lsKey } from '../../utils/lsScope';
 import './dockview.css';
 
-// Per-project: a project's panel arrangement is part of how it is authored (a UI-heavy project wants a wide
-// UI panel, a terrain project wants the landscape tools). Both live keys are resolved through lsScope, so
-// deleting a project takes them with it.
+// Per-project. Both live keys resolve through lsScope, so deleting a project takes them with it.
 const dockLayoutKey = () => lsKey(LS_KEYS.dockLayout);
 // Pre-dockview layout blob ({ barsDimensions, bottomTab }); removed once on startup.
 const OLD_LAYOUT_KEY = 'cleo_project_layout';
-// v1 grouped Scene/UI under one "explorer" panel and Properties/Scripts/Physics under one
-// "inspector" panel; v2 promoted all five to panels of their own. v3 adds the three animation panels;
-// v4 adds the Animation Field panel. A restored older blob simply has no record of them, so those panels
-// would never exist. Every version bump here discards saved arrangements on purpose: a stale layout cannot
-// gain a panel it has never heard of.
-//
-// v5 changes the SHAPE rather than the panel set: one layout per editor mode instead of a single tree that
-// was hidden and reconstituted (see LayoutStore).
-//
-// v7 adds the Profiler panel, kept out of CHROME_PANELS so it survived into renderer mode and Play.
-// SUPERSEDED by v9, which makes it renderer-mode-only — see hiddenPanelIds.
-//
-// v8 replaces the old 'ui' panel (the legacy DOM-overlay inspector) with 'uiAdd', the UI element palette
-// for the new `ui` mode. UI elements are scene nodes now, so the Scene tree and the ordinary Properties
-// inspector cover everything the old panel did.
-//
-// v9 splits the Add palette out of the Scene panel into its own group: the left rail is now a
-// `Scene Elements | UI Elements` tab pair above a Scene panel that holds the tree alone. It also makes the
-// Profiler renderer-mode-only (see hiddenPanelIds), deliberately dropping the v7 arrangement that kept
-// it visible during Play.
-//
-// v10 renames the 'profiler' panel to 'performance' — it absorbed the floating stats HUD — and adds
-// 'rendererSettings', which was the floating renderer options overlay. Both are renderer-mode only. A
-// stored v9 layout knows neither id, and its 'profiler' entry would resolve to a component that no
-// longer exists, so the bump discards it rather than restoring a broken tree.
+// Superseded layout keys, cleared on startup. Bump LAYOUT_VERSION whenever the panel set or the store's
+// shape changes: a stored tree cannot gain a panel it has never heard of, and a stale panel id resolves
+// to a component that no longer exists.
 const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
   'cleo_dock_layout_v5', 'cleo_dock_layout_v6', 'cleo_dock_layout_v7', 'cleo_dock_layout_v8',
@@ -50,39 +26,14 @@ const OLD_DOCK_LAYOUT_KEYS = [
 const LAYOUT_VERSION = 10;
 
 /**
- * One saved arrangement per editor mode.
- *
- * Until v5 there was a single stored tree plus a "stash": entering a mode snapshotted the full layout, closed
- * the panels that mode forbids, and muted persistence until the restriction lifted. That was load-bearing and
- * broken at the same time. `hiddenPanelIds` never returns an empty list for ANY mode (scene mode still hides
- * the four animation panels), so the mute was permanent: the debounced writer below never ran, and the only
- * remaining write re-saved the stash it had just restored. The stored layout was frozen at whatever was in
- * localStorage when the editor booted, and no drag or resize ever reached it.
- *
- * Per-mode layouts delete the problem instead of patching it: nothing is ever mutilated, so nothing has to be
- * reconstituted, and each mode's tree is both authored and saved directly. It also buys a feature — the
- * animation editor's Clips/Variables/State Machine strip no longer has to share a width with the scene
- * editor's Properties panel.
- *
- * There is deliberately no key for play. Play is a restriction applied ON TOP of a mode
- * (hiddenPanelIds(mode, true) closes everything but the viewport), and play always runs in scene mode, so a
- * play entry would just be a viewport-only tree saved over and over. Instead nothing is saved while playing
- * and Stop restores `layouts[mode]` — which is exactly what the user had.
- *
- * v6 adds the two tilemap panels (Tiles + Layers). Same rule as every earlier bump: a stored v5 tree has
- * never heard of them, so it is discarded rather than patched.
+ * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
+ * applied on top of a mode, so nothing is saved while playing and Stop restores `layouts[mode]`.
  */
 type LayoutStore = { version: typeof LAYOUT_VERSION; layouts: Partial<Record<EditorMode, SerializedDockview>> };
 
 /**
- * Which of the stacked bottom panels the user last chose, tracked outside the dockview layout blob.
- *
- * It cannot live in the blob alone. Almost every mode "restricts" the layout (all but animation mode hide
- * the three animation panels), and while a restriction is applied layout changes are deliberately not
- * persisted — the restricted arrangement is meant to be discarded. So a bottom-tab switch made in any
- * normal mode was thrown away, and the next mode change restored the stash taken *before* it, snapping the
- * user back to whichever tab was active then — usually Logger, the default. Keeping the choice here means
- * it survives the stash/restore cycle, the buildDefaultLayout fallback, and a reload.
+ * Which of the stacked bottom panels the user last chose. Tracked outside the dockview layout blob so it
+ * survives a restricted mode's discarded arrangement, the buildDefaultLayout fallback, and a reload.
  */
 const bottomTabKey = () => lsKey(LS_KEYS.dockBottomTab);
 const BOTTOM_PANELS = ['logger', 'assets'] as const;
@@ -97,11 +48,9 @@ function loadBottomTab(): BottomPanel {
 }
 
 /**
- * Which bottom tab is currently selected, or null when the mode hides them both.
- *
- * Read from the group's own `activePanel` rather than `panel.api.isVisible`: both bottom panels are
- * `renderer: 'always'` (so the hidden one stays mounted and keeps its state), which means visibility does
- * not track tab selection for them the way it does for ordinary panels.
+ * Which bottom tab is currently selected, or null when the mode hides them both. Must read the group's
+ * `activePanel`, not `panel.api.isVisible`: both bottom panels are `renderer: 'always'`, so visibility
+ * does not track tab selection for them.
  */
 function activeBottomTab(dock: DockviewApi): BottomPanel | null {
   for (const id of BOTTOM_PANELS) {
@@ -120,13 +69,7 @@ const ANIMATION_FIELD_PANELS = ['animField'] as const;
 /** Tilemap-editor panels: the tile palette and the layer stack. Shown only in tilemap mode. */
 const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
 
-/**
- * The two Add palettes, stacked as tabs above the Scene tree.
- *
- * Unlike the mode-specific groups above, these are ordinary chrome: both are available wherever the tree
- * is, so a HUD element and a mesh are added from the same place rather than one being reachable only from
- * `ui` mode.
- */
+/** The two Add palettes, stacked as tabs above the Scene tree. Ordinary chrome, shown wherever the tree is. */
 const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
 
 /** Renderer-mode panels: the performance readout and the render settings. Shown only there. */
@@ -137,8 +80,7 @@ const CHROME_PANELS = [
   ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS, ...ADD_PANELS,
 ] as const;
 
-// The Scene panel hosts the mode-specific tree (there is no separate dock panel for it), so its tab label
-// follows the mode. The animation editor's own panels are real panels with fixed titles.
+// The Scene panel hosts the mode-specific tree, so its tab label follows the mode.
 const PANEL_TITLES: Record<string, string> = {
   viewport: 'Viewport', scene: 'Scene', sceneAdd: 'Scene Elements', uiAdd: 'UI Elements', properties: 'Properties',
   scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
@@ -160,9 +102,8 @@ function panelTitle(id: string, mode: EditorMode): string {
 
 const cleoTheme: DockviewTheme = { name: 'cleo', className: 'dockview-theme-cleo', colorScheme: 'dark' };
 
-// The viewport is the immovable center anchor: no tab header (so it can't be dragged, floated or
-// closed) and no dropping *into* it — edge drops beside it still work, so panels can dock around.
-// Returns false when the panel is missing, which marks a restored layout as corrupt.
+// The viewport is the immovable center anchor: no tab header and no dropping into it; edge drops beside
+// it still work. Returns false when the panel is missing, which marks a restored layout as corrupt.
 function assertViewportLock(api: DockviewApi): boolean {
   const vp = api.getPanel('viewport');
   if (!vp) return false;
@@ -171,9 +112,8 @@ function assertViewportLock(api: DockviewApi): boolean {
   return true;
 }
 
-// Scene/UI stacked as tabs 20vw left, Properties/Scripts/Physics stacked as tabs 25vw right,
-// Logger/Assets stacked in a 30vh strip under the viewport only (between the sidebars). Every panel
-// is free to be dragged out of its group and re-docked anywhere.
+// Scene/UI tabbed 20vw left, Properties/Scripts/Physics tabbed 25vw right, Logger/Assets in a 30vh strip
+// under the viewport only. Every panel can be dragged out of its group and re-docked.
 function buildDefaultLayout(api: DockviewApi) {
   api.clear();
   const width = api.width || window.innerWidth;
@@ -184,9 +124,8 @@ function buildDefaultLayout(api: DockviewApi) {
     position: { referencePanel: 'viewport', direction: 'left' },
     initialWidth: Math.round(width * 0.20),
   });
-  // The palettes sit in their own group ABOVE the tree, as a `Scene Elements | UI Elements` tab pair, so
-  // the tree stays visible while either palette is in use — the whole point of UI elements being nodes.
-  // This is the only place a non-viewport panel is split rather than tabbed.
+  // The palettes sit in their own group ABOVE the tree so the tree stays visible while either is in use.
+  // The only place a non-viewport panel is split rather than tabbed.
   api.addPanel({
     id: 'sceneAdd', component: 'sceneAdd', title: PANEL_TITLES['sceneAdd'],
     position: { referencePanel: 'scene', direction: 'above' },
@@ -209,18 +148,16 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'physics', component: 'physics', title: 'Physics',
     position: { referencePanel: 'properties', direction: 'within' },
   });
-  // The animation panels share the Properties tab strip. They are hidden everywhere but animation mode,
-  // where Properties itself is hidden — so the strip reads as Clips | Variables | State Machine there.
+  // The animation panels share the Properties tab strip; they are hidden everywhere but animation mode,
+  // where Properties itself is hidden.
   for (const id of [...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS]) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
     });
   }
-  // Docked with Properties on the right rail: both are tall columns of sections, which suits that
-  // rail's proportions, and neither is in CHROME_PANELS so they survive into renderer mode where the
-  // rest of that tab strip is hidden. They share a tab strip there, reading `Performance | Renderer
-  // Settings` — the two halves of what renderer mode is for.
+  // Docked with Properties on the right rail. Neither is in CHROME_PANELS, so they survive into renderer
+  // mode where the rest of that tab strip is hidden.
   for (const id of RENDERER_PANELS) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
@@ -229,8 +166,8 @@ function buildDefaultLayout(api: DockviewApi) {
   }
   scene.api.setActive();
   properties.api.setActive();
-  // Logger and Assets keep renderer:'always' so the hidden tab stays in the DOM: unmounting the
-  // asset explorer would tear down the SVAR store + drag patch and lose the folder being browsed.
+  // Logger and Assets need renderer:'always' so the hidden tab stays in the DOM: unmounting the asset
+  // explorer tears down the SVAR store + drag patch and loses the folder being browsed.
   const logger = api.addPanel({
     id: 'logger', component: 'logger', title: 'Logger', renderer: 'always',
     position: { referencePanel: 'viewport', direction: 'below' },
@@ -240,19 +177,15 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'assets', component: 'assets', title: 'Assets', renderer: 'always',
     position: { referencePanel: 'logger', direction: 'within' },
   });
-  // Honour the remembered bottom tab. This function is also the fallback whenever restoring a stashed
-  // layout fails, so hardcoding Logger here was one of the ways the user's choice got thrown away.
+  // Honour the remembered bottom tab; this is also the fallback when restoring a stashed layout fails.
   (loadBottomTab() === 'assets' ? assets : logger).api.setActive();
   assertViewportLock(api);
 }
 
 /**
- * Re-assert `renderer: 'always'` on the panels that require it.
- *
- * buildDefaultLayout sets it at creation, but a restored blob is not guaranteed to carry it (and one written
- * by an older build certainly won't). The default, 'onlyWhenVisible', unmounts a panel whenever its tab is
- * not selected — which for `assets` tears down the SVAR store, the drag patch and the folder the user was
- * browsing, and for `viewport` tears down the WebGL canvas host.
+ * Re-assert `renderer: 'always'` on viewport/logger/assets; a restored blob is not guaranteed to carry it.
+ * The default 'onlyWhenVisible' unmounts an unselected panel, tearing down the SVAR store and drag patch
+ * for `assets` and the WebGL canvas host for `viewport`.
  */
 function assertRenderers(api: DockviewApi) {
   for (const id of ['viewport', 'logger', 'assets']) {
@@ -286,12 +219,9 @@ function clearLayouts() {
 }
 
 /**
- * Force a layout pass after rebuilding the tree programmatically.
- *
- * `renderer: 'always'` panels (viewport, logger, assets) are not laid out by normal flow — dockview positions
- * their DOM from a layout pass. Tearing the tree down and re-adding panels in the same tick leaves those
- * positions stale, so the canvas and the console come back blank until something else triggers a measure —
- * which is why dragging a sidebar "fixed" it. Deferred a frame so the new groups have been measured first.
+ * Force a layout pass after rebuilding the tree programmatically. `renderer: 'always'` panels are
+ * positioned by a layout pass, not normal flow, so re-adding panels in the same tick leaves them stale.
+ * Deferred a frame so the new groups have been measured first.
  */
 function relayout(api: DockviewApi) {
   requestAnimationFrame(() => {
@@ -302,19 +232,13 @@ function relayout(api: DockviewApi) {
 }
 
 /**
- * Which panels a given mode / play state hides.
- *
- * Accumulated into a Set rather than returned from per-mode branches. The branch form carried a standing
- * hazard its own comment warned about: the fallthrough showed everything, so a mode-specific group had to
- * be spread into EVERY hand-built branch or it leaked into unrelated modes — which it did, three times,
- * when the UI panels were added. Here a group is hidden once, by default, and a mode opts out.
+ * Which panels a given mode / play state hides. A group is hidden once by default and a mode opts out, so
+ * a new mode-specific group cannot leak into unrelated modes.
  */
 function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
-  // Renderer mode is the one home of both renderer panels, so it is the only branch that keeps them.
+  // Renderer mode is the only branch that keeps the renderer panels.
   if (mode === 'renderer') return CHROME_PANELS;
-  // Play strips the chrome AND both renderer panels. This deliberately reverses the v7 arrangement
-  // (which kept the Profiler through Play so it could measure the running game) — renderer mode is now
-  // their only home.
+  // Play strips the chrome AND both renderer panels.
   if (playing) return [...CHROME_PANELS, ...RENDERER_PANELS];
 
   const hidden = new Set<string>(RENDERER_PANELS);
@@ -335,21 +259,17 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
     case 'ui':
       hide('physics');
       break;
-    // Landscape and tilemap keep the tree and Properties — props are placed alongside the terrain/tiles,
-    // and the node inspector is where a terrain's size and heightmap live.
+    // Landscape and tilemap keep the tree and Properties: a terrain's size and heightmap live there.
     case 'landscape':
     case 'tilemap':
       hide('scripts', 'physics');
       break;
-    // A model tab edits ONE thing, so there is no tree to browse: the model node is selected for you and
-    // stays selected (see the SELECT_NODE coercion in EngineContext), and Properties hosts both the asset's
-    // own inspector and that node's transform. The tree it used to show was rooted at the throwaway scene
-    // root, so it was a meaningless `root` row plus one sibling per LOD preview.
+    // A model tab edits one thing, so there is no tree to browse: the model node stays selected (the
+    // SELECT_NODE coercion in EngineContext) and Properties hosts both its inspector and its transform.
     case 'model':
       hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
       break;
-    // Animation brings its own three panels, so Properties has nothing left to host and the Scene panel
-    // becomes the skeleton tree (retitled by panelTitle).
+    // Animation brings its own three panels; the Scene panel becomes the skeleton tree (see panelTitle).
     case 'animation':
       hide(...ADD_PANELS, 'scripts', 'physics', 'properties');
       break;
@@ -375,16 +295,13 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
 export default function DockLayout() {
   const { eventEmitter, editorMode, isPlayMode } = useCleoEngine();
   const [api, setApi] = useState<DockviewApi | null>(null);
-  // Which mode's arrangement the live tree currently IS, and whether it is a play restriction. Both are the
-  // controller's own memory of the last commit, not derived state: the effect needs the OUTGOING mode to
-  // know which key to save the tree under before it swaps trees.
+  // The controller's own memory of the last commit, not derived state: the effect needs the OUTGOING mode
+  // to know which key to save the tree under before it swaps trees.
   const keyRef = useRef<EditorMode | null>(null);
   const playingRef = useRef(false);
   const bottomTabRef = useRef<BottomPanel>(loadBottomTab());
-  // Non-zero while a layout pass we initiated is in flight. Tearing the tree down and rebuilding it emits
-  // a burst of layout events in which the bottom group transiently reports whichever tab happens to be
-  // first — so without this the remembered choice is overwritten by the very churn it exists to survive,
-  // and the restore below then faithfully restores the wrong tab.
+  // Non-zero while a layout pass we initiated is in flight. A rebuild emits a burst of layout events in
+  // which the bottom group transiently reports the first tab, overwriting the remembered choice.
   const programmaticLayoutRef = useRef(0);
 
   /** Run a programmatic layout change with bottom-tab tracking muted until its events have settled. */
@@ -397,9 +314,8 @@ export default function DockLayout() {
   }, []);
 
   /**
-   * Put the remembered bottom tab back if a layout pass moved it. Deliberately a no-op when it is already
-   * showing, or when the mode hides it entirely: `setActive` also takes global focus, and stealing that
-   * on every mode switch would be worse than the problem being fixed.
+   * Put the remembered bottom tab back if a layout pass moved it. A no-op when it is already showing or
+   * the mode hides it entirely: `setActive` also takes global focus.
    */
   const restoreBottomTab = useCallback((dock: DockviewApi) => {
     const want = bottomTabRef.current;
@@ -407,10 +323,8 @@ export default function DockLayout() {
     if (panel && activeBottomTab(dock) !== want) panel.api.setActive();
   }, []);
 
-  // Nothing but legacy cleanup: the mode controller below owns every path that builds a tree, and it runs
-  // immediately after this because `editorMode` is already correct on the first render (the tab state that
-  // derives it is restored synchronously). Building here as well would only build the wrong mode's layout
-  // first and throw it away.
+  // Legacy cleanup only. The mode controller below owns every path that builds a tree and runs immediately
+  // after this, because `editorMode` is already correct on the first render.
   const onReady = (event: DockviewReadyEvent) => {
     try { localStorage.removeItem(OLD_LAYOUT_KEY); } catch { /* ignore */ }
     for (const key of OLD_DOCK_LAYOUT_KEYS) {
@@ -419,9 +333,8 @@ export default function DockLayout() {
     setApi(event.api);
   };
 
-  // Persist the current mode's arrangement (debounced). Muted only while playing — play is a transient
-  // restriction, not an arrangement worth remembering. Unlike the old `restrictedRef`, this mute actually
-  // toggles, so a drag or resize made in any ordinary mode is now saved.
+  // Persist the current mode's arrangement (debounced). Muted only while playing: play is a transient
+  // restriction, not an arrangement worth remembering.
   useEffect(() => {
     if (!api) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -434,16 +347,14 @@ export default function DockLayout() {
       clearTimeout(timer);
       timer = setTimeout(flush, 300);
     });
-    // A drag finished inside the debounce window would otherwise be lost to a reload — which is exactly the
-    // "my layout didn't survive" case this is all for. localStorage is synchronous, so a flush here lands.
+    // localStorage is synchronous, so this flush lands a drag that finished inside the debounce window.
     window.addEventListener('beforeunload', flush);
     return () => { clearTimeout(timer); disposable.dispose(); window.removeEventListener('beforeunload', flush); };
   }, [api]);
 
   /**
-   * Retitle for the mode and close the panels it forbids. Every path that produces a full layout has to run
-   * this — the mode effect below AND Reset Layout, which builds one from scratch while the mode is unchanged
-   * and so cannot rely on that effect firing.
+   * Retitle for the mode and close the panels it forbids. Every path that produces a full layout must run
+   * this, including Reset Layout, which builds one while the mode is unchanged.
    */
   const applyRestriction = useCallback((dock: DockviewApi) => {
     for (const id of Object.keys(PANEL_TITLES)) dock.getPanel(id)?.api.setTitle(panelTitle(id, editorMode));
@@ -451,12 +362,8 @@ export default function DockLayout() {
   }, [editorMode, isPlayMode]);
 
   // Mode/play controller. One path serves mode->mode, mode->play and play->mode: bank the outgoing mode's
-  // arrangement, put the incoming mode's tree up, then restrict it.
-  //
-  // A saved tree already has the mode's forbidden panels closed, so applyRestriction is usually a no-op on
-  // it — but it still has to run, because it is also what turns a freshly built all-panels default into
-  // *this* mode's default, what expresses play, and what repairs a tree written by a build with a different
-  // panel set. `close()` on a missing panel is a no-op, so re-asserting costs nothing.
+  // arrangement, put the incoming mode's tree up, then restrict it. applyRestriction must run even on a
+  // saved tree — it also expresses play and repairs a tree written by a build with a different panel set.
   useEffect(() => {
     if (!api) return;
     const prev = keyRef.current;
@@ -469,8 +376,8 @@ export default function DockLayout() {
       let restored = false;
       if (saved) {
         try {
-          // reuseExistingPanels keeps each panel's React subtree mounted across the swap. Without it the
-          // viewport unmounts and remounts on every mode switch, re-parenting the WebGL canvas each time.
+          // reuseExistingPanels keeps each panel's React subtree mounted across the swap; without it the
+          // viewport re-parents the WebGL canvas on every mode switch.
           api.fromJSON(saved, { reuseExistingPanels: true });
           restored = assertViewportLock(api);
         } catch { restored = false; }
@@ -479,8 +386,7 @@ export default function DockLayout() {
 
       assertRenderers(api);
       applyRestriction(api);
-      // fromJSON restores whichever bottom tab was selected when the tree was saved — put the user's
-      // last actual choice back.
+      // fromJSON restores the tab selected when the tree was saved; put the user's choice back.
       restoreBottomTab(api);
       relayout(api); // opening/closing panels moves the always-rendered viewport and logger
     });
@@ -488,8 +394,8 @@ export default function DockLayout() {
     playingRef.current = isPlayMode;
   }, [api, editorMode, isPlayMode, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
 
-  // Remember which bottom tab the user is on. When a mode hides both panels there is no selection to read,
-  // so the remembered value is left alone rather than being overwritten by a mode that shows neither.
+  // Remember which bottom tab the user is on. When a mode hides both there is no selection to read, so
+  // the remembered value is left alone.
   useEffect(() => {
     if (!api) return;
     const sync = () => {
@@ -508,8 +414,7 @@ export default function DockLayout() {
   useEffect(() => {
     if (!api) return;
     const onFocus = (tab: unknown) => {
-      // A programmatic focus is still the tab the user ends up on, so it becomes the remembered one —
-      // the layout listener would catch it anyway, this just avoids depending on that ordering.
+      // A programmatic focus is still the tab the user ends up on, so it becomes the remembered one.
       const id: BottomPanel = tab === 'Logger' ? 'logger' : 'assets';
       bottomTabRef.current = id;
       try { localStorage.setItem(bottomTabKey(), id); } catch { /* ignore */ }
@@ -519,17 +424,15 @@ export default function DockLayout() {
     return () => { eventEmitter.off('FOCUS_BOTTOM_TAB', onFocus); };
   }, [api, eventEmitter]);
 
-  // Escape hatch: rebuild the default layout and forget the stored one.
   useEffect(() => {
     if (!api) return;
     const onReset = () => {
-      // Every mode, not just this one: "Restore the default panel layout" reads as global, and it is also
-      // the escape hatch when a stored arrangement is corrupt.
+      // Every mode, not just this one: reset is also the escape hatch for a corrupt stored arrangement.
       clearLayouts();
       withProgrammaticLayout(() => {
         buildDefaultLayout(api);
-        // buildDefaultLayout adds EVERY panel, and the mode has not changed, so the effect above will not
-        // fire — reset has to re-apply the restriction itself or the current mode gets other modes' panels.
+        // buildDefaultLayout adds EVERY panel and the mode has not changed, so the effect above will not
+        // fire: reset must re-apply the restriction itself.
         assertRenderers(api);
         applyRestriction(api);
         restoreBottomTab(api);

@@ -2,11 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { LandscapeNode } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 
-// Which landscape the landscape-mode panels act on, and a re-render trigger for its (non-React) contents.
-//
-// The mirror of useActiveTilemap, and for the same reason: a Terrain is plain engine state, so sculpting
-// or painting it re-renders nothing on its own. Panels take a `revision` and re-read what they need
-// rather than trying to mirror a heightfield into React state.
+// Which landscape the landscape-mode panels act on, plus a re-render trigger for its non-React contents:
+// a Terrain is plain engine state, so panels take `revision` as a dependency and re-read what they need.
 
 export function useActiveLandscape(): {
   node: LandscapeNode | null

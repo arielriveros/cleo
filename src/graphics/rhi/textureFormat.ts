@@ -1,16 +1,5 @@
-/**
- * Choosing a texture format from what the caller asked for and what the device can do.
- *
- * This was four nested ternaries in the `Texture` constructor, and it hid something important: when
- * float textures are unavailable, a `precision: 'high'` request does not fail — it quietly becomes
- * RGBA8. Every HDR target in the renderer (the scene buffer, all three G-buffer attachments, the six
- * bloom mips, the compose pair, the velocity chain, the cloud targets) is allocated that way, so on a
- * device without the extensions the entire pipeline turns LDR with nothing logged anywhere.
- *
- * Pulling the decision out here does not change it. It makes it a named function that returns whether
- * the downgrade happened, so a caller can say so once, and it makes the whole policy testable without
- * a GL context.
- */
+// Choosing a texture format from what the caller asked for and what the device can do. A device
+// without the float extensions silently turns the whole HDR pipeline LDR, so the fallback is reported.
 
 import type { TextureFormat } from './types';
 
@@ -19,13 +8,7 @@ export interface TextureFormatRequest {
     usage?: 'color' | 'depth';
     precision?: 'low' | 'high';
     channels?: 'rgba' | 'r';
-    /**
-     * An exact format, bypassing the precision/channels inference.
-     *
-     * Still subject to the float fallback below — asking for `rgba16float` by name on a device that
-     * cannot provide it has to degrade the same way asking for `precision: 'high'` does, or the
-     * explicit path would be the one that crashes.
-     */
+    /** An exact format, bypassing the precision/channels inference. Still subject to the float fallback. */
     format?: TextureFormat;
 }
 
@@ -35,6 +18,7 @@ export interface TextureFormatSupport {
     floatFilterable: boolean;
 }
 
+/** The outcome of {@link resolveTextureFormat}. */
 export interface ResolvedTextureFormat {
     /** The format to allocate. */
     format: TextureFormat;
@@ -44,14 +28,7 @@ export interface ResolvedTextureFormat {
     downgraded: boolean;
 }
 
-/**
- * Whether float colour targets are usable at all.
- *
- * Both extensions, not either: `EXT_color_buffer_float` makes a float target renderable and
- * `OES_texture_float_linear` makes it samplable with anything but NEAREST. The engine's float targets
- * are all both rendered into and then sampled bilinearly — the bloom chain's whole job is filtered
- * downsampling — so one without the other is not enough. This reproduces the existing `&&`.
- */
+// Both capabilities, not either: the engine's float targets are all rendered into AND sampled bilinearly.
 function floatUsable(support: TextureFormatSupport): boolean {
     return support.floatRenderable && support.floatFilterable;
 }
@@ -63,11 +40,11 @@ const FLOAT_FALLBACK: Partial<Record<TextureFormat, TextureFormat>> = {
     'rgba32float': 'rgba8unorm',
 };
 
+/** The format to allocate for `request` on a device with `support`, and whether it was downgraded. */
 export function resolveTextureFormat(
     request: TextureFormatRequest, support: TextureFormatSupport,
 ): ResolvedTextureFormat {
-    // Depth ignores precision and channels entirely, and has no float fallback to make: DEPTH_COMPONENT24
-    // is core WebGL2 and needs no extension.
+    // Depth ignores precision and channels, and has no fallback to make.
     if (request.usage === 'depth')
         return { format: 'depth24plus', requested: 'depth24plus', downgraded: false };
 
@@ -79,7 +56,7 @@ export function resolveTextureFormat(
     return { format: requested, requested, downgraded: false };
 }
 
-/** The precision/channels inference, for callers that did not name a format outright. */
+// The precision/channels inference, for callers that did not name a format outright.
 function inferFormat(request: TextureFormatRequest): TextureFormat {
     const single = request.channels === 'r';
     const high = request.precision === 'high';

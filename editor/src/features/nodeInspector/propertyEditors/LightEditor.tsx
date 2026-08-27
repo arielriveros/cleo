@@ -6,8 +6,7 @@ import Collapsable from '../../../components/Collapsable'
 import { ColorInput, PropertyTable, PropertyRow, Slider, Section, Toggle, Hint } from '../../../components/ui'
 import { LightIcon } from '../sectionIcons'
 
-// The ColorInput now lives in the ui library; re-exported so existing importers
-// (SkyAtmosphereEditor, VolumetricCloudsEditor) keep resolving it from here.
+// Re-exported so SkyAtmosphereEditor and VolumetricCloudsEditor keep resolving ColorInput from here.
 export { ColorInput };
 
 export default function LightEditor(props: {node: LightNode}) {
@@ -64,7 +63,7 @@ export default function LightEditor(props: {node: LightNode}) {
       (props.node.light as Spotlight).linear = properties.linear!;
       (props.node.light as Spotlight).quadratic = properties.quadratic!;
       if (properties.cutOff! > properties.outerCutOff!) {
-        // Outer cut off should be greater than cut off
+        // outerCutOff must stay greater than cutOff.
         setProperties({...properties, outerCutOff: properties.cutOff! + 0.01});
         return;
       }

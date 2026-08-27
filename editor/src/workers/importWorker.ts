@@ -1,8 +1,6 @@
-// Worker entry for model import. Dispatches to runImportJob (importJobs.ts) and posts the result back,
-// correlated by request id. Keep this file free of DOM imports.
-//
-// Unlike projectWorker, this one also emits NON-terminal progress messages ({ id, progress }) before
-// the final { id, ok } reply — see importClient, which must not settle the pending promise on those.
+// Worker entry for model import. Dispatches to runImportJob (importJobs.ts) and posts the result
+// back, correlated by request id; also emits non-terminal { id, progress } messages before the final
+// { id, ok } reply. Keep this file free of DOM imports.
 
 import { runImportJob, ImportJob } from './importJobs';
 

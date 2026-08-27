@@ -2,12 +2,8 @@ import { TextureManager } from 'cleo'
 import { groupImportFiles, isModelFile } from '../../utils/importGrouping'
 
 // Routes a batch of OS files dropped on (or picked from) the asset explorer to the right ingestion path.
-// This replaces the two separate uploaders the old Textures and Models tabs each had.
-//
-// We deliberately do NOT use SVAR's built-in <Uploader>: it walks dropped directories with
-// entry.createReader() but never records the resulting relative path on the File, so a .gltf + .bin +
-// textures/ folder arrives as a flat, unrelated pile. groupImportFiles needs those paths to work out which
-// buffer and which texture belong to which model.
+// SVAR's built-in <Uploader> is not used: it never records a dropped file's relative path, and
+// groupImportFiles needs those paths to pair a .bin and a textures/ folder with the right .gltf.
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.tga', '.webp', '.tiff', '.gif']
 
@@ -20,7 +16,7 @@ export function isImageFile(file: File): boolean {
   return IMAGE_EXTS.includes(extOf(file.name))
 }
 
-/** Register one image file as a texture, keyed by its filename (as the old Textures tab did). */
+/** Register one image file as a texture, keyed by its filename. */
 function addTexture(file: File): Promise<void> {
   return new Promise(resolve => {
     const reader = new FileReader()
@@ -41,11 +37,8 @@ export type UploadDeps = {
 
 /**
  * Ingest a mixed batch of files.
- *
- * When the batch contains any model file the WHOLE batch goes to importModelFiles — it runs groupImportFiles
- * itself, which is what decides that `rock.bin` belongs to `rock.gltf` and not to `tree.gltf`. Pre-splitting
- * here would throw that disambiguation away. Images that no bundle claimed (plus batches with no model at
- * all) are registered as standalone textures.
+ * A batch containing any model file goes to importModelFiles whole: it runs groupImportFiles itself, which
+ * decides that `rock.bin` belongs to `rock.gltf` and not to `tree.gltf`. Unclaimed images become textures.
  */
 export async function runUpload(files: File[], deps: UploadDeps): Promise<void> {
   if (!files.length) return
@@ -59,7 +52,7 @@ export async function runUpload(files: File[], deps: UploadDeps): Promise<void> 
     return
   }
 
-  // Which files the mesh importer will consume — everything else that's an image becomes a loose texture.
+  // Files the mesh importer will consume; every other image becomes a loose texture.
   const claimed = new Set<File>()
   for (const bundle of groupImportFiles(files)) for (const f of bundle.files) claimed.add(f)
 

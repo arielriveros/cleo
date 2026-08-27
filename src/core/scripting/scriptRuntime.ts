@@ -1,20 +1,11 @@
-// The whole user-script contract lives here: which modules a script may import, how its source is
-// rewritten into something `new Function` accepts, and which handlers it can export.
+// The user-script contract: which modules a script may import, how its source is rewritten into
+// something `new Function` accepts, and which handlers it can export. Scripts are authored as
+// TypeScript ES modules but never loaded as modules — buildFactoryBody() strips the types with Sucrase
+// (purely syntactic, line-preserving) and transformScript() rewrites every `import` into a call to
+// `__cleoImport`, the wrapper's only parameter and invisible to the script author.
 //
-// Scripts are authored as ES modules — `import { Logger } from 'cleo'` — but they are never loaded as
-// modules: the editor evals them and the publisher emits them as plain functions. An `import` statement
-// is a SyntaxError inside a function body, so transformScript() rewrites the module syntax away before
-// the source is wrapped (see buildFactoryBody). `__cleoImport` is the wrapper's only parameter and is
-// invisible to the script author.
-//
-// This module deliberately imports nothing from the engine: node.ts depends on it, so any engine import
-// here would close a cycle. The engine's public API reaches scripts through registerScriptModule(),
-// which src/cleo.ts calls with its own namespace.
-//
-// Scripts are authored as TypeScript (the editor types them, see editor/.../monacoSetup.ts). `new Function`
-// only parses JavaScript, so buildFactoryBody() strips the type syntax with Sucrase before the module
-// rewrite runs. Sucrase is purely syntactic (no type-checking) and preserves line numbers, so error line
-// numbers keep meaning and transformScript still sees the untouched `import` statements to rewrite.
+// Must import nothing from the engine: node.ts depends on this, so any engine import closes a cycle.
+// The engine's public API reaches scripts through registerScriptModule(), which src/cleo.ts calls.
 import { transform } from 'sucrase';
 
 export type ScriptModule = Record<string, any>;
@@ -22,8 +13,7 @@ export type ScriptModule = Record<string, any>;
 /** Handlers a script may export. Anything else it exports is ignored. */
 export const SCRIPT_HANDLERS = [
     'onConstruct', 'onStart', 'onSpawn', 'onUpdate', 'onCollision', 'onTrigger', 'onDespawn',
-    // UI. Listed here rather than special-cased so a class script overriding one gets exactly the same
-    // throw-guard and async-rejection handling as onUpdate — see attachClassScript in node.ts.
+    // UI handlers, listed rather than special-cased so they get onUpdate's throw/rejection guarding.
     'onPress', 'onValueChanged', 'onSubmit',
 ] as const;
 
@@ -43,9 +33,8 @@ export function resolveScriptModule(specifier: string): ScriptModule {
 
 /**
  * Builds the `__cleoImport` a single script instance sees. `overrides` replaces exports of the same name
- * with values bound to the node running the script — that is how the imported getData/setData keep
- * enforcing each variable's public/private/protected access level. Only names the module already exports
- * can be overridden, so an override can never smuggle a new global in through an import.
+ * with values bound to the node running the script. Only names the module already exports can be
+ * overridden, so an override can never smuggle a new global in through an import.
  */
 export function createScriptImporter(overrides: ScriptModule = {}): (specifier: string) => ScriptModule {
     return (specifier: string) => {
@@ -169,7 +158,6 @@ function readImport(source: string, afterKeyword: number, index: number): Import
     const alias = `__cleoMod${index}`;
     statements.push(`const ${alias} = ${importCall};`);
 
-    // Split the clause into its default/namespace part and its `{ ... }` named part.
     const braceAt = clause.indexOf('{');
     const head = (braceAt === -1 ? clause : clause.slice(0, braceAt)).replace(/,\s*$/, '').trim();
     const named = braceAt === -1 ? '' : clause.slice(braceAt + 1, clause.lastIndexOf('}')).trim();
@@ -254,11 +242,8 @@ export function transformScript(source: string): string {
                 continue;
             }
 
-            // A class-based script exports its class (`export default class X extends Node {...}`); the
-            // factory body returns that class so attachScriptFactory can harvest its methods. Rewrite the
-            // `export [default]` prefix to `return` and let the `class` keyword emit normally. Same line, so
-            // line numbers stay aligned. Any other top-level `export` is still an error (legacy `this.onX =`
-            // scripts have no exports at all).
+            // A class-based script exports its class, so `export [default]` is rewritten to `return` on
+            // the SAME line to keep line numbers aligned. Any other top-level `export` is an error.
             if (word === 'export' && depth === 0) {
                 const afterExport = skipTrivia(source, j);
                 let k = afterExport;
@@ -301,24 +286,19 @@ export function transformScript(source: string): string {
 /**
  * The body of the script factory, shared by the two paths that run scripts: the engine evals it through
  * `new Function` (compileScript), and the publisher emits it as source inside `function(__cleoImport)
- * {...}` (editor/src/features/publish/extractScripts.ts).
- *
- * There is no postamble: the script assigns its handlers to `this` (`this.onUpdate = ...`), and
- * attachScriptFactory collects them from the node proxy it bound `this` to. Which also means the body
- * must stay a plain `function` — an arrow would capture the wrong `this`.
+ * {...}`. There is no postamble — a script assigns its handlers to `this`, so the wrapper must stay a
+ * plain `function`; an arrow would capture the wrong `this`.
  */
 export function buildFactoryBody(source: string): string {
-    // Strip TypeScript first (leaves `import` statements intact — we don't enable Sucrase's 'imports'
-    // transform), then rewrite the module syntax transformScript understands.
+    // Sucrase's 'imports' transform stays off, so `import` statements survive for transformScript.
     const js = transform(source, { transforms: ['typescript'], preserveDynamicImport: true }).code;
     return `"use strict";\n${transformScript(js)}`;
 }
 
 /**
  * Called with `this` bound to the script's node proxy. A class-based script RETURNS its class constructor
- * (attachScriptFactory harvests the prototype's methods); a legacy `this.onX = ...` script returns nothing
- * and its handlers are collected off the proxy instead. Both shapes are accepted so the two eras coexist
- * during migration.
+ * (attachScriptFactory harvests the prototype's methods); a `this.onX = ...` script returns nothing and
+ * its handlers are collected off the proxy instead.
  */
 export type ScriptFactory = (this: any, importer: (specifier: string) => ScriptModule) => (new (...args: any[]) => any) | void;
 
@@ -332,13 +312,9 @@ let scriptProvider: ((nodeId: string) => ScriptFactory | undefined) | null = nul
 
 /**
  * Register the lookup a NO-EVAL build uses to find a node's precompiled script factory by node id.
- *
- * A published game ships its scripts as real functions in game.scripts.js keyed by node id, and there is no
- * `script` source string left in the scene JSON to compile. Node parsing consults this to bind them, which
- * — unlike a one-shot pass over the parsed scene — also covers nodes created later by `Scene.instantiate`.
- * Those carry `__sourceId` (the id they were copied from), which is the key the registry is built on.
- *
- * The editor never sets this: its scenes carry script source and go through `compileScript`.
+ * A published game ships its scripts as functions in game.scripts.js keyed by node id, with no source
+ * left in the scene JSON. Nodes made by `Scene.instantiate` are keyed by `__sourceId`, the id they were
+ * copied from. The editor never sets this — its scenes carry source and go through `compileScript`.
  */
 export function setScriptProvider(provider: ((nodeId: string) => ScriptFactory | undefined) | null): void {
     scriptProvider = provider;

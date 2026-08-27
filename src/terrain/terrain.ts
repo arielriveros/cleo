@@ -19,8 +19,7 @@ import { FoliageColliderField, FoliageColliderSettings, DEFAULT_FOLIAGE_COLLIDER
  *  can't stall the pointer handler. Whole-terrain generation is not capped (it is an explicit action). */
 const MAX_SCATTER_PER_CALL = 20000;
 
-/** What a whole-terrain foliage regeneration actually did, so the editor can report it instead of
- *  silently appearing to do nothing. */
+/** What a whole-terrain foliage regeneration actually did, so the editor can report it. */
 export interface FoliageGenerateResult {
     /** Instances placed. */
     placed: number;
@@ -126,14 +125,12 @@ function resolveConfig(c: TerrainConfig): Required<TerrainConfig> {
 }
 
 /**
- * Heightfield terrain: data (heights) + physics + render chunks, independent of the scene graph.
- * Owned by a LandscapeNode which wraps each chunk Model in a child ModelNode. Sculpting/importing
- * mutate the shared `_heights` grid; the affected chunk geometries are re-deformed and flagged dirty,
- * and the node re-uploads them to the GPU. A single static cannon-es Heightfield body provides
- * walkable collision and is rebuilt on demand (after a stroke) rather than every frame.
+ * Heightfield terrain: heights + physics + render chunks, independent of the scene graph. Owned by a
+ * LandscapeNode which wraps each chunk Model in a child ModelNode. One static cannon-es Heightfield
+ * body provides walkable collision, rebuilt on demand rather than every frame.
  *
- * Assumes the owning node has no rotation/scale (identity orientation); terrain-local space then
- * differs from world space only by the node's translation.
+ * Assumes the owning node has identity rotation and scale, so terrain-local space differs from world
+ * space only by the node's translation.
  */
 export class Terrain {
     private _cfg: Required<TerrainConfig>;
@@ -275,9 +272,9 @@ export class Terrain {
                 this._normalAt(c, r, n);
                 normals.push([n[0], n[1], n[2]]);
                 uvs.push([c / (R - 1), r / (R - 1)]);
-                // UVs are axis-aligned (u -> +X, v -> +Z), so the tangent frame is constant. Supplying it
-                // explicitly avoids Geometry._calculateTangents, which mis-aligns tangents on indexed
-                // meshes (breaks normal maps + parallax). default.vs negates the bitangent, so pass +Z.
+                // UVs are axis-aligned (u -> +X, v -> +Z), so the tangent frame is constant. Must be
+                // supplied explicitly: Geometry._calculateTangents mis-aligns tangents on indexed meshes.
+                // default.vs negates the bitangent, so pass +Z.
                 tangents.push([1, 0, 0]);
                 bitangents.push([0, 0, 1]);
             }
@@ -310,10 +307,8 @@ export class Terrain {
             }
         }
         this._updateChunkBounds(chunk);
-        // `_updateChunkBounds` only feeds terrain LOD. The geometry keeps its own cached bounding
-        // sphere/box (and BVH) for frustum culling and picking, and the loop above just moved every
-        // vertex under it — without this the chunk keeps its pre-sculpt sphere and a raised hill can be
-        // culled while it is on screen, or missed by a raycast.
+        // `_updateChunkBounds` only feeds terrain LOD; the geometry's own cached bounding sphere/box
+        // (and BVH) drive frustum culling and picking, and the loop above moved every vertex under it.
         g.invalidateBounds();
         chunk.dirty = true;
     }
@@ -345,12 +340,9 @@ export class Terrain {
 
     /**
      * Coarse index set for a chunk at the given vertex `step` (2/4/8), over the chunk's UNCHANGED
-     * full-resolution vertex buffer — an LOD level only decimates the triangulation, never the vertices.
-     *
-     * The chunk's border ring is kept at full resolution and fan-stitched to the decimated interior: every
-     * chunk edge therefore uses the exact same vertices at every level, so two neighbours at different
-     * levels always agree on their shared edge and no T-junction cracks can appear — whatever the
-     * combination of levels, with no neighbour bookkeeping.
+     * full-resolution vertex buffer: an LOD level decimates the triangulation, never the vertices.
+     * The border ring stays at full resolution and is fan-stitched to the decimated interior, so
+     * neighbours at different levels always agree on their shared edge without any bookkeeping.
      */
     public buildLodIndices(chunk: TerrainChunk, step: number): number[] {
         const cols = chunk.c1 - chunk.c0, rows = chunk.r1 - chunk.r0;
@@ -366,8 +358,8 @@ export class Terrain {
             return indices;
         }
 
-        // Cell boundaries along each axis. The last cell absorbs the remainder when the chunk isn't a
-        // whole number of steps across (edge chunks of a terrain whose resolution isn't a power of two + 1).
+        // Cell boundaries along each axis. The last cell absorbs the remainder when the chunk is not a
+        // whole number of steps across.
         const cuts = (n: number): number[] => {
             const out: number[] = [];
             for (let x = 0; x < n; x += step) out.push(x);
@@ -404,8 +396,8 @@ export class Terrain {
                 edge(x1, z1, x1, z0, x1 === cols);
                 edge(x1, z0, x0, z0, z0 === 0);
 
-                // Fan from the corner that lies on no subdivided edge (guaranteed to exist by the 2*step
-                // guard above), so no fan triangle degenerates onto a border edge.
+                // Fan from the corner on no subdivided edge (the 2*step guard above guarantees one exists),
+                // so no fan triangle degenerates onto a border edge.
                 const xa = x0 === 0 ? x1 : x0;
                 const za = z0 === 0 ? z1 : z0;
                 const apex = ring.indexOf(v(xa, za));
@@ -432,8 +424,8 @@ export class Terrain {
         let lod = 0;
         if (d >= s.distance2) lod = 2;
         else if (d >= s.distance1) lod = 1;
-        // Refine only once comfortably inside the threshold, so a camera sitting on a boundary doesn't
-        // flip a chunk's triangulation every frame.
+        // Refine only once comfortably inside the threshold, or a camera on a boundary flips a chunk's
+        // triangulation every frame.
         if (lod < chunk.lod) {
             if (chunk.lod === 2 && d >= s.distance2 * 0.9) return 2;
             if (lod === 0 && d >= s.distance1 * 0.9) return 1;
@@ -512,8 +504,7 @@ export class Terrain {
 
     /**
      * Fill this terrain's splat map by resampling another terrain's (bilinear on RGBA, renormalized),
-     * stretching the painted pattern to this grid. The companion to {@link resampleHeightsFrom}: without
-     * it "Update Terrain" would keep the sculpted shape but reset every paint layer to layer 0.
+     * stretching the painted pattern to this grid. The companion to {@link resampleHeightsFrom}.
      */
     public resampleSplatFrom(other: Terrain): void {
         const S = this._splatRes, oS = other._splatRes, oSplat = other._splat;
@@ -545,9 +536,8 @@ export class Terrain {
     }
 
     /**
-     * Re-place another terrain's scattered foliage onto this one, re-sampling Y from the new heights.
-     * Keeps hand-painted foliage across a size/resolution change instead of regenerating it (which would
-     * discard the author's placement). Positions are normalized by size so the pattern stretches.
+     * Re-place another terrain's scattered foliage onto this one, re-sampling Y from the new heights, so
+     * hand-painted foliage survives a size/resolution change. Positions are normalized by size.
      */
     public resampleFoliageFrom(other: Terrain): void {
         const scale = other.size > 0 ? this._cfg.size / other.size : 1;
@@ -579,7 +569,6 @@ export class Terrain {
         const R = this._R;
         for (let r = 0; r < R; r++) {
             for (let c = 0; c < R; c++) {
-                // Sample the image with normalized coords (nearest).
                 const sx = Math.min(image.width - 1, Math.floor((c / (R - 1)) * (image.width - 1)));
                 const sy = Math.min(image.height - 1, Math.floor((r / (R - 1)) * (image.height - 1)));
                 const red = image.data[(sy * image.width + sx) * 4] / 255;
@@ -628,8 +617,7 @@ export class Terrain {
     }
 
     /** Read the per-layer surface (albedo/normal/displacement + scalar factors) out of a paint-layer
-     *  material, mapping each base shading model's texture/property keys to the terrain-blend inputs.
-     *  Displacement (height) is terrain-specific: stored under `displacementMap` for every base type. */
+     *  material. Displacement is terrain-specific and lives under `displacementMap` for every base type. */
     private _deriveLayerSurface(tm: TerrainMaterial): {
         albedoId: string | null; normalId: string | null; dispId: string | null;
         dispScale: number; heightBlend: number; color: number[]; metallic: number; roughness: number;
@@ -665,14 +653,10 @@ export class Terrain {
 
     /**
      * Combine a layer's normal map and displacement (height) map into the single packed texture bound at
-     * `u_normal{index}`: rgb = tangent-space normal, a = height. Height only ever needed one channel and
-     * normal maps never used their alpha, so this is a free saving — it takes the terrain shader from 13
-     * bound texture units down to 9, and one fewer fetch per layer per fragment.
-     *
-     * Source textures decode asynchronously, so a pack that cannot resolve yet leaves the layer with no
-     * normal/height this frame (flat shading, no parallax) and is retried by {@link syncPackedLayers}.
-     * Clearing the slot is safe here — unlike a standard material, `Renderer._applyTerrainMaterial` binds
-     * a shared fallback texture to every layer sampler, so an empty slot cannot leave one unbound.
+     * `u_normal{index}`: rgb = tangent-space normal, a = height. Source textures decode asynchronously,
+     * so a pack that cannot resolve yet leaves the layer without normal/height this frame and is retried
+     * by {@link syncPackedLayers}; `Renderer._applyTerrainMaterial` binds a fallback to every layer
+     * sampler, so an empty slot cannot leave one unbound.
      */
     private _syncLayerPack(index: number, L: TerrainLayer, frame: number): void {
         const m = this._material;
@@ -684,8 +668,8 @@ export class Terrain {
         if (!L.normalId && !L.dispId) { clear(); return; }
 
         const id = TexturePacker.Instance.resolve({
-            // A flat tangent-space normal where there is no normal map. Marked ignored, so a layer with
-            // only a normal map takes the packer's identity path and reuses that texture untouched.
+            // A flat tangent-space normal where there is no normal map. `ignored` so a layer with only a
+            // normal map takes the packer's identity path and reuses that texture untouched.
             r: L.normalId ? { textureId: L.normalId, channel: 0 } : { constant: 0.5, ignored: true },
             g: L.normalId ? { textureId: L.normalId, channel: 1 } : { constant: 0.5, ignored: true },
             b: L.normalId ? { textureId: L.normalId, channel: 2 } : { constant: 1.0, ignored: true },
@@ -698,8 +682,8 @@ export class Terrain {
         m.properties.set(`u_hasDisp${index}`, L.dispId ? 1 : 0);
     }
 
-    /** Re-resolve every layer's packed normal+height texture. Called once per frame by the renderer;
-     *  this is what picks up a layer whose maps had not finished decoding when it was assigned. */
+    /** Re-resolve every layer's packed normal+height texture. Called once per frame by the renderer, to
+     *  pick up layers whose maps had not finished decoding when they were assigned. */
     public syncPackedLayers(frame: number): void {
         for (let i = 0; i < this._layers.length && i < 4; i++)
             this._syncLayerPack(i, this._layers[i], frame);
@@ -729,10 +713,9 @@ export class Terrain {
 
     /**
      * Configure a layer slot (0..3) and push its uniforms/textures into the composite terrain material.
-     * `source` may be a {@link TerrainMaterial} (its surface + blend defaults are read), or — for
-     * back-compat with old saved scenes — a legacy `{ textureId, tiling, auto, ... }` object (treated
-     * as a plain Basic albedo). Passing null/undefined keeps the current surface and only applies `opts`.
-     * `opts` overrides the blend params (tiling/auto/hRange/sRange) and/or the linked `materialId`.
+     * @param source A {@link TerrainMaterial}, or a legacy `{ textureId, tiling, auto, ... }` object read
+     *               as a plain Basic albedo. Null/undefined keeps the current surface.
+     * @param opts Overrides for the blend params (tiling/auto/hRange/sRange) and the linked `materialId`.
      */
     public setLayer(index: number, source?: TerrainMaterial | Partial<TerrainLayer> | null, opts: Partial<TerrainLayer> = {}): void {
         if (index < 0 || index > 3) return;
@@ -916,8 +899,7 @@ export class Terrain {
 
     /**
      * Re-derive every active foliage layer's prototypes (LOD models, billboard impostor, cull distance,
-     * scatter params) from its current rule, PRESERVING the scattered instances. Called by the editor
-     * after the source mesh asset or terrain material was edited — never re-scatters.
+     * scatter params) from its current rule, PRESERVING the scattered instances. Never re-scatters.
      */
     public refreshFoliagePrototypes(): void {
         for (const { rule } of this._activeFoliageRules()) {
@@ -940,8 +922,8 @@ export class Terrain {
         const touched = new Set<FoliageLayer>();
         const area = Math.PI * radius * radius;
         for (const { rule, layerIndex } of rules) {
-            // density is per m², so a wide brush scatters proportionally more. Capped because a 100-unit
-            // brush at grass density is >60k candidate points, and this runs from a pointer handler.
+            // density is per m², so a wide brush scatters proportionally more. Capped: this runs from a
+            // pointer handler and a 100-unit brush at grass density is >60k candidate points.
             const count = Math.min(MAX_SCATTER_PER_CALL,
                 Math.max(1, Math.round((rule.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * area)));
             for (let i = 0; i < count; i++) {
@@ -972,8 +954,7 @@ export class Terrain {
         return any;
     }
 
-    /** Erase foliage near a world point EXCEPT layers whose name is in keepNames. Used while painting so a
-     *  freshly-painted material's region keeps only that material's own included foliage. */
+    /** Erase foliage near a world point EXCEPT layers whose name is in keepNames. */
     public eraseFoliageExcept(worldPoint: vec3, radius: number, keepNames: string[]): boolean {
         let any = false;
         for (const layer of this._foliage) {
@@ -1001,11 +982,8 @@ export class Terrain {
     /**
      * Regenerate material-driven foliage across the ENTIRE terrain: for each foliage prototype an
      * assigned layer material includes, scatter `density * area` jittered points over the whole surface,
-     * placing where that rule's layer dominates and no present material excludes it.
-     *
-     * The existing instances are wiped first — but ONLY once we know there is something to replace them
-     * with. Clearing ahead of that check is what used to make a mis-set-up terrain silently destroy
-     * hand-painted foliage while appearing to do nothing.
+     * placing where that rule's layer dominates and no present material excludes it. Existing instances
+     * must only be wiped once there is something to replace them with.
      */
     public generateFoliageEverywhere(): FoliageGenerateResult {
         const rules = this._activeFoliageRules();
@@ -1048,9 +1026,8 @@ export class Terrain {
     }
 
     /**
-     * Drop empty runtime foliage layers no active rule names any more — the residue of a renamed rule,
-     * which `_resolveFoliageLayer` would otherwise strand in `_foliage` (and in the save file) forever.
-     * Layers that still hold instances survive: those are user work, not residue.
+     * Drop empty runtime foliage layers no active rule names any more, e.g. the residue of a renamed
+     * rule. Layers that still hold instances survive.
      */
     public pruneFoliage(): number {
         const live = new Set(this._activeFoliageRules().map(r => r.rule.name));
@@ -1070,7 +1047,7 @@ export class Terrain {
 
     /**
      * Analytic ray march against the terrain surface. `origin`/`dir` are world space; returns the
-     * world-space hit point or null. Robust and independent of the physics step (works in the editor).
+     * world-space hit point or null. Independent of the physics step, so it works in the editor.
      */
     public raycast(origin: vec3, dir: vec3, maxDistance = 10000): vec3 | null {
         const step = this._element * 0.5;
@@ -1112,11 +1089,9 @@ export class Terrain {
 
     /**
      * Create/refresh the static Heightfield body and register it with the world (self-heals).
-     *
-     * `material` is the surface the terrain collides as. It matters even though terrain has no friction
-     * settings of its own: cannon only honors a ContactMaterial when BOTH bodies carry a material, so a
-     * terrain left material-less would silently force every character back to the world default friction.
-     * Kept on the instance so a sculpt rebuild re-applies it.
+     * @param material The surface the terrain collides as. Required even though terrain has no friction
+     *                 settings of its own: cannon only honors a ContactMaterial when BOTH bodies carry a
+     *                 material. Kept on the instance so a sculpt rebuild re-applies it.
      */
     public ensureRegistered(world: World, material?: PhysicsMaterial): void {
         this._world = world;
@@ -1142,7 +1117,7 @@ export class Terrain {
 
     /**
      * Refresh the pooled static colliders around `camPos` for collidable foliage. Driven once per step by
-     * PhysicsSystem — which means colliders only exist in play mode, never while authoring.
+     * PhysicsSystem, so colliders only exist in play mode, never while authoring.
      */
     public updateFoliageColliders(world: World, camPos: vec3 | null, material?: PhysicsMaterial): void {
         if (!this.foliageColliders.enabled && !this._colliders) return;
@@ -1174,8 +1149,8 @@ export class Terrain {
     }
 
     /**
-     * Release every GPU/physics resource this terrain owns. Idempotent, because PhysicsSystem calls it
-     * once per frame for a landscape flagged `markForRemoval` until the node actually leaves the scene.
+     * Release every GPU/physics resource this terrain owns. Must stay idempotent: PhysicsSystem calls it
+     * once per frame for a landscape flagged `markForRemoval` until the node leaves the scene.
      */
     public dispose(world?: World): void {
         if (this._disposed) return;
@@ -1185,16 +1160,15 @@ export class Terrain {
         this._body = null;
         this._colliders?.dispose(w ?? undefined);
         this._colliders = null;
-        // Foliage cell buffers reach the renderer through the module-level orphan queue: once the terrain
-        // is detached, the foliage pass no longer walks it to drain collectStaleBuffers().
+        // Foliage cell buffers reach the renderer through the module-level orphan queue: the foliage
+        // pass only walks LIVE landscapes to drain collectStaleBuffers().
         for (const layer of this._foliage) layer.dispose();
         this._foliage = [];
         this._foliageByKey.clear();
         for (const ch of this._chunks) ch.model.mesh.dispose();
         this._chunks = [];
-        // The splat texture is exclusively ours (built in the constructor under a synthetic id), so unlike
-        // an imported texture it is safe to free the GL object as well as drop the registry entry —
-        // removeTexture alone deliberately does not, since other holders may still draw a shared texture.
+        // The splat texture is exclusively ours (built in the constructor under a synthetic id), so it is
+        // safe to free the GL object too; removeTexture alone only drops the registry entry.
         this._splatTex.delete();
         TextureManager.Instance.removeTexture(this._splatId);
         this._world = null;
@@ -1203,8 +1177,8 @@ export class Terrain {
     // --- serialization ------------------------------------------------------------------------
 
     public serialize(): any {
-        // Quantize heights to Uint16 across their own [min,max] range: ~half the size of Float32 with
-        // sub-millimetre precision for typical terrains, and reconstructed exactly enough on load.
+        // Heights quantize to Uint16 across their own [min,max] range: half the size of Float32, with
+        // sub-millimetre precision for typical terrains.
         let min = Infinity, max = -Infinity;
         for (let i = 0; i < this._heights.length; i++) {
             const h = this._heights[i];
@@ -1273,8 +1247,7 @@ export class Terrain {
             const srcRes = json.splatRes ?? terrain._splatRes;
             if (srcRes === terrain._splatRes) terrain._splat.set(splatBytes.subarray(0, terrain._splat.length));
             else {
-                // A resolution change used to DROP the splat entirely, silently resetting every paint
-                // layer to layer 0. Nearest-neighbour resample instead — approximate beats erased.
+                // Nearest-neighbour resample across a resolution change; approximate beats erased.
                 const S = terrain._splatRes;
                 for (let r = 0; r < S; r++) {
                     const sr = Math.min(srcRes - 1, Math.round((S > 1 ? r / (S - 1) : 0) * (srcRes - 1)));

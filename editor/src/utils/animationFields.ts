@@ -3,20 +3,12 @@ import type { AnimationField, AnimationFieldMode, AnimationFieldAxis, AnimationF
 import { cryptoRandomId } from './ids'
 import type { ModelAsset } from './models'
 
-// A reusable, named Animation Field asset — the editor's blend space (mirrors MaterialAsset / ScriptAsset).
+// A reusable, named Animation Field asset — the editor's blend space. A field places clips from ONE
+// animated model at coordinates in a 1D or 2D parameter space; sampling it produces a weighted mix of the
+// surrounding clips. Its `modelId` names the Model asset whose skeleton and clips it blends.
 //
-// A field places clips from ONE animated model at coordinates in a 1D or 2D parameter space; sampling it
-// produces a weighted mix of the surrounding clips instead of a single clip. It is authored in its own
-// editor mode and consumed by the animation state machine as a state that plays a field.
-//
-// The asset owns a `modelId`: the Model asset whose skeleton and clips it blends. That is what makes the
-// field a library asset rather than something bolted to one placed node — every instance of that model can
-// use the same field.
-//
-// NOTE on the runtime: an AnimationState stores `fieldId` (the link) AND an embedded copy of the field,
-// written by the state machine's Apply. The embedded copy is what plays, so a field travels inside the
-// serialized state machine through scene saves, templates, bundles and the published game with no extra
-// plumbing. See toRuntimeField.
+// An AnimationState stores `fieldId` AND an embedded copy of the field, written by the state machine's
+// Apply. The EMBEDDED copy is what plays, so a field travels with the serialized machine. See toRuntimeField.
 
 export type { AnimationField, AnimationFieldMode, AnimationFieldAxis, AnimationFieldSample }
 
@@ -35,9 +27,8 @@ export type AnimationFieldAsset = {
 }
 
 export const DEFAULT_X_AXIS: AnimationFieldAxis = { name: 'Speed', min: 0, max: 100 }
-// `wrap` on by default, because this axis is a HEADING: -180 and +180 are the same direction, and without it
-// a character turning through the seam swings the probe across the whole range in one frame and the blend
-// snaps. A new field gets this right; an existing one is nudged in the panel rather than changed underneath.
+// `wrap` must default on: this axis is a HEADING, so -180 and +180 are the same direction and a character
+// turning through the seam otherwise swings the probe across the whole range in one frame.
 export const DEFAULT_Y_AXIS: AnimationFieldAxis = { name: 'Direction', min: -180, max: 180, wrap: true }
 
 export function buildAnimationFieldAsset(name: string, modelId: string, id?: string): AnimationFieldAsset {
@@ -54,10 +45,8 @@ export function buildAnimationFieldAsset(name: string, modelId: string, id?: str
 
 /**
  * The engine-facing view of a field: exactly what an AnimationState embeds.
- *
- * `yAxis` is dropped in 1D mode on purpose. The asset keeps it so the editor can restore it when the user
- * flips back to 2D, but shipping it would put a second, unused axis into every serialized scene — and worse,
- * would make an embedded copy look like it had changed whenever the user merely touched the hidden axis.
+ * `yAxis` must be dropped in 1D mode — the asset keeps it for the editor, but shipping it would make an
+ * embedded copy look changed whenever the user merely touched the hidden axis.
  */
 export function toRuntimeField(asset: AnimationFieldAsset): AnimationField {
   const field: AnimationField = {
@@ -66,18 +55,14 @@ export function toRuntimeField(asset: AnimationFieldAsset): AnimationField {
     samples: asset.samples.map(s => ({ ...s })),
   }
   if (asset.mode === '2d') field.yAxis = { ...asset.yAxis }
-  // Only written when authored. Absent means the engine's default, and emitting an explicit copy of that
-  // default would put a value into every scene that the engine could then never change.
+  // Only written when authored: absent means the engine's default, which must stay changeable.
   if (typeof asset.weightSmoothing === 'number') field.weightSmoothing = asset.weightSmoothing
   return field
 }
 
 /**
- * The skinned ModelNode inside an instantiated model subtree.
- *
- * A model asset instantiates as a holder Node with the ModelNodes beneath it, so the root is usually NOT
- * the thing carrying the skin. Returns the first skinned, animator-bearing ModelNode in tree order — the
- * one the field editor previews and drives.
+ * The first skinned, animator-bearing ModelNode inside an instantiated model subtree, in tree order.
+ * The root is usually NOT the thing carrying the skin: a model asset instantiates as a holder Node.
  */
 export function firstSkinnedModelNode(root: Node | null): ModelNode | null {
   if (!root) return null
@@ -92,9 +77,7 @@ export function firstSkinnedModelNode(root: Node | null): ModelNode | null {
 
 /**
  * The animation clip names baked into a Model asset's serialized subtree.
- *
- * Read straight from `nodeJson` so a field can be created, listed and validated without instantiating the
- * model into a scene — the editor needs the clip list in pickers and warnings, far from any live preview.
+ * Read straight from `nodeJson`, so pickers and warnings can list clips without instantiating the model.
  */
 export function clipsOfModelAsset(asset: ModelAsset | undefined): string[] {
   const out: string[] = []
@@ -129,11 +112,8 @@ export function sampleRate(s: AnimationFieldSample): number {
 /**
  * Re-embed a field into every state of a state machine that links to it, returning a NEW machine (or the
  * original when nothing referenced it, so callers can skip a pointless write).
- *
- * This is what keeps embed-on-Apply honest: editing a field would otherwise leave already-applied nodes
- * playing the copy they captured. `fields` is the whole library so a machine referencing several fields
- * refreshes them all in one pass; a state whose field asset has been deleted has its copy cleared, which
- * degrades it to "no clip" rather than leaving a pose nothing can explain.
+ * `fields` is the whole library, so a machine referencing several refreshes them all in one pass. A state
+ * whose field asset was deleted has its copy CLEARED, degrading it to "no clip".
  */
 export function reembedFields<T extends { states: any[] }>(sm: T, fields: AnimationFieldAsset[]): T {
   if (!sm?.states?.length) return sm

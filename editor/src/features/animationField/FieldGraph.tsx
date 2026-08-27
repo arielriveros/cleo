@@ -3,14 +3,8 @@ import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
 
 // The blend-space plot: the Animation Field mode's center canvas, an absolute overlay over the WebGL
-// viewport (same placement as StateGraph in animation mode).
-//
-// Hand-rolled SVG rather than react-flow: this is a CONTINUOUS coordinate space with real axis units, where
-// a point's position IS its data. A node graph gives free-floating layout coordinates, which is the exact
-// opposite of what a blend space needs.
-//
-// Interaction: drag a sample to move it in axis space; drag anywhere else to move the probe. The model
-// behind the plot re-blends live, so authoring and previewing are the same gesture.
+// viewport. Hand-rolled SVG because a sample's position IS its data, in real axis units. Drag a sample to
+// move it in axis space; drag anywhere else to move the probe.
 
 const PAD = { left: 56, right: 20, top: 20, bottom: 44 }
 /** How close (in px) a pointer must be to grab a sample instead of moving the probe. */
@@ -25,8 +19,8 @@ export default function FieldGraph() {
   /** Index of the sample being dragged, or -1 (the probe is being dragged). */
   const dragRef = useRef<number | null>(null)
 
-  // The plot is drawn in pixel coordinates, so it has to re-measure whenever its box changes — which in a
-  // dockview editor is constantly (panel drags, sidebar resizes, mode switches), not just on window resize.
+  // The plot is drawn in pixel coordinates, so it must re-measure on every box change, not just on window
+  // resize: panel drags, sidebar resizes and mode switches all move it.
   const measure = useCallback((el: HTMLDivElement | null) => {
     boxRef.current = el
   }, [])
@@ -50,8 +44,8 @@ export default function FieldGraph() {
   const plotW = Math.max(1, size.w - PAD.left - PAD.right)
   const plotH = Math.max(1, size.h - PAD.top - PAD.bottom)
 
-  // Axis <-> pixel. The Y axis is inverted (SVG grows downward, a graph's Y grows upward). In 1D the plot
-  // collapses to a single horizontal line, so every sample sits at the vertical midpoint.
+  // Axis <-> pixel. The Y axis is inverted: SVG grows downward, a graph's Y grows upward. In 1D every
+  // sample sits at the vertical midpoint.
   const spanX = field.xAxis.max - field.xAxis.min || 1
   const spanY = field.yAxis.max - field.yAxis.min || 1
   const px = (x: number) => PAD.left + ((x - field.xAxis.min) / spanX) * plotW
@@ -85,8 +79,8 @@ export default function FieldGraph() {
     if (hit >= 0) setSelected(hit)
     else setProbe(ux(e.clientX, rect), is2D ? uy(e.clientY, rect) : probe.y)
 
-    // Listeners go on `window`, not the SVG: a pointer that leaves the plot mid-drag must keep being
-    // tracked, or the sample sticks to wherever it happened to cross the edge.
+    // Listeners must go on `window`, not the SVG: a pointer that leaves the plot mid-drag has to keep
+    // being tracked.
     const move = (ev: PointerEvent) => {
       const r = el.getBoundingClientRect()
       const i = dragRef.current
@@ -125,8 +119,7 @@ export default function FieldGraph() {
     <div
       data-cleo-overlay
       className='absolute inset-0 z-10 flex flex-col'
-      // The plot sits over the 3D preview; the model stays visible through it so the pose can be judged
-      // while the blend is being authored.
+      // The plot sits over the 3D preview and must stay transparent so the posed model shows through.
       style={{ background: 'transparent' }}
       onMouseDown={e => e.stopPropagation()}>
 

@@ -55,9 +55,8 @@ export type PendingModelImportView = {
   /** Referenced texture files not present in the upload — pickable. `from` names the material + slot. */
   missing: UnresolvedTexture[];
   /**
-   * References no upload can fix: a texture embedded in the model itself that could not be decoded (a
-   * .dds/.tga payload, or raw pixels). Listed separately because offering a file picker for one would be
-   * a dead end, and because saying nothing is what let an untextured FBX report "all textures present".
+   * References no upload can fix: a texture embedded in the model itself that could not be decoded
+   * (a .dds/.tga payload, or raw pixels). Not pickable.
    */
   unloadable: UnresolvedTexture[];
   sizeRadius: number;     // combined bounding radius at scale 1 (diameter = 2*radius)
@@ -71,16 +70,14 @@ export type ModelImportDecision = {
   separate: boolean;
   /**
    * Collapse the file's sub-meshes into ONE mesh carrying one submesh per material — the opposite of
-   * `separate`. An importer splits a model per material and per source mesh object, so a character
-   * arrives as several nodes over one skeleton; merged, it is one node with one Animator.
+   * `separate`. Merged, a character is one node with one Animator instead of several over one skeleton.
    */
   merge: boolean;
 };
 
 // ---- Import progress -------------------------------------------------------------------------------
-// Every step importModelFiles walks a bundle through, in order. These map onto the shared progress store's
-// generic steps (features/progress) — the stage a bundle is in IS what the user is told, so the window
-// cannot drift from what the importer is actually doing.
+// Every step importModelFiles walks a bundle through, in order. Maps onto the shared progress store's
+// generic steps (features/progress).
 type ImportStage =
   | 'queued'       // not started
   | 'parsing'      // Loader: assimp/GLTF parse of the model files
@@ -126,8 +123,8 @@ export type RetargetBoneOption = { node: number; name: string };
 // bone mapping (retarget) the user can inspect and correct — all awaiting review in the import modal.
 export type PendingAnimationImportView = {
   fileName: string;
-  /** `animatedNodes` are the source bones THIS clip drives, so the modal can recount matched/missing live
-   *  against the (possibly edited) mapping rather than showing the stale open-time report. */
+  /** `animatedNodes` are the source bones THIS clip drives, so the modal can recount matched/missing
+   *  against the edited mapping. */
   clips: { name: string; report: AnimationCompatibility; animatedNodes: number[] }[];
   /** The source→target bone mapping the reports were computed from. Edited in the modal. */
   mapping: BoneMapping;
@@ -135,8 +132,6 @@ export type PendingAnimationImportView = {
   sourceBones: RetargetBoneOption[];
   targetBones: RetargetBoneOption[];
 };
-// The user's decision: which clips to add (by index), and the mapping as finally edited. The mapping rides
-// back so the accept path retargets against exactly what the user saw and corrected.
 /** The rig picker's data: which skinned models the animation could be retargeted onto. */
 export type PendingRigPickView = { fileName: string; models: { id: string; name: string }[] };
 
@@ -144,11 +139,8 @@ export type AnimationImportDecision = {
   include: boolean[];
   mapping: BoneMapping;
   /**
-   * Per-clip name as typed in the modal, parallel to `include`. Optional so the null/cancel path and any
-   * other caller keep compiling; a blank or missing entry keeps the clip's parsed name.
-   *
-   * Renaming HERE rather than afterwards matters: a later rename rewrites state-machine references
-   * (StateMachineContext.renameClip) but not Animation Field samples, which reference clips by name.
+   * Per-clip name as typed in the modal, parallel to `include`; blank or missing keeps the parsed name.
+   * Rename HERE: a later rename rewrites state-machine references but not Animation Field samples.
    */
   names?: string[];
 };
@@ -179,9 +171,8 @@ import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
 import { readBackendPreference } from './renderer/backendPreference';
 
-// Rasterise the light-probe glyph (an inner ring + a dashed outer ring, matching the inspector's
-// ProbeIcon) to a white-on-transparent PNG data URL, for use as the probe's viewport billboard texture.
-// A sprite Material.Basic tints this white icon to the probe's cyan.
+// Rasterise the light-probe glyph (inner ring + dashed outer ring, matching the inspector's ProbeIcon) to
+// a white-on-transparent PNG data URL for the probe's billboard; a sprite Material.Basic tints it cyan.
 function buildProbeIconDataURL(): string {
   const size = 64, cx = size / 2, cy = size / 2;
   const canvas = document.createElement('canvas');
@@ -197,9 +188,7 @@ function buildProbeIconDataURL(): string {
 }
 
 // Rasterise the light glyph (a filled core with eight rays, matching the inspector's LightIcon) to a
-// white-on-transparent PNG data URL, for the light's viewport billboard. Same reason as the probe icon
-// above: a sprite needs a raster texture, so this is the one editor glyph that cannot simply be a
-// component. A sprite Material.Basic tints the white icon to the light's own colour.
+// white-on-transparent PNG data URL for the light's billboard; a sprite Material.Basic tints it.
 function buildLightIconDataURL(): string {
   const size = 64, c = size / 2;
   const canvas = document.createElement('canvas');
@@ -251,12 +240,8 @@ type CylinderShapeDescription = {
 };
 
 /**
- * Capsule — the right collider for a character: it rests on an analytic sphere cap, so it rolls over
- * heightfield triangle edges instead of catching on them the way a box does.
- *
- * `height` is the TOTAL tip-to-tip height (as in Unity/Godot), so the straight section is
- * `height - 2 * radius` and a height at or below `2 * radius` is simply a sphere. cannon has no capsule
- * primitive, so `Shape.Capsule` compounds one from a cylinder and two spheres at load.
+ * Capsule collider. `height` is the TOTAL tip-to-tip height, so the straight section is
+ * `height - 2 * radius` and a height at or below `2 * radius` is a sphere.
  */
 type CapsuleShapeDescription = {
   type: 'capsule';
@@ -275,9 +260,8 @@ type PlaneShapeDescription = {
 };
 
 /**
- * Convex hull fitted to a mesh (see `hullFromPositions`). Vertices/faces are baked at authoring time
- * rather than rebuilt on load, and are centered on the hull's centroid — that displacement is folded
- * into `offset`, so the hull can be nudged around like any other shape.
+ * Convex hull fitted to a mesh (see `hullFromPositions`). Vertices/faces are baked at authoring time and
+ * centered on the hull's centroid; that displacement is folded into `offset`.
  */
 type ConvexShapeDescription = {
   type: 'convex';
@@ -288,8 +272,7 @@ type ConvexShapeDescription = {
   vertices: number[][];
   faces: number[][];
   /**
-   * Hull algorithm version. 3 = AABB-anchored carve (low = the bounding box, higher levels cut
-   * volume off with supporting planes) with an absolute containment audit over every mesh vertex.
+   * Hull algorithm version. 3 = AABB-anchored carve with a containment audit over every mesh vertex.
    * Older hulls are rebuilt on load by the editor-helper reconciler.
    */
   v?: number;
@@ -302,29 +285,20 @@ export type BodyDescription = {
   linearConstraints: [number, number, number];
   angularConstraints: [number, number, number];
   /**
-   * Surface properties. Optional because scenes saved before they existed have neither — the engine
-   * defaults them to 0.3 / 0, which is exactly how those scenes already behaved.
-   *
-   * Two bodies combine with min(friction) and max(restitution), so the deliberately-set value wins:
-   * a character at friction 0 stays frictionless on any ground, and a bouncy ball bounces off a dead wall.
+   * Surface properties; absent = the engine defaults, 0.3 friction / 0 restitution.
+   * Two bodies combine with min(friction) and max(restitution), so the deliberately-set value wins.
    */
   friction?: number;
   restitution?: number;
   /**
-   * The two independent channels a body participates in. Optional for the same reason as the surface
-   * properties above: scenes saved before they existed have neither, and absent must mean `true` —
-   * i.e. every such body keeps simulating and keeps blocking the camera exactly as it always did.
-   *
-   * `simulatePhysics: false` leaves the body in the world as a ghost the solver ignores but a camera
-   * probe still sees; `cameraCollision: false` is the reverse. Neither implies the other.
+   * Two independent channels; absent means `true` for both. `simulatePhysics: false` leaves a ghost the
+   * solver ignores but a camera probe still sees; `cameraCollision: false` is the reverse.
    */
   simulatePhysics?: boolean;
   cameraCollision?: boolean;
   /**
-   * Meters below the collider's feet that still count as grounded. Optional and defaulting to `0` (off)
-   * for the same reason as the fields above: scenes saved before it existed have none, and the engine
-   * treats absent as 0 — grounding from solver contacts only, exactly as those scenes behaved. A small
-   * value (~0.1–0.2) probes the ground each frame so `isGrounded` stops flickering under a resting body.
+   * Meters below the collider's feet that still count as grounded. Absent/0 = off, grounding from solver
+   * contacts only. ~0.1–0.2 stops `isGrounded` flickering under a resting body.
    */
   groundProbeDistance?: number;
   /** Time constant for this body's MEASURED motion, in seconds. 0/absent = the engine default (~0.09s). */
@@ -335,19 +309,13 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 
 export type LoadingProgress = { loaded: number; total: number; label: string };
 
-// Soft pastel-blue editor viewport background, used across every editor mode. Projects saved with the old
-// grey default are migrated to this on load (see initializeEngine).
+// Soft pastel-blue editor viewport background, used across every editor mode.
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
 const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
 
 /**
- * Persist an asset library to IndexedDB whenever it changes.
- *
- * Each library is stored under a single key, so a write rewrites the WHOLE array — and a mesh library
- * carries full vertex data plus embedded base64 textures. Importing several models in a row would
- * therefore re-clone the entire library once per model. Two things fix that:
- *  - the write is debounced, so a burst of adds collapses into one write;
- *  - it goes through the project worker (saveToStorage), so the IndexedDB transaction runs off-thread.
+ * Persist an asset library to IndexedDB whenever it changes. A write rewrites the WHOLE array, so it is
+ * debounced and goes through the project worker (saveToStorage) to keep the transaction off-thread.
  */
 function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefObject<boolean>): void {
   useEffect(() => {
@@ -362,15 +330,9 @@ function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefO
 export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
 
 /**
- * Whether a mode actually paints the 3D viewport, or replaces it with a full-panel editor of its own.
- *
- * The viewport's floating chrome — the gizmo-mode switch, the 2D/3D view toggle, the debug menu, the
- * transform gizmo — only means anything over a render. It used to be gated by a denylist of
- * `editorMode !== 'x'` per control, so every mode added afterwards leaked: `script` and `tileset` cover
- * the canvas completely, and the chrome floated on top of the code editor and the tileset atlas.
- *
- * An exhaustive Record, deliberately: adding a mode to the union without deciding this is a compile
- * error, which a denylist could never give.
+ * Whether a mode paints the 3D viewport, or replaces it with a full-panel editor of its own; the
+ * viewport's floating chrome is gated on it. Exhaustive by design — a new mode with no entry is a
+ * compile error.
  */
 export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   scene: true,
@@ -390,32 +352,15 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
-// Browser-style editor tabs. The scene tab hosts the open scene asset and its scene/landscape/renderer
-// sub-mode; template and material tabs each own a live edit session (a throwaway Scene in
-// tabRuntimeRef). `editorMode` is derived from the active tab (see EngineProvider).
-//
-// A 'model' tab is an edit session for an imported model asset: one subtree per LOD level in a throwaway
-// scene (the model's parts, transforms and material edited via the normal Scene + Properties panels,
-// LOD/cull via the Model inspector), saved back to the library and propagated to placed copies. Parts
-// added here adopt the model's material — see adoptModelMaterial (models.ts) for why.
-// Opening one also renders the asset's thumbnail (imports don't — that used to stall the main thread).
-// A 'script' tab is a dedicated code editor for a Script asset (no 3D scene): the full-panel editor renders
-// over the viewport, with a Save Script action. Its working source buffers per-tab until saved.
-// An 'animationField' tab is an edit session for an Animation Field asset: the field's source Model asset
-// is instantiated into a throwaway scene and driven directly by the field editor's transport, while the
-// blend space itself is authored on a 2D plot overlaying the viewport.
-// A 'tileset' tab is a pure 2D editor for a Tileset asset — the atlas image with its slicing grid drawn
-// over it, plus per-tile metadata. Like a script tab it owns NO 3D scene, so it never gets a tabRuntimeRef
-// entry and nothing about it touches the renderer.
+// Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene
+// tab hosts the open scene asset; the library tabs each own a live edit session (a throwaway Scene in
+// tabRuntimeRef), except 'script' and 'tileset', which own no 3D scene and get no tabRuntimeRef entry.
 export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
 
 /**
- * The scene tab's id — a fixed sentinel, unlike the library tabs' random ids.
- *
- * It is deliberately NOT the open scene's id: only one scene is ever open (openScene parses the target
- * blob into the one live Scene), so the tab is a stable slot that different scene assets pass through.
- * Keying it by scene id would leak a dirtyTabs entry per scene switch and buy nothing. What the tab
- * SHOWS — its title — follows the open scene's name; see the tabs/openSceneId sync in EngineProvider.
+ * The scene tab's id — a fixed sentinel, unlike the library tabs' random ids. Deliberately NOT the open
+ * scene's id: the tab is a stable slot different scene assets pass through, and only its title follows
+ * the open scene's name.
  */
 export const SCENE_TAB_ID = 'main';
 
@@ -462,8 +407,7 @@ export interface EditorTab {
   tilesetId?: string | null; // tileset tabs: the edited tileset asset id
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
-// No 'move': a landscape is positioned with the ordinary transform gizmo in scene mode, like any other
-// node. Landscape mode is brushes only.
+// No 'move': landscape mode is brushes only; a landscape is positioned with the scene-mode gizmo.
 export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
 export type TerrainBrushState = {
   mode: TerrainBrushMode;
@@ -484,8 +428,7 @@ export type TilemapTool =
 
 /**
  * The tilemap painting state, shared between the floating tool card, the palette panel and the viewport
- * brush. A ref rather than state for the same reason TerrainBrushState is one: the brush reads it from
- * pointer handlers that register once, and re-registering them on every slider tick would drop strokes.
+ * brush. Held in a ref: the brush reads it from pointer handlers that register once.
  */
 export type TilemapBrushState = {
   tool: TilemapTool;
@@ -501,7 +444,6 @@ export type TilemapBrushState = {
   terrainId: number | null;
 };
 
-// Create a context to hold the engine and scene
 const EngineContext = createContext<{
   instance: CleoEngine | null;
   editorScene: Scene;
@@ -512,17 +454,14 @@ const EngineContext = createContext<{
   isPlayMode: boolean;
   isSceneReady: boolean;
   /**
-   * True once `preloadTextures()` has settled, so the TextureManager's contents are authoritative.
-   * Until then the registry is still filling and a texture that merely looks absent may only be late —
-   * which is why the asset index refuses to garbage-collect texture entries before this flips.
+   * True once `preloadTextures()` has settled, so the TextureManager's contents are authoritative. Before
+   * that, a texture that looks absent may only be late: do not GC texture entries from the asset index.
    */
   texturesPreloaded: boolean;
   editorMode: EditorMode;
   setEditorMode: (mode: EditorMode) => void;
-  // Transform gizmo mode (move/rotate/scale)
   gizmoMode: GizmoMode;
   setGizmoMode: (mode: GizmoMode) => void;
-  // Editor tabs (Main + template tabs)
   tabs: EditorTab[];
   activeTabId: string;
   activeTab: EditorTab;
@@ -537,22 +476,18 @@ const EngineContext = createContext<{
   /** StateMachineProvider publishes the live animation session's Apply here (see saveTabById). */
   registerAnimationApply: (reg: { tabId: string; apply: () => void } | null) => void;
   registerTilesetApply: (reg: { tabId: string; apply: () => void } | null) => void;
-  // Template editor
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
   templateRootId: string | null;
-  // Material editor
   enterMaterialEditor: (materialId?: string) => void;
   createMaterialForNode: (node: Node, submesh?: number) => void;
   editingMaterialName: string | null;
   setActiveMaterialName: (name: string) => void;
-  // Terrain-material editor
   enterTerrainMaterialEditor: (terrainMaterialId?: string) => void;
   editingTerrainMaterialName: string | null;
   editingTerrainMaterialNode: Node | null;
   refreshTerrainMaterialPreview: () => void;
   setActiveTerrainMaterialName: (name: string) => void;
-  // Animation editor
   enterAnimationEditor: (nodeId: string) => void;
   animationTargetId: string | null; // cloned skinned model in the active animation tab's scene
   animationSourceId: string | null; // original node in the main scene (state-machine write-back target)
@@ -564,22 +499,17 @@ const EngineContext = createContext<{
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[]; }>;
-  // UI overlay state (outside 3D scene)
-  // Play lifecycle
   startPlay: () => void;
   stopPlay: () => void;
   pausePlay: () => void;
-  // Node templates
   templates: Template[];
   addTemplate: (t: Template) => void;
   removeTemplate: (id: string) => void;
   updateTemplate: (id: string, t: Template) => void;
-  // Material assets
   materials: MaterialAsset[];
   addMaterial: (m: MaterialAsset) => void;
   removeMaterial: (id: string) => void;
   updateMaterial: (id: string, m: MaterialAsset) => void;
-  // Terrain-material assets
   terrainMaterials: TerrainMaterialAsset[];
   addTerrainMaterial: (m: TerrainMaterialAsset) => void;
   removeTerrainMaterial: (id: string) => void;
@@ -601,9 +531,8 @@ const EngineContext = createContext<{
   saveScriptSource: (id: string, source: string) => void;
   /**
    * Take a source edited outside the editor (the script workspace folder) as the new truth for a script:
-   * saves it, refreshes any open Script tab's buffer and clears that tab's dirty flag.
-   * Returns whether the tab was holding UNSAVED edits that this replaced -- the caller decides whether
-   * that is a conflict worth surfacing.
+   * saves it, refreshes any open Script tab's buffer and clears that tab's dirty flag. Returns whether the
+   * tab was holding UNSAVED edits that this replaced.
    */
   adoptExternalScriptSource: (id: string, source: string) => { replacedUnsaved: boolean };
   /** Rename a script asset, keeping its source and base type (used when a workspace file is renamed). */
@@ -647,7 +576,6 @@ const EngineContext = createContext<{
   setScriptTabSource: (tabId: string, scriptId: string, source: string) => void;
   /** The buffered working source for a script tab, or undefined. */
   getScriptTabSource: (scriptId: string) => string | undefined;
-  // Mesh assets (imported models)
   models: ModelAsset[];
   addModel: (m: ModelAsset) => void;
   removeModel: (id: string) => void;
@@ -663,7 +591,6 @@ const EngineContext = createContext<{
   unlinkAnimationFromModel: (modelId: string, animationId: string) => void;
   /** Rename a clip inside a shared `.anim` asset, or toggle its root motion. */
   editSharedClip: (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => void;
-  // Mesh editor (active mesh tab): LOD/cull authoring + save-and-propagate
   modelSession: ModelEditSession | null;
   /** Node id of the active LOD level's root in the model tab scene (viewport drop parent), or null. */
   modelEditTargetId: string | null;
@@ -677,11 +604,9 @@ const EngineContext = createContext<{
   importModelFiles: (files: File[]) => Promise<void>;
   // True once every IndexedDB-backed asset library has finished its initial read.
   assetsLoaded: boolean;
-  // Mesh import review modal
   pendingModelImport: PendingModelImportView | null;
   resolveModelImport: (decision: ModelImportDecision | null) => void;
-  // Live model-import progress (null when there is no run and nothing left to report)
-  // Animation import (into the Animation Editor's model)
+  // Animation import, into the Animation Editor's model.
   importAnimationFiles: (files: File[]) => Promise<void>;
   importSkeletonNames: (files: File[]) => Promise<void>;
   /** Persist the IK rig for the model open in the Animation Editor, to the asset and every instance. */
@@ -695,10 +620,8 @@ const EngineContext = createContext<{
   pendingRigPick: PendingRigPickView | null;
   resolveRigPick: (modelId: string | null) => void;
   resolveAnimationImport: (decision: AnimationImportDecision | null) => void;
-  // Project persistence
   savingState: SavingState;
   replaceProjectMeta: (meta: ProjectMeta) => Promise<void>;
-  // Multi-scene project
   sceneList: SceneMeta[];
   mainSceneId: string;
   openSceneId: string;
@@ -713,10 +636,8 @@ const EngineContext = createContext<{
   duplicateScene: (sceneId: string) => Promise<string | null>;
   setMainScene: (sceneId: string) => void;
   /**
-   * What the open scene IS: a 2D scene is authored with tilemaps, a 3D one with landscapes. Persisted on
-   * SceneMeta, edited only from the scene settings panel. It decides which sculpt mode the top bar offers
-   * and which of the two a published build keeps.
-   *
+   * What the open scene IS: 2D is authored with tilemaps, 3D with landscapes. Persisted on SceneMeta and
+   * edited only from the scene settings panel; decides which of the two a published build keeps.
    * NOT the camera — see viewDimension for the rig you are looking through.
    */
   sceneDimension: '2D' | '3D';
@@ -725,20 +646,17 @@ const EngineContext = createContext<{
   pendingDimensionConfirm: { to: '2D' | '3D'; losing: 'tilemap' | 'landscape'; count: number } | null;
   resolveDimensionConfirm: (proceed: boolean) => void;
   /**
-   * Which camera rig the viewport is looking through — orthographic pan/zoom or free-fly.
-   *
-   * Editor-session state, deliberately NOT the scene's authored dimension: looking at a 3D scene through
-   * an orthographic camera is a useful thing to do and must not rewrite what the scene is. Follows the
-   * scene on open and on an authored change; never persisted.
+   * Which camera rig the viewport is looking through — orthographic pan/zoom or free-fly. Editor-session
+   * state, NOT the scene's authored dimension: follows the scene on open and on an authored change, and
+   * is never persisted.
    */
   viewDimension: '2D' | '3D';
   setViewDimension: (dimension: '2D' | '3D') => void;
   // Unsaved-changes confirm dialog (promise parked by openScene/closeTab, resolved by UnsavedSceneModal)
   pendingSceneConfirm: { sceneName: string; action: 'switch' | 'close' } | null;
   resolveSceneConfirm: (decision: 'save' | 'discard' | 'cancel') => void;
-  /** Mark a tab as having unsaved edits. For edits the SCENE_CHANGED listener cannot see (e.g. animation
-   *  state-machine edits, which live in StateMachineContext's own React state). */
-  /** `reason` labels the cause in the Dirty debug channel (see utils/dirtyDebug). */
+  /** Mark a tab as having unsaved edits, for edits the SCENE_CHANGED listener cannot see (e.g. animation
+   *  state-machine edits). `reason` labels the cause in the Dirty debug channel (see utils/dirtyDebug). */
   markTabDirty: (tabId: string, reason?: string) => void;
   clearTabDirty: (tabId: string) => void;
   /** Run `fn` without its scene edits marking any tab dirty — for editor chrome (gizmos, helper icons)
@@ -903,15 +821,13 @@ const EngineContext = createContext<{
     isDirtySuppressed: () => false,
   });
   
-  // Create a custom hook to access the engine and scene from anywhere
 export const useCleoEngine = () => {
     return useContext(EngineContext);
 };
 
 /**
- * The live editing scene. `spawnRulesEnabled` is off from the moment it exists, not set later: Scene.parse
- * applies spawnOnStart, and setupInitialScene() parses into this object during boot — a flag assigned after
- * that would arrive too late and hide every dormant node in the editor viewport.
+ * The live editing scene. `spawnRulesEnabled` must be off from construction, never assigned later:
+ * Scene.parse applies spawnOnStart and setupInitialScene() parses into this object during boot.
  */
 function createEditorScene(): Scene {
   const scene = new Scene();
@@ -929,17 +845,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [isSceneReady, setIsSceneReady] = useState(false);
   const [texturesPreloaded, setTexturesPreloaded] = useState(false);
   /**
-   * The open-documents session from the last visit, read ONCE, synchronously, before the first render.
-   *
-   * It has to be synchronous. `editorMode` is derived during render from the active tab, and DockLayout's
-   * controller reads it on its very first effect — so restoring in an effect instead would build the scene
-   * mode's panel layout, show it, and then rebuild the real one a frame later.
+   * The open-documents session from the last visit. Must be read ONCE and synchronously before the first
+   * render: `editorMode` is derived during render, and DockLayout's controller reads it on its first effect.
    */
   const [restoredSession] = useState(() => loadTabState(SCENE_TAB_ID));
   // The Main tab's sub-mode (scene/landscape/renderer). `editorMode` exposed to consumers is derived
   // from the active tab — 'template' when a template tab is active, else this.
   const [mainMode, setMainMode] = useState<MainMode>(restoredSession.mainMode);
-  // Active transform-gizmo mode (move/rotate/scale), driven by the viewport toggle.
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('position');
   /** Where Play was pressed from, so Stop can put the user back. Null while play started on the scene tab. */
   const playReturnRef = useRef<{ tabId: string; mainMode: MainMode } | null>(null);
@@ -949,11 +861,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // value would be a commit behind.
   const mainModeRef = useRef(mainMode);
   mainModeRef.current = mainMode;
-  // Editor tabs: the Main tab (real game scene) plus any open template tabs. Each template tab's live
-  // scene + root live in tabRuntimeRef (not React state — Scene objects shouldn't be serialized).
-  //
-  // Restored tabs arrive as METADATA only: their runtime sessions are built lazily (see hydrateTab), and the
-  // boot effect prunes any whose asset has since been deleted.
+  // Editor tabs: the Main tab (real game scene) plus any open library tabs. Each tab's live scene + root
+  // live in tabRuntimeRef, not React state. Restored tabs arrive as METADATA only — their runtime sessions
+  // are built lazily (see hydrateTab), and the boot effect prunes any whose asset has since been deleted.
   const [tabs, setTabs] = useState<EditorTab[]>(restoredSession.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(restoredSession.activeTabId);
   /** Restored tab ids with no runtime yet. Emptied as each is hydrated on first activation. */
@@ -965,12 +875,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const bootTabsDoneRef = useRef(false);
 
   /**
-   * Put a freshly built tab into the strip — the tail every `enter*Editor` ends with.
-   *
-   * With `adoptTabId` the builder was called to HYDRATE a restored placeholder rather than to open something
-   * new, so the tab is replaced in place (keeping its id and its position in the strip) and activation is
-   * left to the caller: hydration runs *before* the active tab is committed, and activating here would
-   * commit it early, in the wrong order.
+   * Put a freshly built tab into the strip — the tail every `enter*Editor` ends with. With `adoptTabId` the
+   * tab replaces a restored placeholder in place (same id, same position) and activation is left to the
+   * caller: hydration runs before the active tab is committed.
    */
   const commitTab = (tab: EditorTab, adoptTabId?: string) => {
     if (adoptTabId) {
@@ -986,7 +893,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
   const dirtyTabsRef = useRef<Record<string, boolean>>({});
   /** Name a tab for the Dirty debug channel. Reads tabsRef rather than the `tabs` closure so async flows
-   *  never log a stale title; the ref is declared further down but is only ever read at call time. */
+   *  never log a stale title. */
   const labelForTab = (id: string) => {
     const tab = tabsRef.current.find(t => t.id === id);
     return tab ? `${id} (${tab.kind} "${tab.title}")` : id;
@@ -1012,7 +919,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const activeTabKindRef = useRef<TabKind>('scene');
   const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
   // Propagation (the sync*Instances family) edits live scenes and so emits SCENE_CHANGED, which mark()
-  // would blame on the ACTIVE tab — including the tab that just saved. Hold this while propagating.
+  // would blame on the ACTIVE tab. Hold this while propagating.
   const dirtySuppressRef = useRef(false);
   /** Run `fn` (synchronous — the sync*Instances family all are) without its edits marking any tab dirty. */
   const withoutDirty = <T,>(fn: () => T): T => {
@@ -1021,26 +928,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     try { return fn(); } finally { dirtySuppressRef.current = prev; }
   };
   const isDirtySuppressed = () => dirtySuppressRef.current;
-  // Thumbnail rendering builds throwaway scenes whose node inserts emit SCENE_CHANGED, which would
-  // otherwise mark the active tab unsaved — including right after a save cleared it. Installed once here
-  // rather than threaded through every render call, because nothing that module does is ever a user edit.
+  // Thumbnail rendering builds throwaway scenes whose node inserts emit SCENE_CHANGED; nothing that module
+  // does is ever a user edit.
   setThumbnailDirtySuppressor(withoutDirty);
   const [savingState, setSavingState] = useState<SavingState>('idle');
   // The rig the viewport is currently looking through. A ref as well as state because applyActiveTab
-   // reads it off-render to restore the Main tab's view when returning from an asset tab (those always
-   // render in 3D). The scene's AUTHORED dimension is a different thing entirely — see setSceneDimension.
+  // reads it off-render. The scene's AUTHORED dimension is a different thing — see setSceneDimension.
   const [viewDimension, setViewDimensionState] = useState<'2D' | '3D'>('3D');
   const viewDimensionRef = useRef<'2D' | '3D'>('3D');
   // Which rig is currently INSTALLED on the camera. Distinct from viewDimensionRef, which tracks the
   // scene tab's remembered view and is deliberately left alone while an asset tab renders in 3D.
   const previousViewRef = useRef<'2D' | '3D'>('3D');
   /**
-   * Where the editor camera was the last time each rig was on screen, so flipping the view is reversible.
-   *
-   * The 2D branch of the CHANGE_DIMENSION handler parks the camera at a fixed pose and the 3D branch
-   * restores nothing, so without this a 3D -> 2D -> 3D round trip left the camera stranded at the 2D pose
-   * with a perspective projection. Tolerable when the toggle was an authoring setting you flipped once;
-   * not when it is a view control you flip constantly.
+   * Where the editor camera was the last time each rig was on screen, so flipping the view is reversible:
+   * CHANGE_DIMENSION parks the camera at a fixed 2D pose and restores nothing on the 3D side.
    */
   const viewPoseRef = useRef<Partial<Record<'2D' | '3D', {
     position: [number, number, number];
@@ -1061,9 +962,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const isPlayModeRef = useRef(false);
   useEffect(() => {
     isPlayModeRef.current = isPlayMode;
-    // Gate the engine's property-level change events: emit only while editing a ready scene — never during
-    // Play (its transient edits must not mark the scene unsaved) and never before the scene has loaded (so
-    // the initial parse's setter storm costs nothing). Structural changes ignore this and always emit.
+    // Property-level change events fire only while editing a ready scene: never during Play (transient
+    // edits must not mark the scene unsaved) and never before load. Structural changes always emit.
     CleoEngine.authoringMode = isSceneReady && !isPlayMode;
   }, [isPlayMode, isSceneReady]);
   const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null });
@@ -1081,8 +981,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const startedRef = useRef(false);
 
   // Debug-overlay visibility (collider wireframes, light icons, …), per Editor/Runtime channel. The
-  // reconcilers read the ref (they run in rAF/event callbacks, not render), and toggling emits
-  // DEBUG_VISIBILITY_CHANGED so they re-run. Persisted so a chosen debugging setup survives reloads.
+  // reconcilers read the ref, not render state; toggling emits DEBUG_VISIBILITY_CHANGED so they re-run.
   const [debugVisibility, setDebugVisibility] = useState<DebugVisibility>(() => loadDebugVisibility());
   const debugVisibilityRef = useRef(debugVisibility);
   useEffect(() => { debugVisibilityRef.current = debugVisibility; }, [debugVisibility]);
@@ -1097,7 +996,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Reusable node templates, persisted to IndexedDB (they embed base64 textures and would blow the
-  // ~5MB localStorage quota). Loaded asynchronously on mount, migrating any legacy localStorage copy once.
+  // ~5MB localStorage quota). Loaded asynchronously on mount.
   const [templates, setTemplates] = useState<Template[]>([]);
   const templatesLoadedRef = useRef(false);
   useEffect(() => {
@@ -1121,9 +1020,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const addTemplate = (t: Template) => setTemplates(prev => [...prev, t]);
   const removeTemplate = (id: string) => {
-    // Unlink any placed instances so they become normal, fully-editable nodes (instead of staying
-    // locked forever with no template to edit). Removing the marker re-renders the provider, so the
-    // node inspector's read-only gate re-evaluates to editable.
+    // Unlink any placed instances so they become normal, fully-editable nodes. Removing the marker
+    // re-renders the provider, so the node inspector's read-only gate re-evaluates to editable.
     const scene = editorSceneRef.current;
     let changed = false;
     for (const n of Array.from(scene.nodes)) {
@@ -1152,9 +1050,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const addMaterial = (m: MaterialAsset) => setMaterials(prev => [...prev, m]);
   const updateMaterial = (id: string, m: MaterialAsset) => setMaterials(prev => prev.map(x => x.id === id ? m : x));
 
-  // Reusable terrain-material assets (global library like materials): a Basic/Blinn/PBR surface plus
-  // terrain blend + foliage rules. Persisted to IndexedDB (base64 textures + thumbnail). Terrain paint
-  // layers reference one via the layer's materialId.
+  // Reusable terrain-material assets: a Basic/Blinn/PBR surface plus terrain blend + foliage rules,
+  // persisted to IndexedDB. Terrain paint layers reference one via the layer's materialId.
   const [terrainMaterials, setTerrainMaterials] = useState<TerrainMaterialAsset[]>([]);
   const terrainMaterialsLoadedRef = useRef(false);
   useEffect(() => {
@@ -1172,17 +1069,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const updateTerrainMaterial = (id: string, m: TerrainMaterialAsset) => setTerrainMaterials(prev => prev.map(x => x.id === id ? m : x));
 
   // Reusable mesh assets (imported models): persisted to IndexedDB (they embed base64 textures + a
-  // thumbnail). Mirrors the materials library above. Drag a mesh into the viewport to instantiate a copy.
+  // thumbnail). Drag a mesh into the viewport to instantiate a copy.
   const [models, setModels] = useState<ModelAsset[]>([]);
   const modelsLoadedRef = useRef(false);
   useEffect(() => {
     (async () => {
       try {
         const list = await idbGet<ModelAsset[]>(libKey('models'));
-        // One-shot flatten of assets saved before the holder was collapsed away. flattenModelAsset returns
-        // the same object when there is nothing to do, so an already-migrated library is untouched and a
-        // multi-part model is never disturbed. Node ids are preserved, so anything referencing the kept
-        // ModelNode still resolves.
+        // One-shot flatten of legacy assets that still carry a holder node. flattenModelAsset returns the
+        // same object when there is nothing to do, and node ids are preserved.
         if (list && list.length) setModels(prev => prev.length ? prev : list.map(flattenModelAsset));
       } catch (e) { console.warn('Failed to load models:', e); }
       finally { modelsLoadedRef.current = true; }
@@ -1197,8 +1092,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const addModel = (m: ModelAsset) => setModels(prev => [...prev, m]);
   const removeModel = (id: string) => {
     // A preview tab for a deleted mesh would render a subtree whose asset no longer exists — close it
-    // first (mirrors removeMaterial). Safe to reference the later-declared tab helpers: this only ever
-    // runs from a click, long after the component body has evaluated.
+    // first. Safe to reference the later-declared tab helpers: this only ever runs from a click.
     const openTab = tabs.find(t => t.kind === 'model' && t.modelId === id);
     if (openTab) removeTabById(openTab.id);
     setModels(prev => prev.filter(x => x.id !== id));
@@ -1241,20 +1135,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Animation assets: shared clips, stored in their SOURCE rig's space and retargeted per model at use.
-  // A clip used to live only inside the model asset that imported it, so two characters on one rig held
-  // two byte-identical copies and shipped two. A model asset now names the animations it uses by id
-  // (`animationIds`) and the clips are resolved and retargeted from here — see utils/animationAssets.ts.
+  // A model asset names the animations it uses by id (`animationIds`) — see utils/animationAssets.ts.
   const [animations, setAnimations] = useState<AnimationAsset[]>([]);
   const animationsLoadedRef = useRef(false);
   useEffect(() => {
     (async () => {
       try {
         const list = (await idbGet<AnimationAsset[]>(libKey('animations'))) ?? [];
-        // One-shot lift of clips embedded in model assets into shared ones. Runs after both libraries have
-        // been read, and only once (a stamp in kv). Identical clips across characters collapse onto one
-        // asset, which is the point; names are preserved, so state machines and field samples — which
-        // reference clips BY NAME — keep resolving. The pre-migration model library is kept under a backup
-        // key, because this rewrites every skinned model asset in the project.
+        // One-shot lift of clips embedded in model assets into shared ones, stamped in kv, and only after
+        // both libraries have been read. Clip NAMES are preserved: state machines and field samples
+        // reference clips by name. The pre-migration model library is kept under a backup key.
         const done = await idbGet<number>(libKey('animations') + ':migrated');
         if (!done) {
           const models = (await idbGet<ModelAsset[]>(libKey('models'))) ?? [];
@@ -1285,9 +1175,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setAnimations(prev => prev.map(x => x.id === id ? a : x));
   const removeAnimation = (id: string) => {
     setAnimations(prev => prev.filter(x => x.id !== id));
-    // Drop the reference from every model that used it. The clips already instantiated on live nodes are
-    // left alone: they are a copy the user can still see and delete, which is easier to understand than a
-    // character silently losing its walk mid-session.
+    // Drop the reference from every model that used it. Clips already instantiated on live nodes are left
+    // alone — a copy the user can still see and delete.
     for (const m of modelsRef.current) {
       const next = withoutAnimationRef(m, id);
       if (next !== m) updateModel(m.id, next);
@@ -1318,10 +1207,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setAnimationFields(prev => prev.map(x => x.id === id ? f : x));
   const removeAnimationField = (id: string) => {
     setAnimationFields(prev => prev.filter(x => x.id !== id));
-    // Clear the embedded copy from every state that played it, across every live scene. Without this the
-    // node keeps posing a field the project no longer contains — a pose with nothing in the editor to
-    // explain it. Clearing degrades the state to "no clip" (bind pose), which reads as broken and is
-    // therefore fixable.
+    // Clear the embedded copy from every state that played it, across every live scene; the state degrades
+    // to "no clip" (bind pose).
     let changed = false;
     for (const scene of liveScenes()) {
       for (const n of Array.from(scene.nodes)) {
@@ -1369,8 +1256,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const removeTileset = (id: string) => {
     setTilesets(prev => prev.filter(x => x.id !== id));
-    // Unlink every layer painted from it. The cells stay — they are the user's work — but the layer draws
-    // nothing until a tileset is assigned again, which reads as broken and is therefore fixable.
+    // Unlink every layer painted from it. The cells stay, but the layer draws nothing until a tileset is
+    // assigned again.
     let changed = false;
     for (const scene of liveScenes()) if (detachTileset(scene, id)) changed = true;
     if (changed) eventEmitter.current.emit('SCENE_CHANGED');
@@ -1430,14 +1317,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     });
   };
 
-  // Dedicated Script editor tab: opens a script asset in a full-panel code editor (its own mode + Save Script
-  // button), mirroring the mesh/material tabs. Working source buffers per-tab (scriptTabSourceRef) until Save.
+  // Dedicated Script editor tab: opens a script asset in a full-panel code editor (its own mode + Save
+  // Script button). Working source buffers per-tab (scriptTabSourceRef) until Save.
   const scriptTabSourceRef = useRef(new Map<string, string>());
   const enterScriptEditor = (scriptId?: string, adoptTabId?: string) => {
     let id = scriptId;
-    // Held across the mint, because scriptAssetsRef is mirrored during RENDER: a just-added asset is not in
-    // it yet, so looking the new script up below would miss it and title the tab "Script" — which then
-    // silently corrected itself to the real name the next time the tab was restored.
+    // Held across the mint because scriptAssetsRef is mirrored during RENDER: a just-added asset is not in
+    // it yet, so looking the new script up below would miss it.
     let created: ScriptAsset | null = null;
     if (!id) {
       // No id: mint a new 'node'-based script and open it.
@@ -1459,14 +1345,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Save a script tab: commit its buffered source to the asset (persists + propagates to linked nodes) and
-  // clear the tab's dirty flag. Takes a tab id rather than reading the active tab so Save All can reach a
-  // tab that is not on screen; mirrors saveMaterialTab/saveModelTab.
+  // clear the tab's dirty flag. Takes a tab id so Save All can reach a tab that is not on screen.
   const saveScriptTab = (tabId: string) => {
     const tab = tabsRef.current.find(t => t.id === tabId);
     if (!tab || tab.kind !== 'script' || !tab.scriptId) return;
     const source = scriptTabSourceRef.current.get(tab.scriptId);
     if (source !== undefined) saveScriptSource(tab.scriptId, source);
-    // Adopt the (possibly renamed-in-source) class name into the tab title? Keep the asset name.
     clearTabDirty(tab.id);
   };
   // Called by the script tab's editor on every edit: buffer the source and mark the tab dirty.
@@ -1485,12 +1369,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Adopt a source edited in the script workspace folder (VSCode) as the new truth.
-   *
-   * Beyond saving, this has to reconcile the Script TAB: its buffer is what Save Script would later write,
-   * so leaving a stale buffer in place would let the next in-editor save silently clobber the external
-   * edit. The buffer is replaced, the tab un-dirtied, and the open Monaco model refreshed through the
-   * external-source store (it is uncontrolled, so a prop could not move it).
+   * Adopt a source edited in the script workspace folder (VSCode) as the new truth. Must also reconcile the
+   * Script TAB — replace its buffer, un-dirty it, and refresh the open Monaco model through the
+   * external-source store — or the next in-editor save clobbers the external edit.
    */
   const adoptExternalScriptSource = (id: string, source: string): { replacedUnsaved: boolean } => {
     const tab = tabsRef.current.find(t => t.kind === 'script' && t.scriptId === id);
@@ -1521,27 +1402,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   }, [assetsLoaded]);
 
   /**
-   * Re-resolve the STARTUP scene's asset links, once the libraries are actually there.
-   *
-   * openScene resyncs inline, but the boot path cannot: setupInitialScene parses the scene blob before the
-   * five libraries have finished their own async IndexedDB reads, and resyncing against empty libraries
-   * would unlink every material in the scene to the Basic+Null fallback. So the blob's saved hashes are
-   * stashed at parse time and the pass runs here, the moment `assetsLoaded` says the libraries are real.
-   *
-   * Without this, an asset edited and saved WITHOUT also saving the scene renders correctly for the rest of
-   * the session and then comes back stale on reload: the scene blob embeds the material it had at the
-   * scene's last save, and __materialId is only a back-link until something re-resolves it.
+   * Re-resolve the STARTUP scene's asset links, the moment `assetsLoaded` says the libraries are real.
+   * setupInitialScene parses the scene blob before the libraries finish their async IndexedDB reads, and
+   * resyncing against empty ones would unlink every material; the blob's hashes are stashed at parse time.
    */
   const initialAssetHashesRef = useRef<{ hashes: Record<string, string> | undefined } | null>(null);
   const initialResyncDoneRef = useRef(false);
 
   /**
    * One-shot upgrade of legacy sprites in every live scene: an inline tileset (synthesized by
-   * `Sprite.parse` from a raw texture id) becomes a real tileset asset the user can reslice and annotate.
-   *
-   * Runs after the startup resync, once per session. Sprites it cannot migrate — an atlas that never
-   * decoded, or a sheet whose pixel size does not divide into its old grid — are left inline and still
-   * draw correctly, so a partial pass is safe to repeat.
+   * `Sprite.parse` from a raw texture id) becomes a real tileset asset. Runs after the startup resync.
+   * Sprites it cannot migrate are left inline and still draw, so a partial pass is safe to repeat.
    */
   const spriteMigrationDoneRef = useRef(false);
   const migrateSprites = async (): Promise<void> => {
@@ -1562,21 +1433,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (initialResyncDoneRef.current || !assetsLoaded || !isSceneReady) return;
     const stashed = initialAssetHashesRef.current;
     if (!stashed) return; // no blob was parsed (fresh/empty project) — nothing to re-resolve
-    // Refuse to resync against libraries that are entirely empty.
-    //
-    // resyncScene reads "asset not in library" as "asset was deleted" and unlinks the node — so running it
-    // with empty libraries does not just fail to refresh the scene, it strips every template link, class
-    // script and material from it. There is no legitimate case where a scene needs resyncing against
-    // nothing: with no assets there are no links to re-resolve, so skipping is always the safe branch.
-    //
-    // Leave initialResyncDoneRef false so a later commit, once the libraries are actually there, still
-    // gets its pass.
+    // Never resync against libraries that are entirely empty: resyncScene reads "asset not in library" as
+    // "asset was deleted" and unlinks, stripping every template link, class script and material.
+    // Leave initialResyncDoneRef false so a later commit, once the libraries are there, still gets a pass.
     const libs = currentLibs();
     const empty = !libs.materials.length && !libs.models.length && !libs.templates.length
       && !libs.terrainMaterials.length && !libs.scripts.length;
     if (empty) {
-      // Deferred, not cancelled: the libraries are effect deps, so the commit that delivers them runs
-      // this again.
+      // Deferred, not cancelled: the libraries are effect deps, so the commit that delivers them retries.
       Logger.warn('Startup asset resync deferred: libraries not populated yet, will retry.', 'Editor');
       return;
     }
@@ -1595,24 +1459,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         eventEmitter.current.emit('SELECT_NODE', null); // a reinstantiated subtree invalidates the selection
       }
     });
-    // Pre-tileset sprites already draw (Sprite.parse gives them an inline tileset); this promotes those
-    // to real library assets so they can actually be edited. Async because it waits on atlas decodes, and
-    // deliberately not awaited here — it is an upgrade, not a precondition for showing the scene.
+    // Promotes inline-tileset sprites to real library assets so they can be edited. Async (it waits on
+    // atlas decodes) and deliberately not awaited: an upgrade, not a precondition for showing the scene.
     void migrateSprites();
-    // The libraries are deps so the skip-when-empty branch above is recoverable: if this fires before they
-    // arrive, the commit that delivers them runs it again. initialResyncDoneRef keeps it to one real pass.
+    // The libraries are deps so the skip-when-empty branch above retries; initialResyncDoneRef keeps it to
+    // one real pass.
   }, [assetsLoaded, isSceneReady, materials, models, templates, terrainMaterials, scriptAssets]);
 
   /**
    * Finish restoring last session's tabs: drop the ones whose asset is gone, then build the active one.
-   *
-   * DECLARED AFTER THE RESYNC EFFECT ABOVE ON PURPOSE. Effects run in declaration order within a commit, and
-   * a template/model tab clones its subtree out of the libraries — so the open scene has to have been
-   * re-resolved against those same libraries first, or the two disagree about what an asset currently is.
-   *
-   * Gated on `assetsLoaded` because every builder resolves its asset from a library, and on `isSceneReady`
-   * because they all bail while `instanceRef` is null and because the preview scenes they build use the
-   * renderer. Textures need no gate: preloadTextures runs at the top of setupInitialScene.
+   * MUST stay declared after the resync effect above — effects run in declaration order, and a tab clones
+   * its subtree out of the libraries the open scene has to have been re-resolved against first.
    */
   useEffect(() => {
     if (bootTabsDoneRef.current) return;
@@ -1668,16 +1525,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return () => clearTimeout(timer);
   }, [tabs, activeTabId, mainMode]);
 
-  // Keep the texture store in step with the libraries.
-  //
-  // Assets record only texture IDS; the payloads live once in the texture store. This effect is what puts
-  // them there — and it is deliberately a self-healing reconcile rather than a write inside each asset
-  // builder: the builders are synchronous, an IndexedDB write is not, and a missed write would mean an
-  // asset whose textures vanish on reload. Idempotent, so re-running it costs one key scan.
-  //
-  // It also RESCUES legacy assets: their base64 payloads are adopted into the store (and registered) so
-  // they survive, before anything relies on the store alone. Nothing is stripped from them here — the old
-  // inline copy stays until the new path has proven itself.
+  // Keep the texture store in step with the libraries. Assets record only texture IDS; the payloads live
+  // once in the store, and this idempotent self-healing reconcile is what puts them there. It also adopts
+  // legacy assets' inline base64 payloads into the store; nothing is stripped from those assets here.
   const [textureEpoch, setTextureEpoch] = useState(0);
   useEffect(() => {
     const bump = () => setTextureEpoch(n => n + 1);
@@ -1718,9 +1568,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (r) r(decision);
   };
 
-  // Rig picker, shown before the review modal when the import did not come from an open Animation Editor.
-  // An animation file carries no character, so the rig it retargets onto has to be chosen; with the editor
-  // open, the character on screen IS the answer and no prompt appears.
+  // Rig picker, shown before the review modal when the import did not come from an open Animation Editor:
+  // an animation file carries no character, so the rig it retargets onto has to be chosen.
   const [pendingRigPick, setPendingRigPick] = useState<PendingRigPickView | null>(null);
   const pendingRigResolverRef = useRef<((id: string | null) => void) | null>(null);
   const resolveRigPick = (modelId: string | null) => {
@@ -1757,9 +1606,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (r) r(decision);
   };
 
-  // Same park-then-resolve pattern, for switching a scene between 2D and 3D while it holds authoring that
-  // only the OTHER dimension uses. The data is kept either way — the switch is reversible — but a published
-  // build discards it, so the user is told before the switch rather than after the export.
+  // Same park-then-resolve pattern, for switching a scene between 2D and 3D while it holds authoring only
+  // the OTHER dimension uses. The data is kept and the switch is reversible, but a published build
+  // discards it.
   const [pendingDimensionConfirm, setPendingDimensionConfirm] =
     useState<{ to: '2D' | '3D'; losing: 'tilemap' | 'landscape'; count: number } | null>(null);
   const dimensionConfirmResolverRef = useRef<((proceed: boolean) => void) | null>(null);
@@ -1775,13 +1624,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (r) r(proceed);
   };
 
-  // Derive the active tab and everything that used to hang off `editorMode === 'template'`.
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
   const activeRuntime = activeTab.kind !== 'scene' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
   // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material/animation scene.
   const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
-  // Legacy single mode value, now derived from the active tab kind. Keeps every existing
-  // `editorMode === ...` consumer working unchanged.
+  // Single mode value, derived from the active tab kind, for `editorMode === ...` consumers.
   const editorMode: EditorMode = activeTab.kind === 'scene' ? mainMode
     : activeTab.kind === 'material' ? 'material'
     : activeTab.kind === 'terrainMaterial' ? 'terrainMaterial'
@@ -1813,27 +1660,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     : null;
   const editingTilesetId = activeTab.kind === 'tileset' ? (activeTab.tilesetId ?? null) : null;
 
-  // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries (the scripts library
-  // already has scriptAssetsRef). The save + propagation paths read these rather than the render-scoped
-  // state: Save All walks tabs sequentially with an await per asset, where a value captured at the top of
-  // the loop is stale by the second iteration.
+  // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries. The save + propagation
+  // paths read these rather than the render-scoped state: Save All walks tabs sequentially with an await
+  // per asset, where a value captured at the top of the loop is stale by the second iteration.
   const tabsRef = useRef<EditorTab[]>(tabs);
   const modelSessionsRef = useRef<Record<string, ModelEditSession>>(modelSessions);
   const materialsRef = useRef<MaterialAsset[]>(materials);
   const terrainMaterialsRef = useRef<TerrainMaterialAsset[]>(terrainMaterials);
   const modelsRef = useRef<ModelAsset[]>(models);
   const templatesRef = useRef<Template[]>(templates);
-  // Mirrored during RENDER, not in a useEffect.
-  //
-  // These are plain "latest value" mirrors, so assigning them here is idempotent and safe. Doing it in an
-  // effect is not: effects run in DECLARATION order within a commit, and these are declared far below the
-  // boot resync effect. Any commit that both delivered a library and flipped `assetsLoaded` therefore ran
-  // the resync FIRST, against mirrors still holding []. resyncScene treats "asset not in library" as
-  // "asset deleted" and unlinks — dropping every __templateId, unlinking every class script and resetting
-  // every material to the Basic+Null fallback, i.e. wiping the scene it was meant to refresh.
-  //
-  // That window was previously hidden by slow IndexedDB reads landing in their own commits; it is a real
-  // race either way, and assigning during render closes it for every currentLibs() consumer at once.
+  // Mirrored during RENDER, never in a useEffect: effects run in DECLARATION order, these are declared far
+  // below the boot resync effect, and resyncing against mirrors still holding [] unlinks every asset in the
+  // scene. Plain "latest value" mirrors, so assigning during render is idempotent.
   tabsRef.current = tabs;
   modelSessionsRef.current = modelSessions;
   materialsRef.current = materials;
@@ -1844,16 +1682,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
   /**
-   * Every Scene alive in the editor: the open scene, plus each asset tab's throwaway edit scene.
-   *
-   * Propagation on save has to reach all of them, not just the open scene — a template tab showing a
-   * material must update the moment that material is saved, exactly as the scene does. Scenes that are
-   * NOT live (other scene assets, on disk) are handled pull-side by resyncScene when they are opened.
-   *
-   * `exceptTabId` skips the tab doing the saving, and is essential for the re-instantiating kinds: a
-   * template tab's root carries __templateId (instantiateTemplate stamps it), so propagating a template
-   * save into its own tab would rebuild the very subtree being edited — invalidating runtime.rootId and
-   * leaving the session pointing at a detached node.
+   * Every Scene alive in the editor: the open scene, plus each asset tab's throwaway edit scene. Scenes that
+   * are NOT live are handled pull-side by resyncScene when they are opened. `exceptTabId` skips the tab
+   * doing the saving — essential for the re-instantiating kinds, whose own root carries the propagated id.
    */
   const liveScenes = (exceptTabId?: string): Scene[] => [
     editorSceneRef.current,
@@ -1873,16 +1704,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const instance = instanceRef.current;
     if (!instance) return;
 
-    // Focus an already-open tab for this template instead of duplicating it. Skipped when adopting — see
-    // enterScriptEditor for why that would silently no-op the hydration.
+    // Focus an already-open tab for this template instead of duplicating it. Skipped when adopting: that
+    // would find the restored placeholder and no-op the hydration.
     if (templateId && !adoptTabId) {
       const existing = tabs.find(t => t.kind === 'template' && t.templateId === templateId);
       if (existing) { setActiveTab(existing.id); return; }
     }
 
-    // Disarm before constructing — see openMaterialTab. Deliberately after the focus-only early return
-    // above: that path does not build a scene, and if the tab were already active it would not re-run the
-    // activate effect that re-arms.
+    // Disarm before constructing — see openMaterialTab. Must come after the focus-only early return above:
+    // that path builds no scene and would not re-run the activate effect that re-arms.
     dirtyArmedRef.current = false;
     const scene = new Scene();
     scene.animationsEnabled = false; // editing scene: skinned models hold bind pose (no playback)
@@ -1912,13 +1742,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         return;
       }
       rootId = instantiateTemplate(t, scene.root, engineMaps(), materialsRef.current);
-      // instantiateTemplate re-resolves __materialId against the library but has never touched __modelId, so
-      // a template opened here would show whatever clips were frozen into it when it was saved — a clip
-      // imported against the model since then would simply be missing. Refresh them from the asset.
-      //
-      // Patched in place rather than re-instantiated (which is what resyncScene does for scenes): a rebuild
-      // regenerates node ids, and instantiateTemplate has just re-keyed template.scripts/bodies/triggers onto
-      // the ids it created. withoutDirty because a refresh from the library is not the user's edit.
+      // instantiateTemplate re-resolves __materialId but never __modelId, so refresh the clips from the
+      // asset. Patched in place, not re-instantiated: a rebuild regenerates node ids, and instantiateTemplate
+      // has just re-keyed template.scripts/bodies/triggers onto the ids it created.
       const templateRoot = scene.getNodeById(rootId);
       if (templateRoot) {
         withoutDirty(() => {
@@ -1965,10 +1791,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // ASSET, which knows nothing about how this particular placement was configured.
         const spawnOnStart = inst.spawnOnStart;
         const wasSelected = inst.id === selectedNode;
-        // Animation state, restored only where the TEMPLATE has none of its own (see restoreAnimationState).
-        // The asymmetry matters here specifically: this runs on "Save Template", so a machine edited inside the
-        // template must reach its instances — but a template that carries no machine must not wipe one the
-        // instance was configured with directly.
+        // Animation state, restored only where the TEMPLATE has none of its own (see restoreAnimationState):
+        // a template with no machine must not wipe one the instance was configured with directly.
         const animation = captureAnimationState(inst as any);
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
@@ -2000,9 +1824,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (mode === 'scene' || mode === 'landscape' || mode === 'tilemap' || mode === 'ui' || mode === 'renderer') setMainMode(mode);
   };
 
-  // Force skinned models to their bind (T) pose. Used to keep the editor showing the default pose
-  // (animators don't tick while the scene is paused, but a model posed by a previous Play run would
-  // otherwise stay frozen). Also fixes the mesh/shadow both reading the bind pose consistently.
+  // Force skinned models to their bind (T) pose, so the editor shows the default pose: animators don't tick
+  // while the scene is paused, and a model posed by a previous Play run would otherwise stay frozen.
   const showBindPoseForSkinnedModels = (scene: Scene) => {
     for (const node of scene.nodes) {
       if (node instanceof ModelNode && node.model instanceof AnimatedModel && node.animator) {
@@ -2042,11 +1865,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     regenerateIds(json, new Map()); // distinct ids so the clone never collides with the original
 
     // Clone under a HOLDER carrying the source's accumulated world scale/rotation, not straight under
-    // scene.root. A skinned import cannot bake its fit-to-size factor into vertices (the vertices are
-    // bound to the skeleton), so normalizeRootScale puts that factor entirely on the holder ABOVE the
-    // ModelNode — see modelThumbnails.normalizeRootScale and the same note in separateSubModels.
-    // Re-parenting the bare node therefore dropped the whole normalization and the character showed up
-    // here at its raw file scale while looking correct everywhere else.
+    // scene.root: a skinned import cannot bake its fit-to-size factor into vertices, so normalizeRootScale
+    // puts that factor entirely on the holder ABOVE the ModelNode.
     const holder = new Node(`${source.name} (holder)`);
     scene.addNode(holder);
     const worldScale = source.parent ? source.parent.worldScale : [1, 1, 1];
@@ -2087,24 +1907,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // ---- Clips and skeleton belong to the MODEL ASSET --------------------------------------------------
   //
-  // The node the Animation Editor was opened from is a COPY — of a template's stored subtree, or of the
-  // asset placed in a scene — but it carries a `__modelId` back-link. That link is what decides where a clip
-  // edit lands. Writing only to the copy means importing an animation while editing a template reaches that
-  // template and nothing else: not the asset, not the character's other placements, not the next template.
-  //
-  // So every clip/skeleton action ends the same way: patch the ASSET, then patch every live instance.
+  // The node the Animation Editor was opened from is a COPY carrying a `__modelId` back-link, and that link
+  // decides where a clip edit lands. So every clip/skeleton action ends the same way: patch the ASSET, then
+  // patch every live instance.
 
   /**
-   * Apply a clip/skeleton change to every live instance of a model asset, in place.
-   *
-   * Deliberately NOT syncModelInstances. That re-instantiates the whole subtree, which would churn node ids,
-   * invalidate the animation tab's own sourceNodeId mid-session, and drop per-placement scripts and bodies.
-   * AnimatedModel's addAnimation/removeAnimation/renameAnimation and the skin's nodeNames Map are all
-   * mutable in place and need no GPU rebuild, so nothing has to be rebuilt at all.
-   *
-   * `except` skips a node the caller has already updated (the Animation Editor's source node). The active
-   * tab's scene is skipped wholesale, because that is the Animation Editor's own preview clone — also
-   * already updated by the caller, and applying the change twice would land the clip on it as "name (2)".
+   * Apply a clip/skeleton change to every live instance of a model asset, in place — NOT syncModelInstances,
+   * which re-instantiates and churns node ids. `except` skips a node the caller has already updated; the
+   * active tab's scene is skipped wholesale, or the clip lands on its preview clone twice as "name (2)".
    */
   const propagateModelClips = (modelId: string, apply: (m: AnimatedModel) => void, except?: Node | null) => {
     let count = 0;
@@ -2122,8 +1932,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   /**
    * The model asset an Animation Editor session is editing through, or null when the source node is not a
-   * placed instance of one (a hand-built skinned node, or one imported straight into a scene). A null result
-   * means "keep the edit local to that node", which is the pre-existing behaviour.
+   * placed instance of one. Null means "keep the edit local to that node".
    */
   const animationSourceAsset = (src: Node | null | undefined): { id: string; asset: ModelAsset } | null => {
     const id = modelIdOf(src);
@@ -2133,14 +1942,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Re-resolve a model asset's SHARED clips (`animationIds`) onto everything showing that model.
-   *
-   * The counterpart of propagateModelClips for the `.anim` layer. applyModelAnimations is idempotent — it
-   * drops every clip carrying an `assetId` before re-adding — so this covers linking, unlinking and a
-   * change to a linked asset's contents with one call, and running it twice changes nothing.
-   *
-   * `except` skips a node the caller has already updated; `extra` lets a caller pass an animation asset
-   * that is not yet in `animationsRef` (a brand-new import, where the state update has not landed).
+   * Re-resolve a model asset's SHARED clips (`animationIds`) onto everything showing that model — the
+   * `.anim` counterpart of propagateModelClips, and idempotent. `except` skips a node the caller has already
+   * updated; `extra` passes an animation asset not yet in `animationsRef` (a brand-new import).
    */
   const applyAnimationLinks = (modelAsset: ModelAsset, except?: Node | null, extra?: AnimationAsset) => {
     const library = extra ? [...animationsRef.current.filter(a => a.id !== extra.id), extra] : animationsRef.current;
@@ -2152,10 +1956,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         count += applyModelAnimations(node, modelAsset, library);
       }
     }
-    // Asset-edit tabs (the model preview, the Animation Editor's clone) are shown FROM the asset and so
-    // carry no back-link of their own — a definition never holds an instance stamp, and the clone is a
-    // ModelNode whose holder had it. Without this the clips landed everywhere except the thing on screen.
-    // Safe to run unconditionally: applyModelAnimations drops every assetId-bearing clip before re-adding.
+    // Asset-edit tabs (the model preview, the Animation Editor's clone) are shown FROM the asset and carry
+    // no back-link of their own. Safe unconditionally: applyModelAnimations is idempotent.
     const rt = tabRuntimeRef.current.get(activeTabIdRef.current);
     const shown = rt?.rootId ? rt.scene.getNodeById(rt.rootId) : null;
     if (shown && shown !== except && resolveModelAssetId(null) === modelAsset.id)
@@ -2193,12 +1995,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Edit one clip inside a shared `.anim` asset (its name or its root-motion flag).
-   *
-   * Clips resolved from an asset carry `assetId`, and AnimatedModel.serialize drops those — so the
-   * embedded-clip helpers (assetWithClipRenamed / assetWithClipRootMotion) patch a list that is not where
-   * the clip lives. The edit appeared to work and was gone on reload. This writes the library asset, which
-   * is where a shared clip actually is, and re-resolves everything showing it.
+   * Edit one clip inside a shared `.anim` asset (its name or its root-motion flag). Must write the LIBRARY
+   * asset: clips resolved from an asset carry `assetId` and AnimatedModel.serialize drops those, so the
+   * embedded-clip helpers patch a list the clip does not live in.
    */
   const editSharedClip = (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => {
     const anim = animationsRef.current.find(a => a.id === animationId);
@@ -2216,10 +2015,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
 
-  // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation
-  // Editor. Parses the file, builds a bone MAPPING from the file's skeleton onto the model's, shows the
-  // review modal (where the user can correct the mapping), then RETARGETS each accepted clip through the
-  // final mapping and adds it to the preview clone, the source node, the model asset and every placement.
+  // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation Editor:
+  // parse, build a bone MAPPING onto the model's skeleton, review it in the modal, then RETARGET each
+  // accepted clip and add it to the preview clone, the source node, the model asset and every placement.
   const importAnimationFiles = async (files: File[]) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
     const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
@@ -2227,10 +2025,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       ? cloneNode.model : null;
     const fileName = files.find(f => /\.(gltf|glb|fbx)$/i.test(f.name))?.name ?? files[0]?.name ?? 'animation';
 
-    // Which rig to retarget onto. The Animation Editor's open character when there is one — that is the
-    // case where the answer is obvious and asking would be noise — otherwise the user picks from the
-    // skinned models in the library, which is what makes an animation importable from the asset explorer
-    // with no character on screen at all.
+    // Which rig to retarget onto: the Animation Editor's open character when there is one, otherwise the
+    // user picks from the skinned models in the library.
     const rigChoices = modelsRef.current.filter(m => modelAssetIsSkinned(m));
     const openRigId = cloneNode ? modelIdOf(cloneNode) : undefined;
     let rigId = openRigId;
@@ -2253,8 +2049,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
 
     // One task for the whole import, ending in a `finally` so no early return leaves a spinning card.
-    // Single-step on purpose: this handles ONE file, and ProgressWindow renders a lone step as
-    // header + detail rather than a row list.
+    // Single-step on purpose: ProgressWindow renders a lone step as header + detail, not a row list.
     const task = startTask({
       title: 'Importing animation',
       steps: [{ name: fileName, status: 'pending' as StepStatus, detail: 'Queued' }],
@@ -2276,8 +2071,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     };
 
     try {
-    // Parsed in the import worker: for an .fbx this is an uninterruptible assimp WASM call, which used
-    // to freeze the editor for the length of the import.
+    // Parsed in the import worker: for an .fbx this is an uninterruptible assimp WASM call.
     let parsed: { animations: any[]; skin: any };
     setStage('parsing', `Reading ${fileName}`);
     try { parsed = await parseAnimationFiles(files, (_fraction, stage) => setStage('parsing', stage || undefined)); }
@@ -2303,9 +2097,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // and each clip's report is derived cheaply from it (and re-derived as the user edits rows in the modal).
     const mapping = buildBoneMapping(parsed.animations, sourceSkin, targetSkin);
 
-    // Diagnostic (scope 'Retarget'): one structured snapshot per import, so a broken retarget can be
-    // diagnosed from the console without the user's asset files. Includes each key bone's bind rotation
-    // computed both from the inverse bind matrix and from the node transforms — their disagreement is the
+    // Diagnostic (scope 'Retarget'): one structured snapshot per import. Includes each key bone's bind
+    // rotation from both the inverse bind matrix and the node transforms — their disagreement is the
     // tell-tale for an animated glTF whose node transforms are its frame-0 pose, not its bind pose.
     try { Logger.print('debug', [describeRetarget(parsed.animations, sourceSkin, targetSkin, mapping)], 'Retarget'); }
     catch (e) { Logger.warn('Retarget diagnostics failed: ' + e, 'Retarget'); }
@@ -2384,10 +2177,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     } finally { task.finish(); }
   };
 
-  // Backfill bone names onto a skinned model that was imported before bone-name capture existed (so its
-  // skeleton has no names, and imported animations can only match by node index → wrong bones). The user
-  // loads the SAME file the character came from; we copy its bone names onto the model's skin joints by
-  // node index (identical for the same file). After this, animation import matches by name.
+  // Backfill bone names onto a skinned model whose skeleton has none, so imported animations can match by
+  // name instead of by node index. The user loads the SAME file the character came from; its bone names are
+  // copied onto the model's skin joints by node index, which is identical for the same file.
   const importSkeletonNames = async (files: File[]) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
     const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
@@ -2425,8 +2217,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       return;
     }
 
-    // Bone names are skeleton data, so they belong to the asset: without this the backfill would have to be
-    // repeated for every placement, and only the one you happened to open would ever match by name.
+    // Bone names are skeleton data, so they belong to the asset — otherwise the backfill would have to be
+    // repeated for every placement.
     const link = animationSourceAsset(src);
     if (link) {
       updateModel(link.id, assetWithBoneNames(link.asset, srcNames));
@@ -2439,15 +2231,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Persist the IK rig for the model being edited in the Animation Editor.
-   *
-   * Takes the same route bone names do, and for the same reason: a rig is joint indices into the SKELETON, so
-   * it belongs to the model asset rather than to whichever placement happened to be open. Writing only to the
-   * open node would mean re-assigning both legs for every copy of the character in the project.
-   *
-   * Order matters — the preview clone first (so the viewport updates this frame), then the source node, then
-   * the asset, then every other live instance. `Skin` is mutable and needs no GPU rebuild, exactly as
-   * `nodeNames` does, so nothing is re-instantiated.
+   * Persist the IK rig for the model being edited in the Animation Editor. A rig is joint indices into the
+   * SKELETON, so it belongs to the model asset, not to whichever placement is open. Order matters: preview
+   * clone first (so the viewport updates this frame), then the source node, the asset, then live instances.
    */
   const commitIkRig = (rig: any | null) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
@@ -2468,8 +2254,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       propagateModelClips(link.id, m => { if (m.skin) m.skin.ikRig = rig ?? undefined; }, src);
     }
 
-    // No asset link means a hand-built skinned node: the edit stays local to it, which is the pre-existing
-    // behaviour for every other skeleton edit.
+    // No asset link means a hand-built skinned node: the edit stays local to it.
     if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-ik-rig');
     eventEmitter.current.emit('ANIM_IK_CHANGED');
   };
@@ -2544,9 +2329,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   /**
    * Rebuild a restored tab's edit session, if it hasn't been built yet. Returns false when it can't be.
-   *
    * Every builder reached from here is SYNCHRONOUS and has written `tabRuntimeRef` by the time it returns,
-   * which is what lets `setActiveTab` hydrate before committing the active tab — see the rule there.
+   * which is what lets `setActiveTab` hydrate before committing the active tab.
    */
   const hydrateTab = (tab: EditorTab): boolean => {
     if (!pendingHydrationRef.current.has(tab.id)) return true;
@@ -2572,11 +2356,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   /**
    * Switch tabs, building the target's edit session first if it was restored from a previous session.
-   *
-   * Hydrating BEFORE `setActiveTabId` is load-bearing, not a nicety. `activeScene` falls back to the open
-   * scene whenever the active tab has no runtime — so a tab committed early would show the real scene tree
-   * under an asset tab's title, let AddNew and the gizmo edit the real scene, and blame the asset tab for
-   * the resulting dirty mark. Never commit `activeTabId` to a tab without a runtime.
+   * Hydrating BEFORE `setActiveTabId` is load-bearing: `activeScene` falls back to the open scene whenever
+   * the active tab has no runtime. Never commit `activeTabId` to a tab without a runtime.
    */
   const setActiveTab = (id: string) => {
     const tab = tabsRef.current.find(t => t.id === id);
@@ -2614,8 +2395,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
 
-  // Close a template tab (Main is unclosable). Discards unsaved edits after a confirm — saving is the
-  // explicit "Save Template" action, so closing does not auto-save.
   // Low-level tab removal (no confirm). Shared by closeTab and removeMaterial (force-closing a deleted
   // material's tab). Main is unclosable.
   const removeTabById = (id: string) => {
@@ -2668,9 +2447,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     let changed = false;
     for (const scene of liveScenes(exceptTabId)) {
       for (const n of Array.from(scene.nodes)) {
-        // Every submesh that references it, not just the one `__materialId` mirrors. Matching on the
-        // scalar meant a material linked to a second submesh matched NO node, so saving an edit to it did
-        // nothing at all — and writing submesh 0 would have put it on the wrong range even if it had.
+        // Every submesh that references it, not just the one `__materialId` mirrors: matching on the scalar
+        // misses a material linked to a second submesh entirely.
         for (const slot of materialSlotsReferencing(n, materialId)) { applyMaterialAsset(n, asset, slot); changed = true; }
         // Cameras referencing it in their ordered screen-space pass list: rebuild the list, substituting
         // the freshly saved asset for its id (other slots resolve from the current library).
@@ -2720,10 +2498,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // (from `asset`, else a fresh PBR material for a brand-new one). Taking the asset object directly (not
   // an id) lets callers open a just-created asset without waiting for the `materials` state to commit.
   const openMaterialTab = (asset: MaterialAsset | null, adoptTabId?: string) => {
-    // Disarm dirty-tracking before building the preview scene. SCENE_CHANGED is global and names no
-    // scene, so mark() can only blame the ACTIVE tab — and every node this construction splices into the
-    // new throwaway scene would otherwise land on the scene tab as if the user had edited it. The
-    // tab-activate effect re-arms once the new tab is showing.
+    // Disarm dirty-tracking before building the preview scene: SCENE_CHANGED names no scene, so mark()
+    // can only blame the ACTIVE tab. The tab-activate effect re-arms once the new tab is showing.
     dirtyArmedRef.current = false;
     const scene = new Scene();
     void createMaterialPreviewScene(scene); // env map + skybox attach once the cubemap images load
@@ -2736,10 +2512,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const material: Material = asset ? Material.parse(asset.material) : Material.PBR({});
     const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), material));
     scene.addNode(sphere);
-    // Screen-mode custom materials are camera post passes, not mesh surfaces: run the SAME instance on
-    // the preview camera so it previews live (the sphere still carries it for the inspector; the
-    // renderer skips drawing models with a screen material). CustomMaterialEditor keeps the camera
-    // list in step when the mode is switched inside the tab.
+    // Screen-mode custom materials are camera post passes, not mesh surfaces: run the SAME instance on the
+    // preview camera so it previews live. The sphere still carries it for the inspector; the renderer skips
+    // drawing models with a screen material.
     if (material instanceof CustomMaterial && material.renderMode === 'screen' && scene.activeCamera)
       scene.activeCamera.screenMaterials = [material];
     scene.start();
@@ -2754,8 +2529,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const enterMaterialEditor = (materialId?: string, adoptTabId?: string) => {
     if (!instanceRef.current) return;
     if (materialId) {
-      // Opening is what produces the preview now that import no longer renders one. Not on hydration: the
-      // thumbnail already exists, and re-rendering one per restored tab costs a GL frame each at boot.
+      // Opening is what produces the preview. Not on hydration: the thumbnail already exists, and
+      // re-rendering one per restored tab costs a GL frame each at boot.
       if (!adoptTabId) {
         captureAssetThumbnail('material', materialId);
         const existing = tabs.find(t => t.kind === 'material' && t.materialId === materialId);
@@ -2786,12 +2561,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // ---- Thumbnails on open --------------------------------------------------------------------------
   //
-  // Importing no longer renders previews: every capture is a full GL frame, and doing one per material
-  // plus one per mesh froze the editor mid-import. Instead an asset is stored with an empty thumbnail
-  // (the explorer shows the kind's icon) and its preview is rendered the first time it is opened.
-  //
-  // Renders from the asset's *saved* data, not from a live tab scene — renderModelThumbnail reparents the
-  // node it is given, which would rip the subtree out of the preview tab we just built.
+  // An asset is stored with an empty thumbnail (the explorer shows the kind's icon) and its preview is
+  // rendered the first time it is opened — every capture is a full GL frame. Always render from the
+  // asset's *saved* data, never a live tab scene: renderModelThumbnail reparents the node it is given.
   const thumbnailPendingRef = useRef(new Set<string>());
 
   const captureAssetThumbnail = (kind: 'material' | 'terrainMaterial' | 'model', id: string) => {
@@ -2802,8 +2574,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     thumbnailPendingRef.current.add(id);
 
     // Deliberately not awaited: the tab opens immediately and the card updates whenever the render lands.
-    // The write patches only `thumbnail` through the functional setter, so an edit made while the render
-    // was in flight is not clobbered by a stale snapshot.
+    // The write patches only `thumbnail` through the functional setter, so a concurrent edit is not lost.
     (async () => {
       try {
         if (kind === 'material') {
@@ -2842,15 +2613,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Build an edit session for a mesh asset: a throwaway scene holding one subtree per LOD level,
-  // instantiated directly (NOT via the LodGroup wrapper — the renderer must not auto-swap levels while
-  // the user edits). Materials/transforms/sub-models are edited through the normal Scene + Properties
-  // panels; LOD levels, distances and the cull threshold through the Mesh inspector. Opening the tab
-  // also triggers the asset's thumbnail render.
+  // instantiated directly (NOT via the LodGroup wrapper — the renderer must not auto-swap levels while the
+  // user edits). Opening the tab also triggers the asset's thumbnail render.
   const openMeshTab = (asset: ModelAsset, adoptTabId?: string) => {
-    // Disarm dirty-tracking before building the preview scene. SCENE_CHANGED is global and names no
-    // scene, so mark() can only blame the ACTIVE tab — and every node this construction splices into the
-    // new throwaway scene would otherwise land on the scene tab as if the user had edited it. The
-    // tab-activate effect re-arms once the new tab is showing.
+    // Disarm dirty-tracking before building the preview scene: SCENE_CHANGED names no scene, so mark()
+    // can only blame the ACTIVE tab. The tab-activate effect re-arms once the new tab is showing.
     dirtyArmedRef.current = false;
     const scene = new Scene();
     scene.animationsEnabled = false; // skinned models hold their bind pose while editing
@@ -2859,22 +2626,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // __editor__ named, so it neither appears in the mesh's tree nor gets saved into the asset.
     void createAssetEditScene(scene, withoutDirty);
 
-    // No wrapper node here. This tab used to create `new Node(asset.name)` and parse the asset under it,
-    // which put a THIRD identically-named level in the Scene panel (root -> name -> name -> name). It was
-    // never serialized, carried no transform, and was rebuilt from `asset.name` on every open — a pure
-    // per-tab container. The asset's own root is the tab root now, so `runtime.rootId` addresses real
-    // content and selecting the tab selects the model instead of an empty box.
+    // No wrapper node: the asset's own root IS the tab root, so `runtime.rootId` addresses real content.
 
-    // Restore legacy embedded textures (instantiateModelAsset used to do this).
+    // Restore legacy embedded textures.
     for (const t of asset.textures || []) {
       if (t?.id && !TextureManager.Instance.getTexture(t.id))
         TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id);
     }
 
-    // Level 0 is the mesh being edited. Extra levels are resolved from the library every time the tab
-    // opens — that is the point of referencing: the level always shows the current state of its source
-    // mesh. A reference whose asset has been deleted is dropped with a warning rather than opening a tab
-    // that cannot be saved.
+    // Level 0 is the mesh being edited. Extra levels are resolved from the library on every open, so a
+    // level always shows the current state of its source mesh; a reference whose asset has been deleted is
+    // dropped with a warning.
     const lodRefs: ModelLodDef[] = [];
     const lodJsons: any[] = [];
     for (const lod of asset.lods ?? []) {
@@ -2893,9 +2655,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const clone = JSON.parse(JSON.stringify(json));
       regenerateIds(clone, new Map());
       // Re-resolve the material links against the LIBRARY, exactly as instantiateModelAsset does for a
-      // placement. Without it this tab rendered the copies embedded when the model was last saved, so a
-      // material edited since looked unchanged here — and saving the model then wrote the stale copy back
-      // over the asset. The embedded material is a fallback for a deleted asset, never the source of truth.
+      // placement: the embedded material is a fallback for a deleted asset, never the source of truth, and
+      // saving the model would otherwise write the stale copy back over it.
       resolveMaterialRefs(clone, materialsRef.current);
       parseByType(scene.root, clone);
       levelIds.push(clone.id);
@@ -3014,21 +2775,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const session = modelSessionsRef.current[tab.id];
     if (!runtime || !session) return;
     try {
-      // Only level 0 is authored here, so only it has to resolve to a live node. Extra levels are
-      // references — they are saved as `{ modelId, distance }` and their geometry belongs to the mesh they
-      // point at, which is why they no longer need to be found in this scene and serialized back out.
-      //
-      // The recorded id is a hint, not a contract. Restructuring the mesh — parenting it under a new root
-      // node and deleting the old one — is ordinary authoring, and it retires the node this session was
-      // opened with. Rather than refusing to save, fall back to reading the mesh out of its holder: the
-      // holder is the container this tab created, so whatever sits under it (minus the read-only LOD
-      // previews) IS the mesh.
-      // A node the user deleted can still be in the tree: Node.remove() only marks it, and the sweep runs
-      // on a later Scene.update. Serializing one writes content the user already removed — and, when the
-      // deleted node is an emptied parent, writes it INSTEAD of what they moved out. Treat marked nodes
-      // as gone everywhere this resolves a root. (The Delete button now removes synchronously, so this is
-      // the net for any other deferred path — including a node left marked after being moved out of a
-      // deleted subtree, since markForRemoval is never cleared.)
+      // Only level 0 is authored here, so only it has to resolve to a live node; extra levels are saved as
+      // `{ modelId, distance }` references. The recorded id is a hint, not a contract — restructuring the
+      // mesh retires it, so fall back to reading the mesh out of its holder.
+      // A node the user deleted can still be in the tree: Node.remove() only marks it and the sweep runs on
+      // a later Scene.update, so treat marked nodes as gone everywhere this resolves a root.
       const alive = (n: Node | null | undefined): n is Node => !!n && !n.markForRemoval;
 
       let baseRoot: Node | null = null;
@@ -3043,7 +2794,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const isContent = (n: Node) =>
           alive(n) && !previewIds.has(n.id) && !n.name.includes('__editor__') && !n.name.includes('__debug__');
         // Everything the user left at the scene root, minus the read-only LOD previews and the editor's
-        // own camera/light. With the per-tab holder gone this is the only place content can be.
+        // own camera/light. This is the only place content can be.
         const candidates = runtime.scene.root.children.filter(isContent);
 
         if (candidates.length === 0) {
@@ -3057,13 +2808,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, levelIds } }));
           modelSessionsRef.current = { ...modelSessionsRef.current, [tab.id]: { ...session, levelIds } };
         } else {
-          // Several content roots — the normal result of merging models into one mesh: drop a second mesh
-          // in, move both model nodes up to the root, delete the two original roots. A mesh asset
-          // serializes from ONE subtree, so they are wrapped in a single root named after the asset.
-          //
-          // Done by reparenting into a scratch node rather than assembling JSON by hand, because
-          // serialize() reads the live tree. The finally below always puts the nodes back, so a failure
-          // part-way cannot leave the user's scene dismantled.
+          // Several content roots — the normal result of merging models into one mesh. A mesh asset
+          // serializes from ONE subtree, so they are reparented into a scratch root (serialize() reads the
+          // live tree). The finally below always puts them back.
           const scratch = new Node(tab.title);
           for (const c of candidates) {
             const parent = c.parent;
@@ -3086,8 +2833,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // materialIds is the informational list of library materials this mesh's own subtree references.
       // Referenced LOD levels are not included — their materials belong to their own asset.
       const materialIdSet = new Set<string>();
-      // Every submesh's link, not just slot 0 — a merged model's second material would otherwise be
-      // absent from the asset's own reference list and read as unused by the explorer and the publisher.
+      // Every submesh's link, not just slot 0 — a merged model's second material would otherwise read as
+      // unused by the explorer and the publisher.
       const collectMats = (n: Node) => { for (const id of getMaterialIdsOf(n)) if (id) materialIdSet.add(id); n.children.forEach(collectMats); };
       collectMats(baseRoot);
 
@@ -3106,10 +2853,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
       asset.name = tab.title; // the tab title is the asset name (renames edit the title)
 
-      // Refuse to persist a mesh with nothing in it. An empty asset renders as nothing and overwrites
-      // whatever was saved before, so a save that produced one has read the wrong subtree — exactly how
-      // a moved model was silently replaced by the emptied parent it came out of. Returning here leaves
-      // the stored asset untouched and the tab dirty, so the work is still on screen to recover.
+      // Refuse to persist a mesh with nothing in it: an empty asset renders as nothing and overwrites what
+      // was saved before, so a save that produced one has read the wrong subtree. Returning leaves the
+      // stored asset untouched and the tab dirty.
       if (!nodeJsonHasModel(asset.nodeJson)) {
         Logger.error(
           `Model "${tab.title}" has no geometry in it — refusing to save, the stored model is unchanged. ` +
@@ -3121,10 +2867,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       withoutDirty(() => {
         syncModelInstances(tab.modelId!, asset, tab.id);
         syncFoliageRulesForModel(asset);
-        // Levels are references, so this mesh may be a LOD of others — their placed instances embed a
-        // copy of what was just edited and would otherwise keep rendering the previous geometry until
-        // something else happened to re-instantiate them. Refresh those too. Only one hop is needed: a
-        // level renders the referenced mesh's own subtree, never its levels, so this cannot cascade.
+        // Levels are references, so this mesh may be a LOD of others whose placed instances embed a copy of
+        // what was just edited. Refresh those too. One hop only: a level renders the referenced mesh's own
+        // subtree, never its levels, so this cannot cascade.
         for (const dependent of modelsRef.current) {
           if (dependent.id === tab.modelId) continue;
           if (!dependent.lods?.some(l => l.modelId === tab.modelId)) continue;
@@ -3154,12 +2899,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Add an existing mesh asset as the next LOD level of the active mesh tab.
-   *
-   * The level stores only a reference; its geometry keeps living in the mesh it points at, so editing
-   * that low-poly asset later updates every mesh using it as a level. A preview of it is spliced into the
-   * edit scene so the user can compare levels, but that preview is never serialized back — it is rebuilt
-   * from the library each time the tab opens.
+   * Add an existing mesh asset as the next LOD level of the active mesh tab. The level stores only a
+   * reference; its geometry lives in the mesh it points at. A preview is spliced into the edit scene for
+   * comparison but is never serialized back — it is rebuilt from the library each time the tab opens.
    */
   const addModelLodFromAsset = (modelId: string) => {
     const tab = tabs.find(t => t.id === activeTabId);
@@ -3180,9 +2922,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     try {
       // Splice in a preview of the referenced mesh, as a SIBLING of level 0 under the scene root — the
-      // levels are alternatives to each other, and applyActiveModelLevel shows exactly one at a time.
-      // (It used to be parented to this tab's holder; with the holder gone, parenting it to level 0 would
-      // nest one model inside another and it would be serialized into the asset on the next save.)
+      // levels are alternatives, and applyActiveModelLevel shows exactly one at a time. Parenting it to
+      // level 0 would nest one model inside another and serialize it into the asset on the next save.
       const clone = JSON.parse(JSON.stringify(source.nodeJson));
       regenerateIds(clone, new Map());
       resolveMaterialRefs(clone, materialsRef.current);
@@ -3273,12 +3014,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * The model asset a node belongs to — its own back-link, or the asset the current tab is editing.
-   *
-   * The tab fallback is not cosmetic. A model tab parses `asset.nodeJson`, which has the back-link
-   * stripped (a definition must never carry an instance stamp), and the Animation Editor opened from one
-   * clones that node. Without the fallback both read as "no asset", and adopting would file a duplicate
-   * copy of the model the user is already editing.
+   * The model asset a node belongs to — its own back-link, or the asset the current tab is editing. The tab
+   * fallback is required: a model tab parses `asset.nodeJson`, which has the back-link stripped, so without
+   * it adopting would file a duplicate copy of the model already being edited.
    */
   const resolveModelAssetId = (node: Node | null | undefined): string | undefined => {
     const own = modelIdOf(node);
@@ -3292,16 +3030,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * The model asset a node belongs to, creating one from its subtree when it has none.
-   *
-   * A placed model normally carries the back-link already, and then this is a lookup. The exception is a
-   * subtree that never came from the library — an old project, or geometry built in the scene — and the
-   * editor used to hand that case to the user as a "Link to a model asset…" dropdown, with the node's
-   * animation fields and its way into the model editor disabled until they answered. Adopting silently
-   * removes both the question and the disabled state.
-   *
-   * Called only from actions that actually need an asset (link an animation, create a field, open the
-   * model editor) — never from rendering, so selecting a node cannot spawn library entries.
+   * The model asset a node belongs to, creating one from its subtree when it has none. Called only from
+   * actions that actually need an asset (link an animation, create a field, open the model editor) — never
+   * from rendering, so selecting a node cannot spawn library entries.
    */
   const adoptModelAsset = async (node: Node | null | undefined): Promise<string | null> => {
     if (!node) return null;
@@ -3309,9 +3040,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (existing) return existing;
 
     // The node AS GIVEN, not the ModelNode found under it: a skinned import cannot bake its fit-to-size
-    // factor into vertices, so that factor lives on the holder ABOVE the skinned node (see
-    // normalizeRootScale) and adopting the child alone would file the character at its raw file scale.
-    // A subtree with no geometry in it would produce an asset that renders as nothing — refuse instead.
+    // factor into vertices, so that factor lives on the holder ABOVE the skinned node (normalizeRootScale).
+    // A subtree with no geometry would produce an asset that renders as nothing — refuse instead.
     if (!modelNodeOf(node)) return null;
 
     const materialIds = new Set<string>();
@@ -3413,11 +3143,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Persist an edited field and push it into everything already playing it.
-   *
-   * The re-embed is what keeps embed-on-Apply honest: a state stores a COPY of the field, so without this
-   * an edit would only reach nodes whose machine was applied again afterwards. Every live scene is walked
-   * (the open scene plus each asset tab's edit scene), matching how template/model saves propagate.
+   * Persist an edited field and push it into everything already playing it. The re-embed is what keeps
+   * embed-on-Apply honest: a state stores a COPY of the field, so without it an edit would only reach nodes
+   * whose machine was applied again afterwards. Every live scene is walked.
    */
   const saveAnimationField = (asset: AnimationFieldAsset) => {
     updateAnimationField(asset.id, asset);
@@ -3446,15 +3174,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // ---- Tileset editor --------------------------------------------------------------------------------
 
   // Unlike every other asset tab this one owns NO scene: a tileset is an image with a grid drawn over it,
-  // so the editor is a canvas and the tab needs no tabRuntimeRef entry, no throwaway Scene and no renderer
-  // involvement at all. Same shape as the script tab.
+  // so the tab needs no tabRuntimeRef entry, no throwaway Scene and no renderer involvement.
   const enterTilesetEditor = (tilesetId?: string, adoptTabId?: string) => {
     let asset = tilesetId ? tilesetsRef.current.find(t => t.id === tilesetId) : undefined;
 
     if (!tilesetId) {
       // A brand-new tileset starts with no atlas: the image is assigned from the editor's own slot, which
-      // is where its pixel dimensions come from. Building one around a texture up front would need a
-      // picker before the editor has even opened.
+      // is where its pixel dimensions come from.
       asset = buildTilesetAsset('Tileset', '', 0, 0);
       addTileset(asset);
       // The library update lands in the next commit, so seed the ref directly — otherwise the tab opens
@@ -3472,11 +3198,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Import an image and build a tileset around it in one step — the "+ Add > Tileset" path.
-   *
-   * The tile size is guessed from the image, which is right often enough to save retyping it and visibly
-   * wrong when it isn't (the grid draws over the atlas). Returns null when the file could not be decoded,
-   * in which case importAtlasImage has already logged why.
+   * Import an image and build a tileset around it in one step — the "+ Add > Tileset" path. The tile size
+   * is guessed from the image. Returns null when the file could not be decoded (importAtlasImage logs why).
    */
   const createTilesetFromImage = async (file: File): Promise<TilesetAsset | null> => {
     const imported = await importAtlasImage(file, (event) => eventEmitter.current.emit(event as any));
@@ -3501,8 +3224,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   /** Persist an edited tileset and push it into every tilemap already drawing from a copy of it. */
   const saveTileset = (input: TilesetAsset) => {
-    // The card preview is a plain canvas downscale of the atlas, so it is cheap enough to refresh on every
-    // save rather than needing the explicit regenerate path the 3D-rendered thumbnails use.
+    // The card preview is a plain canvas downscale of the atlas, cheap enough to refresh on every save.
     const asset = { ...input, thumbnail: renderTilesetThumbnail(input) ?? input.thumbnail };
     updateTileset(asset.id, asset);
     tilesetsRef.current = tilesetsRef.current.map(t => t.id === asset.id ? asset : t);
@@ -3514,14 +3236,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     Logger.info(`Tileset "${asset.name}" saved`, 'Editor');
   };
 
-  // Import one or more model files (and folders) into the mesh library. Groups the selection into one
-  // bundle per model file; for each: parses, then opens the review modal (missing textures + scale
-  // normalization) and awaits the user. On accept, applies any uploaded textures (re-parse), normalizes
-  // scale, registers each material as a reusable MaterialAsset linked via __materialId, and stores the
-  // model asset. Models land in the library only — drag a card to place it.
-  //
-  // Every stage transition is published to the shared progress store, so what the window says is what the
-  // code is actually doing.
+  // Import one or more model files (and folders) into the mesh library: one bundle per model file, each
+  // parsed, reviewed in the import modal (missing textures + scale normalization), then normalized, its
+  // materials registered as MaterialAssets linked via __materialId, and stored. Placement is drag-only.
   const importModelFiles = async (files: File[]) => {
     const engine = instanceRef.current;
     if (!engine) { Logger.error('Engine not ready for import', 'Editor'); return; }
@@ -3532,10 +3249,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       title: 'Importing models',
       steps: bundles.map(b => ({ name: b.name, status: 'pending' as StepStatus, detail: 'Queued' })),
       cancellable: true,
-      // Settling the review modal lets a loop parked on it reach the cancel check below.
-      // cancelAllImports additionally terminates the worker, which is the only way to stop a parse
-      // that is already running — assimp's conversion is one uninterruptible WASM call, so before the
-      // worker existed Cancel could only take effect between models.
+      // Settling the review modal lets a loop parked on it reach the cancel check below. cancelAllImports
+      // also terminates the worker — the only way to stop an assimp parse, which is one WASM call.
       onCancel: () => {
         cancelAllImports();
         if (pendingResolverRef.current) resolveModelImport(null);
@@ -3584,11 +3299,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         }
         let { root, children } = parsedResult;
 
-        // Two sources, because neither is complete on its own. detectMissingTextures reads the source
-        // files and so can name an image that never even reached the loader (a .gltf/.mtl reference), but
-        // it can only parse the text formats. The loader's own report covers every format — it is the one
-        // thing that actually knows which slot came out empty — including FBX, whose references are
-        // binary and used to go entirely unnoticed.
+        // Two sources, because neither is complete on its own: detectMissingTextures reads the source files
+        // and can name an image that never reached the loader, but only for text formats; the loader's own
+        // report covers every format, including FBX, whose references are binary.
         const byName = (list: UnresolvedTexture[]) => {
           const seen = new Map<string, UnresolvedTexture>();
           for (const t of list) if (!seen.has(t.name)) seen.set(t.name, t);
@@ -3642,12 +3355,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         await awaitSubtreeTexturesReady(root);
 
         // Register a MaterialAsset per unique material (deduped within the bundle) and link each node.
-        //
-        // Thumbnails are deliberately NOT rendered here. Each capture builds a throwaway Scene and drives
-        // renderer.screenshot — a full GL frame — so importing a model with N materials used to cost N+1
-        // synchronous scene renders on the main thread and tanked the framerate. Assets are stored with an
-        // empty thumbnail; thumbnailOf() falls back to the kind's icon, and the real preview is rendered
-        // the first time the asset is opened (see captureAssetThumbnail).
+        // Thumbnails are deliberately NOT rendered here — each capture is a full GL frame. Assets are stored
+        // with an empty thumbnail; the real preview is rendered on first open (see captureAssetThumbnail).
         const materialIds: string[] = [];
         const assetByKey = new Map<string, MaterialAsset>();
         // Which material asset each sub-mesh ended up on — a separated asset must list only the materials
@@ -3715,10 +3424,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // Save a material tab to the library (capturing a sphere thumbnail) and propagate to references.
-  // captureMaterialSphere renders the tab's own scene offscreen, so this works for a tab that is not on
-  // screen — which is what lets Save All reach every dirty material.
-  // Async only because the thumbnail readback is (a WebGPU one is a buffer map). The capture's own
-  // camera and grid restores happen before it suspends — see `captureMaterialSphere`.
+  // captureMaterialSphere renders the tab's own scene offscreen, so this reaches a tab that is not on
+  // screen. Async only because the thumbnail readback is; its camera and grid restores precede that.
   const saveMaterialTab = async (tabId: string) => {
     const instance = instanceRef.current;
     const tab = tabsRef.current.find(t => t.id === tabId);
@@ -3732,9 +3439,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (tab.materialId) {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail, tab.materialId);
         updateMaterial(tab.materialId, asset);
-        // Propagation edits other scenes, so it must not mark them dirty: the link (__materialId) is what
-        // they store, and resyncScene re-resolves it on open. Dirtying here would mean saving any material
-        // left every open scene claiming unsaved edits — and Save All could never reach all-clean.
+        // Propagation edits other scenes and must not mark them dirty: they store the link (__materialId)
+        // and resyncScene re-resolves it on open. Dirtying here would keep Save All from ever going clean.
         withoutDirty(() => syncMaterialInstances(tab.materialId!, asset, tab.id)); // push edits to placed references
       } else {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail);
@@ -3792,10 +3498,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Build a terrain-material editor tab: a preview sphere carrying the TerrainMaterial to edit (its base
   // surface previews as a normal Basic/Blinn/PBR sphere; blend + foliage are edited in the inspector).
   const openTerrainMaterialTab = (asset: TerrainMaterialAsset | null, adoptTabId?: string) => {
-    // Disarm dirty-tracking before building the preview scene. SCENE_CHANGED is global and names no
-    // scene, so mark() can only blame the ACTIVE tab — and every node this construction splices into the
-    // new throwaway scene would otherwise land on the scene tab as if the user had edited it. The
-    // tab-activate effect re-arms once the new tab is showing.
+    // Disarm dirty-tracking before building the preview scene: SCENE_CHANGED names no scene, so mark()
+    // can only blame the ACTIVE tab. The tab-activate effect re-arms once the new tab is showing.
     dirtyArmedRef.current = false;
     const scene = new Scene();
     void createMaterialPreviewScene(scene); // env map + skybox attach once the cubemap images load
@@ -3877,13 +3581,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Keep non-reactive mirrors of the active tab (read by the once-registered SCENE_CHANGED/dimension listeners).
   useEffect(() => { activeTabIdRef.current = activeTabId; activeTabKindRef.current = activeTab.kind; }, [activeTabId, activeTab.kind]);
 
-  // Arm dirty-tracking for the scene tab on a cold start.
-  //
-  // The tab-activate effect below arms on every switch, but it bails while instanceRef is still null — and
-  // on startup that is always the case, because the engine initializes in its own async effect. The scene
-  // tab is active from the first render and never "switches", so nothing would ever arm it and the first
-  // session would silently register no edits at all. Wait for the same settle window the switch path uses,
-  // so the editor-helper reconciler's opening SCENE_CHANGED burst doesn't read as an edit.
+  // Arm dirty-tracking for the scene tab on a cold start: the tab-activate effect below bails while
+  // instanceRef is null, and the scene tab never "switches". Wait for the same settle window the switch
+  // path uses, so the editor-helper reconciler's opening SCENE_CHANGED burst doesn't read as an edit.
   useEffect(() => {
     if (!isSceneReady) return;
     requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
@@ -3891,12 +3591,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   /**
    * Put the engine behind a tab: swap in its scene, set the grid/dimension and reset the selection.
-   *
-   * Extracted from the effect below because that effect cannot cover the boot case. It bails while
-   * `instanceRef` is null — always true on the first commit, since the engine initializes in its own async
-   * effect — and its only dep is `activeTabId`, which does not change during boot. A session restored with
-   * an asset tab active would therefore never get `instance.setScene(runtime.scene)`. The boot effect calls
-   * this directly instead. (The dirty-arming effect above documents the same bail-out.)
+   * Separate from the effect below, which cannot cover boot: it bails while `instanceRef` is null and its
+   * only dep is `activeTabId`, which does not change during boot. The boot effect calls this directly.
    */
   const applyActiveTab = (tab: EditorTab) => {
     const instance = instanceRef.current;
@@ -3934,9 +3630,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     applyActiveTab(tabsRef.current.find(t => t.id === activeTabId) ?? tabsRef.current[0]);
   }, [activeTabId]);
 
-  // The scene tab is titled with the scene asset it is showing, not a fixed label — it is the open scene's
-  // document, and the tab is where the user reads which scene that is. Follows both a scene switch
-  // (openSceneId) and a rename (sceneList).
+  // The scene tab is titled with the scene asset it is showing, not a fixed label. Follows both a scene
+  // switch (openSceneId) and a rename (sceneList).
   useEffect(() => {
     const name = sceneList.find(s => s.id === openSceneId)?.name;
     if (!name) return;
@@ -3944,9 +3639,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   }, [sceneList, openSceneId]);
 
   // Mark the active tab dirty on scene edits (after the open-settle window). Every tab kind goes through
-  // the same dirtyTabs entry — the scene tab included, where it means the open scene asset has unsaved
-  // edits. Play mode never marks dirty (it runs a separate play scene, so its edits must not make the
-  // editor scene look unsaved), and neither does propagation (see dirtySuppressRef).
+  // the same dirtyTabs entry, the scene tab included. Play mode never marks dirty (it runs a separate play
+  // scene), and neither does propagation (see dirtySuppressRef).
   useEffect(() => {
     const mark = (e?: SceneChange) => {
       // Guards are split one per line so the Dirty channel can name which one rejected a mark (verbose
@@ -3956,8 +3650,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (dirtySuppressRef.current) return logDirtySkip('suppressed', e);
       // Ignore mutations to editor-owned nodes — the free-fly viewport camera (an __editor__Camera Node,
       // moved every frame during navigation) and the __editor__/__debug__ helper icons + physics wireframes
-      // the reconciler splices in. None are user edits, and without this the engine's new per-setter transform
-      // events would mark a clean scene unsaved the instant the user orbits the camera.
+      // the reconciler splices in. None are user edits.
       if (e?.node && (e.node.name.includes('__editor__') || e.node.name.includes('__debug__')))
         return logDirtySkip('editor-owned', e);
       markTabDirty(activeTabIdRef.current, describeChange(e));
@@ -4034,15 +3727,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         currentLibs(),
       );
       await saveSceneData(sceneId, { ...gameData, assetHashes, assetHashVersion: ASSET_HASH_VERSION, savedAt: now });
-      // The AUTHORED dimension, never the view. These used to be the same value, so persisting the rig
-      // mirror here was harmless — the moment the viewport toggle became view-only it would have meant
-      // that merely LOOKING at a 3D scene through the orthographic camera and hitting save rewrote the
-      // scene as 2D, and a publish would then discard its landscape.
+      // The AUTHORED dimension, never the view: saving while merely LOOKING at a 3D scene through the
+      // orthographic camera must not rewrite it as 2D and make a publish discard its landscape.
       const authored = dimensionOfScene(sceneId);
       await updateProjectMeta(m => ({
         ...m,
-        // prefs.dimension is legacy (it was project-wide); the rig now belongs to the scene. Kept written
-        // so rolling back to a build that reads it still lands on something sensible.
+        // prefs.dimension is legacy and project-wide; the rig belongs to the scene. Still written so a
+        // build that reads it lands on something sensible.
         prefs: { dimension: authored, selectedNode },
         scenes: m.scenes.map(s => s.id === sceneId
           ? { ...s, updatedAt: now, refs, dimension: authored }
@@ -4065,10 +3756,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
 
   // The live animation session's Apply, registered by StateMachineProvider — and by AnimationFieldProvider
-  // for a field tab, which has the same shape of problem. Neither tab can be saved from here: an animation
-  // tab has no asset of its own (saving it means applying the machine onto the source model), and both keep
-  // their working copy as React state inside their own provider. Only the active tab ever has a session, so
-  // one slot is enough.
+  // for a field tab. Neither can be saved from here: both keep their working copy as React state inside
+  // their own provider. Only the active tab ever has a session, so one slot is enough.
   const animationApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerAnimationApply = (reg: { tabId: string; apply: () => void } | null) => { animationApplyRef.current = reg; };
 
@@ -4092,8 +3781,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'terrainMaterial': await saveTerrainMaterialTab(tabId); break;
       case 'script': saveScriptTab(tabId); break;
       case 'tileset': {
-        // Without this the tab fell through still dirty, so Ctrl+S / Save All / the close prompt all
-        // reported "Save failed" even though the tileset's own Save button worked.
         const session = tilesetApplyRef.current;
         if (!session || session.tabId !== tabId) return false;
         session.apply();
@@ -4115,12 +3802,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const savingRef = useRef(false);
 
   /**
-   * The one save runner: drives `tabIds` sequentially, one progress step each, and owns `savingState` (the
-   * Save button's label/icon). Every save entry point goes through here — a single asset, Save All, and the
-   * scene save that openScene runs — so they cannot drift or nest tasks inside one another.
-   *
-   * Each step races a 15s timeout as a defensive backstop, so a wedged serialize can never leave the UI
-   * stuck on "Saving…".
+   * The one save runner: drives `tabIds` sequentially, one progress step each, and owns `savingState`. Every
+   * save entry point goes through here, so they cannot drift or nest tasks. Each step races a 15s timeout,
+   * so a wedged serialize can never leave the UI stuck on "Saving…".
    */
   const runSave = async (tabIds: string[], title: string): Promise<boolean> => {
     if (savingRef.current || !tabIds.length) return false;
@@ -4170,13 +3854,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Save every tab with unsaved edits.
-   *
-   * Order is load-bearing. Animation applies run first — applying is what makes the source model's tab
-   * dirty, so it has to happen before we decide what to save. Then the leaf assets, then the models and
-   * templates that embed them, and the scene last: saveCurrentScene captures a content hash per referenced
-   * asset, and hashing a material we are about to rewrite would store a stale hash and cause a pointless
-   * resync on next open.
+   * Save every tab with unsaved edits. Order is load-bearing: animation applies first (applying is what
+   * makes the source model's tab dirty), then leaf assets, then the models and templates that embed them,
+   * then the scene — saveCurrentScene hashes referenced assets and must not hash one about to be rewritten.
    */
   const saveAll = async (): Promise<void> => {
     if (savingRef.current) return;
@@ -4188,8 +3868,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0, tileset: 0,
       model: 1, template: 2, scene: 3,
     };
-    // Snapshot: propagation is suppressed and so cannot extend this set, but taking it up front also makes
-    // the loop finite by construction rather than by argument.
+    // Snapshot taken up front, so the loop is finite by construction.
     const targets = tabsRef.current
       .filter(t => dirtyTabsRef.current[t.id])
       .sort((a, b) => ORDER[a.kind] - ORDER[b.kind]);
@@ -4252,16 +3931,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * A scene's camera rig, migrating on read: scenes authored before this was per-scene have no `dimension`,
-   * so they fall back to the old project-wide preference, then to 3D. The resolved value is persisted onto
-   * the scene by the next save (see saveCurrentScene).
-   */
-  /**
-   * Swap the camera rig the viewport looks through.
-   *
-   * The single writer of the view: the viewport's own toggle calls it directly, and everything that should
-   * make the view FOLLOW the scene (opening one, changing its authored type, booting) calls it too. It is
-   * never persisted — reloading always lands on the scene's own dimension.
+   * Swap the camera rig the viewport looks through — the single writer of the view, called both by the
+   * viewport toggle and by everything that should make the view FOLLOW the scene. Never persisted:
+   * reloading always lands on the scene's own dimension.
    */
   const setViewDimension = (dimension: '2D' | '3D') => {
     setViewDimensionState(dimension);
@@ -4277,9 +3949,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const setSceneDimension = async (sceneId: string, dimension: '2D' | '3D'): Promise<void> => {
     if (dimensionOfScene(sceneId) === dimension) return;
 
-    // Warn when the scene still holds authoring the target dimension has no use for. Only checkable for
-    // the OPEN scene — a closed one's tree is a blob on disk — which is also the only one the user can be
-    // looking at while flipping the switch.
+    // Warn when the scene still holds authoring the target dimension has no use for. Only checkable for the
+    // OPEN scene — a closed one's tree is a blob on disk.
     if (sceneId === openSceneIdRef.current) {
       const scene = editorSceneRef.current;
       const losing = dimension === '3D' ? 'tilemap' : 'landscape';
@@ -4291,9 +3962,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       ...m,
       scenes: m.scenes.map(s => s.id === sceneId ? { ...s, dimension } : s),
     }));
-    // Changing what the scene IS also changes what you are looking through — but only for the scene on
-    // screen, and only as a consequence. The view can be flipped back on its own afterwards without
-    // touching this setting again.
+    // Changing what the scene IS also changes what you look through, but only for the scene on screen.
     if (sceneId === openSceneIdRef.current) setViewDimension(dimension);
     markTabDirty(SCENE_TAB_ID, 'scene-dimension');
   };
@@ -4332,9 +4001,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Open a scene asset in the Main tab. Only one scene is ever open: the current scene's editor
-   * state (scripts/bodies/triggers/UI/selection) is torn down and the target's blob is parsed into
-   * the same live Scene object (exactly the Import path, which is proven on a started scene).
+   * Open a scene asset in the Main tab. Only one scene is ever open: the current scene's editor state
+   * (scripts/bodies/triggers/UI/selection) is torn down and the target's blob is parsed into the same
+   * live Scene object.
    */
   const openScene = async (sceneId: string): Promise<boolean> => {
     const meta = projectMetaRef.current;
@@ -4397,9 +4066,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls — with
-    // the INCOMING scene's rig, not the outgoing one's, now that each scene carries its own. This is also
-    // what makes the view follow the scene: a 3D scene always opens looking 3D, whatever you were last
-    // looking through.
+    // the INCOMING scene's rig, not the outgoing one's. This is what makes the view follow the scene.
     setViewDimension(dimensionOfScene(sceneId));
     requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
     Logger.info(`Opened scene "${entry.name}"`, 'Editor');
@@ -4422,12 +4089,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setTexturesPreloaded(true);
     }
 
-    // Multi-scene project: load the meta (migrating a legacy single-scene 'cleo_project' blob once),
-    // then parse the last-open scene's blob. A fresh install gets a meta with one empty "Main" scene
-    // whose blob is written on first save — the "a project always has ≥1 scene" invariant.
-    //
-    // The legacy import is gated on the project: this function now runs once per PROJECT, so without the
-    // gate every project the user creates would adopt the same legacy scene as its "Main".
+    // Multi-scene project: load the meta (migrating a legacy single-scene 'cleo_project' blob once), then
+    // parse the last-open scene's blob. A fresh install gets a meta with one empty "Main" scene — the
+    // "a project always has ≥1 scene" invariant. The legacy import is gated per PROJECT.
     let meta = await loadProjectMeta();
     if (!meta && activeProjectAllowsLegacyImport()) meta = await migrateLegacyProject();
     if (!meta) {
@@ -4498,8 +4162,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           
           await setupInitialScene();
 
-          // Migrate projects saved with the old grey default to the pastel-blue editor background (leaves
-          // any intentionally-customised clear color alone). applyGameData may have restored a saved one.
+          // Migrate the old grey default to the pastel-blue editor background, leaving an intentionally
+          // customised clear color alone.
           const cc = engine.renderer.clearColor;
           if (cc && Math.abs(cc[0] - LEGACY_CLEAR_COLOR[0]) < 0.01 && Math.abs(cc[1] - LEGACY_CLEAR_COLOR[1]) < 0.01 && Math.abs(cc[2] - LEGACY_CLEAR_COLOR[2]) < 0.01)
             engine.renderer.clearColor = [...EDITOR_CLEAR_COLOR];
@@ -4508,14 +4172,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           TextureManager.Instance.addTextureFromBase64(buildLightIconDataURL(), {
             mipMap: false
           }, '__editor__light_icon');
-          // Light-probe viewport billboard icon — the concentric-circles probe glyph (matching the
-          // inspector's ProbeIcon), rasterised to a PNG so it can be a sprite texture like the light icon.
+          // Light-probe viewport billboard icon, rasterised to a PNG so it can be a sprite texture.
           TextureManager.Instance.addTextureFromBase64(buildProbeIconDataURL(), {
             mipMap: false
           }, '__editor__probe_icon');
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
-          // Setting the editor scene and camera
           engine.setScene(editorSceneRef.current);
           // The editor scene runs unpaused (for camera nav), so disable animator playback and pin
           // skinned models to their bind/T pose — animations only play in Play mode + the Anim Editor.
@@ -4552,15 +4214,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       initializeEngine();
   }, []);
 
-  // Keep editor helper nodes (light/camera/probe icons + physics debug wireframes) derived from the
-  // scene's contents. Helpers are __editor__/__debug__ prefixed so they never leak into play/save/
-  // publish; we only maintain them on the active editor scene while editing. Reconciling is coalesced
-  // to one rAF, and a suppress flag ignores the SCENE_CHANGED the reconciler's own edits emit.
+  // Keep editor helper nodes (light/camera/probe icons + physics debug wireframes) derived from the scene's
+  // contents. Helpers are __editor__/__debug__ prefixed so they never leak into play/save/publish.
+  // Reconciling is coalesced to one rAF, and a suppress flag ignores the SCENE_CHANGED its own edits emit.
   const reconcileScheduledRef = useRef(false);
   const suppressReconcileRef = useRef(false);
-  // The pending rAF handle, so the effect's cleanup can drop a reconcile queued by the OUTGOING closure.
-  // Without this a scene parse (which emits structural changes) queues a run with the old isPlayMode, and
-  // that run lands a frame into Play with the editor channel's values. See the cleanup below.
+  // The pending rAF handle, so the effect's cleanup can drop a reconcile queued by the OUTGOING closure —
+  // a scene parse otherwise queues a run that lands a frame into Play with the editor channel's values.
   const reconcileRafRef = useRef(0);
   useEffect(() => {
     const runReconcile = () => {
@@ -4568,11 +4228,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // (Terrain-)material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
       if (editorMode === 'material' || editorMode === 'terrainMaterial') return;
       const vis = debugVisibilityRef.current;
-      // The reference grid is editor CHROME -- global renderer state, not a scene node -- so it is the one
-      // overlay whose visibility survives a scene swap and where the last writer wins outright. Assert it on
-      // EVERY reconcile from whichever channel is in force, rather than once at the play/stop transition:
-      // that makes it self-healing (and live-togglable mid-Play), the same shape DebugSkeletonOverlay uses.
-      // Skipped in renderer mode, where the Renderer panel owns its own grid switch.
+      // The reference grid is editor CHROME -- global renderer state, not a scene node -- so its visibility
+      // survives a scene swap and the last writer wins. Assert it on EVERY reconcile from whichever channel
+      // is in force. Skipped in renderer mode, where the Renderer panel owns its own grid switch.
       if (editorMode !== 'renderer')
         instanceRef.current?.renderer.setGridVisible(isPlayMode ? vis.grid.runtime : vis.grid.editor);
       suppressReconcileRef.current = true;
@@ -4585,9 +4243,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           if (playScene) reconcileEditorHelpers(playScene, bodiesRef.current, triggersRef.current, vis, 'runtime');
         } else if (activeScene) {
           // withoutDirty as well as suppressReconcileRef: the latter only stops the reconciler re-triggering
-          // ITSELF, while the light icons and gizmo helpers it splices in emit SCENE_CHANGED like any other
-          // node edit and would otherwise read as unsaved work. They are editor bookkeeping, never the user's
-          // change, so they must not dirty the tab at any time — not merely inside an opening settle window.
+          // ITSELF, while the helpers it splices in emit SCENE_CHANGED like any other node edit.
           withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current, vis, 'editor'));
         }
       } finally { suppressReconcileRef.current = false; }
@@ -4606,11 +4262,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     emitter.on('DEBUG_VISIBILITY_CHANGED', schedule);
     schedule(); // initial reconcile for the current scene / mode
     return () => {
-      // Drop any reconcile this closure queued. Entering Play parses a whole scene, and those structural
-      // events schedule a run while isPlayMode is still false; it would fire one frame later and reassert
-      // the EDITOR channel over the play session. Clearing the flag as well as the handle is the
-      // load-bearing half -- cleanup runs before the next effect body, so without the reset the re-run's
-      // own schedule() below would see `true` and bail, dropping the play-mode reconcile entirely.
+      // Drop any reconcile this closure queued: entering Play parses a whole scene and those structural
+      // events schedule a run while isPlayMode is still false. Clearing the FLAG as well as the handle is
+      // load-bearing -- cleanup runs before the next effect body, and schedule() would otherwise bail.
       cancelAnimationFrame(reconcileRafRef.current);
       reconcileScheduledRef.current = false;
       emitter.off('SCENE_CHANGED', schedule);
@@ -4619,7 +4273,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     };
   }, [activeScene, isPlayMode, editorMode]);
 
-  // Event handling
   useEffect(() => {
     eventEmitter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
       if (!instanceRef.current) return;
@@ -4627,7 +4280,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // overwrite the rig the scene tab goes back to.
       if (activeTabKindRef.current === 'scene') viewDimensionRef.current = dimension;
 
-      // Wait for scene to be ready
       if (!instanceRef.current.scene) {
         console.log('Scene not ready yet, retrying...');
         setTimeout(() => {
@@ -4636,7 +4288,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         return;
       }
 
-      // change camera to 2D
       // `const`, not `let`: it is never reassigned, and const is what lets the null-guard below narrow
       // it inside the onUpdate closures too (a captured `let` could be reassigned, so TS re-widens it).
       const cameraNode = instanceRef.current.scene.activeCamera;
@@ -4644,13 +4295,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!cameraNode) return;
 
       // Remember where the OUTGOING rig was parked before touching anything, so the trip back lands where
-      // you left. Taken first (rather than only on a real switch) so the boot emit records the starting 3D
-      // pose too — otherwise the very first return from 2D would have nothing to restore.
-      //
-      // Scene tab only, and that guard is load-bearing: applyActiveTab installs the incoming tab's scene
-      // BEFORE it asks for a rig, so without it switching to an asset tab would snapshot that tab's own
-      // preview camera under the scene tab's key and then push the scene's pose onto it. Asset tabs are
-      // transient 3D previews that own their framing; leave their cameras alone.
+      // you left; taken unconditionally so the boot emit records the starting 3D pose too. Scene tab only:
+      // applyActiveTab installs the incoming tab's scene BEFORE it asks for a rig.
       let remembered: typeof viewPoseRef.current['2D'] | undefined;
       if (activeTabKindRef.current === 'scene') {
         const cam = cameraNode.camera;
@@ -4679,7 +4325,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             const node = cameraNode;
             const mouse = InputManager.instance.mouse;
             const movement = delta;
-            // Pan with left OR right button when not dragging gizmo
             if ((mouse.buttons.Left || mouse.buttons.Right) && !isGizmoDraggingRef.current) {
                 node.addX(-mouse.velocity[0] * movement);
                 node.addY(mouse.velocity[1] * movement);
@@ -4689,12 +4334,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
                 InputManager.instance.isKeyPressed('KeyA') && node.addX(-movement * 10);
                 InputManager.instance.isKeyPressed('KeyD') && node.addX(movement * 10);
             }
-            // Zoom with mouse wheel by scaling ortho extents
             if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
-              // Wheel up (deltaY < 0) SHRINKS the ortho extents, i.e. shows less world, i.e. zooms in —
-              // matching the 3D rig's dolly below and every other wheel in the editor. The sign used to be
-              // negated here, which for an orthographic camera meant wheel-up grew the frustum and zoomed
-              // OUT, the opposite of both the 3D rig and this line's own comment.
+              // Wheel up (deltaY < 0) SHRINKS the ortho extents — shows less world, zooms in — matching
+              // the 3D rig's dolly below and every other wheel in the editor.
               const step = mouse.wheel.deltaY * 0.001;
               const factor = Math.max(0.1, 1 + step); // avoid inverting the frustum on a fast scroll
               const cam = cameraNode.camera;
@@ -4735,7 +4377,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           const node = cameraNode;
           const mouse = InputManager.instance.mouse;
           const movement = delta * 2;
-          // Rotate and move with left button when not dragging gizmo
           if (mouse.buttons.Left && !isGizmoDraggingRef.current) {
             node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
             InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
@@ -4745,12 +4386,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
             InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
           }
-          // Pan with right button (translate along the view's right/up axes)
           if (mouse.buttons.Right && !isGizmoDraggingRef.current) {
             node.addRight(-mouse.velocity[0] * movement);
             node.addUp(mouse.velocity[1] * movement);
           }
-          // Zoom with mouse wheel by dollying the camera forward/backward
           if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
             const zoom = -mouse.wheel.deltaY * 0.01; // wheel up -> move forward
             node.addForward(zoom);
@@ -4767,9 +4406,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (state === 'play') {
         instanceRef.current.isPaused = false;
         setIsPlayMode(true);
-        // Enable mouse capture during play so left-click locks pointer
         InputManager.instance.enableMouseCapture();
-        // Clear selection and outline rendering when entering play mode
         setSelectedNode(null);
         if (instanceRef.current && instanceRef.current.renderer) {
           instanceRef.current.renderer.setSelectedNode(null);
@@ -4778,13 +4415,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // Never render a debug channel in the running game (in case Play is pressed in Renderer mode).
           instanceRef.current.renderer.debugView = 'final';
         }
-        // Pressing Escape should release pointer lock
         InputManager.instance.registerKeyPress('Escape', () => InputManager.instance.releaseMouse());
       }
       else if (state === 'pause') {
         instanceRef.current.isPaused = true;
         setIsPlayMode(true);
-        // Keep selection cleared during pause mode
         setSelectedNode(null);
         if (instanceRef.current && instanceRef.current.renderer) {
           instanceRef.current.renderer.setSelectedNode(null);
@@ -4797,17 +4432,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (instanceRef.current.renderer) {
           instanceRef.current.renderer.setGridVisible(debugVisibilityRef.current.grid.editor);
         }
-        // Disable mouse capture and release pointer
         InputManager.instance.disableMouseCapture();
       }
     });
 
     eventEmitter.current.on('SELECT_NODE', (node: string | null) => {
       console.log('SELECT_NODE event received:', node);
-      // A model tab edits ONE thing and has no tree to browse, so the selection is pinned to the active
-      // LOD level's root: clicking any part of the model in the viewport selects the model, and the
-      // Transform panel therefore always edits the model's own transform rather than a sub-mesh's. One
-      // choke point covers tab activation, the LOD level radio and viewport picking alike.
+      // A model tab edits ONE thing and has no tree to browse, so the selection is pinned to the active LOD
+      // level's root: the Transform panel always edits the model's transform, never a sub-mesh's.
       if (activeTabKindRef.current === 'model') {
         const session = modelSessionsRef.current[activeTabIdRef.current];
         const pinned = session ? session.levelIds[session.activeLevel] : undefined;
@@ -4836,7 +4468,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       isGizmoDraggingRef.current = false;
     });
 
-    // Reset gizmo dragging state
     isGizmoDraggingRef.current = false;
     setIsGizmoDragging(false);
 
@@ -4925,16 +4556,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   });
 
   /**
-   * Refresh every animation state's embedded Animation Field from the library.
-   *
-   * A state stores a COPY of the field, written when the machine was applied — that is what lets a field
-   * ride through scene saves and publishing with no extra plumbing. The cost is that the copy can fall
-   * behind the asset: edit a field after applying the machine, or open a scene/template saved before the
-   * last field edit, and the node still plays the old blend. The field editor previews the LIVE field, so
-   * the symptom is a blend that looks right while authoring and wrong in Play.
-   *
-   * Doing this at play start covers every route in one place — the open scene, template instances, whatever
-   * — instead of chasing each one. withoutDirty because refreshing from the library is not the user's edit.
+   * Refresh every animation state's embedded Animation Field from the library. A state stores a COPY of the
+   * field, written when the machine was applied, and that copy can fall behind the asset. Done at play start
+   * so every route is covered in one place. withoutDirty: refreshing from the library is not a user edit.
    */
   const reembedSceneFields = (scene: Scene) => {
     let count = 0;
@@ -4956,20 +4580,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.input.preventDefault();
     if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', 'play'); return; }
 
-    // Play always runs the game scene, from wherever the user happens to be. Asset editors are documents
-    // open beside the game, not places you leave to test it — so pressing Play from a material tab takes
-    // you to the scene, and Stop brings you back to the material.
-    //
-    // It cannot be done in one pass. Both this and the tab-activate effect call instance.setScene, and
-    // passive effects are scheduled rather than flushed at a microtask boundary — so the activate effect's
-    // editor scene could legally land AFTER the play scene built below the await, wiping the running game.
-    // Committing the switch first and re-entering from an effect makes the order explicit.
+    // Play always runs the game scene, from wherever the user happens to be; Stop brings them back.
+    // It cannot be done in one pass: both this and the tab-activate effect call instance.setScene, and
+    // passive effects are scheduled, not flushed — commit the switch first, then re-enter from an effect.
     if (activeTabIdRef.current !== SCENE_TAB_ID || mainModeRef.current !== 'scene') {
       playReturnRef.current = { tabId: activeTabIdRef.current, mainMode: mainModeRef.current };
       const leaving = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-      // Play reads the open scene and the asset LIBRARIES, never a tab's edit session — so unsaved work in
-      // the tab being left is genuinely not in the build. Say so instead of silently saving it: saving here
-      // would rebuild every placed instance of a template, or rewrite every material in every live scene.
+      // Play reads the open scene and the asset LIBRARIES, never a tab's edit session, so unsaved work in
+      // the tab being left is genuinely not in the build. Say so rather than silently saving it.
       if (leaving && leaving.kind !== 'scene' && dirtyTabsRef.current[leaving.id])
         Logger.info(`Playing the scene — unsaved changes in "${leaving.title}" are not included`, 'Editor');
       setMainMode('scene');
@@ -5101,9 +4719,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     ?? projectMetaRef.current?.prefs?.dimension ?? '3D';
 
   // Landscape and Tilemap share one slot in the mode selector, filled by whichever the open scene's
-  // dimension uses — so after a switch (or after opening a scene of the other kind) the current mode can
-  // name a tool with no button and no scene to act on. Snap back to plain scene editing rather than
-  // leaving the user in a mode whose panels are hidden and whose brush can never hit anything.
+  // dimension uses — so after a switch the current mode can name a tool with no button and no scene to act
+  // on. Snap back to plain scene editing.
   useEffect(() => {
     const stale = currentDimension === '2D' ? 'landscape' : 'tilemap';
     if (mainModeRef.current === stale) setMainMode('scene');

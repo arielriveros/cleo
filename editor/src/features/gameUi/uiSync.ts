@@ -6,14 +6,9 @@ import {
 /**
  * The imperative half of the game-UI renderer.
  *
- * React owns STRUCTURE (which elements exist, of what type, under which parent) and re-renders only when
- * the scene tree changes. Everything that moves — rects, opacity, text, fill fractions — is written
- * straight to the DOM from here, once per frame, skipping any node whose `layoutVersion` /
- * `contentVersion` has not moved.
- *
- * That split is load-bearing, not an optimisation. A `setState` per frame over a two-hundred-element HUD
- * re-reconciles the whole tree every frame and costs more than the renderer does; the version counters
- * mean a settled HUD writes nothing at all.
+ * React owns structure and re-renders only when the scene tree changes. Everything that moves — rects,
+ * opacity, text, fill fractions — is written straight to the DOM from here, once per frame, skipping any
+ * node whose `layoutVersion` / `contentVersion` has not moved.
  */
 
 /** The DOM handles for one UI node. Sub-element refs are null for types that do not use them. */
@@ -42,12 +37,8 @@ export function cssColor(c: UIColor | undefined): string {
 }
 
 /**
- * Resolve a texture id to something an `<img>` can load.
- *
- * `Texture.data` is the decoded `HTMLImageElement` the engine uploaded from, so its `src` is already a
- * URL (object URL or data URI) the browser can reuse with no second decode. Returns '' for an unknown id
- * rather than throwing — a UI image whose texture has not finished loading should render empty, not take
- * the frame down.
+ * Resolve a texture id to a URL an `<img>` can load. Returns '' for an unknown id rather than throwing,
+ * so a texture that has not finished loading renders empty.
  */
 export function textureSrc(id: string | null): string {
     if (!id) return '';
@@ -57,10 +48,8 @@ export function textureSrc(id: string | null): string {
 }
 
 /**
- * The CSS `display` a visible node should use.
- *
- * Centralised because layout and content are synced on independent version counters: if both wrote
- * `display`, a layout-only frame would reset a flex box to block and silently drop its alignment.
+ * The CSS `display` a visible node should use. Only one sync path may write `display`: layout and content
+ * run on independent version counters, so a second writer would reset a flex box on a layout-only frame.
  */
 function displayFor(node: UINode): string {
     return (node instanceof UITextNode || node instanceof UIButtonNode || node instanceof UIToggleNode)
@@ -73,31 +62,25 @@ function applyBorder(style: CSSStyleDeclaration, node: UINode): void {
 }
 
 /**
- * Write one node's resolved geometry to its element.
- *
- * Uses `transform: translate3d` rather than `left`/`top` so the browser can composite the move without a
- * layout pass — with a HUD that follows a moving target this is the difference between a free frame and a
- * full reflow of the overlay.
- *
- * `opacity` and `display` are written from the node's OWN values, not the resolved ones: the DOM is
- * nested, so the browser already multiplies opacity and hides descendants of a hidden ancestor. Writing
- * the resolved values would apply the ancestor chain twice.
+ * Write one node's resolved geometry to its element. Moves go through `transform: translate3d`, not
+ * `left`/`top`, so the browser composites without a layout pass. `opacity` and `display` come from the
+ * node's own values, never the resolved ones — the nested DOM already applies the ancestor chain.
  */
 function syncLayout(binding: UIBinding, interactive: boolean, editorPick: boolean): void {
     const { node, box } = binding;
     const style = box.style;
 
     if (node instanceof UIRootNode) {
-        // A root is positioned in real viewport pixels and carries the single scale for its whole
-        // subtree; its descendants then lay out in reference units underneath it.
+        // A root is positioned in real viewport pixels and carries the scale for its whole subtree;
+        // descendants lay out in reference units underneath it.
         const rect = node.rect;
         style.width = `${rect.width}px`;
         style.height = `${rect.height}px`;
         style.transformOrigin = '0 0';
         const plane = node.planeMatrix;
         if (plane) {
-            // Non-billboarded world UI: one homography places the whole quad, so the usual
-            // left/top + scale would fight it. Anchored at the origin and let the matrix do everything.
+            // Non-billboarded world UI: one homography places the whole quad, so it must be anchored at
+            // the origin — left/top + scale would fight the matrix.
             style.left = '0';
             style.top = '0';
             style.transform = `matrix3d(${plane.join(',')})`;
@@ -112,8 +95,8 @@ function syncLayout(binding: UIBinding, interactive: boolean, editorPick: boolea
         const [sx, sy] = node.scale2d;
         style.left = '0';
         style.top = '0';
-        // A content-sized axis is left to the browser: the element cannot be measured while the engine is
-        // also dictating its size, so the DOM owns that axis and reports back (see measureContent).
+        // A content-sized axis is left to the browser: the DOM owns that axis and reports back
+        // (measureContent). The engine must not also dictate its size.
         const contentSized = node.sizing === 'content';
         const autoX = contentSized && node.anchorMin[0] === node.anchorMax[0];
         const autoY = contentSized && node.anchorMin[1] === node.anchorMax[1];
@@ -130,9 +113,8 @@ function syncLayout(binding: UIBinding, interactive: boolean, editorPick: boolea
     style.opacity = String(node.opacity);
     style.zIndex = String(node.zOrder);
     style.overflow = node.clip ? 'hidden' : '';
-    // Interactivity is opt-in per node so a HUD never swallows a click meant for the 3D scene. In the
-    // editor everything is clickable regardless, because there the click SELECTS rather than activates —
-    // a panel with `interactive: false` still has to be selectable by clicking it.
+    // Interactivity is opt-in per node so a HUD never swallows a click meant for the 3D scene; in the
+    // editor everything is clickable, because there a click selects rather than activates.
     style.pointerEvents = editorPick || (interactive && node.interactive) ? 'auto' : 'none';
     style.padding = node.padding.some(v => v !== 0)
         ? `${node.padding[1]}px ${node.padding[2]}px ${node.padding[3]}px ${node.padding[0]}px`
@@ -140,20 +122,16 @@ function syncLayout(binding: UIBinding, interactive: boolean, editorPick: boolea
 }
 
 /**
- * Feed the browser's measurement of a content-sized element back to the engine.
- *
- * Necessarily one frame behind: the measurement is the result of the layout that this very call will feed
- * into, so it cannot exist any earlier. The 0.5px threshold is what makes that loop settle rather than
- * oscillate forever on a sub-pixel difference — without it every content-sized element re-writes its
- * styles on every frame.
+ * Feed the browser's measurement of a content-sized element back to the engine. Necessarily one frame
+ * behind. The 0.5px threshold is what makes the loop settle instead of oscillating on a sub-pixel
+ * difference.
  */
 function measureContent(binding: UIBinding): void {
     const { node, box } = binding;
     if (node.sizing !== 'content') return;
     const w = box.offsetWidth;
     const h = box.offsetHeight;
-    // offsetWidth is pre-transform layout px, so it is already in the root's reference units and needs no
-    // compensation for the root's scale.
+    // offsetWidth is pre-transform layout px, so it is already in the root's reference units.
     const measured = node.measuredContentSize;
     if (Math.abs(w - measured[0]) > 0.5 || Math.abs(h - measured[1]) > 0.5)
         node.setMeasuredContentSize(w, h);
@@ -187,9 +165,7 @@ function syncContent(binding: UIBinding): void {
             binding.image.style.objectFit = node.fit === 'tile' ? 'fill' : node.fit;
             binding.image.style.width = '100%';
             binding.image.style.height = '100%';
-            // CSS cannot multiply an image by an arbitrary colour without a filter matrix, so an image's
-            // tint contributes its ALPHA only. Documented rather than silently ignored; use a coloured
-            // panel behind a white sprite for a real tint.
+            // An image's tint contributes its alpha only; CSS cannot multiply by an arbitrary colour.
             binding.image.style.opacity = String(node.tint[3]);
         }
         applyBorder(style, node);
@@ -216,8 +192,7 @@ function syncContent(binding: UIBinding): void {
             fs.background = cssColor(node.fillTint);
             fs.position = 'absolute';
             fs.borderRadius = 'inherit';
-            // The fill grows from whichever edge the direction names, so a right-to-left bar drains the
-            // way a fuel gauge does rather than jumping.
+            // The fill grows from whichever edge the direction names.
             const horizontal = node.direction === 'ltr' || node.direction === 'rtl';
             fs.width = horizontal ? `${f * 100}%` : '100%';
             fs.height = horizontal ? '100%' : `${f * 100}%`;
@@ -279,8 +254,8 @@ function syncContent(binding: UIBinding): void {
         style.background = cssColor(node.tint);
         applyBorder(style, node);
         if (binding.input) {
-            // Never clobber the field while the user is typing in it: React-style controlled updates on a
-            // focused input move the caret to the end on every keystroke.
+            // Never write the field while it is focused: that moves the caret to the end on every
+            // keystroke.
             if (document.activeElement !== binding.input && binding.input.value !== node.value)
                 binding.input.value = node.value;
             binding.input.placeholder = node.placeholder;
@@ -298,20 +273,19 @@ function syncContent(binding: UIBinding): void {
         return;
     }
 
-    // Panel, stack, spacer: the box itself is the whole element.
     style.background = cssColor(node.tint);
     applyBorder(style, node);
 }
 
-/**
- * Push one frame of resolved layout and content into the DOM.
- *
- * `force` re-writes every binding regardless of version, which the editor needs after a structural
- * re-render has produced brand-new elements that no version counter knows about yet.
- */
 /** Reused across frames so the batched measure pass allocates nothing. */
 const pendingMeasure: UIBinding[] = [];
 
+/**
+ * Push one frame of resolved layout and content into the DOM.
+ *
+ * @param force Re-write every binding regardless of version; needed after a structural re-render has
+ *   produced elements no version counter knows about yet.
+ */
 export function syncUI(
     registry: UIRegistry,
     interactive: boolean,
@@ -323,11 +297,8 @@ export function syncUI(
         // A node removed from the scene between the last React commit and this frame still has a binding.
         if (!node.scene && !force) continue;
 
-        // Two counters, two reasons to re-write. `revision` moves when the user (or a script) authored
-        // something, and touches BOTH paths because an authored property can land in either. `layoutVersion`
-        // moves when the solve produced different geometry, which only the layout path cares about — that
-        // split is what keeps a world-space label (whose transform changes every frame) from also
-        // re-writing every colour and string it owns, sixty times a second.
+        // `revision` moves on an authored change and drives both paths; `layoutVersion` moves when the
+        // solve produced different geometry and drives the layout path only.
         const revision = node.revision;
         const layoutVersion = node.layoutVersion;
         const authored = force || revision !== binding.lastRevision;
@@ -344,12 +315,9 @@ export function syncUI(
         if (node.sizing === 'content') pendingMeasure.push(binding);
     }
 
-    // Measurements happen AFTER every write, never interleaved with them. Reading `offsetWidth` forces the
-    // browser to flush pending layout, so measuring inside the loop above would mean one forced reflow per
-    // content-sized element per frame — the classic layout-thrash. Batched like this it is one flush total.
-    //
-    // Unconditional (rather than gated on a version) because a content-sized element also changes size when
-    // its font finishes loading or its container reflows, and neither of those moves a counter.
+    // Measurements must come after every write, never interleaved: reading `offsetWidth` flushes pending
+    // layout, so measuring inside the loop above is one forced reflow per content-sized element.
+    // Unconditional, because a font load or container reflow resizes content without moving a counter.
     for (const binding of pendingMeasure) measureContent(binding);
     pendingMeasure.length = 0;
 }

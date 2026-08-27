@@ -21,11 +21,8 @@ export type UITextVAlign = 'top' | 'middle' | 'bottom';
 export type UISizing = 'fixed' | 'content';
 
 /**
- * RGBA in 0..1, **sRGB** — deliberately not the linear convention materials use.
- *
- * UI is composited by the browser, entirely outside the engine's linear lighting and tonemapping
- * pipeline, so a colour here goes straight to CSS. Treating it as linear would mean every colour picked
- * in the inspector came out visibly wrong on screen.
+ * RGBA in 0..1, **sRGB** — deliberately not the linear convention materials use. UI is composited by
+ * the browser, outside the engine's linear pipeline, so a colour here goes straight to CSS.
  */
 export type UIColor = [number, number, number, number];
 
@@ -44,11 +41,9 @@ export function numTuple<N extends number[]>(value: any, fallback: N): N {
 /**
  * Base class for every UI element.
  *
- * Rect authoring follows `RectTransform`: an anchor PAIR plus two offsets, which makes pinning and
- * stretching the same data rather than two modes (see {@link solveRect}). Screen-space UI nodes ignore
- * `Node.position`/`rotation`/`scale` entirely — 3D transform state has no meaning in a screen rect, and
- * the editor hides the transform panel for them so nobody edits a silent no-op. The one exception is a
- * world-space {@link UIRootNode}, whose `Node.position` IS the proxy point it projects from.
+ * Rect authoring follows `RectTransform`: an anchor PAIR plus two offsets (see {@link solveRect}).
+ * Screen-space UI nodes ignore `Node.position`/`rotation`/`scale` entirely; the one exception is a
+ * world-space {@link UIRootNode}, whose `Node.position` IS the point it projects from.
  */
 export class UINode extends Node {
     protected _anchorMin: [number, number] = [0, 0];
@@ -80,12 +75,8 @@ export class UINode extends Node {
     protected _onScreen: boolean = true;
     protected _layoutVersion: number = 0;
     /**
-     * Bumped by EVERY authored setter. The DOM layer re-reads a node whenever this moves.
-     *
-     * One counter with one rule, because the alternative failed: when only "content" setters bumped a
-     * counter, every appearance and 2D-transform property on this class silently never reached the DOM —
-     * a colour edit did nothing, and pivot/rotation/scale only appeared once something else happened to
-     * move the rect. `tests/uiNode.test.ts` asserts reflectively that every setter still bumps this.
+     * Bumped by EVERY authored setter; the DOM layer re-reads a node whenever this moves.
+     * `tests/uiNode.test.ts` asserts reflectively that every setter still bumps it.
      */
     protected _revision: number = 0;
 
@@ -115,12 +106,7 @@ export class UINode extends Node {
     public get scale2d(): [number, number] { return this._scale2d; }
     public set scale2d(v: [number, number]) { const p = this._scale2d; this._scale2d = numTuple(v, [1, 1]); this._touch(); this._notifyChange('component', 'scale2d', p, this._scale2d); }
 
-    /**
-     * Set position + size, the reading the inspector shows on a PINNED axis (`anchorMin === anchorMax`).
-     *
-     * Convenience over writing the offset pair, which is what a script actually wants:
-     * `bar.setRect(20, 20, 200, 24)` rather than two coupled writes whose second value depends on the first.
-     */
+    /** Set position + size, the reading the inspector shows on a PINNED axis (`anchorMin === anchorMax`). */
     public setRect(x: number, y: number, width: number, height: number): UINode {
         this.offsetMin = [x, y];
         this.offsetMax = [x + width, y + height];
@@ -189,11 +175,8 @@ export class UINode extends Node {
     protected _touch(): void { this._revision++; }
 
     /**
-     * Report the content size the DOM measured, for `sizing: 'content'`.
-     *
-     * Consumed by the NEXT frame's solve, not this one: the measurement can only exist after the DOM has
-     * laid the element out, which is necessarily after the solve that positioned it. That is one frame of
-     * lag on a size that only changes when the content does.
+     * Report the content size the DOM measured, for `sizing: 'content'`. Consumed by the NEXT frame's
+     * solve: the measurement cannot exist until the DOM has laid the element out.
      */
     public setMeasuredContentSize(width: number, height: number): void {
         this._measured[0] = width;
@@ -216,9 +199,7 @@ export class UINode extends Node {
      * Resolve this node and its descendants.
      *
      * `parentRect` is absolute in reference units; `origin`/`scale` convert that space into viewport
-     * pixels for {@link screenRect}. Hidden subtrees are still solved — the editor has to be able to show
-     * a rect for a hidden-but-selected element — so visibility is carried as a flag rather than used to
-     * prune the walk. Dormant subtrees ARE pruned, matching `updateTransforms`.
+     * pixels for {@link screenRect}. Hidden subtrees are still solved; dormant subtrees are pruned.
      */
     public solveUI(
         parentRect: UIRect,
@@ -253,11 +234,9 @@ export class UINode extends Node {
     }
 
     /**
-     * Resolve this node into a slot a {@link UIStackNode} assigned it.
-     *
-     * The stack owns the MAIN axis, so the slot rect is used verbatim there; the cross axis still goes
-     * through the ordinary anchor solve unless `align` overrides it. That is what makes "stretch to the
-     * stack's width" and "fixed width, centred" the same mechanism rather than two special cases.
+     * Resolve this node into a slot a {@link UIStackNode} assigned it. The stack owns the MAIN axis, so
+     * the slot rect is used verbatim there; the cross axis still goes through the ordinary anchor solve
+     * unless `align` overrides it.
      */
     public solveUIInSlot(
         slot: UIRect,
@@ -290,8 +269,7 @@ export class UINode extends Node {
         else setRect(this._rect, slot.x + crossOffset, slot.y, crossSize, slot.height);
 
         // The DOM nests a stack's children inside the STACK element, so local coordinates are measured
-        // from the stack's rect rather than from the slot the layout handed out. `stackRect` is that
-        // origin, passed down because the slot alone cannot recover it.
+        // from the stack's rect rather than the slot. `stackRect` carries that origin.
         setRect(this._localRect,
             this._rect.x - stackRect.x, this._rect.y - stackRect.y, this._rect.width, this._rect.height);
 
@@ -313,11 +291,8 @@ export class UINode extends Node {
 
     /**
      * Replace the solved extent with the measured content size, on any PINNED axis, when `sizing` asks.
-     *
-     * Only pinned axes: a stretched axis is sized by the distance between its anchors, and letting content
-     * override that would silently ignore the layout the user authored. The measurement itself comes from
-     * the DOM one frame earlier (see `setMeasuredContentSize`) — it cannot exist sooner, since it is the
-     * result of laying out the very element this is sizing.
+     * Pinned axes only: a stretched axis is sized by the distance between its anchors. The measurement
+     * comes from the DOM one frame earlier (see `setMeasuredContentSize`).
      */
     protected _applyContentSize(): void {
         if (this._sizing !== 'content') return;
@@ -354,20 +329,15 @@ export class UINode extends Node {
     }
 
     /**
-     * Per-UI-type payload, merged into the `ui` block.
-     *
-     * Distinct from the base class's {@link _serializePayload}, which UINode itself overrides below: this
-     * one contributes to `ui`, that one contributes to the node's top level. Sharing a name would silently
-     * make every UI subclass override the wrong hook.
+     * Per-UI-type payload, merged into the `ui` block. Distinct from {@link _serializePayload}, which
+     * contributes to the node's top level — the two names must not be confused when overriding.
      */
     protected _serializeUIPayload(): any { return {}; }
 
     protected _serializePayload(): any {
         return {
-            // Unlike every other node family, UI persists `visible`. A hidden mesh is a mistake you see
-            // instantly; a UI panel authored hidden and revealed by a script (game over, pause menu,
-            // damage vignette) is the single most common thing anyone builds here, and the legacy overlay
-            // losing it on every save was a standing bug.
+            // Unlike every other node family, UI persists `visible`: a panel authored hidden and revealed
+            // by a script is the common case here.
             visible: this._visible,
             ui: { ...this._serializeUIBase(), ...this._serializeUIPayload() },
         };
@@ -396,18 +366,14 @@ export class UINode extends Node {
     }
 
     /**
-     * The shared parse tail for every UI type.
-     *
-     * Ends at `Node.finishParse`, which already calls `parent.addChild(node)` — deliberately NOT
-     * followed by a second `addChild` the way `SpriteNode.parse` and friends do, since that fires a
-     * spurious detach/reparent SCENE_CHANGED pair per node on every scene load.
+     * The shared parse tail for every UI type. Ends at `Node.finishParse`, which already calls
+     * `parent.addChild(node)`; a second `addChild` would fire a spurious reparent SCENE_CHANGED per node.
      */
     protected static _parseUI(node: UINode, parent: Node, json: any): void {
         node._parseUIBase(json?.ui);
         node._parsePayload(json?.ui ?? {});
-        // Assigned to the field, not through the setter: the setter emits a visibility SCENE_CHANGED
-        // and a scene load is not an edit. Absent in a subtree written before this was persisted, which
-        // correctly leaves the constructor's default of visible.
+        // Assigned to the field, not through the setter: the setter emits a visibility SCENE_CHANGED and
+        // a scene load is not an edit.
         if (json?.visible === false) node._visible = false;
         Node.finishParse(node, parent, json);
     }
@@ -419,16 +385,3 @@ export class UINode extends Node {
         UINode._parseUI(new UINode(json.name, json.type, json.id), parent, json);
     }
 }
-
-/**
- * A UI element's root: the bridge between the scene and a screen (or world) rectangle.
- *
- * Two spaces, one solve. A `screen` root maps the whole viewport into its reference resolution, so a HUD
- * authored at 1920x1080 lays out identically on any display. A `world` root projects `Node.position` (or
- * a pinned target node) to the screen and scales by camera distance — the "proxy element in the scene"
- * that lets a health bar sit above a monster while its children are authored in the same units as a HUD's.
- *
- * A root is itself a {@link UINode}, so it can be nested under another root, tinted, hidden and despawned
- * like anything else — but its own anchors are ignored, since its rect comes from the viewport or the
- * projection rather than from a parent.
- */

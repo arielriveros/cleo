@@ -12,6 +12,7 @@ import { LightNode } from '../src/core/scene/nodes/lightNode';
 import { LightProbeNode } from '../src/core/scene/nodes/lightProbeNode';
 import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';
 import { SkyAtmosphereNode } from '../src/core/scene/nodes/skyAtmosphereNode';
+import { SkyLightNode } from '../src/core/scene/nodes/skyLightNode';
 import { CameraNode } from '../src/core/scene/nodes/cameraNode';
 import { SpriteNode } from '../src/core/scene/nodes/spriteNode';
 import { AnimatedSpriteNode } from '../src/core/scene/nodes/animatedSpriteNode';
@@ -55,6 +56,7 @@ const CASES: { label: string, make: () => Node, cls: Function }[] = [
     { label: 'lightProbe', make: () => new LightProbeNode('probe', { size: [4, 4, 4] }), cls: LightProbeNode },
     { label: 'volumetricClouds', make: () => new VolumetricCloudsNode('clouds'), cls: VolumetricCloudsNode },
     { label: 'skyAtmosphere', make: () => new SkyAtmosphereNode('sky'), cls: SkyAtmosphereNode },
+    { label: 'skyLight', make: () => new SkyLightNode('sky light'), cls: SkyLightNode },
     { label: 'camera', make: () => new CameraNode('cam', new Camera({ type: 'perspective' })), cls: CameraNode },
     { label: 'sprite', make: () => new SpriteNode('spr', new Sprite(), 'spherical'), cls: SpriteNode },
     { label: 'animatedSprite', make: () => new AnimatedSpriteNode('anim', new Sprite(), { frames: [1, 2], fps: 12, loop: true, constraints: 'cylindrical' }), cls: AnimatedSpriteNode },

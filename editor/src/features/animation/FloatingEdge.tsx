@@ -1,12 +1,7 @@
 import { BaseEdge, getBezierPath, useInternalNode, Position, type EdgeProps, type InternalNode } from '@xyflow/react'
 
-// The transition edge. Two jobs the stock bezier edge can't do:
-//
-//   FLOATING  — it attaches to whichever border of each node is actually facing the other one, recomputed as
-//               you drag. The stock edge is nailed to the handles, so a link to a node on the LEFT loops all
-//               the way around to reach the fixed left-hand target handle.
-//   -> vs =>  — one direction draws a single line with one arrowhead; both directions draw two parallel lines
-//               with an arrow at each end, which is also an honest picture of two independent transitions.
+// The transition edge: it attaches to whichever border of each node faces the other, recomputed as you
+// drag, and draws two parallel lines with an arrow at each end when transitions exist in both directions.
 
 export interface TransitionEdgeData {
   a: string
@@ -27,8 +22,8 @@ const centerOf = (n: InternalNode) => ({
 })
 
 /**
- * Where the line joining the two node centres crosses `node`'s rectangle. Standard xyflow floating-edge math:
- * work in a square normalised around the node's centre, solve for the crossing, then map back.
+ * Where the line joining the two node centres crosses `node`'s rectangle. Solved in a square normalised
+ * around the node's centre, then mapped back.
  */
 function intersection(node: InternalNode, other: InternalNode) {
   const w = (node.measured.width ?? 0) / 2
@@ -59,8 +54,8 @@ function borderOf(node: InternalNode, point: { x: number; y: number }): Position
   return Position.Bottom
 }
 
-// `markerEnd`/`markerStart` arrive already resolved by xyflow into `url(#…)` strings, from the marker objects
-// set on the edge — which is why those still live in StateGraph rather than here.
+// `markerEnd`/`markerStart` arrive already resolved by xyflow into `url(#…)` strings; the marker objects
+// they come from are set on the edge in StateGraph.
 export default function FloatingEdge({ id, source, target, data, style, markerEnd, markerStart }: EdgeProps) {
   const sourceNode = useInternalNode(source)
   const targetNode = useInternalNode(target)
@@ -83,13 +78,11 @@ export default function FloatingEdge({ id, source, target, data, style, markerEn
   const both = !!d.forward && !!d.backward
 
   if (!both) {
-    // One direction: a single line, arrowhead on whichever end is the destination.
     return <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} markerStart={markerStart} />
   }
 
-  // Two directions: the same curve drawn twice, shifted along the normal of the straight source->target line.
-  // Offsetting a bezier properly would mean re-solving it; a translate is an approximation that reads exactly
-  // right at these distances and costs nothing.
+  // Two directions: the same curve drawn twice, translated along the normal of the straight source->target
+  // line. An approximation — a true bezier offset would mean re-solving the curve.
   const dx = targetPoint.x - sourcePoint.x
   const dy = targetPoint.y - sourcePoint.y
   const len = Math.hypot(dx, dy) || 1

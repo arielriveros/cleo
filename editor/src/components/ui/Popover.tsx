@@ -22,11 +22,9 @@ const MARGIN = 8;
 /**
  * Anchored, outside-click-dismiss floating panel. Foundation for the typed selects + texture picker.
  *
- * The panel is portalled to <body> and positioned as `fixed` against the trigger's viewport rect, rather
- * than absolutely inside the trigger. It has to be: an absolute panel is clipped by any ancestor that
- * establishes an overflow — the inspector's scroll container, and Collapsable's `overflow-hidden` (which
- * that section needs for its collapse animation) — and no z-index can lift it out, because clipping is not
- * a stacking-order problem. Portalling escapes both.
+ * The panel must stay portalled to <body> and positioned `fixed` against the trigger's viewport rect:
+ * an absolute panel is clipped by any ancestor overflow (the inspector's scroll container,
+ * Collapsable's `overflow-hidden`), and z-index cannot lift it out of a clip.
  */
 export function Popover({ trigger, children, align = 'left', disabled, title, triggerClassName, className }: PopoverProps) {
   const [open, setOpen] = useState(false);
@@ -42,9 +40,8 @@ export function Popover({ trigger, children, align = 'left', disabled, title, tr
     const t = trigger.getBoundingClientRect();
     const p = panel.getBoundingClientRect();
 
-    // Open downwards, but flip above the trigger when the panel would run off the bottom of the viewport
-    // and there is room above — the variables rows sit at the bottom of their section, so this is the
-    // common case rather than the edge case.
+    // Open downwards, flipping above the trigger when the panel would run off the bottom of the
+    // viewport and there is room above.
     let top = t.bottom + GAP;
     if (top + p.height > window.innerHeight - MARGIN && t.top - GAP - p.height >= MARGIN)
       top = t.top - GAP - p.height;

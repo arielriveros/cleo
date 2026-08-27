@@ -1,19 +1,13 @@
-// The binary-container primitives shared by the two things in this project that write one: publishing's
-// `game.bin` (features/publish/pack.ts) and the project export's `assets.bin` (utils/bundleAssets.ts).
+// The binary-container primitives shared by publishing's `game.bin` (features/publish/pack.ts) and the
+// project export's `assets.bin` (utils/bundleAssets.ts): a JSON side describing the data plus a blob of
+// concatenated chunks that IS the data. Three properties both formats require:
 //
-// Both formats are the same idea — a JSON side that describes the data, plus a blob of concatenated
-// chunks that IS the data — and both need exactly the same three properties from it:
+//   * 4-byte alignment. `new Float32Array(buffer, offset, n)` THROWS unless `offset % 4 === 0`.
+//   * Blob-RELATIVE offsets. An absolute offset depends on the length of the JSON holding it, which
+//     depends on the offset's own digit count — circular. The reader recovers the blob start via align4.
+//   * Bounds checking on read, or a truncated file yields plausible-looking garbage vertices.
 //
-//   * 4-byte alignment. `new Float32Array(buffer, offset, n)` THROWS unless `offset % 4 === 0`, and
-//     mapping typed arrays onto the buffer is the whole point of writing bytes instead of JSON.
-//   * Blob-RELATIVE offsets. An absolute offset depends on the length of the JSON that holds it, which
-//     depends on how many digits the offset takes to write — circular, and it would need an iterative
-//     re-serialize to settle. The reader recovers the blob start with the same align4.
-//   * Bounds checking on read. A chunk that runs past the end of a truncated file otherwise yields
-//     plausible-looking garbage vertices rather than an error.
-//
-// Kept free of DOM, WebGL and `cleo` imports: this is pulled into projectWorker.ts, and the header of
-// workers/projectJobs.ts explains why that constraint is load-bearing.
+// Must stay free of DOM, WebGL and `cleo` imports: this is pulled into projectWorker.ts.
 
 /** Where a chunk sits in the blob region: byte offset (blob-relative) and byte length. */
 export interface ChunkRef { o: number; l: number }
@@ -22,11 +16,8 @@ export interface ChunkRef { o: number; l: number }
 export const align4 = (n: number): number => (n + 3) & ~3;
 
 /**
- * Coerce to a Uint8Array view.
- *
- * Needed because structured clone across the worker boundary can hand back a plain array where a
- * Uint8Array was sent. Anything binary arriving from the caller has to go through this or it silently
- * becomes a one-byte-per-element copy of the wrong thing.
+ * Coerce to a Uint8Array view. Everything binary arriving from a caller must go through this: structured
+ * clone across the worker boundary can hand back a plain array where a Uint8Array was sent.
  */
 export const asBytes = (input: any): Uint8Array =>
   input instanceof Uint8Array ? input : new Uint8Array(input);
@@ -54,12 +45,9 @@ export function sameBytes(a: ArrayBufferView, b: ArrayBufferView): boolean {
 
 /**
  * Append-only writer for a blob of 4-byte-aligned chunks.
- *
- * `add` always writes a new chunk; `addInterned` returns the existing ref when the same bytes have been
- * written before. The split is deliberate rather than a flag: the publish packer must keep writing
- * chunk-per-attribute in its established order (it dedupes at the GEOMETRY level, above this), while the
- * export bundle wants dedup on every payload — which is what makes an animation clip stored once in a
- * model, once in a template and once in a scene collapse to a single copy.
+ * `add` always writes a new chunk; `addInterned` returns the existing ref for bytes already written.
+ * The publish packer needs `add` (it dedupes at the GEOMETRY level, above this); the export bundle needs
+ * `addInterned`, which is what collapses a clip stored in a model, a template and a scene into one copy.
  */
 export class ChunkWriter {
   private readonly chunks: ArrayBufferView[] = [];
@@ -79,9 +67,8 @@ export class ChunkWriter {
 
   /**
    * Write `view`, or return the ref of an identical chunk already written.
-   *
-   * Bucketed by hash and then compared EXACTLY. A hash collision is astronomically unlikely but not
-   * impossible, and accepting one would silently ship a mesh drawn with another mesh's vertices.
+   * Bucketed by hash and then compared EXACTLY: accepting a hash collision would ship a mesh drawn with
+   * another mesh's vertices.
    */
   addInterned(view: ArrayBufferView): ChunkRef {
     const h = hashBytes(FNV_OFFSET, view);
@@ -108,10 +95,8 @@ export class ChunkWriter {
   }
 
   /**
-   * Write every chunk into `out` starting at `blobStart`.
-   *
-   * The variant a container with a header uses: it has already allocated one buffer for header +
-   * manifest + blob and only needs the blob region filled in.
+   * Write every chunk into `out` starting at `blobStart` — for a container that has already allocated one
+   * buffer for header + manifest + blob and needs only the blob region filled in.
    */
   writeInto(out: Uint8Array, blobStart: number): void {
     let cursor = blobStart;
@@ -123,9 +108,7 @@ export class ChunkWriter {
 }
 
 /**
- * Bounds-checked reader over a blob of chunks.
- *
- * `label` names the file in the error message — the point of throwing at all is that a truncated
+ * Bounds-checked reader over a blob of chunks. `label` names the file in the error message, so a truncated
  * download is diagnosable instead of rendering as corrupt geometry.
  */
 export class ChunkReader {

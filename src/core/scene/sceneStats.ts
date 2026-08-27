@@ -1,11 +1,5 @@
-// Per-frame scene-update statistics, accumulated during Scene.update() and read by the editor's
-// performance HUD via `scene.stats`. Standalone (imports nothing engine-specific) so scene.ts and
-// node.ts can both increment it without a circular import — same arrangement as renderStats.ts and
-// physicsStats.ts.
-//
-// This covers the slice of the frame that nothing else measured: everything between physics and
-// render. `frame - render - physics` used to be a single opaque number; these fields say whether it
-// is user scripts, skinned-mesh animation, transform propagation, or camera rigs.
+// Per-frame scene-update statistics, accumulated during Scene.update() and read via `scene.stats`.
+// Imports nothing engine-specific, so scene.ts and the node modules can increment it without a cycle.
 
 export interface SceneStats {
     /** `_root.updateTransforms()` — both passes, including the extra one camera rigs force. */
@@ -44,23 +38,14 @@ export const sceneStats: SceneStats = {
 };
 
 /**
- * Opt-in per-node timing (`scriptMs` / `animatorMs`). **Off by default, deliberately.**
- *
- * It costs two `performance.now()` calls per node per frame — measured at ~240ns per node, i.e.
- * +0.12ms/frame over 500 nodes and +0.44ms over 2000. Against a 16ms budget that is small, but
- * against `Scene.update` itself it is 50-160%, and since `nodeLoopMs` brackets those calls the
- * detail pass inflates the very totals it is attributing. Leaving it on would make the coarse
- * numbers lie.
- *
- * So: the coarse split (transforms / timers / node loop / rigs) is always collected and costs a
- * handful of calls per frame; turn this on only while you specifically want the script-vs-animator
- * breakdown, and read `nodeLoopMs`/`frameMs` as inflated while it is on. The editor's performance
- * panel exposes it as a toggle.
+ * Opt-in per-node timing (`scriptMs` / `animatorMs`). Off by default: it costs two `performance.now()`
+ * calls per node per frame, and `nodeLoopMs` brackets those calls, so read `nodeLoopMs` and `frameMs`
+ * as inflated while it is on. The coarse split is always collected.
  */
 export const sceneStatsDetail = { enabled: false };
 
 /** Zero the per-frame accumulators. `frameMs` and `nodes` are written at the end of update(), so
- *  between frames they hold the last completed values (same convention as resetFrameStats). */
+ *  between frames they hold the last completed values. */
 export function resetSceneStats(): void {
     sceneStats.transformMs = 0;
     sceneStats.timerMs = 0;

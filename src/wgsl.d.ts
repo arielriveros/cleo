@@ -1,11 +1,6 @@
-// A `.wgsl` import is one PROGRAM, not one stage.
-//
-// GLSL imports are strings because a `.vs`/`.fs` file is a single stage. WGSL is different by
-// necessity: naga generates varying names (`_vs2fs_location0`) from a module's location numbers, so the
-// two stages only line up when they came from the same module. One module therefore holds both entry
-// points, and the loader hands back the translated GLSL for each alongside the original WGSL.
-//
-// The WGSL is carried through unchanged so the WebGPU backend can consume the same import.
+// A `.wgsl` import is one PROGRAM, not one stage: naga generates varying names (`_vs2fs_location0`)
+// from a module's location numbers, so two stages only line up when they came from the same module.
+// The loader hands back translated GLSL per stage alongside the original, unchanged WGSL.
 declare module '*.wgsl' {
     interface WgslProgram {
         /** The composed WGSL, includes already expanded. What the WebGPU backend will use directly. */
@@ -14,21 +9,15 @@ declare module '*.wgsl' {
         readonly vertex?: string;
         /** GLSL ES 300 for the fragment stage, when the module declares a `@fragment` entry point. */
         readonly fragment?: string;
-        // There is deliberately NO `compute` GLSL here. naga's GLSL backend targets ES 300, which has
-        // no compute stage, so the translator never sends one through it — see tools/wgslTranslate.mjs.
-        // A compute module is WGSL-only, and `entryPoints.compute` below is the whole of what WebGPU
-        // needs from it.
+        // There is deliberately NO `compute` GLSL: naga's GLSL backend targets ES 300, which has no
+        // compute stage. A compute module is WGSL-only (see tools/wgslTranslate.mjs).
         /** Entry-point function names by stage, as declared in the module. */
         readonly entryPoints: { vertex?: string; fragment?: string; compute?: string };
         /**
-         * Every `@group(G) @binding(B)` the module declares.
-         *
-         * This is what lets a `BindGroup` be satisfied on either backend. WebGPU binds by group and
-         * binding directly; WebGL2 has neither concept, so its device assigns a texture unit and sets
-         * the combined sampler uniform named by `glslName` — which is why the reflection carries the
-         * GLSL name rather than only the WGSL one. A texture/sampler pair shares one `glslName`
-         * (`u_x_texture` + `u_x_sampler` -> `u_x`), so the WebGL2 side acts on the texture entry and
-         * ignores its sampler.
+         * Every `@group(G) @binding(B)` the module declares, so a `BindGroup` can be satisfied on either
+         * backend. WebGL2 has neither concept and binds by `glslName` instead. A texture/sampler pair
+         * shares one `glslName` (`u_x_texture` + `u_x_sampler` -> `u_x`), and WebGL2 acts on the texture
+         * entry only.
          */
         readonly resources: readonly {
             readonly group: number;
@@ -42,17 +31,8 @@ declare module '*.wgsl' {
             readonly glslName: string;
         }[];
         /**
-         * The uniform-buffer resources, with the full byte layout of the struct each points at.
-         *
-         * WebGL2 ignores these and asks the driver instead; WebGPU has no reflection and needs them.
-         * Verified against a real driver by `tools/harness/uniformLayoutCheck.js`.
-         */
-        /**
-         * The vertex stage's `@location(N)` inputs, with the engine's `a_` prefix.
-         *
-         * WebGL2 reflects these off the linked program; WebGPU has no such call and is handed its
-         * vertex layout up front, so a WebGPU program reports this list instead. Read from the same
-         * declaration the translator renames, so the two cannot disagree about a name or a location.
+         * The vertex stage's `@location(N)` inputs, with the engine's `a_` prefix. WebGL2 reflects these
+         * off the linked program; WebGPU has no such call and reports this list instead.
          */
         readonly vertexInputs: readonly {
             /** With the `a_` prefix — `a_position`, not `position`. */
@@ -62,6 +42,11 @@ declare module '*.wgsl' {
             readonly type: string;
         }[];
 
+        /**
+         * The uniform-buffer resources, with the full byte layout of the struct each points at. WebGL2
+         * ignores these and asks the driver; WebGPU has no reflection and needs them. Verified against a
+         * real driver by `tools/harness/uniformLayoutCheck.js`.
+         */
         readonly uniformBlocks: readonly {
             readonly group: number;
             readonly binding: number;
@@ -84,12 +69,8 @@ declare module '*.wgsl' {
         }[];
         /**
          * The module's GLSL, reduced to a pasteable chunk — structs, uniforms, globals and functions,
-         * with `#version`, `precision`, the fragment output and `main()` stripped.
-         *
-         * Present only for a module carrying the `// @glsl-chunk` directive. It exists for
-         * `systems/customShaders.ts`, which assembles user GLSL at runtime and needs the shadow library
-         * as text; generating that half means the library is authored once, in WGSL, instead of being
-         * maintained as two copies that drift.
+         * with `#version`, `precision`, the fragment output and `main()` stripped. Present only for a
+         * module carrying the `// @glsl-chunk` directive; consumed by `systems/customShaders.ts`.
          */
         readonly glslChunk?: string;
     }

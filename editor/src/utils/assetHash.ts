@@ -6,11 +6,9 @@ import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
 import type { TilesetAsset } from './tilesets'
 
-// Content hashes let a closed scene decide, when it is next opened, whether each asset it references
-// actually changed since the scene was saved — so unchanged models/templates aren't needlessly
-// re-instantiated (which would churn node ids and drop per-instance state). The hash is stable across
-// reloads: it is computed purely from the asset's serialized content, minus its thumbnail (a thumbnail
-// re-render must not read as a content change).
+// Content hashes let a closed scene decide, on its next open, whether each asset it references actually
+// changed — so an unchanged model or template is not re-instantiated, which would churn node ids and drop
+// per-instance state. Computed purely from the asset's serialized content, so it is stable across reloads.
 
 /** 32-bit FNV-1a over a string, returned as an 8-char hex. Fast, dependency-free, good enough to gate. */
 function fnv1a(str: string): string {
@@ -24,55 +22,32 @@ function fnv1a(str: string): string {
 }
 
 /**
- * Fields that must NOT count as a content change.
- *
- * `thumbnail` is the obvious one — a re-render is not an edit. The two skeleton fields matter for a subtler
- * reason: they are metadata ABOUT a skeleton rather than part of it, they are pushed to every live instance
- * in place by propagateModelClips, and they also ride each placed node's own serialized skin. So a rebuild
- * gains nothing — and costs everything, because re-instantiating a placement drops the per-node state the
- * asset knows nothing about. Assigning an IK rig used to wipe every placed character's animation state
- * machine through exactly this route.
- *
- * The bar for this list is "changing it cannot alter what instantiating the asset produces STRUCTURALLY".
- * Geometry, materials, hierarchy and clip lists all fail that bar and must stay hashed.
+ * Fields that must NOT count as a content change. `ikRig`/`nodeNames` are metadata ABOUT a skeleton,
+ * pushed to live instances in place by propagateModelClips, so a rebuild gains nothing and costs the
+ * per-node state a placement carries.
+ * The bar for this list: changing the field cannot alter what instantiating the asset produces
+ * STRUCTURALLY. Geometry, materials, hierarchy and clip lists all fail it and must stay hashed.
  */
 const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames'])
 
 /**
- * Bump this whenever {@link hashAsset} changes what it hashes.
+ * Bump this whenever {@link hashAsset} changes what it hashes — including anything that changes the
+ * serialized shape it walks, such as a node's key ORDER (JSON.stringify is key-order sensitive).
  *
- * A stored hash is only comparable against one produced by the SAME function. Change the function — add a key
- * to the exclusion set above, say — and every hash in every saved scene stops matching, so `resyncScene`
- * reads "every asset changed" and re-instantiates every placed template and character in the project at once.
- * That is not a cosmetic churn: a rebuild reconstructs a placement from its asset, and the asset does not know
- * how that placement was configured.
- *
- * Versioning turns that from a silent mass rebuild into a no-op: a scene saved under a different version has
- * hashes we cannot interpret, and the honest reading of "I cannot tell whether this changed" is to leave the
- * scene alone rather than to rebuild all of it.
- *
- * 1 = thumbnail only (original). 2 = thumbnail + ikRig + nodeNames. 3 = node.ts was split into
- * core/scene/nodes/, which moved every subclass onto one shared serialize template; ten of them had been
- * emitting `name, id, type` and now emit `id, name, type`. The JSON is equivalent, but JSON.stringify is
- * key-order sensitive, so every embedded node subtree hashes differently. 4 = a single-sub-mesh model
- * asset's holder Node is collapsed into its ModelNode (flattenModelJson), so every such asset's nodeJson
- * — and therefore its hash — changed. Bumping is the conservative reading: existing placements are
- * self-contained subtrees that keep rendering and still resolve `__modelId` off their holder, so leaving
- * them alone beats rebuilding every character in the project to gain one fewer row in a panel.
+ * A stored hash is only comparable against one produced by the SAME function. Without the version, a
+ * changed function makes every hash miss, `resyncScene` reads "every asset changed", and every placed
+ * template and character is re-instantiated from an asset that knows nothing about how it was configured.
+ * The version turns that mass rebuild into a no-op instead.
  */
 export const ASSET_HASH_VERSION = 4
 
 /**
  * Whether a scene's stored hashes can be compared against ones produced by the CURRENT {@link hashAsset}.
- *
- * Three cases, and the middle one is the whole reason this exists:
- *   - no hashes at all — a legacy blob from before hashing, which has never had the propagation applied and
- *     genuinely does mean "resync everything". Comparable: `changedSince` has nothing to match and says yes.
- *   - hashes from a different version — unreadable. Every lookup would miss and read as "changed", rebuilding
- *     every placed template and character in the project at once. NOT comparable: leave the scene alone.
+ *   - no hashes at all — comparable; `changedSince` has nothing to match and says "changed", which is the
+ *     right reading for a blob saved before hashing existed;
+ *   - hashes from a different version — NOT comparable, so the scene is left alone;
  *   - hashes from this version — compare them.
- *
- * Absent version defaults to 1: scenes saved before the field existed were hashed by the original function.
+ * An absent version means 1.
  */
 export function hashesComparable(
   savedHashes: Record<string, string> | undefined,
@@ -96,9 +71,8 @@ export interface AssetLibs {
   scripts: ScriptAsset[]
   tilesets: TilesetAsset[]
   /**
-   * Shared animation assets. Present so a resync can re-resolve a model's clips, NOT hashed: an animation
-   * is not structural to a placement — changing one changes what plays, never the node tree — so hashing
-   * it would rebuild every character in the project each time a clip was renamed.
+   * Shared animation assets. Present so a resync can re-resolve a model's clips, but NOT hashed: changing
+   * one changes what plays, never the node tree.
    */
   animations?: AnimationAsset[]
 }
@@ -109,9 +83,8 @@ export function assetHashKey(kind: 'material' | 'model' | 'template' | 'terrainM
 }
 
 /**
- * Content hashes keyed "kind:id" for every asset id the just-referenced sets contain. Callers pass the
- * referenced-id sets (from references.ts collectReferenced* run on the live scene) so only assets the
- * scene actually uses are hashed and stored.
+ * Content hashes keyed "kind:id" for every asset id in the referenced sets (from references.ts
+ * collectReferenced* run on the live scene), so only assets the scene uses are hashed and stored.
  */
 export function buildAssetHashes(
   refs: { materialIds: Set<string>; modelIds: Set<string>; templateIds: Set<string>; terrainMaterialIds: Set<string>; scriptIds?: Set<string>; tilesetIds?: Set<string> },

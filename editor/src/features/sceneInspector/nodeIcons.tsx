@@ -2,13 +2,9 @@ import { Glyph as S } from './iconBase';
 
 /**
  * Glyphs for node types — the Add catalog's non-geometry entries and the scene tree's per-row icons.
- *
- * These replaced the last of `editor/src/icons/*.png`. The win is not just file size: a PNG cannot tint,
- * so a tree row's icon stayed the same colour whether the row was selected, dimmed for a dormant node, or
- * greyed inside a template instance. These follow `currentColor` like the rest of the editor's chrome.
- *
- * One module for both surfaces on purpose: the palette and the tree name the same concepts, and they drifted
- * apart while they were separate PNG imports (the tree showed a light probe with the skybox icon).
+ * They follow `currentColor` like the rest of the editor's chrome, so a tree row's icon tints when the row
+ * is selected, dimmed for a dormant node, or greyed inside a template instance.
+ * One module for both surfaces: the palette and the tree name the same concepts.
  */
 
 // --- Structure -------------------------------------------------------------------------------------
@@ -84,6 +80,10 @@ export const SkyboxIcon = () => (
 /** Sky atmosphere: the sun low over a curved horizon, which is what the scattering model draws. */
 export const SkyAtmosphereIcon = () => (
   <S><path d="M2.5 17.5a9.5 9.5 0 0 1 19 0" /><circle cx="12" cy="12.5" r="3" /><path d="M2.5 20.5h19" opacity="0.6" /></S>
+);
+/** Sky light: rays coming DOWN from a dome, which is what a sky light is. */
+export const SkyLightIcon = () => (
+  <S><path d="M3.5 8.5a8.5 8.5 0 0 1 17 0" /><path d="M6 12.5v3" /><path d="M12 12.5v5" /><path d="M18 12.5v3" /></S>
 );
 /** Volumetric clouds. */
 export const CloudsIcon = () => (

@@ -24,19 +24,13 @@ export interface Animation {
     samplers: AnimationSampler[];
     channels: AnimationChannel[];
     /**
-     * When true, the Animator extracts this clip's ROOT bone translation/rotation and applies it to the
-     * character (the nearest bodied ancestor, else the model node) instead of posing it in place — so a clip
-     * authored with root motion (e.g. a turn-in-place or a stepping locomotion) actually moves the character.
-     * Plain data, so it rides the model-asset save through {@link AnimatedModel.serialize}/{@link parse}.
+     * Extract this clip's root bone translation/rotation and apply it to the character — the nearest
+     * bodied ancestor, else the model node — instead of posing it in place.
      */
     rootMotion?: boolean;
     /**
      * Set when this clip came from a SHARED animation asset rather than being embedded in the model.
-     *
-     * Such a clip is deliberately NOT serialized ({@link AnimatedModel.serialize} filters it out): it is
-     * restored by resolving the id again, which is the whole point of a shared asset — one stored copy, not
-     * one per character and one more per placement. A clip without this field is embedded, as before, and
-     * saves exactly as it always did.
+     * Such a clip is not serialized — {@link AnimatedModel.serialize} filters it out and `parse` re-resolves it.
      */
     assetId?: string;
 }
@@ -56,14 +50,8 @@ export interface Skin {
     nodeTransforms?: Map<number, mat4>; // Initial transforms for each node from GLTF
     nodeNames?: Map<number, string>; // Map of node index to bone/node name (for cross-file retargeting)
     /**
-     * Inverse-kinematics setup for this skeleton — which joints are the legs, and how foot placement is tuned.
-     *
-     * It lives here, on the skin, because it is joint indices INTO this skeleton: it cannot be meaningful for
-     * any other rig, and it is the same kind of thing as `nodeNames` — skeleton metadata rather than a
-     * property of any one placed character. That also puts it on the side of the line the editor already
-     * draws ("clips and skeleton belong to the model asset"), so it reaches every instance for free.
-     *
-     * Plain JSON, so it round-trips through serialize/parse below with no special handling.
+     * Inverse-kinematics setup for this skeleton: which joints are the legs, and how foot placement is
+     * tuned. Lives on the skin because its fields are joint indices into this skeleton.
      */
     ikRig?: IkRig;
 }
@@ -80,9 +68,8 @@ interface FromFileOptions {
 }
 
 /**
- * AnimatedModel class handles models with skeletal animation and skinning data.
- * It stores bones (joints), inverse bind matrices, and animation data that can be
- * accessed by an animation player for rendering animated meshes.
+ * A model with skeletal animation: joints, inverse bind matrices and animation clips, read by an
+ * {@link Animator} to pose the mesh.
  */
 export class AnimatedModel {
     private readonly _geometry: Geometry;
@@ -100,7 +87,6 @@ export class AnimatedModel {
     // Animation data
     private readonly _animations: Animation[] = [];
     
-    // Initialization tracking
     /** Which attribute layout the VAO currently holds; see initializeVAO. */
     private _vaoLayoutKey: string | null = null;
     private _isAnimated: boolean = false;
@@ -116,9 +102,8 @@ export class AnimatedModel {
     ) {
         this._geometry = geometry;
         this._materials = Array.isArray(material) ? (material.length ? material : [Material.Default({})]) : [material];
-        // A submesh list that does not line up with the materials is dropped, which turns the model back
-        // into one whole-buffer draw with materials[0]. Say so: silently, it presents as "the second
-        // material vanished on reload", because serialize() then writes only the singular `material`.
+        // A submesh list that does not line up with the materials is dropped, and the model falls back
+        // to one whole-buffer draw with materials[0].
         this._submeshes = submeshes.length === this._materials.length ? submeshes : [];
         if (submeshes.length && submeshes.length !== this._materials.length)
             Logger.warn(`Model: ${submeshes.length} submeshes vs ${this._materials.length} materials — submeshes dropped`, 'Model');
@@ -144,25 +129,19 @@ export class AnimatedModel {
         this._initializeMesh();
     }
     
-    /**
-     * Load an animated model from a file path (only GLTF supported for now)
-     */
+    /** Load animated models from file paths. glTF only. */
     public static async fromPath(config: FromPathOptions): Promise<{name: string, model: AnimatedModel}[]> {
         // This will be implemented to use the enhanced GLTF loader
         throw new Error('AnimatedModel.fromPath not yet implemented. Use GLTF loader directly.');
     }
     
-    /**
-     * Load an animated model from uploaded files (only GLTF supported for now)
-     */
+    /** Load animated models from uploaded files. glTF only. */
     public static async fromFile(config: FromFileOptions): Promise<{name: string, model: AnimatedModel}[]> {
         // This will be implemented to use the enhanced GLTF loader
         throw new Error('AnimatedModel.fromFile not yet implemented. Use GLTF loader directly.');
     }
     
-    /**
-     * Parse serialized animated model data
-     */
+    /** Reconstruct an animated model from {@link serialize} output. */
     public static parse(data: any): AnimatedModel {
         const geometry = new Geometry(
             data.geometry.positions,
@@ -173,8 +152,7 @@ export class AnimatedModel {
             data.geometry.indices
         );
         
-        // One material per submesh, so this is a function called over `materials` below. The single
-        // `material` key is what almost every saved model carries and stays the fallback.
+        // Both shapes must read: `materials` is the multi-material form, `material` the single one.
         const parseMaterial = (m: any): Material => {
         m = m || {};
         const config = {
@@ -200,8 +178,7 @@ export class AnimatedModel {
                 roughness: m.roughness ?? 1.0,
                 opacity: m.opacity ?? 1.0,
                 emissiveFactor: m.emissiveFactor || [0,0,0],
-                // metallicRoughnessTexture is the pre-split key; Material.PBR fans it out to the
-                // metallicMap/roughnessMap source slots so older saves reload unchanged.
+                // `metallicRoughnessTexture` is the pre-split key; Material.PBR fans it out to both slots.
                 textures: {
                     baseColorTexture: m.textures?.baseColorTexture,
                     metallicMap: m.textures?.metallicMap,
@@ -313,12 +290,9 @@ export class AnimatedModel {
         return new AnimatedModel(geometry, materials, skin, jointIndices, jointWeights, animations, submeshes);
     }
 
-    /**
-     * Serialize the animated model for saving
-     */
+    /** Flatten the model to plain JSON. Clips backed by a shared animation asset are omitted. */
     public serialize(): any {
-        // Array.from for the same reason as Model.serialize: JSON.stringify would turn the typed
-        // arrays Geometry stores into objects and silently corrupt the save.
+        // Array.from is mandatory: JSON.stringify turns a typed array into an object, not an array.
         const geometry = {
             positions: Array.from(this._geometry.positions),
             normals: Array.from(this._geometry.normals),
@@ -328,9 +302,8 @@ export class AnimatedModel {
             indices: Array.from(this._geometry.indices)
         };
         
-        // One material per submesh, so this is a function rather than a straight-line block. The skinned
-        // type variants normalize back to their base type: the shader picks the skinned program from the
-        // model being animated, not from the saved material.
+        // Skinned type variants normalize back to their base type: the renderer picks the skinned
+        // program from the model, not from the saved material.
         const serializeMaterial = (mat: Material): any => {
         const cfg = {
             side: mat.config.side,
@@ -362,13 +335,20 @@ export class AnimatedModel {
                 opacity: mat.properties.get('opacity'),
                 emissiveFactor: mat.properties.get('emissiveFactor'),
                 // Source maps only — the engine's derived (channel-packed) slots are never serialized.
+                // These were missing, and a skinned material silently lost them on every save: the
+                // cutout threshold, the parallax depth and its height map. A masked skinned mesh
+                // reloaded solid.
+                alphaCutoff: mat.properties.get('alphaCutoff'),
+                displacementScale: mat.properties.get('dispScale'),
                 textures: {
                     baseColorTexture: mat.textures.get('baseColorTexture'),
                     metallicMap: mat.textures.get('metallicMap'),
                     roughnessMap: mat.textures.get('roughnessMap'),
                     normalMap: mat.textures.get('normalMap'),
                     occlusionMap: mat.textures.get('occlusionMap'),
-                    emissiveMap: mat.textures.get('emissiveMap')
+                    emissiveMap: mat.textures.get('emissiveMap'),
+                    displacementMap: mat.textures.get('displacementMap'),
+                    mask: mat.textures.get('maskMap')
                 },
                 config: cfg
             };
@@ -389,6 +369,7 @@ export class AnimatedModel {
                     mask: mat.textures.get('maskMap'),
                     reflectivity: mat.textures.get('reflectivityMap')
                 },
+                alphaCutoff: mat.properties.get('alphaCutoff'),
                 config: cfg
             };
         }
@@ -443,24 +424,13 @@ export class AnimatedModel {
         let jointIndices = this._jointIndices ? Array.from(this._jointIndices) : null;
         let jointWeights = this._jointWeights ? Array.from(this._jointWeights) : null;
         
-        // Serialize animations.
-        //
-        // A COPY, not the live array. Every other field here is already copied (Array.from for the
-        // geometry and joint arrays, a rebuilt object for the skin); this one was handing out live state,
-        // and `parse` adopted it by reference — so a node parsed from another node's serialized payload
-        // shared its `_animations`. The Animation Editor does exactly that, and adding one clip then
-        // pushed it into the shared array twice: the second add collided with the first and addAnimation's
-        // de-duper renamed it "<clip> (2)". The same aliasing silently made rename/delete no-ops on the
-        // source node, since the clone's mutation had already changed the shared objects.
-        //
-        // Clips resolved from a shared animation asset are filtered out: they are restored by re-resolving
-        // the model's `animationIds`, so writing them here would put a copy in every placement and in the
-        // published game — exactly the duplication the shared asset exists to remove.
+        // Must emit a COPY, never the live array: `parse` adopts what it is given by reference, so two
+        // models round-tripped through one payload would share `_animations`.
+        // Asset-backed clips are filtered out — they are restored by re-resolving `animationIds`.
         const own = this._animations.filter(a => !a.assetId);
         let animations = own.length > 0 ? own.map(a => ({ ...a })) : null;
         
-        // `material` is written for every model so the single-material readers (and older builds) keep
-        // working; `materials`/`submeshes` appear only when there is more than one.
+        // `material` is written for every model so single-material readers keep working.
         const out: any = {
             geometry,
             material: materials[0],
@@ -476,19 +446,12 @@ export class AnimatedModel {
         return out;
     }
     
-    /**
-     * Initialize the mesh with bone data if available
-     */
     private _initializeMesh(): void {
-        // `Geometry.positions` is a FLAT array, so its length is 3x the vertex count. Reading it as the
-        // count uploaded both bone buffers at triple size (the extra two thirds filled with the
-        // "no joint" defaults below) and left Mesh._vertexCount wrong for the drawArrays fallback and
-        // for frameStats. The non-skinned path in ModelNode.initializeModel always used vertexCount.
+        // `vertexCount`, not `positions.length` — the latter is flat, so 3x too large.
         const vertexCount = this._geometry.vertexCount;
 
         if (this.hasSkin && this._jointIndices && this._jointWeights) {
-            // For skinned meshes, we need to create separate buffers for vertex data and bone data
-            // since bone indices must be integers and can't be in the same buffer as floats
+            // Bone data needs its own buffers: the indices are integers, not floats.
             const vertices = this._geometry.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']);
 
             // Create bone indices array (4 per vertex)
@@ -546,35 +509,18 @@ export class AnimatedModel {
         }
     }
 
-    /**
-     * Initialize the animated model's mesh with the appropriate shader
-     */
+    /** Record which skinned shader this model wants. */
     public initializeForSkinning(shaderType: 'basicSkinned' | 'blinn_phongSkinned' = 'blinn_phongSkinned'): void {
         if (!this.hasSkin) {
             throw new Error('Cannot initialize for skinning: model has no skin data');
         }
         
-        // This method will be called by the renderer when the shader manager is available
-        // For now, we just mark that it needs to be initialized
         Logger.info(`AnimatedModel needs to be initialized with shader: ${shaderType}`, 'Animation');
     }
 
     /**
-     * Initialize the VAO for the attribute layout a particular program declares (called by renderer).
-     *
-     * Keyed by the LAYOUT rather than guarded by a once-only flag. The flag was wrong for any model
-     * whose passes disagree about attribute locations: the first caller won and every later call was
-     * silently dropped, so one of the two passes always read unbound attributes.
-     *
-     * That is not hypothetical — it is the unlit Basic family. Having no normal/tangent/bitangent, its
-     * skinned vertex shaders put bone data at locations 2 and 3, while `shadowMapSkinned` mirrors the
-     * LIT skinned layout and reads 5 and 6. Cascades run before the geometry pass, so the shadow
-     * program initialized the VAO and `basicGeometrySkinned` was then drawn against it (or the reverse,
-     * depending on which pass touched the model first) — GL_INVALID_OPERATION either way.
-     *
-     * Keying on the layout rather than removing the guard keeps the common path free: for the PBR and
-     * Blinn-Phong families the shadow and geometry programs declare the SAME locations, so the key
-     * matches and nothing is re-applied. Only a genuine layout change pays for a re-init.
+     * Initialize the VAO for the attribute layout a program declares. Keyed by the LAYOUT, never by a
+     * once-only flag: passes can disagree about bone-attribute locations, and the Basic family does.
      */
     public initializeVAO(shaderAttributes: any[]): void {
         const key = AnimatedModel._layoutKey(shaderAttributes);
@@ -589,12 +535,8 @@ export class AnimatedModel {
         this._vaoLayoutKey = key;
     }
 
-    /**
-     * A stable identity for "which attributes at which locations".
-     *
-     * Sorted so two programs that reflect the same set in a different order — the enumeration order of
-     * `getActiveAttrib` is driver-dependent — compare equal and do not thrash the VAO.
-     */
+    // A stable identity for "which attributes at which locations". Sorted, because `getActiveAttrib`
+    // enumeration order is driver-dependent.
     private static _layoutKey(shaderAttributes: any[]): string {
         return shaderAttributes
             .map(a => `${a.name}@${a.location}`)
@@ -621,9 +563,8 @@ export class AnimatedModel {
     public get animations(): Animation[] { return this._animations; }
 
     /**
-     * Add an animation clip at runtime (e.g. an imported/retargeted clip). De-dups the name so it can
-     * be selected/played by name. The clip is immediately playable — Animator.playAnimationByName
-     * re-reads this array and rebuilds its bone map per play.
+     * Add an animation clip at runtime, de-duplicating its name so it stays selectable by name. The
+     * clip is immediately playable.
      */
     public addAnimation(clip: Animation): Animation {
         const taken = new Set(this._animations.map(a => a.name));
@@ -674,16 +615,12 @@ export class AnimatedModel {
     public get hasSkin(): boolean { return this._skin !== null; }
     public get hasAnimations(): boolean { return this._animations.length > 0; }
     
-    /**
-     * Get a specific animation by name
-     */
+    /** Look up an animation clip by name. */
     public getAnimation(name: string): Animation | undefined {
         return this._animations.find(anim => anim.name === name);
     }
     
-    /**
-     * Get a specific animation by index
-     */
+    /** Look up an animation clip by index. */
     public getAnimationByIndex(index: number): Animation | undefined {
         return this._animations[index];
     }

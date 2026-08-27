@@ -4,12 +4,8 @@ import {
 } from './progressStore'
 import { Button, cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
 
-// The editor's one progress surface: every long operation (model import, publish, export, save, thumbnail
-// refresh) reports to progressStore and is rendered here.
-//
-// Deliberately NOT a modal. Import parks on the review modal mid-run, and two stacked centred modals fight
-// for the same space; as an unobtrusive card this can stay up underneath one and keep showing what is
-// left. Several tasks stack rather than overwrite each other.
+// The editor's one progress surface: every long operation reports to progressStore and is rendered here.
+// Not a modal — it has to stay up underneath the import review modal. Several tasks stack.
 
 /** Leading glyph: spinner while working, a verdict once settled, a pause when it's waiting on a person. */
 function StatusGlyph({ status }: { status: StepStatus }) {
@@ -17,7 +13,6 @@ function StatusGlyph({ status }: { status: StepStatus }) {
   if (status === 'failed') return <span className='text-danger leading-none'>✕</span>
   if (status === 'skipped') return <span className='text-dim leading-none'>⊘</span>
   if (status === 'pending') return <span className='text-dim leading-none'>○</span>
-  // Waiting on a human, not on work — must not read as "working".
   if (status === 'paused') return <span className='text-warning leading-none'>⏸</span>
   return <span className='inline-block w-3 h-3 rounded-full border-2 border-primary border-t-transparent animate-spin' />
 }
@@ -49,9 +44,8 @@ function TaskCard({ task }: { task: Task }) {
   const skipped = steps.filter(s => s.status === 'skipped').length
   const percent = Math.round(taskFraction(task) * 100)
 
-  // While running, the position in the queue. Once finished, the outcome — keyed off what actually
-  // happened rather than off `cancelled`: hitting Cancel on the last item skips nothing, so that run
-  // really did complete.
+  // Keyed off what actually happened, not off `cancelled`: hitting Cancel on the last item skips
+  // nothing, so that run really did complete.
   const heading = running
     ? (steps.length > 1 ? `${task.title} — ${Math.min(settled + 1, steps.length)} of ${steps.length}` : task.title)
     : failed ? `${task.title} — failed`
@@ -79,7 +73,6 @@ function TaskCard({ task }: { task: Task }) {
 
         <div className='mt-2 h-1.5 rounded-full bg-surface-sunken overflow-hidden'>
           {running && indeterminate ? (
-            // No fraction to report: a moving sliver, rather than a bar that pretends to know.
             <div className='h-full w-1/3 rounded-full bg-primary animate-pulse' />
           ) : (
             <div
@@ -123,7 +116,7 @@ export default function ProgressWindow() {
   if (!tasks.length) return null
 
   return (
-    // z-40 keeps this under the review modals (z-50), which are meant to sit on top of it.
+    // z-40 keeps this under the review modals (z-50).
     <div className='fixed bottom-4 right-4 z-40 flex flex-col gap-2 items-end'>
       {tasks.map(t => <TaskCard key={t.id} task={t} />)}
     </div>

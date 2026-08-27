@@ -9,10 +9,9 @@ import { getScriptIdOf, baseTypeMatchesNode, BASE_TYPE_LABEL } from '../../../ut
 import { templateInstanceRootOf, TEMPLATE_ID_VAR } from '../../../utils/templates'
 import { applyAdd, uniquePath, dirOf, KIND_EXT } from '../../../utils/vfs'
 
-// The Script reference control for a node — mirrors MaterialSlot. Linked: shows the script name + Edit (opens
-// the dedicated Script editor tab) + Remove (detaches from this node, keeps the asset). Unlinked: create a
-// new script, link an existing compatible one, or drag a script from the Assets explorer. `onChanged` lets a
-// host re-read the link after an attach/detach (node mutations don't re-render React on their own).
+// The Script reference control for a node, mirroring MaterialSlot: link, create, drag-drop or detach a script
+// asset. `onChanged` lets a host re-read the link after an attach or detach — node mutations do not
+// re-render React on their own.
 export default function ScriptSlot(props: { node: Node; onChanged: () => void }) {
   const { scriptAssets, createScriptForNode, attachScriptToNode, detachScriptFromNode, enterScriptEditor } = useCleoEngine()
   const { vfs, setVfs } = useVfs()
@@ -25,8 +24,7 @@ export default function ScriptSlot(props: { node: Node; onChanged: () => void })
   // Only scripts whose base type can attach to this node are offered.
   const compatible = scriptAssets.filter(a => baseTypeMatchesNode(a.baseType, props.node.nodeType))
 
-  // Where a newly created script's file lands: a template instance drops it in the template's folder, so a
-  // template's script lives beside the template; every other node's script lands at the file-system root.
+  // A template instance's new script lands in the template's folder; every other node's lands at the root.
   const targetFolder = (): string => {
     const root = templateInstanceRootOf(props.node)
     if (!root) return '/'
@@ -40,13 +38,13 @@ export default function ScriptSlot(props: { node: Node; onChanged: () => void })
   const handleCreate = () => {
     const created = createScriptForNode(props.node)
     if (!created) return
-    // Place the new script's VFS entry ourselves (template folder / root) instead of letting the reconciler
-    // land it in whatever folder the explorer is browsing. reconcileVfs keeps an entry that already exists.
+    // Place the VFS entry here rather than letting the reconciler drop it in whatever folder the explorer is
+    // browsing; reconcileVfs keeps an entry that already exists.
     const taken = new Set<string>([...vfs.entries.map(e => e.path), ...vfs.folders])
     const path = uniquePath(taken, targetFolder(), created.name, KIND_EXT.script)
     setVfs(prev => applyAdd(prev, { path, kind: 'script', assetId: created.id, created: Date.now() }))
     changed()
-    enterScriptEditor(created.id) // open the new script for editing straight away
+    enterScriptEditor(created.id)
   }
 
   const handleLink = (id: string) => { if (id && attachScriptToNode(props.node, id)) changed() }

@@ -19,16 +19,12 @@ export class TextureManager {
     }
 
     /**
-     * Registers a texture and returns the id it is stored under.
-     *
-     * @param id Optional id to store under. Omit to have one generated — in which case the returned id is
-     *           the ONLY handle to the texture, since nothing else knows the generated value.
+     * Register a texture and return the id it is stored under.
+     * @param id Omit to generate one, in which case the return value is the only handle to it.
      */
     public addTexture(texture: Texture, id?: string): string {
         const identifier = id || uuidv4();
         this._textures.set(identifier, texture);
-        // `identifier`, not `id`: called without an id this used to return undefined, storing the texture
-        // under a generated uuid that the caller could then never look up.
         return identifier;
     }
 
@@ -39,8 +35,7 @@ export class TextureManager {
         Loader.loadImage(path).then((image: HTMLImageElement) => {
             texture.create(image, image.width, image.height);
         }).catch((err) => {
-            // Missing/broken image path (e.g. a texture file not included in an import): drop the
-            // texture rather than leaving the load promise to surface as an unhandled rejection.
+            // Drop the texture rather than let the load promise surface as an unhandled rejection.
             Logger.print('warn', ['Failed to load texture from path:', path, err], 'Texture');
             this._textures.delete(identifier);
         });
@@ -48,13 +43,8 @@ export class TextureManager {
     }
 
     /**
-     * Register an ALREADY-DECODED image. Unlike the base64/bytes paths this is ready the instant it
-     * returns, which is what anything reading the image's pixel dimensions needs.
-     *
-     * Pass `source` whenever the caller still has the file's compressed bytes. Without them
-     * `getSource` returns null, and anything that persists or re-shares textures by their original
-     * bytes — the editor's texture store, asset-pack export — skips the texture silently, so the image
-     * is simply gone after a reload.
+     * Register an ALREADY-DECODED image, ready the instant this returns. Pass `source` whenever the
+     * caller still holds the compressed bytes — without them the texture cannot be persisted.
      */
     public addTextureFromData(
         data: HTMLImageElement,
@@ -70,16 +60,8 @@ export class TextureManager {
     }
 
     /**
-     * Create a texture from a `data:<mime>;base64,…` URI.
-     *
-     * Base64 data URIs are decoded to bytes here and go through the shared bytes path, rather than being
-     * handed to `image.src` verbatim. That means:
-     *  - the browser never has to base64-decode a multi-megabyte string just to start decoding the image
-     *    (restoring a saved project used to do exactly that, once per texture);
-     *  - EVERY texture ends up retaining its compressed source bytes, which is what lets textures be stored
-     *    and shared as Blobs instead of being re-embedded as base64 in every asset that references them.
-     *
-     * Anything that isn't base64 (e.g. `data:image/svg+xml,<raw>`) still goes down the plain <img> path.
+     * Create a texture from a `data:<mime>;base64,…` URI, decoded to bytes and routed through
+     * {@link addTextureFromBytes} so it retains its source. Non-base64 URIs take the plain `<img>` path.
      */
     public addTextureFromBase64(base64: string | undefined, config?: TextureConfig, id?: string): string | undefined {
         if (!base64) return undefined;
@@ -138,17 +120,9 @@ export class TextureManager {
     }
 
     /**
-     * Create a texture from compressed image bytes (PNG/JPEG/…) — the fast path used by import.
-     *
-     * The bytes are handed to the browser as a Blob and decoded from an object URL. Nothing goes through
-     * base64: the glTF loader used to hand-roll a data URL byte by byte, which the browser then had to
-     * base64-DECODE again before it could even start decoding the image. Both halves of that are gone.
-     *
-     * The bytes are retained on the Texture (see Texture.setSource) so serialization can still produce a
-     * data URL later, on demand, without re-encoding the decoded pixels through a canvas.
-     *
-     * An HTMLImageElement (not createImageBitmap) is still what gets uploaded: UNPACK_FLIP_Y_WEBGL behaves
-     * inconsistently with ImageBitmap across browsers, and the flip semantics here are load-bearing.
+     * Create a texture from compressed image bytes, decoded from a Blob URL and retained on the Texture
+     * so serialization needs no canvas re-encode. Uploads an `HTMLImageElement`, never an `ImageBitmap`
+     * — `UNPACK_FLIP_Y_WEBGL` is inconsistent with the latter and the flip is load-bearing.
      */
     public addTextureFromBytes(bytes: Uint8Array, mime: string, config?: TextureConfig, id?: string): string | undefined {
         if (!bytes || bytes.length === 0) return undefined;
@@ -167,13 +141,11 @@ export class TextureManager {
     private _decodeInto(texture: Texture, identifier: string, bytes: Uint8Array, mime: string): void {
         texture.setSource(bytes, mime);
 
-        // Cast: a Uint8Array IS a valid BlobPart at runtime, but lib.dom types BlobPart against
-        // ArrayBufferView<ArrayBuffer> and a plain Uint8Array widens to Uint8Array<ArrayBufferLike>.
+        // Cast: a Uint8Array is a valid BlobPart at runtime, but lib.dom's type is narrower.
         const blob = new Blob([bytes as unknown as BlobPart], { type: mime });
         const url = URL.createObjectURL(blob);
-        // The URL stays alive for the texture's lifetime (revoked in Texture.delete). It cannot be revoked
-        // on load: the asset explorer previews a texture card straight off `texture.data.src`, so an early
-        // revoke would leave every texture card showing a broken image.
+        // The URL must live for the texture's lifetime: the asset explorer previews cards straight off
+        // `texture.data.src`, so revoking on load breaks every one of them.
         texture.setObjectUrl(url);
 
         const drop = (reason: string) => {
@@ -197,13 +169,10 @@ export class TextureManager {
         const identifier = id || uuidv4();
         const texture = new Texture(config);
 
-        // Register synchronously — callers use the id right away, and awaitTexturesReady treats an
-        // unknown id as "nothing to wait for", so a texture that only appeared later would let an import
-        // serialize before it had decoded and produce an untextured asset.
+        // Register SYNCHRONOUSLY: `awaitTexturesReady` reads an unknown id as "nothing to wait for", so
+        // a late registration lets an import serialize before the texture has decoded.
         this._textures.set(identifier, texture);
 
-        // Then decode from the raw bytes. The old path ran the whole file through
-        // FileReader.readAsDataURL, base64-ing it only for the browser to decode it straight back.
         file.arrayBuffer()
             .then(buf => this._decodeInto(texture, identifier, new Uint8Array(buf), file.type || 'image/png'))
             .catch(() => {
@@ -214,37 +183,24 @@ export class TextureManager {
         return identifier;
     }
 
-    /**
-     * The texture registered under `id`, or undefined if there is none.
-     *
-     * Genuinely absent ids are routine, not exceptional: entries are dropped on every failure path (a
-     * 404ing source, a decode failure, `removeTexture`), so an id held elsewhere can go stale at any time.
-     */
+    /** The texture registered under `id`, or undefined. Absent ids are routine — entries drop on failure. */
     public getTexture(id: string): Texture | undefined {
         return this._textures.get(id);
     }
 
     /**
-     * A texture as a self-contained data URL, or undefined if it has no image to embed.
-     *
-     * Textures created from base64 or from an uploaded File already HAVE a data URL as their image's
-     * `src` (see addTextureFromBase64 / addTextureFromFile) — so the common case is a string return with
-     * no work at all. Re-encoding those through a canvas was pure waste: it cost a full PNG encode
-     * (tens to hundreds of ms per texture) and inflated JPEGs several-fold by re-encoding them as PNG.
-     * The canvas path remains only for path-loaded images, whose `src` is an http/relative URL.
+     * A texture as a self-contained data URL, or undefined when it has no image to embed. Retained
+     * source bytes are re-wrapped directly; only a path-loaded image pays the canvas re-encode.
      */
     public serializeTexture(id: string): string | undefined {
         const texture = this._textures.get(id);
         if (!texture) return undefined;
 
-        // 1. Created from bytes (import): re-wrap the ORIGINAL compressed bytes. Encoded on first call and
-        //    memoized on the Texture, so importing never pays for base64 — only saving does. This also
-        //    keeps a JPEG a JPEG, instead of the canvas path's several-times-larger PNG.
+        // 1. Created from bytes: re-wrap the ORIGINAL compressed bytes, which keeps a JPEG a JPEG.
         const source = texture.sourceUri;
         if (source) return source;
 
-        // Data-backed textures (e.g. editable terrain splat maps) have no HTMLImageElement to draw;
-        // skip them here — such subsystems serialize their own pixel data separately.
+        // Data-backed textures have no image to draw; those subsystems serialize their own pixels.
         if (!(texture.data instanceof HTMLImageElement)) return undefined;
 
         // 2. Created from a data URL (an asset restored from storage): reuse it verbatim.
@@ -256,9 +212,7 @@ export class TextureManager {
         canvas.width = texture.width;
         canvas.height = texture.height;
         const ctx = canvas.getContext('2d');
-        // Only null under context loss / OOM, but that is exactly when a thrown TypeError would be least
-        // welcome. Bailing matches createFallbackTexture's handling of the same call, and every caller
-        // already treats an absent result as "nothing to embed".
+        // Only null under context loss or OOM; every caller reads undefined as "nothing to embed".
         if (!ctx) return undefined;
         ctx.drawImage(image, 0, 0);
 
@@ -266,12 +220,8 @@ export class TextureManager {
     }
 
     /**
-     * Snapshot textures as `{ id, data, config }` records.
-     *
-     * Pass `ids` to snapshot only those textures. Callers that need a handful (an imported material
-     * embedding its own maps) must do this: walking every texture in the project and filtering afterwards
-     * is O(all textures) per call, and with the canvas fallback it was the single worst stall in the
-     * editor. Omit `ids` for a whole-project snapshot (scene serialize, save, publish).
+     * Snapshot textures as `{ id, data, config }` records. Pass `ids` for a subset — a caller that needs
+     * a handful must, since filtering a whole-project snapshot afterwards is the editor's worst stall.
      */
     public serializeTextureData(ids?: Iterable<string>): any {
         const textures: {id: string, data: string, config: any}[] = [];
@@ -296,16 +246,8 @@ export class TextureManager {
     }
 
     /**
-     * Snapshot textures as raw compressed bytes — `{ id, bytes, mime, config }` records.
-     *
-     * The bytes-oriented twin of {@link serializeTextureData}, for consumers that write binary rather
-     * than JSON (publishing packs them into game.bin). For every imported texture this is strictly
-     * cheaper than the base64 path AND smaller on disk: `Texture.source` already retains the original
-     * compressed PNG/JPEG bytes, so there is nothing to encode and no 33% base64 inflation to pay.
-     *
-     * Path-loaded images have no retained bytes, so they fall back through serializeTexture's canvas
-     * re-encode and are decoded straight back to bytes. Data-backed textures (terrain splat maps) have
-     * no image to embed and are skipped, exactly as in serializeTextureData.
+     * Snapshot textures as raw compressed bytes — the binary twin of {@link serializeTextureData}, for
+     * consumers writing binary rather than JSON. Path-loaded images fall back through the canvas path.
      */
     public serializeTextureBytes(ids?: Iterable<string>): { id: string, bytes: Uint8Array, mime: string, config: any }[] {
         const out: { id: string, bytes: Uint8Array, mime: string, config: any }[] = [];
@@ -318,8 +260,7 @@ export class TextureManager {
                 return;
             }
 
-            // 2. No retained bytes (path-loaded, or restored from a non-base64 data URI): go through the
-            //    data-URL path and decode it back. Costs a canvas encode, same as saving does today.
+            // 2. No retained bytes: go through the data-URL path and decode back. Costs a canvas encode.
             const uri = this.serializeTexture(id);
             if (!uri) return; // data-backed texture, or no 2D context — nothing to embed
             const parsed = parseBase64DataUri(uri);
@@ -351,8 +292,7 @@ export class TextureManager {
         const base64Images = [];
 
         const canvas = document.createElement('canvas');
-        // Hoisted: it is the same canvas every iteration, so this was six identical getContext calls.
-        // Null only under context loss / OOM — bail rather than throw, as serializeTexture does.
+        // Null only under context loss or OOM — bail rather than throw.
         const ctx = canvas.getContext('2d');
         if (!ctx) return undefined;
 
@@ -384,8 +324,7 @@ export class TextureManager {
     }
 
     public removeTexture(id: string): void {
-        // Release the blob: URL an imported texture is decoded from. The GL texture is deliberately left
-        // alone — this only drops the registry entry, and other holders may still be drawing with it.
+        // Release the blob: URL only. The GPU texture is left alone — other holders may still draw it.
         this._textures.get(id)?.revokeObjectUrl();
         this._textures.delete(id);
     }

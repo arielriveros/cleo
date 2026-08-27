@@ -4,11 +4,8 @@ import { Shape } from './shape';
 import type { Node } from '../core/scene/nodes/node';
 
 
-// Internal — the shape RigidBody/Trigger pass down to CBody, not the public config. Unlike
-// RigidBodyConfig/TriggerConfig (whose fields are genuinely optional to callers), position and quaternion
-// are REQUIRED here: both subclasses already default them via a ternary before calling super(), and the
-// CBody constructor dereferences them unconditionally. Declaring them optional only made the checker
-// disbelieve code that was always correct.
+// Internal — what RigidBody/Trigger pass down to CBody, not the public config. `position` and `quaternion`
+// are REQUIRED here: both subclasses default them before calling super(), and CBody dereferences them.
 interface BodyConfig {
     owner?: Node;
     name?: string;
@@ -28,14 +25,9 @@ class CBody extends CannonBody {
     private readonly _owner: Node | null = null;
 
     /**
-     * Whether a camera rig's collision probe treats this body as solid — the "camera collision"
-     * channel, independent of whether the body simulates physically.
-     *
-     * A plain read in the probe's raycast callback rather than a cannon `collisionFilterGroup` bit:
-     * encoding two independent channels in the mask is subtly wrong (two camera-only bodies end up
-     * colliding with each other unless a spare bit is reserved just to keep their masks disjoint),
-     * and the probe already needs a per-hit callback to reject triggers. This way the channel cannot
-     * perturb body-body filtering, including the ragdoll's existing group usage.
+     * Whether a camera rig's collision probe treats this body as solid. Its own channel, independent of
+     * whether the body simulates physically, and read in the probe's callback rather than encoded in
+     * `collisionFilterGroup` so it cannot perturb body-body filtering.
      */
     public cameraCollision: boolean;
 
@@ -44,17 +36,15 @@ class CBody extends CannonBody {
         mass: config?.mass || 0,
         position: new Vec3(config.position[0], config.position[1], config.position[2]),
         quaternion: new Quaternion(config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]),
-        // `??`, not `||`: an explicit 0 is a real value here. With `||` a body asking for no damping at all
-        // silently got 0.25 and coasted to a stop, and no API could reach zero.
+        // `??`, not `||`: an explicit 0 is a real value here.
         linearDamping: config.linearDamping ?? 0.25,
         angularDamping: config.angularDamping ?? 0.25,
         linearFactor: config?.linearFactor ? new Vec3(config.linearFactor[0], config.linearFactor[1], config.linearFactor[2]) : new Vec3(1, 1, 1),
         angularFactor: config?.angularFactor ? new Vec3(config.angularFactor[0], config.angularFactor[1], config.angularFactor[2]) : new Vec3(1, 1, 1),
-        // Same trap, worse: `false || true` is `true`, so this flag could only ever say yes.
+        // `??`, not `||`: `false || true` is `true`, so this flag could only ever say yes.
         allowSleep: config.allowSleep ?? true,
-        // Left null on purpose. PhysicsSystem assigns the material when the body enters the world, because
-        // a ContactMaterial can only be registered against a live World. Note cannon only consults one when
-        // BOTH bodies carry a material, so a body that never gets here falls back to the world default.
+        // Left null: PhysicsSystem assigns the material when the body enters the world, since a
+        // ContactMaterial can only be registered against a live World.
         material: undefined,
         isTrigger: config.isTrigger || false,
       });
@@ -65,10 +55,9 @@ class CBody extends CannonBody {
     }
 
     /**
-     * `offset` is the shape's position in body space and `orientation` its euler rotation (degrees).
-     * cannon places a shape at `body.position + bodyQuaternion * offset`, i.e. the offset does not
-     * depend on the shape's own rotation — passing anything but the plain offset here would put the
-     * collider somewhere other than where the editor draws it.
+     * `offset` is the shape's position in body space and `orientation` its euler rotation (DEGREES).
+     * cannon places a shape at `body.position + bodyQuaternion * offset`, so the offset must be passed
+     * plain — it does not depend on the shape's own rotation.
      */
     public attachShape(shape: Shape, offset: vec3 = [0, 0, 0], orientation: vec3 = [0, 0, 0]): CBody {
         const q = quat.create();
@@ -89,7 +78,7 @@ class CBody extends CannonBody {
     public get owner(): Node | null { return this._owner; }
 }
 
-/** Grip against other surfaces. 0 = frictionless — what a character wants, since its script owns its speed. */
+/** Grip against other surfaces. 0 = frictionless. */
 export const DEFAULT_FRICTION = 0.3;
 /** Bounciness. 0 = dead stop, 1 = rebounds at the speed it landed. */
 export const DEFAULT_RESTITUTION = 0;
@@ -110,31 +99,23 @@ interface RigidBodyConfig {
     /** Block a camera rig's collision probe. Default true. */
     cameraCollision?: boolean;
     /**
-     * Meters below the collider's feet that still count as grounded. `0` = off — grounding uses the
-     * solver's contacts only, exactly as before. A small value (~0.1–0.2) removes `isGrounded` flicker
-     * for characters resting on terrain: cannon drops a perfectly resting contact for the odd frame, so
-     * instead of only trusting that contact we probe the ground each frame with a short downward raycast.
-     * The probe never vanishes the way a resting contact does, so the grounded stamp stays fresh.
+     * Meters below the collider's feet that still count as grounded. `0` = off, grounding uses solver
+     * contacts only. A small value (~0.1-0.2) removes `isGrounded` flicker for characters on terrain,
+     * since cannon drops a perfectly resting contact for the odd frame but a raycast never vanishes.
      */
     groundProbeDistance?: number;
     /**
-     * Time constant, in seconds, for this body's MEASURED motion (`Node.currentSpeed` and everything derived
-     * from it, including the acceleration and turn-rate values an animation machine binds to). `0` = the
-     * engine default (~90ms).
-     *
-     * Worth raising for anything whose measured speed is noisy — a capsule straddling heightfield seams, a
-     * body being carried, a ragdoll settling — because that noise is what a blend driven off `planarSpeed`
-     * turns into visible vibration. Worth lowering for something that must react instantly and does not feed
-     * an animation blend. The filter is frame-rate independent either way.
+     * Time constant, in SECONDS, for this body's measured motion (`Node.currentSpeed` and everything derived
+     * from it). `0` = the engine default (~90ms). Raise it where measured speed is noisy enough to vibrate
+     * an animation blend, lower it where the body must react instantly. Frame-rate independent either way.
      */
     motionSmoothing?: number;
 }
 
 export class RigidBody extends CBody {
   /**
-   * Surface properties, read by PhysicsSystem when this body enters the world and turned into a cannon
-   * Material there (a ContactMaterial needs a live World, so it cannot happen in this constructor).
-   * Plain fields rather than accessors: cannon's Body has neither name, only `material`.
+   * Surface properties, turned into a cannon Material by PhysicsSystem when this body enters the world
+   * (a ContactMaterial needs a live World, so it cannot happen in this constructor).
    */
   public readonly friction: number;
   public readonly restitution: number;
@@ -150,7 +131,7 @@ export class RigidBody extends CBody {
       mass: config?.mass || 0,
       position: config?.position ? [config.position[0], config.position[1], config.position[2]] : [0, 0, 0],
       quaternion: config?.quaternion ? [config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]] : [0, 0, 0, 1],
-      // `??`, not `||` — see CBody: an explicit 0 must survive.
+      // `??`, not `||`: an explicit 0 must survive.
       linearDamping: config?.linearDamping ?? 0.25,
       angularDamping: config?.angularDamping ?? 0.25,
       linearFactor: config?.linearConstraints || [1, 1, 1],
@@ -167,12 +148,9 @@ export class RigidBody extends CBody {
   }
 
   /**
-   * The "physical simulation" channel: false leaves the body in the world and still raycastable, but
-   * it exerts and receives no collision response — a ghost to the solver, still solid to a camera
-   * probe (which passes `checkCollisionResponse: false`).
-   *
-   * Backed directly by cannon's `collisionResponse` rather than a parallel field, so the two can
-   * never drift apart.
+   * The physical-simulation channel: false leaves the body in the world and still raycastable but with no
+   * collision response — a ghost to the solver, still solid to a camera probe. Backed directly by cannon's
+   * `collisionResponse`.
    */
   public get simulatePhysics(): boolean { return this.collisionResponse; }
   public set simulatePhysics(value: boolean) { this.collisionResponse = value; }

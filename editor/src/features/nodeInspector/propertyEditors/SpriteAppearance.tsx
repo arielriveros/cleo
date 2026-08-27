@@ -6,11 +6,7 @@ import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { PropertyTable, PropertyRow, Select, Slider, Toggle, ColorInput } from '../../../components/ui'
 import { AppearanceIcon } from '../sectionIcons'
 
-// Tint / opacity / blending for a sprite, inline.
-//
-// Sprites used to reach these through a linked Material asset, which meant three hops (node -> material
-// slot -> material tab -> texture slot) to change a colour, and exposed a texture slot that no longer
-// means anything now that the image comes from the tileset. There are only five knobs; they live here.
+// Tint / opacity / blending for a sprite, inline. A sprite's image comes from its tileset, not a material.
 
 export default function SpriteAppearance(props: { node: SpriteNode }) {
   const eventEmitter = useEventBus()

@@ -11,25 +11,18 @@ import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 import type { ChunkRef } from './chunkBlob'
 
-// The portable project/asset-pack bundle format (a .zip). A "project" bundle carries everything needed to
-// reconstruct the editor state elsewhere — every scene, all asset libraries, the folder layout (VFS) and
-// the texture payloads. An "assetpack" bundle is the same minus the scenes and project meta, so a set of
-// assets + folders can be shared into another project.
+// The portable project/asset-pack bundle format (a .zip). A "project" bundle carries every scene, all
+// asset libraries, the folder layout (VFS) and the texture payloads; an "assetpack" is the same minus the
+// scenes and project meta.
 //
-// The bundle is built and parsed in the project worker (pure data, no engine/DOM), so these types are
-// deliberately engine-free. Texture payloads travel as raw bytes, never base64 — matching how the texture
-// store holds them.
+// Built and parsed in the project worker, so these types must stay engine-free and DOM-free. Texture
+// payloads travel as raw bytes, never base64, matching how the texture store holds them.
 //
-// FORMAT 2 moved every bulk payload into ONE `assets.bin` entry: texture bytes (which were a file each),
-// and everything that used to sit in the JSON as decimal number arrays or base64 — mesh geometry, joint
+// FORMAT 2 puts every bulk payload into one `assets.bin` entry — texture bytes, mesh geometry, joint
 // attributes, skins, animation samplers, terrain height/splat, foliage instances, tilemap cell grids,
-// skybox cubemap faces and every thumbnail. See utils/bundleAssets.ts for the walk and for what each
-// field becomes; the JSON entries themselves are otherwise unchanged, so a v2 bundle reads like a v1 one
-// once inflated.
-//
-// Format 1 is still READ (readBundle branches on manifest.formatVersion). That is what keeps every
-// already-exported .cleoproj.zip importable and lets the example projects under editor/public/examples
-// stay exactly as they were shipped.
+// skybox faces and thumbnails. See utils/bundleAssets.ts; the JSON entries are otherwise unchanged, so a
+// v2 bundle reads like a v1 one once inflated. Format 1 is still READ (readBundle branches on
+// manifest.formatVersion), which is what keeps already-exported bundles and the shipped examples importable.
 
 export const BUNDLE_FORMAT_VERSION = 2
 
@@ -44,7 +37,7 @@ export interface BundleManifest {
   sceneMetas?: SceneMeta[]
   /** Project bundles only: project-wide prefs, so the whole ProjectMeta round-trips faithfully. */
   prefs?: ProjectPrefs
-  /** The exporting project's name, used to name the project an "import as new" creates. Purely additive. */
+  /** The exporting project's name, used to name the project an "import as new" creates. */
   projectName?: string
 }
 
@@ -77,8 +70,7 @@ export interface BundleData {
   textures: BundleTexture[]
 }
 
-// Fixed paths inside the archive. `texturesDir`/`texturesIndex` are format 1 only — never written any
-// more, still read so old bundles import.
+// Fixed paths inside the archive. `texturesDir`/`texturesIndex` are format 1 only: read, never written.
 export const BUNDLE_PATHS = {
   manifest: 'manifest.json',
   vfs: 'vfs.json',
@@ -111,10 +103,9 @@ export interface BundleGeometry extends Partial<Record<GeometryAttr, ChunkRef & 
   /** Absent for an unindexed mesh. */
   indices?: ChunkRef & { bits: 16 | 32 }
   /**
-   * The source attributes were nested tuples (`[[x,y,z], …]`) rather than flat arrays, so inflate must
-   * rebuild them that way. The editor's foliage rule baker (utils/foliageRules.ts) emits that shape while
-   * Model.serialize emits the flat one, and restoring the wrong one would change an asset's content hash
-   * for no reason. The BYTES still dedupe across the two — only the record differs.
+   * The source attributes were nested tuples (`[[x,y,z], …]`), so inflate must rebuild them that way or
+   * the asset's content hash changes. The foliage rule baker emits that shape; Model.serialize emits flat.
+   * The BYTES still dedupe across the two; only the record differs.
    */
   nested?: true
 }
@@ -123,10 +114,8 @@ export interface BundleGeometry extends Partial<Record<GeometryAttr, ChunkRef & 
 export type MediaChunk = ChunkRef & { mime: string }
 
 /**
- * `assets.json` — the two payload tables that are keyed by reference rather than living inline.
- *
- * Everything else a v2 bundle packs is an inline `{o,l}` on the field that owned the data, which keeps
- * each payload next to the thing it belongs to instead of in a second index to keep in sync.
+ * `assets.json` — the two payload tables keyed by reference rather than living inline.
+ * Everything else a v2 bundle packs is an inline `{o,l}` on the field that owned the data.
  */
 export interface BundleAssetIndex {
   version: 1

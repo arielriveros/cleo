@@ -1,26 +1,5 @@
-/**
- * RHI vocabulary → WebGPU vocabulary.
- *
- * Most of these tables are the identity map, and that is not an accident: `rhi/types.ts` deliberately
- * took WebGPU's names so that the mapping which *cannot* be lossless — WebGPU's immutable pipelines
- * onto WebGL2's mutable global state — is the one that runs downhill. Writing the identity out anyway
- * buys something a cast would not: each table is an exhaustive `Record` over its union, so adding an
- * RHI format or blend factor fails to compile until somebody decides what WebGPU should do with it.
- *
- * Three mappings are genuinely NOT the identity, and they are the reason this module exists rather than
- * a handful of `as GPUTextureFormat` casts scattered through the device:
- *
- * - **Dimension.** RHI (and WebGL2) treat `2d-array` and `cube` as texture *shapes*. WebGPU does not:
- *   a `GPUTextureDimension` is only `1d` / `2d` / `3d`, and array-ness and cube-ness are properties of
- *   the *view*. So one RHI dimension becomes a texture dimension plus a view dimension plus a layer
- *   count, which is exactly the split {@link gpuTextureDimension}, {@link gpuViewDimension} and
- *   {@link layersForDimension} make explicit.
- * - **Usage flags.** `BufferUsage` / `TextureUsage` / `ShaderStage` are our own bit values and do not
- *   coincide with `GPUBufferUsage` / `GPUTextureUsage` / `GPUShaderStage`. Passing ours straight
- *   through would be accepted by the API and produce a resource with the wrong permissions.
- * - **Depth formats.** A depth attachment cannot be a colour target, and WebGPU rejects it loudly
- *   rather than silently, so {@link gpuTextureFormat} is paired with `isDepthFormat` at every use.
- */
+// RHI vocabulary -> WebGPU vocabulary. Mostly the identity, written out as exhaustive `Record`s so a
+// new RHI value fails to compile. Texture DIMENSION, USAGE FLAGS and DEPTH formats are the exceptions.
 
 import {
     BufferUsage, TextureUsage, ShaderStage,
@@ -34,14 +13,8 @@ import {
 // Textures
 // ------------------------------------------------------------------------------------------------
 
-/**
- * Every format in the RHI union is spelled the same way in WebGPU.
- *
- * That is true today because the union was chosen from WebGPU's list; it is written out so it stays
- * true. `rgba32float` is here, but note that *filtering* it needs the optional `float32-filterable`
- * feature — the device requests it when the adapter offers it and reports the outcome through
- * `DeviceCapabilities.floatFilterable`.
- */
+// Every RHI format is spelled the same way in WebGPU, written out so it stays true. Filtering
+// `rgba32float` additionally needs the optional `float32-filterable` feature.
 const TEXTURE_FORMAT: Readonly<Record<TextureFormat, GPUTextureFormat>> = {
     'r8unorm': 'r8unorm',
     'r16float': 'r16float',
@@ -60,8 +33,7 @@ export function rhiTextureFormat(format: GPUTextureFormat): TextureFormat {
     for (const key of Object.keys(TEXTURE_FORMAT) as TextureFormat[]) {
         if (TEXTURE_FORMAT[key] === format) return key;
     }
-    // Only reachable if a browser reports a preferred canvas format outside our union. Falling back to
-    // the one every implementation supports is better than allocating a target nothing can present.
+    // A preferred canvas format outside our union; fall back to the one every implementation supports.
     return 'rgba8unorm';
 }
 
@@ -87,12 +59,7 @@ export function gpuViewDimension(dimension: TextureDimension): GPUTextureViewDim
     return VIEW_DIMENSION[dimension];
 }
 
-/**
- * Layer count implied by the shape, before the descriptor's own request is considered.
- *
- * A cube is six layers by definition and a caller that says otherwise is wrong; everything else takes
- * whatever it asked for, defaulting to one.
- */
+/** Layer count implied by the shape. A cube is always six; everything else takes `requested`, or one. */
 export function layersForDimension(dimension: TextureDimension, requested: number | undefined): number {
     if (dimension === 'cube') return 6;
     return Math.max(1, Math.floor(requested ?? 1));
@@ -103,11 +70,8 @@ export function layersForDimension(dimension: TextureDimension, requested: numbe
 // ------------------------------------------------------------------------------------------------
 
 /**
- * Our bits are not WebGPU's bits.
- *
- * `BufferUsage.VERTEX` is 0x0001 while `GPUBufferUsage.VERTEX` is 0x0020, so handing our mask straight
- * to `createBuffer` yields a buffer with a plausible-looking but wrong usage set — one that fails at
- * the first bind rather than at creation.
+ * Translate our usage bits, which are NOT WebGPU's: `BufferUsage.VERTEX` is 0x0001 against
+ * `GPUBufferUsage.VERTEX`'s 0x0020, and passing ours through creates a buffer that fails at first bind.
  */
 export function gpuBufferUsage(usage: BufferUsageFlags): GPUBufferUsageFlags {
     let out = 0;
@@ -253,12 +217,7 @@ export function gpuLoadOp(op: LoadOp): GPULoadOp { return LOAD_OP[op]; }
 const STORE_OP: Readonly<Record<StoreOp, GPUStoreOp>> = { 'store': 'store', 'discard': 'discard' };
 export function gpuStoreOp(op: StoreOp): GPUStoreOp { return STORE_OP[op]; }
 
-/**
- * Per-channel write mask → `GPUColorWriteFlags`.
- *
- * Defaults to all four channels, matching `ColorTargetState.writeMask`'s documented default and
- * WebGL2's `colorMask(true, true, true, true)`.
- */
+/** Per-channel write mask -> `GPUColorWriteFlags`. Defaults to all four channels. */
 export function gpuColorWriteMask(mask: readonly [boolean, boolean, boolean, boolean] | undefined): GPUColorWriteFlags {
     if (!mask) return GPUColorWrite.ALL;
     let out = 0;

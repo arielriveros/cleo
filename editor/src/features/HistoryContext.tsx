@@ -3,21 +3,13 @@ import { HistoryManager, Node, Scene, parseNodeJson } from 'cleo'
 import type { HistoryEntry, SceneChange, NodePlacement } from 'cleo'
 import { useCleoEngine } from './EngineContext'
 
-// Undo/redo for the editor.
+// Undo/redo for the editor. One HistoryManager PER TAB, not one shared stack: each asset tab owns its own
+// throwaway Scene, and a single stack would undo a material edit into the scene tab's graph.
 //
-// One HistoryManager PER TAB, not one shared stack: each asset tab owns its own throwaway Scene, so a
-// single stack would happily undo a material edit into the scene tab's graph. The manager for the active
-// tab is what the shortcuts and the toolbar buttons drive.
-//
-// Recording is a hybrid, because the SCENE_CHANGED bus carries very different amounts of detail per kind:
-//
-//   structure (add/remove/reparent/spawn/despawn)  exact inverse, holding the detached subtree
-//   everything else                                subtree snapshot, diffed across an interaction
-//
-// The snapshot path needs a "before" image that predates the change, which the event itself cannot supply.
-// It comes from a baseline captured when a node is SELECTED — every inspector edit is preceded by selecting
-// the node it edits, so by the time an edit arrives the baseline is already there. After an interaction
-// closes the baseline is refreshed, so a second edit to the same node is diffed against the first result.
+// Recording is a hybrid: `structure` events (add/remove/reparent/spawn/despawn) get an exact inverse
+// holding the detached subtree; everything else is a subtree snapshot diffed across an interaction. The
+// snapshot's "before" image comes from a baseline captured when a node is SELECTED — every inspector edit
+// is preceded by selecting the node it edits. The baseline is refreshed when an interaction closes.
 
 /** How long an interaction stays open after its last change before it becomes one undo step. */
 const INTERACTION_IDLE_MS = 450

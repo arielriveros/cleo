@@ -12,9 +12,8 @@ import FloatingEdge from './FloatingEdge'
 import { isConditionGroup } from 'cleo'
 import type { AnimationTransition, AnimationCondition, AnimationConditionNode } from 'cleo'
 
-// Center-canvas node-graph for the animation state machine. States are draggable nodes, transitions
-// are arrowed edges; both edit the shared machine from StateMachineContext. Rendered as an absolute
-// overlay over the WebGL viewport in animation mode when the Graph view is active.
+// Center-canvas node-graph for the animation state machine: draggable state nodes and arrowed transition
+// edges, both editing the shared machine from StateMachineContext.
 
 const NODE_W = 156
 const AUTO_COLS = 4
@@ -39,8 +38,7 @@ interface StateNodeData {
 function StateNode({ data, selected }: NodeProps) {
   const d = data as StateNodeData
   const border = d.active ? 'border-highlight' : selected ? 'border-selected' : d.isEntry ? 'border-success' : 'border-control-hover'
-  // A blend state and a clip state are read the same way at a glance, so the ⊞ badge is what distinguishes
-  // them — a name alone would not say whether it is one clip or a whole space.
+  // The ⊞ badge is what distinguishes a blend state from a clip state; the name alone does not.
   const what = d.playsField ? (d.fieldName || '(missing field)') : (d.clipName || '(no clip)')
   return (
     <div className={`rounded border-2 ${border} bg-control text-white shadow-panel`} style={{ width: NODE_W }}>
@@ -71,8 +69,8 @@ function StateNode({ data, selected }: NodeProps) {
 const nodeTypes = { state: StateNode }
 const edgeTypes = { transition: FloatingEdge }
 
-// Short human summary of a transition's gate for the edge label. Flattens the condition tree to its first
-// couple of leaves — the sidebar is where the real structure is read, this is just an at-a-glance hint.
+// Short human summary of a transition's gate for the edge label: the condition tree flattened to its first
+// couple of leaves.
 function transitionLabel(t: AnimationTransition, paramOf: (n: string) => any): string {
   const leaves: AnimationCondition[] = []
   const walk = (n: AnimationConditionNode) => { isConditionGroup(n) ? n.children.forEach(walk) : leaves.push(n) }
@@ -143,8 +141,7 @@ function Flow() {
   // Rebuild edges from LINKS, not transitions: A→B and B→A are ONE edge. FloatingEdge draws it as a single
   // line for one direction and two parallel lines for both, and picks the borders to attach to itself.
   useEffect(() => {
-    // Markers stay on the edge: xyflow resolves them into `url(#…)` strings and hands those to the custom
-    // edge, which then puts each on the right one of its two lines.
+    // Markers must stay on the edge: xyflow resolves them into `url(#…)` strings for the custom edge.
     const arrow = { type: MarkerType.ArrowClosed, width: 14, height: 14 }
     setEdges(links.map(l => {
       const isSelected = sameLink(selection, l.a, l.b)
@@ -173,8 +170,7 @@ function Flow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sm.transitions, sm.parameters, selection, activeState])
 
-  // Poll the animator's active state (for the Simulate highlight) without rebuilding on every frame.
-  // Only runs while the graph is actually visible so it isn't a permanent global rAF loop.
+  // Polls the animator's active state for the Simulate highlight, only while the graph is visible.
   useEffect(() => {
     if (!target || !graphView) { setActiveState(null); return }
     let raf = 0
@@ -227,8 +223,7 @@ function Flow() {
   }, [setSelection])
   const onPaneClick = useCallback(() => { setSelection(null); setMenu(null) }, [setSelection])
 
-  // Right-click a node for the things that have no room on it: entry is set here now rather than by a radio
-  // in the sidebar, since the node itself already shows entry (green border + ▶).
+  // Right-click a node for the things that have no room on it, entry state included.
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: RFNode) => {
     e.preventDefault()
     setSelection({ kind: 'state', name: node.id })

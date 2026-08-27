@@ -5,31 +5,20 @@ import { resolveTextureFormat } from "./rhi/textureFormat";
 import { glTextureFormat, glTextureTarget, glAddressMode, glMinFilter } from "./rhi/webgl2/glEnums";
 import { device } from "./rhi/deviceHandle";
 import type { TextureView as RhiTextureView } from './rhi/resources';
+import type { CommandEncoder } from './rhi/device';
 import { WebGL2Texture } from "./rhi/webgl2/webgl2Device";
 import type { Texture as RhiTexture } from "./rhi/resources";
 import { WebGL2TextureView } from "./rhi/webgl2/webgl2Commands";
 import { TextureUsage } from "./rhi/types";
 import type { TextureFormat, TextureDimension, AddressMode } from "./rhi/types";
 
-/**
- * Float-texture capability, as the device reported it at boot.
- *
- * This used to be two `getExtension` calls in the `Texture` constructor — on every single texture the
- * engine ever allocated. The device resolves both once while acquiring the context and publishes them
- * through {@link DeviceCapabilities}, so this is now a field read.
- */
+// Float-texture capability, as the device reported it at boot.
 function floatSupport(): { floatRenderable: boolean; floatFilterable: boolean } {
     const caps = device.capabilities;
     return { floatRenderable: caps.floatRenderable, floatFilterable: caps.floatFilterable };
 }
 
-/**
- * Say, once, that a float target was downgraded.
- *
- * Once per format rather than per texture: the renderer allocates well over a dozen HDR targets, and a
- * device missing the extensions would otherwise produce a wall of identical warnings at boot. One line
- * is enough to explain why the image looks banded and clipped.
- */
+// Warn once per FORMAT, not per texture: a device without the float extensions downgrades dozens.
 const reportedDowngrades = new Set<string>();
 function reportFloatDowngrade(requested: TextureFormat, actual: TextureFormat): void {
     if (reportedDowngrades.has(requested)) return;
@@ -49,53 +38,26 @@ export interface TextureConfig {
     mipMapFilter?: 'nearest' | 'linear';
     precision?: 'low' | 'high';
     target?: 'texture2D' | 'cubemap' | 'texture3D' | 'texture2DArray';
-    /**
-     * Number of colour channels. Defaults to RGBA; 'r' allocates a single-channel target, for buffers
-     * that hold one scalar (ambient occlusion, masks) and would otherwise pay 4x the bandwidth and
-     * memory to store three copies of nothing.
-     */
+    /** Colour channels. Defaults to RGBA; 'r' is a single-channel target for scalar buffers. */
     channels?: 'rgba' | 'r';
     /**
-     * An exact format, bypassing the `precision`/`channels` inference.
-     *
-     * Still subject to the same float fallback: naming `rgba16float` on a device without the float
-     * extensions degrades to RGBA8 exactly as `precision: 'high'` does. See rhi/textureFormat.ts.
+     * An exact format, bypassing the `precision`/`channels` inference. Still subject to the float
+     * fallback in rhi/textureFormat.ts.
      */
     format?: TextureFormat;
     /**
-     * Dimensions to allocate at CREATION, rather than whenever an upload gets around to it.
-     *
-     * Every other path here allocates lazily because that is how WebGL2 works: `texImage2D` and
-     * `texStorage3D` both establish storage long after `createTexture`, so `new Texture(...)` asks
-     * the device for a 0x0 and the uploads correct it. A `GPUTexture` cannot work that way — its size
-     * is fixed when it is made, and the WebGPU backend's upload entry points say so by throwing.
-     *
-     * This is the narrow declarative escape hatch for the one texture that has to be right up front:
-     * the cloud-noise volume, which on WebGPU is filled by a compute dispatch and so is never
-     * "uploaded" at all. It is NOT the general fix — the rest of the engine still allocates through
-     * its uploads, and reforming that is a separate piece of work.
+     * Dimensions to allocate at creation rather than on first upload. Needed only by textures that
+     * are never uploaded to — the cloud-noise volume, filled by a compute dispatch on WebGPU.
      */
     size?: { width: number; height: number; depth?: number };
     /**
-     * Allocate this texture so a compute shader can WRITE it (`texture_storage_*`).
-     *
-     * Exclusive with render-attachment usage rather than additive: a storage texture is never drawn
-     * into, and WebGPU refuses some format/usage combinations that carry both. Requires {@link size},
-     * since a storage binding needs real dimensions before anything can be dispatched against it.
-     *
-     * Ignored on WebGL2, which has no storage textures — `createVolume()` there still runs
-     * `texStorage3D` exactly as it always did.
+     * Allocate so a compute shader can write this (`texture_storage_*`). Exclusive with render-
+     * attachment usage, requires {@link size}, and is ignored on WebGL2.
      */
     storage?: boolean;
 }
 
-/**
- * The six images of a cubemap, in GL face order.
- *
- * Every face is required. The `| null` these once carried was unsourced — no producer in the engine ever
- * yields a null face, because they all resolve through `Loader.loadImage`, which rejects on error rather
- * than resolving null. It only forced null checks on code that could never see one.
- */
+/** The six images of a cubemap, in GL face order. Every face is required. */
 export interface CubemapFaces {
     posX: HTMLImageElement,
     negX: HTMLImageElement,
@@ -111,32 +73,18 @@ const ADDRESS_MODES: Readonly<Record<'clamp' | 'repeat' | 'mirror', AddressMode>
 };
 
 export class Texture {
-    /**
-     * The device-owned texture object. `_texture` below is a getter onto its handle, so the upload
-     * paths — six of them, one per WebGL2 entry point — keep reading exactly as they did while the
-     * allocation, the lifetime and the byte accounting move behind the RHI.
-     */
-    /**
-     * The device-owned texture, as the RHI describes one.
-     *
-     * Typed by the INTERFACE rather than the WebGL2 class, which is what makes this file portable:
-     * every upload below goes through methods both backends can implement, and the two that cannot
-     * (`bind` to a texture unit, `unbind`) are cast at their call sites so the coupling is one named
-     * exception instead of the whole class.
-     */
+    // The device-owned texture, typed by the RHI interface. `bind`/`unbind` are the only WebGL2-only
+    // operations, and they cast at their call sites.
     private readonly _gpu: RhiTexture;
     private _width: number = 0;
     private _height: number = 0;
     // Colour channels actually allocated (1 for an R8/R16F target, 4 otherwise). Only affects byteSize.
     private _channels: number = 4;
-    // Third dimension: slices of a TEXTURE_3D volume or layers of a TEXTURE_2D_ARRAY. Kept as a plain field rather than
-    // a separate subclass so `byteSize`, `bind`/`unbind` and `delete` stay single implementations.
+    // Third dimension: slices of a TEXTURE_3D volume, or layers of a TEXTURE_2D_ARRAY.
     private _depth: number = 0;
     private _data: HTMLImageElement | CubemapFaces | null = null;
-    // The compressed bytes this texture was decoded from (PNG/JPEG/…), kept so it can be serialized
-    // without re-encoding it through a canvas. Import decodes from a Blob URL, so the image has no data:
-    // URL to reuse — these bytes are what `TextureManager.serializeTexture` falls back to, and the base64
-    // is only ever produced (and then memoized) when an asset is actually saved.
+    // The compressed bytes this texture was decoded from, kept so it can be serialized without
+    // re-encoding through a canvas. Base64 is produced (and memoized) only when an asset is saved.
     private _source: { bytes: Uint8Array; mime: string } | null = null;
     private _sourceUri: string | null = null; // memoized data URL for _source
     private _objectUrl: string | null = null; // blob: URL backing _data's src; revoked on delete()
@@ -172,9 +120,7 @@ export class Texture {
         this._addressMode = ADDRESS_MODES[options?.wrapping ?? 'clamp'];
         this._wrapping = glAddressMode(this._addressMode);
 
-        // Which format the device can actually give us, and whether that is the one we asked for. The
-        // policy — including the float-to-RGBA8 fallback that silently turns the HDR pipeline LDR — is
-        // in rhi/textureFormat.ts so it can be tested without a context.
+        // Format policy, including the float-to-RGBA8 fallback, lives in rhi/textureFormat.ts.
         const resolved = resolveTextureFormat(
             { usage: this._usage, precision: this._precision, channels: options?.channels, format: options?.format },
             floatSupport(),
@@ -182,9 +128,7 @@ export class Texture {
         this._resolvedFormat = resolved.format;
         if (resolved.downgraded) reportFloatDowngrade(resolved.requested, resolved.format);
 
-        // Dimensions up front when the caller named them — see TextureConfig.size. Recorded on the
-        // wrapper too, so `byteSize` and the eager `_syncGpuSize` agree with what the device holds
-        // for a texture that will never travel an upload path.
+        // Dimensions up front when the caller named them — see TextureConfig.size.
         const size = options?.size;
         if (size) {
             this._width = size.width;
@@ -200,14 +144,12 @@ export class Texture {
             usage: this._usage === 'depth'
                 ? TextureUsage.RENDER_ATTACHMENT | TextureUsage.TEXTURE_BINDING
                   | TextureUsage.COPY_SRC | TextureUsage.COPY_DST   // _copyDepth blits between targets
-                // STORAGE_BINDING REPLACES the attachment usage rather than joining it: nothing draws
-                // into a storage texture, and asking for both narrows the formats WebGPU will accept.
+                // STORAGE_BINDING replaces attachment usage rather than joining it — asking for both
+                // narrows the formats WebGPU accepts.
                 : options?.storage
                     ? TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST | TextureUsage.STORAGE_BINDING
-                    // COPY_SRC as well, because a colour target can be READ BACK: thumbnails, the probe
-                    // preview, the depth blit. WebGL2 needs no such declaration - anything attached to a
-                    // framebuffer can be `readPixels`'d - so its absence here was invisible until
-                    // `copyTextureToBuffer` started refusing on the other backend.
+                    // COPY_SRC too: a colour target can be read back (thumbnails, probe preview,
+                    // depth blit), and WebGPU's `copyTextureToBuffer` refuses without it.
                     : TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST
                       | TextureUsage.RENDER_ATTACHMENT | TextureUsage.COPY_SRC,
         });
@@ -238,27 +180,13 @@ export class Texture {
     /** The device-owned handle. Everything below still binds and uploads through it directly. */
     private get _texture(): WebGLTexture { return (this._gpu as WebGL2Texture).handle; }
 
-    /** Bind for sampling. See WebGL2Texture.bind — the state cache lives with the GPU resource now. */
-    /**
-     * Bind for sampling at a texture UNIT.
-     *
-     * Not on the RHI interface and never will be: a unit is a WebGL2 concept, and WebGPU binds
-     * through bind groups instead. The remaining callers are the legacy material-application paths;
-     * they go when those do.
-     */
+    /** Bind for sampling at a texture UNIT. WebGL2 only — WebGPU binds through bind groups. */
     public bind(slot: number = 0): void {
         if (device.backend !== 'webgl2') return;
         (this._gpu as WebGL2Texture).bind(slot);
     }
 
-    /**
-     * Release whichever unit this texture was last bound to.
-     *
-     * A no-op off WebGL2, and that guard is not a stub. `_finishUpload` calls this after EVERY upload,
-     * so without it the first texture any backend without units allocates dies on `unbind is not a
-     * function` - a legacy epilogue killing a path that had otherwise completed. There is no unit to
-     * release when bind groups name their resources directly.
-     */
+    /** Release whichever unit this texture was last bound to. A no-op off WebGL2. */
     public unbind(): void {
         if (device.backend !== 'webgl2') return;
         (this._gpu as WebGL2Texture).unbind();
@@ -296,9 +224,7 @@ export class Texture {
             }
             this._gpu.upload2D(img, this._width, this._height, this._mipMap);
         } else {
-            // Null data on a cubemap allocates six empty faces rather than walking into `faces.posX` —
-            // `new Skybox(null)` reaches exactly here, and a no-op would leave the texture incomplete,
-            // which is a subtler failure than the crash it replaced.
+            // Null data on a cubemap allocates six empty faces; a no-op would leave it incomplete.
             const faces = data as CubemapFaces | null;
             const images = faces
                 ? [faces.posX, faces.negX, faces.posY, faces.negY, faces.posZ, faces.negZ]
@@ -358,9 +284,8 @@ export class Texture {
     }
 
     /**
-     * Allocate an empty renderable cubemap (all 6 faces) with immutable storage, sized `size` per
-     * face and `levels` mip levels. Used as an IBL render target (captured environment, irradiance,
-     * prefiltered specular) — render into a face/level with a framebuffer, then sample as a cubemap.
+     * Allocate an empty renderable cubemap with immutable storage, `size` per face and `levels` mips.
+     * The IBL render target: render into a face/level, then sample the whole thing as a cubemap.
      */
     public createCubemapTarget(size: number, levels: number = 1): void {
         this._width = size;
@@ -373,9 +298,7 @@ export class Texture {
 
     /**
      * Allocate an empty renderable 3D volume with immutable storage. Requires `target: 'texture3D'`.
-     *
-     * Wrapping defaults to REPEAT on all three axes, including WRAP_R (which the 2D path never sets),
-     * because the only consumer so far is a *tileable* noise field whose whole purpose is to repeat.
+     * Wrapping defaults to REPEAT on all three axes, WRAP_R included.
      */
     public createVolume(width: number, height: number, depth: number,
                         wrapping: 'clamp' | 'repeat' | 'mirror' = 'repeat'): void {
@@ -393,14 +316,8 @@ export class Texture {
     }
 
     /**
-     * Allocate an empty renderable DEPTH texture array with immutable storage. Requires
-     * `target: 'texture2DArray'` and `usage: 'depth'`. This is the cascaded-shadow-map target: one
-     * layer per cascade, filled through `gl.framebufferTextureLayer` (see LayeredDepthFramebuffer).
-     *
-     * One array replaces N separate `sampler2D`s: GLSL ES 3.00 forbids dynamically indexing a SAMPLER
-     * array, which is why the old three-cascade code unrolled its cascade select into an if-chain and
-     * burned three texture units. A `sampler2DArray` takes a dynamic layer index, so the cascade count
-     * becomes a plain uniform and the whole thing costs one unit.
+     * Allocate an empty renderable DEPTH texture array with immutable storage — the cascaded-shadow-map
+     * target, one layer per cascade. Requires `target: 'texture2DArray'` and `usage: 'depth'`.
      */
     public createArrayTarget(size: number, layers: number, compare: boolean = true): void {
         if (this._gpu.dimension !== '2d-array') {
@@ -422,15 +339,17 @@ export class Texture {
         this.unbind();
     }
 
-    /** (Re)generate the mip chain for this texture — e.g. after rendering a captured cubemap. */
-    public generateMipmaps(): void {
-        this._gpu.generateMipmaps();
+    /**
+     * (Re)generate the mip chain. Pass the encoder the level-0 work was recorded into — on WebGPU,
+     * omitting it while that encoder is open builds the chain from a level nothing has written.
+     */
+    public generateMipmaps(encoder?: CommandEncoder): void {
+        this._gpu.generateMipmaps(encoder);
         this.unbind();
     }
 
     public delete(): void {
-        // Before the destroy, and not only for tidiness: a memoised view outlives the storage it names,
-        // and handing one out afterwards is a use-after-free the type system cannot see.
+        // Before the destroy: a memoised view outlives the storage it names.
         this._views = null;
         this._gpu.destroy();
         if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
@@ -450,12 +369,8 @@ export class Texture {
     public get source(): { bytes: Uint8Array; mime: string } | null { return this._source; }
 
     /**
-     * Hold the blob: URL the image was decoded from, alive for the texture's lifetime and revoked on
-     * delete().
-     *
-     * It must NOT be revoked once the image loads: the editor previews a texture card straight off
-     * `texture.data.src` (assetKinds.thumbnailOf), so revoking early leaves every texture card showing a
-     * broken image.
+     * Hold the blob: URL the image was decoded from, revoked on delete(). It must NOT be revoked on
+     * load — the editor previews texture cards straight off `texture.data.src`.
      */
     public setObjectUrl(url: string): void {
         if (this._objectUrl && this._objectUrl !== url) URL.revokeObjectURL(this._objectUrl);
@@ -467,10 +382,7 @@ export class Texture {
         if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
     }
 
-    /**
-     * The texture's original bytes as a data URL, or null if it wasn't created from bytes. Encoded on first
-     * call and memoized — importing never pays for this, only saving does.
-     */
+    /** The original bytes as a data URL, or null if not created from bytes. Encoded once, then memoized. */
     public get sourceUri(): string | null {
         if (this._sourceUri) return this._sourceUri;
         if (!this._source) return null;
@@ -479,28 +391,12 @@ export class Texture {
     }
     public get texture(): WebGLTexture { return this._texture; }
 
-    /**
-     * The device-owned texture, typed as the RHI describes one.
-     *
-     * The portable half of `gpu` above, which casts to the WebGL2 class and is what the unmigrated
-     * upload callers still need. Anything that only has to hand the texture back to the device — a
-     * bind group entry, a view — should read this instead, and the compute cloud-noise bake does.
-     */
+    /** The device-owned texture, typed by the RHI. Prefer this over `gpu`, which casts to WebGL2. */
     public get rhiTexture(): RhiTexture { return this._gpu; }
 
     /**
-     * This texture as a render ATTACHMENT: mip 0, layer 0.
-     *
-     * Split from {@link sampledView} because the two are different objects on WebGPU and the difference
-     * is not cosmetic. An attachment view must name exactly one mip and one layer - that is how a
-     * shadow cascade or a cube face becomes a target - while a sampled view must span the whole texture
-     * and keep its own dimension, or a `texture_cube` binding gets a `2d` view of face 0 and a mipped
-     * texture goes unfiltered at distance.
-     *
-     * This replaced a single `view` accessor that returned a CONCRETE `WebGL2TextureView` through an
-     * unchecked cast. Nothing caught it because `WebGL2Device.beginRenderPass` never reads a view at
-     * all - it works off a pre-built framebuffer - so the wrong class travelled all the way to
-     * WebGPU's `beginRenderPass`, which reads `view.handle` and got `undefined`.
+     * This texture as a render ATTACHMENT: mip 0, layer 0. Distinct from {@link sampledView}, which
+     * must span the whole texture and keep its dimension — the two are different objects on WebGPU.
      */
     public get attachmentView(): RhiTextureView {
         return this._cachedView('attachment');
@@ -511,17 +407,8 @@ export class Texture {
         return this._cachedView('sampled');
     }
 
-    /**
-     * Both views, memoised until the storage underneath them is replaced.
-     *
-     * Cached because the geometry pass builds a bind group per submesh per node - a fresh view object
-     * per draw is pure garbage on a path that runs hundreds of times a frame.
-     *
-     * Keyed on `generation` rather than on dimensions: a `GPUTexture` is destroyed and recreated by
-     * `setSize`, and every view taken from the old one then refers to storage that no longer exists.
-     * Comparing dimensions here would duplicate the exact condition inside `WebGPUTexture.setSize`, in
-     * a different file, with nothing checking the two agree.
-     */
+    // Both views, memoised until the storage underneath is replaced. Keyed on `generation`, not on
+    // dimensions: `setSize` destroys and recreates the GPUTexture, invalidating every view of it.
     private _cachedView(role: 'attachment' | 'sampled'): RhiTextureView {
         const generation = this._gpu.generation;
         if (this._views && this._views.generation !== generation) this._views = null;
@@ -556,34 +443,14 @@ export class Texture {
     /** Slices of a 3D volume or layers of a 2D array; 0 for plain 2D and cubemap textures. */
     public get depth(): number { return this._depth; }
 
-    /** Rough VRAM footprint in bytes (width*height*depth * bytes-per-pixel * faces * mip factor). bpp
-     *  mirrors the constructor's internalFormat choice (depth=4 / RGBA16F=8 / RGBA8=4). Used by the
-     *  perf HUD. Without the depth term a 128³ volume would report as 64 KB rather than 8 MB. */
+    /** Rough VRAM footprint in bytes: width*height*depth * bytes-per-pixel * faces * mip factor. */
     public get byteSize(): number {
         this._syncGpuSize();
         return this._gpu.byteSize;
     }
 
-    /**
-     * Push the dimensions the upload paths established into the device texture.
-     *
-     * `_width`/`_height`/`_depth`/`_mipMap` are written from eight different upload entry points, and
-     * this used to run lazily on the `byteSize` read so none of them had to remember. That stopped being
-     * viable the moment a `TextureView` became a render-target attachment: `createRenderTarget` sizes
-     * the target from `view.texture.width`, and a texture nobody had asked the byte size of still
-     * reported 0 — which makes every pass into it a 1x1 viewport. So the sync is eager now, through the
-     * one exit {@link _finishUpload} that every upload path already shared.
-     */
-    /**
-     * Push the dimensions this wrapper holds into the device texture.
-     *
-     * Called BEFORE every upload as well as after, and the before is the load-bearing one. WebGL2 learns
-     * a texture's size from the upload itself (`texImage2D` both allocates and fills), so this was only
-     * ever bookkeeping there - `WebGL2Texture.setSize` records four numbers and touches no GL. A
-     * `GPUTexture` fixes its size at creation and cannot be resized, so on WebGPU this call IS the
-     * allocation, and an upload that ran first would have nothing to write into. Every allocate path
-     * below therefore sets `_width`/`_height`/`_depth` and syncs before handing the data over.
-     */
+    // Push the dimensions this wrapper holds into the device texture. Must be called BEFORE every
+    // upload as well as after: on WebGPU this call IS the allocation.
     private _syncGpuSize(): void {
         const slices = (this._gpu.dimension === '3d' || this._gpu.dimension === '2d-array')
             ? Math.max(1, this._depth) : 1;

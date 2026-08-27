@@ -19,16 +19,11 @@ const baseKey = (b: CustomBaseType) => (b == null ? 'scratch' : b)
 const keyToBase = (k: string): CustomBaseType => (k === 'scratch' ? null : k as CustomBaseType)
 
 /**
- * Inspector body for a custom (user-authored shader) material. Provides the render-mode toggle
- * (forward = final color / deferred = G-buffer surface), the "extend base" scaffold chooser, the GLSL
- * source editor, and the user-uniforms editor. Kept preview-live by only advancing the material's shader
- * key (`refreshType`) on a successful compile — a broken edit shows the error and keeps rendering the
- * last good program.
- *
- * **Compiling is explicit** (the Compile button / Ctrl+Enter), not automatic while typing. GL shader
- * compilation and program linking are synchronous main-thread calls with no async variant, so the old
- * debounced-on-every-pause compile froze the whole editor — viewport, input and all — for the duration,
- * repeatedly, mid-keystroke. Typing now only stores the text; the user chooses when to pay for a compile.
+ * Inspector body for a custom (user-authored shader) material: render-mode toggle, "extend base"
+ * scaffold chooser, GLSL source editor and user-uniforms editor. The material's shader key
+ * (`refreshType`) only advances on a successful compile, so a broken edit keeps the last good program.
+ * Compiling is explicit (Compile button / Ctrl+Enter): GL compile and link are synchronous main-thread
+ * calls, so compiling while typing stalls the whole editor.
  */
 export default function CustomMaterialEditor(props: { node: ModelNode }) {
   const eventEmitter = useEventBus()
@@ -36,17 +31,14 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
   const mat = props.node.model.material as CustomMaterial
   const [source, setSource] = useState(mat.fragmentSource)
   const [error, setError] = useState<string | null>(null)
-  // The WebGPU verdict from the last compile. Separate state from `error` on purpose: a material that
-  // fails to translate still compiles, still renders and is still worth saving — it just will not run on
-  // a WebGPU backend. Folding the two together would either block a working shader or bury a real
-  // portability problem in a banner the user learns to ignore.
+  // WebGPU verdict from the last compile, kept separate from `error`: a material that fails to translate
+  // still compiles and renders, it just will not run on a WebGPU backend.
   const [wgslWarning, setWgslWarning] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [, force] = useState(0)
   const timer = useRef<number | null>(null)
-  // The source the live program and the error banner currently reflect. Anything typed since is unapplied,
-  // which is what the Compile button's enabled state and the "unapplied" hint are driven from. Set on a
-  // FAILED compile too: the error shown does describe that text.
+  // The source the live program and the error banner reflect; set on a FAILED compile too. Anything typed
+  // since is unapplied, which drives the Compile button's enabled state.
   const [compiledSource, setCompiledSource] = useState(mat.fragmentSource)
 
   const recompile = (src = mat.fragmentSource) => {
@@ -54,34 +46,28 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
     setError(res.ok ? null : (res.error ?? 'Compile error'))
 
     if (!res.ok) {
-      // Nothing to say about WebGPU when the shader does not compile at all; the GL diagnostic is the
-      // one with real line numbers, and a second failure about the same source is just noise.
+      // A shader that does not compile at all has no WebGPU verdict worth reporting.
       setWgslWarning(null)
       return { ok: false, wgsl: null as string | null }
     }
 
     if (res.wgsl) { setWgslWarning(null); return { ok: true, wgsl: res.wgsl } }
-    // No WGSL and no error means no translator is installed, which is not something to warn about.
+    // No WGSL and no error means no translator is installed.
     setWgslWarning(res.wgslError
       ? 'Compiles and runs on WebGL2, but will not run on WebGPU:\n' + res.wgslError
       : vulkanUnsupportedReason(mat.renderMode))
     return { ok: true, wgsl: null }
   }
 
-  /**
-   * Store `src`, compile it, and on success advance the shader key so the preview picks it up. This is the
-   * only path that compiles a source edit, and it runs solely on explicit user action.
-   */
+  /** Store `src`, compile it, and on success advance the shader key so the preview picks it up. */
   const compileNow = (src: string) => {
-    // A pending store from onSourceChange would otherwise write the same text again and re-dirty the tab.
+    // Cancel the pending store; it would otherwise rewrite the same text and re-dirty the tab.
     if (timer.current) { window.clearTimeout(timer.current); timer.current = null }
     mat.fragmentSource = src
     const res = recompile(src)
     if (res.ok) {
       mat.refreshType()
-      // Stamped AFTER refreshType, never before: `compiledWgslType` records the hash this WGSL was
-      // produced from, and comparing it against a hash computed from the previous source would mark a
-      // fresh translation stale (or, worse, an old one current).
+      // Must be stamped AFTER refreshType: `compiledWgslType` records the hash this WGSL came from.
       mat.compiledWgsl = res.wgsl
       mat.compiledWgslType = res.wgsl ? mat.type : null
     }
@@ -89,23 +75,17 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
     eventEmitter.emit('SCENE_CHANGED')
   }
 
-  // Re-sync when the inspected material changes. Seed a blank material (e.g. one created without a scaffold).
   useEffect(() => {
     if (!mat.fragmentSource) seedCustomMaterial(mat, mat.baseType, mat.renderMode)
     setSource(mat.fragmentSource)
     setCompiledSource(mat.fragmentSource)
-    // Fetch naga before the opening compile, so the first verdict the user sees is a real one rather
-    // than "not checked". It is a dynamic import of ~1.3 MB, so it happens here — on opening a custom
-    // material — and not at editor boot.
+    // naga is a ~1.3 MB dynamic import, pulled in on opening a custom material rather than at editor boot.
     ensureWgslTranslator().then(() => recompile(mat.fragmentSource))
   }, [props.node])
 
-  // Drop a pending store if the inspector closes mid-debounce — it would otherwise write to a material the
-  // user has navigated away from.
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
 
-  // Typing stores the text (cheap, and needed so the edit saves and survives a tab switch) but does NOT
-  // compile. Still debounced, purely to keep SCENE_CHANGED churn down — not to throttle GL work.
+  // Typing only stores the text, it never compiles. The debounce is to keep SCENE_CHANGED churn down.
   const onSourceChange = (src: string) => {
     setSource(src)
     if (timer.current) window.clearTimeout(timer.current)
@@ -119,11 +99,7 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
   const isStale = source !== compiledSource
 
   // --- Save -------------------------------------------------------------------------------------
-  //
-  // Deliberately NOT gated on a clean compile. Saving a shader mid-edit is a normal thing to want —
-  // stopping for the day on something that does not compile yet, or keeping a WebGL2-only material that
-  // simply cannot be translated. A disabled Save would make the editor lose work to protect a rule the
-  // user never agreed to. So it always saves, and says what it is saving instead.
+  // Never gated on a clean compile: saving mid-edit always stores the source as typed.
 
   /** Why saving now stores something other than what is on screen, or null when it does not. */
   const saveWarning = isStale
@@ -138,14 +114,13 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
 
   const save = async () => {
     setSaving(true)
-    // saveActiveTab reads the material off the tab's own scene, so the latest typed text has to be
-    // committed first — otherwise a save within the 300 ms store debounce would write the previous text.
+    // saveActiveTab reads the material off the tab's own scene, so flush the pending store first.
     if (timer.current) { window.clearTimeout(timer.current); timer.current = null }
     mat.fragmentSource = source
     try { await saveActiveTab() } finally { setSaving(false) }
   }
 
-  // Replacing the scaffold (base or mode change) discards the current source — confirm if the user edited it.
+  // Replacing the scaffold discards the current source — confirm if the user edited it.
   const wouldDiscard = () => mat.fragmentSource.trim() !== customSeedTemplate(mat.baseType, mat.renderMode).trim()
 
   const changeBase = (k: string) => {
@@ -154,15 +129,13 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
     if (wouldDiscard() && !window.confirm('Change the base scaffold? This replaces the current shader source.')) return
     seedCustomMaterial(mat, base, mat.renderMode)
     setSource(mat.fragmentSource)
-    // Discrete user action replacing the whole source with a known-good scaffold — compile it straight
-    // away rather than leaving the user with an "unapplied" badge on something they did not type.
+    // A discrete action, not typing: compile the new scaffold immediately.
     compileNow(mat.fragmentSource)
     force(n => n + 1)
   }
 
-  // Keep the material-tab preview camera's pass list in step with the mode: a screen material previews
-  // as a fullscreen camera pass (same instance, so source/uniform edits stay live), any other mode as
-  // the sphere's surface. Only touches the editor preview camera, never a game camera.
+  // Keeps the material-tab preview camera's pass list in step with the mode: a screen material previews as
+  // a fullscreen camera pass, any other mode as the sphere's surface. Editor preview camera only.
   const syncPreviewCamera = () => {
     const cam = props.node.scene?.activeCamera
     if (!cam || !cam.name.startsWith('__editor__')) return
@@ -181,9 +154,7 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
   }
 
   const onUniformsChange = (structural: boolean) => {
-    // A changed declaration set changes the assembled source, so the preview is wrong until it recompiles.
-    // Also a discrete action (add/remove/retype a uniform), not typing — so it compiles immediately, on
-    // the LATEST editor text rather than mat.fragmentSource, which can lag it by one debounce.
+    // Compile the LATEST editor text, not mat.fragmentSource, which can lag it by one debounce.
     if (structural) compileNow(source)
     else eventEmitter.emit('SCENE_CHANGED')
   }

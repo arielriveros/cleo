@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Logger } from 'cleo'
 import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/react-filemanager'
 import type { IApi, IFileMenuOption, IParsedEntity, TContextMenuType, TMode } from '@svar-ui/react-filemanager'
-// Reuse the assets explorer's skin rather than duplicating it — same widget, same look, one place to edit.
 import '../assets/filemanager.css'
 import './projects.css'
 import { iconFor } from '../assets/assetKinds'
@@ -12,25 +11,19 @@ import {
 } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 
-// The project browser: the same SVAR file manager the Assets tab uses, over the project registry instead of
-// the asset libraries. It is a flat list — projects do not nest — so every project is one "file" whose id is
-// its display path.
+// The project browser: the same SVAR file manager the Assets tab uses, over the project registry. A flat
+// list — projects do not nest — so every project is one "file" whose id is its display path.
 //
-// Deliberately not a dock panel. It would have to be registered in dockComponents, PANEL_TITLES and every
-// branch of hiddenPanelIds, and would take part in per-mode layouts for no benefit. Hosting it in a modal (or
-// the boot launcher) also satisfies SVAR's mount-once / data-passed-once constraint for free: each open is a
-// fresh mount with fresh data, each close an unmount.
+// Hosted in a modal (or the boot launcher), not a dock panel, which satisfies SVAR's mount-once /
+// data-passed-once constraint: each open is a fresh mount with fresh data, each close an unmount.
 
 /** View mode is a person's preference, not a project's — this key stays unscoped. */
 const MODE_KEY = 'cleo_projects_view_mode'
 
 /**
  * Turn a project name into a unique, `/`-prefixed path id (SVAR requires ids to be unique paths).
- *
- * No virtual extension, unlike the asset explorer. There is only one kind of thing in this view, so an
- * extension would carry no information — and it would cost real label space: SVAR truncates a card's name to
- * keep the extension visible, so "My Game.cleoproj" renders as "….cleoproj", hiding the only part that
- * identifies the project.
+ * No virtual extension: SVAR truncates a card's name to keep the extension visible, which would hide the
+ * only part that identifies the project.
  */
 function buildEntities(projects: ProjectRecord[]): { data: IParsedEntity[]; byPath: Map<string, string> } {
   const byPath = new Map<string, string>()
@@ -66,8 +59,8 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
   const [naming, setNaming] = useState(false)
   const [newName, setNewName] = useState('')
 
-  // Built once. Re-passing `data` makes SVAR re-run store.init() and rebuild the whole tree; the component
-  // is remounted on every open instead, which is why a modal host suits this widget.
+  // Built once: re-passing `data` makes SVAR re-run store.init() and rebuild the whole tree. The
+  // component is remounted on every open instead.
   const { data, byPath } = useMemo(() => buildEntities(projects), [])
   const byPathRef = useRef(byPath)
   const initialMode = useMemo<TMode>(() => {
@@ -99,9 +92,8 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
     try {
       await deleteProject(id, isActive) // the active case reloads and wipes on the next boot
       if (!isActive) {
-        // The tree is uncontrolled — `data` is passed once — so re-reading the registry is not enough to
-        // make the card go away. Drop it from SVAR's own store too, with skipProvider so the bridge does
-        // not treat this as a fresh user delete.
+        // The tree is uncontrolled, so the card must also be dropped from SVAR's own store, with
+        // skipProvider so the bridge does not treat this as a fresh user delete.
         for (const [path, pid] of byPathRef.current) {
           if (pid !== id) continue
           byPathRef.current.delete(path)
@@ -134,15 +126,13 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
 
     // Projects have no folders and no blank files, and they are not created from inside the widget.
     api.intercept('create-file', () => false)
-    // A project is not a file you can file away: there is nowhere to move it to, and copying one means
-    // duplicating every key it owns (a worthwhile follow-up, not a silent tree mutation).
+    // Nowhere to move a project to, and copying one means duplicating every key it owns.
     api.intercept('move-files', () => false)
     api.intercept('copy-files', () => false)
 
     api.intercept('rename-file', (cfg: any) => {
       if (cfg.skipProvider) return true
-      // Only a path separator is forbidden — ids are paths. Nothing else about the name is load-bearing,
-      // because storage is keyed by project id, never by name.
+      // Only a path separator is forbidden, because ids are paths; storage is keyed by project id.
       const name = (cfg.name ?? '').trim().replace(/[/\\]/g, '-')
       if (!name) return false
       cfg.name = name
@@ -153,15 +143,14 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
       if (cfg.skipProvider) return
       const id = byPathRef.current.get(cfg.id)
       if (!id || !cfg.newId || cfg.newId === cfg.id) return
-      // Nothing in storage is keyed by name, so this is pure metadata — the payoff of id-based namespacing.
+      // Nothing in storage is keyed by name, so this is pure metadata.
       byPathRef.current.delete(cfg.id)
       byPathRef.current.set(cfg.newId, id)
       void renameProject(id, stemOfPath(cfg.newId)).then(refresh)
     })
 
-    // Deletion never goes through SVAR (its menu entry is replaced below), so nothing should reach this.
-    // Kept as a hard stop: the tree must never drop a project card on its own, because the card is not the
-    // project — the data behind it has to be wiped, and the OPEN project cannot even be wiped in-session.
+    // A hard stop: the tree must never drop a project card on its own. Deletion goes through the replaced
+    // menu entry below, which also wipes the data behind the card.
     api.intercept('delete-files', (cfg: any) => cfg.skipProvider === true)
 
     api.on('open-file', (cfg: any) => {
@@ -182,21 +171,17 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
   const icons = useCallback(() => iconFor('scene'), [])
 
   const menuOptions = useCallback((mode: TContextMenuType): IFileMenuOption[] => {
-    // No download and no cut/copy/paste: none of them mean anything for a project.
-    //
-    // `delete` is replaced rather than kept, because SVAR runs its own generic "are you sure" before
-    // dispatching delete-files — so keeping it would ask twice: once with no information, then again with
-    // the warning that actually matters. A custom id is ignored by SVAR's performAction (a closed switch
-    // over the built-in ids), so the capture-phase listener below runs it — the same trick the assets
-    // explorer uses for "New folder".
+    // No download and no cut/copy/paste. `delete` is replaced because SVAR runs its own generic "are you
+    // sure" before dispatching delete-files. A custom id is ignored by SVAR's performAction (a closed
+    // switch over the built-in ids), so the capture-phase listener below runs it.
     const drop = new Set(['download', 'copy', 'cut', 'paste', 'move', 'delete'])
     const options = (getMenuOptions(mode) as IFileMenuOption[]).filter(o => !drop.has(String(o.id)))
     if (mode === 'body') return options
     return [...options, { id: 'cleo-delete-project', icon: 'wxi-delete', text: 'Delete project' }]
   }, [])
 
-  // Which card the context menu was opened on. SVAR's menu portals to <body> and carries no reference back
-  // to its target, so the id is captured off the card's own data-id (which lib-dom prefixes with ':').
+  // SVAR's menu portals to <body> and carries no reference back to its target, so the id is captured off
+  // the card's own data-id, which lib-dom prefixes with ':'.
   const menuTargetRef = useRef<string | null>(null)
   useEffect(() => {
     const onContextMenu = (e: MouseEvent) => {

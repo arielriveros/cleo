@@ -6,13 +6,9 @@ import { ModelNode, AnimatedModel, Vec } from 'cleo'
 import type { Skin } from 'cleo'
 import { bonePairsOf, computeBindMatrices, computeJointWorldMatrices, worldPositionOf } from './animation/skeleton'
 
-// Skeleton/bone overlay for the MAIN viewport (a debug category), distinct from the Animation Editor's
-// AnimationSkeletonTool which owns the overlay while that mode is up. This one draws EVERY skinned model
-// in the live scene at once, packing all joints/bones into the renderer's single instanced overlay
-// (renderer.setSkeletonOverlay) — so it must not run in animation mode, or the two would fight.
-//
-// Reads instance.scene, which is the editor scene while authoring and the play scene during Play, so the
-// same component serves both the Editor and Runtime channels of the `skeleton` toggle with no extra work.
+// Skeleton/bone overlay for the MAIN viewport, distinct from the Animation Editor's AnimationSkeletonTool,
+// which owns the overlay while that mode is up — this one must not run in animation mode or the two fight.
+// Packs every skinned model in the live scene into renderer.setSkeletonOverlay's single instanced buffer.
 
 const JOINT_COLOR: [number, number, number] = [0.25, 0.6, 1.0]
 const BONE_COLOR: [number, number, number] = [0.85, 0.85, 0.9]

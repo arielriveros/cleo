@@ -1,14 +1,6 @@
-// Monaco themes for the script editor, matching codeMirrorTheme.ts's palette (same token names, same
-// literal hex values in the light theme) so the two editors read as the same product while the flag in
-// ScriptEditor.tsx decides which one is mounted.
-//
-// Monaco's two color surfaces need different formats: `colors` (editor chrome -- background, gutter,
-// selection...) accepts any CSS color string, so the design-token rgb()/rgba() strings from token() work
-// directly. `rules` (syntax token foreground) is parsed as a bare 6-digit hex with no '#' and no alpha,
-// so CSS-var-backed colors go through hex() below instead of token().
-//
-// Never call defineCleoThemes before an editor mounts: like codeMirrorTheme.ts, it reads computed
-// styles, and style-loader only injects index.css once the app's stylesheet import has run.
+// Monaco themes for the script editor, matching codeMirrorTheme.ts's palette. `rules` (syntax token
+// foreground) is parsed as a bare 6-digit hex with no '#' and no alpha, so those go through hex() below
+// rather than token(). Never call defineCleoThemes before an editor mounts: it reads computed styles.
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 
 /** Same CSS custom property token() reads, as 6 hex digits (channels, no separators/prefix). */
@@ -27,11 +19,9 @@ function hex(name: string): string {
 }
 
 /**
- * For `colors` entries: #rrggbb, or #rrggbbaa when alpha < 1. Monaco parses EVERY themeData.colors value
- * with Color.fromHex (standaloneThemeService), which accepts hex only and silently falls back to pure red
- * (#ff0000) for anything it can't parse — including token()'s `rgb(r g b)` / `rgb(r g b / a)` strings.
- * That fallback is what turned the Monaco gutter, cursor, line-highlight and selection solid red. Always
- * feed `colors` hex through here; token() is for DOM widgets (console, CodeMirror) only.
+ * For `colors` entries: #rrggbb, or #rrggbbaa when alpha < 1. Monaco parses every themeData.colors value
+ * with Color.fromHex, which accepts hex only and silently falls back to pure red (#ff0000) for anything
+ * else — including token()'s `rgb(r g b)` strings. token() is for DOM widgets only.
  */
 function colorHex(name: string, alpha = 1): string {
   const h = channelsHex(name);
@@ -74,12 +64,10 @@ function darkPalette(): MonacoPalette {
       'editorSuggestWidget.background': colorHex('--surface-raised'),
       'editorSuggestWidget.border': colorHex('--border'),
       'editorSuggestWidget.selectedBackground': colorHex('--primary'),
-      // A muted rose rather than the harsh --danger red: error squiggles should read as a gentle hint in a
-      // casual scripting surface, not alarm the whole editor. Hex (not rgb()) so Monaco's parser accepts it.
+      // A muted rose rather than the harsh --danger red. Hex, not rgb(): Monaco's parser accepts hex only.
       'editorError.foreground': '#e08a8a',
     },
-    // Same hues as codeMirrorTheme.ts's darkPalette(): keyword/comment/cursor share --highlight/--text-dim
-    // with the console inspector; string/number/type are the same seeded literals.
+    // Same hues as codeMirrorTheme.ts's darkPalette().
     keyword: hex('--highlight'),
     string: 'e3a869',
     number: '9980ff',
@@ -113,7 +101,7 @@ function lightPalette(): MonacoPalette {
       'editorSuggestWidget.background': '#ffffff',
       'editorSuggestWidget.border': '#d4d8e0',
       'editorSuggestWidget.selectedBackground': colorHex('--primary'),
-      // Deeper muted rose than the dark theme's, for contrast on white; still softer than --danger.
+      // Deeper muted rose than the dark theme's, for contrast on white.
       'editorError.foreground': '#c15858',
     },
     keyword: '4b3bd6',

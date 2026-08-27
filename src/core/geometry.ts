@@ -2,15 +2,13 @@ import { vec2, vec3 } from "gl-matrix";
 import { BVH } from "./bvh";
 
 /** Anything the constructor accepts for a vertex attribute: flat typed/plain arrays, or the legacy
- *  array-of-tuples shape. See {@link Geometry} for why both are supported. */
+ *  array-of-tuples shape. */
 export type AttributeInput = Float32Array | number[] | number[][] | readonly (readonly number[])[];
 export type IndexInput = Uint32Array | Uint16Array | number[];
 
 /**
- * Flattens any accepted attribute shape into a `Float32Array` of `count * stride` floats.
- *
- * A `Float32Array` passes through untouched (no copy), which is what makes a worker able to hand
- * geometry across a thread boundary as a transferable and have it used directly.
+ * Flattens any accepted attribute shape into a `Float32Array` of `count * stride` floats. A
+ * `Float32Array` passes through untouched — no copy — so a worker's transferable is used directly.
  */
 function toFlat(input: AttributeInput | undefined, stride: number): Float32Array {
     if (!input || (input as ArrayLike<unknown>).length === 0) return EMPTY_F32;
@@ -35,16 +33,9 @@ const EMPTY_F32 = new Float32Array(0);
 const EMPTY_U32 = new Uint32Array(0);
 
 /**
- * Vertex data for a mesh, stored as **flat typed arrays** (`positions[i*3 + 0..2]`).
- *
- * It used to hold arrays-of-tuples, which cost three separate transformations on every import —
- * flat source data was exploded into N little arrays, `getData` flattened them straight back into a
- * `number[]`, and `Mesh.create` copied that into a `Float32Array`. Measured on a 500k-vertex mesh
- * that was ~1s of main-thread work per model, and it also made geometry impossible to hand to a
- * worker: tuple arrays are not transferable and structured-clone walks every element.
- *
- * The constructor still accepts the legacy nested shape, so existing callers and saved projects keep
- * working; it is normalised to flat on the way in.
+ * Vertex data for a mesh, stored as **flat typed arrays** (`positions[i*3 + 0..2]`) — the shape
+ * `Mesh.create` uploads and the only shape a worker can transfer. The constructor also accepts the
+ * legacy array-of-tuples shape, normalising it to flat on the way in.
  */
 export class Geometry {
     private _positions: Float32Array;
@@ -81,17 +72,15 @@ export class Geometry {
      * Concatenate several geometries into one, returning the merged geometry and the index range each
      * input occupies in it — the ranges a multi-material {@link Model} draws one at a time.
      *
-     * Two things are easy to get wrong here:
+     * Two invariants:
      *  - **Index offsetting.** Each part's indices address its own vertices, so they shift by the number
      *    of vertices already emitted. `_indices` is a `Uint32Array`, so passing 65k vertices is safe.
      *  - **Attribute presence.** `getData` drops an attribute whose array is empty, which silently
      *    changes the interleaved stride. If ANY part has an attribute, every part must contribute its
      *    slot — parts that lack it are zero-padded — or the merged vertex buffer desyncs.
      *
-     * Vertices are copied verbatim: no transform is baked in. A skinned part must not be transformed
-     * anyway (its vertices are bound to the skeleton), and glTF gives skinned nodes no node transform.
-     * A caller merging STATIC parts that sit at different transforms has to bake them first — see
-     * `foliageRules.bakeModel` in the editor for that.
+     * Vertices are copied verbatim, with no transform baked in. A caller merging STATIC parts that sit
+     * at different transforms has to bake them first.
      */
     public static merge(parts: Geometry[]): { geometry: Geometry; ranges: { start: number; count: number }[] } {
         if (parts.length === 0) return { geometry: new Geometry(), ranges: [] };
@@ -133,8 +122,7 @@ export class Geometry {
             indexBase += src.length;
         }
 
-        // Recomputing tangents would be wasted work when every part already carries them, and would
-        // otherwise run over the whole merged buffer rather than only the parts that need it.
+        // Only recompute tangents when some part lacks them; the recompute runs over the whole buffer.
         const haveAll = tangents.length > 0 && bitangents.length > 0;
         return {
             geometry: new Geometry(positions, normals, uvs, tangents, bitangents, indices, !haveAll),
@@ -149,24 +137,15 @@ export class Geometry {
     public get indices(): Uint32Array { return this._indices; }
     public get tangents(): Float32Array { return this._tangents; }
     public get bitangents(): Float32Array { return this._bitangents; }
-    /**
-     * Number of vertices — `positions.length`, not the float count.
-     *
-     * This used to return `positions.length * 3`, i.e. three times the answer its name promises. Every
-     * caller feeds it straight to `Mesh.create(data, vertexCount, indices)`, where it becomes the count
-     * for the unindexed `drawArrays` path — so an unindexed geometry asked the driver for three times the
-     * vertices it has. Masked only because every geometry built today carries indices.
-     */
+    /** Number of vertices, not the float count. Feeds `Mesh.create`'s unindexed `drawArrays` count. */
     public get vertexCount(): number { return this._positions.length / 3; }
     /**
      * Bounding Volume Hierarchy over this geometry's triangles, built lazily in object space and
-     * memoized. Used for exact ray/triangle picking (see `Raycaster`); shared across every node
-     * that references this geometry.
+     * memoized. Shared across every node that references this geometry.
      */
     public get bvh(): BVH {
         if (!this._bvh) {
-            // Non-indexed geometry: consecutive triples form triangles, so synthesise the identity
-            // index list the BVH needs. (Carried over from the removed BVH.fromGeometry.)
+            // Non-indexed geometry: consecutive triples are triangles, so synthesise an identity list.
             let indices = this._indices;
             if (indices.length < 3) {
                 indices = new Uint32Array(this.vertexCount);
@@ -177,11 +156,8 @@ export class Geometry {
         return this._bvh;
     }
     /**
-     * Object-space bounding sphere (center + radius), computed lazily and cached. Derived from the
-     * BVH's root AABB when the geometry has triangles (reusing bounds already computed by the BVH
-     * build), otherwise from a single pass over the positions. Purely local-space, so the camera never
-     * invalidates it — only a vertex edit does, via {@link invalidateBounds}. Used for cheap per-object
-     * frustum culling (see `Node.getBoundingSphere`).
+     * Object-space bounding sphere (center + radius), computed lazily and cached. Purely local-space,
+     * so only a vertex edit invalidates it, via {@link invalidateBounds}.
      */
     public get boundingSphere(): { center: vec3; radius: number } {
         if (this._boundingSphere) return this._boundingSphere;
@@ -212,16 +188,12 @@ export class Geometry {
         return this._boundingSphere;
     }
     /**
-     * Object-space axis-aligned bounding box, computed lazily and cached. Local-space, so like
-     * {@link boundingSphere} it only invalidates when the vertices themselves change
-     * ({@link invalidateBounds}).
+     * Object-space axis-aligned bounding box, computed lazily and cached; like {@link boundingSphere}
+     * it only invalidates on a vertex change ({@link invalidateBounds}). Returns a LIVE cached
+     * reference — callers must not mutate it.
      *
-     * Deliberately computed from a direct pass over the positions rather than from `this.bvh.bounds`
-     * (which is where {@link boundingSphere} gets its extents): touching `bvh` force-builds the whole
-     * hierarchy, an O(n log n) job heavy enough to hitch a frame on a dense mesh. Camera collision
-     * queries this every frame, so it must never be able to trigger that build.
-     *
-     * Returns a live cached reference — callers must not mutate it.
+     * Must keep computing this from a direct pass over the positions, never from `this.bvh.bounds`:
+     * touching `bvh` force-builds the hierarchy, and camera collision queries this every frame.
      */
     public get boundingBox(): { min: vec3; max: vec3 } {
         if (this._boundingBox) return this._boundingBox;
@@ -256,17 +228,11 @@ export class Geometry {
     }
 
     /**
-     * Drop the cached BVH and bounding sphere/box so the next reader recomputes them from the current
-     * positions.
+     * Drop the cached BVH and bounding sphere/box so the next reader recomputes them. Anything that
+     * rewrites `positions` IN PLACE must call this.
      *
-     * Anything that rewrites `positions` IN PLACE must call this. {@link scale} was for a long time the
-     * only such writer and invalidated inline, which left the caches looking like they never went stale —
-     * so terrain sculpting, which also writes positions in place, silently kept its pre-sculpt cull
-     * sphere and let a raised chunk be frustum-culled while it was plainly on screen.
-     *
-     * Note this only clears the geometry's OBJECT-space caches. A node holding it also caches a
-     * world-space sphere keyed on its transform, which no vertex edit touches — see
-     * `Node.invalidateWorldBounds`.
+     * Clears the geometry's OBJECT-space caches only. A node holding it also caches a world-space
+     * sphere keyed on its transform — see `Node.invalidateWorldBounds`.
      */
     public invalidateBounds(): void {
         this._bvh = undefined;
@@ -274,19 +240,12 @@ export class Geometry {
         this._boundingBox = undefined;
     }
 
-    /**
-     * Interleaves the requested attributes into a single buffer ready for `Mesh.create` to upload.
-     *
-     * Returns a `Float32Array` written directly rather than a `number[]` built by ~14 `push` calls per
-     * vertex — which the caller then had to copy into a `Float32Array` anyway. On a dense mesh that
-     * pair of steps was ~380ms; now it is one sized allocation and a linear fill.
-     */
+    /** Interleaves the requested attributes into a single buffer ready for `Mesh.create` to upload. */
     public getData(attributes: string[] = []): Float32Array {
         const count = this.vertexCount;
         if (count === 0) return EMPTY_F32;
 
-        // An attribute contributes only when it was requested AND is actually present, matching the
-        // original guards — a geometry with no UVs must not leave a hole in the stride.
+        // An attribute contributes only when requested AND present: no holes in the stride.
         const wantPosition = attributes.includes('position');
         const wantNormal = this._normals.length > 0 && attributes.includes('normal');
         const wantUv = this._uvs.length > 0 && attributes.includes('uv');
@@ -357,9 +316,8 @@ export class Geometry {
         }
     }
 
-    // Per-vertex tangent frame from UVs. Accumulate each face's UV-space tangent onto its 3 vertices, then
-    // Gram-Schmidt against the vertex normal. (The previous version pushed two tangents PER FACE while the
-    // interleaver reads them by VERTEX index — misaligned on any indexed mesh, breaking normal maps/parallax.)
+    // Per-vertex tangent frame from UVs: accumulate each face's UV-space tangent onto its 3 vertices, then
+    // Gram-Schmidt against the vertex normal. Indexed BY VERTEX — that is how the interleaver reads them.
     private _calculateTangents(): void {
         const n = this.vertexCount;
         const acc = new Float32Array(n * 3);
@@ -367,7 +325,6 @@ export class Geometry {
 
         for (let i = 0; i + 2 < this._indices.length; i += 3) {
             const i0 = this._indices[i], i1 = this._indices[i + 1], i2 = this._indices[i + 2];
-            // Guards the same out-of-range cases the tuple version caught via undefined elements.
             if (i0 >= n || i1 >= n || i2 >= n || !hasUvs) continue;
             const p0 = i0 * 3, p1 = i1 * 3, p2 = i2 * 3;
             const t0 = i0 * 2, t1 = i1 * 2, t2 = i2 * 2;
@@ -512,8 +469,7 @@ export class Geometry {
             uvs.push([0.5 + x / radius / 2, 0.5 + y / radius / 2]);
         }
 
-        // i + 2 is in range because the rim runs to index `segments + 1`. The previous loop ran to
-        // i === segments and referenced segments + 2, i.e. two triangles pointed past the last vertex.
+        // i + 2 stays in range because the rim runs to index `segments + 1`.
         for (let i = 0; i < segments; i++)
             indices.push(0, i + 1, i + 2);
 
@@ -590,13 +546,10 @@ export class Geometry {
     }
 
     /**
-     * Wireframe geometry for a convex hull collider. `vertices` are the hull points (typically
-     * centered on their centroid, as `convexHull.ts` emits them) and `faces` are index loops.
-     * Each hull edge is emitted exactly once as a gl.LINES pair — wireframe materials draw the
-     * index buffer as line pairs, so triangle indices would render as edges that don't exist.
-     * Normals and uvs are filled for every vertex: `getData()` skips empty attribute arrays while
-     * the mesh VAO is strided by the *shader's* attribute list, so a positions-only geometry would
-     * be read at the wrong stride and scramble.
+     * Wireframe geometry for a convex hull collider. `vertices` are the hull points, `faces` are index
+     * loops. Each hull edge is emitted exactly once as a gl.LINES pair, because wireframe materials draw
+     * the index buffer as line pairs. Normals and uvs must be filled for every vertex: `getData()` skips
+     * empty attribute arrays while the VAO is strided by the *shader's* attribute list.
      */
     public static ConvexHull(vertices: number[][], faces: number[][]): Geometry {
         const positions: [number, number, number][] = [];
@@ -657,7 +610,6 @@ export class Geometry {
             }
         }
 
-        // Generate indices
         for (let i = 0; i < segments; ++i)
             for (let j = 0; j < segments; ++j)
             {
@@ -685,7 +637,6 @@ export class Geometry {
     
         const halfHeight = height / 2;
     
-        // side vertices
         for (let i = 0; i <= segments; i++) {
             const theta = (i / segments) * 2 * Math.PI;
             const sinTheta = Math.sin(theta);
@@ -708,7 +659,6 @@ export class Geometry {
             }
         }
     
-        // side indices
         for (let i = 0; i < segments; ++i) {
             for (let j = 0; j < 1; ++j) {
                 const k1 = i * 2 + j;
@@ -724,9 +674,8 @@ export class Geometry {
             }
         }
 
-        // Caps. Each is a triangle fan around a real CENTRE vertex at (0, +/-halfHeight, 0). Previously the
-        // fan was hubbed on a rim vertex, which triangulates the disc but leaves it with no centre point:
-        // sliver triangles at the hub, and a UV layout that cannot place the middle of the cap texture.
+        // Caps. Each is a triangle fan around a real CENTRE vertex at (0, +/-halfHeight, 0); hubbing the
+        // fan on a rim vertex instead gives sliver triangles and an unplaceable cap UV.
         const angle = 2 * Math.PI / segments;
         for (const sign of [1, -1]) {
             const centre = positions.length;
@@ -760,13 +709,11 @@ export class Geometry {
     /**
      * Y-aligned capsule centred on the origin — a cylinder capped by two hemispheres.
      *
-     * `cylinderHeight` is the STRAIGHT SECTION ONLY: total height is `cylinderHeight + 2 * radius`. This
-     * mirrors `Shape.Capsule`, which derives the straight section from the collider's total height.
-     * A `cylinderHeight` of 0 degenerates to a sphere, which is exactly right.
+     * `cylinderHeight` is the STRAIGHT SECTION ONLY: total height is `cylinderHeight + 2 * radius`,
+     * mirroring `Shape.Capsule`. A `cylinderHeight` of 0 degenerates to a sphere.
      *
-     * Built as one lathed surface: both hemispheres are swept as ring stacks, and their equator rings are
-     * displaced to +/-cylinderHeight/2. The wall between those two coincident-radius rings IS the straight
-     * section, so no separate cylinder pass is needed and the surface stays closed.
+     * Built as one lathed surface: both hemispheres are swept as ring stacks with their equator rings
+     * displaced to +/-cylinderHeight/2, and the wall between those two rings IS the straight section.
      */
     public static Capsule(segments: number = 32, radius: number = 1, cylinderHeight: number = 1): Geometry {
         const positions: [number, number, number][] = [];
@@ -775,8 +722,7 @@ export class Geometry {
         const indices: number[] = [];
 
         const halfCyl = Math.max(0, cylinderHeight) / 2;
-        // Stacks per hemisphere. Quartering `segments` keeps a capsule's silhouette about as smooth as a
-        // Sphere() of the same segment count, which uses `segments` stacks over the whole 180 degrees.
+        // Stacks per hemisphere: a quarter of `segments`, matching Sphere()'s smoothness per degree.
         const capStacks = Math.max(2, Math.round(segments / 4));
 
         // Ring profile from the top pole to the bottom pole. `y`/`r` are the ring's position and radius;
@@ -822,8 +768,8 @@ export class Geometry {
      * Y-aligned cone centred on the origin: apex at +height/2, base cap at -height/2.
      *
      * The apex is duplicated PER SEGMENT rather than shared, so each side triangle carries its own normal
-     * and UV. A single shared apex would have to average every side normal into one straight-up vector,
-     * which reads as a pinched, over-bright tip. The base reuses Cylinder's centre-vertex fan.
+     * and UV; a shared apex averages every side normal into a pinched, over-bright tip. The base reuses
+     * Cylinder's centre-vertex fan.
      */
     public static Cone(segments: number = 32, radius: number = 0.5, height: number = 1): Geometry {
         const positions: [number, number, number][] = [];
@@ -920,9 +866,8 @@ export class Geometry {
     /**
      * Square-based pyramid centred on the origin: apex at +height/2, base at -height/2.
      *
-     * Every face owns its vertices. The four sides meet at hard creases and the base is perpendicular to
-     * all of them, so sharing corners would average unrelated normals and round off edges that should be
-     * sharp — the same reason `Cube` does not share its eight corners.
+     * Every face owns its vertices: the creases are hard, so sharing corners would average unrelated
+     * normals and round them off. Same rule as `Cube`.
      */
     public static Pyramid(base: number = 1, height: number = 1): Geometry {
         const positions: [number, number, number][] = [];
@@ -1012,11 +957,10 @@ export class Geometry {
     // ---------------------------------------------------------------------------------------------
     // Complex / structural geometries.
     //
-    // These are level-blockout shapes rather than mathematical solids, and several of them are unions of
-    // flat faces. The two helpers below exist so that winding, per-face normals and the quad triangulation
-    // are written ONCE: an inverted face is invisible under backface culling and passes every count and
-    // bounds check, which is exactly how `Torus` shipped inside-out. `tests/geometryPrimitives.test.ts`
-    // asserts the winding of every factory against its authored normal.
+    // Level-blockout shapes, several of them unions of flat faces. Build them through the two helpers
+    // below so winding, per-face normals and quad triangulation stay written ONCE: an inverted face is
+    // invisible under backface culling and passes every count and bounds check.
+    // `tests/geometryPrimitives.test.ts` asserts each factory's winding against its authored normal.
     // ---------------------------------------------------------------------------------------------
 
     /**
@@ -1053,10 +997,8 @@ export class Geometry {
 
     /**
      * Append an axis-aligned box, optionally yawed about +Y. Every face owns its four vertices, matching
-     * `Cube` — a box has six hard creases, so sharing corners would average unrelated normals.
-     *
-     * `centre` is in final coordinates and `yaw` rotates the box about ITS OWN centre. A yaw is a rotation
-     * (determinant +1), so it carries the winding and the normals along with it and cannot flip a face.
+     * `Cube`. `centre` is in final coordinates and `yaw` rotates the box about ITS OWN centre; a yaw has
+     * determinant +1, so it carries winding and normals with it and cannot flip a face.
      */
     private static _pushBox(
         positions: [number, number, number][], normals: [number, number, number][],
@@ -1147,10 +1089,8 @@ export class Geometry {
 
     /**
      * Straight flight of stairs ascending toward +Z, centred on the origin, solid down to the ground.
-     *
-     * Built as ONE extruded stepped profile rather than a stack of boxes: no internal faces, no coplanar
-     * overlap, and 4n+2 quads instead of 6n. Each side is tiled by n full-height columns, which exactly
-     * triangulates the (non-convex) staircase profile without needing a general polygon routine.
+     * Built as ONE extruded stepped profile, not a stack of boxes, so there are no internal faces and no
+     * coplanar overlap. Each side is tiled by n full-height columns.
      */
     public static Stairs(steps: number = 8, width: number = 1, height: number = 1, depth: number = 1): Geometry {
         const positions: [number, number, number][] = [];
@@ -1172,8 +1112,7 @@ export class Geometry {
             // Tread, facing up.
             Geometry._pushQuad(positions, normals, uvs, indices,
                 [-w, y1, z0], [-w, y1, z1], [w, y1, z1], [w, y1, z0], [0, 1, 0]);
-            // Side columns run from the ground to this step's tread, so consecutive columns tile the
-            // profile edge to edge with no overlap.
+            // Side columns run from the ground to this step's tread, tiling the profile with no overlap.
             Geometry._pushQuad(positions, normals, uvs, indices,
                 [-w, -h, z0], [-w, -h, z1], [-w, y1, z1], [-w, y1, z0], [-1, 0, 0]);
             Geometry._pushQuad(positions, normals, uvs, indices,
@@ -1189,11 +1128,9 @@ export class Geometry {
     }
 
     /**
-     * Spiral staircase: `steps` rectangular treads swept around the Y axis, centred on the origin.
-     *
-     * The treads are straight boxes rather than curved wedges — what a blockout kit uses, and what keeps
-     * every face flat. Each tread is `rise` thick so consecutive ones stack flush into a continuous helix;
-     * `sweep` is the total turn in radians.
+     * Spiral staircase: `steps` rectangular treads swept around the Y axis, centred on the origin. The
+     * treads are straight boxes, not curved wedges, so every face stays flat. Each tread is `rise` thick
+     * so consecutive ones stack flush; `sweep` is the total turn in radians.
      */
     public static SpiralStairs(
         steps: number = 12, innerRadius: number = 0.15, outerRadius: number = 0.6,
@@ -1227,8 +1164,8 @@ export class Geometry {
     /**
      * Hollow open-top box — a room shell: a floor slab plus four walls of `thickness`, centred on the
      * origin. The walls stand ON the floor and the X walls are inset between the Z walls, so the pieces
-     * meet face to face without interpenetrating. Coplanar contact faces are safe here because they carry
-     * opposite normals: backface culling only ever draws one of the pair.
+     * meet face to face without interpenetrating. Their coplanar contact faces carry opposite normals,
+     * so backface culling only ever draws one of each pair.
      */
     public static HollowBox(
         width: number = 1, height: number = 1, depth: number = 1, thickness: number = 0.1,
@@ -1305,10 +1242,8 @@ export class Geometry {
 
     /**
      * Archway: an annular sector in the XY plane, extruded along Z. With the default half turn it is a
-     * semicircular arch spanning `2 * radius` and rising `radius`.
-     *
-     * The AABB is re-centred on the origin like every other factory, so for a half turn the springing line
-     * sits at `y = -radius / 2` rather than at y = 0.
+     * semicircular arch spanning `2 * radius` and rising `radius`. The AABB is re-centred on the origin
+     * like every other factory, so for a half turn the springing line sits at `y = -radius / 2`.
      */
     public static Arch(
         segments: number = 24, radius: number = 0.5, thickness: number = 0.15,
@@ -1359,11 +1294,9 @@ export class Geometry {
     }
 
     public static async Terrain(heightmapPath: string): Promise<Geometry> {
-        // Imported lazily so this module stays a leaf. A top-level `import { Loader } from "../cleo"`
-        // dragged the entire engine barrel in — including a circular dependency back to this file, and
-        // every GLSL/WebGL module with it — purely for the one call below, which in turn made Geometry
-        // impossible to unit-test without a GL context. `webpackMode: "eager"` keeps the module in the
-        // single library bundle instead of emitting a lazily-fetched chunk.
+        // Imported lazily so this module stays a leaf: a top-level import of the loader closes a cycle
+        // back to this file and drags in every GL module. `webpackMode: "eager"` keeps it in the one
+        // library bundle instead of emitting a lazily-fetched chunk.
         const { Loader } = await import(/* webpackMode: "eager" */ "../graphics/loader");
 
         return new Promise<Geometry>((resolve, reject) => {
@@ -1380,7 +1313,6 @@ export class Geometry {
                 const halfHeight = height / 2;
                 let data = image.data;
 
-                // calculate amplitude based on width and height of the image
                 const amplitude = Math.sqrt(Math.max(width, height)) / 2;
     
                 for (let i = 0; i <= width; i++) {
@@ -1391,7 +1323,6 @@ export class Geometry {
     
                         positions.push([x, y, z]);
                         uvs.push([j / height, i / width]);
-                        // calculate normal
                         let normal = vec3.fromValues(0.0, 0.0, 0.0);
                         if (i > 0 && j > 0) {
                             const v1 = vec3.fromValues(positions[i * (height + 1) + j][0], positions[i * (height + 1) + j][1], positions[i * (height + 1) + j][2]);

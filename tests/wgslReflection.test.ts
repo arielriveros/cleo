@@ -73,9 +73,10 @@ describe('findUniformBlocks', () => {
         expect(blocks[0].members.map((m: any) => ({ name: m.name, type: m.type, offset: m.offset })))
             .toEqual([
                 { name: 'u_exposure', type: 'f32', offset: 0 },
-                { name: 'u_alphaFromDepth', type: 'f32', offset: 4 },
+                { name: 'u_saturation', type: 'f32', offset: 4 },
+                { name: 'u_alphaFromDepth', type: 'f32', offset: 8 },
             ]);
-        expect(blocks[0].size).toBe(16);   // two f32s, padded to the struct's 16-byte alignment
+        expect(blocks[0].size).toBe(16);   // three f32s, padded to the struct's 16-byte alignment
     });
 
     it('does not lose a member to the comment above it', () => {

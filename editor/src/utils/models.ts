@@ -6,22 +6,13 @@ import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, mode
 import type { AnimationAsset } from './animationAssets'
 import { applyModelAnimations } from './animationResolve'
 
-// A note on vocabulary, because the editor used to get this wrong:
-//
-//   Mesh  — the GPU-side structure (VAO/VBO/index buffers holding vertices, indices, UVs). Internal to
-//           the engine. This is not a modelling tool, so a mesh is never something the user authors.
-//   Model — one Geometry + one Material (src/graphics/model.ts). This is the reusable, placeable thing.
-//
-// What this module defines is therefore a MODEL asset: a named, thumbnailed subtree of ModelNodes that
-// share a material, with optional LOD levels and a cull distance. An imported .gltf/.glb/.obj/.fbx is a
-// model (geometry *and* material), not a mesh.
+// MODEL assets: a named, thumbnailed subtree of ModelNodes sharing a material, with optional LOD levels
+// and a cull distance. Vocabulary: a "mesh" is the GPU-side structure, internal to the engine and never
+// user-authored; a "model" is one Geometry + one Material (src/graphics/model.ts) — the placeable thing.
 
-// Node variable linking a placed instance back to its source model asset (mirrors TEMPLATE_ID_VAR /
-// MATERIAL_ID_VAR). Saving a model asset re-instantiates every scene node carrying it
-// (syncModelInstances in EngineContext), the same way template edits propagate.
-//
-// NOTE: this string is serialized into every placed instance. It was '__meshId' before the model
-// rename; readers still accept the old spelling (see LEGACY_MODEL_ID_VAR) so older data keeps resolving.
+// Node variable linking a placed instance back to its source model asset. Saving the asset
+// re-instantiates every scene node carrying it (syncModelInstances in EngineContext).
+// This string is serialized into every placed instance, so it cannot be changed; see LEGACY_MODEL_ID_VAR.
 export const MODEL_ID_VAR = '__modelId'
 
 /** The pre-rename spelling of MODEL_ID_VAR, still read so unmigrated data keeps resolving. */
@@ -31,22 +22,15 @@ export const LEGACY_MODEL_ID_VAR = '__meshId'
  * The model asset's OWN root transform at the moment this instance was built, as a flat
  * `[px,py,pz, rx,ry,rz, sx,sy,sz]`.
  *
- * It exists because a placement's transform and the asset root's transform occupy the SAME slot: the
- * clone arrives carrying the asset's TRS and is then overwritten with wherever the user put this copy.
- * A rebuild therefore had no way to tell "the user moved this copy" from "the model itself moved", so an
- * edit to the model's root transform was the one asset field that silently went nowhere.
- *
- * Recording what the asset said last time turns that into a subtraction — see applyModelTransformDelta.
- * A placement without this variable (everything authored before it existed) simply keeps its transform
- * verbatim, exactly as before, and gains a baseline on its next rebuild.
+ * A placement's transform and the asset root's transform occupy the same slot, so this baseline is what
+ * lets a rebuild tell "the user moved this copy" from "the model itself moved" (applyModelTransformDelta).
+ * A placement without it keeps its transform verbatim and gains a baseline on its next rebuild.
  */
 export const MODEL_BASE_TRS_VAR = '__modelBaseTRS'
 
 /**
  * The MODEL_BASE_TRS_VAR baseline off a live node, or null when it has none.
- *
- * Stored as JSON because a node variable has only number/string/boolean/vec3 to work with; the array
- * shape is accepted too, so a value that reached the node some other way still reads.
+ * Stored as JSON — a node variable has only number/string/boolean/vec3 — but a raw array also reads.
  */
 export function readModelBaseTrs(node: Node | null | undefined): number[] | null {
   const raw = node?.getVariable(MODEL_BASE_TRS_VAR)
@@ -56,9 +40,8 @@ export function readModelBaseTrs(node: Node | null | undefined): number[] | null
 
 /**
  * Re-apply a placement's own transform on top of a model whose root transform has moved since.
- *
- * The arithmetic (and why it is component-wise) lives in modelTransformDelta; this is the half that
- * touches a live Node. Returns true when something moved.
+ * The arithmetic lives in modelTransformDelta; this is the half that touches a live Node.
+ * Returns true when something moved.
  */
 export function applyModelTransformDelta(node: Node, base: number[] | null | undefined, assetRootJson: any): boolean {
   const next = modelTransformDelta(node, base, nodeJsonTrs(assetRootJson))
@@ -69,13 +52,8 @@ export function applyModelTransformDelta(node: Node, base: number[] | null | und
 
 /**
  * Walk up to the placed model-instance root — the nearest ancestor (or self) carrying `__modelId`.
- *
- * The walk is not optional. A model asset instantiates as *a parent Node holding one ModelNode per
- * sub-mesh* (see parseBundleToRoot), so `__modelId` lands on the HOLDER while the skinned ModelNode — the
- * only node the animation UI applies to — is a child of it. Reading the variable off the selected node
- * alone finds nothing for every normally-imported character.
- *
- * Mirrors templateInstanceRootOf (templates.ts) in shape and purpose.
+ * The walk is mandatory: a model asset instantiates as a holder Node with one ModelNode per sub-mesh, so
+ * `__modelId` sits on the HOLDER and reading it off the selected node alone finds nothing.
  */
 export function modelInstanceRootOf(node: Node | null | undefined): Node | null {
   let n: Node | null | undefined = node
@@ -95,13 +73,8 @@ export function modelIdOf(node: Node | null | undefined): string | undefined {
 
 /**
  * The first skinned ModelNode AT or BENEATH `node` (depth-first, self first), or null.
- *
- * Walks DOWN, the mirror of modelInstanceRootOf's walk up: an imported character is a holder Node with the
- * skinned ModelNode as a CHILD, so any inspector that keys off "is there an animation to edit here" has to
- * look into the subtree of whatever the user selected — the holder, a template root, or the model node itself.
- * The gate matches the one the animation UI needs: an AnimatedModel with a skin AND a live animator (the
- * ModelNode constructor creates the animator for exactly this case). First match on purpose, the same choice
- * skinnedModelJsonOf makes for a multi-part model.
+ * Matches what the animation UI needs: an AnimatedModel with a skin AND a live animator. First match on
+ * purpose for a multi-part model, as skinnedModelJsonOf also does.
  */
 export function skinnedModelNodeOf(node: Node | null | undefined): ModelNode | null {
   if (!node) return null
@@ -116,10 +89,7 @@ export function skinnedModelNodeOf(node: Node | null | undefined): ModelNode | n
 
 /**
  * The first ModelNode AT or BENEATH `node` (depth-first, self first), or null.
- *
- * The unskinned sibling of skinnedModelNodeOf, and it walks for the same reason: an imported model is a
- * holder Node with its ModelNodes as children, so "does this selection contain geometry" cannot be
- * answered from the selected node alone.
+ * The unskinned sibling of skinnedModelNodeOf.
  */
 export function modelNodeOf(node: Node | null | undefined): ModelNode | null {
   if (!node) return null
@@ -134,26 +104,19 @@ export function modelNodeOf(node: Node | null | undefined): ModelNode | null {
 /**
  * One extra LOD level of a model asset: a **reference** to another model asset, plus the camera distance
  * at which it takes over.
- *
- * Levels used to embed a copy of their subtree (`nodeJson`). Referencing instead means a level is authored
- * and re-authored like any other model — edit the low-poly asset once and every model using it as a LOD
- * follows — rather than being a frozen copy that could only be replaced by re-importing a file.
  */
 export type ModelLodDef = {
   distance: number
   /** The model asset rendered at this level. */
   modelId?: string
-  /** Legacy: an embedded copy of the level's subtree, written before levels became references. Still
-   *  read so existing assets keep working; never written. */
+  /** Legacy: an embedded copy of the level's subtree. Still read; never written. */
   nodeJson?: any
 }
 
 /**
  * The subtree a LOD level renders, or null if it cannot be resolved — a reference whose model asset was
  * deleted, or a legacy level with no embedded copy.
- *
- * Only the referenced asset's OWN subtree is used, never its LOD levels, so a chain of references cannot
- * recurse (and a model referencing itself degrades to a duplicate level rather than hanging).
+ * Only the referenced asset's OWN subtree is used, never its LOD levels, so references cannot recurse.
  */
 export function lodLevelJson(lod: ModelLodDef, models?: ModelAsset[]): any | null {
   if (lod.modelId) return models?.find(m => m.id === lod.modelId)?.nodeJson ?? null
@@ -170,9 +133,8 @@ export function resolvedLods(asset: ModelAsset, models?: ModelAsset[]): { nodeJs
   return out
 }
 
-// A reusable, named model imported from file(s): a serialized node subtree (the parent Node with its
-// child ModelNodes) plus every texture it embeds and a rendered thumbnail. Materials are embedded in
-// the subtree (self-contained) and additionally linked to Material library assets via __materialId.
+// A reusable, named model imported from file(s): a serialized node subtree plus its texture ids and a
+// thumbnail. Materials are embedded in the subtree AND linked to Material library assets via __materialId.
 export type ModelAsset = {
   id: string
   name: string
@@ -188,21 +150,16 @@ export type ModelAsset = {
   /** Hide placed instances beyond this camera distance; 0/absent = never cull. */
   cullDistance?: number
   /**
-   * Shared animation assets this model plays, by id (see utils/animationAssets.ts).
-   *
-   * The clips themselves are NOT stored here: they live once in the animation library, in their source
-   * rig's space, and are retargeted onto this model's skeleton when it is instantiated. That is what lets
-   * two characters on the same rig share one stored walk. Clips embedded directly in `nodeJson` still
-   * play — importing one no longer puts it there, but nothing removes an existing one.
+   * Shared animation assets this model plays, by id (see utils/animationAssets.ts). The clips themselves
+   * live once in the animation library in their SOURCE rig's space, and are retargeted onto this model's
+   * skeleton at instantiation. Clips embedded directly in `nodeJson` also still play.
    */
   animationIds?: string[]
 }
 
 /**
  * Snapshot a live node subtree into a saveable model asset.
- *
- * Records only the texture IDS the subtree uses; the payloads live once in the texture store. Embedding
- * them here duplicated every map the model's materials had already embedded themselves.
+ * Records only the texture IDS the subtree uses; the payloads live once in the texture store.
  */
 export async function buildModelAsset(
   root: Node,
@@ -227,8 +184,7 @@ export async function buildModelAsset(
   const asset: ModelAsset = { id: id ?? cryptoRandomId(), name: root.name, nodeJson, textureIds: [...texIds], materialIds, thumbnail }
 
   if (lods?.length) {
-    // Reference levels carry no subtree of their own — the model they point at owns it, and owns its
-    // textures, so there is nothing here to strip or collect. Only legacy embedded levels need cleaning.
+    // Reference levels carry no subtree of their own; only legacy embedded levels need cleaning.
     for (const lod of lods) {
       if (!lod.nodeJson) continue
       stripDebug(lod.nodeJson)
@@ -257,10 +213,7 @@ export function nodeJsonHasSkinnedModel(nodeJson: any): boolean {
 
 /**
  * True if a serialized subtree contains at least one model — i.e. there is actually geometry in it.
- *
- * A model asset with no ModelNodes renders as nothing. Saving one is nearly always the result of the save
- * reading the wrong subtree (an emptied parent, a node pending deletion) rather than something the user
- * meant, and persisting it silently destroys the previous content.
+ * A save must refuse an empty subtree: it renders as nothing and destroys the asset's previous content.
  */
 export function nodeJsonHasModel(nodeJson: any): boolean {
   if (!nodeJson || typeof nodeJson !== 'object') return false
@@ -273,8 +226,8 @@ export function modelAssetHasLodBehavior(asset: ModelAsset): boolean {
   return !!asset.lods?.length || (asset.cullDistance ?? 0) > 0
 }
 
-// Skeleton + animation clips belong to the MODEL ASSET. The serialized half of that lives in modelClips.ts
-// (engine-free, so it can be unit-tested); re-exported here so call sites have one import for model assets.
+// Skeleton + animation clips belong to the MODEL ASSET; the engine-free serialized half lives in
+// modelClips.ts and is re-exported here so call sites have one import.
 export {
   skinnedModelJsonOf, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved,
   assetWithClipRootMotion, assetWithBoneNames, assetClipNames, assetWithIkRig, assetIkRig,
@@ -283,14 +236,10 @@ export {
 
 /**
  * Bring a live subtree's skinned models up to date with their model asset: replace the clip list and merge
- * in any bone names the asset has.
+ * in any bone names the asset has. Returns how many models were refreshed.
  *
- * Ids, transforms, materials, scripts and bodies are untouched — this exists precisely because
- * re-instantiating the subtree (what resyncScene does for scenes) would churn node ids and break a
- * template's script/body/trigger re-keying. Returns how many models were refreshed.
- *
- * Clips and bone names ONLY. `ModelNode.model` is read-only, so geometry and sub-mesh structure cannot be
- * swapped in place; a re-imported character with different sub-meshes still has to be re-placed.
+ * Clips and bone names ONLY — ids, transforms, materials, scripts and bodies must stay untouched, and
+ * `ModelNode.model` is read-only so geometry and sub-mesh structure cannot be swapped in place.
  */
 export function refreshModelClips(root: Node, models: ModelAsset[], animations?: AnimationAsset[]): number {
   let count = 0
@@ -301,12 +250,10 @@ export function refreshModelClips(root: Node, models: ModelAsset[], animations?:
     if (asset && model instanceof AnimatedModel && model.hasSkin) {
       const json = skinnedJson(asset.nodeJson)
       if (json) {
-        // Replace wholesale rather than diffing: the asset is the source of truth, so a clip deleted there
-        // must disappear here too, and a rename must not leave the old name behind.
+        // Replace wholesale rather than diffing: a clip deleted or renamed on the asset must not survive here.
         for (const name of model.animations.map((a: any) => a.name)) model.removeAnimation(name)
         for (const clip of json.animations ?? []) model.addAnimation(clip)
-        // Shared clips are not in `json` (serialize drops them), so re-resolve them from the library or a
-        // refresh would silently strip every asset-backed animation off the node.
+        // Shared clips are not in `json` (serialize drops them), so re-resolve them from the library.
         if (animations?.length && asset.animationIds?.length) applyModelAnimations(node, asset, animations)
 
         const names = json.skin?.nodeNames
@@ -332,15 +279,11 @@ export function modelAssetTextureIds(asset: ModelAsset): string[] {
 
 /**
  * The material every ModelNode in a subtree shares, or null when they disagree (or there are none).
- *
- * A model is one Geometry + one Material, so a model asset composed of several ModelNodes is only
- * coherent while they all carry the same material — that is also what lets the renderer draw the whole
- * asset in a single material batch. The model editor uses this to decide which material to hand a newly
- * added part, and to warn when an asset has drifted.
+ * A multi-node model asset is only coherent while all its parts carry the same material — that is what
+ * lets the renderer draw the whole asset in one batch.
  */
 export function sharedMaterialIdOf(nodeJson: any): string | null {
-  // The link lives in the node's serialized `variables`, not inside model.material — the embedded
-  // material is only the fallback copy (see resolveMaterialRefs).
+  // The link lives in the node's serialized `variables`; model.material is only the fallback copy.
   const ids: (string | undefined)[] = []
   const walk = (n: any) => {
     if (!n || typeof n !== 'object') return
@@ -365,19 +308,16 @@ function modelNodesOf(node: Node): Node[] {
 
 /**
  * The material asset shared by the ModelNodes already under `host`, ignoring anything inside `added`.
- *
- * Used by the model editor to decide what a newly dropped part should adopt. Returns null when the host
- * has no linked material to adopt (an empty model, or one whose parts are on ad-hoc materials rather than
- * a library asset) — in which case the part keeps whatever it arrived with.
+ * Returns null when the host has no linked material to adopt, in which case the newly dropped part keeps
+ * whatever it arrived with.
  */
 function hostMaterialId(host: Node, added: Node): string | null {
   const ignore = new Set(modelNodesOf(added))
   let found: string | null = null
   for (const n of modelNodesOf(host)) {
     if (ignore.has(n)) continue
-    // A MERGED node carries one material per submesh, so it is mixed by construction. Reading its scalar
-    // link would report the first submesh's material as "the" host material and then overwrite the added
-    // part with it — the same slot-0-only mistake that made editing a second submesh do nothing.
+    // A MERGED node carries one material per submesh, so it is mixed by construction; its scalar link
+    // would report only submesh 0's material.
     const ids = getMaterialIdsOf(n).filter((x): x is string => !!x)
     if (ids.length > 1) return null
     const id = ids[0]
@@ -389,11 +329,8 @@ function hostMaterialId(host: Node, added: Node): string | null {
 }
 
 /**
- * Make every ModelNode in `added` use the material the rest of `host` already shares.
- *
- * This is what keeps a model asset to ONE material: the renderer batches by material, so a model whose
- * parts disagree cannot be drawn as a single batch. Returns the adopted material's NAME when it changed
- * something (for the caller's notice), else null.
+ * Make every ModelNode in `added` use the material the rest of `host` already shares, keeping the asset
+ * to ONE material so the renderer can batch it. Returns the adopted material's NAME on a change, else null.
  */
 export function adoptModelMaterial(added: Node, host: Node, materials: MaterialAsset[]): string | null {
   const wanted = hostMaterialId(host, added)
@@ -403,8 +340,7 @@ export function adoptModelMaterial(added: Node, host: Node, materials: MaterialA
 
   let changed = false
   for (const n of modelNodesOf(added)) {
-    // Never flatten a merged part onto one material: that would silently discard the other submeshes'
-    // links. Such a part keeps what it has, and the caller's "adopted" notice simply does not fire for it.
+    // Never flatten a merged part onto one material; that would discard the other submeshes' links.
     if (getMaterialIdsOf(n).filter(Boolean).length > 1) continue
     if (n.getVariable(MATERIAL_ID_VAR) === wanted) continue
     applyMaterialAsset(n, asset)
@@ -415,14 +351,7 @@ export function adoptModelMaterial(added: Node, host: Node, materials: MaterialA
 
 /**
  * Collapse an imported model's sub-meshes into ONE ModelNode carrying one submesh per material.
- *
- * An importer splits a model per material (glTF mandates one primitive per material) and per source mesh
- * object, so a character routinely arrives as several nodes over one skeleton. That costs a draw call, an
- * `Animator` and a full 100-mat4 bone upload *per pass and per shadow cascade* each — and, worse, the
- * editor binds an animation to the FIRST skinned child it finds, so half a two-part character would sit
- * in bind pose.
- *
- * Returns the merged children (a single node) or null with the reason logged when the parts are not
+ * Returns the merged children (a single node), or null with the reason logged when the parts are not
  * mergeable — mixed skeletons, or materials the renderer would route to different passes.
  */
 export function mergeSubModels(
@@ -438,8 +367,7 @@ export function mergeSubModels(
     Logger.warn(`Kept "${root.name}" split across ${children.length} parts: ${blocker}`, 'Import')
     return null
   }
-  // Vertices are concatenated verbatim, so a part sitting at its own transform would land in the wrong
-  // place. Skinned parts never carry one (they are posed by the skeleton); static ones can.
+  // Vertices are concatenated verbatim, so a part sitting at its own transform would land in the wrong place.
   const moved = children.filter(c => !isIdentityTransform(c))
   if (moved.length) {
     Logger.warn(`Kept "${root.name}" split across ${children.length} parts: a part has its own transform`, 'Import')
@@ -449,12 +377,9 @@ export function mergeSubModels(
   const merged = mergeModels(models)
   if (!merged) return null
 
-  // One asset per SUBMESH, taken from the child that submesh came from. This used to de-duplicate the
-  // assets itself and assume the result lined up — but `mergeModels` collapses only CONSECUTIVE parts, so
-  // a material used again later legitimately gets a second submesh while the de-duplicated asset list did
-  // not. The lists then drifted: every link after the first repeat landed on the wrong range, and the
-  // trailing submeshes got none at all — so editing those materials appeared to do nothing. With 2 parts
-  // the two rules agree, which is why it only showed up on a model with many sub-meshes.
+  // One asset per SUBMESH, taken from the child that submesh came from — never de-duplicated by material:
+  // `mergeModels` collapses only CONSECUTIVE parts, so a repeated material legitimately gets two submeshes
+  // and a de-duplicated list would misalign every link after the first repeat.
   const assets = merged.sources.map(i => materialAssetOfChild.get(children[i]))
 
   const name = root.name
@@ -480,15 +405,10 @@ function isIdentityTransform(node: Node): boolean {
 
 /**
  * Turn one imported subtree into a separate ModelAsset per sub-mesh (the import modal's "Separate parts"
- * option). Each asset is re-centred on its own bounds, so dragging it into the scene drops it where you
- * point instead of wherever it happened to sit in the source file.
+ * option), each re-centred on its own bounds so it drops where the user points.
  *
- * The re-centring is done with the NODE TRANSFORM, never by translating vertices: a skinned model's
- * vertices are bound to its skeleton and moving them would break the binding (the same reason
- * normalizeRootScale falls back to transform-space scaling for skinned subtrees).
- *
- * Rotation and scale are deliberately KEPT — those are the part's authored size and orientation. Only
- * its position (the file's layout) is dropped.
+ * Re-centre with the NODE TRANSFORM, never by translating vertices: a skinned model's vertices are bound
+ * to its skeleton. Rotation and scale are kept — only the position (the file's layout) is dropped.
  */
 export async function separateSubModels(
   root: Node,
@@ -504,17 +424,16 @@ export async function separateSubModels(
     const name = child.name?.trim() || `${bundleName}_${i + 1}`
 
     const holder = new Node(name)
-    // normalizeRootScale scales a SKINNED subtree through the root's transform (it cannot bake into the
-    // vertices), so a separated skinned child would silently lose its normalization without this.
+    // normalizeRootScale scales a SKINNED subtree through the root's transform, so a separated skinned
+    // child loses its normalization without this.
     holder.setScale([rootScale[0], rootScale[1], rootScale[2]])
 
     child.setPosition([0, 0, 0]) // drop the file's authored layout; keep rotation + scale
     holder.addChild(child)
     holder.updateTransforms()
 
-    // Shift the child so its bounds land on the origin. getBoundingSphere is WORLD space, and the holder
-    // sits at the origin with only a scale, so dividing that scale back out converts it to the child's
-    // local space.
+    // getBoundingSphere is WORLD space; the holder is at the origin with only a scale, so dividing that
+    // scale back out converts the centre to the child's local space.
     const center = child.getBoundingSphere().center
     const sx = rootScale[0] || 1, sy = rootScale[1] || 1, sz = rootScale[2] || 1
     child.setPosition([-center[0] / sx, -center[1] / sy, -center[2] / sz])
@@ -532,9 +451,8 @@ export async function separateSubModels(
  *  per level (level 0 = the base nodeJson); plain assets keep the original single-subtree shape.
  *  `materials` re-resolves the subtree's __materialId links against the library — see resolveMaterialRefs. */
 export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials?: MaterialAsset[], models?: ModelAsset[], animations?: AnimationAsset[]): string {
-  // LOD levels are references, so the library is needed to resolve them. A level whose model has been
-  // deleted is dropped rather than instantiated as a hole — the instance simply keeps the levels that
-  // still resolve, and `resolvedLods` drops the matching distance so the two arrays stay aligned.
+  // LOD levels are references, so the library is needed to resolve them. `resolvedLods` drops a dangling
+  // level together with its distance so the two arrays stay aligned.
   const lods = resolvedLods(asset, models)
   const clone = (lods.length || (asset.cullDistance ?? 0) > 0)
     ? {
@@ -554,15 +472,12 @@ export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials
   const idMap = new Map<string, string>()
   regenerateIds(clone, idMap)
 
-  // Tag the instance root so it can be recognized as a placed model instance. Persists via the node's
-  // serialized `variables`.
+  // Tag the instance root; this persists via the node's serialized `variables`.
   clone.variables = { ...(clone.variables || {}), [MODEL_ID_VAR]: { type: 'string', value: asset.id } }
 
-  // ...and record the asset's own root transform, so a later edit to it can be applied to this copy as a
-  // change rather than being overwritten by the copy's placement (see applyModelTransformDelta). A
-  // LOD-wrapped instance needs no baseline: the wrapper is identity and the asset root sits INSIDE it as
-  // child 0, so a transform edit already arrives through the child — recording one here would double it.
-  // Serialized as JSON because a node variable has only number/string/boolean/vec3 to work with.
+  // Record the asset's own root transform so a later edit to it applies as a delta (applyModelTransformDelta).
+  // A LOD-wrapped instance must NOT get a baseline: the asset root sits inside the identity wrapper as
+  // child 0, so a transform edit already arrives through the child and recording one here would double it.
   if (!(lods.length || (asset.cullDistance ?? 0) > 0))
     clone.variables[MODEL_BASE_TRS_VAR] = { type: 'string', value: JSON.stringify(nodeJsonTrs(asset.nodeJson)) }
 
@@ -574,9 +489,8 @@ export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials
 
   parseByType(parent, clone)
 
-  // Shared animation clips are applied to the LIVE node, never spliced into `clone`: a resolved clip
-  // carries an `assetId` and AnimatedModel.serialize drops those, so putting them in the JSON would only
-  // get them stripped on the next save. Retargeting happens here because the target rig is this asset's.
+  // Shared animation clips must be applied to the LIVE node, never spliced into `clone`: a resolved clip
+  // carries an `assetId` and AnimatedModel.serialize drops those.
   if (animations?.length && asset.animationIds?.length) {
     const placed = parent.children.find(c => c.id === clone.id)
     if (placed) applyModelAnimations(placed, asset, animations)

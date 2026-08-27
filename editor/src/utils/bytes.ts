@@ -1,10 +1,6 @@
-// Base64 and DEFLATE, engine-free.
-//
-// The canonical base64 implementation is `src/core/base64.ts`, and this is a deliberate copy of it for
-// the same reason features/publish/pack.ts duplicates `toFlat`/`needs32Bit`: the only path to the engine
-// from here is the `cleo` package, and importing that inside projectWorker.ts would drag the whole WebGL
-// module graph across the thread boundary — which the header of workers/projectJobs.ts forbids. Keep the
-// two in step; the chunking is not a micro-optimization, see that file.
+// Base64 and DEFLATE, engine-free. A deliberate copy of `src/core/base64.ts` — importing `cleo` here would
+// drag the whole WebGL module graph into projectWorker.ts. Keep the two in step; the chunking there is
+// required, not a micro-optimization.
 
 const CHUNK = 0x8000;
 
@@ -47,8 +43,7 @@ export function parseBase64DataUri(uri: string): { mime: string; bytes: Uint8Arr
   }
 }
 
-// `CompressionStream`/`DecompressionStream` are globals on both the window and the worker scope, so
-// these stay usable from the project worker and testable under vitest.
+// `CompressionStream`/`DecompressionStream` are globals on both the window and the worker scope.
 
 export async function deflateBytes(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('deflate'));

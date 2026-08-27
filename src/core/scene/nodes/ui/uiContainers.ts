@@ -5,7 +5,8 @@ import { UINode, rgba } from "./uiNode";
 /**
  * UI elements that arrange other elements: Panel, Stack, Spacer.
  *
- * UIPanelNode ships alongside the layout containers because all three are "a box that holds other boxes"; UIStackNode additionally needs UISpacerNode at runtime (an `instanceof` in its layout), so they cannot be separated without a cycle.
+ * UIStackNode does an `instanceof UISpacerNode` at layout time, so these cannot be split into separate
+ * modules without a cycle.
  */
 
 export class UIPanelNode extends UINode {
@@ -19,7 +20,12 @@ export class UIPanelNode extends UINode {
     }
 }
 
-/** A run of text. `tint` is the text colour here, not a background. */
+/**
+ * A row or column that positions its children in flow instead of by anchors.
+ *
+ * The stack owns only the main axis; children keep their cross-axis anchors. A child's `flex` (see
+ * {@link UISpacerNode}) absorbs the slack.
+ */
 
 export class UIStackNode extends UINode {
     private _direction: 'row' | 'column' = 'column';
@@ -52,9 +58,8 @@ export class UIStackNode extends UINode {
     /**
      * Lay children out along the main axis, then solve each one against the slot it was given.
      *
-     * Each child is solved against a one-child parent rect representing its slot, so its own anchors and
-     * offsets still apply on the CROSS axis — which is how `align: 'stretch'` and a fixed cross size end
-     * up being the same mechanism rather than two.
+     * A child is solved against a one-child parent rect representing its slot, so its own anchors and
+     * offsets still apply on the CROSS axis.
      */
     protected _solveChildren(origin: { x: number, y: number }, scale: number): void {
         const kids: UINode[] = [];
@@ -130,10 +135,3 @@ export class UISpacerNode extends UINode {
         UINode._parseUI(new UISpacerNode(json.name, json.id), parent, json);
     }
 }
-
-/**
- * A filled bar showing `value` between `min` and `max`.
- *
- * This exists so a health bar is a data binding rather than a script rewriting a width every frame —
- * which is what the legacy overlay forced, and the reason its HUD scripts were mostly layout arithmetic.
- */

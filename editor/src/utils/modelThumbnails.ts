@@ -10,7 +10,7 @@ import { awaitTexturesReady } from './textureReady';
 
 const THUMB_SIZE = 256;
 
-// Texture ids a material references (skip empties). Used to wait for async decode before capturing.
+// Texture ids a material references, empties skipped.
 export function materialTextureIds(material: Material): string[] {
   const textures = (material.serialize() as any)?.textures;
   if (!textures || typeof textures !== 'object') return [];
@@ -19,11 +19,8 @@ export function materialTextureIds(material: Material): string[] {
 
 /**
  * Push the camera node's world transform into its Camera.
- *
- * `Camera` keeps its own position/eye and is only synced by `CameraNode.update()`, which runs from
- * `scene.update()`. Preview scenes are throwaway — the engine's game loop only updates the *active* scene —
- * so without this the capture renders from a camera still at the origin (position == eye == [0,0,0]) and the
- * framing the preview scene computed is never actually applied.
+ * `Camera` is normally synced by `CameraNode.update()` from `scene.update()`, which never runs for a
+ * throwaway preview scene — without this the capture renders from a camera still at the origin.
  */
 function syncPreviewCamera(scene: Scene): void {
   scene.root.updateTransforms();
@@ -31,13 +28,11 @@ function syncPreviewCamera(scene: Scene): void {
   if (cam) cam.update(0, 0);
 }
 
-// Capture a scene to a base64 PNG with the ground grid hidden (kept clean, then restored).
+// Capture a scene to a base64 PNG with the ground grid hidden, then restored.
 //
-// The restore is deliberately NOT in a `finally` around the await. `screenshotOffscreen` is async
-// because the readback is, but an async function body runs synchronously up to its first `await` — and
-// that await comes after the render. So the promise returned below has already drawn the frame, and the
-// grid can go back on immediately. Awaiting first would leave the live viewport without its grid for as
-// long as the readback takes, which on WebGPU is a real gap rather than a microtask.
+// The restore must NOT be awaited: `screenshotOffscreen` has already drawn the frame by the time it
+// returns its promise, so the grid goes back on immediately. Awaiting first leaves the live viewport
+// without its grid for the whole readback, which on WebGPU is a visible gap.
 async function captureClean(engine: CleoEngine, scene: Scene): Promise<string> {
   const prevGrid = engine.renderer.gridVisible;
   engine.renderer.setGridVisible(false);
@@ -53,11 +48,8 @@ async function captureClean(engine: CleoEngine, scene: Scene): Promise<string> {
 
 /**
  * Capture the material editor's live preview sphere.
- *
- * The orbit rig lets the user zoom closer than the sphere's fit distance to inspect the material, which
- * crops it — a thumbnail must show the whole sphere, so the camera is dollied back out to the fit distance
- * for the capture only (keeping the user's orbit orientation) and restored afterwards. The orbit controller
- * is muted while dollied so it can't snap the camera back to its zoom radius mid-capture.
+ * The camera is dollied back out to the sphere's fit distance for the capture only, keeping the user's
+ * orbit orientation. The orbit controller must be muted while dollied or it snaps the camera back.
  */
 export function captureMaterialSphere(engine: CleoEngine, scene: Scene): Promise<string> {
   const cam = scene.activeCamera;
@@ -72,8 +64,7 @@ export function captureMaterialSphere(engine: CleoEngine, scene: Scene): Promise
       cam.onUpdate = () => {};
       cam.setPosition([0, 0, -fit]); // the rig looks down its local -Z at the pivot (the sphere)
     }
-    // The promise, not its value — see the note in `captureClean`. The frame is already drawn by the
-    // time this returns, so the camera can be put back before the readback resolves rather than after.
+    // The promise, not its value — see the note in `captureClean`: the frame is already drawn.
     return captureClean(engine, scene);
   } finally {
     if (dollied) {
@@ -90,10 +81,8 @@ export function collectModelNodes(node: Node, out: ModelNode[]): void {
 
 /**
  * Union of every child ModelNode's world-space bounding sphere (center + radius).
- *
- * `cullingMargin` keeps the extra room a skinned model's bounds carry so an animated pose cannot poke
- * outside them (SKINNED_BOUNDS_MARGIN). That is right for framing a camera and wrong for MEASURING —
- * pass false to get the true bind-pose size.
+ * `cullingMargin` keeps a skinned model's SKINNED_BOUNDS_MARGIN slack. Right for framing a camera, wrong
+ * for MEASURING — pass false to get the true bind-pose size.
  */
 export function combineBounds(root: Node, cullingMargin = true): { center: [number, number, number]; radius: number } {
   const models: ModelNode[] = [];
@@ -125,9 +114,7 @@ export function combineBounds(root: Node, cullingMargin = true): { center: [numb
 
 /**
  * Combined bounding-sphere radius of a subtree at its current scale (updates transforms first).
- *
- * Measured WITHOUT the skinned culling margin. Including it made every rigged import land at 1/1.75 of
- * the size the user asked for, and the import review report a "current size" 1.75x larger than the model.
+ * Measured WITHOUT the skinned culling margin, which would inflate a rigged model by 1.75x.
  */
 export function meshBoundsRadius(root: Node): number {
   root.updateTransforms();
@@ -135,12 +122,9 @@ export function meshBoundsRadius(root: Node): number {
 }
 
 /**
- * Scale a model so its bounding diameter becomes `targetSize` world units (imported models arrive at
- * wildly different scales — many far too big for the scene). Returns the applied factor.
- *
- * Scaling is baked into the mesh **vertices** (`Geometry.scale`) so the asset keeps an identity node
- * transform. Skinned models are the exception: their vertices are bound to a skeleton, so vertex scaling
- * would break the skinning — those fall back to transform-space scaling on the root.
+ * Scale a model so its bounding diameter becomes `targetSize` world units. Returns the applied factor.
+ * Baked into the mesh **vertices** (`Geometry.scale`) so the asset keeps an identity node transform.
+ * A skinned model's vertices are bound to its skeleton, so those fall back to scaling the root transform.
  */
 export function normalizeRootScale(root: Node, targetSize: number): number {
   const radius = meshBoundsRadius(root);
@@ -156,7 +140,7 @@ export function normalizeRootScale(root: Node, targetSize: number): number {
     return factor;
   }
 
-  // Static subtree: scale each unique geometry's vertices (dedupe in case a geometry is shared).
+  // Static subtree: scale each unique geometry's vertices; a geometry may be shared.
   const scaled = new Set<Geometry>();
   for (const m of models) {
     const geo = m.model.geometry;
@@ -164,8 +148,8 @@ export function normalizeRootScale(root: Node, targetSize: number): number {
     scaled.add(geo);
     geo.scale(factor);
   }
-  // Sub-models can carry glTF node translations (multi-part layouts); scale those too, or the parts
-  // shrink in place while their spacing stays at the original size.
+  // Sub-models can carry glTF node translations; scale those too, or the parts shrink in place while
+  // their spacing stays at the original size.
   const scalePositions = (n: Node) => {
     for (const c of n.children) {
       c.setPosition([c.position[0] * factor, c.position[1] * factor, c.position[2] * factor]);
@@ -178,10 +162,9 @@ export function normalizeRootScale(root: Node, targetSize: number): number {
 }
 
 /**
- * Wait until every texture referenced by any material in the subtree has finished decoding. Imported
- * textures (and modal-uploaded ones after a re-parse) load asynchronously, so callers must await this
- * before serializing the mesh/material — TextureManager.serializeTextureData() silently drops any texture
- * whose image hasn't loaded yet.
+ * Wait until every texture referenced by any material in the subtree has finished decoding.
+ * Must be awaited before serializing the mesh/material: TextureManager.serializeTextureData() silently
+ * drops any texture whose image has not loaded yet.
  */
 export async function awaitSubtreeTexturesReady(root: Node): Promise<void> {
   const models: ModelNode[] = [];
@@ -192,15 +175,9 @@ export async function awaitSubtreeTexturesReady(root: Node): Promise<void> {
 }
 
 /**
- * Every render in this module builds a throwaway scene, and `Node.addChild` emits `SCENE_CHANGED`
- * unconditionally — even for a node with no scene attached. The editor reads that event as "the user
- * edited something", so rendering a thumbnail marked the active tab unsaved: a mesh save would clear the
- * tab's dirty flag, then its own thumbnail render would set it straight back, and Save All (which reports
- * failure purely on "is the tab still dirty") called the successful save a failure.
- *
- * Nothing offscreen here is ever a user edit, so EngineContext installs its `withoutDirty` once and every
- * helper wraps its scene mutations in it. Defaults to a pass-through: thumbnails can be rendered before
- * the editor mounts, when there is no tab to dirty.
+ * `Node.addChild` emits `SCENE_CHANGED` even for a node with no scene attached, and the editor reads that
+ * as a user edit — so every throwaway scene built here must wrap its mutations in this suppressor.
+ * Defaults to a pass-through: thumbnails can be rendered before the editor mounts.
  */
 let silently: <T>(fn: () => T) => T = fn => fn();
 
@@ -208,12 +185,12 @@ let silently: <T>(fn: () => T) => T = fn => fn();
 export function setThumbnailDirtySuppressor(fn: <T>(f: () => T) => T): void { silently = fn; }
 
 /**
- * Render a base64 PNG thumbnail of an imported mesh subtree: a throwaway scene auto-framed to the
- * model's bounds, lit by the mesh preview lights, captured after its textures finish loading.
+ * Render a base64 PNG thumbnail of an imported mesh subtree: a throwaway scene auto-framed to the model's
+ * bounds, lit by the mesh preview lights, captured after its textures finish loading.
  */
 export async function renderModelThumbnail(engine: CleoEngine, root: Node): Promise<string> {
-  // Only the synchronous scene building is suppressed, never the awaits below — holding the suppression
-  // across the render would also swallow a genuine edit the user makes while it is in flight.
+  // Suppress only the synchronous scene building, never the awaits below: holding it across the render
+  // would also swallow a genuine edit made while it is in flight.
   const scene = silently(() => {
     const s = new Scene();
     s.addNode(root);
@@ -230,17 +207,14 @@ export async function renderModelThumbnail(engine: CleoEngine, root: Node): Prom
   return captureClean(engine, scene);
 }
 
-/**
- * Render a base64 PNG sphere thumbnail for a material (used to give each imported MaterialAsset a
- * preview), mirroring the material editor's preview sphere.
- */
+/** Render a base64 PNG sphere thumbnail for a material, mirroring the material editor's preview sphere. */
 export async function renderMaterialThumbnail(engine: CleoEngine, material: Material): Promise<string> {
   const { scene, envReady, preview } = silently(() => {
     const s = new Scene();
-    // No skybox: thumbnail captures skip background draws anyway, but the environment map must be applied
-    // (awaited below) so the sphere's reflections make it into the capture.
+    // No skybox, but the environment map must still be applied (awaited below) or the sphere's
+    // reflections miss the capture.
     const ready = createMaterialPreviewScene(s, { skybox: false, silently });
-    // Render an independent copy so we never share GPU/material state with the live node's material.
+    // An independent copy: never share GPU/material state with the live node's material.
     const mat = Material.parse(material.serialize());
     const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), mat));
     s.addNode(sphere);
@@ -254,9 +228,8 @@ export async function renderMaterialThumbnail(engine: CleoEngine, material: Mate
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Re-rendering a thumbnail from a *saved asset* (the explorer's refresh button), as opposed to from the
-// live object it was created from. Each of these rebuilds the same preview the asset's editor/import
-// showed, from the asset's own embedded data, so it can run for assets nothing currently has open.
+// Re-rendering a thumbnail from a *saved asset* (the explorer's refresh button) rather than from a live
+// object, so it can run for assets nothing currently has open.
 // ---------------------------------------------------------------------------------------------------
 
 /** Re-register an asset's embedded textures so its material parses against real images, not the fallback. */
@@ -278,9 +251,8 @@ export async function renderMaterialAssetThumbnail(engine: CleoEngine, asset: Ma
 }
 
 /**
- * Re-render a saved ModelAsset's preview. Only the base level (LOD0) is instantiated — directly from its
- * nodeJson, never via instantiateModelAsset, so no LodGroupNode ends up auto-swapping levels inside a
- * throwaway thumbnail scene.
+ * Re-render a saved ModelAsset's preview. Instantiate only the base level, directly from its nodeJson and
+ * never via instantiateModelAsset, or a LodGroupNode auto-swaps levels inside the throwaway scene.
  */
 export async function renderModelAssetThumbnail(engine: CleoEngine, asset: ModelAsset): Promise<string> {
   restoreEmbeddedTextures(asset.textures); // legacy embedded-texture assets
@@ -296,9 +268,8 @@ export async function renderModelAssetThumbnail(engine: CleoEngine, asset: Model
 }
 
 /**
- * Re-render a saved TerrainMaterialAsset's preview sphere. Mirrors the terrain-material tab: the material
- * is layer 0 of a tiny helper terrain, so the sphere renders through the terrain shader (height blending,
- * displacement and parallax all show up) rather than as a plain PBR surface.
+ * Re-render a saved TerrainMaterialAsset's preview sphere. The material is layer 0 of a tiny helper
+ * terrain, so the sphere renders through the terrain shader rather than as a plain PBR surface.
  */
 export async function renderTerrainMaterialAssetThumbnail(engine: CleoEngine, asset: TerrainMaterialAsset): Promise<string> {
   const texIds = restoreEmbeddedTextures(asset.textures);

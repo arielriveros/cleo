@@ -1,14 +1,6 @@
-// The runtime template table: serialized node subtrees a script can materialize with `scene.instantiate`.
-//
-// Templates are an EDITOR asset — a subtree plus its scripts, colliders and material links, all held in
-// separate editor-side maps. What lands here is the baked form: one self-contained JSON blob per template
-// with everything already inlined, exactly the shape Scene.parse feeds to a node's `parse`. Baking happens
-// once, at play/publish time (editor/src/features/publish/buildGameData.ts), so this module never has to
-// know anything about the editor's asset model.
-//
-// Deliberately global rather than per-Scene: a published game packs ONE template table shared by all its
-// scenes (geometry interning dedupes across them), and it is registered once at boot, before any scene is
-// parsed. Loading a new scene must not lose it.
+// The runtime template table: baked node-subtree JSON a script materializes with `scene.instantiate`.
+// Each entry is self-contained, in the shape Scene.parse feeds to a node's `parse`. Global, not
+// per-Scene: one table is registered at boot and shared by every scene, so loading a scene must not clear it.
 
 import { Logger } from '../logger';
 
@@ -28,8 +20,7 @@ export function registerTemplates(templates: NodeTemplate[] | undefined | null):
     for (const template of templates ?? []) {
         if (!template?.node) continue;
         byId.set(template.id, template);
-        // Names are not guaranteed unique across the library; first one registered wins, and the collision is
-        // reported rather than silently deciding which "Bullet" a script meant.
+        // Names are not unique across the library; the first one registered wins.
         if (byName.has(template.name))
             Logger.warn(`Two templates are named '${template.name}'; scene.instantiate('${template.name}') will always use the first.`, 'Scene');
         else

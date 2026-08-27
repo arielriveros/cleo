@@ -41,8 +41,8 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
   }, [state, props.node]);
 
   const eventEmitter = useEventBus();
-  // Emit from the user handlers (not the apply-effect above, which also runs on mount/node-select and would
-  // false-dirty on selection). 'environment' kind marks the tab unsaved without triggering a tree rebuild.
+  // Emit from the user handlers, not the apply-effect above, which also runs on mount and would false-dirty
+  // on selection. The 'environment' kind marks the tab unsaved without triggering a tree rebuild.
   const update = (patch: Partial<typeof state>) => {
     setState((prev) => ({ ...prev, ...patch }));
     eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node });
@@ -54,18 +54,15 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
   const { instance } = useCleoEngine();
   const [previewSrc, setPreviewSrc] = useState('');
 
-  // Read-only capture of the probe's baked cube -> equirectangular thumbnail. Never emits SCENE_CHANGED,
-  // so refreshing the preview never marks the tab dirty.
+  // Read-only capture of the probe's baked cube. Never emits SCENE_CHANGED, so it cannot dirty the tab.
   const refreshPreview = useCallback(() => {
     const renderer = instance?.renderer;
     if (!renderer) return;
-    // The readback is async (a WebGPU one is a buffer map and cannot be otherwise), so this resolves a
-    // frame or two later. Nothing here depends on the timing: an empty src just shows no preview until
-    // it lands, and a stale resolve is overwritten by the next refresh.
+    // The readback is async (a WebGPU one is a buffer map), so this resolves a frame or two later.
     void renderer.renderProbePreview(props.node, 256).then(setPreviewSrc);
   }, [instance, props.node]);
 
-  // On select / node change: one deferred refresh (a freshly-added probe bakes on the next engine frame).
+  // A freshly-added probe bakes on the next engine frame, so the refresh is deferred.
   useEffect(() => {
     setPreviewSrc('');
     const id = window.setTimeout(refreshPreview, 60);
@@ -86,8 +83,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     return () => window.clearInterval(id);
   }, [state.mode, state.updateFrequency, props.node, refreshPreview]);
 
-  // Baked probes only capture on the engine's next _updateIBL after bake() flags them; wait for the new
-  // bake to land (lastBakeTime advances) before refreshing the thumbnail.
+  // Baked probes capture on the engine's next _updateIBL, so wait for lastBakeTime to advance.
   const bakeAndPreview = () => {
     const before = props.node.lastBakeTime;
     props.node.bake();

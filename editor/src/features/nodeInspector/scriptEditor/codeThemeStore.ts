@@ -1,9 +1,5 @@
-// The code editors' theme preference. One value, shared by every code surface: flipping the theme in the
-// script editor also flips the GLSL editor, which plain component state cannot do — the two have no common
-// ancestor short of the inspector. So this follows logStore.ts: a module-level store read through
-// useSyncExternalStore.
-//
-// The preference is persisted; the theme itself defaults to dark, like the rest of the editor.
+// The code editors' theme preference: one value shared by every code surface, held in a module-level store
+// read through useSyncExternalStore. Persisted; defaults to dark.
 import { useSyncExternalStore } from 'react';
 
 export type CodeThemeName = 'light' | 'dark';
@@ -28,8 +24,7 @@ export const codeThemeStore = {
     return () => { listeners.delete(listener); };
   },
 
-  // Returns a primitive, so there is no snapshot to memoize: it is returning a *fresh object* each call
-  // that sends useSyncExternalStore into an infinite loop, and a string can't.
+  // Must return a primitive: a fresh object on each call sends useSyncExternalStore into an infinite loop.
   getSnapshot(): CodeThemeName {
     return current;
   },

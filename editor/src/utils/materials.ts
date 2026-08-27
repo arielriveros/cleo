@@ -1,12 +1,11 @@
 import { Node, Material, TextureManager } from 'cleo'
 import { cryptoRandomId } from './ids'
 
-// Node variable that links a node's mesh material to a shared material asset (mirrors TEMPLATE_ID_VAR).
+// Node variable linking a node's mesh material to a shared material asset.
 export const MATERIAL_ID_VAR = '__materialId'
 
-// A merged, multi-material model links one asset PER SUBMESH. Held as a JSON string list, the same
-// convention SCREEN_MATERIAL_IDS_VAR uses, because the node variable system has no array type.
-// MATERIAL_ID_VAR keeps mirroring entry [0] so everything that reads a node's single material still works.
+// A merged, multi-material model links one asset PER SUBMESH, held as a JSON string list because the node
+// variable system has no array type. MATERIAL_ID_VAR must keep mirroring entry [0].
 export const MATERIAL_IDS_VAR = '__materialIds'
 
 // A reusable, named material saved to the global material library, with a rendered preview thumbnail.
@@ -28,9 +27,7 @@ export function getMaterialIdOf(node: Node | null | undefined): string | undefin
 
 /**
  * The per-submesh material asset ids a node references, one per submesh.
- *
- * Falls back to the single MATERIAL_ID_VAR so an unmerged node reads as a one-entry list and callers
- * need only one code path.
+ * Falls back to MATERIAL_ID_VAR, so an unmerged node reads as a one-entry list.
  */
 export function getMaterialIdsOf(node: Node | null | undefined): (string | undefined)[] {
   const raw = node?.getVariable(MATERIAL_IDS_VAR)
@@ -44,9 +41,8 @@ export function getMaterialIdsOf(node: Node | null | undefined): (string | undef
   return single ? [single] : []
 }
 
-// Sprites are deliberately absent from all three of these. A sprite's image comes from its tileset and
-// its tint/opacity/blending are plain fields on the node; the Material it still holds internally is an
-// implementation detail of the renderer, not something a material asset may be linked to.
+// Sprites must stay absent from all three. A sprite's image comes from its tileset and its
+// tint/opacity/blending are plain node fields; its internal Material may never be linked to an asset.
 
 /** The live Material carried by a node's mesh, or null for non-material nodes. */
 export function getNodeMaterial(node: Node): Material | null {
@@ -81,10 +77,7 @@ function collectMaterialTextureIds(serialized: any): Set<string> {
 
 /**
  * Snapshot a live Material into a saveable asset.
- *
- * The asset records only the texture IDS it uses — the payloads live once in the texture store, not
- * embedded per asset. This used to serialize every texture in the project to base64 and then filter, once
- * per material, which is what froze the editor on import.
+ * Records only the texture IDS it uses; the payloads live once in the texture store.
  */
 export function buildMaterialAsset(material: Material, name: string, thumbnail: string, id?: string): MaterialAsset {
   const serialized = material.serialize()
@@ -100,8 +93,7 @@ export function materialAssetTextureIds(asset: MaterialAsset): string[] {
 
 /** Apply a material asset to a node's `submesh`-th material: rebuild the Material and tag the link. */
 export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0): void {
-  // New assets carry no payloads — their textures are preloaded from the texture store at boot, so they
-  // are already registered. This loop only still matters for legacy assets with embedded base64.
+  // Only legacy assets carry embedded base64; a current asset's textures are preloaded at boot.
   for (const t of asset.textures || []) {
     if (t?.id && !TextureManager.Instance.getTexture(t.id))
       TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id)
@@ -109,7 +101,7 @@ export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0
   setNodeMaterial(node, Material.parse(asset.material), submesh)
   if (submesh === 0) node.setVariable(MATERIAL_ID_VAR, asset.id, 'string')
 
-  // Keep the per-submesh list in step whenever the node has one, so the two links can never disagree.
+  // Keep the per-submesh list in step whenever the node has one; the two links must never disagree.
   const ids = getMaterialIdsOf(node)
   if (ids.length > 1 || submesh > 0) {
     while (ids.length <= submesh) ids.push(undefined)
@@ -120,10 +112,8 @@ export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0
 
 /**
  * Apply one material asset per submesh, in order, and stamp the whole link list in one go.
- *
- * `assets` is parallel to the model's SUBMESHES, so a hole is meaningful: that submesh keeps the material
- * the merge gave it and records no link. Holes must be preserved in the stamped list rather than
- * compacted away, or every later entry shifts onto the wrong range.
+ * `assets` is parallel to the model's SUBMESHES, so a hole means "keep what the merge gave it". Holes must
+ * be preserved in the stamped list, never compacted, or every later entry shifts onto the wrong range.
  */
 export function applyMaterialAssets(node: Node, assets: (MaterialAsset | undefined)[]): void {
   assets.forEach((asset, i) => { if (asset) applyMaterialAsset(node, asset, i) })
@@ -146,13 +136,9 @@ export function unlinkToFallback(node: Node): void {
 }
 
 /**
- * Which submeshes of `node` reference a given material asset.
- *
- * The one definition of "does this node use that material", so every propagation and cleanup path agrees.
- * Matching on `getMaterialIdOf` instead — the scalar `__materialId`, which only ever mirrors entry [0] —
- * is what made an edit to a second submesh's material match no node at all and silently do nothing.
- *
- * Returns every matching slot, since the same asset may legitimately be linked to several.
+ * Which submeshes of `node` reference a given material asset — the one definition of "does this node use
+ * that material", which every propagation and cleanup path must go through rather than the scalar
+ * `__materialId`. Returns every matching slot; the same asset may be linked to several.
  */
 export function materialSlotsReferencing(node: Node | null | undefined, materialId: string): number[] {
   const out: number[] = []
@@ -163,13 +149,8 @@ export function materialSlotsReferencing(node: Node | null | undefined, material
 
 /**
  * Reset ONE submesh to the fallback material and drop just that submesh's link.
- *
- * The ✕ on a material slot used to call {@link unlinkToFallback}, which resets every submesh and removes
- * both link variables — so clearing one slot of a merged model wiped all of them. `setNodeMaterial`
- * already writes a single index, so nothing ever required the whole-node behaviour.
- *
- * `__materialId` keeps mirroring entry [0] (and disappears with it), because everything that has not been
- * converted to the per-submesh list still reads the scalar.
+ * `__materialId` keeps mirroring entry [0] and disappears with it, since callers not converted to the
+ * per-submesh list still read the scalar.
  */
 export function unlinkMaterialAt(node: Node, submesh: number): void {
   const n = node as any
@@ -200,21 +181,14 @@ export function serializedVar(json: any, name: string): string | undefined {
 
 /**
  * Re-resolve the embedded material copies in a SERIALIZED node subtree against the current library, in
- * place, before it is parsed into a scene.
- *
- * This is what makes __materialId the reference and the embedded copy a mere fallback. Templates and mesh
- * assets each store a whole serialized subtree with its materials baked in, so a material edited after the
- * template was saved leaves that copy stale. Rather than rewriting every stored template/mesh record on
- * each material save — which would churn their content hashes and make resyncScene needlessly
- * re-instantiate every placed instance, besides rewriting megabytes of embedded geometry — we resolve the
- * link at the moment of instantiation, which is the only moment the copy is actually read.
- *
+ * place, before it is parsed into a scene. This is what makes `__materialId` the reference and the
+ * embedded copy a fallback: templates and model assets bake their materials in, and resolving at
+ * instantiation avoids rewriting every stored record (and churning its content hash) on each material save.
  * A node with no link, or one whose asset is gone, keeps whatever was embedded.
  */
 export function resolveMaterialRefs(json: any, materials: MaterialAsset[]): void {
   if (!json || typeof json !== 'object') return
-  // Deep-copy every resolved material: the asset's serialized material is shared library state, and
-  // Material.parse must not be handed something a later edit could mutate under it.
+  // Deep-copy every resolved material: the asset's serialized material is shared library state.
   const resolve = (id: string | undefined) => {
     const asset = id ? materials.find(m => m.id === id) : undefined
     return asset ? JSON.parse(JSON.stringify(asset.material)) : undefined
@@ -223,9 +197,8 @@ export function resolveMaterialRefs(json: any, materials: MaterialAsset[]): void
   const single = resolve(serializedVar(json, MATERIAL_ID_VAR))
   if (single && json.model) {
     json.model.material = single
-    // `Model.parse` PREFERS `materials` over `material` whenever the array is present, so writing only the
-    // singular here left a merged model rendering the stale embedded copy while its resolved link sat in a
-    // field nothing read. Slot 0 and the scalar link are the same thing; keep them together from the start.
+    // `Model.parse` PREFERS `materials` over `material` whenever the array is present, so the singular
+    // alone is not enough. Slot 0 and the scalar link are the same thing and must be written together.
     if (Array.isArray(json.model.materials) && json.model.materials.length) json.model.materials[0] = single
   }
 

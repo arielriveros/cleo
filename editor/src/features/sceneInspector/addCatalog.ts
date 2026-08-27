@@ -19,6 +19,7 @@ import {
   AnimatedSpriteNode,
   VolumetricCloudsNode,
   SkyAtmosphereNode,
+  SkyLightNode,
   TilemapNode,
   Tilemap,
   LandscapeNode,
@@ -53,12 +54,12 @@ import {
   EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon,
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon,
-  SkyboxIcon, SkyAtmosphereIcon, CloudsIcon, LandscapeIcon,
+  SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon,
 } from './nodeIcons'
 
-// The catalog of addable node types. It is data rather than a set of closures inside AddNew because the
-// same item can now be created from three places: the Add grid's click, a drop on the scene tree, and a
-// drop into the viewport — the latter two only receive the item's `id` through a DataTransfer.
+// The catalog of addable node types, as data rather than closures inside AddNew: the same item is created
+// from the Add grid's click, a drop on the scene tree and a drop into the viewport, and the last two
+// receive only the item's `id` through a DataTransfer.
 export const NEW_NODE_MIME = 'text/cleo-new-node';
 
 export type AddCategory = 'common' | 'cameras' | 'lights' | 'sprites' | 'primitives' | 'complex'
@@ -69,13 +70,11 @@ export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
   { value: 'cameras', label: 'Cameras' },
   { value: 'lights', label: 'Lights' },
   { value: 'sprites', label: 'Sprites' },
-  // The values are internal and stay short; only the labels are user-facing. Renaming a value would
-  // invalidate the stored cleo.addnew.category preference for no gain.
+  // The values are internal; renaming one invalidates the stored cleo.addnew.category preference.
   { value: 'primitives', label: 'Primitive Geometries' },
   { value: 'complex', label: 'Complex Geometries' },
   { value: 'environment', label: 'Environment' },
-  // UI categories. Shown only in `ui` mode (see AddNew) — a HUD element dropped into a scene-mode
-  // session would be authored with no way to see what it looks like.
+  // UI categories. Shown only in `ui` mode (see AddNew).
   { value: 'uiLayout', label: 'Layout' },
   { value: 'uiCore', label: 'Elements' },
   { value: 'uiWidgets', label: 'Widgets' },
@@ -145,8 +144,7 @@ export const ADD_ITEMS: AddItem[] = [
       return cameraNode;
     },
   },
-  // Shipped with its camera child already attached: a rig with no camera does nothing, and making
-  // the user assemble the pair by hand is the first thing they would get wrong.
+  // Shipped with its camera child already attached: a rig with no camera does nothing.
   {
     id: 'cameraRig', label: 'Camera Rig', icon: CameraRigIcon, category: 'cameras',
     create: async () => {
@@ -175,8 +173,7 @@ export const ADD_ITEMS: AddItem[] = [
 
   {
     id: 'sprite', label: 'Static', icon: SpriteIcon, category: 'sprites',
-    // No tileset yet: a fresh sprite draws nothing until one is assigned in the inspector, the same
-    // way a tilemap layer with no tileset does.
+    // No tileset yet: a fresh sprite draws nothing until one is assigned in the inspector.
     create: async () => new SpriteNode('sprite', new Sprite(), 'spherical'),
   },
   {
@@ -185,12 +182,9 @@ export const ADD_ITEMS: AddItem[] = [
       { frames: [], fps: 12, loop: true, constraints: 'spherical' }),
   },
 
-  // Primitives. Solids first, then the flat shapes (which are double-sided, since a single-sided flat
-  // shape vanishes when you orbit past it and reads as a bug).
-  //
-  // Cube/Sphere/Cylinder keep their original geometry arguments and node scales so existing muscle memory
-  // holds; the ones added later are authored at unit size with an identity transform instead, which is the
-  // better default for a new primitive.
+  // Primitives. Solids first, then the flat shapes, which are double-sided so they do not vanish when
+  // orbited past. Cube/Sphere/Cylinder keep their original geometry arguments and node scales; the later
+  // additions are authored at unit size with an identity transform.
   {
     id: 'cube', label: 'Cube', icon: CubeIcon, category: 'primitives',
     create: async () => new ModelNode('cube', new Model(Geometry.Cube(), Material.Default({}))),
@@ -242,10 +236,9 @@ export const ADD_ITEMS: AddItem[] = [
     create: async () => new ModelNode('triangle', new Model(Geometry.Triangle(), Material.Default({}, { side: 'double' }))),
   },
 
-  // Complex geometries: parametric level-blockout pieces. All are authored at unit size with an identity
-  // transform, and all are solid single-sided shells, so scaling the node is the intended way to fit one
-  // to a space. Like every other primitive they are created as a bare ModelNode — the Physics panel fits
-  // a collider on demand, and its Add Convex Hull covers the sloped ones exactly.
+  // Complex geometries: parametric level-blockout pieces, authored at unit size with an identity transform
+  // as solid single-sided shells, so scaling the node is how one is fitted to a space. Bare ModelNodes:
+  // the Physics panel fits a collider on demand.
   {
     id: 'ramp', label: 'Ramp', icon: RampIcon, category: 'complex',
     create: async () => new ModelNode('ramp', new Model(Geometry.Ramp(1, 1, 1), Material.Default({}))),
@@ -302,21 +295,24 @@ export const ADD_ITEMS: AddItem[] = [
     create: async () => new LightProbeNode('light probe', { size: [10, 10, 10] }),
   },
   {
+    // Scene-wide, so unplaceable — unlike a light probe, which has a volume.
+    id: 'skyLight', label: 'Sky Light', icon: SkyLightIcon, category: 'environment', placeable: false,
+    create: async () => new SkyLightNode('sky light'),
+  },
+  {
     id: 'volumetricClouds', label: 'Clouds', icon: CloudsIcon, category: 'environment', placeable: false,
     create: async () => new VolumetricCloudsNode('volumetric clouds'),
   },
   {
     id: 'landscape', label: 'Landscape', icon: LandscapeIcon, category: 'environment', placeable: false,
-    // Not placeable, like the clouds and the sky: a terrain spans +/-size/2 around its own origin, so
-    // dropping one at an arbitrary raycast point (possibly mid-air) is worse than putting it at 0.
-    // These defaults are the ones the old "Create Terrain" button used.
+    // Not placeable: a terrain spans +/-size/2 around its own origin, so dropping one at an arbitrary
+    // raycast point (possibly mid-air) is worse than putting it at 0.
     create: async () => new LandscapeNode('landscape', new Terrain({ size: 200, resolution: 129, chunkQuads: 32 })),
   },
   {
     id: 'tilemap', label: 'Tilemap', icon: TilemapIcon, category: 'sprites',
-    // One default layer, because a map with no layer has nothing to paint on and the layers panel would
-    // open empty. Unit cells: they line up with the 2D camera's default extents, and a tileset's pixel
-    // size is decoupled from world size anyway.
+    // One default layer, or there is nothing to paint on and the layers panel opens empty. Unit cells:
+    // they line up with the 2D camera's default extents, and a tileset's pixel size is world-independent.
     create: async () => {
       const tilemap = new Tilemap({ kind: 'orthogonal', cellWidth: 1, cellHeight: 1 });
       tilemap.addLayer({ name: 'Ground' });
@@ -325,17 +321,15 @@ export const ADD_ITEMS: AddItem[] = [
   },
 
   // --- UI ---------------------------------------------------------------------------------------
-  // Every screen-space type is `placeable: false`: a viewport drop resolves a WORLD position, which is
-  // meaningless for something anchored to the screen. World UI is the deliberate exception — dropping one
-  // at the raycast point is exactly what you want.
+  // Every screen-space type is `placeable: false`: a viewport drop resolves a WORLD position, meaningless
+  // for something anchored to the screen. World UI is the exception.
   {
     id: 'uiCanvas', label: 'Canvas', icon: CanvasIcon, category: 'uiLayout', placeable: false,
     create: async () => new UIRootNode('UI', 'screen'),
   },
   {
     id: 'uiWorldRoot', label: 'World UI', icon: WorldUIIcon, category: 'uiLayout', placeable: true,
-    // Pivot at the bottom centre so the element hangs ABOVE its anchor point, which is what a nameplate
-    // or a health bar over a character wants out of the box.
+    // Pivot at the bottom centre so the element hangs ABOVE its anchor point.
     create: async () => {
       const root = new UIRootNode('world ui', 'world');
       root.pivot = [0.5, 1];
@@ -365,8 +359,7 @@ export const ADD_ITEMS: AddItem[] = [
   },
   {
     id: 'uiImage', label: 'Image', icon: ImageIcon, category: 'uiCore', placeable: false,
-    // No texture yet: a fresh image draws nothing until one is assigned in the inspector, the same way a
-    // fresh sprite with no tileset does.
+    // No texture yet: a fresh image draws nothing until one is assigned in the inspector.
     create: async () => new UIImageNode('image'),
   },
   {
@@ -398,15 +391,10 @@ export function findAddItem(id: string): AddItem | undefined {
 
 /**
  * Where a UI element should actually be parented.
- *
- * A UI element under a `ModelNode` is not an error the user will see — it is a node that silently never
- * renders, because only a {@link UIRootNode} subtree is resolved by the layout pass. So a UI item dropped
- * anywhere outside a UI subtree is retargeted to the scene's first root, creating one if the scene has
- * none. Applied inside `addItemTo` so the Add-grid click and BOTH drop paths (scene tree, viewport)
- * inherit it rather than each growing their own copy.
- *
- * A root itself is exempt: nesting a Canvas under another Canvas is meaningful (a world-space nameplate
- * authored inside a HUD), and a root's rect comes from the viewport or its projection either way.
+ * Only a {@link UIRootNode} subtree is resolved by the layout pass, so a UI item dropped outside one is
+ * retargeted to the scene's first root, creating one if the scene has none. Applied inside `addItemTo` so
+ * the Add-grid click and both drop paths inherit it.
+ * A root itself is exempt: nesting a Canvas under another Canvas is meaningful.
  */
 function resolveUIParent(item: AddItem, parent: Node, ctx: AddContext, created: Node): Node {
   if (!(created instanceof UINode)) return parent;

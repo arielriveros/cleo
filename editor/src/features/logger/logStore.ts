@@ -1,7 +1,5 @@
-// In-memory console store. Lives outside React so producers (engine, scripts, uncaught errors) never
-// touch component state directly: entries land in a buffer and at most one snapshot is published per
-// animation frame, which is what keeps a per-frame `console.log` from melting the panel.
-// Nothing is persisted — the buffer dies with the tab, by design.
+// In-memory console store, outside React: producers append to a buffer and at most one snapshot is
+// published per animation frame. Nothing is persisted; the buffer dies with the tab.
 import { CleoEngine, Logger } from 'cleo';
 import type { LogEntry, LogMethod } from 'cleo';
 
@@ -51,9 +49,8 @@ function ingest(entry: LogEntry) {
   schedule();
 }
 
-// A flushed entry replaces its row in place instead of appending one. It is matched by flushKey
-// (unique in the buffer) rather than id, because the engine hands out a fresh id per emit so the
-// console actually repaints the row.
+// A flushed entry replaces its row in place. Matched by flushKey (unique in the buffer), not id: the
+// engine hands out a fresh id per emit.
 function update(entry: LogEntry) {
   for (let i = buffer.length - 1; i >= 0; i--) {
     if (buffer[i].flushKey === entry.flushKey) {
@@ -65,8 +62,7 @@ function update(entry: LogEntry) {
   ingest(entry); // the original row already fell out of the ring buffer
 }
 
-// Engine objects are huge and often circular, so the preview stays shallow — the inspector in the
-// panel is what you expand when you actually want to look inside.
+// Engine objects are huge and often circular, so the preview stays shallow.
 function preview(value: any): string {
   if (typeof value === 'string') return value;
   if (value instanceof Error) return `${value.name}: ${value.message}`;
@@ -100,8 +96,8 @@ export function attachLogStore() {
     schedule();
   });
 
-  // Uncaught failures go straight into the buffer rather than through Logger: the browser already
-  // reports them on the native console, and re-logging them would double up there.
+  // Uncaught failures go straight into the buffer, not through Logger: the browser already reports
+  // them on the native console.
   window.addEventListener('error', (e: ErrorEvent) => {
     ingest({
       id: `uncaught-${uncaughtId++}`,

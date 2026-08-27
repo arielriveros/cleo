@@ -2,13 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
 
-// Floating bottom transport for the Animation Field editor, mirroring AnimationPlayer. The field tab's
-// scene is paused (animationsEnabled = false), so this component drives the target animator itself via
-// requestAnimationFrame.
-//
-// The axis sliders are the whole point of the transport: they move the probe, and moving the probe is how
-// you see the blend work. They intentionally do the same thing as dragging on the plot — one is precise,
-// the other is fast.
+// Floating bottom transport for the Animation Field editor: play/scrub plus axis sliders that move the
+// probe. The field tab's scene is paused (animationsEnabled = false), so this drives the target animator
+// itself via requestAnimationFrame.
 
 export default function AnimationFieldPlayer() {
   const { editorMode, closeTab, activeTabId } = useCleoEngine()
@@ -21,8 +17,8 @@ export default function AnimationFieldPlayer() {
 
   useEffect(() => { playingRef.current = playing }, [playing])
 
-  // Per-frame drive loop. Reads the target through the ref chain each tick rather than closing over it, so
-  // a tab switch mid-flight cannot leave it advancing a detached animator.
+  // The drive loop must read the target through this ref each tick, not close over it, or a mid-flight tab
+  // switch leaves it advancing a detached animator.
   const targetRef = useRef(target)
   targetRef.current = target
   useEffect(() => {
@@ -132,8 +128,7 @@ function AxisSlider({ name, min, max, value, onChange }: {
   value: number
   onChange: (v: number) => void
 }) {
-  // A degenerate range would give the slider a zero step and freeze it; 100 stops across whatever span
-  // exists is fine for a preview control.
+  // A degenerate range would give the slider a zero step and freeze it.
   const step = Math.abs(max - min) / 100 || 0.01
   return (
     <div className='flex items-center gap-2 text-[11px] text-gray-300'>

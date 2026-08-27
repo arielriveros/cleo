@@ -1,9 +1,8 @@
 import { CameraNode, Material, CustomMaterial } from 'cleo'
 import type { MaterialAsset } from './materials'
 
-// Node variable that links a camera's ordered screen-space material passes to material assets
-// (mirrors MATERIAL_ID_VAR, but holds an ORDERED LIST of asset ids as a JSON string — the node
-// variable system has no array type).
+// Node variable linking a camera's screen-space material passes to material assets. Holds an ORDERED LIST
+// of asset ids as a JSON string: the node variable system has no array type.
 export const SCREEN_MATERIAL_IDS_VAR = '__screenMaterialIds'
 
 /** The ordered screen-material asset ids a camera references (empty when unset/corrupt). */
@@ -25,9 +24,9 @@ export function setScreenMaterialIds(node: CameraNode, ids: string[]): void {
 }
 
 /**
- * Rebuild the camera's live screenMaterials from an ordered list of material assets (skipping any
- * that are not screen-mode custom materials) and stamp the id link variable. The materials are
- * serialized inline with the camera on save, so runtime scenes don't need the asset library.
+ * Rebuild the camera's live screenMaterials from an ordered list of material assets, skipping any that are
+ * not screen-mode custom materials, and stamp the id link variable.
+ * The materials serialize inline with the camera, so a runtime scene needs no asset library.
  */
 export function applyScreenMaterials(node: CameraNode, assets: MaterialAsset[]): void {
   const mats: CustomMaterial[] = []

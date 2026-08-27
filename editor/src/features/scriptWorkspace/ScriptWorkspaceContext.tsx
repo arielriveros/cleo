@@ -21,15 +21,14 @@ import { clearExternalSource } from './externalSourceStore'
 
 // Keeps the project's script library and a folder on disk in step, so scripts can be edited in VSCode.
 //
-// The two directions are deliberately asymmetric. Editor -> disk is DERIVED: a debounced effect over
-// (vfs, scriptAssets) recomputes what should be on disk and writes the difference, so every origin is
-// covered at once -- a Monaco save, an explorer rename, a duplicate, a bundle import, a merge remap --
-// rather than each having to remember to call us. Disk -> editor is an EVENT: the main process reports a
-// coalesced changeset, which planPull turns into renames/updates/creates/deletes.
+// The two directions are asymmetric. Editor -> disk is derived: a debounced effect over (vfs,
+// scriptAssets) recomputes what should be on disk and writes the difference, so every origin is covered
+// at once. Disk -> editor is an event: the main process reports a coalesced changeset, which planPull
+// turns into renames/updates/creates/deletes.
 //
-// `agreedRef` is the state both sides last agreed on and the pivot for both plans. Keeping it in a ref
-// rather than state matters: it is written from an async apply and read by the next push, and a render
-// in between would plan against a stale mirror and rewrite files that are already correct.
+// `agreedRef` is the state both sides last agreed on and the pivot for both plans. It must stay a ref:
+// it is written from an async apply and read by the next push, and a render in between would plan
+// against a stale mirror.
 
 export type WorkspaceStatus = 'off' | 'connecting' | 'live' | 'paused' | 'error'
 
@@ -82,10 +81,10 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
   const statusRef = useRef<WorkspaceStatus>('off')
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pushingRef = useRef(false)
+  // The last change reported while paused, so "Apply deletions" has something to act on.
   const pendingDeletionsRef = useRef<PullPlan | null>(null)
   /** Fingerprint of the last manifest written, so an unchanged one is not rewritten on every push. */
   const manifestRef = useRef('')
-  // The last change reported while paused, so "Apply deletions" has something to act on.
 
   const available = hasScriptWorkspace()
 
@@ -115,11 +114,9 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     const manifest = buildManifest(activeProjectId(), plan.next, typesHashRef.current)
     const fingerprint = JSON.stringify(manifest)
 
-    // The manifest has to be written even when no FILE changes -- it is the identity record, and the
-    // cases that leave the file plan empty are exactly the ones that move it: a script created or edited
-    // on disk is already in the right place, so only the id -> path mapping is new. Skipping it there
-    // left the workspace with no manifest at all, and the next connect would read those files as brand
-    // new, mint fresh asset ids and break `__scriptId` on every node using them.
+    // The manifest must be written even when no FILE changes: it is the identity record, and a script
+    // created or edited on disk is already in the right place, so only the id -> path mapping is new.
+    // Without it the next connect mints fresh asset ids and breaks `__scriptId` on every node.
     if (!plan.filesChanged && fingerprint === manifestRef.current) return
 
     pushingRef.current = true
@@ -162,8 +159,8 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     const asset = buildScriptAsset(name, baseType, source || defaultScriptClass(name, baseType), cryptoRandomId())
     addScriptAsset(asset)
     setVfs(v => {
-      // The folders the file sits in may not exist in the index yet -- an IDE can create a directory
-      // the editor has never seen.
+      // The folders the file sits in may not exist in the index yet: an IDE can create a directory the
+      // editor has never seen.
       let next = v
       for (const folder of ancestorsOf(path)) next = applyCreateFolder(next, folder)
       return applyAdd(next, { path, kind: 'script', assetId: asset.id, created: Date.now() })
@@ -197,8 +194,8 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     for (const c of plan.creates) createdIds.set(c.rel, createFromFile(c.rel, c.source, c.baseType))
 
     for (const d of plan.deletes) {
-      // The explorer's own delete path, so unlinking every node that referenced the script (and whatever
-      // history that records) behaves identically to deleting the card in the Assets tab.
+      // The explorer's own delete path, so node unlinking and history match deleting the card in the
+      // Assets tab.
       deleteAsset('script', d.scriptId, depsRef.current)
       setVfs(v => applyDelete(v, [vfsPathOfRel(d.rel)]))
       clearExternalSource(d.scriptId)
@@ -223,8 +220,8 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
 
     const plan = planPull(agreedRef.current, change)
     if (plan.paused) {
-      // Nothing is applied. A vanished folder or a pile of deletions is far more likely to be a git
-      // checkout or a moved directory than an intent to drop scripts from every node using them.
+      // Nothing is applied: a vanished folder or a pile of deletions is more likely a git checkout or a
+      // moved directory than an intent to drop scripts.
       pendingDeletionsRef.current = plan
       setStatusBoth('paused', plan.pauseReason ?? 'Script sync paused.')
       Logger.warn(`Script workspace paused: ${plan.pauseReason}`, 'Editor')
@@ -233,7 +230,7 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     applyPull(plan)
   }, [applyPull, setStatusBoth])
 
-  // Held in a ref so the IPC subscription below is registered once and never re-registered on a render.
+  // Must be a ref so the IPC subscription below is registered once, never re-registered on a render.
   const onExternalChangeRef = useRef(onExternalChange)
   onExternalChangeRef.current = onExternalChange
 
@@ -278,9 +275,8 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     setStatus('live')
     setMessage(null)
 
-    // Whatever the folder holds now is a changeset against what we last agreed with it -- which covers
-    // edits made while the editor was closed. Reusing the pull path means the bulk-delete guard applies
-    // to those too, so a folder emptied out of session pauses rather than gutting the library.
+    // Whatever the folder holds now is a changeset against what was last agreed, covering edits made
+    // while the editor was closed. Reusing the pull path applies the bulk-delete guard to those too.
     const knownRels = new Set([...agreedRef.current.values()].map(v => v.rel))
     const present = new Map(opened.files.map(f => [f.rel, f.source]))
     onExternalChangeRef.current({
@@ -289,7 +285,6 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
       removed: [...knownRels].filter(rel => !present.has(rel)),
     })
 
-    // Then push whatever the library has that the folder does not.
     await push()
     if (announce) Logger.info(`Scripts are mirrored to ${root}`, 'Editor')
   }, [push, setStatusBoth])
@@ -373,7 +368,7 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
       const hit = prev.find(c => c.scriptId === scriptId)
       if (hit && keep === 'mine') {
         // The external edit was already adopted when it arrived, so keeping the editor's version means
-        // putting it back -- which the derived push then mirrors to disk.
+        // putting it back; the derived push then mirrors that to disk.
         adoptExternalScriptSource(scriptId, hit.mine)
       }
       return prev.filter(c => c.scriptId !== scriptId)

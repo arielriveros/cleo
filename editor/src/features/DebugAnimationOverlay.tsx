@@ -6,19 +6,9 @@ import { usePlayback } from './PlaybackContext'
 import { useDebugVisibility } from './DebugVisibilityContext'
 import FieldDebugReadout from './animation/FieldDebugReadout'
 
-// The animation blend readout, in the VIEWPORT — which is the only place it can tell you anything about a
-// real character.
-//
-// The same numbers are already in the State Machine inspector, but that panel runs against the editor's
-// preview scene, and the editor has no physics. Every MEASURED built-in (planarSpeed, planarAngle,
-// isGrounded, the whole NODE_BUILTINS family) therefore reads 0 in there, so a blend driven by movement
-// cannot be reproduced, let alone diagnosed. Play is the only place its inputs exist.
-//
-// Reads instance.scene, which is the editor scene while authoring and the play scene during Play, so one
-// component serves both channels of the `animation` toggle — same trick as DebugSkeletonOverlay.
-//
-// A DOM overlay, not scene nodes: nothing here can reach a published game, and the helper-name strip is not
-// even involved.
+// The animation blend readout, in the VIEWPORT. The State Machine inspector shows the same numbers, but it
+// runs against the editor's preview scene, which has no physics, so every MEASURED built-in reads 0 there.
+// Reads instance.scene, so one component serves both channels of the `animation` toggle. A DOM overlay.
 
 /** Animators in the live scene, with a label to pick between them. Rebuilt on demand, not per frame. */
 function animatorsIn(scene: any): { id: string; name: string; animator: Animator }[] {
@@ -78,8 +68,6 @@ export default function DebugAnimationOverlay() {
         : <FieldDebugReadout animator={current.animator} />}
 
       {!isPlayMode && (
-        // Worth saying every time it is open in the editor: a reader who does not know this will conclude the
-        // character's speed really is zero.
         <p className='mt-1 border-t border-control pt-1 text-[10px] text-gray-500'>
           Editor has no physics — measured inputs (speed, angle) read 0 here. Enter Play for real values.
         </p>

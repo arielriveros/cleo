@@ -1,8 +1,7 @@
 import type { ExternalChange } from '../../utils/scriptMirror'
 
-// Typed view of the script-workspace half of `window.cleoDesktop` (desktop/preload.js). Mirrors the
-// shape publishClient.ts uses for the publish half: the bridge only exists inside the Electron shell, so
-// every caller goes through `hasScriptWorkspace()` and the web build simply has the feature disabled.
+// Typed view of the script-workspace half of `window.cleoDesktop` (desktop/preload.js). The bridge only
+// exists inside the Electron shell, so every caller must go through `hasScriptWorkspace()`.
 
 export type ScriptBatch = {
   deletes?: string[]

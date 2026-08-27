@@ -73,10 +73,8 @@ export default function EngineViewport() {
     const wasDraggingRef = useRef(false);
     const isGizmoDraggingRef = useRef(false);
     const justFinishedGizmoDragRef = useRef(false);
-    // The floating control is a VIEW toggle: it swaps the camera rig and nothing else. It used to write
-    // the scene's authored dimension, which meant glancing at a 3D scene through an orthographic camera
-    // dirtied the tab, raised the "you'll lose your landscape" prompt, and changed what a publish would
-    // keep. The scene's type is edited in its own settings panel; this is just a lens.
+    // The floating control is a VIEW toggle: it swaps the camera rig and nothing else. The scene's
+    // authored dimension is edited in its own settings panel.
     const dimension = viewDimension;
  
     useEffect(() => {
@@ -111,12 +109,9 @@ export default function EngineViewport() {
         const inOverlay = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-cleo-overlay]');
 
         /**
-         * The landscape or tilemap under a ray, or null. The click-selection fallback for the two node
-         * types the generic raycaster skips.
-         *
-         * A tilemap only counts when the cell under the cursor actually holds a tile: its plane is
-         * infinite, so selecting on any plane hit would make it impossible ever to deselect in a 2D scene.
-         * A terrain has a bounded footprint, so any hit on it counts.
+         * The landscape or tilemap under a ray, or null — the click-selection fallback for the two node
+         * types the generic raycaster skips. A tilemap only counts when the cell under the cursor holds a
+         * tile: its plane is infinite, so any plane hit would make deselecting impossible in a 2D scene.
          */
         const pickGroundNode = (ray: { origin: Vec.vec3; direction: Vec.vec3 }): Node | null => {
             let best: Node | null = null;
@@ -169,15 +164,12 @@ export default function EngineViewport() {
                 const deltaX = Math.abs(x - dragStartPos.x);
                 const deltaY = Math.abs(y - dragStartPos.y);
 
-                // If mouse moved more than 5 pixels, consider it a drag
                 if (deltaX > 5 || deltaY > 5) {
                     setIsDragging(true);
                     wasDraggingRef.current = true;
-                    // The camera is being dragged, so capture the mouse: the orbit/pan can then run
-                    // indefinitely without the cursor escaping the viewport. Capturing only once the
-                    // threshold trips means a plain click-to-select never hides the cursor. From here on
-                    // client coordinates are frozen, but `wasDraggingRef` is already set so the click
-                    // handler below still knows to skip selection.
+                    // Capture the mouse so the orbit/pan can run without the cursor escaping the viewport.
+                    // Capturing only once the 5px threshold trips means a plain click-to-select never hides
+                    // the cursor. Client coordinates freeze here; `wasDraggingRef` still gates the click.
                     captureViewport(instance);
                 }
             }
@@ -192,16 +184,13 @@ export default function EngineViewport() {
         const handleClick = (event: MouseEvent) => {
             // Ignore clicks that land on a floating overlay (2D/3D control, etc.).
             if (inOverlay(event.target)) return;
-            // Don't allow selection during play mode
             if (isPlayMode) return;
             // In landscape/tilemap/renderer modes the viewport is not a selection surface. In material mode
             // the preview sphere stays selected (it drives the material inspector), so clicks must not change
             // it. Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
             if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
             
-            // Only allow selection on single clicks, not drags
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
-                // Reset dragging state after checking
                 setIsDragging(false);
                 wasDraggingRef.current = false;
                 return;
@@ -221,7 +210,6 @@ export default function EngineViewport() {
                 
                 console.log('Mouse position:', { x, y, rectWidth: rect.width, rectHeight: rect.height });
                 
-                // Create ray from mouse position
                 const ray = Raycaster.screenToRay(
                     x, 
                     y, 
@@ -238,7 +226,6 @@ export default function EngineViewport() {
                 console.log('Total nodes in scene:', allNodes.length);
                 console.log('Nodes:', allNodes.map(n => ({ id: n.id, name: n.name, type: n.nodeType, visible: n.visible })));
 
-                // Perform raycast
                 const hits = Raycaster.raycast(ray, allNodes);
                 console.log('Raycast hits:', hits.length);
 
@@ -251,9 +238,8 @@ export default function EngineViewport() {
                     eventEmitter.emit('SELECT_NODE', target.id);
                 } else {
                     // Nothing ordinary was hit. Terrain and tilemaps are deliberately skipped by
-                    // Raycaster.raycast (a terrain has its own analytic picker, and a tilemap's box spans
-                    // everything it has ever painted), so they get their own pass here — otherwise the two
-                    // node types you can see filling the viewport would be the only ones you cannot click.
+                    // Raycaster.raycast (a terrain has its own analytic picker; a tilemap's box spans
+                    // everything it has ever painted), so they get their own pass here.
                     const analytic = pickGroundNode(ray);
                     // A click on genuinely empty space still deselects, which is how a selection is cleared.
                     eventEmitter.emit('SELECT_NODE', analytic?.id ?? null);
@@ -261,14 +247,12 @@ export default function EngineViewport() {
             } catch (error) {
                 console.error('Error during node selection:', error);
             } finally {
-                // Reset dragging state after click handling
                 setIsDragging(false);
                 wasDraggingRef.current = false;
             }
         };
 
         const viewport = viewportRef.current;
-        // Use capture: false to allow events to bubble to the canvas
         viewport.addEventListener('mousedown', handleMouseDown, false);
         viewport.addEventListener('mousemove', handleMouseMove, false);
         viewport.addEventListener('click', handleClick, false);
@@ -284,7 +268,6 @@ export default function EngineViewport() {
         };
     }, [instance, editorScene, eventEmitter, isDragging, isGizmoDragging, dragStartPos, isPlayMode, editorMode]);
 
-    // Listen for gizmo drag events
     useEffect(() => {
         const handleGizmoDragStart = () => {
             isGizmoDraggingRef.current = true;

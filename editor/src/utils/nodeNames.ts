@@ -1,10 +1,10 @@
 /**
- * The one place node names are validated. Shared by the Properties panel and the scene tree's inline
- * rename so both refuse exactly the same names.
+ * The one place node names are validated, so the Properties panel and the tree's inline rename refuse
+ * exactly the same names.
  *
- * `__editor__` / `__debug__` are not cosmetic: the publish pass strips every node whose name contains
- * them (buildGameData), so a name that slipped through here would delete content from shipped builds.
- * `root` is reserved because Scene.parse re-finds the root by that literal name.
+ * `__editor__` / `__debug__` are not cosmetic: buildGameData strips every node whose name contains them,
+ * so a name that slips through deletes content from shipped builds. `root` is reserved because
+ * Scene.parse re-finds the root by that literal name.
  *
  * @returns a warning to show the user, or null when the name is acceptable.
  */

@@ -1,15 +1,8 @@
-// Publish-time transform: pull node scripts OUT of the game data and emit them as real functions in a
-// separate game.scripts.js. The published game then loads scripts as normal JS (parsed by the browser)
-// instead of eval-ing script strings at runtime.
-//
-// The factory body is built by the engine's buildFactoryBody — the same function the editor's eval path
-// compiles through — so the two paths cannot drift apart. It is also what rewrites the script's `import`
-// statements into `__cleoImport(...)` calls, since an import statement is not legal inside a function.
-//
-// The source this module produces is then heavily obfuscated (see ./obfuscate) so shipped game logic is
-// unreadable. Obfuscation lives in its own module because it runs in the project worker, while this one
-// cannot: buildFactoryBody comes from `cleo`, and importing the engine into a worker is neither needed
-// nor safe. Building the script source is cheap (a few KB of user code); obfuscating it is not.
+// Publish-time transform: pull node scripts out of the game data and emit them as real functions in a
+// separate game.scripts.js, so the published game parses them as normal JS instead of eval-ing strings.
+// The factory body comes from the engine's buildFactoryBody — the same function the editor's eval path
+// uses — which also rewrites the script's `import` statements into `__cleoImport(...)` calls.
+// Obfuscation lives in ./obfuscate because that runs in the project worker, which cannot import `cleo`.
 
 import { buildFactoryBody } from 'cleo';
 
@@ -49,8 +42,7 @@ export function buildScriptsSource(scripts: ScriptMap): string {
   for (const [id, script] of Object.entries(scripts)) {
     let source: string;
     try {
-      // buildFactoryBody throws on unsupported module syntax; `new Function` then catches plain syntax
-      // errors. Either way one broken script is skipped rather than breaking the whole file's parse.
+      // buildFactoryBody throws on unsupported module syntax; `new Function` catches plain syntax errors.
       source = `function(__cleoImport) {\n${buildFactoryBody(script)}\n}`;
       // eslint-disable-next-line no-new-func
       new Function(`return (${source});`);

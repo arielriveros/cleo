@@ -10,7 +10,7 @@ export type AddScope = 'scene' | 'ui';
 const categoryKey = (scope: AddScope) => `cleo.addnew.category${scope === 'ui' ? '.ui' : ''}`;
 
 // One grid cell. The grid sizes the cell, so a long label wraps to two lines instead of widening its
-// column — which is what used to shove the whole section around in a narrow panel.
+// column.
 const CELL = 'flex flex-col items-center justify-start gap-1 h-[62px] p-1 rounded border border-control bg-control text-white hover:bg-control-hover cursor-pointer';
 const CELL_LABEL = 'text-[10px] leading-tight text-center break-words line-clamp-2 w-full';
 
@@ -22,8 +22,8 @@ function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAd
       title={item.label}
       draggable={!locked}
       onDragStart={(e) => {
-        // Deliberately not also text/plain: the scene tree's reparent path falls back to it and would
-        // try to resolve this item id as a node id.
+        // Not also text/plain: the scene tree's reparent path falls back to it and would try to resolve
+        // this item id as a node id.
         e.dataTransfer.setData(NEW_NODE_MIME, item.id);
         e.dataTransfer.effectAllowed = 'copy';
       }}
@@ -38,16 +38,13 @@ function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAd
 export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
   const { editorScene, selectedNode, editorMode, eventEmitter, triggers } = useCleoEngine();
 
-  // The palette's OWN scope decides its categories, not the editor mode. Deriving it from the mode made the
-  // two halves mutually exclusive by construction, which is exactly what stopped them being shown side by
-  // side; the panel that hosts this component picks the half instead.
+  // The palette's OWN scope decides its categories, not the editor mode; the hosting panel picks the half.
   const categories = useMemo(
     () => ADD_CATEGORIES.filter(c => UI_CATEGORIES.includes(c.value) === (scope === 'ui')),
     [scope]);
 
   // Validated against the VISIBLE list, not the whole catalog: a stored value can be valid for the other
-  // palette and match nothing here, which renders an empty grid. Also covers a category renamed since the
-  // value was stored ('meshes' -> 'primitives').
+  // palette, or name a since-renamed category, and match nothing here.
   const [category, setCategory] = useState<AddCategory>(() => {
     const stored = localStorage.getItem(categoryKey(scope)) as AddCategory | null;
     return stored && categories.some(c => c.value === stored) ? stored : categories[0].value;
@@ -66,17 +63,14 @@ export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
   };
 
   // A placed template instance (and its children) is read-only in Scene mode; adding nodes would parent
-  // them into the locked subtree, so disable the whole group. Computed fresh from the current selection.
+  // them into the locked subtree, so the whole group is disabled.
   const selectedNodeObj = editorScene && selectedNode ? editorScene.getNodeById(selectedNode) : null;
   const locked = editorMode === 'scene' && isWithinTemplateInstance(selectedNodeObj);
 
   const ctx: AddContext = { editorScene, eventEmitter, triggers };
 
-  // Clicking still parents onto the selection (drag onto the tree or the viewport to choose a parent).
-  //
-  // With no selection the fallback is the scene root rather than doing nothing. That matters most in ui
-  // mode, where the very first click is necessarily made with nothing selected — `addItemTo` retargets a
-  // UI element to (or creates) a UI root anyway, so the root is only ever a routing hop.
+  // Clicking parents onto the selection; with no selection the fallback is the scene root, which is only a
+  // routing hop since `addItemTo` retargets a UI element to (or creates) a UI root anyway.
   const onAdd = (item: AddItem) => {
     const parent = selectedNodeObj ?? editorScene?.root;
     if (!parent) return;

@@ -40,8 +40,7 @@ export interface SkyAtmosphereOptions {
     fogColor?: [number, number, number]; // custom tint, blended with the atmosphere color
     fogColorBlend?: number;     // 0 = pure atmosphere color, 1 = pure custom fogColor
     // God rays (volumetric light shafts from the scene directional light — a raymarched post pass
-    // that tests the sun's shadow map along each view ray). Legacy radial-blur keys (godRayWeight
-    // godRayDecay, godRayThreshold, godRaySunSpread) are ignored when parsing old scenes.
+    // that tests the sun's shadow map along each view ray).
     godRaysEnabled?: boolean;
     godRaySamples?: number;      // raymarch steps per pixel (quality/cost)
     godRayDensity?: number;      // 0..1 — scattering density of the participating medium
@@ -52,11 +51,9 @@ export interface SkyAtmosphereOptions {
 }
 
 /**
- * Scene-wide physically-based sky. Holds only parameters (plus a runtime cubemap that is NOT
- * serialized). The Renderer discovers it as a singleton off the Scene (like the skybox), bakes a
- * Nishita single-scattering atmosphere into a cubemap whenever the directional light changes
- * direction, and draws that cubemap as the sky background. Mutually exclusive with SkyboxNode
- * (the editor enforces one-at-a-time).
+ * Scene-wide physically-based sky. Holds only parameters; the runtime cubemap is NOT serialized. The
+ * renderer bakes a Nishita single-scattering atmosphere into it whenever the directional light changes
+ * direction. Mutually exclusive with SkyboxNode — the editor enforces one at a time.
  */
 export class SkyAtmosphereNode extends Node {
     // Sun

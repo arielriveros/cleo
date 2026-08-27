@@ -1,18 +1,13 @@
 // ---------------------------------------------------------------------------------------------------
-// Skeleton + animation clips belong to the MODEL ASSET, and this is the serialized half of that.
+// Skeleton + animation clips belong to the MODEL ASSET; this is the serialized half of that. A template or
+// scene stores its own copy of the subtree, but the `__modelId` back-link makes the ASSET where clips live.
 //
-// A template (or a scene) stores a full serialized copy of the subtree it contains, but the copy carries a
-// `__modelId` back-link. That link is what makes the asset — not the copy — the place clips live: importing
-// an animation while editing a template has to reach the character everywhere it is placed, not just that
-// template's private copy.
+// These functions patch an asset's `nodeJson`. The LIVE half goes through AnimatedModel's
+// addAnimation/removeAnimation/renameAnimation (see refreshModelClips in models.ts), and both halves must
+// move together — which is why the de-duping below mirrors AnimatedModel's exactly.
 //
-// These functions patch an asset's `nodeJson`; the LIVE half is patched through AnimatedModel's own
-// addAnimation/removeAnimation/renameAnimation (see refreshModelClips in models.ts), which need no GPU
-// rebuild. Both halves have to move together, which is why the de-duping below deliberately mirrors
-// AnimatedModel's.
-//
-// Deliberately engine-free — no `cleo` import — so it is unit-testable from the root test suite, which
-// cannot resolve the editor's `cleo` → ../dist link.
+// Must stay engine-free (no `cleo` import) so the root test suite, which cannot resolve the editor's
+// `cleo` → ../dist link, can exercise it.
 // ---------------------------------------------------------------------------------------------------
 
 /** The shape these helpers need from a model asset. Structural, so ModelAsset satisfies it. */
@@ -20,9 +15,7 @@ export type ClipBearingAsset = { nodeJson: any }
 
 /**
  * The first serialized SKINNED model inside a nodeJson subtree, or null.
- *
- * Not the root: an imported model's root is a plain holder Node ("a parent Node holding one ModelNode per
- * sub-mesh", see parseBundleToRoot) and the skinned model hangs off a child of it.
+ * Never the root: an imported model's root is a plain holder Node and the skinned model hangs off a child.
  */
 export function skinnedModelJsonOf(nodeJson: any): any | null {
   if (!nodeJson || typeof nodeJson !== 'object') return null
@@ -53,11 +46,10 @@ function withClips<T extends ClipBearingAsset>(asset: T, mutate: (clips: any[]) 
   if (!model) return asset
   const before = model.animations ?? []
   const next = mutate(before)
-  // Hand the ORIGINAL back when nothing actually changed. Callers feed the result to updateModel, and a
-  // new-but-equal object would mark the library dirty and trigger a full IndexedDB rewrite for a no-op.
+  // Hand the ORIGINAL back on a no-op: a new-but-equal object marks the library dirty and triggers a full
+  // IndexedDB rewrite.
   if (next === before) return asset
-  // AnimatedModel.serialize writes `null` rather than [] for an empty list; match it, so a round-trip
-  // through the asset produces the JSON the engine itself would have written.
+  // AnimatedModel.serialize writes `null`, not [], for an empty list; a round trip must match it.
   model.animations = next.length ? next : null
   return { ...asset, nodeJson }
 }
@@ -88,8 +80,8 @@ export function assetWithClipRemoved<T extends ClipBearingAsset>(asset: T, name:
 }
 
 /**
- * Toggle root motion on a clip in an asset's serialized model. A name that is not there, or a value that
- * matches what the clip already carries, leaves the asset untouched (withClips returns the original on no-op).
+ * Toggle root motion on a clip in an asset's serialized model. An unknown name, or a value the clip already
+ * carries, leaves the asset untouched.
  */
 export function assetWithClipRootMotion<T extends ClipBearingAsset>(asset: T, name: string, on: boolean): T {
   return withClips(asset, clips => {
@@ -101,9 +93,8 @@ export function assetWithClipRootMotion<T extends ClipBearingAsset>(asset: T, na
 
 /**
  * Merge bone names into an asset's serialized skin, so animation import can match by name from then on.
- *
- * The serialized skin stores `nodeNames` as entry PAIRS (`[number, string][]`) — a Map does not survive
- * JSON — which is the shape AnimatedModel.parse reads back.
+ * The serialized skin stores `nodeNames` as entry PAIRS (`[number, string][]`), the shape
+ * AnimatedModel.parse reads back.
  */
 export function assetWithBoneNames<T extends ClipBearingAsset>(asset: T, names: Map<number, string>): T {
   const nodeJson = JSON.parse(JSON.stringify(asset.nodeJson))
@@ -125,25 +116,19 @@ export function assetClipNames(asset: ClipBearingAsset | undefined): string[] {
 
 /**
  * Write an IK rig into an asset's serialized skin. `null` clears it.
- *
- * The rig belongs to the SKELETON — it is joint indices into this skin and cannot mean anything for another
- * one — so it lands beside `nodeNames` rather than on any placed node, and reaches every instance of the
- * model through the same propagation clips use.
- *
- * Unlike `nodeNames` this replaces rather than merges: a rig is one document that the editor edits whole,
- * and merging a half-assigned chain into a complete one would produce a rig nobody authored.
+ * The rig is joint indices into THIS skin, so it lands beside `nodeNames` rather than on a placed node.
+ * Unlike `nodeNames` it replaces rather than merges: merging a half-assigned chain into a complete one
+ * would produce a rig nobody authored.
  */
 export function assetWithIkRig<T extends ClipBearingAsset>(asset: T, rig: any | null): T {
   const current = assetIkRig(asset)
-  // Hand the ORIGINAL back on a no-op. Callers feed the result to updateModel, and a new-but-equal object
-  // marks the library dirty and triggers a full IndexedDB rewrite for nothing.
+  // Hand the ORIGINAL back on a no-op: a new-but-equal object triggers a full IndexedDB rewrite.
   if (JSON.stringify(current ?? null) === JSON.stringify(rig ?? null)) return asset
 
   const nodeJson = JSON.parse(JSON.stringify(asset.nodeJson))
   const model = skinnedModelJsonOf(nodeJson)
   if (!model?.skin) return asset
-  // `null` rather than `undefined`, matching what AnimatedModel.serialize writes for an absent rig — so a
-  // round-trip through the asset produces the JSON the engine itself would have.
+  // `null`, not `undefined`, matching what AnimatedModel.serialize writes for an absent rig.
   model.skin.ikRig = rig ?? null
   return { ...asset, nodeJson }
 }
@@ -154,24 +139,15 @@ export function assetIkRig(asset: ClipBearingAsset | undefined): any | null {
 }
 
 /**
- * Collapse a model asset's redundant holder node into its single ModelNode.
+ * Collapse a model asset's redundant holder node into its single ModelNode, so a single-mesh character is
+ * one row in the Scene panel rather than two. Everything the holder carried survives: its fit-to-size
+ * factor folds into the child's scale/position, and `__modelId` resolves the same on the ModelNode because
+ * `modelInstanceRootOf` and `skinnedModelNodeOf` are self-inclusive. A holder with >1 child groups a
+ * multi-part model and is left alone.
  *
- * An import used to always produce `holder -> ModelNode`, so a single-mesh character showed up in the
- * Scene panel as two identically-named rows (three, with the per-tab container that openMeshTab added on
- * top). The holder exists for three reasons and all of them survive the collapse:
- *  - it carries the fit-to-size factor for a RIGGED import, which cannot be baked into skinned vertices —
- *    folded into the child's scale/position here, and the renderer applies a skinned node's own world
- *    transform, so it keeps working;
- *  - it carries `__modelId` on a placed instance — `modelInstanceRootOf` and `skinnedModelNodeOf` are both
- *    self-inclusive, so the id landing on the ModelNode resolves identically;
- *  - it groups a MULTI-part model, which is why >1 child is left alone.
- *
- * Deliberately conservative: a holder with a non-zero ROTATION is left as-is. Composing an arbitrary
- * rotation with a child's TRS needs matrix decomposition (and is ambiguous under non-uniform scale), while
- * every holder this actually targets is either identity or uniformly scaled. Returns the SAME object when
- * nothing changed, so a caller can skip a pointless rewrite.
- *
- * Engine-free, like the rest of this module, so it is unit-testable without a GL context.
+ * A holder with a non-zero ROTATION is also left alone: composing it with the child's TRS needs matrix
+ * decomposition and is ambiguous under non-uniform scale.
+ * Returns the SAME object when nothing changed, so a caller can skip a pointless rewrite.
  */
 export function flattenModelJson(nodeJson: any): any {
   if (!nodeJson || nodeJson.type === 'model' || nodeJson.type === 'mesh') return nodeJson
@@ -193,13 +169,13 @@ export function flattenModelJson(nodeJson: any): any {
   const flat = {
     ...child,
     // The holder's name is the asset's name and the one the user sees; the child's is the file's internal
-    // mesh name, which for a single-part import is usually the same string anyway.
+    // mesh name.
     name: nodeJson.name ?? child.name,
-    // With no holder rotation this is exact: scale composes componentwise and the child's offset is scaled
-    // by the holder before being added to it.
+    // Exact only because the holder is unrotated: scale composes componentwise and the child's offset is
+    // scaled by the holder before being added.
     position: [hp[0] + hs[0] * cp[0], hp[1] + hs[1] * cp[1], hp[2] + hs[2] * cp[2]],
     scale: [hs[0] * cs[0], hs[1] * cs[1], hs[2] * cs[2]],
-    // Holder variables win only where the child has none — the child is the node being kept.
+    // Holder variables win only where the child has none; the child is the node being kept.
     variables: { ...(nodeJson.variables ?? {}), ...(child.variables ?? {}) },
   }
   if (!Object.keys(flat.variables).length) delete flat.variables
@@ -224,14 +200,12 @@ export function assetWithoutEmbeddedClips<T extends ClipBearingAsset>(asset: T):
 
 /**
  * The `[px,py,pz, rx,ry,rz, sx,sy,sz]` of a serialized node, defaulting to an identity transform.
- *
  * Engine-free half of the model-transform propagation (see applyModelTransformDelta in models.ts).
  */
 export function nodeJsonTrs(nodeJson: any): number[] {
   const triple = (v: any, d: number) => {
     const a = Array.isArray(v) ? v : []
-    // `a[i] == null` first: Number(null) is 0, so a null component would silently read as a zero SCALE
-    // rather than falling back to 1.
+    // `a[i] == null` must be tested first: Number(null) is 0, so a null component reads as a zero SCALE.
     return [0, 1, 2].map(i => (a[i] == null || !Number.isFinite(Number(a[i])) ? d : Number(a[i])))
   }
   return [...triple(nodeJson?.position, 0), ...triple(nodeJson?.rotation, 0), ...triple(nodeJson?.scale, 1)]
@@ -240,18 +214,9 @@ export function nodeJsonTrs(nodeJson: any): number[] {
 /**
  * A placement's transform with the change its MODEL made to its own root transform applied on top.
  *
- * A placement's transform and the asset root's transform occupy the SAME slot: the clone arrives carrying
- * the asset's TRS and is immediately overwritten with wherever the user put this copy. A rebuild therefore
- * had no way to tell "the user moved this copy" from "the model itself moved", and an edit to the model's
- * root transform was the one asset field that silently went nowhere.
- *
- * Recording what the asset said when the copy was built (MODEL_BASE_TRS_VAR) turns that into a
- * subtraction. Component-wise on purpose — `pos += new - base`, `rot += new - base`, `scale *= new / base`
- * — which is exactly "keep the copy where it is, and apply the change the model made". Exact whenever the
- * model root is unrotated, the normal case since flattenModelJson refuses to collapse a rotated holder;
- * an approximation under simultaneous rotation and non-uniform scale, the same ambiguity that function
- * declines to resolve.
- *
+ * The asset's TRS at the time the copy was built (MODEL_BASE_TRS_VAR) turns this into a subtraction, done
+ * component-wise: `pos += new - base`, `rot += new - base`, `scale *= new / base`. Exact whenever the model
+ * root is unrotated; an approximation under simultaneous rotation and non-uniform scale.
  * Returns null when there is no baseline or nothing moved, so the caller can skip the write.
  */
 export function modelTransformDelta(
@@ -263,7 +228,7 @@ export function modelTransformDelta(
   if (base.every((v, i) => Math.abs(v - next[i]) < 1e-6)) return null
 
   const p = instance.position, r = instance.rotation, s = instance.scale
-  // A zero base scale carries no ratio — treat it as 1 rather than producing NaN or collapsing the copy.
+  // A zero base scale carries no ratio; treat it as 1 or the copy collapses to NaN.
   const ratio = (i: number) => (Math.abs(base[6 + i]) < 1e-6 ? 1 : next[6 + i] / base[6 + i])
   return {
     position: [p[0] + (next[0] - base[0]), p[1] + (next[1] - base[1]), p[2] + (next[2] - base[2])],

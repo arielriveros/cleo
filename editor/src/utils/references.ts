@@ -35,10 +35,8 @@ export function collectReferencedTextureIds(
     for (const ln of scene.landscapes) {
       const terrain: any = (ln as any).terrain
       if (!terrain) continue
-      // These read LIVE material.textures maps, which — unlike the serialized ones the walks below
-      // use — also hold the engine's derived channel-packed slots. Those are rebuilt from the source
-      // maps at render time and have no stored bytes, so counting one as "referenced" would mark a
-      // phantom asset in the explorer and try to publish a texture that cannot be serialized.
+      // A LIVE material.textures map also holds the engine's derived channel-packed slots, which have no
+      // stored bytes; counting one as referenced publishes a texture that cannot be serialized.
       if (terrain.material?.textures)
         for (const id of terrain.material.textures.values()) if (!isDerivedTextureId(id as string)) set.add(id)
       for (const layer of terrain.layers ?? []) {
@@ -51,8 +49,8 @@ export function collectReferencedTextureIds(
     // Live tilemaps: each layer's tileset draws from one atlas texture.
     for (const tn of scene.tilemaps)
       for (const ts of tn.tilemap.tilesets.values()) if (ts.textureId) set.add(ts.textureId)
-    // Live sprites: same story, one embedded tileset each. Sprites carry no material asset, so the
-    // getNodeMaterial pass above sees nothing of theirs.
+    // Live sprites: one embedded tileset each. They carry no material asset, so the getNodeMaterial pass
+    // above sees nothing of theirs.
     for (const sn of scene.sprites) {
       const id = sn.tileset?.textureId
       if (id) set.add(id)
@@ -73,24 +71,15 @@ export function collectReferencedTextureIds(
 }
 
 /**
- * Every texture id a SERIALIZED scene tree references — i.e. what a published build actually needs.
+ * Every texture id a SERIALIZED scene tree references — what a published build actually needs. Driven off
+ * the scenes, not the asset libraries, so a publish ships what is used rather than everything imported.
  *
- * Driven off the serialized scenes rather than the asset libraries (which is what `referencedTextureIds`
- * in textureStore.ts does for a bundle export): a publish must ship what the scenes use, not everything
- * the project ever imported.
- *
- * Deliberately BROAD, because the failure mode is asymmetric — shipping a texture nothing uses wastes a
- * few KB, while missing one ships a broken game. So it does two passes:
- *
- *  1. `collectTextureIds`, a generic deep walk that picks up every `textures` slot→id map anywhere in the
- *     tree. That is what catches the indirect cases: a camera's inline `screenMaterials`, a
- *     CustomMaterial's sampler2D uniforms (whose ids also live in `textures`), and terrain layer
- *     materials' base surfaces.
- *  2. The terrain-specific fields that are NOT inside a `textures` map and so are invisible to (1):
- *     `displacementMap`, and each foliage rule's billboard/impostor texture.
- *
- * The terrain's composite splat texture never appears here — Terrain.serialize does not emit the
- * composite material, and its pixels ride in the terrain blob rather than the TextureManager.
+ * Deliberately BROAD: an extra texture wastes a few KB, a missing one ships a broken game. Two passes:
+ *  1. a generic deep walk over every `textures` slot→id map, catching the indirect cases (a camera's
+ *     inline `screenMaterials`, a CustomMaterial's sampler2D uniforms, terrain layer base surfaces);
+ *  2. the terrain fields that are NOT inside a `textures` map: `displacementMap` and each foliage rule's
+ *     billboard/impostor texture.
+ * The terrain's composite splat texture is not here: its pixels ride in the terrain blob.
  */
 export function collectPublishedTextureIds(node: any, set: Set<string>): void {
   if (!node || typeof node !== 'object') return
@@ -98,16 +87,14 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
   collectTextureIds(node, set)
 
   // A serialized tilemap's atlas ids sit on its embedded tilesets, NOT inside a `textures` map, so the
-  // generic walk above cannot see them — exactly like terrain's displacementMap.
-  // Sprites embed a single tileset under `sprite.tileset` rather than a `tilesets` array, so they need
-  // their own line here for the same reason.
+  // generic walk cannot see them. A sprite embeds a single tileset under `sprite.tileset` rather than a
+  // `tilesets` array, so it needs its own line.
   const walkTilesets = (n: any): void => {
     for (const ts of n?.tilemap?.tilesets ?? []) if (ts?.textureId) set.add(ts.textureId)
     const spriteTileset = n?.sprite?.tileset
     if (spriteTileset?.textureId) set.add(spriteTileset.textureId)
-    // A uiImage's texture id sits on its `ui` payload, not in a `textures` map — same blind spot as the
-    // tilemap and sprite cases above. Miss it and a published game's UI images come back blank with
-    // nothing logged, because the texture was simply never packed into the bundle.
+    // A uiImage's texture id sits on its `ui` payload, not in a `textures` map. Missing it packs no
+    // texture and the published game's UI images come back blank with nothing logged.
     if (typeof n?.ui?.textureId === 'string' && n.ui.textureId) set.add(n.ui.textureId)
     for (const child of n?.children ?? []) walkTilesets(child)
   }
@@ -136,8 +123,8 @@ export function collectReferencedMaterialIds(scene: Scene | null | undefined, mo
   const set = new Set<string>()
   if (scene) {
     for (const node of scene.nodes) {
-      // Every submesh's link. A merged model's second material is referenced by nothing else, so reading
-      // only the scalar reported it as orphaned in the explorer.
+      // Every submesh's link: a merged model's second material is referenced by nothing else, and the
+      // scalar link covers slot 0 only.
       for (const id of getMaterialIdsOf(node)) if (id) set.add(id)
       if (node.nodeType === 'camera')
         for (const sid of getScreenMaterialIds(node as CameraNode)) set.add(sid)
@@ -164,9 +151,8 @@ export function collectReferencedModelIds(scene: Scene | null | undefined): Set<
   const set = new Set<string>()
   if (scene) {
     for (const node of scene.nodes) {
-      // The legacy spelling is read too: a scene that predates the model rename (or one imported from an
-      // old bundle) would otherwise look unreferenced here — and "unreferenced" is what the explorer uses
-      // to flag an asset as safe to delete.
+      // The legacy spelling must be read too: "unreferenced" is what the explorer uses to flag an asset
+      // as safe to delete.
       const id = node.getVariable(MODEL_ID_VAR) ?? node.getVariable(LEGACY_MODEL_ID_VAR)
       if (id) set.add(id)
     }
@@ -188,10 +174,7 @@ export function collectReferencedScriptIds(scene: Scene | null | undefined): Set
 
 /**
  * Animation Field asset ids referenced by any node's animation state machine.
- *
- * Unlike every other kind above, the link is NOT a node variable: a field is referenced from inside the
- * machine, by the states that play it (`state.fieldId`). The machine lives on the node's animator, so this
- * reads it there rather than from the serialized `variables` map.
+ * The link is NOT a node variable: it is `state.fieldId` inside the machine, which lives on the animator.
  */
 export function collectReferencedAnimationFieldIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()
@@ -208,10 +191,8 @@ export function collectReferencedAnimationFieldIds(scene: Scene | null | undefin
 
 /**
  * Shared animation asset ids referenced by any MODEL asset in the library.
- *
- * The link is on the model asset (`animationIds`), not on a node and not on a scene: clips belong to the
- * character, so every placement of it plays the same set. That also means "is this animation used" cannot
- * be answered from a scene at all — hence the library argument rather than a Scene.
+ * The link is `animationIds` on the model asset, never on a node or a scene, so this takes the library
+ * rather than a Scene.
  */
 export function collectReferencedAnimationIds(models: { animationIds?: string[] }[]): Set<string> {
   const set = new Set<string>()
@@ -228,8 +209,7 @@ export function collectReferencedTilesetIds(scene: Scene | null | undefined): Se
         if (layer.cfg.tilesetId) set.add(layer.cfg.tilesetId)
       }
     }
-    // Inline tilesets (a helper icon's 1x1 wrapper, a migrated sheet) have no library asset behind
-    // them and must not be reported as references to one.
+    // Inline tilesets have no library asset behind them and must not be reported as references to one.
     for (const sn of scene.sprites) {
       const id = sn.tileset?.id
       if (id && !isInlineTilesetId(id)) set.add(id)

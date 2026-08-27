@@ -1,11 +1,5 @@
-// Undo/redo stack.
-//
-// Deliberately generic: an entry is just a label plus an undo and a redo closure, so the engine never
-// has to know what an "edit" is. The editor's recorder decides how each kind of scene change becomes a
-// pair of closures — an exact inverse where the change event carries enough detail, a subtree snapshot
-// where it does not.
-//
-// No DOM, no GL, no scene imports, so it is directly unit-testable and cheap to hold one per tab.
+// Undo/redo stack. An entry is just a label plus an undo and a redo closure, so this never has to know
+// what an "edit" is. No DOM, no GL, no scene imports.
 
 /** One reversible edit. `undo` must restore exactly the state `redo` produces from. */
 export interface HistoryEntry {
@@ -13,9 +7,8 @@ export interface HistoryEntry {
     undo(): void;
     redo(): void;
     /**
-     * Entries pushed within `coalesceMs` of each other under the same key are merged into one: the
-     * older entry's `undo` is kept and the newer one's `redo`. This is what turns a slider drag's
-     * hundred property writes into a single undo step.
+     * Entries pushed within `coalesceMs` of each other under the same key merge into one: the older
+     * entry's `undo` is kept and the newer one's `redo`, so a slider drag is a single undo step.
      */
     coalesceKey?: string;
     /** Milliseconds, supplied by the pusher so the manager stays free of a clock dependency. */
@@ -59,7 +52,6 @@ export class HistoryManager {
 
         if (this._batchDepth > 0) { this._batch.push(entry); return; }
 
-        // A new edit invalidates the redo branch — the usual linear-history rule.
         this._redoStack.length = 0;
 
         const top = this._undoStack[this._undoStack.length - 1];
@@ -83,11 +75,8 @@ export class HistoryManager {
     }
 
     /**
-     * Group everything pushed until the matching `endBatch` into one entry.
-     *
-     * Re-entrant: a nested begin/end pair does not close the outer group. That matters because the
-     * things being bracketed — a paint stroke, a gizmo drag, a bulk edit — routinely call into code
-     * that brackets itself.
+     * Group everything pushed until the matching `endBatch` into one entry. Re-entrant: a nested
+     * begin/end pair does not close the outer group.
      */
     public beginBatch(label: string): void {
         if (this._batchDepth === 0) { this._batch = []; this._batchLabel = label; }
@@ -121,9 +110,8 @@ export class HistoryManager {
     }
 
     /**
-     * Run `fn` with recording off. This is how undo/redo avoid recording themselves, and how the editor
-     * excludes its own bookkeeping (thumbnail renders, asset propagation) from the user's history.
-     * Re-entrant.
+     * Run `fn` with recording off — how undo/redo avoid recording themselves, and how a caller keeps
+     * its own bookkeeping out of the user's history. Re-entrant.
      */
     public silently<T>(fn: () => T): T {
         this._silent++;

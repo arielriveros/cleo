@@ -4,9 +4,9 @@ import type { CustomBaseType, CustomRenderMode } from 'cleo'
 type MaterialConfig = Parameters<typeof CustomMaterial.Create>[2]
 
 /**
- * (Re)seed a custom material's shader source + uniform declarations (and their live values) from an
- * "extend base" choice and a render mode. Clears any previous user uniforms/textures so switching base
- * or mode gives a clean, compiling scaffold. Callers should refresh the inspector afterwards.
+ * (Re)seed a custom material's shader source, uniform declarations and their live values from an "extend
+ * base" choice and a render mode. Clears previous user uniforms/textures, so switching base or mode gives
+ * a clean, compiling scaffold. Callers must refresh the inspector afterwards.
  */
 export function seedCustomMaterial(mat: CustomMaterial, base: CustomBaseType, mode: CustomRenderMode): void {
   mat.baseType = base

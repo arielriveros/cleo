@@ -53,10 +53,9 @@ export function groupImportFiles(files: File[]): ImportBundle[] {
   const soleModel = models.length === 1
 
   return models.map(m => {
-    // Only a model at least two levels deep has a meaningful parent to look sideways from. At depth 1
-    // the parent is the selection root, and reaching for it would let `rock/rock.fbx` swallow
-    // `tree/`'s textures — over-claiming is not free, since an image a bundle claims but no material
-    // ends up using is never registered as a loose texture either (see runUpload).
+    // Only a model at least two levels deep has a parent worth looking sideways from: at depth 1 the
+    // parent is the selection root, and `rock/rock.fbx` would swallow `tree/`'s textures. Over-claiming
+    // is not free — an image a bundle claims but no material uses is never registered at all.
     const parent = dirOf(m.dir)
     const bundleFiles: File[] = [m.file]
     for (const a of aux) {

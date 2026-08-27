@@ -4,13 +4,9 @@ import { getAnimationTarget } from './skeleton'
 import { useStateMachine } from './StateMachineContext'
 import { Toggle } from '../../components/ui'
 
-// Floating bottom transport for the Animation Editor. The editor scene is paused (animators don't
-// tick), so this component drives the target animator itself via requestAnimationFrame: it advances
-// the clip while playing, scrubs on the timeline, and hosts the event markers for the selected clip.
-//
-// The timeline is a hand-rolled track rather than an <input type='range'>: markers have to sit at exact
-// times along it and be dragged, and a native range gives no way to map pixels to time (its thumb inset
-// means an overlay drawn at time/duration would not line up with the thumb).
+// Floating bottom transport for the Animation Editor: play/scrub the target clip and host its event
+// markers. The editor scene is paused (animators do not tick), so this drives the animator itself
+// via requestAnimationFrame.
 
 export default function AnimationPlayer() {
   const { editorScene, animationTargetId, closeTab, activeTabId, eventEmitter } = useCleoEngine()
@@ -39,7 +35,6 @@ export default function AnimationPlayer() {
   useEffect(() => { playingRef.current = playing }, [playing])
   useEffect(() => { simulateRef.current = simulate }, [simulate])
 
-  // Reflect a state machine applied in the right sidebar and imported clips (so the clip dropdown refreshes).
   useEffect(() => {
     const onChanged = () => force(x => x + 1)
     eventEmitter.on('ANIM_SM_CHANGED', onChanged)
@@ -157,8 +152,8 @@ export default function AnimationPlayer() {
     window.addEventListener('pointerup', up)
   }
 
-  // Marker drag. The listeners go on `window`, not the panel: the panel's onMouseDown stopPropagation only
-  // guards the viewport from clicks, and a pointer that leaves the track mid-drag must keep being tracked.
+  // Drag listeners go on `window`, not the panel: a pointer that leaves the track mid-drag must keep
+  // being tracked.
   const onMarkerDown = (e: React.PointerEvent, index: number) => {
     e.stopPropagation() // otherwise the track underneath seeks to wherever the marker was grabbed
     dragRef.current = index

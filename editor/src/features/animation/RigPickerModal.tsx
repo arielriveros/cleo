@@ -3,17 +3,9 @@ import { useEditorSessions } from '../EditorSessionsContext'
 import { Modal, ModalHeader, ModalFooter, Button } from '../../components/ui'
 
 /**
- * "Which rig is this animation for?"
- *
- * An animation file carries clips and a skeleton but no character, so there is nothing in it that says
- * which of the project's rigs it belongs to. Importing one from the asset explorer therefore has to ask.
- *
- * It does NOT ask when the Animation Editor is open: the character on screen is the answer, and prompting
- * for something already decided is noise. See `importAnimationFiles`.
- *
- * The choice is not permanent. Clips are stored in the FILE's own rig space, and the rig picked here only
- * decides which model gets the first link — the same asset can be linked to any other rig later, and is
- * retargeted afresh for each one.
+ * Asks which rig an imported animation file is for; an animation file names no character of its own.
+ * Skipped while the Animation Editor is open — see `importAnimationFiles`. The answer is not permanent:
+ * clips are stored in the file's own rig space and are retargeted afresh for every model linked later.
  */
 export default function RigPickerModal() {
   const { pendingRigPick, resolveRigPick } = useEditorSessions()

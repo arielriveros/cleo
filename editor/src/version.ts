@@ -1,14 +1,6 @@
 // The build's product version, injected by webpack's DefinePlugin (see webpack.config.js).
-//
-// Read from the ROOT package.json at build time rather than from `cleo`/dist, so a stale engine build
-// can never make the editor report the wrong version. `__BUILD_TAGGED__` is `git describe --exact-match`
-// on HEAD: only a build made from the exact commit a release tag points at is allowed to call itself
-// that version — everything else (local dev, a feature branch, a mid-cycle merge to main, a PR preview
-// deploy) is marked `-dev`. Both defines fail safe: no git, a shallow clone or an untagged commit all
-// resolve to `false`, so an unmarked version string is always a real release.
-//
-// Declared here rather than in a global .d.ts: this module is the only consumer, and keeping the
-// ambients next to it means there is no second file to remember when the defines change.
+// `__APP_VERSION__` comes from the ROOT package.json, never from `cleo`/dist. `__BUILD_TAGGED__` is
+// `git describe --exact-match` on HEAD and fails safe to false, so anything untagged is marked -dev.
 declare const __APP_VERSION__: string;
 declare const __BUILD_TAGGED__: boolean;
 

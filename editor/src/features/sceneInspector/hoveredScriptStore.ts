@@ -1,9 +1,8 @@
 import { useSyncExternalStore } from 'react'
 
 // Shared "which script is being hovered" state, so hovering one node's script icon (or a script asset card
-// in the Assets explorer) can tint every node icon that references the SAME script asset light-blue. A tiny
-// external store rather than context: both the scene tree and the assets explorer read it, and it changes on
-// pointer move — keeping it out of React state avoids re-rendering their providers on every hover.
+// in the Assets explorer) tints every node icon referencing the SAME script asset. An external store rather
+// than context: it changes on pointer move, and React state would re-render both providers every hover.
 
 let hovered: string | null = null
 const listeners = new Set<() => void>()

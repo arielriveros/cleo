@@ -5,9 +5,8 @@ import TemplateInstanceNotice from '../TemplateInstanceNotice'
 import { useSelectedNode, isRootNode } from '../useSelectedNode'
 import { getScriptIdOf } from '../../../utils/scripts'
 
-// The Scripts inspector panel: it links a script to the selected node and edits that node's variable values.
-// The script SOURCE is edited in the dedicated Script editor tab (ScriptSlot's "Edit Script" opens it, as
-// does the scene-tree script icon) — the code editor no longer lives here.
+// The Scripts inspector panel: links a script to the selected node and edits that node's variable values.
+// The script SOURCE is edited in the dedicated Script editor tab, not here.
 export default function ScriptEditor() {
   const { node, readOnly } = useSelectedNode()
   if (!node || isRootNode(node)) return null

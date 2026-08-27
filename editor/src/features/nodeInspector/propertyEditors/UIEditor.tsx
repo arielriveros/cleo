@@ -8,12 +8,7 @@ import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTab
 import { useEventBus } from '../../EventBusContext';
 import { TextureManager, isDerivedTextureId } from 'cleo';
 
-/**
- * The inspector for every UI element type.
- *
- * One component rather than eleven registered editors, because the shared rect/appearance block is most of
- * the surface and only the payload section differs — the same reason `UINode` owns most of the class.
- */
+/** The inspector for every UI element type; the rect/appearance block is shared and only the payload differs. */
 
 /** `Select` takes `<option>` children; this is the options-array shape the rest of this file wants. */
 function Choice<T extends string>({ value, onChange, options }: {
@@ -29,11 +24,8 @@ function Choice<T extends string>({ value, onChange, options }: {
 }
 
 /**
- * Texture picker for a UI image.
- *
- * Its own control rather than the shared `TextureInspector`, which is bound to a `Material` and a slot
- * name — a UI image holds a bare texture id. Derived (channel-packed) textures are filtered out: they are
- * engine-owned and never assignable, per `isDerivedTextureId`.
+ * Texture picker for a UI image, which holds a bare texture id rather than a `Material` slot. Derived
+ * (channel-packed) textures are engine-owned and never assignable, per `isDerivedTextureId`.
  */
 function TexturePicker({ value, onChange }: { value: string | null, onChange: (id: string | null) => void }) {
     const ids = Array.from(TextureManager.Instance.textures.keys())
@@ -131,11 +123,8 @@ function AnchorPicker({ node, onChange }: { node: UINode, onChange: () => void }
 }
 
 /**
- * The rect fields.
- *
- * The labels change per axis, and that is the whole point: on a PINNED axis the offsets read as position
- * and size, on a STRETCHED one they read as insets from each edge. Same stored data (see `solveRect`),
- * two very different mental models — showing "Offset Min X" for both would make the widget unusable.
+ * The rect fields. Labels change per axis: on a PINNED axis the offsets read as position and size, on a
+ * STRETCHED one as insets from each edge. Same stored data either way — see `solveRect`.
  */
 function RectFields({ node, onChange }: { node: UINode, onChange: () => void }) {
     const stretchX = node.anchorMin[0] !== node.anchorMax[0];
@@ -465,8 +454,7 @@ function PayloadFields({ node, onChange }: { node: UINode, onChange: () => void 
 export default function UIEditor({ node }: { node: UINode }) {
     const bump = useNodeVersion(node);
 
-    // A root's rect comes from the viewport or its projection, so the anchor/offset fields do not apply
-    // to it — showing them would be offering edits the layout pass ignores.
+    // A root's rect comes from the viewport or its projection, so anchor/offset do not apply to it.
     const isRoot = node instanceof UIRootNode;
 
     return (

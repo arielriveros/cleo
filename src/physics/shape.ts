@@ -23,8 +23,6 @@ export class Shape {
 
     constructor(shape: CannonShape, debugGeometry?: Geometry) {
         this._shape = shape;
-        // The debug model is built lazily: constructing a Model allocates GPU buffers, and shapes
-        // are created for every collider in published games where the wireframe is never drawn.
         this._debugGeometry = debugGeometry ?? null;
     }
 
@@ -47,20 +45,11 @@ export class Shape {
     }
 
     /**
-     * Capsule collider — the right shape for a character. cannon has no capsule primitive (its SHAPE_TYPES
-     * stop at cylinder), so one is compounded from a cylinder and two spheres; this returns the parts and
-     * the caller attaches each at its offset. That matters beyond convenience: cannon's Cylinder is a
-     * faceted ConvexPolyhedron, but Sphere is analytic — a character rests on the bottom sphere cap and so
-     * rolls over heightfield triangle edges instead of catching on them, which a box does.
-     *
-     * `height` is the TOTAL tip-to-tip height (Unity/Godot convention), so the straight section is
-     * `height - 2 * radius`. At or below `2 * radius` there is no straight section and the capsule is just
-     * a sphere — reachable by authoring, but also by a non-uniform scale, since the radius grows radially
-     * while the height follows Y.
-     *
-     * Offsets are in scaled body space and lie along the capsule's local Y, BEFORE the shape's own
-     * rotation — `attachShape` does not rotate offsets, so a caller applying a rotation must rotate these
-     * to match.
+     * Capsule collider. cannon has no capsule primitive, so this returns the parts of a compound (a cylinder
+     * and two spheres) for the caller to attach at each offset. `height` is the TOTAL tip-to-tip height, so
+     * the straight section is `height - 2 * radius`; at or below `2 * radius` it degenerates to a sphere.
+     * Offsets are in scaled body space along local Y, BEFORE the shape's own rotation — `attachShape` does
+     * not rotate offsets, so a caller applying a rotation must rotate these to match.
      */
     public static Capsule(radius: number, height: number, numSegments: number, scale: vec3 = NO_SCALE): { shape: Shape; offset: vec3 }[] {
         const [sx, sy, sz] = absScale(scale);
@@ -70,8 +59,8 @@ export class Shape {
         if (cyl <= EPSILON)
             return [{ shape: new Shape(new Sphere(r), Geometry.Sphere(16, r + EPSILON)), offset: [0, 0, 0] }];
 
-        // Only the cylinder carries debug geometry, and it carries the WHOLE capsule's — otherwise the
-        // three parts would draw three overlapping wireframes for one collider.
+        // Only the cylinder carries debug geometry, and it carries the WHOLE capsule's: three parts would
+        // otherwise draw three overlapping wireframes for one collider.
         return [
             { shape: new Shape(new Cylinder(r, r, cyl, numSegments), Geometry.Capsule(numSegments, r + EPSILON, cyl)), offset: [0, 0, 0] },
             { shape: new Shape(new Sphere(r)), offset: [0, cyl / 2, 0] },
@@ -84,12 +73,9 @@ export class Shape {
     }
 
     /**
-     * Convex hull collider. `vertices` / `faces` come from `convexHull.ts` (faces are index loops wound
-     * CCW from outside, and the hull is centered on its own centroid — cannon validates face planes
-     * against the origin). Returns null for a degenerate hull so the caller can fall back.
-     *
-     * cannon-es collides convex polyhedra with convex, box, sphere, plane, cylinder, heightfield and
-     * particle shapes. There is no convex/trimesh narrowphase.
+     * Convex hull collider. `vertices` / `faces` come from `convexHull.ts`: faces are index loops wound CCW
+     * from outside and the hull must be centered on its own centroid, since cannon validates face planes
+     * against the origin. Returns null for a degenerate hull. There is no convex/trimesh narrowphase.
      */
     public static ConvexHull(vertices: number[][], faces: number[][], scale: vec3 = NO_SCALE): Shape | null {
         if (vertices.length < 4 || faces.length < 4) return null;
@@ -110,8 +96,7 @@ export class Shape {
      * @returns trimesh shape
      */
     public static TriMesh(geometry: Geometry, scale: vec3 = vec3.fromValues(1, 1, 1)): Shape {
-        // cannon's Trimesh wants plain arrays; Geometry stores flat typed arrays, so this is a
-        // straight widening rather than the per-vertex unpack it used to be.
+        // cannon's Trimesh wants plain arrays; Geometry stores flat typed arrays.
         const trimesh = new Trimesh(Array.from(geometry.positions), Array.from(geometry.indices));
         trimesh.setScale(new Vec3( scale[0], scale[1], scale[2]));
         return new Shape(trimesh);

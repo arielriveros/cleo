@@ -7,9 +7,8 @@ import { importAtlasImage } from './importAtlas'
 
 // The tileset editing session: one working copy of the open tileset asset, shared by the atlas grid in the
 // viewport slot and the inspector in the Properties panel.
-//
-// It wraps the whole dock (see Editor.tsx) for the same reason the animation and blend-space sessions do:
-// either panel can be dragged anywhere, and the working copy must not be tied to one panel's mount.
+// It wraps the whole dock (see Editor.tsx): either panel can be dragged anywhere, so the working copy must
+// not be tied to one panel's mount.
 
 type TilesetContextValue = {
   /** The working copy, or null when no tileset tab is active. */
@@ -18,8 +17,8 @@ type TilesetContextValue = {
   patch: (p: Partial<TilesetAsset>) => void
   /**
    * Import an image file as this tileset's atlas. Returns false when it could not be decoded (the reason
-   * is logged). Guesses the tile size only for a tileset that has no atlas yet — swapping in a redrawn
-   * sheet of the same layout must not clobber slicing the author already set.
+   * is logged). Guesses the tile size only for a tileset that has no atlas yet, so swapping in a redrawn
+   * sheet of the same layout keeps the slicing the author set.
    */
   importAtlas: (file: File) => Promise<boolean>
   /** Replace one tile's metadata; passing undefined (or an empty object) clears it. */
@@ -42,8 +41,8 @@ export function useTileset(): TilesetContextValue {
   return ctx
 }
 
-// Fields whose change alters the grid, so the derived columns/rows (and any now-out-of-range per-tile
-// metadata) have to be recomputed rather than left stale.
+// Fields whose change alters the grid, so the derived columns/rows and any now-out-of-range per-tile
+// metadata have to be recomputed.
 const SLICING_KEYS: (keyof TilesetAsset)[] = [
   'tileWidth', 'tileHeight', 'margin', 'spacing', 'imageWidth', 'imageHeight', 'textureId',
 ]
@@ -53,15 +52,14 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
   const { markTabDirty, dirtyTabs } = useDocument()
 
   const [asset, setAsset] = useState<TilesetAsset | null>(null)
-  // Mirrored so importAtlas can read the CURRENT atlas without re-creating itself on every edit — it only
-  // needs to know whether there is one, to decide between guessing the slicing and preserving it.
+  // Mirrored so importAtlas can read the CURRENT atlas without re-creating itself on every edit.
   const assetRef = useRef<TilesetAsset | null>(null)
   assetRef.current = asset
   const [selection, setSelection] = useState<number[]>([])
   const loadedIdRef = useRef<string | null>(null)
 
-  // Adopt the tab's asset when it changes. Guarded on the id rather than the library array so a save (which
-  // rewrites the library) does not throw away the working copy the user is still editing.
+  // Adopt the tab's asset when it changes. Guarded on the id rather than the library array, so a save
+  // (which rewrites the library) does not throw away the working copy still being edited.
   useEffect(() => {
     if (!editingTilesetId) {
       loadedIdRef.current = null
@@ -93,8 +91,8 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
     setAsset(prev => {
       if (!prev) return prev
       const tiles = { ...prev.tiles }
-      // An empty record is dropped rather than stored: a husk would ship in every embedded copy and would
-      // make the "has metadata" markers in the grid lie.
+      // An empty record is dropped rather than stored: a husk would ship in every embedded copy and make
+      // the grid's "has metadata" markers lie.
       if (!meta || Object.keys(meta).length === 0) delete tiles[index]
       else tiles[index] = meta
       return { ...prev, tiles }
@@ -120,8 +118,8 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
 
   const save = useCallback(() => { if (asset) saveTileset(asset) }, [asset, saveTileset])
 
-  // Hand the save back to EngineContext so Ctrl+S, Save All and the close-tab prompt can reach the
-  // working copy — they only know tab ids, and it lives in this provider's state.
+  // Hand the save back to EngineContext so Ctrl+S, Save All and the close-tab prompt can reach the working
+  // copy — they only know tab ids.
   useEffect(() => {
     if (!tabId) return
     registerTilesetApply({ tabId, apply: save })

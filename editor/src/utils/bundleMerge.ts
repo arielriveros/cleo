@@ -13,11 +13,9 @@ import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 
 // Pure merge logic for importing a bundle alongside an existing project (the "Merge", not "Replace",
-// path). Any imported id that collides with a local one is re-minted, and every cross-reference to it —
-// texture ids, __materialId/__modelId/__templateId links, terrain layer materialId, foliage modelId,
-// camera screen-material lists, VFS assetIds — is rewritten to the new id. Imported scene node ids are
-// regenerated wholesale so they can never collide with local scenes (the published script registry keys
-// on node id). Everything here is deterministic and engine-free, so it is unit-testable in isolation.
+// path). An imported id that collides with a local one is re-minted, and every cross-reference to it is
+// rewritten. Imported scene node ids are regenerated wholesale — the published script registry keys on
+// node id, so they must never collide with a local scene's. Deterministic and engine-free.
 
 /** What the caller knows about the local project, so collisions can be detected. */
 export interface LocalState {
@@ -88,22 +86,20 @@ export function remapDeep(obj: any, r: Remaps): void {
     if (key === 'textureId' || key === 'displacementMap') { obj[key] = sub(r.tex, val); continue }
     if (key === 'materialId') { obj[key] = sub(r.tmat, val); continue } // terrain layer → terrain material
     if (key === 'materialIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.mat, x)); continue }
-    // 'meshId' is the pre-rename spelling; both point at a model asset (foliage rule → model asset).
+    // 'meshId' is the legacy spelling of 'modelId'; both point at a model asset.
     if (key === 'modelId' || key === 'meshId') { obj[key] = sub(r.model, val); continue }
-    // An animation state's link to its blend-space asset. The state also carries an EMBEDDED copy of the
-    // field, which needs no remapping — it is inline data, not a reference.
+    // An animation state's link to its blend-space asset. Its EMBEDDED copy of the field is inline data,
+    // not a reference, and must not be remapped.
     if (key === 'fieldId') { obj[key] = sub(r.afield, val); continue }
-    // A tilemap layer's link to its tileset asset, and the id on the tileset copy the map embeds. Both
-    // must move together: the layer looks its tileset up by id in the map's own embedded table, so
-    // remapping one without the other silently leaves the layer with nothing to draw.
+    // A tilemap layer's tileset link and the id on the embedded tileset copy must move together: the layer
+    // looks its tileset up by id in the map's own embedded table.
     if (key === 'tilesetId') { obj[key] = sub(r.tileset, val); continue }
     if (key === 'tilesets' && Array.isArray(val)) {
       for (const ts of val) if (ts && typeof ts === 'object') { ts.id = sub(r.tileset, ts.id); remapDeep(ts, r) }
       continue
     }
-    // A sprite embeds ONE tileset, under the singular key — the array branch above never matches it.
-    // Missing this is silent: the sprite's `tilesetId` would be remapped while its embedded copy kept
-    // the old id, and the sprite would draw nothing.
+    // A sprite embeds ONE tileset under the singular key, which the array branch above never matches.
+    // Skipping it leaves the embedded copy on the old id and the sprite draws nothing.
     if (key === 'tileset' && val && typeof val === 'object') {
       ;(val as any).id = sub(r.tileset, (val as any).id)
       remapDeep(val, r)
@@ -129,10 +125,9 @@ function remapVariables(vars: any, r: Remaps): void {
   one('__templateId', r.tpl)
   one('__scriptId', r.script)
 
-  // The two JSON-STRING id lists. `__screenMaterialIds` was already here but guarded on
-  // `Array.isArray(sm.value)` — and setScreenMaterialIds writes `JSON.stringify(ids)`, so that branch
-  // never ran and a camera's post passes kept pointing at re-minted ids. `__materialIds` (one material
-  // per submesh of a merged model) was missing outright, which dangled every slot but the first.
+  // The two JSON-STRING id lists: `__screenMaterialIds` (a camera's post passes, written by
+  // setScreenMaterialIds as `JSON.stringify(ids)`) and `__materialIds` (one material per submesh of a
+  // merged model). Both are strings, not arrays, so an `Array.isArray` guard silently skips them.
   list('__materialIds', r.mat)
   list('__screenMaterialIds', r.mat)
 
@@ -154,7 +149,7 @@ function remapVariables(vars: any, r: Remaps): void {
 function textureIdFor(t: BundleTexture, local: LocalState, r: Remaps): { keep: boolean; row: BundleTexture } {
   const existing = local.textures.get(t.id)
   if (!existing) return { keep: true, row: t } // id free — import as-is
-  // Same id already present: reuse it (drop the import) when it looks identical, else re-mint.
+  // Same id already present: reuse it when it looks identical, else re-mint.
   if (existing.size === t.bytes.byteLength && existing.mime === t.mime) return { keep: false, row: t }
   const newId = cryptoRandomId()
   r.tex.set(t.id, newId)
@@ -170,11 +165,11 @@ function uniqueName(base: string, taken: Set<string>): string {
 }
 
 export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
-  // Deep-clone so we never mutate the parsed bundle the caller may still hold.
+  // Deep-clone: the caller may still hold the parsed bundle.
   const data: BundleData = JSON.parse(JSON.stringify({
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }))
-  // Textures carry ArrayBuffers (not JSON-cloneable that way) — keep the originals, remap ids separately.
+  // Textures carry ArrayBuffers, which do not survive that clone; keep the originals and remap ids apart.
   const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), tileset: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
@@ -240,9 +235,8 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   }
   const vfsEntries: VfsEntry[] = []
   for (const e of data.vfs.entries) {
-    // Scene entries only make sense in a project bundle; their assetId maps to a freshly-minted scene id
-    // which we don't track per-old-id here, so skip re-adding scene VFS entries (scenes appear in the
-    // explorer via the scene list regardless of a VFS entry).
+    // A scene entry's assetId maps to a freshly-minted scene id that is not tracked per-old-id here.
+    // Scenes appear in the explorer via the scene list regardless of a VFS entry.
     if (e.kind === 'scene') continue
     const remap = e.kind === 'material' ? r.mat
       : e.kind === 'terrainMaterial' ? r.tmat

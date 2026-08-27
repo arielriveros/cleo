@@ -1,13 +1,8 @@
 import { Glyph as S } from './iconBase';
 
 /**
- * Inline SVG glyphs for the UI element catalog.
- *
- * Inline rather than twelve new PNG imports: SVG-as-currentColor is the house style for editor chrome, and
- * these need to tint with the cell's text colour anyway.
- *
- * Sizing comes from `iconBase`, i.e. from the container. These used to hard-code 24px, which overflowed
- * the scene tree's 16px icon box.
+ * Inline SVG glyphs for the UI element catalog, tinting with the cell's text colour via currentColor.
+ * Sizing comes from `iconBase`, i.e. from the container.
  */
 
 /** A screen with an anchored rect inside it. */

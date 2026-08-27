@@ -1,12 +1,9 @@
 import { createContext, useContext } from 'react';
 
 /**
- * The play-mode lifecycle slice, split out of the large EngineContext.
- *
- * `isPlayMode` and the play controls are read by the toolbar, viewport and gizmo. The state lives in and
- * is driven by EngineProvider (starting/stopping Play swaps the live scene); this context re-exposes it as
- * a narrow, memoized value so a consumer that only drives playback need not depend on the whole context.
- * The action wrappers are referentially stable, so the value changes only when `isPlayMode` flips.
+ * The play-mode lifecycle slice. `isPlayMode` and the play controls are read by the toolbar, viewport and
+ * gizmo; the state lives in EngineProvider, where starting/stopping Play swaps the live scene. The action
+ * wrappers are referentially stable, so this value changes only when `isPlayMode` flips.
  */
 export interface PlaybackContextValue {
   isPlayMode: boolean;

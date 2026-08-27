@@ -59,7 +59,13 @@ const CONFIGS = [
   // Sky-atmosphere features. Gated on the sky NODE rather than the renderer, so they take `sky`
   // patches: distance fog (skyFog) and raymarched light shafts (volumetricGodRays).
   { name: 'skyFog', patch: {}, sky: { fogEnabled: true, fogDensity: 0.02, fogStart: 2, fogMaxOpacity: 0.9 } },
-  { name: 'godRays', patch: {}, sky: { godRaysEnabled: true } },
+  // Exposure and density well above their defaults (0.3 / 0.9) ON PURPOSE. The gate below asserts that
+  // a pass visibly changes the frame, and god rays are additive light: at default strength they scatter
+  // 23 of the 128 signature values by no more than 4, which is under the noise floor, so the gate would
+  // be watching a pass it cannot see. That went unnoticed while the sky carried a black band at the
+  // horizon for the shafts to stand against — the moment the band was fixed the gate went vacuous.
+  // Turned up, the shafts are measurable against a lit sky, which is the case worth gating.
+  { name: 'godRays', patch: {}, sky: { godRaysEnabled: true, godRayDensity: 2.4, godRayExposure: 1.2 } },
   // Deliberately excludes SSAO so this one CAN be exact: it exists to prove stacked passes compose,
   // and bloom + chromatic aberration are both deterministic.
   { name: 'combined', patch: { bloomIntensity: 2, bloomThreshold: 0.4, chromaticAberrationStrength: 2, renderScale: 0.75 } },

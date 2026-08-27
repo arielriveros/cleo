@@ -7,17 +7,11 @@ import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 
-// The editor's virtual filesystem: the folder layout the unified Assets explorer shows.
-//
-// The five asset libraries (textures, materials, terrain materials, templates, models) are flat and know
-// nothing about folders. This index is the *side table* that gives each of them a path. It is deliberately
-// NOT a field on the asset records: textures have no record type at all (they live only in TextureManager),
-// and buildMaterialAsset/buildTerrainMaterialAsset/buildModelAsset each rebuild a fresh literal on every
-// save, which would silently drop any extra field.
+// The editor's virtual filesystem: a side table giving each flat asset library a folder path.
 //
 // A path is also the SVAR file-manager id, so it must be unique across every kind. The kind is carried by
-// a virtual extension (.mat/.tmat/.tpl/.model); textures keep their real image extension. Path rules match
-// SVAR's own FileTree.normalizeFile: the extension is everything after the LAST dot.
+// a virtual extension (.mat/.tmat/.tpl/.model); textures keep their real image extension. As in SVAR's
+// FileTree.normalizeFile, the extension is everything after the LAST dot.
 
 export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'tileset'
 
@@ -60,8 +54,7 @@ export type VfsIndex = {
   entries: VfsEntry[]
 }
 
-// IndexedDB 'cleo'/'kv', alongside the asset libraries. The name comes from the key registry (storageKeys)
-// and is a function, not a constant, so it can gain a project scope without any call site changing.
+// Stored in IndexedDB 'cleo'/'kv'. `vfsKey` is a function, not a constant, so it can carry a project scope.
 export { vfsKey } from './storageKeys'
 export const EMPTY_VFS: VfsIndex = { version: 1, folders: [], entries: [] }
 
@@ -120,8 +113,7 @@ export function kindOfExt(ext: string): AssetKind {
     case '.tmat': return 'terrainMaterial'
     case '.tpl': return 'template'
     case '.model': return 'model'
-    // Pre-rename model assets were saved with a '.mesh' path. Still accepted so an older index (or one
-    // from an old bundle) keeps resolving.
+    // '.mesh' is the legacy spelling of '.model' and must stay resolvable.
     case '.mesh': return 'model'
     case '.script': return 'script'
     case '.afield': return 'animationField'
@@ -204,11 +196,7 @@ export function isUnder(path: string, folder: string): boolean {
 
 /**
  * Drop every id that is a descendant of another id in the same list.
- *
- * SVAR's DataTree.remove purges a folder's whole subtree from its id pool, then dereferences
- * `_pool.get(nextId)` unconditionally — so handing it a folder AND a file inside that folder throws
- * `undefined.data` and aborts the batch half-applied. Deleting only the top-most ids is equivalent
- * (the subtree goes with the folder) and safe.
+ * SVAR's DataTree.remove throws if a batch names both a folder and something inside it.
  */
 export function topMostIds(ids: string[]): string[] {
   const unique = Array.from(new Set(ids))
@@ -216,14 +204,9 @@ export function topMostIds(ids: string[]): string[] {
 }
 
 /**
- * Of `paths`, the ones that can actually move into `target` — the filter a multi-item move has to pass
- * before SVAR's store sees it. Anything else either throws inside the store or is a no-op:
- *
- *   - a descendant listed alongside its own folder — FileTree.copyFiles re-ids the folder's subtree as it
- *     moves, so the descendant's id is stale by the time its turn comes (same trap as `topMostIds`)
- *   - the target itself, or a folder containing it — the store logs "cannot move a folder into itself"
- *   - something already in the target — FileTree.moveFiles tests only ids[0]'s parent, so one such id at
- *     the head of the batch silently cancels the whole move
+ * Of `paths`, the ones that can actually move into `target`. Every multi-item move must pass through this
+ * before SVAR's store sees it: descendants of a moved folder, the target or its ancestors, and paths
+ * already in the target each throw or silently cancel the whole batch.
  */
 export function movablePaths(paths: string[], target: string, isKnown: (path: string) => boolean): string[] {
   return topMostIds(paths).filter(src =>
@@ -255,9 +238,8 @@ export function subtreeOf(vfs: VfsIndex, ids: string[]): { entries: VfsEntry[]; 
 }
 
 /**
- * Rewrite every path at or beneath `oldPrefix` to sit under `newPrefix`. This mirrors exactly what SVAR's
- * FileTree.renameFiles does internally on a folder rename/move — it recurses into descendants but only
- * reports the top-level id back to us, so we have to redo the descendant remap on our side.
+ * Rewrite every path at or beneath `oldPrefix` to sit under `newPrefix`.
+ * SVAR's FileTree.renameFiles remaps descendants but reports only the top-level id, so this repeats it.
  */
 export function remapSubtree(vfs: VfsIndex, oldPrefix: string, newPrefix: string): VfsIndex {
   if (oldPrefix === newPrefix) return vfs
@@ -316,21 +298,13 @@ export function applyAdd(vfs: VfsIndex, entry: VfsEntry): VfsIndex {
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * The invariants every consumer of a VfsIndex is entitled to assume:
+ * Coerce anything index-shaped into an index satisfying the four invariants every consumer may assume:
  *   1. every path is absolute, has no empty segment and no trailing slash;
  *   2. every entry path's ancestors are present in `folders`;
  *   3. no path is claimed twice — not by two entries, and not by a folder and an entry;
  *   4. no asset (kind + assetId) is indexed twice.
- *
- * Violating (2) is not a cosmetic problem: SVAR's FileTree.parse silently *unlinks* a node whose
- * parent is absent — it stays in the id pool but never appears in serialize() — and the store-sync
- * effect then tries to create it, whereupon FileTree.add dereferences the missing parent and throws
- * `Cannot read properties of undefined (reading 'data')`. That state persists in IndexedDB, so the
- * explorer is bricked on every subsequent load.
- *
- * Pure, idempotent, and total: it takes any object shaped vaguely like an index (including one read
- * back from an older build or a hand-edited bundle) and returns one that satisfies all four. `notes`
- * describes what had to be changed, so a repair is visible in the log rather than silent.
+ * Breaking (2) makes SVAR's FileTree throw on its next sync, and the bad state persists in IndexedDB.
+ * Pure, idempotent and total; `notes` lists what had to be changed.
  */
 export function repairVfs(vfs: VfsIndex | null | undefined): { next: VfsIndex; notes: string[] } {
   const notes: string[] = []
@@ -375,8 +349,7 @@ export function repairVfs(vfs: VfsIndex | null | undefined): { next: VfsIndex; n
     }
     seenAsset.add(key)
 
-    // A path claimed by a folder or by another entry: the newcomer moves, the incumbent stays. Folders
-    // win over files because a folder may already have children hanging off it.
+    // On a path collision the newcomer moves and the incumbent stays; folders outrank files.
     let final = path
     if (taken.has(path)) {
       const ext = extOf(path)
@@ -410,9 +383,8 @@ function normalizePath(path: string): string {
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * Does this path's stem still represent `name`? Two assets can share a name, so the second one's path
- * carries a disambiguating suffix ('Rock' -> 'Rock (2).mat'). Without this, that suffix would read as a
- * rename on every pass and the reconciler would never reach a fixed point.
+ * Does this path's stem still represent `name`? A disambiguating ' (2)' suffix still counts, otherwise
+ * the reconciler would read it as a rename on every pass and never reach a fixed point.
  */
 function stemRepresents(stem: string, name: string): boolean {
   if (stem === name) return true
@@ -424,20 +396,13 @@ type ReconcileOpts = {
   /** Folder that assets created outside the explorer land in (the folder the user is browsing). */
   landingFolder?: string
   /**
-   * Drop entries whose asset no longer exists. Only safe once the IndexedDB libraries have loaded —
-   * they start as [] and a pruning pass before that would wipe the user's whole layout.
-   * Texture entries need `pruneTextures` on top: TextureManager is emptied and refilled during a
-   * project load, so an entry that merely looks dead may just be waiting for preloadTextures.
+   * Drop entries whose asset no longer exists. Only safe once the IndexedDB libraries have loaded; they
+   * start as [] and pruning before that wipes the user's whole layout. Textures need `pruneTextures` too.
    */
   prune?: boolean
   /**
-   * Also drop texture entries whose texture is gone. Only pass this once the registry has finished
-   * filling (`preloadTextures()` resolved AND the initial scene restored) — before that every entry
-   * looks orphaned. It is still not airtight: a legacy ModelAsset re-registers its embedded textures
-   * only when it is instantiated, so one that is never placed keeps its textures out of the registry.
-   * That is survivable rather than destructive — the entry is only a folder placement, and if the
-   * texture does reappear it is simply re-indexed at the root. No material reference is affected:
-   * those key on the TextureManager id, which this never touches.
+   * Also drop texture entries whose texture is gone. Only pass this once `preloadTextures()` has resolved
+   * AND the initial scene is restored; before that every entry looks orphaned.
    */
   pruneTextures?: boolean
   /** Rough byte size for a newly indexed asset (computed once, at index time — never per render). */
@@ -445,13 +410,9 @@ type ReconcileOpts = {
 }
 
 /**
- * Self-healing pass, run whenever a library changes. It:
- *   - indexes assets created outside the explorer (a mesh import, "New Material", a dropped scene node),
- *     landing them in `landingFolder`;
- *   - re-syncs an entry's stem when the asset was renamed elsewhere (e.g. in the material editor);
- *   - closes the folder set under its ancestors;
- *   - optionally prunes entries whose asset is gone (see `prune`).
- * It is idempotent, and reports `changed` so the caller can skip a needless state update + IDB write.
+ * Self-healing pass, run whenever a library changes: indexes assets created outside the explorer into
+ * `landingFolder`, re-syncs stems after an external rename, closes the folder set under its ancestors and
+ * optionally prunes dead entries. Idempotent; `changed` lets the caller skip a state update + IDB write.
  */
 export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileOpts = {}): { next: VfsIndex; changed: boolean } {
   const landing = opts.landingFolder && opts.landingFolder !== '/' ? opts.landingFolder : '/'
@@ -476,8 +437,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
     }
 
     kept.add(existing)
-    // A texture's name IS its immutable TextureManager id, so it can never drift. For everything else the
-    // record's `name` is the truth (the material editor can rename it), and the stem follows it.
+    // A texture's name IS its immutable TextureManager id; for every other kind the record's `name` wins.
     if (kind !== 'texture' && !stemRepresents(stemOf(existing.path), name)) {
       taken.delete(existing.path)
       const path = uniquePath(taken, dirOf(existing.path), name, ext)
@@ -500,9 +460,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const s of libs.scenes) visit('scene', s.id, s.name)
   for (const id of libs.textureIds) visit('texture', id, id)
 
-  // Entries whose asset wasn't visited: either a ghost (asset deleted behind our back) or an asset whose
-  // library hasn't finished loading. Keep them unless pruning is explicitly allowed — and never prune a
-  // texture, whose registry is torn down and rebuilt on every project load.
+  // An unvisited entry may just be a library that hasn't loaded, so keep it unless pruning is allowed.
   for (const e of prev.entries) {
     if (kept.has(e)) continue
     const prunable = e.kind === 'texture' ? opts.pruneTextures : opts.prune
@@ -511,9 +469,8 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   }
 
   const folders = withAncestors([...prev.folders, ...entries.flatMap(e => ancestorsOf(e.path))])
-  // Compare the folder SETS, not their lengths: withAncestors dedupes, so a duplicate in prev.folders
-  // used to cancel out a genuinely missing ancestor and the un-closed index was returned unchanged —
-  // which is exactly the state that makes the file manager throw on its next sync.
+  // Compare the folder SETS, not their lengths: withAncestors dedupes, so a duplicate in prev.folders can
+  // mask a genuinely missing ancestor, and an un-closed index makes the file manager throw on next sync.
   if (folders.length !== prev.folders.length || folders.some((f, i) => f !== prev.folders[i])) changed = true
 
   if (!changed) return { next: prev, changed: false }
@@ -578,10 +535,8 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
 export type OrphanEntry = { path: string; kind: AssetKind; assetId: string }
 
 /**
- * Entries pointing at an asset that is gone. They are invisible (buildFileManagerData skips them) but
- * not harmless: they hold their path in `uniquePath`'s taken set forever, so re-importing the same file
- * silently comes back as "Rock (2)". Auto-pruning them is gated on the libraries being loaded, which
- * fails open in exactly the case that produces them, so they are also offered for manual cleanup.
+ * Entries pointing at an asset that is gone. Invisible in the explorer, but they hold their path in
+ * `uniquePath`'s taken set forever, so re-importing the same file comes back as "Rock (2)".
  */
 export function findOrphanEntries(vfs: VfsIndex, libs: LibSnapshot): OrphanEntry[] {
   const alive = aliveIds(libs)
@@ -620,12 +575,9 @@ function aliveIds(libs: LibSnapshot): Record<AssetKind, Set<string>> {
 }
 
 /**
- * The flat `data[]` the SVAR file manager is initialised with. Folders come first (shallowest first) so a
- * parent always exists before its children — FileTree.add resolves `byId(parent)` eagerly. The root '/' is
- * never emitted; FileTree creates it itself.
- *
- * Entries whose asset no longer exists are skipped: they stay in the index (so an in-flight library load
- * can't lose them) but must not show up as phantom files.
+ * The flat `data[]` the SVAR file manager is initialised with. Folders come first, shallowest first —
+ * FileTree.add resolves `byId(parent)` eagerly. The root '/' must not be emitted; FileTree creates it.
+ * Entries whose asset no longer exists are skipped rather than dropped from the index.
  */
 export function buildFileManagerData(vfs: VfsIndex, libs: LibSnapshot): FmEntity[] {
   const alive = aliveIds(libs)

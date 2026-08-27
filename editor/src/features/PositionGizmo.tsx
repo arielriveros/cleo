@@ -43,10 +43,9 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
     // advanced by the raw movement deltas. Seeded at the grab point so the maths below is unchanged.
     const cursor = useRef<{ x: number; y: number } | null>(null);
 
-    // Create the gizmo node set for the given mode. Position uses arrows + shaft lines, scale uses cube
-    // tips + shaft lines, rotation uses a ring per axis (no shafts). Returns every created node so the
-    // caller can remove them on cleanup / mode change. All nodes are tagged `isGizmo` so the renderer
-    // draws them on top (depth test disabled) and the selection raycast can filter them out.
+    // Create the gizmo node set for the given mode: position = arrows + shaft lines, scale = cube tips +
+    // shaft lines, rotation = a ring per axis. Returns every created node for cleanup. All are tagged
+    // `isGizmo` so the renderer draws them on top (depth test off) and the selection raycast skips them.
     const createGizmoNodes = (mode: GizmoMode): ModelNode[] => {
         if (!instance || !editorScene) return [];
 
@@ -91,10 +90,9 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         return created;
     };
 
-    // Screen-space size factor: keep the gizmo a constant apparent size regardless of the camera
-    // distance. For a perspective camera the world size needed to cover a fixed fraction of the
-    // viewport grows linearly with distance and with tan(fov/2). For an orthographic camera the
-    // apparent size is distance-independent, so we derive it from the vertical ortho extent.
+    // Screen-space size factor: keep the gizmo a constant apparent size regardless of camera distance.
+    // Perspective — the world size covering a fixed fraction of the viewport grows with distance and with
+    // tan(fov/2). Orthographic — apparent size is distance-independent, so it comes from the vertical extent.
     const GIZMO_SCREEN_SIZE = 0.15;
     const computeGizmoScale = (worldPos: ArrayLike<number>): number => {
         const cam = instance?.scene?.activeCamera?.camera;
@@ -111,7 +109,6 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         return Math.max(dist * Math.tan(halfFov) * GIZMO_SCREEN_SIZE, 1e-3);
     };
 
-    // Update gizmo position (and constant-size scale) to follow selected node
     const updateGizmoPosition = () => {
         if (!selectedNodeId || !editorScene) return;
 
@@ -149,11 +146,9 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         placeLine(gizmoNodes.xLine); placeLine(gizmoNodes.yLine); placeLine(gizmoNodes.zLine);
     };
 
-    // Handle mouse interactions
     const handleMouseDown = (event: MouseEvent) => {
         if (!selectedNodeId || !instance || !instance.scene || !editorScene || !viewportRef.current) return;
 
-        // Only handle left mouse button
         if (event.button !== 0) return;
 
         const rect = viewportRef.current.getBoundingClientRect();
@@ -163,7 +158,6 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         const activeCamera = instance.scene.activeCamera;
         if (!activeCamera) return;
 
-        // Create ray from mouse position
         const ray = Raycaster.screenToRay(
             x,
             y,
@@ -201,7 +195,6 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
                 cursor.current = { x, y };
                 captureViewport(instance);
 
-                // Emit event to disable camera controls
                 eventEmitter.emit('GIZMO_DRAG_START', { axis, nodeId: selectedNodeId });
 
                 const selectedNode = editorScene.getNodeById(selectedNodeId);
@@ -237,12 +230,10 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         const x = c.x;
         const y = c.y;
 
-        // Check if we've moved enough to consider it a drag
         const deltaX = x - dragStartPos.x;
         const deltaY = y - dragStartPos.y;
         const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-        // Only start actual dragging if moved more than 5 pixels
         if (distance < 5) {
             return;
         }
@@ -250,11 +241,9 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         const moveDeltaX = x - initialMousePos.x;
         const moveDeltaY = y - initialMousePos.y;
 
-        // Calculate movement based on camera orientation
         const camera = instance?.scene.activeCamera;
         if (!camera) return;
 
-        // Get camera's right and up vectors in world space
         const viewMatrix = camera.camera.viewMatrix;
         const cameraRight = [viewMatrix[0], viewMatrix[4], viewMatrix[8]];
         const cameraUp = [viewMatrix[1], viewMatrix[5], viewMatrix[9]];
@@ -294,13 +283,11 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
             onTransformChange(selectedNodeId, 'position', newPosition);
         }
 
-        // Update gizmo position to follow the object
         updateGizmoPosition();
     };
 
     const endDrag = () => {
         if (isDragging) {
-            // Emit event to re-enable camera controls
             eventEmitter.emit('GIZMO_DRAG_END', { axis: draggedAxis, nodeId: selectedNodeId });
         }
 
@@ -317,13 +304,9 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
         endDrag();
     };
 
-    // Build (and rebuild on mode change) the gizmo node set; remove the previous set on cleanup.
-    //
-    // Both halves run with dirty-marking suppressed. The gizmo's nodes live in the scene, so adding and
-    // removing them emits SCENE_CHANGED exactly like a real node edit. That matters most on a tab switch:
-    // `editorScene` changes, so this cleanup fires — and React runs a child's effects before its parent's,
-    // meaning EngineContext has not yet re-pointed activeTabIdRef at the incoming tab. The OUTGOING tab
-    // would be marked dirty for chrome the user never touched.
+    // Build (and rebuild on mode change) the gizmo node set; remove the previous set on cleanup. Both
+    // halves must run with dirty-marking suppressed: the gizmo's nodes live in the scene, and on a tab
+    // switch this cleanup runs before EngineContext has re-pointed activeTabIdRef at the incoming tab.
     useEffect(() => {
         if (!instance || !editorScene) return;
         const created = withoutDirty(() => createGizmoNodes(gizmoMode));
@@ -337,7 +320,6 @@ export default function PositionGizmo({ selectedNodeId, onTransformChange, viewp
     useEffect(() => {
         if (!gizmoNodes.xAxis || !gizmoNodes.yAxis || !gizmoNodes.zAxis) return;
 
-        // Check if selected node is root node
         const isRootNode = selectedNodeId === 'root' || selectedNodeId === editorScene?.root?.id;
         const show = !!selectedNodeId && !isPlayMode && !isRootNode;
 
